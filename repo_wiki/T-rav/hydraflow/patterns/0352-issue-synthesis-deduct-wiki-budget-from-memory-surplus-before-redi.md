@@ -1,0 +1,19 @@
+---
+id: 0352
+topic: patterns
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-22T12:09:24.765921+00:00
+status: superseded
+corroborations: 1
+supersedes: 0344,0345,0346,0347,0349
+superseded_by: 0356
+---
+
+# Deduct wiki budget from memory surplus before redistributing
+
+Compute the wiki budget (`max_repo_wiki_chars`) and subtract it from the memory surplus BEFORE distributing the remainder proportionally across memory sections.
+
+Example: `surplus -= wiki_budget; memory_alloc = distribute(surplus, weights)`.
+
+**Why:** Not deducting first causes memory sections to over-allocate, then the wiki gets truncated when both compete for the same token pool.

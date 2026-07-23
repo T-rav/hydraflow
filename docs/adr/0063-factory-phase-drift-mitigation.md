@@ -102,7 +102,7 @@ PR (#9775).
 
 - `src/triage_phase.py:_triage_single` — current parking path with no autonomous re-entry
 - `src/discover_runner.py:_escalate_stuck` — coherence-failure path
-- `src/shape_phase.py:ShapePhase` — `ExpertCouncil` two-round mediation
+- Shape-phase `ExpertCouncil` two-round mediation — removed by ADR-0107 (the standalone `ShapePhase` wrapper and its council are gone; shaping is now a planner-invoked `ShapeRunner` helper).
 - `src/plan_phase.py:PlanPhase` — `PlanReviewer` validation + `PipelineEscalator`
 - `src/implement_phase.py:_check_attempt_cap` — plus `_escalate_no_changes_to_hitl`
 - `src/review_phase/_phase.py:_handle_visual_failure` — plus merge-conflict, CI-red escalation handlers

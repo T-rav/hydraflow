@@ -1,0 +1,21 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# upload_screenshot uploads a local PNG and returns its URL (empty on
+# failure). FIDELITY GAP: the air-gapped fake never uploads an asset and
+# returns the empty URL — the contract records empty stdout for it.
+adapter: github
+interaction: upload_screenshot
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: upload_screenshot
+  args:
+  - /tmp/shot.png
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true

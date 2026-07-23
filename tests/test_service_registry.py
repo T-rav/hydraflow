@@ -30,6 +30,7 @@ def _make_callbacks() -> WorkerRegistryCallbacks:
         update_status=lambda *args, **kwargs: None,
         is_enabled=lambda name: True,
         get_interval=lambda name: 60,
+        get_watchdog_timeout=lambda name: 7200,
     )
 
 
@@ -63,6 +64,27 @@ class TestBuildServices:
             if field_name in optional_fields:
                 continue
             assert getattr(registry, field_name) is not None, f"{field_name} is None"
+
+    def test_pipeline_label_listener_is_wired_to_the_store(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """#9842: label swaps must reach the in-memory pipeline immediately.
+
+        The wiring is hasattr-gated (sandbox fakes read labels live and skip
+        it), so a rename on either side would silently sever the event-driven
+        card path and quietly reintroduce the 5-minute poll lag — pin it.
+        """
+        bus = EventBus()
+        state = StateTracker(config.state_file)
+        stop_event = asyncio.Event()
+        callbacks = _make_callbacks()
+
+        registry = build_services(config, bus, state, stop_event, callbacks)
+
+        listener = registry.prs._pipeline_label_listener
+        assert listener is not None, "pipeline label listener not wired"
+        assert listener.__func__ is type(registry.store).apply_label_transition
+        assert listener.__self__ is registry.store
 
     def test_agents_runner_is_shared(self, config: HydraFlowConfig) -> None:
         """Agents, planners, reviewers, and HITL runner should share the subprocess runner."""
@@ -273,10 +295,15 @@ class TestServiceRegistryWiring:
 
 
 class TestWorkerRegistryCallbacks:
-    def test_has_three_fields_only(self) -> None:
-        """WorkerRegistryCallbacks should expose exactly 3 focused callbacks."""
+    def test_has_four_fields_only(self) -> None:
+        """WorkerRegistryCallbacks should expose exactly 4 focused callbacks."""
         fields = set(WorkerRegistryCallbacks.__dataclass_fields__)
-        assert fields == {"update_status", "is_enabled", "get_interval"}
+        assert fields == {
+            "update_status",
+            "is_enabled",
+            "get_interval",
+            "get_watchdog_timeout",
+        }
 
     def test_is_frozen(self) -> None:
         """WorkerRegistryCallbacks should be immutable."""
@@ -286,6 +313,7 @@ class TestWorkerRegistryCallbacks:
             update_status=lambda *a, **kw: None,
             is_enabled=lambda _: True,
             get_interval=lambda _: 60,
+            get_watchdog_timeout=lambda _: 7200,
         )
         with pytest.raises(AttributeError):
             cb.update_status = lambda *a, **kw: None  # type: ignore[misc]
@@ -376,10 +404,10 @@ class TestHumanSteeringLoopActiveIssuesCb:
 class TestAdversarialPipelineWiring:
     """Factory wiring for the earlier-adversarial pipeline (ADR-0064).
 
-    The pipeline is now unconditional: ``DiscoverPhase`` always gets a
-    ``ComplexityGate`` attached AND all three phases (plan, discover,
-    shape) always get ``SubprocessAgentRunner`` adapters wired into
-    every adversarial-stage slot. No config flag, no opt-out.
+    ADR-0107 retired the standalone Discover/Shape phases, so the adversarial
+    council/surfacer wiring now lives only on the plan phase. The discover/shape
+    engines are the ``DiscoverRunner`` / ``ShapeRunner`` the planner invokes on
+    demand; the factory constructs them and binds their escalation deps.
     """
 
     @staticmethod
@@ -390,17 +418,26 @@ class TestAdversarialPipelineWiring:
         callbacks = _make_callbacks()
         return build_services(config, bus, state, stop_event, callbacks)
 
-    def test_complexity_gate_attached(self, config: HydraFlowConfig) -> None:
-        """DiscoverPhase gets a heuristic-only ComplexityGate."""
-        from complexity_gate import ComplexityGate
+    def test_discover_shape_runners_wired_with_escalation_deps(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """ADR-0107: the factory builds the discover/shape engines, binds their
+        escalation deps, and hands them to the planner as on-demand helpers."""
+        from discover_runner import DiscoverRunner
+        from shape_runner import ShapeRunner
 
         registry = self._build(config)
-        gate = registry.discover_phase._complexity_gate
-        assert gate is not None
-        assert isinstance(gate, ComplexityGate)
-        # Heuristic-only — no LLM callable. The gate falls back to
-        # LOAD_BEARING on uncertainty so this is safe.
-        assert gate.llm is None
+
+        assert isinstance(registry.discover_runner, DiscoverRunner)
+        assert isinstance(registry.shape_runner, ShapeRunner)
+        # bind_escalation_deps ran at wire-up: prs + dedup are set.
+        assert registry.discover_runner._prs is not None
+        assert registry.discover_runner._dedup is not None
+        assert registry.shape_runner._prs is not None
+        assert registry.shape_runner._dedup is not None
+        # The planner borrows the SAME engine instances for its decision gate.
+        assert registry.planner_phase._discover_runner is registry.discover_runner
+        assert registry.planner_phase._shape_runner is registry.shape_runner
 
     def test_plan_phase_adversarial_agents_attached(
         self, config: HydraFlowConfig
@@ -422,44 +459,6 @@ class TestAdversarialPipelineWiring:
             assert isinstance(voter, SubprocessAgentRunner)
         assert isinstance(plan_phase._spec_ac_agent, SubprocessAgentRunner)
         assert isinstance(plan_phase._spec_judge_agent, SubprocessAgentRunner)
-
-    def test_discover_phase_adversarial_agents_attached(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """DiscoverPhase surfacer + three-voter council both wired."""
-        from adversarial_agent_runner import SubprocessAgentRunner
-
-        registry = self._build(config)
-        discover_phase = registry.discover_phase
-
-        assert isinstance(discover_phase._surfacer_agent, SubprocessAgentRunner)
-        assert discover_phase._council_agents is not None
-        assert set(discover_phase._council_agents.keys()) == {
-            "problem_sharpener",
-            "existing_solution_hunter",
-            "cheapest_test_advocate",
-        }
-        for voter in discover_phase._council_agents.values():
-            assert isinstance(voter, SubprocessAgentRunner)
-
-    def test_shape_phase_adversarial_agents_attached(
-        self, config: HydraFlowConfig
-    ) -> None:
-        """ShapePhase challenger + three-voter council both wired."""
-        from adversarial_agent_runner import SubprocessAgentRunner
-
-        registry = self._build(config)
-        shape_phase = registry.shape_phase
-
-        assert isinstance(shape_phase._challenger_agent, SubprocessAgentRunner)
-        assert shape_phase._shape_council_agents is not None
-        assert set(shape_phase._shape_council_agents.keys()) == {
-            "user_advocate",
-            "tech_lead",
-            "product_strategist",
-        }
-        for voter in shape_phase._shape_council_agents.values():
-            assert isinstance(voter, SubprocessAgentRunner)
 
 
 class TestAutoTightenGhClosures:

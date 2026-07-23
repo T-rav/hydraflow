@@ -917,6 +917,15 @@ class TestRestoreState:
         assert 10 in orch._svc.implementer.active_issues
         assert 20 in orch._svc.implementer.active_issues
 
+    def test_restores_watchdog_timeouts(self, config: HydraFlowConfig) -> None:
+        """Mirrors test_restores_intervals_and_crash_recovery (#9503)."""
+        orch = HydraFlowOrchestrator(config)
+        orch._state.set_watchdog_timeouts({"repo_wiki": 3600})
+
+        orch._restore_state()
+
+        assert orch._bg_workers.worker_timeouts.get("repo_wiki") == 3600
+
     def test_clears_interrupted_issues(self, config: HydraFlowConfig) -> None:
         """_restore_state should remove interrupted issues from all tracking sets."""
         orch = HydraFlowOrchestrator(config)
@@ -1106,6 +1115,47 @@ class TestBgWorkerInterval:
         # Verify state was persisted via public StateTracker method
         intervals = orch._state.get_worker_intervals()
         assert intervals.get("metrics") == 600
+
+
+# --- Background Worker Watchdog Timeout (#9503) ---
+
+
+class TestBgWorkerWatchdogTimeout:
+    """Mirrors TestBgWorkerInterval for the per-loop watchdog-timeout override."""
+
+    def test_set_bg_worker_timeout_stores_value(self, config: HydraFlowConfig) -> None:
+        orch = HydraFlowOrchestrator(config)
+        orch.set_bg_worker_timeout("memory_sync", 3600)
+        assert orch.get_bg_worker_timeout("memory_sync") == 3600
+
+    def test_set_bg_worker_timeout_persists_to_state(
+        self, config: HydraFlowConfig
+    ) -> None:
+        orch = HydraFlowOrchestrator(config)
+        orch.set_bg_worker_timeout("metrics", 1800)
+        # Verify state was persisted via public StateTracker method
+        timeouts = orch._state.get_watchdog_timeouts()
+        assert timeouts.get("metrics") == 1800
+
+    def test_get_bg_worker_timeout_defaults_to_config(
+        self, config: HydraFlowConfig
+    ) -> None:
+        orch = HydraFlowOrchestrator(config)
+        assert orch.get_bg_worker_timeout("never_set") == (
+            config.loop_watchdog_default_seconds
+        )
+
+    def test_watchdog_timeout_cb_wired_into_shared_loop_deps(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """The read path: a registered loop's timeout_cb resolves through the
+        orchestrator's override table, not just some in-memory dict nobody
+        reads (the #9503 "unread override is a silent no-op" failure mode).
+        """
+        orch = HydraFlowOrchestrator(config)
+        loop = orch._svc.pr_unsticker_loop
+        orch.set_bg_worker_timeout("pr_unsticker", 5400)
+        assert loop._cycle_timeout_seconds() == 5400
 
 
 # --- Update Background Worker Status ---

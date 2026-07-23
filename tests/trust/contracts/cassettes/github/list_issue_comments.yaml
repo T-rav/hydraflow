@@ -1,0 +1,27 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_issue_comments projects each seeded FakeComment into the
+# `gh issue view --json comments`-shaped dict (user.login/body/
+# created_at) that gather_context expects. The dispatcher seeds one
+# comment with an explicit non-default login/created_at so the
+# contract covers the structured-comment path, not just the
+# fake-author default.
+adapter: github
+interaction: list_issue_comments
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_issue_comments
+  args:
+  - '950'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"user": {"login": "reviewer-bot"}, "body": "First comment", "created_at":
+    "2026-02-01T00:00:00Z"}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

@@ -350,16 +350,12 @@ async def test_run_audit_emits_subprocess_trace(loop_env, monkeypatch, tmp_path)
 
     monkeypatch.setattr(trace_collector, "emit_loop_subprocess_trace", fake_emit)
 
-    class FakeProc:
-        returncode = 0
+    from execution import SimpleResult
 
-        async def communicate(self):
-            return (b'{"findings": []}', b"")
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout='{"findings": []}', stderr="", returncode=0)
 
-    async def fake_subproc(*args, **kwargs):
-        return FakeProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("principles_audit_loop.run_subprocess_result", fake_result)
 
     await loop._run_audit("hydraflow-self", tmp_path)
 
@@ -385,16 +381,12 @@ async def test_run_audit_emits_trace_on_nonzero_exit(loop_env, monkeypatch, tmp_
         lambda **kw: emitted.append(kw),
     )
 
-    class FakeProc:
-        returncode = 2
+    from execution import SimpleResult
 
-        async def communicate(self):
-            return (b'{"findings": []}', b"boom")
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout='{"findings": []}', stderr="boom", returncode=2)
 
-    async def fake_subproc(*args, **kwargs):
-        return FakeProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("principles_audit_loop.run_subprocess_result", fake_result)
 
     await loop._run_audit("hydraflow-self", tmp_path)
 
@@ -418,16 +410,12 @@ async def test_run_git_emits_subprocess_trace(loop_env, monkeypatch, tmp_path):
         lambda **kw: emitted.append(kw),
     )
 
-    class FakeProc:
-        returncode = 0
+    from execution import SimpleResult
 
-        async def communicate(self):
-            return (b"ok", b"")
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="ok", stderr="", returncode=0)
 
-    async def fake_subproc(*args, **kwargs):
-        return FakeProc()
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_subproc)
+    monkeypatch.setattr("principles_audit_loop.run_subprocess_result", fake_result)
 
     code, out = await loop._run_git("fetch", "--depth", "1", "origin", "main")
 
@@ -436,6 +424,81 @@ async def test_run_git_emits_subprocess_trace(loop_env, monkeypatch, tmp_path):
     assert emitted[0]["loop"] == "principles_audit"
     assert emitted[0]["command"][0] == "git"
     assert "fetch" in emitted[0]["command"]
+
+
+# --- #9554/#10028: _run_audit/_run_git route through run_subprocess_result ---
+
+
+async def test_run_audit_timeout_raises_runtime_error(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """A SubprocessTimeoutError from the shared helper surfaces as a
+    RuntimeError with exit_code=124 traced (matching prior TimeoutError
+    handling)."""
+    from subprocess_util import SubprocessTimeoutError
+
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    import trace_collector
+
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        trace_collector,
+        "emit_loop_subprocess_trace",
+        lambda **kw: emitted.append(kw),
+    )
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("principles_audit_loop.run_subprocess_result", fake_result)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        await loop._run_audit("hydraflow-self", tmp_path)
+
+    assert emitted[0]["exit_code"] == 124
+
+
+async def test_run_git_timeout_raises_runtime_error(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    from subprocess_util import SubprocessTimeoutError
+
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("principles_audit_loop.run_subprocess_result", fake_result)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        await loop._run_git("fetch", "--depth", "1", "origin", "main")
+
+
+async def test_run_git_combines_stdout_and_stderr(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """Both stdout and stderr text land in the combined-output contract."""
+    from execution import SimpleResult
+
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="some output", stderr="a warning", returncode=1)
+
+    monkeypatch.setattr("principles_audit_loop.run_subprocess_result", fake_result)
+
+    code, out = await loop._run_git("fetch", cwd=tmp_path)
+
+    assert code == 1
+    assert "some output" in out
+    assert "a warning" in out
 
 
 async def test_no_emission_when_loop_disabled(loop_env, monkeypatch, tmp_path):
@@ -695,3 +758,117 @@ async def test_reconcile_closed_escalations_resets_counter(
         "principles-stuck", limit=100
     )
     state.reset_drift_attempts.assert_called_once_with("hydra/widgets", "P2.3")
+
+
+# --- #9555: heavy-make timeout is an operator knob, read live per call -------
+
+
+async def test_run_audit_timeout_uses_config_knob(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """The `make audit-json` bound comes from the live config knob (#9555),
+    not a hardcoded constant — a System-tab PATCH (which mutates the live
+    config in-place) applies to the next audit without a restart."""
+    from execution import SimpleResult
+
+    cfg, state, pr = loop_env
+    object.__setattr__(cfg, "principles_audit_timeout_seconds", 888)
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*cmd: str, **kwargs: object) -> SimpleResult:
+        captured["cmd"] = cmd
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(stdout='{"findings": []}', stderr="", returncode=0)
+
+    monkeypatch.setattr("principles_audit_loop.run_subprocess_result", fake_result)
+
+    await loop._run_audit("hydraflow-self", tmp_path)
+
+    assert captured["cmd"][:2] == ("make", "audit-json")
+    assert captured["timeout"] == 888
+
+
+async def test_run_audit_default_timeout_preserves_prior_constant(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """Default knob value == the former _AUDIT_TIMEOUT_SECONDS (1800): no
+    behaviour change when the operator sets nothing."""
+    from execution import SimpleResult
+
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*_cmd: str, **kwargs: object) -> SimpleResult:
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(stdout='{"findings": []}', stderr="", returncode=0)
+
+    monkeypatch.setattr("principles_audit_loop.run_subprocess_result", fake_result)
+
+    await loop._run_audit("hydraflow-self", tmp_path)
+
+    assert captured["timeout"] == 1800
+
+
+async def test_run_audit_timeout_error_cites_configured_value(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """On timeout, the trace excerpt and the raised error cite the CONFIGURED
+    bound, so an operator investigating a false timeout sees the value in play
+    (not a phantom constant)."""
+    from subprocess_util import SubprocessTimeoutError
+
+    cfg, state, pr = loop_env
+    object.__setattr__(cfg, "principles_audit_timeout_seconds", 888)
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    import trace_collector
+
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        trace_collector,
+        "emit_loop_subprocess_trace",
+        lambda **kw: emitted.append(kw),
+    )
+
+    async def fake_result(*_cmd: str, **_kwargs: object) -> object:
+        raise SubprocessTimeoutError("timed out")
+
+    monkeypatch.setattr("principles_audit_loop.run_subprocess_result", fake_result)
+
+    with pytest.raises(RuntimeError, match=r"timed out after 888s"):
+        await loop._run_audit("hydraflow-self", tmp_path)
+
+    assert emitted[0]["exit_code"] == 124
+    assert emitted[0]["stderr_excerpt"] == "timeout after 888s"
+
+
+async def test_run_git_bound_unaffected_by_audit_knob(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """The incidental `git` call keeps its FIXED 120s tier constant (#9555):
+    only the heavy `make` bound is operator-tunable."""
+    from execution import SimpleResult
+
+    cfg, state, pr = loop_env
+    object.__setattr__(cfg, "principles_audit_timeout_seconds", 888)
+    stop = asyncio.Event()
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*_cmd: str, **kwargs: object) -> SimpleResult:
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(stdout="ok", stderr="", returncode=0)
+
+    monkeypatch.setattr("principles_audit_loop.run_subprocess_result", fake_result)
+
+    await loop._run_git("fetch", cwd=tmp_path)
+
+    assert captured["timeout"] == 120

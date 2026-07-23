@@ -210,6 +210,14 @@ export function PipelineControlPanel({ onToggleBgWorker }) {
                 </span>
               )}
               <span style={styles.loopCountLabel}>workers</span>
+              {enabled && activeCount > 0 && (
+                <span
+                  style={styles.activeBadge}
+                  data-testid={`loop-active-${loop.key}`}
+                >
+                  {activeCount} active
+                </span>
+              )}
               {onToggleBgWorker && (
                 <button
                   style={{
@@ -301,6 +309,17 @@ const styles = {
     fontWeight: 600,
     color: theme.textMuted,
     textTransform: 'uppercase',
+  },
+  activeBadge: {
+    fontSize: 9,
+    fontWeight: 700,
+    color: theme.accent,
+    background: 'transparent',
+    border: `1px solid ${theme.accent}`,
+    borderRadius: 8,
+    padding: '1px 6px',
+    marginLeft: 2,
+    whiteSpace: 'nowrap',
   },
   toggleOn: {
     padding: '2px 8px',

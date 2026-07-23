@@ -516,7 +516,7 @@ def find_break_glass_label(labels: Sequence[str], prefix: str) -> str:
     return ""
 
 
-async def _fetch_pr_labels(config: HydraFlowConfig, pr_number: int) -> list[str]:
+async def fetch_pr_labels(config: HydraFlowConfig, pr_number: int) -> list[str]:
     """Fresh PR-label read at the gh subprocess boundary.
 
     Raw gh rather than a new PRPort method (same call and rationale as the
@@ -605,7 +605,7 @@ async def enforce_merge_policy(
         paths: list[str] = []
         if policy.has_change_matchers:
             paths = await prs.get_pr_diff_names(pr_number)
-            labels = await _fetch_pr_labels(config, pr_number)
+            labels = await fetch_pr_labels(config, pr_number)
         decision = policy.classify_change(paths, labels or [])
         verdict = policy.check_merge_allowed(decision, actor=actor, approvals=approvals)
 
@@ -613,7 +613,7 @@ async def enforce_merge_policy(
         return verdict
 
     if labels is None:
-        labels = await _fetch_pr_labels(config, pr_number)
+        labels = await fetch_pr_labels(config, pr_number)
     label = find_break_glass_label(labels, prefix)
     if label:
         record = _break_glass_record(

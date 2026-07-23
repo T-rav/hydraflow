@@ -15,7 +15,7 @@
  *
  * @typedef {Record<string, string>} HumanInputRequests
  *
- * @typedef {{ name: string, status: string, last_run: string|null, interval_seconds: number|null, next_run: string|null, details: Record<string, any> }} BackgroundWorkerState
+ * @typedef {{ name: string, status: string, last_run: string|null, interval_seconds: number|null, watchdog_timeout_seconds: number|null, next_run: string|null, details: Record<string, any> }} BackgroundWorkerState
  *
  * @typedef {{ lifetime: { issues_completed: number, prs_merged: number, issues_created: number }, rates: Record<string, number> }} MetricsData
  *

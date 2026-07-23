@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# branch_has_diff_from_main reports whether a branch has commits ahead of
+# main (`git rev-list`). The fake conservatively returns True always so
+# callers never falsely skip a branch as empty.
+adapter: github
+interaction: branch_has_diff_from_main
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: branch_has_diff_from_main
+  args:
+  - feat/diff-me
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'True
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

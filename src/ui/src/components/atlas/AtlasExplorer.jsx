@@ -5,13 +5,14 @@ import { GraphView } from './GraphView'
 import { DetailPanel } from './DetailPanel'
 import { ArticlesView } from './ArticlesView'
 import { MaintenanceView } from './MaintenanceView'
+import { AdrConformancePanel } from '../AdrConformancePanel'
 import {
   loadSavedViews,
   saveView,
   deleteSavedView,
 } from './atlasSavedViews'
 
-const VALID_SUBTABS = new Set(['domain', 'graph', 'articles', 'maintenance'])
+const VALID_SUBTABS = new Set(['domain', 'graph', 'articles', 'maintenance', 'conformance'])
 
 function readDeepLink() {
   if (typeof window === 'undefined') return { sub: 'domain', node: null }
@@ -44,6 +45,8 @@ const SUBTABS = [
   { id: 'graph', label: 'Graph' },
   { id: 'articles', label: 'Articles' },
   { id: 'maintenance', label: 'Maintenance' },
+  // #9789: nested from the former top-level tab — architecture family.
+  { id: 'conformance', label: 'ADR Conformance' },
 ]
 
 const KINDS = [
@@ -352,6 +355,7 @@ export function AtlasExplorer() {
         )}
         {activeSubtab === 'articles' && <ArticlesView />}
         {activeSubtab === 'maintenance' && <MaintenanceView />}
+        {activeSubtab === 'conformance' && <AdrConformancePanel />}
       </div>
     </div>
   )

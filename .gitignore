@@ -257,7 +257,16 @@ MagicMock/
 # demand and read from disk at runtime. Tracking them left the factory's
 # working tree permanently dirty (the maintenance PR is built in an ephemeral
 # worktree and never cleans the originals). Keep them out of git; see
-# tests/architecture/test_wiki_runtime_caches_untracked.py.
+# tests/architecture/test_wiki_runtime_caches_untracked.py and the proactive
+# guard scripts/check_runtime_cache_tracked.py (#9599).
 docs/wiki/log.jsonl
 docs/wiki/ingest_dedup.json
 docs/wiki/index.json
+
+# FitnessScorecardLoop rewrites this into the live repo root every tick
+# (src/fitness_scorecard_loop.py:_ARTIFACT_REL). Unlike the other tracked
+# docs/arch/generated/*.md (regenerated in a worktree by arch-regen), it was
+# neither tracked nor gitignored, leaving a permanent '??' in git status
+# (#9599 groom 2026-07-19). Ignore it so the loop's rewrites cannot dirty the
+# tree; see scripts/check_runtime_cache_tracked.py.
+docs/arch/generated/loop-fitness.md

@@ -266,6 +266,47 @@ class TestQueueAccessors:
         )
         assert [t.id for t in store.get_plannable(10)] == [23]
 
+    def test_get_implementable_skips_in_progress_claimed(self) -> None:
+        # #10168: a ready issue carrying the durable build-claim marker is
+        # already being built (possibly by another actor). The work-picker
+        # must skip it even though it still carries the ready label — this is
+        # the cross-actor belt-and-suspenders to the in-process eager guard.
+        # ("test-label" is ConfigFactory's ready-stage routing label.)
+        store = _make_store()
+        store._route_issues(
+            [TaskFactory.create(id=30, tags=["test-label", "hydraflow-in-progress"])]
+        )
+        assert store.get_implementable(10) == []
+
+    def test_in_progress_claimed_skipped_but_clean_sibling_returned(self) -> None:
+        # #10168: the claim only sidelines the claimed issue; an unclaimed
+        # ready sibling is still dispatchable on the same tick.
+        store = _make_store()
+        store._route_issues(
+            [
+                TaskFactory.create(id=31, tags=["test-label", "hydraflow-in-progress"]),
+                TaskFactory.create(id=32, tags=["test-label"]),
+            ]
+        )
+        assert [t.id for t in store.get_implementable(10)] == [32]
+
+    def test_in_progress_claim_cleared_makes_issue_re_pickable(self) -> None:
+        # #10168: the claim only sidelines an issue while the marker is
+        # present. Once _release_claim (build abandoned/failed) or an operator
+        # clears it, a fresh ingest of that ready issue is pickable again — the
+        # claim never permanently strands an issue.
+        claimed = _make_store()
+        claimed._route_issues(
+            [TaskFactory.create(id=33, tags=["test-label", "hydraflow-in-progress"])]
+        )
+        assert claimed.get_implementable(10) == []
+
+        # A foreign actor that ingests the same issue after the claim cleared
+        # sees a plain ready issue and picks it.
+        cleared = _make_store()
+        cleared._route_issues([TaskFactory.create(id=33, tags=["test-label"])])
+        assert [t.id for t in cleared.get_implementable(10)] == [33]
+
     def test_get_implementable_excludes_active_issues(self) -> None:
         store = _make_store()
         store._route_issues(
@@ -816,6 +857,93 @@ class TestPipelineSnapshotPush:
         assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs), (
             f"snapshot seq must be strictly increasing; got {seqs}"
         )
+
+
+# ── Label-driven eager transitions (#9842) ───────────────────────────
+
+
+class TestApplyLabelTransition:
+    """``apply_label_transition`` mirrors a GitHub label swap in-memory.
+
+    #9842: phase transitions swap GitHub labels immediately, but the board
+    only re-read labels at the ``data_poll_interval`` (300s) refresh — cards
+    lagged up to 5 minutes. ``apply_label_transition`` is the event-driven
+    bridge: PRManager notifies the store on every ``swap_pipeline_labels``,
+    the store applies the move eagerly, and the existing coalesced
+    PIPELINE_SNAPSHOT push carries it to the dashboard within ~1s.
+    """
+
+    def test_moves_cached_issue_to_the_swapped_stage(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=11, tags=["hydraflow-find"])
+        store._route_issues([issue])
+
+        applied = store.apply_label_transition(11, "hydraflow-review")
+
+        assert applied is True
+        assert store._queue_members[STAGE_REVIEW] == {11}
+        assert 11 not in store._queue_members[STAGE_FIND]
+
+    def test_hitl_label_moves_issue_to_hitl_set(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=12, tags=["hydraflow-review"])
+        store._route_issues([issue])
+
+        applied = store.apply_label_transition(12, "hydraflow-hitl")
+
+        assert applied is True
+        assert 12 in store.get_hitl_issues()
+        assert 12 not in store._queue_members[STAGE_REVIEW]
+
+    def test_non_stage_label_is_ignored(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=13, tags=["hydraflow-find"])
+        store._route_issues([issue])
+
+        applied = store.apply_label_transition(13, "hydraflow-duplicate")
+
+        assert applied is False
+        assert store._queue_members[STAGE_FIND] == {13}
+
+    def test_uncached_issue_is_ignored(self) -> None:
+        store = _make_store()
+
+        applied = store.apply_label_transition(999, "hydraflow-review")
+
+        assert applied is False
+        assert store._queue_members[STAGE_REVIEW] == set()
+
+    @pytest.mark.asyncio
+    async def test_pushes_pipeline_snapshot_with_the_new_stage(self, event_bus) -> None:
+        store = _make_store(event_bus=event_bus)
+        capture = _SnapshotCapture(event_bus)
+        issue = TaskFactory.create(id=14, tags=["test-label"])
+        store._route_issues([issue])
+
+        store.apply_label_transition(14, "hydraflow-review")
+        await _drain_snapshot_flush(store)
+
+        snap = capture.snapshots()[-1]
+        review_numbers = [e["issue_number"] for e in snap.data["stages"]["review"]]
+        implement_numbers = [
+            e["issue_number"] for e in snap.data["stages"]["implement"]
+        ]
+        assert 14 in review_numbers
+        assert 14 not in implement_numbers
+
+    def test_stale_refresh_does_not_move_the_issue_backward(self) -> None:
+        """The reconciling poll may still carry pre-swap labels — the eager
+        transition must hold until GitHub labels catch up."""
+        store = _make_store()
+        issue = TaskFactory.create(id=15, tags=["test-label"])
+        store._route_issues([issue])
+
+        store.apply_label_transition(15, "hydraflow-review")
+        # Stale poll data: labels still say ready.
+        store._route_issues([TaskFactory.create(id=15, tags=["test-label"])])
+
+        assert store._queue_members[STAGE_REVIEW] == {15}
+        assert 15 not in store._queue_members[STAGE_READY]
 
 
 # ── Lifecycle ────────────────────────────────────────────────────────

@@ -54,9 +54,9 @@ def test_abort_precedence_over_pause_and_steer():
 
 
 def test_redo_fires_once_via_high_water_mark():
-    comments = [_c("/redo shape", "2026-07-03T10:00:00Z")]
+    comments = [_c("/redo plan", "2026-07-03T10:00:00Z")]
     d = parse_directives(comments, None, _ALICE)
-    assert d.redo_phase == "shape"
+    assert d.redo_phase == "plan"
     assert d.new_last_applied_ts == "2026-07-03T10:00:00Z"
     # re-poll with the mark advanced: redo must NOT re-fire
     d2 = parse_directives(comments, "2026-07-03T10:00:00Z", _ALICE)
@@ -105,7 +105,7 @@ def test_empty_allowlist_honors_nobody():
 def test_resolve_redo_phase_dashboard_and_internal():
     assert resolve_redo_phase("implement") == "ready"  # dashboard → internal
     assert resolve_redo_phase("ready") == "ready"  # internal passthrough
-    assert resolve_redo_phase("shape") == "shape"
+    assert resolve_redo_phase("plan") == "plan"  # internal passthrough
     assert resolve_redo_phase("bogus") is None
 
 

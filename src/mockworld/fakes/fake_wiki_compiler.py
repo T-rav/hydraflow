@@ -3,9 +3,8 @@
 Records every ``compile_topic_tracked`` invocation and returns a
 configurable number of compiled entries. Never invokes an LLM.
 
-Scenario tests exercising the post-merge wiki-compile hook
-(PR #8400 / ``post_merge_handler._compile_tracked_topics_for_merge``)
-and the RepoWikiLoop's on-demand compile assert on
+Scenario tests exercising the ``RepoWikiLoop``'s tracked-topic compile
+(the inline on-merge compile of PR #8400 was removed by #9836) assert on
 ``.compile_calls`` to verify the right topics were picked.
 """
 

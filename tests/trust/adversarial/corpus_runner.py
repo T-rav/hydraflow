@@ -9,6 +9,12 @@ A *case* lives at ``tests/trust/adversarial/cases/<name>/``:
   - ``expected_transcript.txt``  (optional) canned LLM transcript fixture
   - ``plan.md`` / ``provenance.txt``  (optional)
 
+Document-judging skills read their real inputs from conventional paths inside
+``before/`` / ``after/`` rather than from the synthesized diff — see
+``_SKILL_INPUT_FILES`` (``before/issue.md`` + ``after/brief.md`` for
+``discover-completeness``; ``before/discover_brief.md`` + ``after/proposal.md``
+for ``shape-coherence``).
+
 ``evaluate_case`` synthesizes a unified diff from ``before/`` vs ``after/``,
 feeds it to every skill's ``prompt_builder``, parses the transcript with each
 skill's ``result_parser``, and decides a per-case ``status``:
@@ -22,7 +28,29 @@ skill's ``result_parser``, and decides a per-case ``status``:
 The pytest harness asserts on this; the loop diffs ``PASS -> FAIL`` per case to
 detect skill-prompt drift. Run ``python corpus_runner.py --json`` to emit the
 loop-facing result list (``[{case_id, skill, status, provenance,
-expected_catcher}, ...]``) on stdout.
+expected_catcher, summary}, ...]``) on stdout. ``summary`` carries the failing
+run's transcript summary — the refiner reads it as the failure transcript, so
+the slim projection must include it (empty string when a branch produced none).
+
+Live mode (``HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1``, the weekly backstop): up to
+``HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET`` catcher-skill cases are evaluated
+via the per-skill path (:func:`evaluate_case_for_skill` with ``force_live``),
+round-robin across skills, so every skill's OWN prompt gets exercised against
+the real agent CLI — not just ``BUILTIN_SKILLS[0]``'s (#10014). Cases beyond
+the budget, ``"none"`` sentinels, and every non-live run replay their
+``expected_transcript.txt`` fixtures exactly as before.
+
+Refine-candidate validation (``--live-skill`` + ``--force-live-cases``,
+#10063): ``SkillPromptEvalLoop._validate_candidate`` re-runs this module
+against a candidate (already-patched) worktree to decide whether a
+synthesized prompt fix may auto-merge. Passing ``--force-live-cases`` names
+a small subset of the ``--cases`` set (the regressed case + a holdout
+sample — :func:`prompt_refiner.select_live_validation_sample`) that gets
+``force_live=True``, so the candidate prompt is genuinely exercised against
+the real agent CLI instead of being judged only against the OLD prompt's
+canned transcript. Cases outside that subset keep replaying fixtures. Inert
+unless the operator has also set ``HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1`` —
+without it every case replays its fixture (CI determinism).
 """
 
 from __future__ import annotations
@@ -58,11 +86,66 @@ class MissingTranscriptError(RuntimeError):
     """Raised in strict mode when a case has no transcript fixture and live is off."""
 
 
-def discover_cases(cases_dir: Path = CASES_DIR) -> list[Path]:
+HOLDOUT_MARKER = "HOLDOUT"
+
+# Default cap on how many catcher-skill cases a live run evaluates via the
+# per-skill live path (one real agent-CLI call each). The weekly backstop
+# forwards the operator knob (`skill_prompt_eval_live_case_budget`) via
+# HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET; this constant only covers manual
+# runs where the env var is absent. Keep the two defaults aligned.
+DEFAULT_LIVE_BUDGET = 12
+
+# Per-skill prompt-input fixtures (#10014). The document-judging skills
+# (`discover-completeness`, `shape-coherence`) take their real inputs as
+# builder kwargs (`issue_body`/`brief`, `discover_brief`/`proposal`) — the
+# generic diff/plan call in `evaluate_case_for_skill` leaves those empty (the
+# builders `**_kwargs`-swallow `diff`/`plan_text` and return "" without their
+# document), which fed `claude -p ""` on the live path. The case-dir
+# convention already stores the documents as before/after content; thread
+# them through explicitly. Keyed per skill so builders without `**_kwargs`
+# (e.g. `plan-compliance`) never receive unexpected keywords.
+_SKILL_INPUT_FILES: dict[str, dict[str, str]] = {
+    "discover-completeness": {
+        "issue_body": "before/issue.md",
+        "brief": "after/brief.md",
+    },
+    "shape-coherence": {
+        "discover_brief": "before/discover_brief.md",
+        "proposal": "after/proposal.md",
+    },
+}
+
+
+def load_skill_input_texts(case_dir: Path, skill_name: str) -> dict[str, str]:
+    """Builder kwargs harvested from *case_dir*'s conventional input files.
+
+    Returns only the entries whose file exists, and only for *skill_name*'s
+    registered mapping — an empty dict for diff-judging skills.
+    """
+    out: dict[str, str] = {}
+    for kwarg, rel in _SKILL_INPUT_FILES.get(skill_name, {}).items():
+        path = case_dir / rel
+        if path.is_file():
+            out[kwarg] = path.read_text(encoding="utf-8")
+    return out
+
+
+def is_holdout(case_dir: Path) -> bool:
+    """True when *case_dir* is a held-out honeypot (never shown to the refiner)."""
+    return (case_dir / HOLDOUT_MARKER).is_file()
+
+
+def discover_cases(
+    cases_dir: Path = CASES_DIR, *, include_holdout: bool = True
+) -> list[Path]:
     if not cases_dir.is_dir():
         return []
     return sorted(
-        p for p in cases_dir.iterdir() if p.is_dir() and not p.name.startswith(".")
+        p
+        for p in cases_dir.iterdir()
+        if p.is_dir()
+        and not p.name.startswith(".")
+        and (include_holdout or not is_holdout(p))
     )
 
 
@@ -99,14 +182,19 @@ def synthesize_diff(before_dir: Path, after_dir: Path) -> str:
     return "".join(chunks)
 
 
-def load_transcript(case_dir: Path, prompt: str, *, live: bool) -> str | None:
+def load_transcript(
+    case_dir: Path, prompt: str, *, live: bool, force_live: bool = False
+) -> str | None:
     """Return the canned transcript for *case_dir*, invoke live claude, or None.
 
     Returns ``None`` when no ``expected_transcript.txt`` exists and *live* is
-    off — callers decide whether that is a skip or an error.
+    off — callers decide whether that is a skip or an error. *force_live*
+    (only meaningful with ``live=True``) skips the fixture short-circuit so a
+    budgeted backstop case genuinely exercises the current prompt against the
+    real agent CLI instead of replaying its canned transcript.
     """
     fixture = case_dir / "expected_transcript.txt"
-    if fixture.exists():
+    if fixture.exists() and not (live and force_live):
         return fixture.read_text(encoding="utf-8")
     if not live:
         return None
@@ -240,13 +328,136 @@ def evaluate_case(
     }
 
 
+def evaluate_case_for_skill(
+    case_dir: Path, skill_name: str, *, live: bool = False, force_live: bool = False
+) -> dict[str, Any]:
+    """Evaluate one case against ONE skill, building THAT skill's prompt.
+
+    Unlike :func:`evaluate_case` (one transcript, all parsers), this is the
+    per-skill path — refine-candidate validation and the budgeted live
+    backstop: the target skill's own ``prompt_builder`` produces the live
+    prompt (document-judging skills get their real inputs threaded via
+    :func:`load_skill_input_texts`), and only its parser judges the
+    transcript. Cases whose ``expected_catcher`` is neither *skill_name* nor
+    ``"none"`` return ``SKIPPED``.
+
+    *force_live* bypasses the fixture short-circuit (see
+    :func:`load_transcript`). A case whose builder renders an empty prompt —
+    its input documents are absent, the skills' "no input data" signal —
+    falls back to fixture replay instead of invoking the CLI on "".
+    """
+    case_id = case_dir.name
+    catcher = read_expected_catcher(case_dir)
+    provenance = read_provenance(case_dir)
+    if catcher not in (skill_name, "none"):
+        return {
+            "case_id": case_id,
+            "skill": skill_name,
+            "status": "SKIPPED",
+            "expected_catcher": catcher,
+            "provenance": provenance,
+            "summary": "",
+            "findings": [],
+        }
+    skill = next(s for s in BUILTIN_SKILLS if s.name == skill_name)
+    diff = synthesize_diff(case_dir / "before", case_dir / "after")
+    prompt = skill.prompt_builder(
+        issue_number=0,
+        issue_title=f"adversarial-corpus::{case_id}",
+        diff=diff,
+        plan_text=load_plan_text(case_dir),
+        **load_skill_input_texts(case_dir, skill_name),
+    )
+    if not prompt.strip():
+        force_live = False
+    transcript = load_transcript(case_dir, prompt, live=live, force_live=force_live)
+    if transcript is None:
+        return {
+            "case_id": case_id,
+            "skill": skill_name,
+            "status": "SKIPPED",
+            "expected_catcher": catcher,
+            "provenance": provenance,
+            "summary": "",
+            "findings": [],
+        }
+    passed, summary, findings = skill.result_parser(transcript)
+    if catcher == "none":
+        status = "PASS" if passed else "FAIL"
+    else:
+        keyword = read_keyword(case_dir / "README.md")
+        haystack = (summary + "\n" + "\n".join(findings)).lower()
+        status = "PASS" if (not passed and keyword.lower() in haystack) else "FAIL"
+    return {
+        "case_id": case_id,
+        "skill": skill_name,
+        "status": status,
+        "expected_catcher": catcher,
+        "provenance": provenance,
+        "summary": summary,
+        "findings": findings,
+    }
+
+
+def select_live_skill_cases(case_dirs: list[Path], budget: int) -> set[str]:
+    """Case names to route through the per-skill LIVE path, at most *budget*.
+
+    Round-robin across expected catchers (``"none"`` sentinels excluded) so a
+    small budget still exercises every skill's OWN prompt at least once —
+    a plain first-N slice of the sorted corpus would spend the whole budget
+    on one alphabetically-early skill. Deterministic: skills and their cases
+    are visited in sorted order.
+    """
+    if budget <= 0:
+        return set()
+    by_catcher: dict[str, list[Path]] = {}
+    for case_dir in case_dirs:
+        catcher = read_expected_catcher(case_dir)
+        if catcher != "none":
+            by_catcher.setdefault(catcher, []).append(case_dir)
+    queues = [sorted(by_catcher[c], key=lambda p: p.name) for c in sorted(by_catcher)]
+    selected: set[str] = set()
+    rank = 0
+    while len(selected) < budget and any(rank < len(q) for q in queues):
+        for queue in queues:
+            if rank < len(queue) and len(selected) < budget:
+                selected.add(queue[rank].name)
+        rank += 1
+    return selected
+
+
 def run_corpus(
-    *, cases_dir: Path = CASES_DIR, live: bool = False, strict: bool = False
+    *,
+    cases_dir: Path = CASES_DIR,
+    live: bool = False,
+    strict: bool = False,
+    case_ids: frozenset[str] | None = None,
+    live_budget: int = DEFAULT_LIVE_BUDGET,
 ) -> list[dict[str, Any]]:
-    """Evaluate every discovered case and return the loop-facing result list."""
-    return [
-        evaluate_case(case_dir, live=live, strict=strict)
+    """Evaluate every discovered case and return the loop-facing result list.
+
+    Holdouts are always included (the weekly backstop covers them) — pass
+    *case_ids* to run a targeted subset by directory name.
+
+    When *live* is on, up to *live_budget* catcher-skill cases (round-robin
+    across skills — :func:`select_live_skill_cases`) run through the
+    per-skill live path so each skill's OWN prompt is exercised against the
+    real agent CLI (#10014); everything else replays fixtures via
+    :func:`evaluate_case` exactly as in a non-live run.
+    """
+    case_dirs = [
+        case_dir
         for case_dir in discover_cases(cases_dir)
+        if case_ids is None or case_dir.name in case_ids
+    ]
+    live_cases = select_live_skill_cases(case_dirs, live_budget) if live else set()
+    return [
+        evaluate_case_for_skill(
+            case_dir, read_expected_catcher(case_dir), live=True, force_live=True
+        )
+        if case_dir.name in live_cases
+        else evaluate_case(case_dir, live=live, strict=strict)
+        for case_dir in case_dirs
     ]
 
 
@@ -257,9 +468,58 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="emit the loop-facing result list as JSON on stdout",
     )
+    parser.add_argument(
+        "--cases",
+        default="",
+        help="comma-separated case ids to run (default: all)",
+    )
+    parser.add_argument(
+        "--live-skill",
+        default="",
+        help="evaluate only this skill's cases, building its own prompt/parser",
+    )
+    parser.add_argument(
+        "--force-live-cases",
+        default="",
+        help=(
+            "comma-separated case ids to force through force_live=True "
+            "(bypassing the expected_transcript.txt fixture short-circuit) "
+            "when combined with --live-skill; only meaningful when "
+            "HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1 (live=True) is also set. "
+            "Used by refine-candidate validation (#10063) to genuinely "
+            "exercise a small sample against the real agent CLI instead of "
+            "replaying the old prompt's canned transcript"
+        ),
+    )
     args = parser.parse_args(argv)
     live = os.environ.get("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE") == "1"
-    results = run_corpus(live=live, strict=False)
+    try:
+        live_budget = int(os.environ.get("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE_BUDGET", ""))
+    except ValueError:
+        live_budget = DEFAULT_LIVE_BUDGET
+    case_ids = (
+        frozenset(c.strip() for c in args.cases.split(",") if c.strip())
+        if args.cases.strip()
+        else None
+    )
+    if args.live_skill:
+        force_live_cases = frozenset(
+            c.strip() for c in args.force_live_cases.split(",") if c.strip()
+        )
+        results = [
+            evaluate_case_for_skill(
+                case_dir,
+                args.live_skill,
+                live=live,
+                force_live=live and case_dir.name in force_live_cases,
+            )
+            for case_dir in discover_cases(CASES_DIR)
+            if case_ids is None or case_dir.name in case_ids
+        ]
+    else:
+        results = run_corpus(
+            live=live, strict=False, case_ids=case_ids, live_budget=live_budget
+        )
     if args.json:
         # Only the loop-facing keys belong on stdout (the loop json.loads it).
         slim = [
@@ -269,6 +529,11 @@ def main(argv: list[str] | None = None) -> int:
                 "status": r["status"],
                 "provenance": r["provenance"],
                 "expected_catcher": r["expected_catcher"],
+                # The loop reads this as the failure transcript fed to the
+                # refiner (`case.get("summary","")`); omitting it left the
+                # production refine context permanently blank. Both branches
+                # now carry `summary`; `.get` stays as shape-safety.
+                "summary": r.get("summary", ""),
             }
             for r in results
         ]

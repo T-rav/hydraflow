@@ -74,8 +74,6 @@ class TestFakeGitHubMutations:
         ("stage", "expected_label"),
         [
             ("find", "hydraflow-find"),
-            ("discover", "hydraflow-discover"),
-            ("shape", "hydraflow-shape"),
             ("plan", "hydraflow-plan"),
             ("ready", "hydraflow-ready"),
             ("review", "hydraflow-review"),

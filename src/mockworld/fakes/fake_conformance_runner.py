@@ -22,9 +22,21 @@ if TYPE_CHECKING:
 class FakeConformanceRunner:
     """In-memory ConformanceRunnerPort: ``check.raw`` -> preset outcome."""
 
-    def __init__(self, outcomes: dict[str, CheckOutcome] | None = None) -> None:
+    def __init__(
+        self,
+        outcomes: dict[str, CheckOutcome] | None = None,
+        *,
+        available: bool = True,
+    ) -> None:
         self._outcomes = outcomes or {}
         self.calls: list[str] = []
+        # Pre-flight probe result (#10243). Defaults True so existing scenarios
+        # exercise the normal path; a test flips it to drive the broken-runner-
+        # env short circuit (loop skips the tick, files nothing).
+        self._available = available
+
+    def available(self) -> bool:
+        return self._available
 
     def run(
         self, check: Check, *, repo_root: Path, timeout_s: float = 300.0

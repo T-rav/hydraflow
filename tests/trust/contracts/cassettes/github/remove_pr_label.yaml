@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# remove_pr_label strips exactly the named label from the PR, leaving
+# other labels untouched, and returns nothing -- the PR sibling of
+# remove_label.yaml. The dispatcher seeds a PR with two labels and
+# asserts only the targeted one is gone.
+adapter: github
+interaction: remove_pr_label
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: remove_pr_label
+  args:
+  - '522'
+  - hydraflow-hitl
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true

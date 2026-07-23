@@ -20,7 +20,6 @@ by Plan 6b (§4.11 factory-cost work).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -31,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 from trust_fleet_anomaly_detectors import (
     REPAIRED_SUCCESS_KEYS,
     TRUST_LOOP_WORKERS,
@@ -280,6 +280,16 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                     if bg is not None and hasattr(bg, "get_interval")
                     else 86400
                 )
+                # Expected max single-cycle duration floor (#10236): a loop
+                # whose poll cadence is short but whose real work-cycle is long
+                # (e.g. staging_bisect) must not be flagged stale mid-cycle.
+                # Its own per-cycle watchdog bound is the natural upper bound on
+                # a legitimate cycle, decoupled from poll interval.
+                max_cycle_s = (
+                    int(bg.cycle_timeout(worker))
+                    if bg is not None and hasattr(bg, "cycle_timeout")
+                    else cfg.loop_watchdog_default_seconds
+                )
                 is_enabled = bool(enabled_map.get(worker, True))
                 breached, details = detect_staleness(
                     worker,
@@ -288,6 +298,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                     multiplier=cfg.loop_anomaly_staleness_multiplier,
                     is_enabled=is_enabled,
                     now=now,
+                    max_cycle_s=max_cycle_s,
                 )
                 if breached:
                     per_worker_breaches.append(("staleness", details))
@@ -348,12 +359,68 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             "filed": filed,
         }
 
+    async def _find_open_escalation(self, worker: str, kind: str) -> int:
+        """Open issue/epic already covering this anomaly, or 0 (#9855).
+
+        Triage may CLOSE the filed anomaly issue by decomposing it into an
+        epic; the reconcile pass then clears the dedup key even though the
+        anomaly is not resolved — and the detector minted a fresh epic
+        every cycle (23 orphans on 2026-07-18). GitHub is the source of
+        truth: when ANY open issue still references this worker+kind
+        (the original escalation or a derived epic), reuse it instead of
+        filing again. Fail-open (0) on gh errors — filing is the safe
+        degradation.
+        """
+        cmd = [
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._config.repo,
+            "--state",
+            "open",
+            "--search",
+            f"{kind} in:title",
+            "--limit",
+            "50",
+            "--json",
+            "number,title",
+        ]
+        try:
+            try:
+                result = await run_subprocess_result(
+                    *cmd, timeout=_RECONCILE_GH_TIMEOUT_SECONDS
+                )
+            except SubprocessTimeoutError:
+                logger.warning("open-escalation probe timed out — filing anyway")
+                return 0
+            rows = json.loads(result.stdout or "[]")
+        except (OSError, ValueError, RuntimeError) as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.debug("open-escalation probe failed: %s", exc)
+            return 0
+        for row in rows:
+            title = str(row.get("title", ""))
+            if worker in title and kind in title:
+                return int(row.get("number") or 0)
+        return 0
+
     async def _file_anomaly(
         self,
         worker: str,
         kind: str,
         details: dict[str, Any],
     ) -> int:
+        existing = await self._find_open_escalation(worker, kind)
+        if existing > 0:
+            logger.info(
+                "trust_fleet_sanity: open issue #%d already covers %s/%s — "
+                "reusing instead of re-filing (#9855)",
+                existing,
+                worker,
+                kind,
+            )
+            return existing
         title = f"HITL: trust-loop anomaly — {worker} {kind}"
         detail_lines = "\n".join(
             f"- `{k}`: `{v}`" for k, v in sorted(details.items()) if k not in {"worker"}
@@ -409,21 +476,15 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             "title",
         ]
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                stdout, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=_RECONCILE_GH_TIMEOUT_SECONDS
+                result = await run_subprocess_result(
+                    *cmd, timeout=_RECONCILE_GH_TIMEOUT_SECONDS
                 )
-            except TimeoutError:
-                # Kill the orphaned `gh` and skip this reconcile pass rather
-                # than hang the cycle forever; the next tick retries. A visible
-                # warning (not debug) is deliberate — the original failure was a
-                # *silent* stall that only the dead-man-switch caught (#9410).
-                proc.kill()
+            except SubprocessTimeoutError:
+                # Skip this reconcile pass rather than hang the cycle forever;
+                # the next tick retries. A visible warning (not debug) is
+                # deliberate — the original failure was a *silent* stall that
+                # only the dead-man-switch caught (#9410).
                 logger.warning(
                     "gh issue list timed out after %ss; skipping reconcile pass",
                     _RECONCILE_GH_TIMEOUT_SECONDS,
@@ -433,10 +494,10 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             reraise_on_credit_or_bug(exc)
             logger.debug("gh issue list failed", exc_info=True)
             return
-        if proc.returncode != 0:
+        if result.returncode != 0:
             return
         try:
-            closed = json.loads(stdout.decode() or "[]")
+            closed = json.loads(result.stdout or "[]")
         except json.JSONDecodeError:
             return
         current = self._dedup.get() or set()

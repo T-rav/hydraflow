@@ -60,6 +60,7 @@ from models import (
     LabelDrift,
     LoopResult,
     PRInfo,
+    PRListItem,
     ReviewVerdict,
     Task,
     TranscriptEventData,
@@ -298,14 +299,30 @@ class PRPort(Protocol):
         """Return aggregated CI failure logs for *pr_number*."""
         ...
 
+    async def get_pr_checks(self, pr_number: int) -> list[dict[str, str]]:
+        """Return CI check results for *pr_number*.
+
+        Each dict carries ``name`` and ``state`` keys. Returns an empty
+        list on failure or when no checks are registered.
+        """
+        ...
+
     async def fetch_code_scanning_alerts(self, branch: str) -> list[CodeScanningAlert]:
         """Return open code scanning alerts for *branch*."""
         ...
 
     # --- Issue management ---
 
-    async def close_issue(self, issue_number: int) -> bool:
+    async def close_issue(
+        self, issue_number: int, *, reason: str | None = None
+    ) -> bool:
         """Close GitHub issue *issue_number*.
+
+        *reason* maps to ``gh issue close --reason`` (``"completed"`` |
+        ``"not planned"``); ``None`` keeps gh's default, which records
+        ``stateReason=COMPLETED``. Automated dedup/wontfix closes should
+        pass ``"not planned"`` so ``get_issue_state`` consumers don't read
+        them as resolved (#10025).
 
         Returns True when the close reached GitHub, False when the
         underlying call failed (fail-soft: no raise). Background callers
@@ -417,10 +434,34 @@ class PRPort(Protocol):
         """Return open issues with the given label as a list of typed dicts."""
         ...
 
+    async def list_open_issues(self) -> list[GitHubIssueSummary]:
+        """Return ALL open issues (no label filter) as a list of typed dicts.
+
+        Used by the backlog refinement loop (``IssueRefinementLoop``, #9957) for a
+        full-repo sweep. Unlike ``list_issues_by_label`` this is unfiltered;
+        unlike ``list_open_issue_numbers`` it carries the full projection
+        (title/body/labels) refinement needs to reason about content, not
+        just identity.
+        """
+        ...
+
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return the numbers of ALL open issues (no label filter).
+
+        Used by the state-prune sweep (#9905) as the keep-set: per-issue
+        state entries whose issue is no longer open are garbage.
+        """
+        ...
+
     async def list_closed_issues_by_label(
         self, label: str, limit: int = 100
     ) -> list[GitHubIssueSummary]:
-        """Return closed issues with the given label as a list of typed dicts."""
+        """Return closed issues with the given label as a list of typed dicts.
+
+        Rows carry ``closed_at`` (gh ``closedAt``, #9727) in addition to
+        ``updated_at`` — window filters over closed issues must key on
+        ``closed_at``, since ``updated_at`` moves on ANY issue activity.
+        """
         ...
 
     async def list_prs_by_label(self, label: str) -> list[PRInfo]:
@@ -441,12 +482,84 @@ class PRPort(Protocol):
         """
         ...
 
+    async def find_open_resolving_pr(self, issue_number: int) -> int | None:
+        """Return the number of an OPEN PR that resolves *issue_number*.
+
+        A PR "resolves" an issue when its body carries a
+        ``Fixes/Closes/Resolves #N`` link to it. Draft PRs are excluded.
+        Returns ``None`` when no such PR is open. Used by the label/dispatch
+        reconciliation path (#10260) so a stale ``hitl-escalation``/
+        ``diagnose-failed`` label never re-triggers a new auto-agent attempt
+        once a linked PR is already open and green.
+        """
+        ...
+
     async def get_issue_state(self, issue_number: int) -> str:
         """Return the resolved state of a GitHub issue (``'COMPLETED'``, ``'OPEN'``, etc.)."""
         ...
 
+    async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return recent workflow runs, newest first (#9974, read-only).
+
+        Each dict: ``{"id", "workflow", "conclusion", "created_at",
+        "pr_number"}`` — ``pr_number`` is 0 when the run has no PR
+        association.
+        """
+        ...
+
+    async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        """Return jobs for one run (#9974, enriched #10010, #10027).
+
+        Each dict: ``{"name", "status", "conclusion", "started_at",
+        "completed_at", "steps"}`` — the timing/steps fields feed
+        GateHealthLoop's suspected-hang classifier; ``status`` feeds
+        PrRedRepairLoop's settled-red predicate.
+        """
+        ...
+
+    async def list_runs_for_workflow(
+        self, workflow: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Return recent runs of ONE workflow file, newest first (#9814).
+
+        Each dict: ``{"id", "url", "status", "conclusion", "created_at",
+        "run_started_at", "updated_at"}``. Distinct from
+        :meth:`list_workflow_runs` (repo-wide, blame-correlation shape):
+        this is the CI-history read behind
+        ``GitHubDataCache.get_rc_workflow_runs``, which flake_tracker and
+        rc_budget consume instead of per-tick raw ``gh run list``
+        subprocesses.
+        """
+        ...
+
+    async def count_workflow_run_artifacts(self, run_id: int) -> int:
+        """Return the number of artifacts a run uploaded (#9974)."""
+        ...
+
+    async def rerun_workflow_failed(self, run_id: int) -> bool:
+        """Trigger ``gh run rerun <id> --failed`` (#10027). Never raises."""
+        ...
+
+    async def list_all_open_prs(self) -> list[PRListItem]:
+        """Return ALL open PRs regardless of label, including author login.
+
+        Pre-existing ``PRManager``/``FakeGitHub`` method, reused by #10027
+        to enumerate settled-red candidates instead of adding a new read.
+        """
+        ...
+
     async def get_issue_updated_at(self, issue_number: int) -> str:
         """Return the updated_at timestamp for an issue as ISO string."""
+        ...
+
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names carried by a GitHub issue.
+
+        Propagates read failures (does not swallow) so callers such as
+        ``WorkspaceGCLoop._issue_has_pipeline_label`` can fail-closed on
+        error rather than mistaking an unreadable issue for an unlabelled
+        one (#9575).
+        """
         ...
 
     async def update_issue_body(self, issue_number: int, body: str) -> None:
@@ -563,14 +676,6 @@ class IssueStorePort(Protocol):
 
     def get_triageable(self, max_count: int) -> list[Task]:
         """Return up to *max_count* issues from the find queue."""
-        ...
-
-    def get_discoverable(self, max_count: int) -> list[Task]:
-        """Return up to *max_count* issues from the discover queue."""
-        ...
-
-    def get_shapeable(self, max_count: int) -> list[Task]:
-        """Return up to *max_count* issues from the shape queue."""
         ...
 
     def get_plannable(self, max_count: int) -> list[Task]:
@@ -745,5 +850,17 @@ class ConformanceRunnerPort(Protocol):
 
         Matches ``adr_conformance_runner.SubprocessConformanceRunner.run``
         exactly.
+        """
+        ...
+
+    def available(self) -> bool:
+        """Return True iff the runner can execute pytest-kind checks.
+
+        Pre-flight for ``AdrConformanceLoop`` (#10243): if pytest can't launch
+        under the runner's interpreter (a half-synced venv with the test extra
+        dropped), every pytest-kind check would fail identically with
+        "No module named pytest" — which ``run`` maps to FAIL, storming one
+        false-positive drift issue per ADR. The loop probes this once per tick
+        and skips (filing nothing) when it returns False.
         """
         ...

@@ -14,7 +14,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from typing import TYPE_CHECKING
 
-from models import PlanResult, ResearchResult, Task
+from models import (
+    ConversationTurn,
+    DiscoverResult,
+    PlanResult,
+    ResearchResult,
+    ShapeConversation,
+    ShapeTurnResult,
+    Task,
+)
 from tests.conftest import AnalysisResultFactory, PlanResultFactory, TaskFactory
 from tests.helpers import make_plan_phase, supply_once
 
@@ -1610,3 +1618,466 @@ class TestPlanConvergenceLedger:
         ledger = state.get_convergence_ledger(204)
         assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["plan"].last_verdict == "ADVANCE"
+
+
+# ---------------------------------------------------------------------------
+# ADR-0107: planner-invoked discover/shape helpers (no standalone phases)
+# ---------------------------------------------------------------------------
+
+
+class TestPlanPhaseDiscoverShapeHelpers:
+    """The planner's on-demand discover/shape decision gate (ADR-0107).
+
+    Conservative default: a well-specified issue plans directly with no
+    helper. Both gates return False when no runner is wired (e.g. a PlanPhase
+    built without the factory), so planning proceeds without a pre-pass.
+    """
+
+    # -- _triage_hints ----------------------------------------------------
+
+    def test_triage_hints_default_when_no_issue_cache(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, *_ = make_plan_phase(config)
+        issue = TaskFactory.create(id=1)
+        assert phase._triage_hints(issue) == (10, False)
+
+    def test_triage_hints_default_when_no_classification_record(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        phase, *_ = make_plan_phase(config)
+        mock_cache = MagicMock()
+        mock_cache.latest_classification.return_value = None
+        phase._issue_cache = mock_cache
+        issue = TaskFactory.create(id=1)
+        assert phase._triage_hints(issue) == (10, False)
+
+    def test_triage_hints_reads_classification_payload(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        phase, *_ = make_plan_phase(config)
+        record = MagicMock()
+        record.payload = {"clarity_score": 3, "needs_discovery": True}
+        mock_cache = MagicMock()
+        mock_cache.latest_classification.return_value = record
+        phase._issue_cache = mock_cache
+        issue = TaskFactory.create(id=1)
+        assert phase._triage_hints(issue) == (3, True)
+
+    # -- _should_discover_helper ------------------------------------------
+
+    def test_should_discover_helper_false_when_no_runner(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, *_ = make_plan_phase(config)
+        issue = TaskFactory.create(id=1)
+        assert phase._should_discover_helper(issue) is False
+
+    def test_should_discover_helper_false_for_well_specified_issue(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Conservative default: no hints, no signals -> plans directly."""
+        phase, *_ = make_plan_phase(config)
+        phase._discover_runner = AsyncMock()
+        issue = TaskFactory.create(id=1)
+        assert phase._should_discover_helper(issue) is False
+
+    def test_should_discover_helper_true_for_needs_discovery_hint(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        phase, *_ = make_plan_phase(config)
+        phase._discover_runner = AsyncMock()
+        record = MagicMock()
+        record.payload = {"clarity_score": 10, "needs_discovery": True}
+        mock_cache = MagicMock()
+        mock_cache.latest_classification.return_value = record
+        phase._issue_cache = mock_cache
+        issue = TaskFactory.create(id=1)
+        assert phase._should_discover_helper(issue) is True
+
+    def test_should_discover_helper_true_for_low_clarity_hint(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        phase, *_ = make_plan_phase(config)
+        phase._discover_runner = AsyncMock()
+        record = MagicMock()
+        record.payload = {"clarity_score": 3, "needs_discovery": False}
+        mock_cache = MagicMock()
+        mock_cache.latest_classification.return_value = record
+        phase._issue_cache = mock_cache
+        issue = TaskFactory.create(id=1)
+        assert phase._should_discover_helper(issue) is True
+
+    def test_should_discover_helper_true_for_cycled_issue(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, state, *_ = make_plan_phase(config)
+        phase._discover_runner = AsyncMock()
+        issue = TaskFactory.create(id=7)
+        state.increment_route_back_count(issue.id)
+        assert phase._should_discover_helper(issue) is True
+
+    def test_should_discover_helper_true_for_escalation_label(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, *_ = make_plan_phase(config)
+        phase._discover_runner = AsyncMock()
+        issue = TaskFactory.create(id=1, tags=[config.research_escalation_labels[0]])
+        assert phase._should_discover_helper(issue) is True
+
+    def test_should_discover_helper_false_for_epic_child(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Epic children are already-scoped decomposition output — skip
+        discovery outright even when the clarity hints would otherwise
+        fire the gate."""
+        from unittest.mock import MagicMock
+
+        phase, *_ = make_plan_phase(config)
+        phase._discover_runner = AsyncMock()
+        phase._is_epic_child = lambda _issue: True  # type: ignore[method-assign]
+        record = MagicMock()
+        record.payload = {"clarity_score": 2, "needs_discovery": True}
+        mock_cache = MagicMock()
+        mock_cache.latest_classification.return_value = record
+        phase._issue_cache = mock_cache
+        issue = TaskFactory.create(id=1)
+        assert phase._should_discover_helper(issue) is False
+
+    # -- _should_shape_helper -----------------------------------------------
+
+    def test_should_shape_helper_false_when_no_runner(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, *_ = make_plan_phase(config)
+        result = DiscoverResult(issue_number=1, opportunities=["a", "b"])
+        issue = TaskFactory.create(id=1)
+        assert phase._should_shape_helper(issue, result) is False
+
+    def test_should_shape_helper_false_when_no_discover_result(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, *_ = make_plan_phase(config)
+        phase._shape_runner = AsyncMock()
+        issue = TaskFactory.create(id=1)
+        assert phase._should_shape_helper(issue, None) is False
+
+    def test_should_shape_helper_false_for_single_opportunity(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, *_ = make_plan_phase(config)
+        phase._shape_runner = AsyncMock()
+        result = DiscoverResult(issue_number=1, opportunities=["only one"])
+        issue = TaskFactory.create(id=1)
+        assert phase._should_shape_helper(issue, result) is False
+
+    def test_should_shape_helper_true_for_divergent_opportunities(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, *_ = make_plan_phase(config)
+        phase._shape_runner = AsyncMock()
+        result = DiscoverResult(issue_number=1, opportunities=["a", "b"])
+        issue = TaskFactory.create(id=1)
+        assert phase._should_shape_helper(issue, result) is True
+
+    # -- _run_discover_helper ------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_run_discover_helper_posts_brief_and_returns_result(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, _state, _planners, prs, _store, _stop = make_plan_phase(config)
+        discover_mock = AsyncMock()
+        discover_mock.discover = AsyncMock(
+            return_value=DiscoverResult(
+                issue_number=1,
+                research_brief="Brief text",
+                opportunities=["Opp A"],
+            )
+        )
+        phase._discover_runner = discover_mock
+        issue = TaskFactory.create(id=1)
+
+        result = await phase._run_discover_helper(issue, guidance="")
+
+        discover_mock.discover.assert_awaited_once()
+        assert result is not None
+        assert result.research_brief == "Brief text"
+        prs.post_comment.assert_awaited_once()
+        posted = prs.post_comment.call_args.args[1]
+        assert "Discovery Research" in posted
+        assert "Brief text" in posted
+
+    @pytest.mark.asyncio
+    async def test_run_discover_helper_returns_none_on_failure(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, _state, _planners, prs, _store, _stop = make_plan_phase(config)
+        discover_mock = AsyncMock()
+        discover_mock.discover = AsyncMock(side_effect=RuntimeError("boom"))
+        phase._discover_runner = discover_mock
+        issue = TaskFactory.create(id=1)
+
+        result = await phase._run_discover_helper(issue, guidance="")
+
+        assert result is None
+        prs.post_comment.assert_not_awaited()
+
+    # -- _run_shape_helper -----------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_run_shape_helper_returns_none_at_turn_ceiling(
+        self, config: HydraFlowConfig
+    ) -> None:
+        short_turn_config = config.model_copy(update={"max_shape_turns": 2})
+        phase, state, _planners, _prs, _store, _stop = make_plan_phase(
+            short_turn_config
+        )
+        shape_mock = AsyncMock()
+        phase._shape_runner = shape_mock
+        issue = TaskFactory.create(id=1)
+        conv = ShapeConversation(
+            issue_number=1,
+            turns=[
+                ConversationTurn(role="agent", content="x"),
+                ConversationTurn(role="agent", content="y"),
+            ],
+        )
+        state.set_shape_conversation(1, conv)
+        discover_result = DiscoverResult(
+            issue_number=1, research_brief="b", opportunities=["a", "b"]
+        )
+
+        result = await phase._run_shape_helper(issue, discover_result, guidance="")
+
+        assert result is None
+        shape_mock.run_turn.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_run_shape_helper_persists_conversation_turn(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, state, _planners, _prs, _store, _stop = make_plan_phase(config)
+        shape_mock = AsyncMock()
+        shape_mock.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Directions...", is_final=False)
+        )
+        phase._shape_runner = shape_mock
+        issue = TaskFactory.create(id=1)
+        discover_result = DiscoverResult(
+            issue_number=1, research_brief="b", opportunities=["a", "b"]
+        )
+
+        result = await phase._run_shape_helper(issue, discover_result, guidance="")
+
+        assert result is not None
+        assert result.is_final is False
+        conv = state.get_shape_conversation(1)
+        assert conv is not None
+        assert len(conv.turns) == 1
+        assert conv.turns[0].content == "Directions..."
+
+    # -- integration via plan_issues() ------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_no_runner_wired_never_touches_discover_or_shape(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """No runner wired (e.g. PlanPhase built without the factory): the gate
+        short-circuits and planning proceeds without a discover/shape pre-pass,
+        even for an issue whose escalation label would otherwise trigger it."""
+        phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
+        # Runners left at their None default — no discover/shape helpers wired.
+        # Tags/labels that WOULD trigger the gate if a runner were wired.
+        issue = TaskFactory.create(id=1, tags=[config.research_escalation_labels[0]])
+        plan_result = PlanResultFactory.create(
+            issue_number=1, success=True, plan="p", use_defaults=True
+        )
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        assert phase._should_discover_helper(issue) is False
+        planners.plan.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_well_specified_issue_plans_directly_no_helper(
+        self, config: HydraFlowConfig
+    ) -> None:
+        phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
+        discover_mock = AsyncMock()
+        phase._discover_runner = discover_mock
+        issue = TaskFactory.create(id=1)  # no hints / no cache => well-specified
+        plan_result = PlanResultFactory.create(
+            issue_number=1, success=True, plan="p", use_defaults=True
+        )
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        discover_mock.discover.assert_not_awaited()
+        planners.plan.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_low_clarity_issue_gets_discover_helper(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
+        record = MagicMock()
+        record.payload = {"clarity_score": 3, "needs_discovery": False}
+        mock_cache = MagicMock()
+        mock_cache.latest_classification.return_value = record
+        phase._issue_cache = mock_cache
+        discover_mock = AsyncMock()
+        discover_mock.discover = AsyncMock(
+            return_value=DiscoverResult(
+                issue_number=1,
+                research_brief="Discovered context",
+                opportunities=["Only one"],
+            )
+        )
+        phase._discover_runner = discover_mock
+        issue = TaskFactory.create(id=1)
+        plan_result = PlanResultFactory.create(
+            issue_number=1, success=True, plan="p", use_defaults=True
+        )
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        discover_mock.discover.assert_awaited_once()
+        planners.plan.assert_awaited_once()
+        research_context = planners.plan.call_args.kwargs["research_context"]
+        assert "Discovered context" in research_context
+
+    @pytest.mark.asyncio
+    async def test_divergent_directions_escalates_and_skips_planning(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        record = MagicMock()
+        record.payload = {"clarity_score": 2, "needs_discovery": True}
+        mock_cache = MagicMock()
+        mock_cache.latest_classification.return_value = record
+        phase._issue_cache = mock_cache
+        discover_mock = AsyncMock()
+        discover_mock.discover = AsyncMock(
+            return_value=DiscoverResult(
+                issue_number=1,
+                research_brief="Discovered context",
+                opportunities=["A", "B"],
+            )
+        )
+        phase._discover_runner = discover_mock
+        shape_mock = AsyncMock()
+        shape_mock.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Direction A vs B", is_final=False)
+        )
+        phase._shape_runner = shape_mock
+        # #10311: only PRIORITIZED forks escalate to HITL, so pin a priority.
+        issue = TaskFactory.create(id=1, tags=["P1"])
+        store.get_plannable = supply_once([issue])
+
+        results = await phase.plan_issues()
+
+        shape_mock.run_turn.assert_awaited_once()
+        planners.plan.assert_not_awaited()
+        assert any(r.error == "shape_escalated" for r in results)
+        assert prs.post_comment.await_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_memory_backlog_shape_fork_closes_as_captured_not_hitl(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """#10292: a memory-backlog (behavioral) issue that shape-forks resolves
+        as CAPTURED (closed) instead of escalating to HITL — the captured memory
+        is the rule, so a P4 fork must not pile into the HITL queue."""
+        from unittest.mock import MagicMock
+
+        phase, _state, planners, prs, store, _stop = make_plan_phase(config)
+        record = MagicMock()
+        record.payload = {"clarity_score": 2, "needs_discovery": True}
+        mock_cache = MagicMock()
+        mock_cache.latest_classification.return_value = record
+        phase._issue_cache = mock_cache
+        discover_mock = AsyncMock()
+        discover_mock.discover = AsyncMock(
+            return_value=DiscoverResult(
+                issue_number=1,
+                research_brief="Discovered context",
+                opportunities=["A", "B"],
+            )
+        )
+        phase._discover_runner = discover_mock
+        shape_mock = AsyncMock()
+        shape_mock.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(content="Direction A vs B", is_final=False)
+        )
+        phase._shape_runner = shape_mock
+        # The ONLY difference from the escalation test: the memory-backlog label.
+        issue = TaskFactory.create(id=1, tags=[config.memory_backlog_label[0]])
+        store.get_plannable = supply_once([issue])
+
+        results = await phase.plan_issues()
+
+        planners.plan.assert_not_awaited()
+        prs.close_task.assert_awaited_once_with(1)  # closed, not escalated
+        assert any(r.error == "memory_backlog_shape_captured" for r in results)
+        assert not any(r.error == "shape_escalated" for r in results)
+
+    @pytest.mark.asyncio
+    async def test_finalized_shape_injects_decomposition_guidance(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from unittest.mock import MagicMock
+
+        phase, _state, planners, _prs, store, _stop = make_plan_phase(config)
+        record = MagicMock()
+        record.payload = {"clarity_score": 2, "needs_discovery": True}
+        mock_cache = MagicMock()
+        mock_cache.latest_classification.return_value = record
+        phase._issue_cache = mock_cache
+        discover_mock = AsyncMock()
+        discover_mock.discover = AsyncMock(
+            return_value=DiscoverResult(
+                issue_number=1,
+                research_brief="Discovered context",
+                opportunities=["A", "B"],
+            )
+        )
+        phase._discover_runner = discover_mock
+        shape_mock = AsyncMock()
+        shape_mock.run_turn = AsyncMock(
+            return_value=ShapeTurnResult(
+                content="Final direction chosen", is_final=True
+            )
+        )
+        phase._shape_runner = shape_mock
+        issue = TaskFactory.create(id=1)
+        plan_result = PlanResultFactory.create(
+            issue_number=1, success=True, plan="p", use_defaults=True
+        )
+        planners.plan = AsyncMock(return_value=plan_result)
+        store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        planners.plan.assert_awaited_once()
+        research_context = planners.plan.call_args.kwargs["research_context"]
+        assert "Final direction chosen" in research_context
+        assert "DECOMPOSITION REQUIRED" in research_context

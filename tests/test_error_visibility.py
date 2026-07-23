@@ -212,6 +212,18 @@ class TestHistoryCacheWarmUpLogLevel:
 # ---------------------------------------------------------------------------
 
 
+async def _park_forever() -> dict:
+    """A quiet, still-connected client: receive() that never resolves.
+
+    Stands in for real Starlette receive() on tests that must exercise the
+    live-stream send path — a bare AsyncMock receive() resolves instantly with
+    a Mock, which the #10071 disconnect watcher correctly reads as "client
+    gone" before any event is sent.
+    """
+    await asyncio.Event().wait()
+    raise AssertionError("unreachable")
+
+
 class TestWebSocketDisconnectDifferentiation:
     """WebSocket handlers should log ERROR for bugs and WARNING for disconnects."""
 
@@ -337,6 +349,11 @@ class TestWebSocketDisconnectDifferentiation:
         await q2.put(event)
 
         mock_ws.send_text = AsyncMock(side_effect=BrokenPipeError("gone"))
+        # The live stream races queue.get() against a disconnect watcher
+        # (#10071). A bare AsyncMock receive() resolves instantly with a Mock,
+        # which reads as "client gone" before the event is ever sent — park it
+        # like a real quiet client so the send (and its logging) happens.
+        mock_ws.receive = _park_forever
 
         with (
             patch.object(event_bus, "subscription") as mock_sub,
@@ -377,6 +394,9 @@ class TestWebSocketDisconnectDifferentiation:
         mock_ws.send_text = AsyncMock(
             side_effect=ValueError("unexpected serialization error")
         )
+        # See test_websocket_live_stream_disconnect_logs_warning: park the
+        # disconnect watcher so the live-stream send path is exercised.
+        mock_ws.receive = _park_forever
 
         with (
             patch.object(event_bus, "subscription") as mock_sub,

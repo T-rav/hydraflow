@@ -290,8 +290,9 @@ class TestCompileTopicTracked:
         compiler, tracked_root = compiler_with_active_entries
 
         compiler._call_model = AsyncMock(
-            return_value='[{"title":"Merged","content":"Unified body.",'
-            '"source_type":"synthesis"}]'
+            # Anchored content (names RepoWikiLoop) so the #9954 gate keeps it.
+            return_value='[{"title":"Merged","content":"RepoWikiLoop unifies '
+            'these. See `src/repo_wiki.py`.","source_type":"synthesis"}]'
         )
 
         count = await compiler.compile_topic_tracked(tracked_root, REPO, "patterns")

@@ -75,6 +75,17 @@ else
   echo "[factory] WARNING: no .env in $DEV_ROOT — the factory may lack credentials" >&2
 fi
 
-echo "[factory] launching from $WORKSPACE (branch: $BRANCH)"
 cd "$WORKSPACE"
+
+# Self-heal the workspace environment on every boot via the canonical `make env`
+# (uv sync --all-extras + pytest-importable sanity check). `make run` has NO
+# `deps` prerequisite and `uv run` only auto-syncs base deps, so the test extra
+# (pytest, …) can silently be absent — a pytest-less venv makes pytest-kind
+# sensors misfire (the ADR conformance loop storms "No module named pytest" on
+# every enforced ADR at once, #10243). `make env` is the same command a human
+# runs to sanitize their own checkout, so boot-heal and manual-heal never drift.
+echo "[factory] healing environment (make env)"
+make env
+
+echo "[factory] launching from $WORKSPACE (branch: $BRANCH)"
 exec make run

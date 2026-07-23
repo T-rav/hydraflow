@@ -11,6 +11,15 @@ on:
 permissions:
   contents: read
 
+# Superseded PR runs are cancelled (a new push makes the old run's verdict
+# moot); push/schedule runs are never cancelled — rc promotion gates and the
+# nightly must always finish (#10027 flake-class fix at the source: without
+# groups, every PR push left the prior run burning runners, and "cancelled"
+# was ambiguous between superseded and infra-killed).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   changes:
     name: Detect Changes
@@ -30,6 +39,7 @@ jobs:
       compose: ${{ steps.filter.outputs.compose }}
       sandbox_scenarios: ${{ steps.filter.outputs.sandbox_scenarios }}
       dashboard: ${{ steps.filter.outputs.dashboard }}
+      subprocess_signal: ${{ steps.filter.outputs.subprocess_signal }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -82,6 +92,29 @@ jobs:
               - 'src/route_types.py'
               - 'tests/scenarios/browser/**'
               - 'tests/scenarios/fakes/mock_world.py'
+            subprocess_signal:
+              # Signal/reap blast-radius set (#10049, deferred from #10010):
+              # the modules where a mocked `.pid` can reach a real os.killpg
+              # (#9983/#10002), plus their signal-focused test files. Positive
+              # globs ONLY, so this entry is safe in this default-quantifier
+              # step — negations belong exclusively in the core_filter step
+              # below (predicate-quantifier: every; see #9908). Keep this list
+              # in sync with the linux-signal-smoke job's pytest args —
+              # tests/regressions/test_issue_10049_linux_signal_lane.py
+              # guards both directions.
+              - 'src/execution.py'
+              - 'src/runner_utils.py'
+              - 'src/subprocess_util.py'
+              - 'src/process_group.py'
+              - 'tests/test_execution.py'
+              - 'tests/test_runner_utils.py'
+              - 'tests/test_subprocess_util.py'
+              - 'tests/regressions/test_reap_processlookuperror.py'
+              - 'tests/regressions/test_issue_9553.py'
+              - 'tests/regressions/test_issue_9579.py'
+              - 'tests/regressions/test_issue_9911_stop_path_reap.py'
+              - 'tests/regressions/test_issue_9641_unified_group_kill.py'
+              - 'tests/regressions/test_hostrunner_reap_grandchildren.py'
       # core_python lives in its OWN paths-filter step because it is the only
       # filter with `!` negations, and negation semantics depend on the
       # quantifier. Under the default `some`, each `!glob` independently
@@ -130,6 +163,23 @@ jobs:
       - name: Scan tracked files for git conflict markers
         run: python3 scripts/check_conflict_markers.py --tracked
 
+  # Universal backstop (#9599): reject git-tracked runtime caches on EVERY
+  # PR/push, ungated by `changes`. docs/wiki/{log.jsonl,ingest_dedup.json,
+  # index.json} were tracked runtime caches the RepoWikiLoop rewrote every tick,
+  # leaving the working tree perpetually dirty (fixed reactively in #9537). This
+  # gate catches the next one before it lands. stdlib-only; no uv sync needed.
+  runtime-cache-guard:
+    name: Runtime Cache Guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Scan tracked files for runtime caches
+        run: python3 scripts/check_runtime_cache_tracked.py --tracked
+
   lint:
     name: Lint & Format
     needs: changes
@@ -141,6 +191,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -162,6 +214,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -181,6 +235,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -202,6 +258,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -226,6 +284,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -233,8 +293,49 @@ jobs:
         run: uv sync --all-extras
       - name: Warning gate (targeted)
         run: PYTHONPATH=src uv run pytest tests/test_execution.py tests/test_agent_advanced.py tests/test_agent_cli.py tests/test_agent_execution.py tests/test_agent_lifecycle.py tests/test_agent_output.py tests/test_hitl_runner.py tests/test_prompt_telemetry.py tests/test_dashboard_routes_control.py tests/test_dashboard_routes_core.py tests/test_dashboard_routes_hitl.py tests/test_dashboard_routes_issue_history.py tests/test_dashboard_routes_metrics.py tests/test_dashboard_routes_repo.py tests/test_dashboard_routes_state.py -W error::RuntimeWarning -W error::pytest.PytestUnraisableExceptionWarning
-      - name: Run tests with coverage
-        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --cov=src --cov-fail-under=70 --cov-report=term-missing --cov-report=json
+      # PR merge gate (Tier 2a): FAST parallel pass/fail, no coverage. Coverage
+      # is single-threaded and too slow for the merge path — it moved to the
+      # trailing `coverage` job (push-to-staging + nightly). tests/scenarios now
+      # runs in the parallel bulk (#10111): its loop-registry leak is contained
+      # by the _restore_loop_catalog_registry autouse fixture and OTel state is
+      # reset per test, so scenarios are xdist-safe.
+      - name: Run tests (fast, parallel — no coverage)
+        # Only tests/test_review_phase_metrics.py stays xdist-unsafe here (a
+        # leaked review_advisor client mock, #10119) — excluded and run serially
+        # below. Keep in sync with the Makefile PYTEST_SERIAL_PATHS.
+        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/test_review_phase_metrics.py -n auto --dist loadscope --reruns 2 --reruns-delay 1
+      - name: Run serial (xdist-unsafe) tests
+        run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py
+
+  # Trailing coverage gate (Tier 2a). Coverage is SINGLE-THREADED (xdist + --cov
+  # is finicky) and therefore too slow for the PR merge path, so it runs OFF the
+  # PR critical path — on push to the default/staging branch and on the nightly
+  # schedule only (`if: github.event_name != 'pull_request'`). It STILL fails
+  # red if coverage drops below 70%, so the gate is preserved as a trailing
+  # safety net rather than dropped. The `changes` gating mirrors the `test` job.
+  # Deliberately NOT in ci-gate's `needs`: it must not gate the PR merge path.
+  coverage:
+    name: Coverage (trailing)
+    needs: changes
+    if: |
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Run tests with coverage (single-threaded)
+        run: PYTHONPATH=src uv run pytest tests/ --cov=src --cov-fail-under=70 --cov-report=term-missing --cov-report=json -p no:xdist
       - name: Upload coverage.json
         if: always()
         uses: actions/upload-artifact@v4
@@ -261,6 +362,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -288,6 +391,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -309,13 +414,77 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install dependencies
         run: uv sync --all-extras
-      - name: Run regression tests
-        run: PYTHONPATH=src uv run pytest tests/regressions/ -q
+      - name: Run regression tests (parallel; reap tests serial)
+        # The subprocess-group reap tests race under parallel workers, so they
+        # run SERIALLY here (they also have the signal-context lane below); the
+        # rest of tests/regressions/ is xdist-safe and parallelizes. Keep the
+        # reap-file list in sync with the Makefile REAP_TESTS.
+        run: |
+          set -euo pipefail
+          REAP="tests/regressions/test_reap_processlookuperror.py \
+            tests/regressions/test_issue_9553.py \
+            tests/regressions/test_issue_9579.py \
+            tests/regressions/test_issue_9911_stop_path_reap.py \
+            tests/regressions/test_issue_9641_unified_group_kill.py \
+            tests/regressions/test_hostrunner_reap_grandchildren.py"
+          IGNORES=""; for f in $REAP; do IGNORES="$IGNORES --ignore=$f"; done
+          PYTHONPATH=src uv run pytest tests/regressions/ $IGNORES -n auto --dist loadscope --reruns 2 --reruns-delay 1 -q
+          PYTHONPATH=src uv run pytest $REAP -q
+
+  # Linux signal-context smoke lane (#10049, deferred from #10010). Reruns the
+  # reap/signal-focused test subset INSIDE a plain Linux container as root —
+  # not merely `runs-on: ubuntu-latest`, which the `test` job already is. The
+  # container-as-root process tree is the environment where a mocked `.pid`
+  # reaching the real `os.killpg` hit the container's own PID 1 and wedged the
+  # job until timeout-cancel (#9983/#10002): benign EPERM on a macOS dev box,
+  # fatal on Linux CI — that platform divergence IS the signal this lane
+  # surfaces at PR time instead of at the 30-minute Tests timeout. ADVISORY by
+  # design: no gates.toml record and deliberately NOT in ci-gate's `needs` —
+  # per #9922, an advisory lane must never block RC auto-merge. Keep the
+  # pytest file list in sync with the subprocess_signal filter above
+  # (tests/regressions/test_issue_10049_linux_signal_lane.py guards both
+  # directions).
+  linux-signal-smoke:
+    name: Linux Signal Smoke (advisory)
+    needs: changes
+    if: needs.changes.outputs.subprocess_signal == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run signal/reap test subset in a Linux container as root
+        run: |
+          # --init matters: without it bash is PID 1 and killed grandchildren
+          # zombify unreaped, so the real-process reap tests read them as
+          # still alive and fail spuriously (validated locally). The GitHub
+          # runner VM has a real init, so tini-as-PID-1 is the faithful
+          # container analogue; root + Linux killpg delivery — the #9983
+          # divergence — is unchanged.
+          docker run --rm --init -v "$PWD":/w -w /w \
+            -e UV_PROJECT_ENVIRONMENT=/opt/venv \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e PYTHONPATH=src \
+            python:3.11-slim bash -c '
+              pip install --quiet uv &&
+              uv sync --all-extras --quiet &&
+              uv run pytest \
+                tests/test_execution.py \
+                tests/test_runner_utils.py \
+                tests/test_subprocess_util.py \
+                tests/regressions/test_reap_processlookuperror.py \
+                tests/regressions/test_issue_9553.py \
+                tests/regressions/test_issue_9579.py \
+                tests/regressions/test_issue_9911_stop_path_reap.py \
+                tests/regressions/test_issue_9641_unified_group_kill.py \
+                tests/regressions/test_hostrunner_reap_grandchildren.py \
+                -q -p no:cacheprovider'
 
   audit:
     name: Principles Audit
@@ -341,9 +510,15 @@ jobs:
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main
           git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+          # P10.6 diffs the PR against its base; make the base ref resolvable.
+          if [ -n "${{ github.base_ref }}" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" || true
+          fi
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -352,6 +527,9 @@ jobs:
       - name: Run principles audit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # P10.6 per-PR regression gate: empty on push builds, so the gate
+          # is NA there and only the telemetry history scan runs (#9902).
+          HYDRAFLOW_AUDIT_PR_BASE: ${{ github.base_ref }}
         run: make audit
 
   ui-build:
@@ -397,16 +575,23 @@ jobs:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
       - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
-      - name: Run fast subset (s01, s06, s53, s54)
+      - name: Run fast subset (s01, s06, s53, s54, s55, s58, s59)
         run: |
           # Run every scenario and aggregate failures — do NOT early-exit on the
           # first red, or a broken leading scenario (e.g. s01, #9754) silently
           # hides the status of the ones after it. Report which failed.
-          # s55_nested_decompose is QUARANTINED (#9925, born-racy) — keep this
-          # list in sync with the scenario-file markers until the loader drives
-          # this step's selection too.
+          # Keep this list in sync with the scenario-file QUARANTINED markers
+          # until the loader drives this step's selection too. s55 was
+          # quarantined under #9925 and un-quarantined once the #9796
+          # discover/shape wedge fix (#9919) proved to resolve it. s58 gates the
+          # work-queue strategy dial (#10037): the picker decides what the
+          # factory works on next, and the dial is the only runtime access to
+          # it, so a broken dropdown is worth catching per-PR rather than at
+          # the next collective run. s59 guards the board's strategy badge —
+          # the config→/api/control/status→context→StreamView chain that tells
+          # an operator which algorithm is picking work (#10067).
           rc=0
-          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge; do
+          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge s55_nested_decompose s58_work_queue_settings_ui s59_queue_strategy_board_badge; do
             if python scripts/sandbox_scenario.py run "$s"; then
               echo "::notice::sandbox $s PASSED"
             else
@@ -441,6 +626,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -473,11 +660,19 @@ jobs:
           path: tests/scenarios/browser/_artifacts/
           retention-days: 7
 
-  sandbox-full:
-    name: Sandbox (rc/* promotion PR full suite)
+  # The 71-scenario RC sandbox suite fanned across parallel matrix shards
+  # (round-robin, ~12 scenarios each) so the RC gate runs in ~one shard's
+  # wall-clock instead of the whole suite's. Each runner boots its own
+  # docker sandbox, so shards are fully isolated (no shared ports/state).
+  sandbox-shard:
+    name: Sandbox shard
     runs-on: ubuntu-latest
     needs: [changes]
     if: github.base_ref == 'main' && startsWith(github.head_ref, 'rc/')
+    strategy:
+      fail-fast: false # run every shard so all failures surface in one pass
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -485,9 +680,30 @@ jobs:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
       - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
-      - name: Run full suite
-        id: runall
-        run: python scripts/sandbox_scenario.py run-all
+      - name: Run shard ${{ matrix.shard }}/6
+        run: python scripts/sandbox_scenario.py run-all --shard ${{ matrix.shard }}/6
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-full-results-shard-${{ matrix.shard }}
+          path: /tmp/sandbox-results/
+          retention-days: 7
+
+  # Aggregator gate — KEEPS the exact required-check name so main's ruleset is
+  # unchanged. Passes only when every shard succeeded; fails (and auto-labels
+  # once) if any shard failed. `always()` so it still runs when a shard fails;
+  # the rc-condition keeps it skipped (neutral) on non-RC PRs, as before.
+  sandbox-full:
+    name: Sandbox (rc/* promotion PR full suite)
+    runs-on: ubuntu-latest
+    needs: [sandbox-shard]
+    if: always() && github.base_ref == 'main' && startsWith(github.head_ref, 'rc/')
+    steps:
+      - name: Gate on all sandbox shards
+        run: |
+          result="${{ needs.sandbox-shard.result }}"
+          echo "sandbox-shard matrix result: $result"
+          [ "$result" = "success" ] || { echo "One or more sandbox shards failed."; exit 1; }
       - name: Auto-label PR for self-fix on failure
         if: failure()
         env:
@@ -495,18 +711,18 @@ jobs:
         run: |
           gh pr edit ${{ github.event.pull_request.number }} --add-label sandbox-fail-auto-fix
           gh pr comment ${{ github.event.pull_request.number }} \
-            --body "Sandbox suite failed. SandboxFailureFixerLoop will dispatch the auto-agent. Logs: \`/tmp/sandbox-results/\`"
-      - if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sandbox-full-results
-          path: /tmp/sandbox-results/
-          retention-days: 7
+            --body "Sandbox suite failed. SandboxFailureFixerLoop will dispatch the auto-agent. Per-shard logs: \`sandbox-full-results-shard-*\` artifacts."
 
   sandbox-nightly:
     name: Sandbox (nightly regression)
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
+    # Workflow-level default is contents:read; the failure step files a
+    # hydraflow-find issue, which needs issues:write (#10309 follow-up — the
+    # nightly's issue-create had silently lacked the scope).
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -533,6 +749,70 @@ jobs:
           path: /tmp/sandbox-results/
           retention-days: 14
 
+  # Post-merge full-machine smoke (#10309). Every sandbox job above is
+  # PR-gated or scheduled, so a merge that broke the factory's core loop
+  # (issue → build → PR → merge) or the ADR-0042 RC promotion path stayed
+  # invisible until the next PR's gate or the 03:00 UTC nightly. This boots
+  # the real server once (MockWorld at the ports) and drives BOTH merge lanes
+  # via s82 on every push to staging/main — a machine-breaking merge is
+  # caught within minutes of landing. Advisory-but-alerting: not in ci-gate
+  # (push context has no PR to gate); failures roll up into ONE open
+  # post-merge-smoke issue the factory's issue loop picks up.
+  post-merge-smoke:
+    name: Post-merge smoke (full machine, s82)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    timeout-minutes: 20
+    # The failure step provisions a label + files/updates a rolling
+    # hydraflow-find issue; the workflow-level contents:read default can do
+    # neither, so grant issues:write here (#10309 follow-up).
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      # Merge trains (e.g. the staging batch-merge cascade) push in quick
+      # succession; only the newest SHA's verdict matters.
+      group: post-merge-smoke-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install uv && uv pip install --system -e ".[dev]"
+      - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
+      - name: Run s82 (standard PR path + RC promotion path, one boot)
+        run: python scripts/sandbox_scenario.py run s82_full_machine_rc_promotion
+      - name: File or update rolling post-merge-smoke issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Rolling-issue pattern (#9359 issue-hygiene): one open issue tracks
+          # "post-merge smoke is red"; per-push failures append as comments
+          # instead of piling up new issues. Label is provisioned first — a
+          # raw `gh issue create` with a missing label hard-fails (#10297).
+          gh label create post-merge-smoke \
+            --description "Post-merge full-machine smoke (s82) failed" \
+            --color D93F0B || true
+          body="Post-merge smoke failed on \`${{ github.ref_name }}\` at ${{ github.sha }}. The full machine (issue → merged PR, and rc/* cut → promoted) no longer completes after this merge. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          existing=$(gh issue list --label post-merge-smoke --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create \
+              --title "Post-merge smoke failing on ${{ github.ref_name }}" \
+              --label hydraflow-find,post-merge-smoke \
+              --body "$body"
+          fi
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-merge-smoke-results
+          path: /tmp/sandbox-results/
+          retention-days: 7
+
   # Umbrella aggregator (ADR-0082 / add-a-gate runbook). One check that rolls up
   # every conditional CI job. `if: always()` + `needs:` means a path-filtered
   # SKIPPED job is treated as "passed", so requiring ONLY this single context in
@@ -540,6 +820,8 @@ jobs:
   # skipped required check otherwise reads as "not passed" and blocks forever).
   # Not yet a required check: it must land on the base branch before being
   # required (see docs/standards/branch_protection/ADDING-A-GATE.md).
+  # linux-signal-smoke is EXCLUDED on purpose: it is an advisory lane (#10049)
+  # and must never gate RC auto-merge (#9922) — do not add it to `needs`.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest

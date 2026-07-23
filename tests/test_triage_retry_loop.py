@@ -45,6 +45,9 @@ def env(tmp_path: Path):
         data_root=tmp_path / ".hydraflow",
         repo="hydra/hydraflow",
         repo_root=tmp_path,
+        # TTL 0 (#9814): every cached read refreshes through the pr mock so
+        # per-test return_value mutations stay visible tick-to-tick.
+        github_cache_issue_list_ttl_s=0,
     )
     state = MagicMock()
     state.get_triage_retry_attempts.return_value = 0
@@ -52,6 +55,10 @@ def env(tmp_path: Path):
     state.get_triage_retry_last_attempt.return_value = ""
     state.set_triage_retry_last_attempt.return_value = None
     state.clear_triage_retry_attempts.return_value = None
+    # #10290: default to the clarification-park path (24h floor); infra-park
+    # tests flip this to True. Without an explicit return_value a MagicMock is
+    # truthy, which would silently route every issue through the short floor.
+    state.is_triage_infra_parked.return_value = False
     # ``_reconcile_closed_parked`` reads ``state._data.triage_retry_attempts``
     # directly so it can iterate every tracked key (some of which may no
     # longer be in the open parked list).
@@ -71,11 +78,14 @@ def env(tmp_path: Path):
 
 def _make_loop(env, *, enabled: bool = True) -> TriageRetryLoop:
     cfg, state, pr = env
+    from github_cache_loop import GitHubDataCache
+
     return TriageRetryLoop(
         config=cfg,
         state=state,
         pr_manager=pr,
         deps=_deps(asyncio.Event(), enabled=enabled),
+        github_cache=GitHubDataCache(cfg, pr, MagicMock()),
     )
 
 
@@ -195,6 +205,72 @@ async def test_recent_attempt_skips_under_24h_floor(env) -> None:
 
 
 @pytest.mark.asyncio
+async def test_infra_parked_reflows_on_short_floor(env) -> None:
+    """#10290: an issue parked by a TRANSIENT INFRA failure re-flows on the
+    short infra floor — a 30-min-old attempt is past the 15-min floor, so it is
+    RETRIED, not held for 24h like a clarification-park."""
+    cfg, state, pr = env
+    state.is_triage_infra_parked.return_value = True  # infra-park
+    pr.list_issues_by_label.return_value = [
+        {"number": 404, "title": "infra-parked", "body": "", "updated_at": "z"}
+    ]
+    # 30 min ago — inside the 24h clarification floor, but PAST the 15m infra floor.
+    assert cfg.triage_infra_retry_interval < 30 * 60 < cfg.triage_retry_interval
+    state.get_triage_retry_last_attempt.return_value = (
+        datetime.now(UTC) - timedelta(minutes=30)
+    ).isoformat()
+    loop = _make_loop(env)
+
+    result = await loop._do_work()
+
+    assert result["retried"] == 1  # re-flowed, not held
+    assert result["skipped_recent"] == 0
+    pr.swap_pipeline_labels.assert_awaited()  # swapped back to find
+
+
+@pytest.mark.asyncio
+async def test_infra_park_never_escalates_even_past_max_attempts(env) -> None:
+    """#10290: a sustained infra outage must NOT turn into a HITL storm. An
+    infra-park keeps re-flowing on the short floor even past
+    triage_retry_max_attempts — it never escalates (that's the trust-fleet
+    anomaly detector's job, one fleet signal not N per-issue escalations)."""
+    cfg, state, pr = env
+    state.is_triage_infra_parked.return_value = True
+    state.get_triage_retry_attempts.return_value = cfg.triage_retry_max_attempts + 5
+    pr.list_issues_by_label.return_value = [
+        {"number": 406, "title": "infra outage", "body": "", "updated_at": "z"}
+    ]
+    state.get_triage_retry_last_attempt.return_value = ""  # no floor block
+    loop = _make_loop(env)
+
+    result = await loop._do_work()
+
+    assert result["escalated"] == 0  # no HITL storm
+    assert result["retried"] == 1
+    pr.create_issue.assert_not_called()  # escalation would create a HITL issue
+
+
+@pytest.mark.asyncio
+async def test_clarification_park_holds_the_same_30min_attempt(env) -> None:
+    """The control for #10290: the SAME 30-min-old attempt on a
+    clarification-park (not infra) is held under the 24h floor."""
+    _, state, pr = env
+    state.is_triage_infra_parked.return_value = False  # clarification-park
+    pr.list_issues_by_label.return_value = [
+        {"number": 405, "title": "needs-info", "body": "", "updated_at": "z"}
+    ]
+    state.get_triage_retry_last_attempt.return_value = (
+        datetime.now(UTC) - timedelta(minutes=30)
+    ).isoformat()
+    loop = _make_loop(env)
+
+    result = await loop._do_work()
+
+    assert result["skipped_recent"] == 1
+    assert result["retried"] == 0
+
+
+@pytest.mark.asyncio
 async def test_corrupt_last_attempt_timestamp_does_not_skip(env) -> None:
     """A garbled timestamp shouldn't lock the issue out of retry forever."""
     _, state, pr = env
@@ -265,7 +341,9 @@ def test_extract_parking_reason_walks_to_newest_block(env) -> None:
 
 
 def test_default_interval_matches_config(env) -> None:
-    """The base interval defaults to ``triage_retry_interval`` from config."""
+    """The tick interval is the short infra floor so infra-parks (#10290) can
+    re-flow on their fast cadence; clarification-parks are gated at 24h by the
+    per-issue floor, not the tick."""
     cfg, _, _ = env
     loop = _make_loop(env)
-    assert loop._get_default_interval() == cfg.triage_retry_interval
+    assert loop._get_default_interval() == cfg.triage_infra_retry_interval

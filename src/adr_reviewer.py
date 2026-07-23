@@ -936,7 +936,10 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
         writes the Accepted ADR (and updated README, if any) INTO the worktree
         it is handed — ``repo_root`` is never written for the PR (#9539).
         """
-        from auto_pr import generate_and_open_pr_async  # noqa: PLC0415
+        from auto_pr import (  # noqa: PLC0415
+            PREFLIGHT_DOCS_ONLY,
+            generate_and_open_pr_async,
+        )
 
         if self._config.dry_run:
             logger.info(
@@ -994,6 +997,9 @@ minority_note: <dissenting opinion if not unanimous, or "none">"""
             path_specs=path_specs,
             pr_title=pr_title,
             pr_body=pr_body,
+            # ADR acceptance PRs are Markdown-only — docs-only preflight
+            # set (#10013).
+            preflight=PREFLIGHT_DOCS_ONLY,
             commit_message=commit_message,
             base=self._config.base_branch(),
             auto_merge=False,

@@ -121,12 +121,14 @@ from review_insights import (
     build_persistent_finding_body,
     extract_categories,
     is_infra_failure_summary,
+    reconcile_closed_insight_escalations,
     verify_proposals,
 )
 from reviewer import ReviewRunner
 from state import StateTracker
 from task_source import TaskTransitioner
 from transcript_summarizer import TranscriptSummarizer
+from wiki_maint_queue import enqueue_wiki_ingest
 
 from ._common import (
     PreReviewContext,
@@ -417,12 +419,15 @@ class ReviewPhase:
                             decisions=decisions,
                         )
                     else:
-                        self._wiki_store.ingest(repo, entries)
+                        # No issue worktree: boot store is read-only, so
+                        # route entries through the maintenance queue for
+                        # the worktree-isolated PR (#9836).
+                        enqueue_wiki_ingest(self._config, repo, entries)
                     self._wiki_store.mark_ingested(repo, issue_number, "review")
                     return
 
             # Fallback: mechanical extraction from structured summary
-            from repo_wiki_ingest import ingest_from_review  # noqa: PLC0415
+            from repo_wiki_ingest import build_review_entries  # noqa: PLC0415
 
             if tracked_store is not None and worktree_path is not None:
                 await asyncio.to_thread(
@@ -435,7 +440,11 @@ class ReviewPhase:
                     path_prefix=self._config.repo_wiki_path,
                 )
             else:
-                ingest_from_review(self._wiki_store, repo, issue_number, summary)
+                enqueue_wiki_ingest(
+                    self._config,
+                    repo,
+                    [e for e, _ in build_review_entries(issue_number, summary)],
+                )
             self._wiki_store.mark_ingested(repo, issue_number, "review")
         except Exception:  # noqa: BLE001
             logger.warning(
@@ -3142,6 +3151,25 @@ class ReviewPhase:
                 # factory as an actionable `find_label` issue (#9227) — not a
                 # HITL dead-end — and skips (no duplicate, no comment spam) when
                 # one is already open.
+                if stale:
+                    # Re-arm: any HUMAN-closed escalation clears its category
+                    # from the in-memory window-tracker so a still-stale
+                    # category can refile fresh. Bot-closed escalations are
+                    # retained, not re-armed — same shared contract the loop
+                    # site uses (#8996), via the one shared implementation so
+                    # this fallback can't drift from it.
+                    reconcile_labels = self._config.find_label[:1]
+                    if reconcile_labels:
+                        rearmed = await reconcile_closed_insight_escalations(
+                            prs=self._prs,
+                            insight_escalated_at=self._insight_escalated_at,
+                            find_label=reconcile_labels[0],
+                        )
+                        if rearmed:
+                            logger.info(
+                                "ReviewPhase: re-armed stale-insight tracker for %s",
+                                rearmed,
+                            )
                 now_escalated = datetime.now(UTC)
                 for category in stale:
                     desc = CATEGORY_DESCRIPTIONS.get(category, category)

@@ -49,6 +49,8 @@ def _loop(tmp_path: Path) -> RCBudgetLoop:
     pr_manager = AsyncMock()
     dedup = MagicMock()
     dedup.get.return_value = set()
+    github_cache = MagicMock()
+    github_cache.get_rc_workflow_runs = AsyncMock(return_value=[])
     deps = LoopDeps(
         event_bus=EventBus(),
         stop_event=asyncio.Event(),
@@ -56,7 +58,12 @@ def _loop(tmp_path: Path) -> RCBudgetLoop:
         enabled_cb=lambda _name: True,
     )
     return RCBudgetLoop(
-        config=cfg, state=state, pr_manager=pr_manager, dedup=dedup, deps=deps
+        config=cfg,
+        state=state,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+        github_cache=github_cache,
     )
 
 
@@ -134,30 +141,24 @@ def test_skipped_suite_jobs_identify_gate_only_run(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_schedule_run_resolved_via_jobs(tmp_path: Path) -> None:
-    """Schedule runs are undecidable from list fields; jobs settle + cache them."""
+async def test_gate_only_resolved_via_jobs_and_cached(tmp_path: Path) -> None:
+    """The shared run snapshot has no per-job data; classify via PRPort jobs.
+
+    A completed run is immutable, so its gate-only verdict is fetched once via
+    ``PRPort.get_workflow_run_jobs`` and cached per run id — no per-tick fan-out
+    (#10254 / respecting #9814).
+    """
     loop = _loop(tmp_path)
-    # A pull_request run on an rc/* head is a full run with no job fetch.
-    assert (
-        loop._classify_from_list_fields(
-            {"event": "pull_request", "headBranch": "rc/2026-07-22-1824"}
-        )
-        is False
-    )
-    # A schedule run needs the job-level fetch.
-    assert (
-        loop._classify_from_list_fields({"event": "schedule", "headBranch": "staging"})
-        is None
-    )
-    fetch = AsyncMock(
+    loop._pr.get_workflow_run_jobs = AsyncMock(
         return_value=[
             {"name": "Resolve RC PR", "conclusion": "success"},
             {"name": "Scenario Tests", "conclusion": "skipped"},
             {"name": "Browser Scenarios", "conclusion": "skipped"},
         ]
     )
-    loop._fetch_run_jobs_raw = fetch
-    run = {"databaseId": 777, "event": "schedule", "headBranch": "staging"}
+    run = {"databaseId": 777}
     assert await loop._classify_gate_only(run) is True
     assert await loop._classify_gate_only(run) is True
-    fetch.assert_awaited_once()  # cached, not re-fetched
+    loop._pr.get_workflow_run_jobs.assert_awaited_once_with(
+        777
+    )  # cached, not re-fetched

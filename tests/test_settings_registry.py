@@ -90,6 +90,15 @@ class TestSchemaDerivation:
         for r in enum_rows:
             assert r["choices"], f"{r['name']} typed enum but no choices"
 
+    def test_enum_field_from_str_enum_offers_every_queue_discipline(self) -> None:
+        # queue_strategy (#10037) is a StrEnum, not a Literal — a different
+        # branch of _derive_type. It is the operator's only runtime access to
+        # the work picker, and 'fifo' in particular is the escape hatch back to
+        # the pre-#10037 ordering, so a dropped choice strands them.
+        row = self._schema()["queue_strategy"]
+        assert row["type"] == "enum"
+        assert set(row["choices"]) == {"fifo", "priority", "weighted_mix"}
+
     def test_current_value_reflects_config(self) -> None:
         cfg = HydraFlowConfig()
         object.__setattr__(cfg, "max_workers", 7)
@@ -112,3 +121,51 @@ class TestSchemaDerivation:
     def test_live_flag_present_per_row(self) -> None:
         for row in build_settings_schema(HydraFlowConfig()):
             assert isinstance(row["live"], bool)
+
+
+class TestHeavyMakeTimeoutKnobs:
+    """#9555 — heavy-make subprocess caps are System-tab knobs, not constants.
+
+    #9580 (closed into #9555) additionally requires the caps to be
+    operator-visible numeric inputs with the Pydantic ge/le bounds as
+    min/max — satisfied here because the settings screen is schema-driven:
+    a registry row with min/max IS the editable numeric input.
+    """
+
+    def _schema(self) -> dict[str, dict]:
+        rows = build_settings_schema(HydraFlowConfig())
+        return {r["name"]: r for r in rows}
+
+    def test_adversarial_timeout_is_mutable_and_schema_visible(self) -> None:
+        assert "skill_prompt_eval_adversarial_timeout_seconds" in mutable_field_names()
+        row = self._schema()["skill_prompt_eval_adversarial_timeout_seconds"]
+        assert row["type"] == "int"
+        assert row["group"] == "Trust Fleet"
+        assert row["live"] is True
+        assert row["default"] == 3600
+        assert row["min"] == 60
+        assert row["max"] == 21600
+        assert row["description"]
+
+    def test_principles_audit_timeout_is_mutable_and_schema_visible(self) -> None:
+        assert "principles_audit_timeout_seconds" in mutable_field_names()
+        row = self._schema()["principles_audit_timeout_seconds"]
+        assert row["type"] == "int"
+        assert row["group"] == "Trust Fleet"
+        assert row["live"] is True
+        assert row["default"] == 1800
+        assert row["min"] == 60
+        assert row["max"] == 21600
+        assert row["description"]
+
+    def test_staging_bisect_runtime_cap_is_mutable_and_schema_visible(self) -> None:
+        # The pre-existing runtime cap #9580 called out as PATCH-mutable but
+        # operator-invisible; same treatment as the two new caps.
+        assert "staging_bisect_runtime_cap_seconds" in mutable_field_names()
+        row = self._schema()["staging_bisect_runtime_cap_seconds"]
+        assert row["type"] == "int"
+        assert row["group"] == "Branching & Release"
+        assert row["live"] is True
+        assert row["default"] == 2700
+        assert row["min"] == 300
+        assert row["max"] == 14400

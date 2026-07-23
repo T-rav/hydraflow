@@ -30,6 +30,9 @@ def loop_env(tmp_path: Path):
     state.get_skill_prompt_last_green.return_value = {}
     state.get_skill_prompt_attempts.return_value = 0
     state.inc_skill_prompt_attempts.return_value = 1
+    # Refine weekly-cap read must return a real int (a bare MagicMock raises on
+    # the `>= max_weekly` compare); 0 lets `_try_refine` proceed past the cap.
+    state.refine_proposals_last_7d.return_value = 0
     pr = AsyncMock()
     pr.create_issue = AsyncMock(return_value=42)
     pr.list_issues_by_label = AsyncMock(return_value=[])
@@ -190,6 +193,86 @@ async def test_reconcile_closed_escalations(loop_env) -> None:
     remaining = dedup.set_all.call_args.args[0]
     assert "skill_prompt_eval:case_alpha" not in remaining
     state.clear_skill_prompt_attempts.assert_called_once_with("case_alpha")
+
+
+async def test_do_work_clears_inefficiency_key_when_issue_closed(
+    loop_env, monkeypatch
+) -> None:
+    """#10025: a closed `prompt-inefficiency` issue clears its dedup key on the
+    next tick (same closed-path reconcile as escalations), so a source that
+    re-degrades after triage re-files instead of hitting a dead dedup key."""
+    from skill_prompt_eval_loop import _INEFFICIENCY_LABEL, _inefficiency_title
+
+    cfg, state, pr, dedup = loop_env
+    key = "skill_prompt_eval:inefficiency:base_runner"
+    dedup.get.return_value = {key}
+
+    async def _closed(label: str, limit: int = 100) -> list[dict]:
+        if label == _INEFFICIENCY_LABEL:
+            return [
+                {
+                    "number": 9701,
+                    "title": _inefficiency_title("base_runner"),
+                    "body": "",
+                    "updated_at": "",
+                }
+            ]
+        return []
+
+    pr.list_closed_issues_by_label.side_effect = _closed
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    loop._run_corpus = AsyncMock(return_value=[])
+
+    await loop._do_work()
+
+    dedup.set_all.assert_called_once()
+    remaining = dedup.set_all.call_args.args[0]
+    assert key not in remaining
+    # Inefficiency filings have no per-source attempt counter to clear.
+    state.clear_skill_prompt_attempts.assert_not_called()
+
+
+async def test_inefficiency_refiles_after_key_cleared(loop_env) -> None:
+    """With the dedup key cleared, `_file_inefficiency_issue` files again for
+    the same source; with the key present it stays deduped (#10025)."""
+    from prompt_efficiency import SkillEfficiencyRow
+    from skill_prompt_eval_loop import _INEFFICIENCY_LABEL
+
+    cfg, state, pr, dedup = loop_env
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    row = SkillEfficiencyRow(
+        source="base_runner",
+        calls=120,
+        est_cost_usd=3.6,
+        anomalies=0,
+        cost_per_call=0.03,
+        trend_vs_baseline=0.42,
+    )
+
+    dedup.get.return_value = {"skill_prompt_eval:inefficiency:base_runner"}
+    await loop._file_inefficiency_issue(row)
+    pr.create_issue.assert_not_awaited()  # key present -> deduped
+
+    dedup.get.return_value = set()
+    await loop._file_inefficiency_issue(row)
+    pr.create_issue.assert_awaited_once()
+    labels = pr.create_issue.await_args.args[2]
+    assert _INEFFICIENCY_LABEL in labels
+
+
+def test_inefficiency_title_round_trips_through_subject_parser() -> None:
+    """The reconciler's title parser must invert the filing path's title
+    builder — drift between them orphans the dedup key forever (#10025)."""
+    from skill_prompt_eval_loop import _inefficiency_subject, _inefficiency_title
+
+    assert _inefficiency_subject(_inefficiency_title("base_runner")) == "base_runner"
+    assert _inefficiency_subject("Some operator-created issue title") is None
 
 
 _STALE_ESCALATION = {
@@ -403,3 +486,288 @@ async def test_recovery_closes_drift_issue_and_clears(loop_env, monkeypatch) -> 
     assert stats["resolved"] == 1
     pr.close_issue.assert_awaited_once_with(88)
     state.clear_skill_prompt_attempts.assert_called_once_with("case_shrink_001")
+
+
+# --- #9555: heavy-make timeout is an operator knob, read live per call -------
+
+
+async def test_run_corpus_timeout_uses_config_knob(loop_env, monkeypatch) -> None:
+    """The `make trust-adversarial` bound comes from the live config knob
+    (#9555), not a hardcoded constant — a System-tab PATCH (which mutates the
+    live config in-place) applies to the next invocation without a restart."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    object.__setattr__(cfg, "skill_prompt_eval_adversarial_timeout_seconds", 777)
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*cmd: str, **kwargs: object) -> SimpleResult:
+        captured["cmd"] = cmd
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(stdout="[]", stderr="", returncode=0)
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", fake_result)
+
+    out = await loop._run_corpus()
+
+    assert out == []
+    assert captured["cmd"][:2] == ("make", "trust-adversarial")
+    assert captured["timeout"] == 777
+
+
+async def test_run_corpus_default_timeout_preserves_prior_constant(
+    loop_env, monkeypatch
+) -> None:
+    """Default knob value == the former _ADVERSARIAL_TIMEOUT_SECONDS (3600):
+    no behaviour change when the operator sets nothing."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*_cmd: str, **kwargs: object) -> SimpleResult:
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(stdout="[]", stderr="", returncode=0)
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", fake_result)
+
+    await loop._run_corpus()
+
+    assert captured["timeout"] == 3600
+
+
+async def test_validate_candidate_timeout_uses_config_knob(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """The live-skill refine-validation corpus run shares the adversarial-eval
+    semantic, so it is bounded by the same knob (#9555)."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    object.__setattr__(cfg, "skill_prompt_eval_adversarial_timeout_seconds", 777)
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.discover_validation_case_ids",
+        lambda _cases_dir, _case_id: ["case_x"],
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*_cmd: str, **kwargs: object) -> SimpleResult:
+        captured["timeout"] = kwargs.get("timeout")
+        return SimpleResult(stdout="[]", stderr="", returncode=0)
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", fake_result)
+
+    await loop._validate_candidate(tmp_path, "diff_sanity", "case_x")
+
+    assert captured["timeout"] == 777
+
+
+# ---------------------------------------------------------------------------
+# #10063 — candidate-prompt live re-validation, gated on
+# HYDRAFLOW_TRUST_ADVERSARIAL_LIVE, budget-bounded, fail-closed.
+# ---------------------------------------------------------------------------
+
+
+async def test_validate_candidate_no_force_live_without_operator_opt_in(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """Without the operator's HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1 opt-in, the
+    subprocess command must NOT carry --force-live-cases — every validation
+    case keeps replaying its fixture (CI/non-live determinism, #10063)."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    monkeypatch.delenv("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE", raising=False)
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.discover_validation_case_ids",
+        lambda _cases_dir, _case_id: ["case_x"],
+    )
+    called = MagicMock()
+    monkeypatch.setattr("skill_prompt_eval_loop.select_live_validation_sample", called)
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*cmd: str, **kwargs: object) -> SimpleResult:
+        captured["cmd"] = cmd
+        return SimpleResult(stdout="[]", stderr="", returncode=0)
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", fake_result)
+
+    await loop._validate_candidate(tmp_path, "diff-sanity", "case_x")
+
+    assert "--force-live-cases" not in captured["cmd"]
+    called.assert_not_called()
+
+
+async def test_validate_candidate_forces_live_sample_when_operator_opts_in(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """With HYDRAFLOW_TRUST_ADVERSARIAL_LIVE=1 set, the subprocess command
+    must carry --force-live-cases with the budget-bounded sample computed by
+    select_live_validation_sample (regressed case + skill's own holdouts,
+    #10063), sized from the operator's config knob."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    object.__setattr__(cfg, "skill_prompt_refine_live_validation_budget", 3)
+    monkeypatch.setenv("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE", "1")
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.discover_validation_case_ids",
+        lambda _cases_dir, _case_id: ["case_x", "holdout-1"],
+    )
+
+    sample_calls: list[tuple[object, ...]] = []
+
+    def fake_sample(cases_dir, regressed_case_id, skill_name, budget):
+        sample_calls.append((cases_dir, regressed_case_id, skill_name, budget))
+        return ["case_x", "holdout-1"]
+
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.select_live_validation_sample", fake_sample
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*cmd: str, **kwargs: object) -> SimpleResult:
+        captured["cmd"] = cmd
+        return SimpleResult(stdout="[]", stderr="", returncode=0)
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", fake_result)
+
+    await loop._validate_candidate(tmp_path, "diff-sanity", "case_x")
+
+    assert sample_calls == [
+        (tmp_path / "tests/trust/adversarial/cases", "case_x", "diff-sanity", 3)
+    ]
+    cmd = captured["cmd"]
+    assert "--force-live-cases" in cmd
+    idx = cmd.index("--force-live-cases")
+    assert cmd[idx + 1] == "case_x,holdout-1"
+
+
+async def test_validate_candidate_empty_live_sample_omits_flag(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """A budget of 0 (or no eligible holdouts) makes
+    select_live_validation_sample return [] — the flag must be omitted
+    entirely rather than passed as an empty string."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    object.__setattr__(cfg, "skill_prompt_refine_live_validation_budget", 0)
+    monkeypatch.setenv("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE", "1")
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.discover_validation_case_ids",
+        lambda _cases_dir, _case_id: ["case_x"],
+    )
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.select_live_validation_sample",
+        lambda *_a, **_k: [],
+    )
+
+    captured: dict[str, object] = {}
+
+    async def fake_result(*cmd: str, **kwargs: object) -> SimpleResult:
+        captured["cmd"] = cmd
+        return SimpleResult(stdout="[]", stderr="", returncode=0)
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", fake_result)
+
+    await loop._validate_candidate(tmp_path, "diff-sanity", "case_x")
+
+    assert "--force-live-cases" not in captured["cmd"]
+
+
+async def test_validate_candidate_fails_closed_on_live_validation_error(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """FAIL-CLOSED (#10063): when the operator has opted into live
+    re-validation and the corpus-runner subprocess errors (a live-CLI
+    error/timeout surfacing as an exception), _validate_candidate must
+    return False — never fall back to a silent fixture-replay pass."""
+    cfg, state, pr, dedup = loop_env
+    object.__setattr__(cfg, "skill_prompt_refine_live_validation_budget", 3)
+    monkeypatch.setenv("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE", "1")
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.discover_validation_case_ids",
+        lambda _cases_dir, _case_id: ["case_x", "holdout-1"],
+    )
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.select_live_validation_sample",
+        lambda *_a, **_k: ["case_x"],
+    )
+
+    async def raising_result(*_cmd: str, **_kwargs: object):
+        raise RuntimeError("simulated live CLI timeout")
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", raising_result)
+
+    ok = await loop._validate_candidate(tmp_path, "diff-sanity", "case_x")
+
+    assert ok is False
+
+
+async def test_validate_candidate_fails_closed_on_nonzero_exit_under_live(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """FAIL-CLOSED (#10063): a non-zero exit from the corpus-runner
+    subprocess (e.g. an uncaught exception inside a forced-live CLI call)
+    must also return False, not a fixture-replay pass."""
+    from execution import SimpleResult
+
+    cfg, state, pr, dedup = loop_env
+    object.__setattr__(cfg, "skill_prompt_refine_live_validation_budget", 3)
+    monkeypatch.setenv("HYDRAFLOW_TRUST_ADVERSARIAL_LIVE", "1")
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.discover_validation_case_ids",
+        lambda _cases_dir, _case_id: ["case_x"],
+    )
+    monkeypatch.setattr(
+        "skill_prompt_eval_loop.select_live_validation_sample",
+        lambda *_a, **_k: ["case_x"],
+    )
+
+    async def nonzero_result(*_cmd: str, **_kwargs: object) -> SimpleResult:
+        return SimpleResult(stdout="", stderr="live CLI crashed", returncode=1)
+
+    monkeypatch.setattr("skill_prompt_eval_loop.run_subprocess_result", nonzero_result)
+
+    ok = await loop._validate_candidate(tmp_path, "diff-sanity", "case_x")
+
+    assert ok is False

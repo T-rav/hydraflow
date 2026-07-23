@@ -588,12 +588,42 @@ class TestInstallHooks:
         ) as mock_exec:
             await manager._install_hooks(tmp_path)
 
-        mock_exec.assert_called_once()
-        assert mock_exec.call_args.args[:4] == (
+        # core.hooksPath is set first; the arch-meta merge driver follows.
+        assert mock_exec.call_args_list[0].args[:4] == (
             "git",
             "config",
             "core.hooksPath",
             ".githooks",
+        )
+
+    @pytest.mark.asyncio
+    async def test_install_hooks_registers_arch_meta_driver(
+        self, config, tmp_path: Path
+    ) -> None:
+        """Host mode registers the arch-meta merge driver (mirrors ensure-hooks).
+
+        Without this, docs/arch/.meta.json's ``merge=arch-meta`` mapping in
+        .gitattributes is inert in factory worktrees and every rebase onto
+        staging re-conflicts on the regen stamp (#10099 follow-up).
+        """
+        manager = WorkspaceManager(config)
+        success_proc = make_proc()
+
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=success_proc
+        ) as mock_exec:
+            await manager._install_hooks(tmp_path)
+
+        config_calls = [c.args[:4] for c in mock_exec.call_args_list]
+        assert (
+            "git",
+            "config",
+            "merge.arch-meta.driver",
+            "cp -- %B %A",
+        ) in config_calls
+        assert any(
+            call[:3] == ("git", "config", "merge.arch-meta.name")
+            for call in config_calls
         )
 
     @pytest.mark.asyncio
@@ -608,4 +638,4 @@ class TestInstallHooks:
             # Should not raise
             await manager._install_hooks(tmp_path)
 
-        mock_exec.assert_called_once()
+        assert mock_exec.called

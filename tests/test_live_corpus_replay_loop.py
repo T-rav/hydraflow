@@ -845,3 +845,65 @@ async def test_skipped_volatile_zero_for_deterministic_shape(tmp_path: Path) -> 
     assert result["skipped_volatile"] == 0
     assert result["compared"] == 1
     assert result["drifted"] == 0
+
+
+# ---------------------------------------------------------------------------
+# covers() — registry-derived coverage for record-time pruning (#9633)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_covers_false_when_no_dispatcher_registered(tmp_path: Path) -> None:
+    """No dispatcher for (adapter, command) means no possible opinion."""
+    loop, _, _, _ = _build_loop(tmp_path)
+    assert loop.covers("git", "git", ["ls-remote"]) is False
+
+
+@pytest.mark.asyncio
+async def test_covers_delegates_to_registered_predicate(tmp_path: Path) -> None:
+    """A per-key covers= predicate decides on args."""
+    from contracts.shape_dispatchers import gh_shape_covers, gh_shape_validator
+
+    loop, _, _, _ = _build_loop(tmp_path)
+    loop.register("github", "gh", gh_shape_validator, covers=gh_shape_covers)
+    assert (
+        loop.covers(
+            "github", "gh", ["pr", "view", "42", "--json", "number,title,state"]
+        )
+        is True
+    )
+    assert (
+        loop.covers("github", "gh", ["api", "search/issues", "--jq", ".total_count"])
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_covers_true_when_dispatcher_has_no_predicate(tmp_path: Path) -> None:
+    """Conservative default: a dispatcher without a covers= predicate keeps
+    every sample for its key (limits blast radius if composition is
+    forgotten when chaining a second dispatcher — see #9803 guard)."""
+
+    async def dispatcher(_sample: object) -> dict[str, Any] | None:
+        return None
+
+    loop, _, _, _ = _build_loop(tmp_path)
+    loop.register("github", "gh", dispatcher)
+    assert (
+        loop.covers("github", "gh", ["api", "search/issues", "--jq", ".total_count"])
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_register_without_covers_kwarg_stays_backward_compatible(
+    tmp_path: Path,
+) -> None:
+    """The pre-#9633 two-positional register() call shape still works."""
+
+    async def dispatcher(_sample: object) -> dict[str, Any] | None:
+        return None
+
+    loop, _, _, _ = _build_loop(tmp_path)
+    loop.register("github", "gh", dispatcher)
+    assert ("github", "gh") in loop.registered_shapes()

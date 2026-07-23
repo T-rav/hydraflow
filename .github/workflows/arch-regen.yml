@@ -48,6 +48,9 @@ jobs:
           fi
       - uses: astral-sh/setup-uv@v4
         if: steps.skip_check.outputs.pure_regen != 'true'
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
       - uses: actions/setup-python@v5
         if: steps.skip_check.outputs.pure_regen != 'true'
         with:

@@ -2,9 +2,9 @@
 source: feedback_make_audit_separate_from_quality.md
 name: feedback_make_audit_separate_from_quality
 description: CI's "Principles Audit" runs `make audit` — NOT part of `make quality`; run it on convention/CI/workflow-touching PRs
-status: pending
-issue: null
-promoted_in: null
+status: promoted
+issue: 10173
+promoted_in: '#10173'
 wontfix_reason: null
 created: '2026-05-31'
 ---

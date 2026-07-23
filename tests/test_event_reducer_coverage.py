@@ -43,13 +43,13 @@ SKIP_LIST: set[str] = {
     "crate_completed",
     # Issue-created events are handled by pipeline snapshot refresh
     "issue_created",
+    # Refinement tick summaries surface via the rolling digest issue and the
+    # background_worker_status heartbeat, not a dedicated reducer case (#9957)
+    "issue_refinement_update",
     # CI check events are handled server-side for review phase decisions
     "ci_check",
     # Epic releasing is dispatched via REST (uppercase EPIC_RELEASING), not WS events
     "epic_releasing",
-    # Product track events are consumed server-side (shape phase polling, memory writes)
-    "discover_update",
-    "shape_update",
     # System reroute events are internal routing decisions (park, requeue), not dashboard state
     "system_reroute",
     # Diagnostic events are internal loop state, not dashboard-dispatched

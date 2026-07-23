@@ -34,7 +34,9 @@ issue; see ``_file_repoint_issue``) when the new identity is unambiguous.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -402,12 +404,41 @@ class AdrConformanceLoop(BaseBackgroundLoop):
 
         t0 = time.perf_counter()
 
+        # Pre-flight (#10211/#10243): if pytest can't launch under the runner's
+        # interpreter (a half-synced factory venv with the test extra dropped),
+        # EVERY pytest-kind check would fail identically with "No module named
+        # pytest", which the runner maps to FAIL — storming one false-positive
+        # drift issue per enforced ADR. Detect the broken runner env once, skip
+        # the whole tick, file NOTHING, and surface it as a single operational
+        # alert (below) instead of a per-ADR issue storm. #10212's per-check
+        # FAIL semantics stay intact — this guard fires before any check runs.
+        if not await asyncio.to_thread(self._runner.available):
+            logger.error(
+                "adr_conformance: pytest is not importable under %s — the "
+                "conformance runner environment is broken (e.g. a half-synced "
+                "venv). Skipping this tick and filing nothing to avoid a "
+                "false-positive drift storm (one issue per ADR). Fix: run "
+                "`uv sync --all-extras` in the factory workspace. See #10243.",
+                sys.executable,
+            )
+            self._emit_env_unavailable_signal(t0)
+            return {"status": "runner_env_unavailable"}
+
         await self._reconcile_closed_conformance_issues()
 
         now = datetime.now(UTC)
         adrs = self._adr_index.adrs()
-        results = evaluate_adrs(
-            adrs, self._runner, repo_root=self._repo_root, timestamp=now
+        # Offload to a worker thread: evaluate_adrs runs each ADR's
+        # ``**Enforced by:**`` check as a BLOCKING subprocess.run (pytest/make,
+        # up to 300s each). Running it inline wedges the single asyncio event
+        # loop for the whole sweep and trips the event-loop freeze detector
+        # (120s), taking the entire factory (dashboard + every loop) down.
+        results = await asyncio.to_thread(
+            evaluate_adrs,
+            adrs,
+            self._runner,
+            repo_root=self._repo_root,
+            timestamp=now,
         )
         self._persist_jsonl(results)
 
@@ -458,7 +489,9 @@ class AdrConformanceLoop(BaseBackgroundLoop):
             "repointed": repointed,
         }
 
-    def _emit_trace(self, t0: float, *, evaluated: int, filed: int) -> None:
+    def _emit_subprocess_trace(
+        self, t0: float, *, command: list[str], exit_code: int, stderr_excerpt: str
+    ) -> None:
         try:
             from trace_collector import emit_loop_subprocess_trace  # noqa: PLC0415
         except ImportError:
@@ -466,8 +499,30 @@ class AdrConformanceLoop(BaseBackgroundLoop):
         duration_ms = int((time.perf_counter() - t0) * 1000)
         emit_loop_subprocess_trace(
             loop=self._worker_name,
+            command=command,
+            exit_code=exit_code,
+            duration_ms=duration_ms,
+            stderr_excerpt=stderr_excerpt,
+        )
+
+    def _emit_trace(self, t0: float, *, evaluated: int, filed: int) -> None:
+        self._emit_subprocess_trace(
+            t0,
             command=["adr_conformance", "evaluate"],
             exit_code=0,
-            duration_ms=duration_ms,
             stderr_excerpt=f"evaluated={evaluated} filed={filed}",
+        )
+
+    def _emit_env_unavailable_signal(self, t0: float) -> None:
+        """One observable ops signal (non-zero trace) for the skipped tick.
+
+        Pairs with the ``logger.error`` in ``_do_work`` so the broken runner
+        env surfaces in loop telemetry (not silently swallowed) without filing
+        a per-ADR drift issue (#10243).
+        """
+        self._emit_subprocess_trace(
+            t0,
+            command=["adr_conformance", "preflight"],
+            exit_code=1,
+            stderr_excerpt="pytest not importable under sys.executable — tick skipped",
         )

@@ -1,0 +1,29 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_runs_for_workflow returns runs of ONE workflow file newest-first
+# in the CI-history shape {id, url, status, conclusion, created_at,
+# run_started_at, updated_at} (behind GitHubDataCache.get_rc_workflow_runs).
+# A run of a different workflow is seeded and must be excluded.
+adapter: github
+interaction: list_runs_for_workflow
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_runs_for_workflow
+  args:
+  - ci.yml
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"id": 5202, "url": "https://github.com/_/_/actions/runs/5202", "status":
+    "completed", "conclusion": "failure", "created_at": "2026-07-03T00:00:00Z", "run_started_at":
+    "2026-07-03T00:00:10Z", "updated_at": "2026-07-03T00:05:00Z"}, {"id": 5201, "url":
+    "https://github.com/_/_/actions/runs/5201", "status": "completed", "conclusion":
+    "success", "created_at": "2026-07-01T00:00:00Z", "run_started_at": "2026-07-01T00:00:10Z",
+    "updated_at": "2026-07-01T00:05:00Z"}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

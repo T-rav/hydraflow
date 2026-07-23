@@ -16,12 +16,16 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ +decompose-to-converge PLC0415 lazy imports (decomposition_council/issue_decomposer/decompose_terminal/decomposition_docs\
   \ deferred run_lightweight_agent + models imports \u2014 circular-safe convention).\
   \ re-snapshot 2026-07-12: +1 sandbox_main type-ignore[attr-defined] (6\u21927) for\
-  \ the s54 DecompositionCouncil fake-LLM sentinel attach \u2014 same dynamic-attach idiom\
-  \ as the 6 existing sentinel wirings; -1 decision.py PLC0415 (the deferred\
+  \ the s54 DecompositionCouncil fake-LLM sentinel attach \u2014 same dynamic-attach\
+  \ idiom as the 6 existing sentinel wirings; -1 decision.py PLC0415 (the deferred\
   \ decompose_terminal imports no longer need the noqa after the b8ed6d8f cast fix).\
-  \ re-snapshot 2026-07-13: +1 sandbox_main type-ignore[misc] (3->4) — _apply_sandbox_config_overrides\
+  \ re-snapshot 2026-07-13: +1 sandbox_main type-ignore[misc] (3->4) \u2014 _apply_sandbox_config_overrides\
   \ sets config.merge_policy_enabled=False for the air-gap (#9754), same frozen-field\
-  \ assignment idiom as the 3 sibling overrides it now sits beside."
+  \ assignment idiom as the 3 sibling overrides it now sits beside. re-snapshot 2026-07-19:\
+  \ -2 staging_bisect_loop.py PLC0415 (#9554/#10028 \u2014 _run_bisect_probe/_run_gh\
+  \ migrated onto the shared subprocess_util.run_subprocess_result/run_subprocess\
+  \ bounded helper; each dropped a now-redundant local 'import asyncio' re-import\
+  \ that shadowed the module-level import)."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -30,7 +34,7 @@ entries:
   src/adr_conformance_loop.py::noqa:TCH001: 3
   src/adr_draft_opener.py::noqa:BLE001: 1
   src/adr_reviewer.py::noqa:PLC0415: 2
-  src/adr_touchpoint_auditor_loop.py::noqa:PLC0415: 2
+  src/adr_touchpoint_auditor_loop.py::noqa:PLC0415: 1
   src/adr_touchpoint_auditor_loop.py::noqa:PLR0915: 1
   src/adr_touchpoint_auditor_loop.py::noqa:TCH001: 2
   src/adversarial_retry_loop.py::noqa:PLC0415: 4
@@ -113,7 +117,6 @@ entries:
   src/diagnostic_loop.py::noqa:UP007: 1
   src/diagram_loop.py::noqa:PLC0415: 6
   "src/discover_expander.py::noqa:BLE001\u2014logandfallthrough": 1
-  src/discover_phase.py::type-ignore[arg-type]: 1
   src/discover_runner.py::type-ignore[attr-defined]: 1
   src/discover_runner.py::type-ignore[override]: 1
   src/disturbance_dampener_loop.py::noqa:BLE001: 1
@@ -132,10 +135,6 @@ entries:
   src/exception_classify.py::noqa:PLC0415: 3
   src/execution.py::noqa:A002: 2
   src/execution.py::noqa:PLW0603: 1
-  src/expert_council.py::noqa:ANN001: 1
-  src/expert_council.py::noqa:PLC0415: 1
-  src/expert_council.py::type-ignore[attr-defined]: 1
-  src/expert_council.py::type-ignore[override]: 1
   "src/fake_coverage_auditor_loop.py::noqa:BLE001\u2014auditmustnotcrashtheloop": 1
   "src/fake_coverage_auditor_loop.py::noqa:BLE001\u2014issuefilingfailure\u2260loopfailure": 1
   src/fake_coverage_auditor_loop.py::noqa:PLC0415: 2
@@ -234,7 +233,7 @@ entries:
   src/rc_budget_loop.py::noqa:PLC0415: 1
   src/rc_budget_loop.py::noqa:TCH001: 2
   src/repo_wiki.py::noqa:BLE001: 3
-  src/repo_wiki.py::noqa:PLC0415: 5
+  src/repo_wiki.py::noqa:PLC0415: 6
   "src/repo_wiki.py::noqa:PLC0415\u2014isolatedhere,notamodule-leveldep": 1
   src/repo_wiki.py::type-ignore[return-value]: 1
   src/repo_wiki_ingest.py::noqa:BLE001: 1
@@ -245,12 +244,11 @@ entries:
   src/report_issue_loop.py::noqa:PLR0911: 1
   src/research_runner.py::type-ignore[override]: 1
   src/retrospective.py::noqa:PLC0415: 4
-  src/retrospective_loop.py::noqa:BLE001: 1
-  src/retrospective_loop.py::noqa:PLC0415: 3
+  src/retrospective_loop.py::noqa:PLC0415: 2
   "src/review_advisor.py::noqa:BLE001\u2014telemetryneverbreaksbusinesslogic": 3
   src/review_advisor.py::noqa:PLC0415: 2
   src/review_advisor.py::type-ignore[override]: 1
-  src/review_insights.py::noqa:BLE001: 2
+  src/review_insights.py::noqa:BLE001: 1
   src/review_insights.py::noqa:PLC0415: 4
   src/review_insights.py::noqa:TCH004: 1
   src/review_phase/__init__.py::noqa:E402: 3
@@ -279,24 +277,19 @@ entries:
   src/server.py::noqa:PLC0415: 18
   src/server.py::type-ignore[arg-type]: 2
   src/server.py::type-ignore[no-untyped-def]: 1
-  src/service_registry.py::noqa:F841: 34
-  src/service_registry.py::noqa:PLC0415: 14
-  src/service_registry.py::noqa:TCH001: 14
+  src/service_registry.py::noqa:F841: 32
+  src/service_registry.py::noqa:PLC0415: 12
+  src/service_registry.py::noqa:TCH001: 12
   "src/service_registry.py::noqa:TCH001\u2014dataclassannotation": 1
   "src/service_registry.py::noqa:TCH001\u2014usedindataclassfield": 2
   src/service_registry.py::type-ignore[arg-type]: 2
   src/service_registry.py::type-ignore[assignment]: 1
   src/service_registry.py::type-ignore[attr-defined]: 4
-  src/shape_challenger.py::noqa:BLE001: 1
-  src/shape_phase.py::noqa:BLE001: 2
-  src/shape_phase.py::noqa:PLC0415: 4
-  src/shape_phase.py::noqa:TCH001: 5
-  src/shape_phase.py::type-ignore[arg-type]: 1
   src/shape_runner.py::type-ignore[override]: 1
   src/skill_prompt_eval_loop.py::noqa:BLE001: 1
   src/skill_prompt_eval_loop.py::noqa:PLC0415: 1
   src/staging_bisect_loop.py::noqa:BLE001: 3
-  src/staging_bisect_loop.py::noqa:PLC0415: 14
+  src/staging_bisect_loop.py::noqa:PLC0415: 12
   src/staging_bisect_loop.py::noqa:PLR0911: 2
   src/staging_promotion_loop.py::noqa:BLE001: 4
   src/state/_convergence.py::noqa:PLC0415: 1
@@ -338,6 +331,7 @@ entries:
   "src/ubiquitous_language.py::noqa:PLR0911\u2014linearF1guards,eachwithitsownfailpath": 1
   src/verification_judge.py::noqa:PLC0415: 1
   src/whatsapp_bridge.py::noqa:PLC0415: 1
+  src/wiki_anchor_gate.py::noqa:PLC0415: 1
   src/wiki_compiler.py::noqa:BLE001: 3
   src/wiki_compiler.py::noqa:PLC0415: 5
   src/wiki_drift_detector.py::noqa:BLE001: 1
@@ -346,4 +340,4 @@ entries:
   src/wiki_rot_detector_loop.py::noqa:PLC0415: 3
   src/workspace.py::noqa:E402: 1
   src/workspace.py::noqa:S311: 1
-  src/workspace_gc_loop.py::noqa:BLE001: 7
+  src/workspace_gc_loop.py::noqa:BLE001: 8

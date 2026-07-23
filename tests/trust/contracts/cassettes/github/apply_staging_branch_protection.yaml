@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# apply_staging_branch_protection PUTs HydraFlow's default protection rules
+# onto <branch>. The real adapter returns the literal dict
+# {"status": "protected", "branch": branch} (src/pr_manager.py) and the
+# fake mirrors it verbatim — the contract pins that exact JSON shape.
+adapter: github
+interaction: apply_staging_branch_protection
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: apply_staging_branch_protection
+  args:
+    - "staging"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "{\"status\": \"protected\", \"branch\": \"staging\"}\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

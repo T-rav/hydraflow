@@ -1,0 +1,55 @@
+name: xdist Audit
+
+# Nightly probe for xdist-isolation flakes: tests that fail under `pytest -n
+# auto` but pass serially (issue #10141). Runs the suite in parallel, then
+# re-runs only the failures serially; a test that fails parallel + passes serial
+# is a `PYTEST_SERIAL_PATHS` quarantine candidate. Off the merge path — always
+# exits 0 and uploads `xdist-audit.json` for FlakeTrackerLoop to window + act on.
+# Manually triggerable via workflow_dispatch.
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # 05:00 UTC nightly (offset from the 03:00 CI nightly)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  xdist-audit:
+    name: xdist Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      # Same target set as ci.yml's parallel `test` lane so the audit measures
+      # the tests that actually run under -n auto there. tests/regressions has
+      # its own lane; tests/test_review_phase_metrics.py is already serial.
+      - name: Run xdist-isolation audit
+        run: |
+          PYTHONPATH=src uv run python scripts/xdist_audit.py \
+            --target tests/ \
+            --ignore tests/regressions \
+            --ignore tests/test_review_phase_metrics.py \
+            --out junit/xdist-audit.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xdist-audit
+          path: junit/xdist-audit.json
+          if-no-files-found: warn

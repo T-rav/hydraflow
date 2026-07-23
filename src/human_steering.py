@@ -45,7 +45,7 @@ def resolve_redo_phase(token: str) -> str | None:
     """Resolve a `/redo` token to an internal stage value.
 
     Accepts either a dashboard-facing display name (e.g. "implement") or an
-    already-internal stage name (e.g. "ready", "shape") and returns the
+    already-internal stage name (e.g. "ready", "plan") and returns the
     internal ``IssueStoreStage`` value. Returns ``None`` for anything
     unrecognized, including "merged" (not a redoable phase).
     """

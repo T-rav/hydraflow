@@ -5,13 +5,13 @@ kind: "runner"
 bounded_context: "builder"
 code_anchor: "src/agent.py:AgentRunner"
 aliases: ["agent runner", "implement runner", "claude agent runner"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K8"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K9"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K6"}, {"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488G"}, {"kind": "implements", "target": "01KWDRENTS7VACCW9PDA7Y488G"}, {"kind": "depends_on", "target": "01KXV30G7W143XRZFQM9SCSX27"}]
-evidence: ["01KQP0XFBGMB32VFGNPV8GZ26X", "01KQRULESET2026B0PHASE2002", "implement-phase-half-state-on-skill-failure"]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K8"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K9"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K6"}, {"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488G"}, {"kind": "implements", "target": "01KWDRENTS7VACCW9PDA7Y488G"}, {"kind": "depends_on", "target": "01KXV30G7W143XRZFQM9SCSX27"}, {"kind": "depends_on", "target": "01KY4QKSBGMKHY3AV0JJ0QNMMD"}]
+evidence: ["01KQP0R43781VJFJ9HZRWQCZP8", "01KQP0XFBGMB32VFGNPV8GZ26X", "01KQRULESET2026B0PHASE2002", "implement-phase-half-state-on-skill-failure"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668798+00:00"
-updated_at: "2026-07-18T22:46:42.178459+00:00"
+updated_at: "2026-07-22T15:07:38.028195+00:00"
 ---
 
 ## Definition

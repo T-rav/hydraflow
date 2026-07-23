@@ -191,20 +191,21 @@ async def test_adr_drafts_opened_increments():
     assert metrics.snapshot()["adr_drafts_opened"] == 1
 
 
-async def test_reflections_bridged_increments(tmp_path):
+def test_reflections_bridged_increments(tmp_path):
     from post_merge_handler import _bridge_reflections_to_wiki
     from reflections import append_reflection
-    from wiki_compiler import ContradictionCheck
 
     cfg = MagicMock()
     cfg.data_root = tmp_path
+    # enqueue_wiki_ingest resolves the shared queue via config.data_path.
+    cfg.data_path = tmp_path.joinpath
 
     store = RepoWikiStore(tmp_path / "wiki")
     compiler = AsyncMock()
-    compiler.detect_contradictions = AsyncMock(return_value=ContradictionCheck())
     append_reflection(cfg, 42, phase="plan", content="architecture: insight.")
 
-    await _bridge_reflections_to_wiki(
+    # Bridge is sync since #9836 (it enqueues rather than writing inline).
+    _bridge_reflections_to_wiki(
         config=cfg,
         issue_number=42,
         repo="acme/widget",

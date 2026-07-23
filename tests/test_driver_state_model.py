@@ -11,11 +11,11 @@ class TestSuspendRecord:
             reason="shape_human_select",
             suspended_at="2026-06-30T12:00:00+00:00",
             wake_signal="comment",
-            resume_state="SHAPE",
+            resume_state="PLAN",
         )
         restored = SuspendRecord.model_validate_json(rec.model_dump_json())
         assert restored == rec
-        assert restored.resume_state == "SHAPE"
+        assert restored.resume_state == "PLAN"
 
 
 class TestPolicyEvent:

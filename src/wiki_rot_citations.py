@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import difflib
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -176,6 +177,74 @@ _BUILTINS_DENY: frozenset[str] = frozenset(
         "None",
     }
 )
+
+
+# ---------------------------------------------------------------------------
+# Shipped-claim extraction (issue #9598)
+# ---------------------------------------------------------------------------
+
+# ``json:entry`` machine blocks — the RepoWikiStore house format. Both the
+# single-line compiled shape and the multi-line manual shape are captured;
+# the JSON body is parsed leniently below.
+_JSON_ENTRY_RE = re.compile(r"```json:entry\s*\n(.*?)```", re.DOTALL)
+
+
+@dataclass(frozen=True)
+class ShippedClaim:
+    """A structured "shipped in #NNNN" assertion from a wiki entry.
+
+    Sourced from the ``fixed_in_pr`` field of a ``json:entry`` machine
+    block — the one machine-readable shape in the RepoWikiStore format that
+    asserts a fix *landed* in a specific PR.  ``code_refs`` carries the
+    entry's own corroborating code references (``path.py:symbol`` strings);
+    the loop verifies the claim by resolving them against the codebase.
+
+    Provenance footers (``_Source: #NNNN (plan)_``) are deliberately **not**
+    shipped claims and are never extracted here.
+    """
+
+    pr_ref: str  # e.g. "#8713"
+    code_refs: tuple[str, ...]
+    raw: str  # verbatim block body, for excerpting in issue bodies
+
+
+def extract_shipped_claims(text: str) -> list[ShippedClaim]:
+    """Extract structured shipped claims (``fixed_in_pr``) from *text*.
+
+    Scans every ``json:entry`` block, parses its JSON body leniently, and
+    emits a :class:`ShippedClaim` for each block carrying a non-empty
+    ``fixed_in_pr``.  Blocks with malformed JSON, no ``fixed_in_pr``, or a
+    blank ``fixed_in_pr`` are skipped — the function never raises on bad
+    input.  Deduplicated by ``(pr_ref, code_refs)``.
+    """
+    seen: set[tuple[str, tuple[str, ...]]] = set()
+    out: list[ShippedClaim] = []
+
+    for block in _JSON_ENTRY_RE.finditer(text):
+        body = block.group(1)
+        try:
+            data = json.loads(body)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        pr_ref = data.get("fixed_in_pr")
+        if not isinstance(pr_ref, str) or not pr_ref.strip():
+            continue
+        pr_ref = pr_ref.strip()
+
+        raw_refs = data.get("code_refs", [])
+        code_refs: tuple[str, ...] = ()
+        if isinstance(raw_refs, list):
+            code_refs = tuple(r for r in raw_refs if isinstance(r, str) and r.strip())
+
+        key = (pr_ref, code_refs)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ShippedClaim(pr_ref=pr_ref, code_refs=code_refs, raw=body.strip()))
+
+    return out
 
 
 # ---------------------------------------------------------------------------

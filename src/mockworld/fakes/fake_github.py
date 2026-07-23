@@ -7,6 +7,7 @@ that phases call via PipelineHarness.
 
 from __future__ import annotations
 
+import copy
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from mockworld.fakes._factories import PRInfoFactory
 from models import LabelDrift
+from pr_manager import PRManager
 
 if TYPE_CHECKING:
     from mockworld.seed import MockWorldSeed
@@ -76,6 +78,22 @@ class FakeIssue:
     # because FakeComment *is* a str.
     comments: list[FakeComment] = field(default_factory=list)
     updated_at: str = "2026-01-01T00:00:00Z"
+    # Only meaningful once state == "closed"; mirrors gh's closedAt (#9727).
+    # Empty = "not explicitly seeded": the closed listing falls back to
+    # updated_at, mirroring GitHub (closing an issue touches both).
+    closed_at: str = ""
+    # Only meaningful once state == "closed"; mirrors gh's stateReason
+    # ("COMPLETED" | "NOT_PLANNED"). Empty = closed without an explicit
+    # reason — get_issue_state falls back to "COMPLETED", matching gh's
+    # default close reason (#10025).
+    state_reason: str = ""
+
+
+# RC promotion naming (#10309). Matches config's ``rc_branch_prefix`` default —
+# the fake serves one repo's worth of state under default naming. The fixed
+# date mirrors FakeIssue's hard-coded timestamps: deterministic, no wall clock.
+_RC_BRANCH_PREFIX = "rc/"
+_RC_FIXED_DATE = "2026-01-01T00:00:00Z"
 
 
 @dataclass
@@ -115,8 +133,25 @@ class FakeGitHub:
 
     def __init__(self) -> None:
         self._issues: dict[int, FakeIssue] = {}
+        self._pr_diff_names: dict[int, list[str]] = {}
+        # #9974: seeded workflow-run history for GateHealthLoop scenarios.
+        self._workflow_runs: list[dict[str, Any]] = []
+        self._workflow_jobs: dict[int, list[dict[str, Any]]] = {}
+        self._workflow_artifacts: dict[int, int] = {}
+        # #10027: run ids passed to rerun_workflow_failed, in call order.
+        # Scenarios re-seed via add_workflow_run (status="in_progress") after
+        # asserting a rerun fired, to simulate the mid-rerun stale-conclusion
+        # trap the settled-red predicate must not double-fire on.
+        self._workflow_reruns: list[int] = []
         self._prs: dict[int, FakePR] = {}
         self._pr_counter = 10_000
+        # #10309: rc/* branches created via create_rc_branch, branch → ISO
+        # committer date, so the promotion read side (find_open_promotion_pr /
+        # list_rc_branches / list_recent_promotion_prs) is backed by real
+        # state and StagingPromotionLoop can cut → find → monitor → merge its
+        # own RC end-to-end against the fake (previously the reads were
+        # hard-coded None/[] stubs).
+        self._rc_branches: dict[str, str] = {}
         self._ci_scripts: dict[int, deque[tuple[bool, str]]] = {}
         self._comments: list[tuple[int, str]] = []
         self._ci_main_status: tuple[str, str] = ("success", "")
@@ -147,6 +182,17 @@ class FakeGitHub:
         # attribute directly when constructing `gh` CLI args via _run_gh.
         # The value never reaches a real GitHub API in the sandbox.
         self._repo: str = "owner/repo"
+        # Branch-protection rulesets keyed by name, served by fetch_rulesets
+        # (ADR-0082, #9644). Mirrors the shape gh_fetch_rulesets returns:
+        # {name: {name, target, enforcement, conditions, rules, ...}}.
+        self._rulesets: dict[str, dict[str, Any]] = {}
+        # Classic branch-protection config keyed by branch name, served by
+        # fetch_legacy_protection (#10148). Mirrors the shape GitHub's
+        # ``/repos/{repo}/branches/{branch}/protection`` returns. Default
+        # empty: fetch_legacy_protection returns None (no classic rule) for
+        # every branch, matching the raw ``gh api`` 404 case, so existing
+        # ruleset-only seeds see no new drift from this seam.
+        self._legacy_protection: dict[str, dict[str, Any]] = {}
 
     @classmethod
     def from_seed(cls, seed: MockWorldSeed) -> FakeGitHub:
@@ -158,6 +204,8 @@ class FakeGitHub:
                 title=issue_dict["title"],
                 body=issue_dict["body"],
                 labels=list(issue_dict.get("labels", [])),
+                state=issue_dict.get("state", "open"),
+                updated_at=issue_dict.get("updated_at"),
             )
         for issue_number, comment_dicts in seed.comments.items():
             for comment_dict in comment_dicts:
@@ -176,6 +224,7 @@ class FakeGitHub:
                 merged=pr_dict.get("merged", False),
                 author=pr_dict.get("author", "fake-author"),
                 is_bot=pr_dict.get("is_bot", False),
+                mergeable=pr_dict.get("mergeable", True),
             )
             for label in pr_dict.get("labels", []):
                 gh.add_pr_label(pr_dict["number"], label)
@@ -183,6 +232,8 @@ class FakeGitHub:
         conclusion, url = seed.main_branch_ci_status
         if conclusion != "success":
             gh.set_ci_main_status(conclusion, url)
+        for name, cfg in seed.rulesets.items():
+            gh.add_ruleset(name, cfg)
         return gh
 
     # --- Seed API ---
@@ -193,13 +244,33 @@ class FakeGitHub:
         title: str,
         body: str,
         labels: list[str] | None = None,
+        state: str = "open",
+        updated_at: str | None = None,
     ) -> None:
-        self._issues[number] = FakeIssue(
+        """Seed an issue. ``state`` accepts ``"open"`` (default) or ``"closed"``.
+
+        A closed seed issue reports ``COMPLETED`` from ``get_issue_state``
+        (close-reason defaulting mirrors gh, #10025) — the surface loops like
+        workspace_gc/epic_sweeper consult before acting (#9543).
+
+        ``updated_at`` (#9544) lets a scenario control the issue's staleness
+        independently of ``FakeIssue``'s hard-coded ``2026-01-01T00:00:00Z``
+        default — needed to drive time-triggered loops like
+        ``stale_issue_gc`` down BOTH branches (closes a genuinely stale
+        issue, skips a genuinely fresh one) instead of every seeded issue
+        reading as equally stale. ``None`` (default) leaves ``FakeIssue``'s
+        own default untouched — back-compat for every pre-#9544 seed.
+        """
+        issue = FakeIssue(
             number=number,
             title=title,
             body=body,
             labels=labels or [],
+            state=state,
         )
+        if updated_at:
+            issue.updated_at = updated_at
+        self._issues[number] = issue
 
     def add_seeded_comment(
         self,
@@ -232,12 +303,14 @@ class FakeGitHub:
         merged: bool = False,
         author: str = "fake-author",
         is_bot: bool = False,
+        mergeable: bool = True,
     ) -> None:
         """Directly insert a PR record (sync helper for test seeding).
 
         The async ``create_pr`` handles the production path; this helper
         exists so scenario seeds can set up a fully-populated world
-        synchronously.
+        synchronously. ``mergeable=False`` seeds a CONFLICTING PR that
+        ``list_conflicting_prs`` surfaces to merge_state_watcher (#9543).
         """
         self._prs[number] = FakePR(
             number=number,
@@ -247,6 +320,7 @@ class FakeGitHub:
             ci_status=ci_status,
             author=author,
             is_bot=is_bot,
+            mergeable=mergeable,
         )
 
     def add_pr_label(self, pr_number: int, label: str) -> None:
@@ -260,6 +334,30 @@ class FakeGitHub:
     def add_alerts(self, *, branch: str, alerts: list[Any]) -> None:
         """Script code-scanning alerts returned by fetch_code_scanning_alerts."""
         self._alerts[branch] = list(alerts)
+
+    def add_ruleset(self, name: str, config: dict[str, Any]) -> None:
+        """Seed-API helper: register a live branch-protection ruleset by name.
+
+        The stored config is what ``fetch_rulesets`` serves — shaped like
+        GitHub's ``/repos/{repo}/rulesets/{id}`` response so it can be diffed
+        against the canonical contract by ``branch_protection_audit`` (#9644).
+        Stored as a shallow copy so later mutation of the caller's dict does
+        not retroactively alter seeded state.
+        """
+        self._rulesets[name] = dict(config)
+
+    def add_legacy_protection(self, branch: str, config: dict[str, Any]) -> None:
+        """Seed-API helper: register classic branch-protection config for a branch.
+
+        The stored config is what ``fetch_legacy_protection`` serves — shaped
+        like GitHub's ``/repos/{repo}/branches/{branch}/protection`` response
+        (``{"required_status_checks": {"contexts": [...], "checks": [...]}}``)
+        so ``branch_protection_audit.undeclared_legacy_contexts`` can detect an
+        undeclared legacy layer stacking extra required checks on top of the
+        ruleset (#10148). Stored as a shallow copy so later mutation of the
+        caller's dict does not retroactively alter seeded state.
+        """
+        self._legacy_protection[branch] = dict(config)
 
     def script_ci(self, pr_number: int, results: list[tuple[bool, str]]) -> None:
         self._ci_scripts[pr_number] = deque(results)
@@ -313,6 +411,11 @@ class FakeGitHub:
         """Set the updated_at timestamp on a seeded issue."""
         if issue_number in self._issues:
             self._issues[issue_number].updated_at = updated_at
+
+    def set_issue_closed_at(self, issue_number: int, closed_at: str) -> None:
+        """Set the closed_at timestamp on a seeded issue (#9727)."""
+        if issue_number in self._issues:
+            self._issues[issue_number].closed_at = closed_at
 
     def set_rate_limit_mode(
         self,
@@ -374,8 +477,6 @@ class FakeGitHub:
         stage_label_map = {
             "find": "hydraflow-find",
             "triage": "hydraflow-triage",
-            "discover": "hydraflow-discover",
-            "shape": "hydraflow-shape",
             "plan": "hydraflow-plan",
             "ready": "hydraflow-ready",
             "review": "hydraflow-review",
@@ -454,10 +555,22 @@ class FakeGitHub:
         if issue_number in self._issues:
             self._issues[issue_number].state = "closed"
 
-    async def close_issue(self, issue_number: int) -> bool:
+    async def close_issue(
+        self, issue_number: int, *, reason: str | None = None
+    ) -> bool:
         self._maybe_rate_limit()
         if issue_number in self._issues:
-            self._issues[issue_number].state = "closed"
+            issue = self._issues[issue_number]
+            issue.state = "closed"
+            # Mirror gh: `--reason "not planned"` -> stateReason NOT_PLANNED;
+            # no --reason -> COMPLETED (get_issue_state's empty fallback).
+            issue.state_reason = reason.upper().replace(" ", "_") if reason else ""
+        elif issue_number in self._prs:
+            # gh treats PRs as issues — `gh issue close <pr#>` closes the PR.
+            # StagingPromotionLoop closes red promotion PRs through this exact
+            # call (#10309); without the fallthrough the fake left them open
+            # and the loop re-found the same "open" PR every tick.
+            self._prs[issue_number].closed = True
         return True
 
     async def close_pr(self, pr_number: int) -> bool:
@@ -566,9 +679,13 @@ class FakeGitHub:
         self._maybe_rate_limit()
         return "abc123"
 
+    def set_pr_diff_names(self, pr_number: int, names: list[str]) -> None:
+        """Seed the changed-file list one PR reports (#9974 blame scenarios)."""
+        self._pr_diff_names[pr_number] = list(names)
+
     async def get_pr_diff_names(self, pr_number: int) -> list[str]:
         self._maybe_rate_limit()
-        return ["src/app.py"]
+        return list(self._pr_diff_names.get(pr_number, ["src/app.py"]))
 
     async def get_pr_recent_commit_diffs(self, pr_number: int, *, n: int = 3) -> str:
         """Return a stub diff block for the last *n* commits on *pr_number*.
@@ -589,12 +706,33 @@ class FakeGitHub:
         return ["octocat"]
 
     async def get_pr_checks(self, pr_number: int) -> list[dict[str, str]]:
-        """No CI checks in the air-gapped sandbox. Empty is falsy, so epic
-        detail rendering (EpicManager._enrich_pr_status) derives no CI status
-        rather than AttributeError-ing — which previously dropped any epic with
-        a PR'd child from /api/epics."""
+        """Serve seeded ``FakePR.checks`` (#10260). Defaults to empty — same
+        falsy-empty contract as before, so epic detail rendering
+        (EpicManager._enrich_pr_status) derives no CI status rather than
+        AttributeError-ing when a scenario hasn't seeded checks."""
         self._maybe_rate_limit()
-        return []
+        pr = self._prs.get(pr_number)
+        if pr is None:
+            return []
+        return [{"name": name, "state": state} for name, state in pr.checks]
+
+    async def find_open_resolving_pr(self, issue_number: int) -> int | None:
+        """In-memory mirror of :meth:`PRPort.find_open_resolving_pr` (#10260).
+
+        Unlike the real adapter (which parses ``Fixes #N`` from the PR
+        body), the fake's ``FakePR.issue_number`` already encodes the link.
+        Draft PRs are excluded, mirroring the real adapter.
+        """
+        self._maybe_rate_limit()
+        for pr in self._prs.values():
+            if (
+                pr.issue_number == issue_number
+                and not pr.merged
+                and not pr.closed
+                and not pr.draft
+            ):
+                return pr.number
+        return None
 
     async def get_pr_reviews(self, pr_number: int) -> list[dict[str, str]]:
         """No GitHub reviews in the air-gapped sandbox. Empty → epic detail
@@ -653,19 +791,154 @@ class FakeGitHub:
 
     # --- Loop-required PRPort methods ---
 
+    @staticmethod
+    def _issue_summary(issue: FakeIssue) -> dict[str, Any]:
+        """GitHubIssueSummary-style projection of one issue.
+
+        Shared by ``list_issues_by_label`` / ``list_open_issues`` — previously
+        two byte-identical copies (#10025). ``labels`` mirrors the gh wire
+        shape (``{"name": ...}``, #9943) so filters reading ``lbl["name"]``
+        behave identically under the fake and the adapter.
+        """
+        return {
+            "number": issue.number,
+            "title": issue.title,
+            "body": issue.body,
+            "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+            "labels": [{"name": name} for name in issue.labels],
+        }
+
     async def list_issues_by_label(self, label: str) -> list[dict[str, Any]]:
         """Return open issues carrying *label* as GitHubIssueSummary-style dicts."""
         self._maybe_rate_limit()
         return [
-            {
-                "number": issue.number,
-                "title": issue.title,
-                "body": issue.body,
-                "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
-            }
+            self._issue_summary(issue)
             for issue in self._issues.values()
             if issue.state == "open" and label in issue.labels
         ]
+
+    async def list_open_issues(self) -> list[dict[str, Any]]:
+        """Return ALL open issues (no label filter), mirroring the gh projection.
+
+        Used by IssueRefinementLoop's backlog-wide sweep (#9957).
+        """
+        self._maybe_rate_limit()
+        return [
+            self._issue_summary(issue)
+            for issue in self._issues.values()
+            if issue.state == "open"
+        ]
+
+    async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
+        """Return numbers of ALL open issues, mirroring the gh projection (#9905)."""
+        self._maybe_rate_limit()
+        numbers = [
+            issue.number for issue in self._issues.values() if issue.state == "open"
+        ]
+        return sorted(numbers)[:limit]
+
+    def add_workflow_run(
+        self,
+        run_id: int,
+        *,
+        workflow: str,
+        conclusion: str,
+        created_at: str = "2026-07-01T00:00:00Z",
+        pr_number: int = 0,
+        jobs: list[dict[str, Any]] | None = None,
+        artifact_count: int = 0,
+        url: str = "",
+        status: str = "completed",
+        run_started_at: str = "",
+        updated_at: str = "",
+    ) -> None:
+        """Seed one workflow run (+jobs/artifacts) for gate-health scenarios.
+
+        ``url``/``status``/``run_started_at``/``updated_at`` (#9814) feed
+        :meth:`list_runs_for_workflow`; the timestamps default to
+        ``created_at`` — mirroring the adapter's ``run_started_at``
+        fallback — so duration-math consumers see 0s, never a crash.
+        """
+        self._workflow_runs.append(
+            {
+                "id": run_id,
+                "workflow": workflow,
+                "conclusion": conclusion,
+                "created_at": created_at,
+                "pr_number": pr_number,
+                "url": url,
+                "status": status,
+                "run_started_at": run_started_at or created_at,
+                "updated_at": updated_at or created_at,
+            }
+        )
+        self._workflow_jobs[run_id] = jobs or []
+        self._workflow_artifacts[run_id] = artifact_count
+
+    async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Newest-first slice of the seeded run history (#9974).
+
+        Projects exactly the repo-wide blame-correlation shape — the
+        #9814 seed extras stay out so pre-existing consumers see the
+        same rows as before.
+        """
+        self._maybe_rate_limit()
+        newest_first = sorted(
+            self._workflow_runs, key=lambda r: str(r["created_at"]), reverse=True
+        )
+        return [
+            {
+                "id": r["id"],
+                "workflow": r["workflow"],
+                "conclusion": r["conclusion"],
+                "created_at": r["created_at"],
+                "pr_number": r["pr_number"],
+            }
+            for r in newest_first[:limit]
+        ]
+
+    async def list_runs_for_workflow(
+        self, workflow: str, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        """Newest-first runs of ONE workflow file in the port shape (#9814)."""
+        self._maybe_rate_limit()
+        matching = sorted(
+            (r for r in self._workflow_runs if r["workflow"] == workflow),
+            key=lambda r: str(r["created_at"]),
+            reverse=True,
+        )
+        return [
+            {
+                "id": r["id"],
+                "url": r["url"],
+                "status": r["status"],
+                "conclusion": r["conclusion"],
+                "created_at": r["created_at"],
+                "run_started_at": r["run_started_at"],
+                "updated_at": r["updated_at"],
+            }
+            for r in matching[:limit]
+        ]
+
+    async def get_workflow_run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        self._maybe_rate_limit()
+        return [dict(j) for j in self._workflow_jobs.get(run_id, [])]
+
+    async def count_workflow_run_artifacts(self, run_id: int) -> int:
+        self._maybe_rate_limit()
+        return self._workflow_artifacts.get(run_id, 0)
+
+    async def rerun_workflow_failed(self, run_id: int) -> bool:
+        """Record a rerun trigger for *run_id* (#10027).
+
+        Mirrors ``PRManager.rerun_workflow_failed``'s always-True success
+        path; does not itself mutate the seeded run/job state — scenarios
+        that want to simulate a rerun's effect re-seed via
+        :meth:`add_workflow_run`.
+        """
+        self._maybe_rate_limit()
+        self._workflow_reruns.append(run_id)
+        return True
 
     async def list_closed_issues_by_label(
         self,
@@ -673,14 +946,20 @@ class FakeGitHub:
         *,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Return closed issues carrying *label* (most recent up to *limit*)."""
+        """Return closed issues carrying *label* (most recent up to *limit*).
+
+        ``closed_at`` mirrors the adapter's ``closedAt`` projection (#9727)
+        so churn windows keyed on close time behave identically under the
+        fake and the real port. ``labels`` (#8996) reuses ``_issue_summary``
+        so ``escalation_reconcile.is_bot_close`` sees the same gh-wire-shape
+        label list under the fake as under the real adapter.
+        """
         self._maybe_rate_limit()
         rows = [
             {
-                "number": issue.number,
-                "title": issue.title,
-                "body": issue.body,
-                "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+                **self._issue_summary(issue),
+                "closed_at": getattr(issue, "closed_at", "")
+                or getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
             }
             for issue in self._issues.values()
             if issue.state != "open" and label in issue.labels
@@ -733,27 +1012,60 @@ class FakeGitHub:
             issue = self._issues.get(pr.issue_number)
             if issue is None:
                 continue
+            # Mirror PRManager.find_label_drift: the in-progress claim marker
+            # (#10168) is not a pipeline stage, so exclude it from the stage
+            # pick — a ready+in-progress issue must read as ``hydraflow-ready``.
             pr_pipeline = next(
-                (lbl for lbl in pr.labels if lbl.startswith("hydraflow-")),
+                (
+                    lbl
+                    for lbl in pr.labels
+                    if lbl.startswith("hydraflow-") and lbl != "hydraflow-in-progress"
+                ),
                 "",
             )
             issue_pipeline = next(
-                (lbl for lbl in issue.labels if lbl.startswith("hydraflow-")),
+                (
+                    lbl
+                    for lbl in issue.labels
+                    if lbl.startswith("hydraflow-") and lbl != "hydraflow-in-progress"
+                ),
                 "",
             )
             commits = pr.commits
 
+            # More specific — checked first (#10260): a resolved-but-stale
+            # escalation label outranks the pipeline-stage drift kinds below.
+            # Requires BOTH labels — see the matching comment in
+            # PRManager.find_label_drift for why bare `hitl-escalation`
+            # (filed by loops other than diagnostic_loop, with no pipeline
+            # label backing it) must not be cleared this way. Draft PRs are
+            # excluded — mirrors find_open_resolving_pr's draft check.
+            escalations = set(issue.labels) & {"hitl-escalation", "diagnose-failed"}
             kind: str | None = None
+            issue_label = issue_pipeline
             if (
-                issue_pipeline in pre_pr_labels
-                and pr_pipeline == "hydraflow-review"
-                and commits > 0
+                {"hitl-escalation", "diagnose-failed"} <= set(issue.labels)
+                and not pr.draft
+                and pr.checks
+                and all(
+                    state.upper() in {"SUCCESS", "NEUTRAL", "SKIPPED"}
+                    for _name, state in pr.checks
+                )
             ):
-                kind = "pr_ahead_of_issue"
-            elif pr_pipeline in pre_pr_labels and commits > 0:
-                kind = "pr_at_pre_pr_stage"
-            elif pr_pipeline in post_pr_labels and issue_pipeline in pre_pr_labels:
-                kind = "pr_ahead_of_issue"
+                kind = "escalated_with_resolving_pr"
+                issue_label = ",".join(sorted(escalations))
+
+            if kind is None:
+                if (
+                    issue_pipeline in pre_pr_labels
+                    and pr_pipeline == "hydraflow-review"
+                    and commits > 0
+                ):
+                    kind = "pr_ahead_of_issue"
+                elif pr_pipeline in pre_pr_labels and commits > 0:
+                    kind = "pr_at_pre_pr_stage"
+                elif pr_pipeline in post_pr_labels and issue_pipeline in pre_pr_labels:
+                    kind = "pr_ahead_of_issue"
 
             if kind is None:
                 continue
@@ -762,7 +1074,7 @@ class FakeGitHub:
                     issue=pr.issue_number,
                     pr=pr.number,
                     pr_commits=commits,
-                    issue_label=issue_pipeline,
+                    issue_label=issue_label,
                     pr_label=pr_pipeline,
                     kind=kind,  # type: ignore[arg-type]
                     detected_at=datetime.now(UTC),
@@ -802,12 +1114,29 @@ class FakeGitHub:
         return ""
 
     async def get_issue_state(self, issue_number: int) -> str:
-        """Return issue state as GitHub GraphQL style (OPEN/COMPLETED)."""
+        """Return issue state as GitHub GraphQL style (OPEN/COMPLETED/NOT_PLANNED).
+
+        An unknown issue returns ``"UNKNOWN"`` — matching prod
+        ``PRManager.get_issue_state``, which fail-closes with ``"UNKNOWN"``
+        when the ``gh`` read errors. The fake previously fail-opened with
+        ``"OPEN"`` here, which made every still-open guard (e.g. the
+        refinement TOCTOU stale-close check) pass vacuously for issues the
+        fake never saw (#10025).
+        """
         self._maybe_rate_limit()
         if issue_number in self._issues:
-            state = self._issues[issue_number].state
-            return "COMPLETED" if state == "closed" else "OPEN"
-        return "OPEN"
+            issue = self._issues[issue_number]
+            if issue.state == "closed":
+                return issue.state_reason or "COMPLETED"
+            return "OPEN"
+        return "UNKNOWN"
+
+    async def get_issue_labels(self, issue_number: int) -> list[str]:
+        """Return the label names on an issue (empty list when unknown)."""
+        self._maybe_rate_limit()
+        if issue_number in self._issues:
+            return list(self._issues[issue_number].labels)
+        return []
 
     async def list_hitl_items(
         self, hitl_labels: list[str], *, concurrency: int = 10
@@ -860,7 +1189,15 @@ class FakeGitHub:
 
     @staticmethod
     def expected_pr_title(issue_number: int, issue_title: str) -> str:
-        return f"[#{issue_number}] {issue_title}"
+        """Return the canonical PR title (``Fixes #N: <title>``, truncated).
+
+        Delegates to the real :meth:`PRManager.expected_pr_title` so the fake
+        can never drift from production formatting (#10153). FakeGitHub is cast
+        to ``PRPort`` in the sandbox harness, so a divergent title here would be
+        live-reachable — a fake that lies about the real format.
+        """
+
+        return PRManager.expected_pr_title(issue_number, issue_title)
 
     async def get_pr_mergeable(self, pr_number: int) -> bool | None:
         self._maybe_rate_limit()
@@ -901,8 +1238,16 @@ class FakeGitHub:
         return ""
 
     # --- Staging / RC promotion PRPort methods ---
+    #
+    # Mirrors the real PRManager semantics (#10309): a "promotion PR" is an
+    # open PR whose head branch starts with the RC prefix; the listing methods
+    # serve the same projections the real gh-backed reads produce. The prefix
+    # matches config's ``rc_branch_prefix`` default — the fake serves one
+    # repo's worth of state under default naming, like FakeIssue's fixed
+    # timestamps.
 
     async def create_rc_branch(self, rc_branch: str) -> str:
+        self._rc_branches[rc_branch] = _RC_FIXED_DATE
         return f"sha-{rc_branch}"
 
     async def push_synthetic_commit(self, branch: str, message: str) -> str:
@@ -927,6 +1272,20 @@ class FakeGitHub:
         return num
 
     async def find_open_promotion_pr(self) -> Any:
+        """First open ``rc/*`` PR, as PRInfo — the real read's projection."""
+        for pr in sorted(self._prs.values(), key=lambda p: p.number):
+            if (
+                pr.branch.startswith(_RC_BRANCH_PREFIX)
+                and not pr.merged
+                and not pr.closed
+            ):
+                return PRInfoFactory.create(
+                    number=pr.number,
+                    issue_number=0,
+                    branch=pr.branch,
+                    url=pr.url,
+                    draft=pr.draft,
+                )
         return None
 
     async def merge_promotion_pr(self, pr_number: int, **_kw: Any) -> bool:
@@ -953,15 +1312,26 @@ class FakeGitHub:
         return False
 
     async def list_rc_branches(self) -> list[tuple[str, str]]:
-        return []
+        return list(self._rc_branches.items())
 
     async def delete_branch(self, branch: str) -> bool:
-        _ = branch
+        self._rc_branches.pop(branch, None)
         return True
 
     async def list_recent_promotion_prs(self, days: int = 7) -> list[dict[str, Any]]:
-        _ = days
-        return []
+        """Closed ``rc/*`` PRs in the ``GhPromotionPR`` projection shape."""
+        _ = days  # every fake entry is "recent" — fixed dates, no wall clock
+        return [
+            {
+                "number": pr.number,
+                "branch": pr.branch,
+                "merged": pr.merged,
+                "closed_at": _RC_FIXED_DATE,
+                "url": pr.url,
+            }
+            for pr in sorted(self._prs.values(), key=lambda p: p.number)
+            if pr.branch.startswith(_RC_BRANCH_PREFIX) and (pr.merged or pr.closed)
+        ]
 
     async def ensure_branch_exists(self, branch: str, *, base: str) -> bool:
         _ = (branch, base)
@@ -969,6 +1339,45 @@ class FakeGitHub:
 
     async def apply_staging_branch_protection(self, branch: str) -> dict[str, Any]:
         return {"status": "protected", "branch": branch}
+
+    def fetch_rulesets(self, repo: str) -> dict[str, dict[str, Any]]:
+        """Serve seeded branch-protection rulesets, keyed by ruleset name.
+
+        Sync mirror of ``branch_protection_audit.gh_fetch_rulesets`` (which
+        shells out to ``gh api /repos/{repo}/rulesets``). Injectable verbatim
+        as the ``fetch_rulesets=`` seam of ``branch_protection_audit.audit_repo``
+        so a sandbox / scenario ``branch_protection_auditor`` run observes drift
+        against the canonical contract without a real network fetch — the seam
+        the s41 scenario needs (#9644, ADR-0082).
+
+        ``repo`` is accepted for signature parity with ``gh_fetch_rulesets`` but
+        ignored: the Fake serves one repo's worth of seeded state. Returns a
+        deep copy so a caller mutating the result cannot corrupt seeded state.
+        """
+        _ = repo
+        return copy.deepcopy(self._rulesets)
+
+    def fetch_legacy_protection(self, repo: str, branch: str) -> dict[str, Any] | None:
+        """Serve seeded classic branch-protection config for one branch.
+
+        Sync mirror of ``branch_protection_audit.gh_fetch_legacy_protection``
+        (which shells out to ``gh api /repos/{repo}/branches/{branch}/
+        protection``, 404-ing to ``None`` when no classic rule exists).
+        Injectable verbatim as the ``fetch_legacy_protection=`` seam of
+        ``branch_protection_audit.audit_repo`` so a sandbox / scenario
+        ``branch_protection_auditor`` run can observe an undeclared
+        legacy-layer drift without a real network fetch (#10148).
+
+        ``repo`` is accepted for signature parity with
+        ``gh_fetch_legacy_protection`` but ignored: the Fake serves one
+        repo's worth of seeded state. Returns a deep copy so a caller
+        mutating the result cannot corrupt seeded state. ``None`` (not an
+        empty dict) when ``branch`` was never seeded — matches the raw
+        fetcher's "no classic rule" return.
+        """
+        _ = repo
+        protection = self._legacy_protection.get(branch)
+        return copy.deepcopy(protection) if protection is not None else None
 
     # --- Concrete-only PRManager methods invoked at orchestrator boot ---
 

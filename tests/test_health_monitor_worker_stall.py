@@ -41,21 +41,23 @@ def hm_env(tmp_path: Path):
     prs = AsyncMock()
     prs.create_issue = AsyncMock(return_value=17)
     prs.list_issues_by_label = AsyncMock(return_value=[])
+    bus = AsyncMock()
     hm = HealthMonitorLoop.__new__(HealthMonitorLoop)
     hm._config = cfg
     hm._state = state
     hm._bg_workers = bg_workers
     hm._prs = prs
+    hm._bus = bus
     hm._worker_stall_dedup = DedupStore(
         "hm_worker_stall_test",
         tmp_path / "dedup" / "hm_worker_stall_test.json",
     )
-    return hm, state, bg_workers, prs
+    return hm, state, bg_workers, prs, bus
 
 
 @pytest.mark.asyncio
 async def test_healthy_loop_untouched(hm_env) -> None:
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     state.get_worker_heartbeats.return_value = {"workspace_gc": _hb(60)}
     await hm._check_worker_staleness()
     bg_workers.restart.assert_not_awaited()
@@ -64,7 +66,7 @@ async def test_healthy_loop_untouched(hm_env) -> None:
 
 @pytest.mark.asyncio
 async def test_stale_loop_restarted_not_escalated(hm_env) -> None:
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     state.get_worker_heartbeats.return_value = {"workspace_gc": _hb(2400)}
     await hm._check_worker_staleness()
     bg_workers.restart.assert_awaited_once_with("workspace_gc")
@@ -73,7 +75,7 @@ async def test_stale_loop_restarted_not_escalated(hm_env) -> None:
 
 @pytest.mark.asyncio
 async def test_still_stale_after_restart_files_once(hm_env) -> None:
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     state.get_worker_heartbeats.return_value = {"workspace_gc": _hb(2400)}
     await hm._check_worker_staleness()  # restart tick
     await hm._check_worker_staleness()  # still stale — file
@@ -86,11 +88,19 @@ async def test_still_stale_after_restart_files_once(hm_env) -> None:
     assert "Auto-restart attempted" in body
     assert "hydraflow-find" in labels
     assert "loop-stalled" in labels
+    # Escalation publishes exactly one SYSTEM_ALERT (#10086) — the only
+    # observable signal of a genuine escalation via the dashboard event feed.
+    bus.publish.assert_awaited_once()
+    (event,) = bus.publish.await_args.args
+    assert event.data["kind"] == "worker_stall"
+    assert event.data["source"] == "health_monitor"
+    assert event.data["worker"] == "workspace_gc"
+    assert event.data["issue"] == 17
 
 
 @pytest.mark.asyncio
 async def test_recovery_closes_own_issue_and_clears_markers(hm_env) -> None:
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     state.get_worker_heartbeats.return_value = {"workspace_gc": _hb(2400)}
     await hm._check_worker_staleness()  # restart
     await hm._check_worker_staleness()  # file
@@ -115,7 +125,7 @@ async def test_recovery_closes_own_issue_and_clears_markers(hm_env) -> None:
 
 @pytest.mark.asyncio
 async def test_long_llm_cycle_bound_prevents_false_restart(hm_env) -> None:
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     # A LONG_LLM_CYCLE loop mid-cycle: heartbeat 2400s old but the loop's
     # watchdog bound is 4h — threshold 3×600+14400 = 16200s. Healthy.
     bg_workers.cycle_timeout.return_value = 14400
@@ -127,7 +137,7 @@ async def test_long_llm_cycle_bound_prevents_false_restart(hm_env) -> None:
 
 @pytest.mark.asyncio
 async def test_disabled_worker_skipped(hm_env) -> None:
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     bg_workers.worker_enabled = {"workspace_gc": False}
     state.get_worker_heartbeats.return_value = {"workspace_gc": _hb(99999)}
     await hm._check_worker_staleness()
@@ -137,7 +147,7 @@ async def test_disabled_worker_skipped(hm_env) -> None:
 
 @pytest.mark.asyncio
 async def test_trust_fleet_sanity_owned_by_specific_check(hm_env) -> None:
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     bg_workers.registered_loop_names.return_value = {"trust_fleet_sanity"}
     state.get_worker_heartbeats.return_value = {"trust_fleet_sanity": _hb(99999)}
     await hm._check_worker_staleness()
@@ -147,7 +157,7 @@ async def test_trust_fleet_sanity_owned_by_specific_check(hm_env) -> None:
 
 @pytest.mark.asyncio
 async def test_unregistered_worker_skipped(hm_env) -> None:
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     state.get_worker_heartbeats.return_value = {"pipeline_poller": _hb(99999)}
     await hm._check_worker_staleness()
     bg_workers.restart.assert_not_awaited()
@@ -156,7 +166,7 @@ async def test_unregistered_worker_skipped(hm_env) -> None:
 
 @pytest.mark.asyncio
 async def test_restart_unavailable_files_immediately(hm_env) -> None:
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     bg_workers.restart = AsyncMock(return_value=False)
     state.get_worker_heartbeats.return_value = {"workspace_gc": _hb(2400)}
     await hm._check_worker_staleness()
@@ -169,7 +179,7 @@ async def test_recovery_close_does_not_match_prefix_sibling(hm_env) -> None:
     """`stale_issue` recovering must not close `stale_issue_gc`'s stall issue
     (nor clear its markers) — the registry's only prefix pair; a bare
     substring title match would hit both."""
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     bg_workers.registered_loop_names.return_value = {
         "stale_issue",
         "stale_issue_gc",
@@ -213,7 +223,7 @@ async def test_health_monitor_never_self_restarts(hm_env) -> None:
     """The sweep runs inside health_monitor — self-cancelling mid-cycle
     (e.g. stale persisted heartbeat after long orchestrator downtime) is
     harm without benefit; a truly wedged health_monitor can't sweep anyway."""
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     bg_workers.registered_loop_names.return_value = {"health_monitor"}
     state.get_worker_heartbeats.return_value = {"health_monitor": _hb(99_999)}
     await hm._check_worker_staleness()
@@ -227,7 +237,7 @@ async def test_young_task_with_stale_heartbeat_not_restarted(hm_env) -> None:
     stale but the current task was just created — heartbeats only refresh at
     cycle COMPLETION, so restarting here would cancel a healthy in-flight
     first cycle (wasted LLM spend) and could file false issues."""
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     bg_workers.run_started_at.return_value = datetime.now(UTC) - timedelta(seconds=30)
     state.get_worker_heartbeats.return_value = {"workspace_gc": _hb(99_999)}
     await hm._check_worker_staleness()
@@ -239,7 +249,7 @@ async def test_young_task_with_stale_heartbeat_not_restarted(hm_env) -> None:
 async def test_old_task_with_stale_heartbeat_still_restarted(hm_env) -> None:
     """A task that has been running past the threshold without completing a
     cycle IS wedged — run_started_at must not mask genuine stalls."""
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     bg_workers.run_started_at.return_value = datetime.now(UTC) - timedelta(
         seconds=99_999
     )
@@ -253,7 +263,7 @@ async def test_restart_once_contract_survives_young_task_window(hm_env) -> None:
     """The young-task window after a restart must NOT read as recovery:
     clearing the restart marker there turns 'restart once, then escalate'
     into 'restart forever, never escalate' for a genuinely wedged loop."""
-    hm, state, bg_workers, prs = hm_env
+    hm, state, bg_workers, prs, bus = hm_env
     state.get_worker_heartbeats.return_value = {"workspace_gc": _hb(99_999)}
     await hm._check_worker_staleness()  # restart tick
     assert bg_workers.restart.await_count == 1
@@ -277,7 +287,7 @@ async def test_restart_once_contract_survives_young_task_window(hm_env) -> None:
 
 @pytest.mark.asyncio
 async def test_missing_deps_is_silent_noop(hm_env) -> None:
-    hm, _state, bg_workers, prs = hm_env
+    hm, _state, bg_workers, prs, _bus = hm_env
     hm._bg_workers = None  # minimal scenario fixtures omit the injection
     await hm._check_worker_staleness()
     prs.create_issue.assert_not_awaited()

@@ -23,6 +23,9 @@ class PreflightResult:
     cost_usd: float
     wall_clock_s: float
     tokens: int
+    # #9821: True when the model had no pricing entry — render "cost
+    # unknown", never $0.00 (a $0 line reads as "cheap", hiding spend).
+    cost_unknown: bool = False
     prompt_hash: str = ""  # populated from PreflightSpawn for audit traceability
     # Convergence signals (ADR-0084 pillar B): the agent's self-assessed
     # confidence and why it stopped. ``needs_human`` is only honored for a
@@ -43,15 +46,20 @@ class _PRPort(Protocol):
     async def add_labels(self, issue_number: int, labels: list[str]) -> None: ...
     async def remove_label(self, issue_number: int, label: str) -> None: ...
     async def post_comment(self, issue_number: int, body: str) -> None: ...
+    async def swap_pipeline_labels(self, issue_number: int, new_label: str) -> None: ...
 
 
 # Status → (labels-to-add, labels-to-remove)
 #
 # Note: `resolved` removes `human-required` as well as `hitl-escalation` so a
 # previously-failed-then-re-submitted issue (operator manually reset state)
-# doesn't stay in the human queue after a successful auto-fix.
+# doesn't stay in the human queue after a successful auto-fix. `diagnose-failed`
+# is removed unconditionally too (#10260) — the dynamic sub-label removal below
+# only strips ONE sub-label (the alphabetically-first), so an issue carrying
+# `diagnose-failed` alongside another sub-label that sorts first would
+# otherwise keep it stale after a resolve.
 _LABEL_MAP: dict[str, tuple[list[str], list[str]]] = {
-    "resolved": ([], ["hitl-escalation", "human-required"]),
+    "resolved": ([], ["hitl-escalation", "human-required", "diagnose-failed"]),
     # `retry` (ADR-0084 B): a recoverable/low-confidence bail. Add nothing and
     # remove nothing — the issue keeps `hitl-escalation` (no `human-required`)
     # so the loop re-attempts next cycle. If the attempt budget is exhausted,
@@ -77,6 +85,8 @@ async def apply_decision(
     council: Any | None = None,
     config: Any | None = None,
     ctx: Any | None = None,
+    hitl_widened: bool = False,
+    origin_label: str | None = None,
 ) -> dict[str, Any]:
     """Apply labels + comment for a single attempt's result.
 
@@ -88,6 +98,20 @@ async def apply_decision(
     issue is already closed + `mark_issue("decomposed")` by
     `IssueDecomposer.create_epic_from_result`); a decline or missing wiring
     falls through to today's behavior unchanged.
+
+    #9721 widened intake: *hitl_widened* marks an issue that arrived via the
+    widened ``hydraflow-hitl`` poll and is claimed under the autofix label.
+    The resolver owns the transition (mirrors ``HITLPhase``):
+
+    - ``resolved`` → swap the claim to *origin_label* (``ready_label[0]`` when
+      no origin was recorded), reset ``issue_attempts``, clear
+      ``hitl_origin``/``hitl_cause``. No ``human-required``.
+    - terminal / exhausted → swap the claim back to ``hitl_label[0]`` (the
+      human queue) BEFORE the ``human-required`` add — the swap clears
+      ``human-required`` because it rides in ``all_pipeline_labels``.
+    - ``retry`` with budget left → keep the claim; the next tick re-attempts.
+
+    ``hitl_widened=False`` keeps today's behavior byte-for-byte.
     """
     # Race-detection: re-read attempts to ensure no concurrent bumper.
     current_attempts = state.get_auto_agent_attempts(issue_number)
@@ -97,8 +121,18 @@ async def apply_decision(
     # Spec §3 (state transitions, line 119): a successful resolve also removes
     # the sub-label so the issue doesn't carry an orphaned routing tag in the
     # GitHub UI. The base _LABEL_MAP can't encode this because the sub-label
-    # is dynamic per call.
-    if result.status == "resolved" and sub_label and sub_label != "_default":
+    # is dynamic per call. Widened issues are exempt: their sub_label is a
+    # playbook routing stem derived from hitl_origin, not an issue label.
+    # Guarded against `sub_label` already being in `remove` (e.g. it IS
+    # `diagnose-failed`, which the base map now removes unconditionally) so
+    # remove_label is never called twice for the same label (#10260).
+    if (
+        result.status == "resolved"
+        and sub_label
+        and sub_label != "_default"
+        and not hitl_widened
+        and sub_label not in remove
+    ):
         remove = list(remove) + [sub_label]
 
     # Exhaustion check — if this attempt brought us to the cap and it didn't
@@ -153,7 +187,28 @@ async def apply_decision(
             "added": [],
             "removed": [],
             "decomposed": True,
+            "hitl_widened": hitl_widened,
         }
+
+    if hitl_widened:
+        hitl_return = config.hitl_label[0] if config is not None else "hydraflow-hitl"
+        ready = config.ready_label[0] if config is not None else "hydraflow-ready"
+        if result.status == "resolved":
+            # Mirror HITLPhase's successful-correction transition: back to the
+            # origin stage (or ready when none recorded, so the issue re-enters
+            # the pipeline rather than orphaning), attempts reset, origin/cause
+            # cleared. The swap drops the autofix claim label.
+            await pr_port.swap_pipeline_labels(issue_number, origin_label or ready)
+            state.reset_issue_attempts(issue_number)
+            state.remove_hitl_origin(issue_number)
+            state.remove_hitl_cause(issue_number)
+        elif "human-required" in add:
+            # Terminal / exhausted: return the claim to the human queue. Must
+            # happen BEFORE the add below — swap_pipeline_labels clears
+            # human-required (it rides in all_pipeline_labels).
+            await pr_port.swap_pipeline_labels(issue_number, hitl_return)
+        # A non-exhausted `retry` keeps the autofix claim; the widened poll
+        # also covers the autofix label, so the next tick re-attempts.
 
     if add:
         await pr_port.add_labels(issue_number, add)
@@ -173,7 +228,13 @@ async def apply_decision(
         "added": add,
         "removed": remove,
         "decomposed": False,
+        "hitl_widened": hitl_widened,
     }
+
+
+def _cost_str(result: PreflightResult) -> str:
+    """Render cost for comments — 'cost unknown' beats a lying $0.00 (#9821)."""
+    return "cost unknown" if result.cost_unknown else f"${result.cost_usd:.2f}"
 
 
 def _format_comment(
@@ -187,7 +248,7 @@ def _format_comment(
         pr_link = f" PR: {result.pr_url}" if result.pr_url else ""
         return (
             f"**Auto-Agent resolved this issue** (attempt {attempts}, "
-            f"sub-label `{sub_label}`, ${result.cost_usd:.2f}, "
+            f"sub-label `{sub_label}`, {_cost_str(result)}, "
             f"{result.wall_clock_s:.0f}s).{pr_link}\n\n"
             f"{result.diagnosis}"
         )
@@ -198,7 +259,7 @@ def _format_comment(
     )
     return (
         f"**Auto-Agent attempt {attempts} → `{result.status}`** "
-        f"(sub-label `{sub_label}`, ${result.cost_usd:.2f}, "
+        f"(sub-label `{sub_label}`, {_cost_str(result)}, "
         f"{result.wall_clock_s:.0f}s){suffix}.\n\n"
         f"**Diagnosis:**\n{result.diagnosis}"
     )

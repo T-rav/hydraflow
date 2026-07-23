@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,6 +44,13 @@ logger = logging.getLogger("hydraflow.contracts.shadow")
 # fixtures are JSONL streams; this module handles command-shaped calls).
 Adapter = Literal["github", "git", "docker", "claude"]
 _KNOWN_ADAPTERS: frozenset[str] = frozenset({"github", "git", "docker", "claude"})
+
+# Record-time coverage predicate (#9633): answers "would any registered
+# dispatcher form an opinion on (adapter, command, args)?". Kept opaque —
+# this module never imports the dispatcher registry or shape validators;
+# the composition root injects the callable (typically
+# ``LiveCorpusReplayLoop.covers``).
+CoveragePredicate = Callable[[str, str, list[str]], bool]
 
 # Normalizers applied to every persisted stdout/stderr. Order matches
 # ``contracts._schema.NORMALIZERS`` — sha:long before sha:short so the
@@ -113,6 +121,7 @@ class ShadowCorpus:
         *,
         max_per_adapter: int = 100,
         exclude_mutating: bool = False,
+        covers_cb: CoveragePredicate | None = None,
     ) -> None:
         if max_per_adapter < 1:
             msg = f"max_per_adapter must be >= 1, got {max_per_adapter}"
@@ -120,6 +129,17 @@ class ShadowCorpus:
         self._root = root
         self._max_per_adapter = max_per_adapter
         self._exclude_mutating = exclude_mutating
+        self._covers_cb = covers_cb
+
+    def set_coverage_predicate(self, cb: CoveragePredicate | None) -> None:
+        """Late-bind the record-time coverage predicate (#9633).
+
+        The composition root constructs the corpus before the replay loop
+        exists, so the registry-derived predicate
+        (``LiveCorpusReplayLoop.covers``) is wired via this setter after
+        dispatcher registration. ``None`` restores record-everything.
+        """
+        self._covers_cb = cb
 
     def record(
         self,
@@ -149,6 +169,16 @@ class ShadowCorpus:
             self._exclude_mutating
             and classify(adapter, command, args) is ShapeClass.MUTATING
         ):
+            return None
+
+        # Coverage gate (#9633): samples no registered dispatcher can form
+        # an opinion on would only consume per-adapter LRU budget and evict
+        # replay-valuable shapes. Dropping is reversible — the corpus
+        # self-refreshes on the next matching call once coverage expands.
+        if self._covers_cb is not None and not self._covers_cb(adapter, command, args):
+            logger.debug(
+                "shadow corpus: dropping uncovered sample %s %s", adapter, command
+            )
             return None
 
         adapter_dir = self._root / adapter

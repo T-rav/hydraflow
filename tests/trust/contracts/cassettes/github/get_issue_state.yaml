@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_issue_state mirrors gh's GraphQL-style state (OPEN/COMPLETED/
+# NOT_PLANNED/UNKNOWN). The dispatcher seeds a closed issue with no
+# explicit close reason, covering the COMPLETED fallback branch
+# (#10025) rather than the trivial OPEN/UNKNOWN paths.
+adapter: github
+interaction: get_issue_state
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_issue_state
+  args:
+  - '777'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'COMPLETED
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

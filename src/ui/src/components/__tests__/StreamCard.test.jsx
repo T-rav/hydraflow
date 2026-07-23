@@ -159,6 +159,20 @@ describe('StageRow queued presentation', () => {
   })
 })
 
+describe('StageRow hitl presentation', () => {
+  it('renders the hitl stage node in HITL-red, not Triage-yellow', () => {
+    const issue = makeIssue({ overallStatus: 'hitl', currentStage: 'review' })
+    issue.stages.review = { ...issue.stages.review, status: 'hitl' }
+
+    const { getByTestId } = render(<StreamCard issue={issue} defaultExpanded />)
+    const node = getByTestId('stage-node-review')
+
+    expect(node.style.background).toBe(theme.red)
+    expect(node.style.borderColor).toBe(theme.red)
+    expect(node.style.background).not.toBe(theme.yellow)
+  })
+})
+
 describe('StreamCard phase-aware styling', () => {
   it('aligns border and accent to stage color when collapsed', () => {
     const issue = makeIssue({ overallStatus: 'active', currentStage: 'review' })
@@ -641,5 +655,31 @@ describe('StreamCard repo badge', () => {
   it('hides the repo badge when issue.repo is empty (single-repo view)', () => {
     render(<StreamCard issue={makeIssue({ repo: '' })} />)
     expect(screen.queryByTestId('repo-badge-42')).toBeNull()
+  })
+})
+
+describe('priority band chip (#10067)', () => {
+  it('renders the P0 chip for a P0 issue', () => {
+    render(<StreamCard issue={makeIssue({ issueNumber: 7, priority: 'P0' })} />)
+    const chip = screen.getByTestId('priority-badge-7')
+    expect(chip.textContent).toBe('P0')
+    expect(chip.style.color).toBe(theme.red)
+  })
+
+  it('renders the P1 chip in the accent color', () => {
+    render(<StreamCard issue={makeIssue({ issueNumber: 8, priority: 'P1' })} />)
+    expect(screen.getByTestId('priority-badge-8').style.color).toBe(theme.accent)
+  })
+
+  it('renders no chip for an unprioritised issue', () => {
+    render(<StreamCard issue={makeIssue({ issueNumber: 9, priority: 'none' })} />)
+    expect(screen.queryByTestId('priority-badge-9')).toBeNull()
+  })
+
+  it('renders no chip when priority is absent (old payloads)', () => {
+    const issue = makeIssue({ issueNumber: 10 })
+    delete issue.priority
+    render(<StreamCard issue={issue} />)
+    expect(screen.queryByTestId('priority-badge-10')).toBeNull()
   })
 })

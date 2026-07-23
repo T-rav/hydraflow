@@ -1,0 +1,26 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_closed_issues_by_label returns closed issues carrying *label*,
+# newest-first up to *limit*, each row extending _issue_summary with a
+# closed_at field mirroring gh's closedAt projection (#9727). The
+# dispatcher seeds one closed, labelled issue with an explicit
+# updated_at/closed_at so the JSON row is deterministic.
+adapter: github
+interaction: list_closed_issues_by_label
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_closed_issues_by_label
+  args:
+  - hydraflow-hitl
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"number": 901, "title": "Closed with label", "body": "body text", "updated_at":
+    "2026-01-15T00:00:00Z", "labels": [{"name": "hydraflow-hitl"}], "closed_at": "2026-01-15T00:00:00Z"}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

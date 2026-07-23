@@ -15,8 +15,6 @@ auto-close via the shared `EscalationReconciler` (#9618 class).
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 import json
 import logging
 import re
@@ -29,10 +27,12 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from escalation_reconcile import EscalationReconciler
 from models import WorkCycleResult
+from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
     from dedup_store import DedupStore
+    from github_cache_loop import GitHubDataCache
     from pr_manager import PRManager
     from state import StateTracker
 
@@ -40,6 +40,31 @@ logger = logging.getLogger("hydraflow.flake_tracker_loop")
 
 _MAX_ATTEMPTS = 3
 _RUN_WINDOW = 20
+
+# xdist-quarantine detection (#10141): read the nightly xdist-audit report
+# (produced by .github/workflows/xdist-audit.yml → scripts/xdist_audit.py) and
+# file a consent-package quarantine issue for a test consistently flagged
+# fail-parallel/pass-serial across the window. The workflow name is
+# single-sourced in github_cache_loop.XDIST_AUDIT_WORKFLOW (the cache lists it).
+_XDIST_AUDIT_ARTIFACT = "xdist-audit"
+_XDIST_AUDIT_REPORT = "xdist-audit.json"
+
+
+def _quarantine_path_hint(test_id: str) -> str:
+    """Best-effort test FILE path from a ``{classname}.{name}`` JUnit id.
+
+    pytest's ``classname`` is the dotted module path, optionally suffixed with
+    the class (``tests.scenarios.test_foo.TestBar``). Drop the test name and any
+    trailing ``Capitalized`` class components to recover the module, then map
+    dots to a ``.py`` path. Only a HINT for the consent package — a human
+    confirms the exact ``PYTEST_SERIAL_PATHS`` entry.
+    """
+    classname = test_id.rsplit(".", 1)[0] if "." in test_id else test_id
+    parts = classname.split(".")
+    while parts and parts[-1][:1].isupper():
+        parts.pop()
+    return "/".join(parts) + ".py" if parts else ""
+
 
 # Marker label on the HITL escalation issue. Single-sourced so the filing
 # path (`_file_escalation`) and the reconciler can never drift apart — no
@@ -61,30 +86,10 @@ def _escalation_subject(title: str) -> str | None:
 
 # Hard cap on each ``gh`` read/download. A wedged child must not hang the loop
 # cycle forever and freeze its heartbeat — the #9410 silent-stall failure
-# class (#9454 / #9508).
+# class (#9454 / #9508). Bounded (and, via ``run_subprocess_result``,
+# circuit-breaker/rate-limit/process-group hardened — #9554/#10028) rather
+# than a raw ``create_subprocess_exec``.
 _GH_TIMEOUT_SECONDS = 120
-
-
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process,
-) -> tuple[bytes, bytes]:
-    """``proc.communicate()`` bounded by ``_GH_TIMEOUT_SECONDS``.
-
-    On timeout the wedged child is killed and a ``TimeoutError`` propagates so
-    the caller can treat it as a failed read (rather than hanging the loop
-    cycle indefinitely).
-    """
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout=_GH_TIMEOUT_SECONDS)
-    except TimeoutError:
-        # proc.kill() itself raises ProcessLookupError when the child already
-        # exited — suppress it too, not just proc.wait() — so the TimeoutError
-        # (the intended failed-read signal) propagates instead of crashing the
-        # caller with ProcessLookupError. (#9794/#9814)
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-            await proc.wait()
-        raise
 
 
 def parse_junit_xml(xml_bytes: bytes) -> dict[str, str]:
@@ -116,6 +121,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         pr_manager: PRManager,
         dedup: DedupStore,
         deps: LoopDeps,
+        github_cache: GitHubDataCache,
     ) -> None:
         super().__init__(
             worker_name="flake_tracker",
@@ -126,6 +132,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         self._state = state
         self._pr = pr_manager
         self._dedup = dedup
+        self._github_cache = github_cache
         self._escalations = EscalationReconciler(
             prs=pr_manager,
             dedup=dedup,
@@ -139,45 +146,25 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         return self._config.flake_tracker_interval
 
     async def _fetch_recent_runs(self) -> list[dict[str, Any]]:
-        """Return metadata for the last 20 RC promotion workflow runs."""
-        cmd = [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            self._config.repo,
-            "--workflow",
-            "rc-promotion-scenario.yml",
-            "--limit",
-            str(_RUN_WINDOW),
-            "--json",
-            "databaseId,url,conclusion,createdAt",
+        """Return metadata for the last 20 RC promotion workflow runs.
+
+        Served from the shared ``GitHubDataCache`` snapshot (#9814)
+        instead of a per-tick raw ``gh run list`` subprocess, so N loops
+        cost one gh call per freshness window and a gh outage degrades to
+        the stale-snapshot path inside the cache (never a loop crash).
+        Rows keep the legacy gh-CLI key shape the downstream helpers and
+        issue bodies were built on.
+        """
+        rows = await self._github_cache.get_rc_workflow_runs()
+        return [
+            {
+                "databaseId": row.get("id"),
+                "url": row.get("url", ""),
+                "conclusion": row.get("conclusion", ""),
+                "createdAt": row.get("created_at", ""),
+            }
+            for row in rows[:_RUN_WINDOW]
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, stderr = await _communicate_bounded(proc)
-        except TimeoutError:
-            logger.warning(
-                "gh run list timed out after %ss; returning empty",
-                _GH_TIMEOUT_SECONDS,
-            )
-            return []
-        if proc.returncode != 0:
-            logger.warning(
-                "gh run list exit=%d: %s",
-                proc.returncode,
-                stderr.decode(errors="replace")[:400],
-            )
-            return []
-        try:
-            return json.loads(stdout.decode() or "[]")
-        except json.JSONDecodeError:
-            logger.warning("gh run list non-JSON response; returning empty")
-            return []
 
     async def _download_junit(self, run: dict[str, Any]) -> dict[str, str]:
         """Download the ``junit-scenario`` artifact for a run; return per-test results."""
@@ -197,25 +184,20 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
                 "--dir",
                 td,
             ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
             try:
-                _, stderr = await _communicate_bounded(proc)
-            except TimeoutError:
+                result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+            except SubprocessTimeoutError:
                 logger.info(
                     "gh run download timed out after %ss for run %s",
                     _GH_TIMEOUT_SECONDS,
                     run_id,
                 )
                 return {}
-            if proc.returncode != 0:
+            if result.returncode != 0:
                 logger.info(
                     "no junit-scenario artifact for run %s: %s",
                     run_id,
-                    stderr.decode(errors="replace")[:200],
+                    result.stderr[:200],
                 )
                 return {}
             combined: dict[str, str] = {}
@@ -323,6 +305,139 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         """
         await self._escalations.reconcile_closed()
 
+    async def _fetch_xdist_audit_runs(self) -> list[dict[str, Any]]:
+        """Recent ``xdist-audit`` runs from the shared cache (no per-tick gh).
+
+        Mirrors :meth:`_fetch_recent_runs`: served from the demand-refreshed
+        ``GitHubDataCache`` snapshot so the 4h tick costs at most one gh call per
+        freshness window and a gh outage degrades to an empty list (#9814).
+        """
+        rows = await self._github_cache.get_xdist_audit_runs()
+        return [
+            {
+                "databaseId": row.get("id"),
+                "url": row.get("url", ""),
+                "conclusion": row.get("conclusion", ""),
+                "createdAt": row.get("created_at", ""),
+            }
+            for row in rows[:_RUN_WINDOW]
+        ]
+
+    async def _download_xdist_audit(self, run: dict[str, Any]) -> list[str]:
+        """Download a run's ``xdist-audit`` artifact; return its ``xdist_unsafe`` list."""
+        run_id = str(run.get("databaseId", ""))
+        if not run_id:
+            return []
+        with tempfile.TemporaryDirectory() as td:
+            cmd = [
+                "gh",
+                "run",
+                "download",
+                run_id,
+                "--repo",
+                self._config.repo,
+                "--name",
+                _XDIST_AUDIT_ARTIFACT,
+                "--dir",
+                td,
+            ]
+            try:
+                result = await run_subprocess_result(*cmd, timeout=_GH_TIMEOUT_SECONDS)
+            except SubprocessTimeoutError:
+                return []
+            if result.returncode != 0:
+                return []
+            for report in Path(td).rglob(_XDIST_AUDIT_REPORT):
+                try:
+                    data = json.loads(report.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    continue
+                unsafe = data.get("xdist_unsafe", []) if isinstance(data, dict) else []
+                return [str(t) for t in unsafe] if isinstance(unsafe, list) else []
+            return []
+
+    @staticmethod
+    def _tally_xdist_unsafe(per_run: list[list[str]]) -> dict[str, int]:
+        """Count the audit runs (not occurrences) that flagged each test."""
+        counts: dict[str, int] = {}
+        for run_unsafe in per_run:
+            for test_id in set(run_unsafe):
+                counts[test_id] = counts.get(test_id, 0) + 1
+        return counts
+
+    async def _file_xdist_quarantine_issue(
+        self, test_id: str, flagged: int, total: int
+    ) -> int:
+        """File a consent-package issue to quarantine an xdist-unsafe test.
+
+        Mirrors the GateHealthLoop consent-package shape (evidence +
+        recommendation + exact command); human-gated — the loop never edits the
+        serial list itself.
+        """
+        path_hint = _quarantine_path_hint(test_id)
+        hint_line = f"`{path_hint}`" if path_hint else "_(derive from the test id)_"
+        title = f"xdist-unsafe test: {test_id}"
+        body = (
+            "## Evidence (xdist-audit, automated)\n\n"
+            "| metric | value |\n|---|---|\n"
+            f"| test | `{test_id}` |\n"
+            f"| flagged fail-parallel/pass-serial | {flagged} of the last "
+            f"{total} audit run(s) |\n"
+            f"| likely file | {hint_line} |\n\n"
+            "This test fails under `pytest -n auto` but passes serially across "
+            "the audit window — a process-global isolation leak. Moving it to "
+            "the serial lane unblocks the parallel bulk while the root isolation "
+            "issue is fixed.\n\n"
+            "## Consent package\n\n"
+            "**Recommendation:** quarantine into `PYTEST_SERIAL_PATHS`, then "
+            "fix the isolation leak and remove it again (shrink-only baseline).\n\n"
+            "**Exact edit:** append the file to `PYTEST_SERIAL_PATHS` in the "
+            "`Makefile` and keep the `ci.yml` serial lane in sync — add "
+            f"`--ignore={path_hint or '<file>'}` to the parallel `test` step and "
+            f"`{path_hint or '<file>'}` to the serial step. (A path already under "
+            "`tests/regressions/` is covered by the blanket `--ignore=tests/"
+            "regressions` in ci.yml; only the Makefile needs it.)\n\n"
+            "Human-gated: `flake_tracker` will NOT apply this edit.\n\n"
+            "_Auto-filed by HydraFlow's `flake_tracker` loop (#10141)._"
+        )
+        return await self._pr.create_issue(
+            title, body, ["hydraflow-find", "flaky-test"]
+        )
+
+    async def _run_xdist_quarantine_detection(self) -> dict[str, int]:
+        """Detect + file consent-package quarantines from the xdist-audit report.
+
+        Independent of the RC flake-tally path: windows the nightly audit so a
+        one-off transient parallel failure never triggers a quarantine (only a
+        test flagged in ``xdist_quarantine_threshold`` runs). Dedup-keyed
+        separately (``xdist_quarantine:``) from the flake keys.
+        """
+        if not self._config.xdist_quarantine_enabled:
+            return {"filed": 0}
+        runs = await self._fetch_xdist_audit_runs()
+        if not runs:
+            return {"filed": 0}
+        per_run = [await self._download_xdist_audit(run) for run in runs[:_RUN_WINDOW]]
+        counts = self._tally_xdist_unsafe(per_run)
+        threshold = self._config.xdist_quarantine_threshold
+
+        dedup = set(self._dedup.get())
+        filed = 0
+        dirty = False
+        for test_id, flagged in counts.items():
+            if flagged < threshold:
+                continue
+            key = f"xdist_quarantine:{test_id}"
+            if key in dedup:
+                continue
+            await self._file_xdist_quarantine_issue(test_id, flagged, len(runs))
+            dedup.add(key)
+            dirty = True
+            filed += 1
+        if dirty:
+            self._dedup.set_all(dedup)
+        return {"filed": filed}
+
     async def _do_work(self) -> WorkCycleResult:
         """One flake-tracking cycle (spec §4.5)."""
         if not self._enabled_cb(self._worker_name):
@@ -333,9 +448,14 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         t0 = time.perf_counter()
         await self._reconcile_closed_escalations()
 
+        # xdist-quarantine detection is independent of the RC flake tally
+        # (different data source) — run it first so an empty RC window still
+        # processes the audit report.
+        xdist = await self._run_xdist_quarantine_detection()
+
         runs = await self._fetch_recent_runs()
         if not runs:
-            return {"status": "no_runs", "filed": 0}
+            return {"status": "no_runs", "filed": 0, "xdist_filed": xdist["filed"]}
 
         per_run_results: list[dict[str, str]] = []
         for run in runs:
@@ -412,6 +532,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
             "resolved": resolved,
             "autoclosed": autoclosed,
             "tests_seen": len(counts),
+            "xdist_filed": xdist["filed"],
         }
 
     def _emit_trace(self, t0: float, *, runs_seen: int) -> None:
@@ -424,7 +545,7 @@ class FlakeTrackerLoop(BaseBackgroundLoop):
         duration_ms = int((time.perf_counter() - t0) * 1000)
         emit_loop_subprocess_trace(
             loop=self._worker_name,
-            command=["gh", "run", "list", "rc-promotion-scenario.yml"],
+            command=["github_cache", "rc_workflow_runs"],
             exit_code=0,
             duration_ms=duration_ms,
             stderr_excerpt=f"runs_seen={runs_seen}",

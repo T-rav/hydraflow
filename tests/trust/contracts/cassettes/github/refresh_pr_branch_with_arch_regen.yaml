@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# refresh_pr_branch_with_arch_regen self-heals a bot PR stuck red on
+# stale docs/arch/generated/: merge base, re-run arch-regen, push. Returns
+# True when a refresh commit was pushed (default). The dispatcher asserts
+# the call was recorded (arch_refresh_call_count == 1).
+adapter: github
+interaction: refresh_pr_branch_with_arch_regen
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: refresh_pr_branch_with_arch_regen
+  args:
+  - '810'
+  - feat/heal-arch
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'True
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

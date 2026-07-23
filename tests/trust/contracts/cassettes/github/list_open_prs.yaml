@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_open_prs returns open PRs carrying any of the given labels as
+# PRListItem rows (GitHubCacheLoop warms its PR-by-label cache from
+# this). Merged PRs and PRs missing every wanted label are excluded.
+adapter: github
+interaction: list_open_prs
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_open_prs
+  args:
+  - hydraflow-review
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"pr": 780, "issue": 4, "branch": "feat/z", "url": "", "draft": false,
+    "title": "", "merged": false, "author": "fake-author", "is_bot": false}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

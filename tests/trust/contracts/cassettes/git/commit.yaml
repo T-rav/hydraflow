@@ -1,6 +1,6 @@
 adapter: git
 interaction: commit
-recorded_at: "2026-04-22T14:00:00Z"
+recorded_at: "2026-07-22T00:00:00Z"
 recorder_sha: "729304f1"
 fixture_repo: tests/trust/contracts/fixtures/git_sandbox
 input:
@@ -11,7 +11,7 @@ input:
   env: {}
 output:
   exit_code: 0
-  stdout: "[main abc1234] initial\n"
+  stdout: "[main (root-commit) abc1234] initial\n 3 files changed, 5 insertions(+)\n create mode 100644 .gitkeep\n create mode 100644 README.md\n create mode 100644 file.txt\n"
   stderr: ""
 normalizers:
   - sha:short

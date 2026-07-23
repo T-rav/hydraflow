@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# ensure_branch_exists creates <branch> from <base> HEAD if absent,
+# returning True only when the branch was created THIS call and False when
+# it already existed. The fake models the steady state (branch present) and
+# returns False — the idempotent no-op path the two-tier bootstrap
+# (ADR-0042) hits on every tick after the first.
+adapter: github
+interaction: ensure_branch_exists
+recorded_at: "2026-07-20T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: ensure_branch_exists
+  args:
+    - "staging"
+    - "main"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "False\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

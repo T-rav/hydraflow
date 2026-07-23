@@ -327,10 +327,13 @@ class ReportIssueLoop(BaseBackgroundLoop):
             # instructions (codebase research, duplicate check, structured body).
             description = report.description
             if screenshot_path:
-                description += (
-                    f"\n\nA screenshot of the bug is saved at {screenshot_path} "
-                    f"— read it with the Read tool to see what the user saw."
-                )
+                # Do NOT instruct the agent to vision-Read the screenshot. A
+                # large image plus the /hf.issue skill's research/dedup work
+                # exhausted max_turns and the agent exited 1 *after* creating
+                # the issue — extraction then returned 0 and the report was
+                # falsely escalated to HITL. The uploaded URL below already
+                # makes the screenshot visible inline, and the text description
+                # is enough to file the issue.
                 if screenshot_url:
                     description += (
                         f"\n\nThe screenshot has been uploaded to: {screenshot_url}"
@@ -358,7 +361,10 @@ class ReportIssueLoop(BaseBackgroundLoop):
             cmd = build_agent_command(
                 tool=self._config.report_issue_tool,
                 model=self._config.report_issue_model,
-                max_turns=10,
+                # 10 was too tight: the /hf.issue skill (codebase research +
+                # duplicate check + structured body) routinely needed more, hit
+                # the cap, and exited 1 before printing the created-issue URL.
+                max_turns=25,
             )
 
             event_data: TranscriptEventData = {
