@@ -1533,6 +1533,91 @@ describe('EPIC_RELEASED reducer', () => {
   })
 })
 
+describe('epic reducers de-collide by (repo, epic_number) under repo=__all__', () => {
+  // Two supervised repos can each have an epic #5. In the aggregate view epics
+  // must key on (repo, epic_number) — mirroring issueKey/workerKey — so one
+  // repo's update does not overwrite the other's fields.
+  const aggState = (epics) => ({ ...initialState, selectedRepoSlug: '__all__', epics })
+  const twoRepoEpics = () => [
+    { epic_number: 5, repo: 'org-a', status: 'active', title: 'A5', completed: 1 },
+    { epic_number: 5, repo: 'org-b', status: 'active', title: 'B5', completed: 2 },
+  ]
+
+  it('epic_update only touches the same-repo epic, not another repo sharing the number', () => {
+    const state = aggState(twoRepoEpics())
+    const next = reducer(state, {
+      type: 'epic_update',
+      repo: 'org-a',
+      data: { progress: { epic_number: 5, status: 'active', completed: 9 } },
+    })
+    const a = next.epics.find(e => e.repo === 'org-a' && e.epic_number === 5)
+    const b = next.epics.find(e => e.repo === 'org-b' && e.epic_number === 5)
+    expect(next.epics).toHaveLength(2)
+    expect(a.completed).toBe(9) // updated
+    expect(a.title).toBe('A5') // detail preserved
+    expect(b.completed).toBe(2) // untouched
+    expect(b.title).toBe('B5')
+  })
+
+  it('epic_update appends a new repo epic instead of overwriting a same-number epic in another repo', () => {
+    const state = aggState([
+      { epic_number: 5, repo: 'org-a', status: 'active', title: 'A5', completed: 1 },
+    ])
+    const next = reducer(state, {
+      type: 'epic_update',
+      repo: 'org-b',
+      data: { progress: { epic_number: 5, status: 'active', completed: 7 } },
+    })
+    expect(next.epics).toHaveLength(2)
+    const a = next.epics.find(e => e.repo === 'org-a' && e.epic_number === 5)
+    const b = next.epics.find(e => e.repo === 'org-b' && e.epic_number === 5)
+    expect(a.completed).toBe(1)
+    expect(a.title).toBe('A5')
+    expect(b.completed).toBe(7)
+    expect(b.repo).toBe('org-b')
+  })
+
+  it('EPIC_READY marks only the same-repo epic ready', () => {
+    const state = aggState(twoRepoEpics())
+    const next = reducer(state, {
+      type: 'EPIC_READY',
+      repo: 'org-a',
+      data: { epic_number: 5 },
+    })
+    expect(next.epics.find(e => e.repo === 'org-a').status).toBe('ready')
+    expect(next.epics.find(e => e.repo === 'org-b').status).toBe('active')
+  })
+
+  it('EPIC_RELEASING marks only the same-repo epic releasing', () => {
+    const state = aggState(twoRepoEpics())
+    const next = reducer(state, {
+      type: 'EPIC_RELEASING',
+      repo: 'org-b',
+      data: { epic_number: 5, progress: 1, total: 3 },
+    })
+    expect(next.epics.find(e => e.repo === 'org-a').status).toBe('active')
+    expect(next.epics.find(e => e.repo === 'org-b').status).toBe('releasing')
+  })
+
+  it('EPIC_RELEASED marks only the same-repo epic released', () => {
+    const state = aggState([
+      { epic_number: 5, repo: 'org-a', status: 'releasing', title: 'A5' },
+      { epic_number: 5, repo: 'org-b', status: 'releasing', title: 'B5' },
+    ])
+    const next = reducer(state, {
+      type: 'EPIC_RELEASED',
+      repo: 'org-a',
+      data: { epic_number: 5, version: 'v1.0.0', released_at: '2026-07-22T00:00:00Z' },
+    })
+    const a = next.epics.find(e => e.repo === 'org-a')
+    const b = next.epics.find(e => e.repo === 'org-b')
+    expect(a.status).toBe('released')
+    expect(a.version).toBe('v1.0.0')
+    expect(b.status).toBe('releasing') // untouched
+    expect(b.version).toBeUndefined()
+  })
+})
+
 describe('background_worker_status action', () => {
   it('preserves interval_seconds from prior state on heartbeat', () => {
     const state = {
