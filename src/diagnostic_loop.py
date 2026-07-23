@@ -517,17 +517,63 @@ class DiagnosticLoop(BaseBackgroundLoop):
         # a pipeline-stage label, so it survives the swap above — the issue then
         # carries both ``hydraflow-hitl`` (HITL queue) and the Auto-Agent
         # routing labels.
-        try:
-            await self._prs.add_labels(
-                issue_number, ["hitl-escalation", "diagnose-failed"]
+        #
+        # #10262: guard the re-arm. If a *prior* attempt's resolving PR is
+        # already open, reconciliation (the Auto-Agent routes a resolved
+        # ``diagnose-failed`` issue back to review) has just cleared these
+        # labels. Re-adding them here — including on the comment-dedup hit path
+        # above ("labels still applied") — flaps the labels and renews
+        # auto-agent dispatch pressure. Defer to the reconciler's verdict and
+        # skip the re-arm when an open resolving PR exists. Conservative: any
+        # lookup failure falls through to today's escalate behaviour.
+        if await self._has_open_resolving_pr(issue_number):
+            logger.info(
+                "Diagnostic: open resolving PR exists for issue #%d — skipping "
+                "hitl-escalation/diagnose-failed re-arm (deferring to the "
+                "reconciler)",
+                issue_number,
             )
-        except Exception:
+        else:
+            try:
+                await self._prs.add_labels(
+                    issue_number, ["hitl-escalation", "diagnose-failed"]
+                )
+            except Exception:
+                logger.warning(
+                    "Diagnostic: failed to add Auto-Agent routing labels for #%d",
+                    issue_number,
+                    exc_info=True,
+                )
+        await self._publish_update(issue_number, "escalated")
+
+    async def _has_open_resolving_pr(self, issue_number: int) -> bool:
+        """Return whether an open PR already resolves *issue_number*.
+
+        Uses the same branch-convention signal the reconciler consults —
+        ``find_open_pr_for_branch`` on the canonical ``agent/issue-{N}``
+        branch. A prior diagnostic/auto-agent attempt that pushed a fix opens
+        such a PR; the Auto-Agent then routes the resolved issue back to review
+        and clears the escalation labels. On any lookup error this returns
+        ``False`` (fail-open to the escalate behaviour) after re-raising
+        credit/bug signals per the dark-factory contract.
+        """
+        try:
+            pr = await self._prs.find_open_pr_for_branch(
+                self._config.branch_for_issue(issue_number),
+                issue_number=issue_number,
+            )
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
             logger.warning(
-                "Diagnostic: failed to add Auto-Agent routing labels for #%d",
+                "Diagnostic: open-PR lookup failed for issue #%d — proceeding "
+                "with escalation",
                 issue_number,
                 exc_info=True,
             )
-        await self._publish_update(issue_number, "escalated")
+            return False
+        # FakeGitHub returns ``PRInfo(number=0)`` as an absence sentinel; the
+        # real PRManager returns ``None``. Both mean "no open resolving PR".
+        return pr is not None and pr.number > 0
 
     async def _publish_update(self, issue_number: int, status: str) -> None:
         """Publish a DIAGNOSTIC_UPDATE event for dashboard visibility."""
