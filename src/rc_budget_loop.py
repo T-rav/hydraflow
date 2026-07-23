@@ -57,6 +57,17 @@ _MIN_HISTORY = 5
 # ``github_cache_loop.RC_PROMOTION_WORKFLOW`` (#9814): this loop reads the
 # shared run snapshot, it no longer names the workflow in a gh command.
 
+# Job-name markers for the heavy suite jobs gated behind the workflow's
+# ``gate`` job (``if: needs.gate.outputs.should_run == 'true'``). When the gate
+# resolves ``should_run=false`` (a schedule tick with no open ``rc/*`` PR, or a
+# non-RC PR), every one of these jobs is ``skipped`` and the run finishes in a
+# few seconds — a "gate-only" run that must be excluded from the baseline
+# population so it doesn't deflate the median/spike thresholds (#10254). The
+# shared run snapshot (#9814) carries no per-job data, so a run's gate-only
+# status is resolved from its jobs (``PRPort.get_workflow_run_jobs``) and cached
+# per run id — a completed (immutable) run is classified at most once.
+_SUITE_JOB_MARKERS = ("Scenario Tests", "Browser Scenarios")
+
 # Marker label on the HITL escalation issue (paired with ``hitl-escalation``).
 # Single-sourced so the filing path (`_file_escalation`) and the reconciler
 # can never drift apart.
@@ -93,6 +104,11 @@ def _regression_subject(title: str) -> str | None:
 # circuit-breaker/rate-limit/process-group hardened — #9554/#10028) rather
 # than a raw ``create_subprocess_exec``.
 _GH_TIMEOUT_SECONDS = 120
+
+
+def _is_suite_job(name: str) -> bool:
+    """True if *name* is one of the heavy suite jobs gated on ``should_run``."""
+    return any(marker in name for marker in _SUITE_JOB_MARKERS)
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -136,6 +152,11 @@ class RCBudgetLoop(BaseBackgroundLoop):
             clear_attempts=state.clear_rc_budget_attempts,
             subject_from_title=_escalation_subject,
         )
+        # gate-only classification cache, keyed by run databaseId. Completed
+        # runs are immutable, so a run is classified via ``gh`` at most once
+        # across the loop's lifetime — amortising the job-level fetch instead
+        # of re-fan-out on every 4h tick (#10254 / respecting #9814).
+        self._gate_only_cache: dict[int, bool] = {}
 
     def _get_default_interval(self) -> int:
         return self._config.rc_budget_interval
@@ -250,14 +271,83 @@ class RCBudgetLoop(BaseBackgroundLoop):
                 }
             )
         out.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
-        return out[:_HISTORY_CAP]
+        out = out[:_HISTORY_CAP]
+        for run in out:
+            run["gate_only"] = await self._classify_gate_only(run)
+        return out
+
+    async def _classify_gate_only(self, run: dict[str, Any]) -> bool:
+        """Return True when *run* is a gate-only (``should_run=false``) tick.
+
+        The shared run snapshot (#9814) carries no per-job or event data, so a
+        run's gate-only status can only be settled from its jobs: a gate-only
+        run runs the ``gate`` job alone and skips every suite job. Resolved via
+        one ``PRPort.get_workflow_run_jobs`` fetch, cached per run id so an
+        immutable completed run is classified at most once (#10254).
+        """
+        try:
+            run_id = int(run.get("databaseId") or 0)
+        except (TypeError, ValueError):
+            return False
+        if not run_id:
+            return False
+        if run_id in self._gate_only_cache:
+            return self._gate_only_cache[run_id]
+        verdict = self._jobs_indicate_gate_only(await self._run_jobs(run_id))
+        self._gate_only_cache[run_id] = verdict
+        return verdict
+
+    @staticmethod
+    def _jobs_indicate_gate_only(jobs: list[dict[str, Any]]) -> bool:
+        """True iff every present suite job was ``skipped`` (gate-only run).
+
+        A gate-only run skips ``Scenario Tests`` / ``Browser Scenarios``. A full
+        run executes them (``success`` / ``failure`` / ``cancelled``). An
+        unrecognised shape (no suite jobs found — e.g. an empty/failed fetch)
+        fails open: treated as a full run so a transient/odd payload never drops
+        a real run from the baseline.
+        """
+        suite = [j for j in jobs if _is_suite_job(str(j.get("name", "")))]
+        if not suite:
+            return False
+        return all(str(j.get("conclusion", "")).lower() == "skipped" for j in suite)
+
+    async def _run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        """Return raw jobs for *run_id* via the PRPort; fail-soft, billing-safe.
+
+        Shared by gate-only classification and the per-job regression
+        breakdown. Empty list on any failure; credit/bug signals propagate.
+        """
+        try:
+            return await self._pr.get_workflow_run_jobs(run_id)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "rc_budget: jobs unavailable for run %s",
+                run_id,
+                exc_info=True,
+            )
+            return []
 
     def _compute_baselines(
         self, runs: list[dict[str, Any]]
     ) -> tuple[dict[str, Any], dict[str, int]]:
-        """Return ``(current, {rolling_median, recent_max})`` excluding current."""
+        """Return ``(current, {rolling_median, recent_max})`` excluding current.
+
+        The baseline population (rolling median + recent-5 spike window) is
+        built from real full runs only: gate-only (``should_run=false``) runs
+        are excluded so their near-zero durations don't deflate the thresholds
+        and make a normal full run read as an extreme spike (#10254). The
+        ``current`` run is still the newest run regardless of gate-only status,
+        so its own duration reporting is unaffected.
+        """
         current = max(runs, key=lambda r: r.get("createdAt", ""))
-        others = [r for r in runs if r.get("databaseId") != current.get("databaseId")]
+        others = [
+            r
+            for r in runs
+            if r.get("databaseId") != current.get("databaseId")
+            and not r.get("gate_only", False)
+        ]
         others.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
         durations = [int(r["duration_s"]) for r in others]
         recent = durations[:_RECENT_N]
@@ -296,16 +386,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
             return []
         if not run_id:
             return []
-        try:
-            jobs = await self._pr.get_workflow_run_jobs(run_id)
-        except Exception as exc:
-            reraise_on_credit_or_bug(exc)
-            logger.warning(
-                "rc_budget: job breakdown unavailable for run %s",
-                run_id,
-                exc_info=True,
-            )
-            return []
+        jobs = await self._run_jobs(run_id)
         out: list[dict[str, Any]] = []
         for job in jobs:
             s = _parse_iso(job.get("started_at"))
