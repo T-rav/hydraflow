@@ -190,6 +190,8 @@ class TestInitialization:
             "erosion_last_processed_sha",
             # EscapeLedgerLoop (#10367) — escape-detection last-processed-SHA cursor.
             "escape_ledger_last_processed_sha",
+            # InterventionTallyLoop (#10369) — attention-side last-processed-ts cursor.
+            "intervention_tally_last_processed_ts",
         }
         assert set(d.keys()) == expected_keys
 

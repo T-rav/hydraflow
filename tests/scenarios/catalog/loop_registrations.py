@@ -196,6 +196,56 @@ def _build_escape_ledger(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     )
 
 
+def _build_intervention_tally(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build InterventionTallyLoop for scenarios (#10369).
+
+    ``state`` defaults to a MagicMock whose last-processed-ts cursor is a
+    clean-slate in-memory string (the first tick primes the baseline, matching
+    production's fresh-install behavior) and whose ``get_all_human_steering``
+    returns any seeded steering map (default empty). ``dedup`` defaults to a
+    clean-slate MagicMock. The loop senses steering from state and HITL /
+    governor actions from ``config.event_log_path`` on disk, not through the
+    ``github`` port — see ``tests/scenarios/test_intervention_tally_scenario.py``.
+    The free-text cheap-LLM path is injected as a fake so no scenario shells
+    out to a real ``claude``.
+    """
+    from intervention_tally_loop import InterventionTallyLoop  # noqa: PLC0415
+
+    state = ports.get("intervention_tally_state")
+    if state is None:
+        state = MagicMock()
+        cursor: dict[str, str] = {"ts": ""}
+
+        def _get_ts() -> str:
+            return cursor["ts"]
+
+        def _set_ts(ts: str) -> None:
+            cursor["ts"] = ts
+
+        state.get_intervention_tally_last_processed_ts.side_effect = _get_ts
+        state.set_intervention_tally_last_processed_ts.side_effect = _set_ts
+        state.get_all_human_steering.return_value = ports.get(
+            "intervention_tally_steering", {}
+        )
+        ports["intervention_tally_state"] = state
+
+    dedup = ports.get("intervention_tally_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["intervention_tally_dedup"] = dedup
+
+    classifier = ports.get("intervention_tally_classifier")
+
+    return InterventionTallyLoop(
+        config=config,
+        state=state,
+        dedup=dedup,
+        deps=deps,
+        classifier_llm=classifier,
+    )
+
+
 def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build IssueRefinementLoop for scenarios (#9957).
 
@@ -2079,6 +2129,7 @@ _BUILDERS: dict[str, Any] = {
     "erosion_metrics": _build_erosion_metrics,
     "fail_open_monitor": _build_fail_open_monitor,
     "escape_ledger": _build_escape_ledger,
+    "intervention_tally": _build_intervention_tally,
     "issue_refinement": _build_issue_refinement,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,

@@ -81,6 +81,7 @@ areas:
       - ErosionMetricsLoop
       - EscapeLedgerLoop
       - FailOpenMonitorLoop
+      - InterventionTallyLoop
       - FakeCoverageAuditorLoop
       - FlakeTrackerLoop
       - LiveCorpusReplayLoop

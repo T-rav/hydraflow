@@ -6,7 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `a801410` — feat(evidence): judge-independence budget + fail-visible dispatch (#10371) (#10371) *(2026-07-23)*
+- `b253d8a` — feat(instruments): intervention tally — attention-side telemetry (#10369) (#10369) *(2026-07-23)*
+- `f166e7f` — feat(instruments): escape ledger + erosion trend surfaces (#10367) (#10375) (#10375) *(2026-07-23)*
 - `db16faf` — feat(hygiene): close-verification controller — reopen+retriage false auto-close, default-off (#10358) (#10364) (#10364) *(2026-07-23)*
 - `e612920` — docs(adr): evaluate deterministic-simulation fault injection on sandbox compose (#10361) (#10362) (#10362) *(2026-07-23)*
 - `0b341ec` — feat(audit): close-verification — flag issues closed without a fix delta (#10354) (#10356) (#10356) *(2026-07-23)*

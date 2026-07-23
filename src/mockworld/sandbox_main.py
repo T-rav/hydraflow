@@ -130,6 +130,14 @@ SANDBOX_SEAMS: dict[str, str] = {
     # rc_auto_recut_enabled, rc_promotion_health_enabled), so no spawn is
     # reachable — the sandbox still exercises the cut→monitor→merge path (s82).
     "staging_promotion_loop": "config_disable",
+    # InterventionTallyLoop's only spawn is the cheap-LLM classification of
+    # free-text steering directives (``run_lightweight_agent``), gated by
+    # ``intervention_tally_classify_enabled``. That flag is pinned OFF in
+    # ``_apply_sandbox_config_overrides`` so the classifier path is never
+    # reached on the air-gapped network — the sensing/recording path (event
+    # log + steering state, no spawn) still runs, and the idle-poll scenario
+    # (s84) exercises the loop end-to-end without any real ``claude`` (#10369).
+    "intervention_tally_loop": "config_disable",
 }
 
 
@@ -205,6 +213,12 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     object.__setattr__(config, "rc_observed_advance_close_enabled", False)
     object.__setattr__(config, "rc_auto_recut_enabled", False)
     object.__setattr__(config, "rc_promotion_health_enabled", False)
+    # InterventionTallyLoop (#10369): its ONLY spawn is the cheap-LLM
+    # classification of free-text steering directives. Pin the classify flag
+    # OFF so that path is unreachable on the air-gapped network (the
+    # ``intervention_tally_loop`` config_disable seam); the loop still senses +
+    # records from the event log / steering state (no spawn) and heartbeats.
+    object.__setattr__(config, "intervention_tally_classify_enabled", False)
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
