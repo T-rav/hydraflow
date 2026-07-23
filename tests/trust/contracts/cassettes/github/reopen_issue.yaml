@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# reopen_issue undoes a close (`gh issue reopen <n> --repo ...`). Mirrors
+# close_issue.yaml's shape: empty stdout, side-effect pinned via the seeded
+# issue's `.state` flipping back to "open" rather than the returned bool.
+# Added for the close-verification controller (#10358), which reopens an
+# issue a merged PR closed without a fix delta.
+adapter: github
+interaction: reopen_issue
+recorded_at: '2026-07-23T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: reopen_issue
+  args:
+  - '42'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ''
+  stderr: ''
+normalizers: []
+baseline_only: true

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from acceptance_criteria import AcceptanceCriteriaGenerator
+from close_verification import reconcile_false_close
 from config import HydraFlowConfig
 from epic import EpicCompletionChecker
 from events import EventBus, EventType, HydraFlowEvent
@@ -451,6 +452,17 @@ class PostMergeHandler:
                 pr.issue_number, self._config.fixed_label[0]
             )
             await self._prs.close_issue(pr.issue_number)
+            # G3 close-verification (#10358): observe the close we just made
+            # and reopen + re-triage it when the merged PR carried no fix delta
+            # (the #10223 false-close signature). Default-OFF and fully inert
+            # until close_verification_enabled; never blocks the merge path.
+            await reconcile_false_close(
+                config=self._config,
+                prs=self._prs,
+                issue_number=pr.issue_number,
+                pr_number=pr.number,
+                bus=self._bus,
+            )
             await self._post_inference_totals_comment(pr, issue)
             await self._run_post_merge_hooks(pr, issue, result, diff, visual_decision)
             # Clear convergence ledger AFTER hooks so retrospective and other

@@ -6,6 +6,12 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `0b341ec` — feat(audit): close-verification — flag issues closed without a fix delta (#10354) (#10356) (#10356) *(2026-07-23)*
+- `df6f0a6` — docs(adr): reconcile 5 ADR citations drifted by #10238 (#10247) (#10347) (#10347) *(2026-07-23)*
+- `8e68c92` — test(arch): grandfather ratchet for new-loop-vs-workstream + correct #10027 doc (#10318) (#10346) (#10346) *(2026-07-23)*
+- `d775531` — docs(memory-feedback): promote 4 documented-convention entries (#10328) (#10328) *(2026-07-22)*
+- `111e858` — docs(memory-feedback): promote feedback_make_audit_separate_from_quality (#10173) (#10324) (#10324) *(2026-07-22)*
+- `379b576` — feat(sandbox): post-merge full-machine smoke — s82 exercises both merge lanes (#10309) (#10321) (#10321) *(2026-07-22)*
 - `b28837f` — feat(ul): entry-evidence — 2 new entry links across 2 terms (#10305) (#10305) *(2026-07-22)*
 - `bb77fb1` — fix(triage): parse code-quoting verdicts + raise turn budget (#10291); infra-park != clarification-park (#10290) (#10300) (#10300) *(2026-07-22)*
 - `b1cde30` — feat(ul): entry-evidence — 5 new entry links across 5 terms (#10295) (#10295) *(2026-07-22)*
@@ -568,11 +574,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a5f32b6` — chore: remove Dolt state backend, files-only persistence (#8419) (#8419) *(2026-04-24)*
 - `9ee5fe8` — docs: consolidate per-repo wiki at docs/wiki/ (#8418) (#8418) *(2026-04-24)*
 - `163c2f0` — trust-arch-hardening: lights-off trust fleet (spec + 11 plans + 194 beads) (#8390) (#8390) *(2026-04-24)*
-- `665e3e0` — feat(wiki): depth upgrades — corroborations counter + temporal tags (#8413) (#8413) *(2026-04-24)*
-- `1485467` — feat(principles): inject ADR-0044 checklist into plan + review prompts (#8412) (#8412) *(2026-04-23)*
-- `be1315c` — feat(wiki): LLM semantic-drift layer (E2) (#8410) (#8410) *(2026-04-23)*
-- `8de17bf` — docs(adr): backfill real Enforced-by refs for 14 ADRs (B1) (#8404) (#8404) *(2026-04-23)*
-- `1b79b45` — feat(adr): require Enforced-by linkage on Accepted ADRs (P3) (#8398) (#8398) *(2026-04-23)*
 
 
 <!-- arch:generated -->

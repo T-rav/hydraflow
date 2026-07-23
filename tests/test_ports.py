@@ -141,6 +141,7 @@ class TestPRPortMethods:
         "fetch_ci_failure_logs",
         "fetch_code_scanning_alerts",
         "close_issue",
+        "reopen_issue",
         # Issue search / listing methods
         "find_existing_issue",
         "create_issue",
@@ -151,6 +152,7 @@ class TestPRPortMethods:
         "update_pr_title",
         "get_pr_diff_names",
         "get_pr_recent_commit_diffs",
+        "get_pr_commit_messages",
         "get_pr_approvers",
         "get_pr_head_sha",
         "get_pr_mergeable",
@@ -279,6 +281,7 @@ class TestPRPortSignatures:
         "fetch_ci_failure_logs",
         "fetch_code_scanning_alerts",
         "close_issue",
+        "reopen_issue",
         # Issue search / listing methods
         "find_existing_issue",
         "create_issue",
@@ -289,6 +292,7 @@ class TestPRPortSignatures:
         "update_pr_title",
         "get_pr_diff_names",
         "get_pr_recent_commit_diffs",
+        "get_pr_commit_messages",
         "get_pr_approvers",
         "get_pr_head_sha",
         "get_pr_mergeable",

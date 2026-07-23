@@ -8,6 +8,11 @@ import re
 import subprocess
 from pathlib import Path
 
+from ..false_close import SKIP_REGRESSION_RE as _SKIP_REGRESSION_RE
+from ..false_close import UI_TEST_RE as _UI_TEST_RE
+from ..false_close import closing_issue_refs as _closing_issue_refs
+from ..false_close import has_regression_delta as _has_regression_delta
+from ..false_close import product_paths as _product_paths
 from ..models import CheckContext, Finding, Status
 from ..registry import register
 from ._helpers import finding
@@ -281,9 +286,6 @@ def _touched_regressions(root: Path, sha: str) -> bool:
     return "tests/regressions/" in result.stdout
 
 
-_SKIP_REGRESSION_RE = re.compile(r"^Skip-Regression:\s*(\S.*)$", re.MULTILINE)
-# UI regression coverage: a test delta under src/ui counts for UI-only fixes.
-_UI_TEST_RE = re.compile(r"^src/ui/.*(?:__tests__/|\.test\.[jt]sx?$)")
 _PR_BASE_ENV = "HYDRAFLOW_AUDIT_PR_BASE"
 
 
@@ -346,25 +348,6 @@ def _skip_regression_reason(root: Path, merge_base: str) -> str | None:
         return None
     match = _SKIP_REGRESSION_RE.search(result.stdout)
     return match.group(1).strip() if match else None
-
-
-def _has_regression_delta(paths: list[str]) -> bool:
-    """True when any changed path lives under ``tests/regressions/``."""
-    return any(path.startswith("tests/regressions/") for path in paths)
-
-
-def _product_paths(paths: list[str]) -> list[str]:
-    """Changed paths that are non-test product source (the P10.6 fix-delta set).
-
-    Excludes tests, docs, CI workflow, and UI test files — the same filter the
-    per-PR gate uses to decide whether a regression test is even applicable.
-    """
-    return [
-        path
-        for path in paths
-        if not path.startswith(("tests/", "docs/", ".github/"))
-        and not _UI_TEST_RE.match(path)
-    ]
 
 
 def _evaluate_pr_regression_delta(root: Path, merge_base: str) -> Finding:
@@ -461,19 +444,7 @@ def _fix_prs_carry_regression_delta(ctx: CheckContext) -> Finding:
     return _evaluate_pr_regression_delta(ctx.root, merge_base)
 
 
-# GitHub's issue-closing keywords (close/closes/closed, fix/fixes/fixed,
-# resolve/resolves/resolved) followed by ``#<number>``. A `fix:` conventional
-# prefix does not match — the ``:``/`` `` between the word and ``#`` breaks it.
-_CLOSE_KEYWORD_RE = re.compile(
-    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b",
-    re.IGNORECASE,
-)
 _CLOSE_SCAN_COUNT = 100
-
-
-def _closing_issue_refs(body: str) -> set[int]:
-    """Issue numbers this commit message declares it closes."""
-    return {int(m) for m in _CLOSE_KEYWORD_RE.findall(body)}
 
 
 def _recent_commits_with_bodies(root: Path, count: int) -> list[tuple[str, str]] | None:

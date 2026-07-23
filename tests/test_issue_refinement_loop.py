@@ -600,8 +600,15 @@ async def test_earlier_open_proposal_re_renders_on_later_changed_tick(
     assert "#101 vs #102" in gh._issues[digest_num].body
 
 
-async def test_digest_recreated_when_stored_issue_closed(tmp_path) -> None:
-    """A closed digest issue is not silently written — a fresh one is minted."""
+async def test_digest_reopened_when_stored_issue_closed(tmp_path) -> None:
+    """A closed digest issue is reopened + reused, not silently written.
+
+    Now that ``PRPort`` grows a ``reopen_issue`` seam (added for the
+    close-verification controller, #10358), ``_reopen_digest``'s capability
+    probe fires and the rolling digest is reused instead of a fresh one being
+    minted — the behaviour the seam was explicitly kept for. The invariant is
+    unchanged: the loop never silently writes the body of a *closed* issue.
+    """
     gh, state, dedup, bus = _env(tmp_path)
     _near_dup_pair(gh)
     state.set_refinement_last_full_sweep(datetime.now(UTC))
@@ -619,7 +626,8 @@ async def test_digest_recreated_when_stored_issue_closed(tmp_path) -> None:
     await loop._do_work()
 
     new_digest = state.get_refinement_digest_issue()
-    assert new_digest != old_digest
+    # The rolling digest is reopened and reused — not churned into a new issue.
+    assert new_digest == old_digest
     assert gh._issues[new_digest].state == "open"
     assert _DIGEST_LABEL in gh._issues[new_digest].labels
 

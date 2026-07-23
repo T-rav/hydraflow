@@ -162,6 +162,10 @@ class FakeGitHub:
         # Per-PR list of commit-diff strings for get_pr_recent_commit_diffs.
         # Each entry is a pre-rendered "## <sha> <title>\n<diff>" block.
         self._commit_diffs: dict[int, list[str]] = {}
+        # Per-PR concatenated commit messages for get_pr_commit_messages —
+        # the close-verification controller (#10358) reads these for the
+        # Skip-Regression: opt-out trailer and Closes #N references.
+        self._pr_commit_messages: dict[int, str] = {}
         # Per-PR full unified diff for get_pr_diff. Lets scenarios control the
         # diff a review sees (e.g. its blast radius for retry-budget tests).
         self._pr_diffs: dict[int, str] = {}
@@ -573,6 +577,15 @@ class FakeGitHub:
             self._prs[issue_number].closed = True
         return True
 
+    async def reopen_issue(self, issue_number: int) -> bool:
+        self._maybe_rate_limit()
+        if issue_number in self._issues:
+            issue = self._issues[issue_number]
+            issue.state = "open"
+            issue.state_reason = ""
+            issue.closed_at = ""
+        return True
+
     async def close_pr(self, pr_number: int) -> bool:
         self._maybe_rate_limit()
         pr = self._prs.get(pr_number)
@@ -686,6 +699,18 @@ class FakeGitHub:
     async def get_pr_diff_names(self, pr_number: int) -> list[str]:
         self._maybe_rate_limit()
         return list(self._pr_diff_names.get(pr_number, ["src/app.py"]))
+
+    def set_pr_commit_messages(self, pr_number: int, message: str) -> None:
+        """Seed the concatenated commit messages get_pr_commit_messages returns.
+
+        Carries the Skip-Regression: trailer and Closes #N references the
+        close-verification controller (#10358) reads.
+        """
+        self._pr_commit_messages[pr_number] = message
+
+    async def get_pr_commit_messages(self, pr_number: int) -> str:
+        self._maybe_rate_limit()
+        return self._pr_commit_messages.get(pr_number, "")
 
     async def get_pr_recent_commit_diffs(self, pr_number: int, *, n: int = 3) -> str:
         """Return a stub diff block for the last *n* commits on *pr_number*.
