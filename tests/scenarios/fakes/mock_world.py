@@ -13,7 +13,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from events import EventBus, EventLog
 from mockworld.fakes.fake_clock import FakeClock
@@ -1142,31 +1142,83 @@ class MockWorld:
         raise TimeoutError("dashboard did not bind a port within 5s")
 
     async def _build_wired_orchestrator(self, config: Any, bus: Any, state: Any) -> Any:
-        """Construct a real HydraFlowOrchestrator wired against this world's fakes.
+        """Construct a HydraFlowOrchestrator whose services are air-gapped Fakes.
 
-        Uses a small adapter class to map ServiceRegistry attribute names to
-        the shape _wire_targets expects (prs / triage_runner / planners /
-        agents / reviewers / workspaces).  ServiceRegistry uses ``triage``
-        instead of ``triage_runner``; the other five names already match.
+        Threads this world's Fakes through ``build_services`` exactly as
+        ``mockworld.sandbox_main.main`` does — ``subprocess_runner=Fake…`` plus
+        the Fake ports/runners and the claude/git-spawn sentinels
+        (``air_gap_runner_sentinels``) — so the ~60 BACKGROUND caretaker loops
+        the orchestrator supervises can never spawn real Docker/gh/claude on the
+        shared event loop.
+
+        Before #10253 this built a REAL ``ServiceRegistry`` (real Docker
+        ``SubprocessRunner``, real ``gh``) and monkeypatched only the four
+        PIPELINE runners after the fact via ``_wire_targets``; every background
+        loop kept its real adapter. Clicking the dashboard Start button then ran
+        those real loops in-process and a single blocking caretaker call wedged
+        the loop shared by the test, the dashboard, and Playwright — the 2715s
+        RC hang (#10215). Air-gapping the whole registry here is what makes the
+        started orchestrator's background loops non-blocking.
         """
-        from orchestrator import HydraFlowOrchestrator  # noqa: PLC0415
-
-        orch = HydraFlowOrchestrator(
-            config=config, event_bus=bus, state=state, pipeline_enabled=False
+        from mockworld.fakes.fake_issue_fetcher import FakeIssueFetcher
+        from mockworld.fakes.fake_issue_store import FakeIssueStore
+        from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
+        from mockworld.sandbox_main import (
+            _apply_sandbox_config_overrides,
+            air_gap_runner_sentinels,
         )
+        from orchestrator import HydraFlowOrchestrator
+        from ports import (
+            IssueFetcherPort,
+            IssueStorePort,
+            PRPort,
+            WorkspacePort,
+        )
+        from service_registry import WorkerRegistryCallbacks, build_services
 
-        # Wrap the ServiceRegistry so _wire_targets sees the attribute shape
-        # it expects (prs / triage_runner / planners / agents / reviewers /
-        # workspaces). ServiceRegistry uses `triage` instead of
-        # `triage_runner`; the other five attribute names already match.
-        class _SvcAdapter:
-            def __init__(self, svc: Any) -> None:
-                self.prs = svc.prs
-                self.triage_runner = svc.triage  # renamed!
-                self.planners = svc.planners
-                self.agents = svc.agents
-                self.reviewers = svc.reviewers
-                self.workspaces = svc.workspaces
+        # The same air-gap config overrides the docker sandbox applies: turn off
+        # the production code paths that reach the network via a RAW gh/git
+        # subprocess (merge_policy, approval_records, flake_tracker,
+        # evidence_pack, …) rather than through a Faked Port. Without this a
+        # background caretaker's raw ``gh`` call can still block the shared loop.
+        _apply_sandbox_config_overrides(config)
 
-        self._wire_targets(_SvcAdapter(orch._svc))
-        return orch
+        shared_github = self._github
+        callbacks = WorkerRegistryCallbacks(
+            update_status=lambda *_a, **_kw: None,
+            # Enable every caretaker loop (mirrors sandbox_main's
+            # ``loops_enabled=None``) so the started orch genuinely exercises the
+            # background fleet the Start button spins up — the fleet that wedged.
+            is_enabled=lambda *_a, **_kw: True,
+            get_interval=lambda *_a, **_kw: 60,
+            get_watchdog_timeout=(
+                lambda *_a, **_kw: config.loop_watchdog_default_seconds
+            ),
+        )
+        svc = build_services(
+            config,
+            bus,
+            state,
+            asyncio.Event(),
+            callbacks,
+            prs=cast(PRPort, shared_github),
+            workspaces=cast(WorkspacePort, self._workspace),
+            store=cast(
+                IssueStorePort,
+                FakeIssueStore(github=shared_github, event_bus=bus),
+            ),
+            fetcher=cast(IssueFetcherPort, FakeIssueFetcher(github=shared_github)),
+            runners=self._llm,
+            subprocess_runner=FakeSubprocessRunner(self._docker),
+        )
+        # Attach the fake-LLM sentinels + fake repo-prober (the paths
+        # build_services' two seams don't cover); shared with sandbox_main.
+        air_gap_runner_sentinels(svc, self._llm)
+
+        return HydraFlowOrchestrator(
+            config=config,
+            event_bus=bus,
+            state=state,
+            pipeline_enabled=False,
+            services=svc,
+        )

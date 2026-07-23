@@ -42,6 +42,7 @@ from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
 from repo_wiki import RepoWikiStore, WikiEntry
 from runtime_config import load_runtime_config
 from service_registry import (
+    ServiceRegistry,
     WorkerRegistryCallbacks,
     build_services,
     build_state_tracker,
@@ -785,6 +786,57 @@ def build_seeded_branch_protection_auditor(
     return _audit
 
 
+def air_gap_runner_sentinels(svc: ServiceRegistry, fake_llm: FakeLLM) -> None:
+    """Route every remaining raw ``claude``/``git`` spawn on ``svc`` to the fakes.
+
+    ``build_services`` already air-gaps the four phase runners (``runners=
+    fake_llm``) and the docker dispatch (``subprocess_runner=``). This attaches
+    the fake-LLM sentinels + fake repo-prober for the paths those two seams do
+    NOT cover, so no runner or background loop can reach the network via a raw
+    spawn:
+
+    - ``HealthMonitorLoop._repo_prober`` — production ``DefaultRepoProber``
+      shells a raw ``git ls-remote`` (#10140); the persistent-error self-repair
+      path reaches it whenever the health monitor runs. Swap in a fake that
+      reports "reachable" without spawning.
+    - ``svc.reviewers`` advisor routing — ``ReviewPhase._build_post_verify_
+      runner``'s adapter probes ``_mockworld_fake_llm`` before falling through
+      to ``ReviewRunner._execute`` (a real Claude spawn). With ``runners=
+      fake_llm`` ``svc.reviewers`` IS the fake runner, whose ``__dict__``
+      carries the assignment cleanly.
+    - ADR-0063/ADR-0107 engines (discover/shape/plan-review/spec-review/
+      diagnostic/decompose-council) each consult ``getattr(self,
+      "_mockworld_fake_llm", None)`` in their subprocess-dispatch method before
+      the real ``claude`` spawn (#9796).
+
+    Shared by :func:`main` (the docker sandbox entrypoint) and
+    ``tests.scenarios.fakes.mock_world.MockWorld._build_wired_orchestrator``
+    (the in-process browser-scenario wired orch) so the two air-gaps cannot
+    drift — a single missed path re-opens the exact hang class
+    #9796/#10140/#10215 document (#10253).
+    """
+    svc.health_monitor_loop._repo_prober = _FakeRepoProber()
+    svc.reviewers._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    discover_runner = getattr(svc, "discover_runner", None)
+    if discover_runner is not None:
+        discover_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    shape_runner = getattr(svc, "shape_runner", None)
+    if shape_runner is not None:
+        shape_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    plan_reviewer = getattr(svc.planner_phase, "_plan_reviewer", None)
+    if plan_reviewer is not None:
+        plan_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    spec_reviewer = getattr(svc.implementer, "_spec_reviewer", None)
+    if spec_reviewer is not None:
+        spec_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    diagnostic_runner = getattr(svc.diagnostic_loop, "_runner", None)
+    if diagnostic_runner is not None:
+        diagnostic_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    decompose_council = getattr(svc.auto_agent_preflight_loop, "_council", None)
+    if decompose_council is not None:
+        decompose_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+
+
 async def main() -> None:
     config = load_runtime_config()
     # Disable production code paths that reach services unreachable on the
@@ -943,68 +995,12 @@ async def main() -> None:
     if bg_workers is not None:
         svc.health_monitor_loop.set_bg_workers(bg_workers)
 
-    # Air-gap the persistent-error self-repair actuator's repo-existence probe
-    # (#10140). ``HealthMonitorLoop._repo_probe`` delegates to an injected
-    # ``RepoProber``; production's ``DefaultRepoProber`` shells out to a raw
-    # ``git ls-remote`` that would hang on the air-gapped sandbox network — and
-    # the ``principles_audit`` self-repair path can reach it whenever the health
-    # monitor runs (s48/s72/s75 drive the loop). Swap in a fake that reports
-    # "reachable" without spawning. No SANDBOX_SEAMS entry is needed: the raw
-    # spawn now lives in ``repo_existence_prober`` (outside the scanned
-    # ``*_loop.py`` set), so the loop declares no undeclared spawn.
-    svc.health_monitor_loop._repo_prober = _FakeRepoProber()
-
-    # Attach the advisor-routing sentinel — mirrors
-    # tests/scenarios/fakes/mock_world.py::_wire_targets so
-    # ReviewPhase._build_post_verify_runner's ``_PostVerifyRunner.run``
-    # adapter routes advisor consults into FakeLLM (via
-    # ``pop_advisor_result``) instead of falling through to
-    # ``ReviewRunner._execute``, which would spawn a real Claude
-    # subprocess and fail under the sandbox's air-gapped network.
-    #
-    # The sentinel must land on the SAME object the production runner
-    # adapter probes (``parent._reviewers.__dict__``). With
-    # ``runners=fake_llm`` above, ``svc.reviewers`` IS the
-    # ``_FakeReviewRunner`` — a plain Python instance whose ``__dict__``
-    # carries the assignment cleanly.
-    svc.reviewers._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-
-    # ADR-0063 sentinel wiring (W3a/W3b/W4/W5). Each runner consults the
-    # sentinel via ``getattr(self, "_mockworld_fake_llm", None)`` in its
-    # subprocess-dispatch method; setting the attribute here lets sandbox
-    # scenarios drive failure-path recovery without producing synthetic
-    # subprocess transcripts.
-    # ADR-0107: Discover/Shape are planner-invoked engines now (svc.discover_runner
-    # / svc.shape_runner), not standalone phases. Route both through the fake-LLM
-    # sentinel so that if the planner's decision gate invokes them, their
-    # ``discover`` / ``run_turn`` subprocess dispatch consults the sentinel
-    # instead of spawning a real ``claude`` process that would wedge the
-    # air-gapped sandbox (#9796).
-    discover_runner = getattr(svc, "discover_runner", None)
-    if discover_runner is not None:
-        discover_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    shape_runner = getattr(svc, "shape_runner", None)
-    if shape_runner is not None:
-        shape_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    plan_reviewer = getattr(svc.planner_phase, "_plan_reviewer", None)
-    if plan_reviewer is not None:
-        plan_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    spec_reviewer = getattr(svc.implementer, "_spec_reviewer", None)
-    if spec_reviewer is not None:
-        spec_reviewer._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    # DiagnosticRunner.diagnose spawns a real ``claude`` subprocess that hangs
-    # in the air-gapped sandbox; the sentinel routes it to a not-fixable
-    # diagnosis so review-fix-cap escalations reach HITL (s05).
-    diagnostic_runner = getattr(svc.diagnostic_loop, "_runner", None)
-    if diagnostic_runner is not None:
-        diagnostic_runner._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
-    # DecompositionCouncil (decompose-to-converge, ADR-0105): route its two
-    # seam calls (direction + validation) to scripted transcripts so a scenario
-    # (s54) can drive the decompose terminal deterministically. The council
-    # lives on the auto-agent loop when epic_manager/runner were wired.
-    decompose_council = getattr(svc.auto_agent_preflight_loop, "_council", None)
-    if decompose_council is not None:
-        decompose_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    # Air-gap every remaining raw ``claude``/``git`` spawn path the
+    # ``runners=fake_llm`` / injected ``subprocess_runner`` seams above do not
+    # cover — the fake-LLM sentinels + fake repo-prober (#9796/#10140). Shared
+    # with MockWorld's in-process wired orch so the two air-gaps can't drift
+    # (#10253); see ``air_gap_runner_sentinels`` for the per-path rationale.
+    air_gap_runner_sentinels(svc, fake_llm)
 
     # Prompt self-refinement (#9724) air-gap seam. SkillPromptEvalLoop's refine
     # path has two pre-PR escape points that ``runners=fake_llm`` does NOT cover:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -886,3 +887,87 @@ class TestClearCreditPauseEndpoint:
 # ---------------------------------------------------------------------------
 # /api/pipeline endpoint
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# POST /api/control/start — no-registry branch reuses the wired orchestrator
+# ---------------------------------------------------------------------------
+
+
+class TestStartReusesWiredOrchestrator:
+    @pytest.mark.asyncio
+    async def test_no_registry_start_runs_existing_orchestrator(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """The no-registry Start branch RUNS the already-wired orchestrator
+        rather than constructing a fresh one with real services (#10253).
+
+        MockWorld hands the dashboard an air-gapped fake-wired orch; the old
+        branch discarded it for a brand-new ``HydraFlowOrchestrator`` built with
+        real Docker/gh adapters, whose ~60 background loops wedged the shared
+        event loop (the 2715s RC hang, #10215). Reusing the existing orch is
+        what keeps the fake wiring alive across the Start click.
+        """
+        from types import SimpleNamespace
+
+        ran = asyncio.Event()
+
+        class _FakeOrch:
+            def __init__(self) -> None:
+                self.running = False
+                # _runtime_status reads _svc.prs._is_fake_adapter for the status
+                # route; give it a benign shape so nothing else 500s.
+                self._svc = SimpleNamespace(prs=SimpleNamespace(_is_fake_adapter=True))
+
+            async def run(self) -> None:
+                ran.set()
+
+        existing = _FakeOrch()
+        captured: dict[str, object] = {}
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            get_orch=lambda: existing,
+            set_orchestrator=lambda o: captured.__setitem__("set_orch", o),
+            set_run_task=lambda t: captured.__setitem__("task", t),
+            registry=None,
+        )
+        start = find_endpoint(router, "/api/control/start")
+        assert start is not None
+        response = await start()
+        assert json.loads(response.body)["status"] == "started"
+
+        # No fresh orchestrator was constructed / installed — the wiring is reused.
+        assert "set_orch" not in captured
+        # The scheduled run-task drives the SAME wired orch, not a new one.
+        task = captured.get("task")
+        assert isinstance(task, asyncio.Task)
+        await task
+        assert ran.is_set()
+
+    @pytest.mark.asyncio
+    async def test_no_registry_start_409_when_existing_orch_running(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        """A running wired orch is never replaced — Start reports already-running."""
+        from types import SimpleNamespace
+
+        existing = SimpleNamespace(running=True)
+        captured: dict[str, object] = {}
+        router, _ = make_dashboard_router(
+            config,
+            event_bus,
+            state,
+            tmp_path,
+            get_orch=lambda: existing,
+            set_orchestrator=lambda o: captured.__setitem__("set_orch", o),
+            set_run_task=lambda t: captured.__setitem__("task", t),
+            registry=None,
+        )
+        start = find_endpoint(router, "/api/control/start")
+        response = await start()
+        assert response.status_code == 409
+        assert "already running" in json.loads(response.body)["error"]
+        assert captured == {}
