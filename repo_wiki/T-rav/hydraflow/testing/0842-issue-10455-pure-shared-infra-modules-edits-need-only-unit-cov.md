@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10455
 source_phase: plan
 created_at: 2026-07-24T12:32:23.750703+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0847
 ---
 
 # Pure _SHARED_INFRA_MODULES edits need only unit coverage, not MockWorld/e2e

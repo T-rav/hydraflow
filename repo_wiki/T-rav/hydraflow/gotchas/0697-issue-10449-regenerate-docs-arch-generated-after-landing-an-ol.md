@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10449
 source_phase: plan
 created_at: 2026-07-24T12:33:05.988851+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0704
 ---
 
 # Regenerate docs/arch/generated after landing an old commit, don't reuse its snapshot
