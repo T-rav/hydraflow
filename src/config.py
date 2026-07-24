@@ -5313,6 +5313,23 @@ class HydraFlowConfig(BaseModel):
         return result
 
     @property
+    def dispatchable_stage_labels(self) -> list[str]:
+        """Active pipeline-stage labels whose presence makes an issue a
+        dispatch candidate — ``all_pipeline_labels`` minus the terminal
+        markers (``fixed`` / ``verify``).
+
+        A CLOSED issue must never keep one of these: a label-scan
+        dispatcher (ready/plan/review/hitl work-picker) queues by label
+        presence, so a stale active stage label left on a closed issue
+        causes duplicate re-dispatch of already-shipped work (#10394).
+        Terminal labels are preserved — they record shipped/verified
+        state and no loop dispatches on them. Derived from the single
+        ``all_pipeline_labels`` source, never a parallel hardcoded list.
+        """
+        terminal = {*self.fixed_label, *self.verify_label}
+        return [lbl for lbl in self.all_pipeline_labels if lbl not in terminal]
+
+    @property
     def log_dir(self) -> Path:
         """Return the directory for transcript / log files."""
         return self.data_root / "logs"

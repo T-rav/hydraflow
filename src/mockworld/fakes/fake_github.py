@@ -14,11 +14,31 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from mockworld.fakes._factories import PRInfoFactory
-from models import LabelDrift
+from models import ClosedStageLabelDrift, LabelDrift
 from pr_manager import PRManager
 
 if TYPE_CHECKING:
     from mockworld.seed import MockWorldSeed
+
+#: Mirrors ``HydraFlowConfig.dispatchable_stage_labels`` default (#10394): the
+#: active pipeline-stage labels a CLOSED issue must never keep, or a label-scan
+#: dispatcher would re-queue shipped work. This is the exact list, NOT a
+#: ``startswith("hydraflow-")`` heuristic — terminal markers (``hydraflow-fixed``
+#: / ``hydraflow-verify``) and orthogonal markers like ``hydraflow-auto-resolved``
+#: are intentionally excluded so they survive a close.
+_DISPATCHABLE_STAGE_LABELS = frozenset(
+    {
+        "hydraflow-find",
+        "hydraflow-plan",
+        "hydraflow-ready",
+        "hydraflow-review",
+        "hydraflow-hitl",
+        "hydraflow-hitl-active",
+        "hydraflow-hitl-autofix",
+        "human-required",
+        "hydraflow-in-progress",
+    }
+)
 
 
 class RateLimitError(Exception):
@@ -569,6 +589,13 @@ class FakeGitHub:
             # Mirror gh: `--reason "not planned"` -> stateReason NOT_PLANNED;
             # no --reason -> COMPLETED (get_issue_state's empty fallback).
             issue.state_reason = reason.upper().replace(" ", "_") if reason else ""
+            # Mirror PRManager.close_issue's #10394 strip: a closed issue must
+            # never keep an active pipeline-stage label, or a label-scan
+            # dispatcher would re-queue shipped work. Scoped to the exact
+            # dispatchable set (terminal + orthogonal markers survive).
+            issue.labels = [
+                lbl for lbl in issue.labels if lbl not in _DISPATCHABLE_STAGE_LABELS
+            ]
         elif issue_number in self._prs:
             # gh treats PRs as issues — `gh issue close <pr#>` closes the PR.
             # StagingPromotionLoop closes red promotion PRs through this exact
@@ -1105,6 +1132,30 @@ class FakeGitHub:
                     detected_at=datetime.now(UTC),
                 )
             )
+        return out
+
+    async def find_closed_stage_labeled_issues(
+        self,
+    ) -> list[ClosedStageLabelDrift]:
+        """In-memory mirror of :meth:`PRPort.find_closed_stage_labeled_issues`.
+
+        Reports CLOSED issues that still carry an active ``hydraflow-*``
+        pipeline-stage label (#10394). Terminal markers (``hydraflow-fixed`` /
+        ``hydraflow-verify``) are excluded — they record shipped/verified
+        state, mirroring ``HydraFlowConfig.dispatchable_stage_labels``.
+        """
+        self._maybe_rate_limit()
+        out: list[ClosedStageLabelDrift] = []
+        for issue in self._issues.values():
+            if issue.state != "closed":
+                continue
+            stale = sorted(
+                lbl for lbl in issue.labels if lbl in _DISPATCHABLE_STAGE_LABELS
+            )
+            if stale:
+                out.append(
+                    ClosedStageLabelDrift(issue=issue.number, stale_labels=stale)
+                )
         return out
 
     async def list_issue_comments(self, issue_number: int) -> list[dict[str, Any]]:

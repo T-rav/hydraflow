@@ -17,7 +17,11 @@ import logging
 from typing import TYPE_CHECKING
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
-from models import LabelDrift, WorkCycleResult  # noqa: TCH001
+from models import (  # noqa: TCH001
+    ClosedStageLabelDrift,
+    LabelDrift,
+    WorkCycleResult,
+)
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -69,7 +73,53 @@ class LabelDriftWatcherLoop(BaseBackgroundLoop):
                     d.pr,
                     exc_info=True,
                 )
-        return {"detected": len(drift), "reconciled": reconciled}
+        result: WorkCycleResult = {"detected": len(drift), "reconciled": reconciled}
+
+        # Caretaker check (#10394): a CLOSED issue that still carries an
+        # active pipeline-stage label would be re-dispatched by a label-scan
+        # work-picker. PRManager.close_issue strips these on every
+        # HydraFlow-initiated close, but a GitHub-native ``Closes #N``
+        # auto-close bypasses that path — this is the belt-and-suspenders
+        # backstop. Keys are added only when something is found so the
+        # no-op tick shape (``{detected, reconciled}``) is unchanged.
+        closed_stale = await self._prs.find_closed_stage_labeled_issues()
+        if closed_stale:
+            stripped = 0
+            for cd in closed_stale:
+                try:
+                    await self._strip_closed_stage_labels(cd)
+                    stripped += 1
+                except Exception:
+                    logger.warning(
+                        "label_drift_watcher: failed to strip stale stage "
+                        "labels from closed issue #%d",
+                        cd.issue,
+                        exc_info=True,
+                    )
+            result["closed_stale_detected"] = len(closed_stale)
+            result["closed_stale_stripped"] = stripped
+        return result
+
+    async def _strip_closed_stage_labels(self, cd: ClosedStageLabelDrift) -> None:
+        """Remove the stale pipeline-stage labels from a closed issue (#10394)."""
+        for lbl in cd.stale_labels:
+            await self._prs.remove_label(cd.issue, lbl)
+        labels_md = ", ".join(f"`{lbl}`" for lbl in cd.stale_labels)
+        await self._prs.post_comment(
+            cd.issue,
+            (
+                f"**LabelDriftWatcher** stripped stale pipeline-stage "
+                f"label(s) {labels_md} from this CLOSED issue — a leftover "
+                f"stage label re-dispatches already-shipped work (#10394).\n\n"
+                "---\n*Automated by HydraFlow Label Drift Watcher (ADR-0088)*"
+            ),
+        )
+        logger.info(
+            "label_drift_watcher: stripped %d stale stage label(s) from "
+            "closed issue #%d",
+            len(cd.stale_labels),
+            cd.issue,
+        )
 
     async def _reconcile(self, d: LabelDrift) -> None:
         """Apply per-stage labels mirroring Phase D's split-call pattern.

@@ -19,7 +19,7 @@ from base_background_loop import LoopDeps
 from config import HydraFlowConfig
 from events import EventBus
 from label_drift_watcher_loop import LabelDriftWatcherLoop
-from models import LabelDrift
+from models import ClosedStageLabelDrift, LabelDrift
 
 
 def _deps(stop: asyncio.Event) -> LoopDeps:
@@ -38,7 +38,9 @@ def loop_env(tmp_path: Path):
     )
     pr = AsyncMock()
     pr.find_label_drift = AsyncMock(return_value=[])
+    pr.find_closed_stage_labeled_issues = AsyncMock(return_value=[])
     pr.swap_pipeline_labels = AsyncMock(return_value=None)
+    pr.remove_label = AsyncMock(return_value=None)
     pr.post_comment = AsyncMock(return_value=None)
     return cfg, pr
 
@@ -286,6 +288,66 @@ async def test_reconciles_escalated_with_resolving_pr(loop_env) -> None:
     body = pr.post_comment.await_args.args[1]
     assert "escalated_with_resolving_pr" in body
     assert "100" in body
+
+
+@pytest.mark.asyncio
+async def test_strips_stale_stage_labels_from_closed_issue(loop_env) -> None:
+    """#10394: a CLOSED issue still carrying an active stage label gets the
+    label stripped and an explanatory comment posted."""
+    cfg, pr = loop_env
+    pr.find_closed_stage_labeled_issues = AsyncMock(
+        return_value=[
+            ClosedStageLabelDrift(
+                issue=10314, stale_labels=["hydraflow-in-progress", "hydraflow-ready"]
+            )
+        ]
+    )
+
+    stop = asyncio.Event()
+    loop = LabelDriftWatcherLoop(config=cfg, pr_manager=pr, deps=_deps(stop))
+
+    stats = await loop._do_work()
+
+    assert stats["closed_stale_detected"] == 1
+    assert stats["closed_stale_stripped"] == 1
+    pr.remove_label.assert_any_await(10314, "hydraflow-in-progress")
+    pr.remove_label.assert_any_await(10314, "hydraflow-ready")
+    pr.post_comment.assert_awaited_once()
+    body = pr.post_comment.await_args.args[1]
+    assert "LabelDriftWatcher" in body
+    assert "10394" in body
+
+
+@pytest.mark.asyncio
+async def test_no_closed_stale_keys_omitted_on_clean_tick(loop_env) -> None:
+    """No closed stale-labeled issues → result keeps the {detected,reconciled}
+    shape (no closed_stale_* keys), so existing consumers are unaffected."""
+    cfg, pr = loop_env
+    stop = asyncio.Event()
+    loop = LabelDriftWatcherLoop(config=cfg, pr_manager=pr, deps=_deps(stop))
+
+    stats = await loop._do_work()
+
+    assert stats == {"detected": 0, "reconciled": 0}
+    pr.remove_label.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_closed_stale_strip_failure_counted_separately(loop_env) -> None:
+    """A remove failure on one closed issue is caught; detected still counts."""
+    cfg, pr = loop_env
+    pr.find_closed_stage_labeled_issues = AsyncMock(
+        return_value=[ClosedStageLabelDrift(issue=555, stale_labels=["hydraflow-plan"])]
+    )
+    pr.remove_label = AsyncMock(side_effect=RuntimeError("api fail"))
+
+    stop = asyncio.Event()
+    loop = LabelDriftWatcherLoop(config=cfg, pr_manager=pr, deps=_deps(stop))
+
+    stats = await loop._do_work()
+
+    assert stats["closed_stale_detected"] == 1
+    assert stats["closed_stale_stripped"] == 0
 
 
 def test_label_drift_kind_accepts_escalated_with_resolving_pr() -> None:
