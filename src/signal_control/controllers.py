@@ -1,0 +1,62 @@
+"""Controllers — drive an actuator toward a setpoint with bounded, stable moves.
+
+Pure policy objects: they compute the next actuator value from a scalar/boolean
+signal. Wiring to a real actuator (max_workers, a rebase cycle) happens in later
+stages. ``CircuitBreaker`` is re-exported from the existing src/circuit_breaker.py
+so callers have a single import point.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from circuit_breaker import CircuitBreaker  # re-export; see Task 10
+
+__all__ = ["AimdController", "CircuitBreaker"]
+
+
+@dataclass
+class AimdController:
+    """Additive-increase / multiplicative-decrease controller (TCP-style).
+
+    For a saturating actuator (e.g. concurrency): shed fast on breach, probe up
+    slowly on sustained headroom. Bounded to ``[lo, hi]``; a dead-band (neither
+    breached nor headroom) holds steady and resets the ramp streak.
+    """
+
+    lo: int
+    hi: int
+    start: int
+    decrease_factor: float = 0.5
+    increase_step: int = 1
+    hold_ticks: int = 3
+    _cap: int = field(init=False)
+    _headroom_streak: int = field(default=0, init=False)
+
+    def __post_init__(self) -> None:
+        if self.lo < 1 or self.hi < self.lo:
+            raise ValueError(f"require 1 <= lo <= hi, got lo={self.lo} hi={self.hi}")
+        if not self.lo <= self.start <= self.hi:
+            raise ValueError(f"start {self.start} must be in [{self.lo}, {self.hi}]")
+        if not 0.0 < self.decrease_factor < 1.0:
+            raise ValueError(
+                f"decrease_factor must be in (0, 1), got {self.decrease_factor}"
+            )
+        self._cap = self.start
+
+    def update(self, *, breached: bool, headroom: bool) -> int:
+        if breached:
+            self._cap = max(self.lo, round(self._cap * self.decrease_factor))
+            self._headroom_streak = 0
+        elif headroom:
+            self._headroom_streak += 1
+            if self._headroom_streak >= self.hold_ticks:
+                self._cap = min(self.hi, self._cap + self.increase_step)
+                self._headroom_streak = 0
+        else:
+            self._headroom_streak = 0
+        return self._cap
+
+    @property
+    def cap(self) -> int:
+        return self._cap
