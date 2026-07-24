@@ -336,8 +336,10 @@ class TestProcessIssueMaxAttemptsExhausted:
 
         assert outcome == "escalated"
         runner.fix.assert_not_awaited()
+        # #10411/#10403: attempts-exhausted routes to the Auto-Agent autofix
+        # stage (auto-resolvable), NOT the human-visible HITL queue.
         prs.swap_pipeline_labels.assert_awaited_once_with(
-            42, loop._config.hitl_label[0]
+            42, loop._config.hitl_autofix_label[0]
         )
 
     @pytest.mark.asyncio
@@ -370,8 +372,9 @@ class TestProcessIssueMaxAttemptsExhausted:
         outcome = await loop._process_issue(42, "Title", "Body")
 
         assert outcome == "escalated"
+        # #10411/#10403: exhausted → Auto-Agent autofix stage, not human HITL.
         prs.swap_pipeline_labels.assert_awaited_once_with(
-            42, loop._config.hitl_label[0]
+            42, loop._config.hitl_autofix_label[0]
         )
 
     @pytest.mark.asyncio
