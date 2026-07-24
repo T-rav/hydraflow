@@ -57,7 +57,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from audit.budget import within_budget
+from audit.budget import MAX_DIFF_CONTEXT_CHARS, within_budget
 from audit.crosslink import sample_to_escape_record
 from audit.detect import (
     current_head_sha,
@@ -100,8 +100,9 @@ _SAMPLES_FILENAME = "audit_samples.jsonl"
 _ESCAPE_LEDGER_FILENAME = "escape_ledger.jsonl"
 
 # How much of the merged diff the auditor is shown (chars) — bounded so a huge
-# merge cannot blow the prompt / token budget.
-_DIFF_CONTEXT_CHARS = 12000
+# merge cannot blow the prompt / token budget. Canonical in ``audit.budget`` so
+# the truncation window and the budget's diff-token charge stay in lockstep.
+_DIFF_CONTEXT_CHARS = MAX_DIFF_CONTEXT_CHARS
 
 
 class _AuditLLM(Protocol):
@@ -513,7 +514,17 @@ class SampledAuditLoop(BaseBackgroundLoop):
     # --- governance ------------------------------------------------------
 
     def _govern(self, audited: list[AuditSample]) -> None:
-        """Record this tick's disagreement observation + update the sample rate."""
+        """Record this tick's disagreement observation + update the sample rate.
+
+        Skips a tick that audited NOTHING (Bernoulli selected nothing, the
+        budget was exhausted, or the re-audit seam is off): a ``sampled=0``
+        observation carries no disagreement signal, yet its ``0.0`` proportion
+        is ``<= target`` and would narrow the rate on no information — decaying
+        toward the floor on quiet ticks. Governing only on ticks that actually
+        sampled keeps the Shewhart series signal-bearing.
+        """
+        if not audited:
+            return
         observation = DisagreementObservation(
             sampled=len(audited),
             disagreements=sum(1 for s in audited if s.verdict == "disagree"),
@@ -569,9 +580,11 @@ def _render_finding(sample: AuditSample) -> tuple[str, str]:
         f"{sample.findings or '(none recorded)'}\n\n"
         "This is a falsification-instrument finding, NOT a gate: the change "
         "already merged. Take the standard adjudication path — fix, refute with "
-        "evidence, or encode the exception. Add the `audit-refuted` label if the "
-        "auditor was wrong (counts against its false-alarm budget); any other "
-        "close reads as UPHELD and cross-links into the escape ledger "
-        "(`detection_source: sampled-audit`).\n"
+        "evidence, or encode the exception. Add the `audit-upheld` label when "
+        "you confirm/fix a real escape (cross-links into the escape ledger, "
+        "`detection_source: sampled-audit`); add the `audit-refuted` label if "
+        "the auditor was wrong (counts against its false-alarm budget). A plain "
+        "close with NEITHER label stays unadjudicated — an incidental stale/dup "
+        "close never fabricates an escape.\n"
     )
     return title, body

@@ -105,6 +105,62 @@ def test_unclassed_change_untouched(tmp_path: Path):
     assert ji.read_records(tmp_path / "l.jsonl") == []
 
 
+def test_classification_paths_classes_a_headerless_diff(tmp_path: Path):
+    """A header-less "diff" classifies via ``classification_paths``.
+
+    The ADR-review surface passes the ADR body as ``diff`` (no ``+++ b/`` /
+    ``diff --git`` headers, so ``classify_diff`` finds nothing) plus
+    ``classification_paths`` declaring the ADR corpus. The union classifies
+    STRUCTURAL and routes to the independent family — the fix for the
+    ADR-review classification bypass, tested at the advisor unit level.
+    """
+    runner = _StubRunner(_APPROVE)
+    advisor = PostVerifyAdvisor(
+        runner=runner,
+        surface_config=SURFACE_ADVISOR_CONFIGS["adr_review"],
+        ledger_path=tmp_path / "l.jsonl",
+        judge_independence_enabled=True,
+        independent_model="gpt-4o",
+    )
+    inp = PostVerifyInput(
+        surface="adr_review",
+        diff="# ADR-1234\n## Decision\nNo unified-diff headers appear here.\n",
+        executor_verdict_summary="ok",
+        classification_paths=["docs/adr/"],
+    )
+    asyncio.run(advisor.run(inp))
+    assert runner.calls[0]["model"] == "gpt-4o"
+    classed = [
+        r
+        for r in ji.read_records(tmp_path / "l.jsonl")
+        if r["kind"] == ji.KIND_CLASSED_VERDICT
+    ]
+    assert len(classed) == 1
+    assert "structural" in classed[0]["failure_class"]
+
+
+def test_no_classification_paths_leaves_headerless_diff_unclassed(tmp_path: Path):
+    """Control for the test above: WITHOUT ``classification_paths`` the same
+    header-less body is still unclassed (same-family dispatch, no row) — proving
+    the field is the load-bearing difference, not the body content."""
+    runner = _StubRunner(_APPROVE)
+    advisor = PostVerifyAdvisor(
+        runner=runner,
+        surface_config=SURFACE_ADVISOR_CONFIGS["adr_review"],
+        ledger_path=tmp_path / "l.jsonl",
+        judge_independence_enabled=True,
+        independent_model="gpt-4o",
+    )
+    inp = PostVerifyInput(
+        surface="adr_review",
+        diff="# ADR-1234\n## Decision\nNo unified-diff headers appear here.\n",
+        executor_verdict_summary="ok",
+    )
+    asyncio.run(advisor.run(inp))
+    assert runner.calls[0]["model"] == "opus"
+    assert ji.read_records(tmp_path / "l.jsonl") == []
+
+
 def test_flag_off_does_not_route_independently(tmp_path: Path):
     runner = _StubRunner(_APPROVE)
     advisor = PostVerifyAdvisor(
@@ -119,6 +175,47 @@ def test_flag_off_does_not_route_independently(tmp_path: Path):
     )
     asyncio.run(advisor.run(inp))
     assert runner.calls[0]["model"] == "opus"
+
+
+def test_flag_off_classed_success_is_inert_no_ledger_no_bus(tmp_path: Path):
+    """Flag-off + classed change + SUCCESS path is fully inert.
+
+    The ledger/alarm are "always live" only for fail-open / degraded events —
+    on a flag-off SUCCESS path there is nothing to record: no independence
+    routing, no classed-verdict row, no fail-open row, and no bus publish. A spy
+    on BOTH the ledger file and the event bus proves zero writes / zero
+    publishes, so a regression that made ledgering unconditional (or dropped the
+    flag guard on independence routing) fails here — not just the dispatch-model
+    check above.
+    """
+    published: list[Any] = []
+
+    class _SpyBus:
+        async def publish(self, event: Any) -> None:
+            published.append(event)
+
+    runner = _StubRunner(_APPROVE)
+    ledger = tmp_path / "l.jsonl"
+    advisor = PostVerifyAdvisor(
+        runner=runner,
+        surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        ledger_path=ledger,
+        event_bus=_SpyBus(),  # type: ignore[arg-type]
+        judge_independence_enabled=False,  # flag OFF
+        self_mod_fail_closed_enabled=False,  # flag OFF
+        # Configured but MUST be ignored while the flag is off.
+        independent_model="gpt-4o",
+    )
+    inp = PostVerifyInput(
+        surface="pr_review", diff=_structural_diff(), executor_verdict_summary="ok"
+    )
+    result = asyncio.run(advisor.run(inp))
+    assert result.verdict == "APPROVE"
+    # Same-family dispatch — no independent routing while the flag is off.
+    assert runner.calls[0]["model"] == "opus"
+    # Inert: no ledger rows and no bus publishes on the flag-off success path.
+    assert ji.read_records(ledger) == []
+    assert published == []
 
 
 # ---------------------------------------------------------------------------
@@ -280,3 +377,68 @@ def test_no_ledger_path_is_backwards_compatible(tmp_path: Path):
     )
     result = asyncio.run(advisor.run(inp))
     assert result.verdict == "APPROVE"
+
+
+# ---------------------------------------------------------------------------
+# Advisory surface must NOT silently downgrade a self-mod fail-closed VETO.
+#
+# The advisory-authority downgrade block (``review_advisor.py`` ~724-731) turns
+# a VETO into APPROVE for advisory surfaces. It runs ONLY on the parse-success
+# path, AFTER the self-mod fail-closed / HITL branches have already early-
+# returned their VETO. The no-downgrade property is therefore guaranteed by
+# ordering alone — these tests fail if the downgrade block is ever moved above
+# those early returns (which would silently pass a fail-closed STOP).
+# ---------------------------------------------------------------------------
+
+
+def test_advisory_surface_does_not_downgrade_self_mod_fail_closed_stop(
+    tmp_path: Path,
+):
+    """Fail-open self-mod STOP on an advisory surface (wiki_ingest) stays VETO."""
+    runner = _StubRunner(RuntimeError("judge unavailable"))
+    advisor = PostVerifyAdvisor(
+        runner=runner,
+        surface_config=SURFACE_ADVISOR_CONFIGS["wiki_ingest"],
+        ledger_path=tmp_path / "l.jsonl",
+        self_mod_fail_closed_enabled=True,
+    )
+    # Premise guard: this surface is genuinely advisory, so the downgrade block
+    # is "armed" — the test is meaningful only if a VETO here COULD be
+    # downgraded on the success path.
+    assert advisor._cfg.post_verify_authority == "advisory"
+    inp = PostVerifyInput(
+        surface="wiki_ingest", diff=_self_mod_diff(), executor_verdict_summary="ok"
+    )
+    result = asyncio.run(advisor.run(inp))
+    # The self-mod fail-closed STOP survives the advisory surface.
+    assert result.verdict == "VETO"
+    fo = [
+        r
+        for r in ji.read_records(tmp_path / "l.jsonl")
+        if r["kind"] == ji.KIND_FAIL_OPEN
+    ]
+    assert fo[0]["disposition"] == "fail_closed_stop"
+
+
+def test_advisory_surface_does_not_downgrade_self_mod_hitl_escalation(
+    tmp_path: Path,
+):
+    """Self-mod HITL escalation (no independent family + fail-closed) on an
+    advisory surface stays VETO and never dispatches to the same-family judge."""
+    runner = _StubRunner(_APPROVE)  # would APPROVE if it were ever dispatched
+    advisor = PostVerifyAdvisor(
+        runner=runner,
+        surface_config=SURFACE_ADVISOR_CONFIGS["wiki_ingest"],
+        ledger_path=tmp_path / "l.jsonl",
+        judge_independence_enabled=True,
+        self_mod_fail_closed_enabled=True,
+        independent_model="",  # no independent family → self-mod escalates to HITL
+    )
+    assert advisor._cfg.post_verify_authority == "advisory"
+    inp = PostVerifyInput(
+        surface="wiki_ingest", diff=_self_mod_diff(), executor_verdict_summary="ok"
+    )
+    result = asyncio.run(advisor.run(inp))
+    assert result.verdict == "VETO"
+    assert "HITL" in result.reasoning
+    assert runner.calls == []  # early return before dispatch and before downgrade

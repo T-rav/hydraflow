@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/dedup_store.py:DedupStore"
 aliases: ["dedup tracking set", "dedup set store"]
 related: [{"kind": "depends_on", "target": "01KTX0X7RK9NPDNYRPZ58BVT9J"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B6"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9C3"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B4"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9C1"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B9"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B8"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B5"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B2"}, {"kind": "depends_on", "target": "01KSY46G6QFVCRC5FE26Q5FKJY"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A5"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A4"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K6"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A9"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A7"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A1"}, {"kind": "depends_on", "target": "01KQZR9QW4RJ5Q7TB2220V3JZN"}, {"kind": "depends_on", "target": "01KT3WKPR5MN8QJ14CF77W6K6"}]
-evidence: []
+evidence: ["EXTERNAL-LIVENESS-WATCHDOG-OPERATOR-INSTALL-001"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-22T10:55:46.542376+00:00"
-updated_at: "2026-07-22T10:55:46.542379+00:00"
+updated_at: "2026-07-24T03:43:34.624929+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-07-22T10:55:46.542330+00:00"
 proposal_signals: ["S2"]

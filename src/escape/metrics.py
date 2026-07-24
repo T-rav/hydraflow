@@ -5,19 +5,29 @@ merge count) so the headline falsification metrics are unit-testable with
 synthetic rows and rendered identically by the report and the dashboard:
 
 * **escapes per 100 merges** — the headline falsification metric (rolling
-  30-day and monthly series)
-* **time-to-detection** — median / p90 by detection source
+  30-day and monthly series), surfaced BOTH all-confidence and CONFIRMED-only.
+  In a fix-heavy repo every ``fix(...): fixes #N`` merge is a low-confidence
+  ``bug-issue`` row, so the all-confidence headline conflates ordinary issue
+  resolution with real escapes; the confirmed-only rate (high/medium mechanical
+  confidence) is the trustworthy number.
+* **time-to-detection** — median / p90 (nearest-rank) by detection source
 * **encoded-vs-unencoded** — every escape SHOULD terminate in an encoding;
   ``none-yet`` rows aging past a threshold are surfaced for human triage
 """
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from escape.models import EscapeRecord, _parse_iso
+
+#: Mechanical-attribution confidences that count as a CONFIRMED escape. Excludes
+#: ``low`` — where the fix-heavy ``bug-issue`` closes land — so the confirmed
+#: headline is not inflated by ordinary issue resolution.
+CONFIRMED_CONFIDENCES: tuple[str, ...] = ("high", "medium")
 
 
 @dataclass(frozen=True)
@@ -49,12 +59,17 @@ class MonthlyEscapeRow:
 
 
 def _percentile(sorted_values: list[float], pct: float) -> float | None:
-    """Nearest-rank percentile of *sorted_values* (already sorted); ``None`` if empty."""
+    """Nearest-rank percentile of *sorted_values* (already sorted); ``None`` if empty.
+
+    Uses the nearest-rank ``ceil(pct/100 * n)`` ordinal, not ``round`` — ``round``
+    lands one rank low at small n (p90 of 5 values → rank 4 not 5; of 25 → 22
+    not 23), understating the tail. Nearest-rank matches the docstring's claim.
+    """
     if not sorted_values:
         return None
     if len(sorted_values) == 1:
         return sorted_values[0]
-    rank = max(1, min(len(sorted_values), round(pct / 100.0 * len(sorted_values))))
+    rank = max(1, min(len(sorted_values), math.ceil(pct / 100.0 * len(sorted_values))))
     return sorted_values[rank - 1]
 
 
@@ -74,17 +89,51 @@ def escapes_per_100_merges(escape_count: int, merge_count: int) -> float:
     return escape_count / merge_count * 100.0
 
 
+def is_confirmed(record: EscapeRecord) -> bool:
+    """True for a CONFIRMED escape: high/medium mechanical attribution confidence.
+
+    Excludes ``low``-confidence rows — chiefly the ``bug-issue`` ``fix: … fixes
+    #N`` closes that dominate a fix-heavy repo — so the confirmed headline counts
+    real escapes, not ordinary issue resolution. A derived read over the EXACT
+    ledger schema; it changes no record.
+    """
+    return record.attribution_confidence in CONFIRMED_CONFIDENCES
+
+
+def confirmed_escapes(records: list[EscapeRecord]) -> list[EscapeRecord]:
+    """Subset of *records* that are CONFIRMED escapes (high/medium confidence)."""
+    return [r for r in records if is_confirmed(r)]
+
+
 def rolling_escape_count(
-    records: list[EscapeRecord], now: datetime, *, days: int = 30
+    records: list[EscapeRecord],
+    now: datetime,
+    *,
+    days: int = 30,
+    confirmed_only: bool = False,
 ) -> int:
-    """Count escapes detected within the last *days* ending at *now*."""
+    """Count escapes detected within the last *days* ending at *now*.
+
+    With ``confirmed_only`` the count includes only high/medium-confidence
+    (CONFIRMED) rows, excluding the low-confidence ``bug-issue`` closes that
+    would otherwise inflate the headline in a fix-heavy repo.
+    """
     cutoff = now - timedelta(days=days)
     count = 0
     for r in records:
+        if confirmed_only and not is_confirmed(r):
+            continue
         detected = _parse_iso(r.detected_at)
         if detected is not None and cutoff <= detected <= now:
             count += 1
     return count
+
+
+def rolling_confirmed_escape_count(
+    records: list[EscapeRecord], now: datetime, *, days: int = 30
+) -> int:
+    """CONFIRMED-only rolling escape count — the trustworthy headline numerator."""
+    return rolling_escape_count(records, now, days=days, confirmed_only=True)
 
 
 def time_to_detection_stats(records: list[EscapeRecord]) -> dict[str, TtdStat]:

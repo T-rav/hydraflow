@@ -18,6 +18,15 @@ spec's intent. So the control limit is anchored to ``TARGET_DISAGREEMENT_RATE``:
   the rate down toward the floor;
 * **within the band** (between target and UCL) → hold.
 
+The control limit's sampling variance is based on the POOLED window sample size,
+not just the latest subgroup. At realistic per-tick volumes (5% of a handful of
+merges = 0-3 samples) a latest-subgroup-only sigma makes the UCL ~0.43-0.70, so
+the widen branch almost never fires while every quiet tick narrows — the rate
+decays to the floor and rarely widens. Pooling the retained window's samples
+gives a stable variance base so sustained real-volume disagreement actually
+crosses the limit. (An *average* subgroup n would not help — it just re-derives
+the tiny per-tick size; the total pooled n is what tightens the limit.)
+
 The result is always clamped to ``[floor, ceiling]``. Below a minimum pooled
 sample count there is not enough signal to move, so the current rate holds
 (clamped) — a fresh install does not thrash its rate on one data point.
@@ -59,18 +68,20 @@ def upper_control_limit(
     *,
     target: float = TARGET_DISAGREEMENT_RATE,
 ) -> float:
-    """3-sigma one-sided p-chart UCL around *target* for the latest subgroup.
+    """3-sigma one-sided p-chart UCL around *target*, over the POOLED window.
 
-    Anchored to *target* (not a pooled mean) so a sustained high disagreement
-    rate keeps tripping it. Returns ``target`` when the latest subgroup is empty
-    (no subgroup → no sampling variance to add).
+    Anchored to *target* (not a self-referential pooled mean) so a sustained
+    high disagreement rate keeps tripping it. The sampling variance uses the
+    POOLED window sample size — the sum of every retained subgroup's ``sampled``
+    count — rather than only the latest subgroup: at realistic per-tick volumes
+    the latest subgroup is 0-3 samples, whose ``sqrt(1/n)`` sigma is so wide the
+    limit never trips. Returns ``target`` when the window carries no samples (no
+    data → no sampling variance to add).
     """
-    if not history:
+    pooled_n = sum(o.sampled for o in history)
+    if pooled_n <= 0:
         return target
-    latest_n = history[-1].sampled
-    if latest_n <= 0:
-        return target
-    sigma = math.sqrt(target * (1.0 - target) / latest_n)
+    sigma = math.sqrt(target * (1.0 - target) / pooled_n)
     return target + _SIGMA_K * sigma
 
 

@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/base_background_loop.py:LoopDeps"
 aliases: []
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01JZ9FK3C0M03HYR42BF33W0C3"}, {"kind": "depends_on", "target": "01JZ9FK3C0M01HYR42BF11W0A1"}]
-evidence: []
+evidence: ["01KQP0HK6TCK1CTRYANSJ8NRSH"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T02:34:42.393501+00:00"
-updated_at: "2026-07-18T19:39:52.060621+00:00"
+updated_at: "2026-07-24T03:43:34.624929+00:00"
 ---
 
 ## Definition

@@ -25,17 +25,28 @@ from tests.scenarios.fakes.mock_world import MockWorld
 from vitals.models import (
     SERIES_AUDIT_DISAGREEMENT,
     SERIES_ESCAPES,
+    SERIES_FAIL_OPEN,
     SERIES_INTERVENTION_CORRECTIONS,
 )
 from vitals.observe import PrimaryHealth
+
+# A non-flat baseline: mean 11, 3σ UCL ≈ 16.32. A reading of 14 is above the
+# mean but inside the band; 30 is above the UCL.
+_NONFLAT_BASE = [10.0, 12.0, 10.0, 12.0, 10.0, 12.0]
 
 pytestmark = pytest.mark.scenario_loops
 
 
 class _FakeState:
-    def __init__(self, history: dict[str, list[float]], last: str = "") -> None:
+    def __init__(
+        self,
+        history: dict[str, list[float]],
+        last: str = "",
+        last_obs_ts: str = "",
+    ) -> None:
         self._history = {k: list(v) for k, v in history.items()}
         self._last = last
+        self._last_obs_ts = last_obs_ts
 
     def get_second_order_vitals_series_history(self) -> dict[str, list[float]]:
         return {k: list(v) for k, v in self._history.items()}
@@ -51,6 +62,12 @@ class _FakeState:
     def set_second_order_vitals_last_verdict(self, verdict: str) -> None:
         self._last = verdict
 
+    def get_second_order_vitals_last_observation_ts(self) -> str:
+        return self._last_obs_ts
+
+    def set_second_order_vitals_last_observation_ts(self, ts: str) -> None:
+        self._last_obs_ts = ts
+
 
 class _FakePR:
     def __init__(self) -> None:
@@ -64,7 +81,13 @@ class _FakePR:
 
 
 def _seed_ledgers(
-    diag: Path, now_iso: str, *, escapes: int, corrections: int, disagreements: int
+    diag: Path,
+    now_iso: str,
+    *,
+    escapes: int,
+    corrections: int,
+    disagreements: int,
+    fail_opens: int = 0,
 ) -> None:
     """Seed the instrument ledgers so this tick's readings are adverse."""
     diag.mkdir(parents=True, exist_ok=True)
@@ -93,6 +116,14 @@ def _seed_ledgers(
                     {"id": f"a{i}", "audited_at": now_iso, "verdict": "disagree"}
                 )
                 for i in range(disagreements)
+            )
+            + "\n"
+        )
+    if fail_opens:
+        (diag / "fail_open_ledger.jsonl").write_text(
+            "\n".join(
+                json.dumps({"ts": now_iso, "kind": "fail_open"})
+                for _ in range(fail_opens)
             )
             + "\n"
         )
@@ -186,4 +217,62 @@ class TestSecondOrderVitalsScenario:
         assert result["verdict"] == "watch"
         assert result["k"] == 2
         assert result["filed"] == 0
+        assert prs.calls == []
+
+    async def test_nonflat_baseline_above_ucl_is_diverging(
+        self, tmp_path: Path
+    ) -> None:
+        # End-to-end proof the 3σ band is real over MockWorld + real ledgers:
+        # three count families with a NON-flat baseline (mean 11, UCL ≈ 16.32)
+        # read 30 this tick — above the UCL — so the verdict is diverging.
+        MockWorld(tmp_path)
+        now_iso = datetime.now(UTC).isoformat()
+        diag = tmp_path / "data" / "diagnostics"
+        _seed_ledgers(
+            diag, now_iso, escapes=30, corrections=30, disagreements=0, fail_opens=30
+        )
+        base = [*_NONFLAT_BASE, 30.0]
+        state = _FakeState(
+            {
+                SERIES_ESCAPES: list(base),
+                SERIES_INTERVENTION_CORRECTIONS: list(base),
+                SERIES_FAIL_OPEN: list(base),
+            }
+        )
+        prs = _FakePR()
+        loop = _build_loop(tmp_path, state, prs)
+
+        result = await loop._do_work()
+
+        assert result["verdict"] == "diverging"
+        assert result["k"] == 3
+        assert result["filed"] == 1
+
+    async def test_nonflat_baseline_within_band_is_not_diverging(
+        self, tmp_path: Path
+    ) -> None:
+        # The same three families read 14 — above the baseline mean (11) but
+        # INSIDE the band (< UCL ≈ 16.32) — so nothing breaches and the verdict
+        # is green. This fails if the 3σ band is removed (14 > 11 → diverging).
+        MockWorld(tmp_path)
+        now_iso = datetime.now(UTC).isoformat()
+        diag = tmp_path / "data" / "diagnostics"
+        _seed_ledgers(
+            diag, now_iso, escapes=14, corrections=14, disagreements=0, fail_opens=14
+        )
+        base = [*_NONFLAT_BASE, 14.0]
+        state = _FakeState(
+            {
+                SERIES_ESCAPES: list(base),
+                SERIES_INTERVENTION_CORRECTIONS: list(base),
+                SERIES_FAIL_OPEN: list(base),
+            }
+        )
+        prs = _FakePR()
+        loop = _build_loop(tmp_path, state, prs)
+
+        result = await loop._do_work()
+
+        assert result["verdict"] == "green"
+        assert result["k"] == 0
         assert prs.calls == []

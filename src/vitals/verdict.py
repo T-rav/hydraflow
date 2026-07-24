@@ -33,7 +33,7 @@ is ``green`` annotated ``n-of-5 reporting``.
 
 from __future__ import annotations
 
-from vitals.control import individuals_limits
+from vitals.control import breaches_upper, individuals_limits
 from vitals.models import (
     FAMILY_SERIES,
     SERIES_LABELS,
@@ -79,9 +79,16 @@ def _series_sustained_breach(
     baseline = _frozen_baseline(history, sustained_windows=sustained_windows)
     if len(baseline) < max(1, min_baseline_windows):
         return False
-    _centre, ucl = individuals_limits(baseline)
     recent = history[-sustained_windows:]
-    return all(v > ucl for v in recent)
+    # SINGLE SOURCE OF TRUTH for the "above the 3σ upper control limit" decision:
+    # every monitored window is tested through the very ``breaches_upper``
+    # predicate the control chart owns, so the boundary — strictly above the
+    # 3σ UCL, NOT merely above the baseline mean — lives in exactly one place.
+    # ``all`` ⇒ EVERY one of the recent windows must breach (a single high
+    # window never fires); the same ``min_baseline_windows`` floor is applied.
+    return all(
+        breaches_upper(v, baseline, min_windows=min_baseline_windows) for v in recent
+    )
 
 
 def _series_detail(
@@ -96,7 +103,12 @@ def _series_detail(
     value = history[-1] if history else 0.0
     baseline = _frozen_baseline(history, sustained_windows=sustained_windows)
     centre, ucl = individuals_limits(baseline)
-    reporting = windows >= max(1, min_baseline_windows)
+    # A family is *reporting* only once its FROZEN baseline — the points the
+    # control limit is actually computed from (history minus the monitored recent
+    # windows) — is primed. Gating on the raw window count overstated readiness by
+    # ``sustained_windows``: a limit derived from a baseline with fewer than
+    # ``min_baseline_windows`` points is noise, not signal, and must not vote.
+    reporting = len(baseline) >= max(1, min_baseline_windows)
     breaching = _series_sustained_breach(
         history,
         min_baseline_windows=min_baseline_windows,

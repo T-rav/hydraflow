@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10290
 source_phase: plan
 created_at: 2026-07-22T17:18:40.189838+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0370
 ---
 
 # Tag park class at park time so retry floors can diverge by cause

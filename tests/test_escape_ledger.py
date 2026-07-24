@@ -138,6 +138,17 @@ class TestAttribution:
         )
         assert shas == ["9f8e7d6c5b4a"]
 
+    def test_extract_referenced_shas_rejects_bogus_tokens(self) -> None:
+        # A real git sha mixes digits AND a-f letters; a pure-digit number or an
+        # all-letter hex-looking word must not be mistaken for an originating
+        # merge sha (which would mis-attribute an escape).
+        assert attribution.extract_referenced_shas("closes 12345678 today") == []
+        assert attribution.extract_referenced_shas("the deadbeef word here") == []
+        # …but a real mixed digit+letter sha is still extracted.
+        assert attribution.extract_referenced_shas("from 9f8e7d6c5b4a") == [
+            "9f8e7d6c5b4a"
+        ]
+
     def test_adds_regression_pin(self) -> None:
         assert attribution.adds_regression_pin(("tests/regressions/test_x.py",))
         assert not attribution.adds_regression_pin(("tests/test_x.py",))
@@ -267,6 +278,41 @@ class TestMetrics:
         ]
         assert metrics.rolling_escape_count(recs, now, days=30) == 1
 
+    def test_confirmed_rolling_count_excludes_low_confidence(self) -> None:
+        # In a fix-heavy repo every `fix: … fixes #N` is a low-confidence
+        # bug-issue row; the CONFIRMED headline must not count them as escapes.
+        now = datetime(2026, 2, 1, tzinfo=UTC)
+        recs = [
+            _record(
+                "revert:a", confidence="high", detected_at="2026-01-20T00:00:00+00:00"
+            ),
+            _record(
+                "hotfix:c", confidence="medium", detected_at="2026-01-22T00:00:00+00:00"
+            ),
+            _record(
+                "bug-issue:b",
+                source="bug-issue",
+                confidence="low",
+                detected_at="2026-01-21T00:00:00+00:00",
+            ),
+        ]
+        assert metrics.rolling_escape_count(recs, now, days=30) == 3
+        assert metrics.rolling_confirmed_escape_count(recs, now, days=30) == 2
+        # …so the confirmed rate is strictly below the all-confidence rate.
+        assert metrics.escapes_per_100_merges(
+            metrics.rolling_confirmed_escape_count(recs, now, days=30), 100
+        ) < metrics.escapes_per_100_merges(
+            metrics.rolling_escape_count(recs, now, days=30), 100
+        )
+
+    def test_percentile_uses_nearest_rank_not_round(self) -> None:
+        # p90 of ttd 1..5: nearest-rank ordinal ceil(0.9*5)=5 → the max (5.0),
+        # not round(4.5)=4 → 4.0 which understates the tail by one rank.
+        recs = [_record(f"revert:{i}", ttd=float(i)) for i in range(1, 6)]
+        stats = metrics.time_to_detection_stats(recs)
+        assert stats["overall"].n == 5
+        assert stats["overall"].p90_hours == 5.0
+
     def test_time_to_detection_stats_by_source(self) -> None:
         recs = [
             _record("revert:a", source="revert", ttd=10.0),
@@ -338,3 +384,23 @@ def test_render_report_contains_headline_rate() -> None:
     # 1 escape / 200 merges * 100 = 0.50
     assert "0.50" in md
     assert "revert" in md
+
+
+def test_render_report_confirmed_rate_not_inflated_by_low_confidence() -> None:
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    recs = [
+        _record("revert:a", confidence="high", detected_at="2026-01-20T00:00:00+00:00"),
+        _record(
+            "bug-issue:b",
+            source="bug-issue",
+            confidence="low",
+            detected_at="2026-01-21T00:00:00+00:00",
+        ),
+    ]
+    md = render_escape_ledger_markdown(recs, now=now, merge_count_30d=100)
+    assert "| confirmed escapes (rolling 30d) | 1 |" in md
+    assert "| escapes (rolling 30d, all confidence) | 2 |" in md
+    # Confirmed rate (1/100*100 = 1.00) < all-confidence rate (2/100*100 = 2.00):
+    # the low-confidence bug-issue row does NOT inflate the confirmed headline.
+    assert "**confirmed escapes per 100 merges** | **1.00**" in md
+    assert "escapes per 100 merges (all confidence) | 2.00" in md

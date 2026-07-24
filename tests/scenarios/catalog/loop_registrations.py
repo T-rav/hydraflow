@@ -134,7 +134,7 @@ def _build_fail_open_monitor(ports: dict[str, Any], config: Any, deps: Any) -> A
     fail-open ledger from ``config.diagnostics_dir`` on disk (written by the
     PostVerifyAdvisor), not through the ``github`` port, so scenarios exercising
     the breach path seed that ledger file directly — see
-    ``tests/scenarios/test_fail_open_monitor_scenario.py``.
+    ``tests/scenarios/test_judge_independence_scenario.py``.
     """
     from fail_open_monitor_loop import FailOpenMonitorLoop
 
@@ -315,7 +315,7 @@ def _build_second_order_vitals(ports: dict[str, Any], config: Any, deps: Any) ->
     state = ports.get("second_order_vitals_state")
     if state is None:
         state = MagicMock()
-        store: dict[str, Any] = {"history": {}, "verdict": ""}
+        store: dict[str, Any] = {"history": {}, "verdict": "", "last_obs_ts": ""}
 
         state.get_second_order_vitals_series_history.side_effect = lambda: {
             k: list(v) for k, v in store["history"].items()
@@ -328,6 +328,12 @@ def _build_second_order_vitals(ports: dict[str, Any], config: Any, deps: Any) ->
         ]
         state.set_second_order_vitals_last_verdict.side_effect = lambda v: (
             store.__setitem__("verdict", v)
+        )
+        state.get_second_order_vitals_last_observation_ts.side_effect = lambda: store[
+            "last_obs_ts"
+        ]
+        state.set_second_order_vitals_last_observation_ts.side_effect = lambda ts: (
+            store.__setitem__("last_obs_ts", ts)
         )
         ports["second_order_vitals_state"] = state
 
