@@ -11,6 +11,7 @@ from adr_drift import (
     DriftFinding,
     FleetDriftBatch,
     _adr_file_in_diff,
+    _bare_citation_fanout,
     compute_drift,
     compute_drift_by_adr,
     partition_fleet_drift,
@@ -296,6 +297,171 @@ def test_real_adrs_do_not_drift_on_dependency_only_touches() -> None:
         f"dependency-only touches drifted ADRs {drifted}; the cited module(s) "
         "must be shared-infra or symbol-qualified in the owning ADR"
     )
+
+
+# ---------------------------------------------------------------------------
+# Churn-derived shared-infra suppression (#10456)
+# ---------------------------------------------------------------------------
+
+
+def _write_fanout_adrs(
+    adr_dir: Path, *, count: int, module: str, bare: bool = True
+) -> None:
+    """Write *count* Accepted ADRs that each cite *module*.
+
+    ``bare=True`` cites the file with no ``:Symbol`` tail (counts toward
+    fan-out); ``bare=False`` cites ``{module}:Owner`` (symbol-qualified —
+    must never be fan-out-suppressed).
+    """
+    cited = module if bare else f"{module}:Owner"
+    for i in range(count):
+        _write_adr(
+            adr_dir,
+            number=800 + i,
+            title=f"cites hot {i}",
+            status="Accepted",
+            related_files=[cited],
+        )
+
+
+def test_bare_citation_fanout_counts_only_bare_citations(tmp_path: Path) -> None:
+    # _bare_citation_fanout counts ADRs that cite the path bare (empty symbol
+    # set); a :Symbol citation of the same file does not count.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_fanout_adrs(adr_dir, count=3, module="src/hot.py", bare=True)
+    _write_adr(
+        adr_dir,
+        number=900,
+        title="owns hot symbol",
+        status="Accepted",
+        related_files=["src/hot.py:Owner"],
+    )
+    idx = ADRIndex(adr_dir)
+    adrs = idx.adrs_touching(["src/hot.py"])["src/hot.py"]
+    assert _bare_citation_fanout("src/hot.py", adrs) == 3
+
+
+def test_high_fanout_bare_citation_is_auto_suppressed(tmp_path: Path) -> None:
+    # A src/ module bare-cited by >= threshold live ADRs is treated as shared
+    # infra WITHOUT a manual `_SHARED_INFRA_MODULES` edit: no drift fires.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_fanout_adrs(adr_dir, count=4, module="src/hot.py", bare=True)
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/hot.py"],
+        shared_infra_fanout_threshold=4,
+    )
+    assert findings == []
+
+
+def test_below_threshold_bare_citation_still_drifts(tmp_path: Path) -> None:
+    # Fan-out below the threshold must NOT suppress: genuine drift still fires.
+    # Guards the off-by-one that would silently mask real single/low-fan-out
+    # drift.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_fanout_adrs(adr_dir, count=3, module="src/hot.py", bare=True)
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/hot.py"],
+        shared_infra_fanout_threshold=4,
+    )
+    assert sorted(f.adr.number for f in findings) == [800, 801, 802]
+
+
+def test_no_threshold_preserves_prior_bare_citation_drift(tmp_path: Path) -> None:
+    # Parity: with the default (threshold=None) a high-fan-out bare citation
+    # drifts exactly as before — the derived suppression is opt-in.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_fanout_adrs(adr_dir, count=5, module="src/hot.py", bare=True)
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/hot.py"],
+    )
+    assert sorted(f.adr.number for f in findings) == [800, 801, 802, 803, 804]
+
+
+def test_symbol_owner_still_drifts_regardless_of_fanout(tmp_path: Path) -> None:
+    # A genuinely symbol-owning ADR still drifts on its symbol even when many
+    # OTHER ADRs bare-cite the same high-fan-out file. Fan-out suppression is
+    # only for bare citations.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_fanout_adrs(adr_dir, count=5, module="src/hot.py", bare=True)
+    _write_adr(
+        adr_dir,
+        number=910,
+        title="owns hot symbol",
+        status="Accepted",
+        related_files=["src/hot.py:Owner"],
+    )
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/hot.py:Owner"],
+        shared_infra_fanout_threshold=4,
+    )
+    assert [f.adr.number for f in findings] == [910]
+
+
+def test_allowlist_suppression_independent_of_fanout(tmp_path: Path) -> None:
+    # The manual `_SHARED_INFRA_MODULES` path still suppresses even when the
+    # derived fan-out path is disabled (threshold=None): the two are OR'd.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_adr(
+        adr_dir,
+        number=920,
+        title="depends on config",
+        status="Accepted",
+        related_files=["src/config.py"],
+    )
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/config.py"],
+    )
+    assert findings == []
+
+
+def test_fanout_threshold_threads_through_partition_fleet_drift(
+    tmp_path: Path,
+) -> None:
+    # The public fleet-partition entry point honours the derived suppression:
+    # a high-fan-out bare-cited module produces no per-ADR rollups.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_fanout_adrs(adr_dir, count=4, module="src/hot.py", bare=True)
+    rollups, batches = partition_fleet_drift(
+        ADRIndex(adr_dir),
+        [(1, ["src/hot.py"])],
+        fleet_threshold=2,
+        shared_infra_fanout_threshold=4,
+    )
+    assert rollups == []
+    assert batches == []
+
+
+def test_fanout_threshold_threads_through_compute_drift_by_adr(
+    tmp_path: Path,
+) -> None:
+    # The rollup/reconcile entry point honours the derived suppression too, so
+    # a rollup that recomputes empty under fan-out suppression can auto-close.
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_fanout_adrs(adr_dir, count=4, module="src/hot.py", bare=True)
+    rollups = compute_drift_by_adr(
+        ADRIndex(adr_dir),
+        [(1, ["src/hot.py"])],
+        shared_infra_fanout_threshold=4,
+    )
+    assert rollups == []
 
 
 def test_adr_file_in_diff_helper(adr_index: ADRIndex) -> None:

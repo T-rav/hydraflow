@@ -1054,6 +1054,98 @@ async def test_closed_fleet_escalation_clears_dedup_and_state(loop_env) -> None:
     state.clear_adr_rollup.assert_called_with("FLEET-9592")
 
 
+# --- #10456: churn-derived shared-infra suppression threaded to both sites ---
+
+
+async def test_main_scan_suppresses_high_fanout_bare_cited_module(
+    loop_env, monkeypatch, tmp_path
+) -> None:
+    """#10456: the main scan threads ``adr_drift_shared_infra_fanout_threshold``
+    to ``partition_fleet_drift`` — a module bare-cited by >= threshold live ADRs
+    files NO rollup, with no ``_SHARED_INFRA_MODULES`` edit. Without the
+    threading these >= threshold bare citations would file a fleet batch."""
+    cfg, state, pr, dedup, _idx = loop_env
+    threshold = cfg.adr_drift_shared_infra_fanout_threshold
+    adr_dir = tmp_path / "fanout" / "adr"
+    adr_dir.mkdir(parents=True)
+    for i in range(threshold):
+        _write_adr(adr_dir, number=600 + i, title=f"hot{i}", related=["src/hot.py"])
+    from adr_index import ADRIndex  # noqa: PLC0415
+
+    idx = ADRIndex(adr_dir)
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    async def fake_list(_cursor):
+        return [
+            {
+                "number": 8888,
+                "mergedAt": "2026-05-06T20:00:00Z",
+                "title": "feat: churn the hot module",
+                "files": [{"path": "src/hot.py"}],
+            }
+        ]
+
+    monkeypatch.setattr(loop, "_list_recent_merged_prs", fake_list)
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", AsyncMock())
+
+    stats = await loop._do_work()
+    assert stats["filed"] == 0
+    pr.create_issue.assert_not_awaited()
+    state.set_adr_rollup.assert_not_called()
+
+
+async def test_reconcile_autocloses_rollup_obsoleted_by_fanout(
+    loop_env, tmp_path
+) -> None:
+    """#10456: the stale-rollup reconcile threads the same threshold to
+    ``compute_drift_by_adr`` — an OPEN per-ADR rollup whose recompute is now
+    empty under fan-out suppression auto-closes. Without the threading the ADR
+    would still drift and the rollup would strand open."""
+    cfg, state, pr, dedup, _idx = loop_env
+    threshold = cfg.adr_drift_shared_infra_fanout_threshold
+    adr_dir = tmp_path / "fanout" / "adr"
+    adr_dir.mkdir(parents=True)
+    for i in range(threshold):
+        _write_adr(adr_dir, number=600 + i, title=f"hot{i}", related=["src/hot.py"])
+    from adr_index import ADRIndex  # noqa: PLC0415
+
+    idx = ADRIndex(adr_dir)
+
+    state.all_adr_rollups.return_value = {
+        "ADR-0600": {"issue_number": 555, "pr_numbers": [123]},
+    }
+    pr.get_issue_state = AsyncMock(return_value="OPEN")
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+    loop._fetch_pr_changed_files = AsyncMock(  # type: ignore[method-assign]
+        return_value=["src/hot.py"]
+    )
+
+    closed = await loop._reconcile_stale_rollups(
+        drifting_adrs=set(), adrs_resolved_this_tick=set()
+    )
+    assert closed == 1
+    state.clear_adr_rollup.assert_called_with("ADR-0600")
+    pr.close_issue.assert_awaited_with(555)
+
+
 # --- #9662 P5: ADR-0056 amendment stays self-covered and in sync ---
 
 
