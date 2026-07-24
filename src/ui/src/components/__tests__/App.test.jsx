@@ -89,13 +89,15 @@ beforeEach(() => {
   cleanup()
 })
 
-describe('HITL badge rendering', () => {
+describe('HITL badge rendering (on the merged Outcomes tab)', () => {
   it('shows no badge when hitlItems is empty', async () => {
     const { default: App } = await import('../../App')
     render(<App />)
 
-    const hitlTab = screen.getByText('HITL')
-    expect(hitlTab.querySelector('span')).toBeNull()
+    // HITL merged into Outcomes — the needs-human count badge rides the
+    // Outcomes tab now (there is no separate HITL tab).
+    const outcomesTab = screen.getByText('Outcomes')
+    expect(outcomesTab.querySelector('span')).toBeNull()
   })
 
   it('shows badge with count when hitlItems has entries', async () => {
@@ -262,15 +264,17 @@ describe('Config warning banner', () => {
 })
 
 describe('Main tab bar', () => {
-  it('has exactly 5 main tabs — Loop Fitness and ADR Conformance are nested (#9789)', async () => {
+  it('has exactly 4 main tabs — HITL merged into Outcomes; Loop Fitness/ADR Conformance nested', async () => {
     const { default: App } = await import('../../App')
     render(<App />)
-    const tabLabels = ['Work Stream', 'HITL', 'Outcomes', 'Atlas', 'System']
+    const tabLabels = ['Work Stream', 'Outcomes', 'Atlas', 'System']
     const tabContainer = screen.getByTestId('main-tabs')
     expect(tabContainer.childElementCount).toBe(tabLabels.length)
     for (const label of tabLabels) {
       expect(within(tabContainer).getByText(label)).toBeInTheDocument()
     }
+    // HITL is no longer a top-level tab — it merged into Outcomes.
+    expect(within(tabContainer).queryByText('HITL')).toBeNull()
     // Nested destinations must NOT appear at the top level.
     expect(within(tabContainer).queryByText('Loop Fitness')).toBeNull()
     expect(within(tabContainer).queryByText('ADR Conformance')).toBeNull()
