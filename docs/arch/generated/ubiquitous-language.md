@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_69 terms across 3 bounded contexts._
+_71 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -379,6 +379,18 @@ Centralized GitHub data poller that replaces the pattern where every dashboard e
 - Write operations bypass the cache and call `gh` directly.
 - Cache staleness is observable: each `CacheSnapshot` carries a `fetched_at` timestamp; `age_seconds` is infinite until the first poll completes.
 
+## GitHubDataCache
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/github_cache_loop.py:GitHubDataCache` · **Confidence:** `accepted`
+**Aliases:** `github data cache`, `shared github snapshot`, `gh api cache`
+
+GitHubDataCache is a repo-scoped, in-memory and disk-persisted cache for GitHub API read data. A single GitHubCacheLoop poller fetches data on a fixed interval and stores it here; dashboard endpoints and background workers such as DependabotMergeLoop, FlakeTrackerLoop, and RCBudgetLoop read from it via get_* methods instead of each issuing their own gh api calls. High-frequency datasets (open PRs, HITL items, label counts, collaborators) are refreshed by the poll cycle, while low-frequency datasets (RC-promotion workflow runs, xdist-audit runs, per-label issue lists) are demand-refreshed with an explicit staleness bound, single-flight locking to coalesce concurrent refreshes, and a stale-serve fallback before returning empty.
+
+**Invariants:**
+- get_* read methods never hit the network — only poll() and the demand-refresh paths call the GitHub API
+- Demand-refreshed datasets serve a stale snapshot while younger than a multiple (default 3x) of the caller's staleness bound; beyond that, callers get an empty result rather than acting on ancient data
+- The cache is repo-scoped: each RepoRuntime gets its own instance with its own disk file
+
 ## Governor
 
 **Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/base_background_loop.py:LoopDeps` · **Confidence:** `accepted`
@@ -387,6 +399,18 @@ The saturation limiter and safety interlock that bounds every Actuator regardles
 
 **Invariants:**
 - The Governor can veto or throttle any actuation; a Controller cannot override it.
+
+## HITLItem
+
+**Kind:** `entity` · **Context:** `caretaker` · **Anchor:** `src/models.py:HITLItem` · **Confidence:** `accepted`
+**Aliases:** `hitl issue`, `hitl queue item`, `escalation item`
+
+HITLItem is the entity representing a single Human-In-The-Loop escalation: an issue (and, if one exists, its associated PR) that has stalled and requires human review or intervention. It carries identity (issue number), the escalation cause, a lifecycle status (HITLItemStatus: pending, processing, resolved), and pointers to the underlying issue/PR/branch. PRManager assembles HITLItems from raw GitHub issues, GitHubDataCache serves them via GitHubCacheLoop.get_hitl_items(), PRPort exposes list_hitl_items() as the formal port method for fetching them, and PRUnstickerLoop (ADR-0077) consumes them to drive autonomous resolution of stuck HITL-labeled PRs before falling back to a human.
+
+**Invariants:**
+- status defaults to HITLItemStatus.PENDING and transitions through PROCESSING to RESOLVED
+- issue is the required identity field; pr/pr_url/branch are populated only when a PR is associated
+- cause records the escalation reason that routed the issue into the HITL queue
 
 ## HumanSteeringLoop
 
