@@ -63,3 +63,29 @@ def test_hysteresis_never_flaps_inside_the_band(xs):
     start = h.tripped
     for x in xs:
         assert h.update(x) is start
+
+
+from signal_control.conditioners import Persistence
+
+
+def test_persistence_requires_k_consecutive():
+    p = Persistence(k=3)
+    assert p.update(True) is False
+    assert p.update(True) is False
+    assert p.update(True) is True
+    assert p.update(False) is False  # reset
+    assert p.update(True) is False
+
+
+def test_persistence_rejects_bad_k():
+    with pytest.raises(ValueError):
+        Persistence(k=0)
+
+
+@given(
+    n=st.integers(min_value=1, max_value=50), k=st.integers(min_value=1, max_value=10)
+)
+def test_persistence_fires_iff_streak_reaches_k(n, k):
+    p = Persistence(k=k)
+    fired = [p.update(True) for _ in range(n)]
+    assert all(fired[i] == (i + 1 >= k) for i in range(n))

@@ -63,3 +63,23 @@ class SchmittHysteresis:
     @property
     def tripped(self) -> bool:
         return self._tripped
+
+
+@dataclass
+class Persistence:
+    """A breach must hold for ``k`` consecutive updates before it counts."""
+
+    k: int
+    _streak: int = field(default=0, init=False)
+
+    def __post_init__(self) -> None:
+        if self.k < 1:
+            raise ValueError(f"k must be >= 1, got {self.k}")
+
+    def update(self, breached: bool) -> bool:
+        self._streak = self._streak + 1 if breached else 0
+        return self._streak >= self.k
+
+    @property
+    def streak(self) -> int:
+        return self._streak
