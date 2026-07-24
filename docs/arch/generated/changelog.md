@@ -6,9 +6,13 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `d32a740` — merge origin/staging into feat/10370-sampled-audit-loop *(2026-07-23)*
+- `5ee1477` — feat(ul): entry-evidence — 13 new entry links across 11 terms (#10412) (#10412) *(2026-07-23)*
+- `856435d` — feat(ul): entry-evidence — 6 new entry links across 6 terms (#10407) (#10407) *(2026-07-23)*
+- `dce4307` — feat(ul): entry-evidence — 4 new entry links across 4 terms (#10389) (#10389) *(2026-07-23)*
+- `33e7f43` — feat(instruments): second-order vitals — detect green-while-dying (#10373) (#10379) (#10379) *(2026-07-23)*
+- `679fb22` — feat(instruments): sampled adversarial re-audit — silent-escape estimator (#10370) (#10378) (#10378) *(2026-07-23)*
+- `95d9c04` — feat(instruments): intervention tally — attention-side telemetry (#10369) (#10377) (#10377) *(2026-07-23)*
 - `3428cd6` — feat(evidence): judge-independence budget + fail-visible dispatch (#10371) (#10376) (#10376) *(2026-07-23)*
-- `f1969f7` — feat(instruments): sampled adversarial re-audit — silent-escape estimator (#10370) (#10370) *(2026-07-23)*
 - `f166e7f` — feat(instruments): escape ledger + erosion trend surfaces (#10367) (#10375) (#10375) *(2026-07-23)*
 - `db16faf` — feat(hygiene): close-verification controller — reopen+retriage false auto-close, default-off (#10358) (#10364) (#10364) *(2026-07-23)*
 - `e612920` — docs(adr): evaluate deterministic-simulation fault injection on sandbox compose (#10361) (#10362) (#10362) *(2026-07-23)*
@@ -575,10 +579,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `f893069` — feat(arch): Plan C — DiagramLoop (L24) + CI guard + Pages site (#8434) (#8434) *(2026-04-25)*
 - `300c3c7` — feat(arch): Plan B — Functional Areas + ADR-0001 amendment + migration (#8433) (#8433) *(2026-04-25)*
 - `bee256f` — feat(arch): Architecture Knowledge System v1 — spec + 3 plans + Plan A runner (#8432) (#8432) *(2026-04-25)*
-- `87da6ef` — feat(adr-gate): symbol-level precision so unrelated edits stop tripping it (#8428) (#8428) *(2026-04-24)*
-- `ed4a4c0` — fix(staging-bisect): close 2 dark-factory gaps (G3+G7) (#8420) (#8420) *(2026-04-24)*
-- `a5f32b6` — chore: remove Dolt state backend, files-only persistence (#8419) (#8419) *(2026-04-24)*
-- `9ee5fe8` — docs: consolidate per-repo wiki at docs/wiki/ (#8418) (#8418) *(2026-04-24)*
 
 
 <!-- arch:generated -->
