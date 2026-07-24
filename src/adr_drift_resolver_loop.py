@@ -264,15 +264,18 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
             )
             return None
 
-    async def _fetch_scoped_diff(self, pr_number: int, adr: ADR) -> str:
+    async def _fetch_raw_pr_diff(self, pr_number: int) -> str:
         try:
-            diff = await self._pr.get_pr_diff(pr_number)
+            return await self._pr.get_pr_diff(pr_number)
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             logger.warning(
                 "adr_drift_resolver: get_pr_diff(%s) failed", pr_number, exc_info=True
             )
             return ""
+
+    async def _fetch_scoped_diff(self, pr_number: int, adr: ADR) -> str:
+        diff = await self._fetch_raw_pr_diff(pr_number)
         return filter_diff_to_paths(diff, adr.source_files)
 
     async def _fetch_issue_labels(self, issue_number: int) -> list[str]:
@@ -511,8 +514,13 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
 
         verdicts: list[TriageVerdict] = []
         issue_labels = await self._fetch_issue_labels(issue_number)
+        # Fetch the PR diff ONCE per batch, not once per member ADR — every
+        # member is triaged against the SAME PR, so re-fetching identical
+        # diff text N times would be N redundant gh/network calls for no
+        # benefit; only the per-ADR path filter differs, applied locally.
+        raw_pr_diff = await self._fetch_raw_pr_diff(pr_number)
         for adr, adr_markdown in members:
-            pr_diff = await self._fetch_scoped_diff(pr_number, adr)
+            pr_diff = filter_diff_to_paths(raw_pr_diff, adr.source_files)
             ctx = TriageContext(
                 adr_number=adr.number,
                 adr_title=adr.title,
