@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10459
 source_phase: plan
 created_at: 2026-07-24T12:58:41.700672+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0704
 ---
 
 # Attempt counters bump-before-run means max-attempt is always unprotected (known gap)

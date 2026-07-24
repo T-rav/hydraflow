@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10455
 source_phase: plan
 created_at: 2026-07-24T12:32:23.750694+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0704
 ---
 
 # Untracked near-duplicate regression test drafts trip jscpd — land only the matching one

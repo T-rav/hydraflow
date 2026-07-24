@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10458
 source_phase: plan
 created_at: 2026-07-24T13:01:26.369175+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0704
 ---
 
 # Generated docs under docs/arch/generated/ are freshness-gated, not just regenerated

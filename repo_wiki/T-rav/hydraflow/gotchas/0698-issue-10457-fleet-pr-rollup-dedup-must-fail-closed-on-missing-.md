@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10457
 source_phase: plan
 created_at: 2026-07-24T12:45:53.971751+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0704
 ---
 
 # FLEET-<pr> rollup dedup must fail-closed on missing/errored members
