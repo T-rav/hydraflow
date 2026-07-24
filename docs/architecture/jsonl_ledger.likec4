@@ -17,7 +17,7 @@ specification {
   element method
   element loop
   relationship uses
-  relationship extends
+  relationship derives
 }
 
 model {
@@ -79,17 +79,17 @@ model {
       m_ids_base = method 'existing_ids() -> set[str]  [single definition]'
     }
   }
-  idProto -> rowProto extends 'Recordable = JsonlRow + id'
-  identBase -> appendBase extends 'dedup tier extends plain tier'
+  idProto -> rowProto derives 'Recordable = JsonlRow + id'
+  identBase -> appendBase derives 'dedup tier extends plain tier'
   appendBase -> rowProto uses 'S: JsonlRow'
   identBase -> idProto uses 'T: Recordable'
 
   // PLAIN tier member (no id):
-  trendStore -> appendBase extends 'subclasses AppendOnlyJsonlLedger[ChangeDatapoint]'
+  trendStore -> appendBase derives 'subclasses AppendOnlyJsonlLedger[ChangeDatapoint]'
   // DEDUP tier members (id-bearing) — rebased from the old single JsonlLedger[T]:
-  auditStore -> identBase extends 'IdentifiedJsonlLedger[AuditSample]; keeps update_dispositions'
-  escapeLedger -> identBase extends 'IdentifiedJsonlLedger[EscapeRecord]'
-  ivLedger -> identBase extends 'IdentifiedJsonlLedger[InterventionRecord]'
+  auditStore -> identBase derives 'IdentifiedJsonlLedger[AuditSample]; keeps update_dispositions'
+  escapeLedger -> identBase derives 'IdentifiedJsonlLedger[EscapeRecord]'
+  ivLedger -> identBase derives 'IdentifiedJsonlLedger[InterventionRecord]'
 }
 
 views {
