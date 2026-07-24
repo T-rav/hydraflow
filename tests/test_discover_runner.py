@@ -80,6 +80,52 @@ class TestBuildPrompt:
         assert "competitors" in prompt.lower()
         assert "user_needs" in prompt.lower()
 
+    def test_prompt_requires_discover_completeness_rubric_sections(
+        self, config, event_bus
+    ) -> None:
+        """The requested brief must match the discover-completeness rubric (#10423).
+
+        ADR-0107 made this a general planner-invoked helper for any
+        low-clarity/escalated issue, not just product features — but the
+        prior prompt only asked for a market-research paragraph, never the
+        named sections the ``discover-completeness`` evaluator (§4.10)
+        actually grades. That mismatch guaranteed rejection regardless of
+        brief quality.
+        """
+        from unittest.mock import MagicMock
+
+        runner = DiscoverRunner(config, event_bus)
+        task = MagicMock()
+        task.id = 42
+        task.title = "Add a lint warning for bare ADR citations"
+        task.body = "A caretaker check could flag bare citations."
+
+        prompt = runner._build_prompt(task)
+
+        for heading in (
+            "### Intent",
+            "### Affected area",
+            "### Acceptance criteria",
+            "### Open questions",
+            "### Known unknowns",
+        ):
+            assert heading in prompt
+
+    def test_product_research_framed_as_optional(self, config, event_bus) -> None:
+        """Competitor/market research must not be forced onto every issue (#10423)."""
+        from unittest.mock import MagicMock
+
+        runner = DiscoverRunner(config, event_bus)
+        task = MagicMock()
+        task.id = 42
+        task.title = "Add a lint warning for bare ADR citations"
+        task.body = "A caretaker check could flag bare citations."
+
+        prompt = runner._build_prompt(task)
+
+        assert "senior product strategist" not in prompt
+        assert "Optional: Product & Market Research" in prompt
+
     def test_folds_fenced_human_steering_guidance(self, config, event_bus) -> None:
         """ADR-0099 #4 — live operator guidance is folded in FENCED.
 
