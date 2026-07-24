@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10440
 source_phase: plan
 created_at: 2026-07-24T10:50:57.616711+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: drift_detected: src/file.py
 ---
 
 # ADR source citations must use single-colon `src/file.py:Symbol` form

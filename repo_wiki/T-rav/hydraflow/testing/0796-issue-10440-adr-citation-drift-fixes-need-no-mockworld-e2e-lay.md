@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10440
 source_phase: plan
 created_at: 2026-07-24T10:50:57.616765+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0798
 ---
 
 # ADR-citation drift fixes need no MockWorld/e2e layer — pure static check

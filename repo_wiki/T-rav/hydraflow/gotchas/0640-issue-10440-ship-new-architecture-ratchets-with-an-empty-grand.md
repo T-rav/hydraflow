@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10440
 source_phase: plan
 created_at: 2026-07-24T10:50:57.616757+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0643
 ---
 
 # Ship new architecture ratchets with an empty grandfather list, fail closed
