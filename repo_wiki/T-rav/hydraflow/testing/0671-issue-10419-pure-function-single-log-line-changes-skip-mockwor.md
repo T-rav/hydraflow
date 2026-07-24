@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10419
 source_phase: plan
 created_at: 2026-07-24T07:06:01.754996+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0672
 ---
 
 # Pure-function + single log-line changes skip MockWorld/sandbox e2e

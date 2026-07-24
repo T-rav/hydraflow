@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10419
 source_phase: plan
 created_at: 2026-07-24T07:06:01.754939+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0494
 ---
 
 # ADRValidationResult splits `issues` (gating) from `advisories` (non-gating)

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10420
 source_phase: plan
 created_at: 2026-07-24T06:29:23.521318+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0672
 ---
 
 # Keep src/adr_drift.py pure; inject state via params, don't cross-import
