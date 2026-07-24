@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10236
 source_phase: plan
 created_at: 2026-07-22T17:17:17.227723+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0370
 ---
 
 # Bare MagicMock int-coercion silently defeats numeric floor logic in tests

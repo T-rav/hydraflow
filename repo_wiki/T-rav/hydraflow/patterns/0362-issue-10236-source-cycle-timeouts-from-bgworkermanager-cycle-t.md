@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10236
 source_phase: plan
 created_at: 2026-07-22T17:17:17.227712+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0364
 ---
 
 # Source cycle timeouts from BGWorkerManager.cycle_timeout, not new config

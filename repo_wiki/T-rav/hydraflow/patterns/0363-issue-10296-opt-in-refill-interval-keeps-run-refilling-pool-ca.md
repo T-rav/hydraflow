@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10296
 source_phase: plan
 created_at: 2026-07-22T17:44:18.122210+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0364
 ---
 
 # Opt-in refill_interval keeps run_refilling_pool cadence unchanged for other callers
