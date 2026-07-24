@@ -53,6 +53,7 @@ if TYPE_CHECKING:
 
 from merge_state_watcher import ConflictingPR
 from models import (
+    ClosedStageLabelDrift,
     CodeScanningAlert,
     GitHubIssue,
     GitHubIssueSummary,
@@ -503,6 +504,19 @@ class PRPort(Protocol):
         Returns a list of :class:`LabelDrift` records — one per drifted
         (issue, PR) pair. See ADR-0088 for the drift kinds and the
         ``LabelDriftWatcherLoop`` reconciliation policy.
+        """
+        ...
+
+    async def find_closed_stage_labeled_issues(
+        self,
+    ) -> list[ClosedStageLabelDrift]:
+        """Return CLOSED issues still carrying an active pipeline-stage label.
+
+        Belt-and-suspenders for #10394: a GitHub-native ``Closes #N``
+        auto-close can leave a closed issue tagged ``hydraflow-ready`` etc.,
+        which a label-scan dispatcher would re-queue. The
+        ``LabelDriftWatcherLoop`` (ADR-0088) strips them. Matches
+        ``pr_manager.PRManager.find_closed_stage_labeled_issues`` exactly.
         """
         ...
 

@@ -179,6 +179,8 @@ class TestPRPortMethods:
         # Label/dispatch reconciliation (#10260)
         "get_pr_checks",
         "find_open_resolving_pr",
+        # Closed-issue stale stage-label caretaker (#10394)
+        "find_closed_stage_labeled_issues",
     ]
 
     @pytest.mark.parametrize("method", _REQUIRED_METHODS)
@@ -319,6 +321,8 @@ class TestPRPortSignatures:
         # Label/dispatch reconciliation (#10260)
         "get_pr_checks",
         "find_open_resolving_pr",
+        # Closed-issue stale stage-label caretaker (#10394)
+        "find_closed_stage_labeled_issues",
     ]
 
     @pytest.mark.parametrize("method", _SIGNED_METHODS)

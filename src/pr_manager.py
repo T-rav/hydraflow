@@ -24,6 +24,7 @@ from events import EventBus, EventType, HydraFlowEvent
 from merge_state_watcher import ConflictingPR
 from models import (
     CICheckPayload,
+    ClosedStageLabelDrift,
     CodeScanningAlert,
     Crate,
     GitHubIssue,
@@ -1983,7 +1984,40 @@ class PRManager:
                 exc,
             )
             return False
+        # Choke point (#10394): a closed issue must never keep an active
+        # pipeline-stage label, or a label-scan dispatcher will re-queue
+        # already-shipped work. Strip them here so every HydraFlow-initiated
+        # close is clean. (GitHub-native ``Closes #N`` auto-closes bypass this
+        # method entirely — the LabelDriftWatcherLoop, ADR-0088, is the
+        # backstop for those.)
+        await self._strip_dispatch_labels(issue_number)
         return True
+
+    async def _strip_dispatch_labels(self, issue_number: int) -> None:
+        """Remove any active pipeline-stage labels from *issue_number* (#10394).
+
+        Best-effort: reads the issue's current labels once and removes only
+        the intersection with ``dispatchable_stage_labels`` — terminal
+        markers (``fixed`` / ``verify``) are preserved so the merge path's
+        ``hydraflow-fixed`` end-state is unchanged. A label read/remove
+        failure is logged, never raised, so it can never turn a successful
+        close into a reported failure (the drift watcher will catch anything
+        missed on a later tick).
+        """
+        dispatch_labels = set(self._config.dispatchable_stage_labels)
+        if not dispatch_labels:
+            return
+        try:
+            current = set(await self.get_issue_labels(issue_number))
+        except RuntimeError as exc:
+            logger.debug(
+                "close_issue: could not read labels for #%d to strip stage labels: %s",
+                issue_number,
+                exc,
+            )
+            return
+        for lbl in sorted(current & dispatch_labels):
+            await self._remove_label("issue", issue_number, lbl)
 
     async def reopen_issue(self, issue_number: int) -> bool:
         """Reopen a closed GitHub issue. Returns False when the gh call failed.
@@ -2367,6 +2401,64 @@ class PRManager:
                     detected_at=datetime.now(UTC),
                 )
             )
+        return out
+
+    async def find_closed_stage_labeled_issues(
+        self,
+    ) -> list[ClosedStageLabelDrift]:
+        """Return CLOSED issues that still carry an active pipeline-stage label.
+
+        Belt-and-suspenders for #10394: a GitHub-native ``Closes #N``
+        auto-close (or any close path that bypassed
+        :meth:`close_issue`'s label strip) can leave a closed issue tagged
+        ``hydraflow-ready`` etc., which a label-scan dispatcher would
+        re-queue as duplicate work. The ``LabelDriftWatcherLoop`` (ADR-0088)
+        strips them. One search request keyed on the active stage labels
+        (comma-joined = GitHub label OR), scoped to ``is:closed``.
+        """
+        self._assert_repo()
+        stage_labels = self._config.dispatchable_stage_labels
+        if not stage_labels:
+            return []
+        search = "is:closed label:" + ",".join(stage_labels)
+        raw = await self._gh_json_query(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            "closed",
+            "--search",
+            search,
+            "--limit",
+            "200",
+            "--json",
+            "number,labels",
+            dry_run_return=[],
+            error_log="find_closed_stage_labeled_issues: issue list failed",
+        )
+        if not isinstance(raw, list):
+            return []
+        stage_set = set(stage_labels)
+        out: list[ClosedStageLabelDrift] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            try:
+                issue_n = int(item.get("number", 0))
+            except (TypeError, ValueError):
+                continue
+            if issue_n <= 0:
+                continue
+            labels = {
+                lbl.get("name", "")
+                for lbl in (item.get("labels") or [])
+                if isinstance(lbl, dict)
+            }
+            stale = sorted(labels & stage_set)
+            if stale:
+                out.append(ClosedStageLabelDrift(issue=issue_n, stale_labels=stale))
         return out
 
     async def find_open_resolving_pr(self, issue_number: int) -> int | None:

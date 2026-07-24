@@ -166,6 +166,46 @@ class TestFetchReadyIssues:
         assert issues[0].number == 42
 
     @pytest.mark.asyncio
+    async def test_excludes_closed_issue_carrying_stage_label(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """#10394: a CLOSED issue that still carries a stage label (e.g. from a
+        stale gh ``--cache`` snapshot or a GitHub-native ``Closes #N``
+        auto-close) must NOT be dispatched, even though it matches the label
+        scan. The OPEN issue in the same batch still comes through."""
+        raw = json.dumps(
+            [
+                {
+                    "number": 42,
+                    "title": "open work",
+                    "body": "",
+                    "labels": [{"name": "ready"}],
+                    "comments": [],
+                    "url": "",
+                    "state": "open",
+                },
+                {
+                    "number": 10314,
+                    "title": "already shipped + closed",
+                    "body": "",
+                    "labels": [{"name": "ready"}],
+                    "comments": [],
+                    "url": "",
+                    "state": "closed",
+                },
+            ]
+        )
+        fetcher = IssueFetcher(config)
+        mock_proc = make_proc(stdout=raw.encode())
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            issues = await fetcher.fetch_ready_issues(set())
+
+        numbers = {i.number for i in issues}
+        assert 42 in numbers
+        assert 10314 not in numbers, "closed issue must not be dispatched (#10394)"
+
+    @pytest.mark.asyncio
     async def test_returns_empty_list_when_gh_fails(
         self, config: HydraFlowConfig
     ) -> None:
