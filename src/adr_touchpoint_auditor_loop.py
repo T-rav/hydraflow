@@ -643,6 +643,7 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
                     rollup_key,
                     issue_number=issue_number,
                     pr_numbers=[batch.pr_number],
+                    adr_numbers=[e.adr.number for e in members],
                 )
                 filed += 1
             dedup.add(dedup_key)

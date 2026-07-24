@@ -19,11 +19,11 @@ or ``adr_drift.py``.
 ## Pipeline: DETECT → TRIAGE → RESOLVE → FAIL-CLOSED
 
 1. **DETECT** — the auditor already does this. This loop reads
-   ``state.all_adr_rollups()`` for open ``ADR-NNNN`` rollups (fleet batches,
-   keyed ``FLEET-<pr>``, are skipped — ADR-0056 point 7 makes those
-   one-shot, human-closed-only by design; a cross-cutting sweep spanning
-   many ADRs at once is exactly the case that deserves a human look, not an
-   LLM guess).
+   ``state.all_adr_rollups()`` for open ``ADR-NNNN`` rollups AND
+   fleet-batched ``FLEET-<pr>`` rollups (#10457 — see "Fleet batch triage"
+   below). A fleet rollup persisted before #10457 (no ``adr_numbers``) has
+   no member ADRs to triage against and is left exactly as before: one-shot,
+   human-closed only.
 2. **TRIAGE** — one LLM call (``adr_drift_triage_llm.AdrDriftTriageLLM``)
    over the ADR's Context+Decision text and the rollup's most-recently-
    contributing PR's diff (scoped to the ADR's cited module(s) via
@@ -54,6 +54,30 @@ or ``adr_drift.py``.
    action. Only an explicit, successfully-parsed ``CONSISTENT`` verdict
    ever closes a rollup; every other outcome (including an error) leaves
    it open.
+
+## Fleet batch triage (#10457, amends ADR-0056 point 7)
+
+A ``FLEET-<pr>`` rollup batches several ADRs the auditor found drifting in
+the SAME PR (#9662). Per-ADR triage does not directly apply — a single
+CONSISTENT/REAL_DRIFT verdict says nothing about the OTHER member ADRs in
+the batch. Instead, :meth:`AdrDriftResolverLoop._triage_fleet_batch`
+triages every member ADR (persisted on the rollup as ``adr_numbers`` by
+``AdrTouchpointAuditorLoop._process_fleet_batches``) against the SAME PR
+and aggregates fail-closed:
+
+- All members classify CONSISTENT → one aggregate audit comment, close the
+  batched issue (``reason="not planned"``). No HITL.
+- Any member does NOT classify CONSISTENT → the batch stays open, exactly
+  as it always has (a human closes it, per ADR-0056 point 7) — this loop
+  does not relabel or escalate fleet batches, only auto-closes the clean
+  case.
+- A missing/renumbered member ADR, or a triage-call error on ANY member,
+  skips the WHOLE batch with no dedup mark — retried in full next tick.
+  Member ADRs are validated to exist before any triage call is spent, so a
+  missing member never wastes an LLM call on the others.
+- Both "closed" and "left open" are definitive outcomes and mark dedup
+  (one triage attempt per batch issue lifetime, same fingerprint shape as
+  the per-ADR path below); only a call ERROR withholds the mark.
 
 ## Idempotency: one triage per rollup ISSUE, not per rollup ADR
 
@@ -122,14 +146,28 @@ _WORKER_NAME = "adr_drift_resolver"
 def _adr_num_from_key(rollup_key: str) -> int | None:
     """Parse the ADR number out of an ``ADR-NNNN`` rollup key.
 
-    Returns ``None`` for ``FLEET-<pr>`` keys (skipped — see module
-    docstring) or any malformed key, so a corrupt state entry can't crash
-    a tick.
+    Returns ``None`` for ``FLEET-<pr>`` keys (triaged separately — see
+    :meth:`AdrDriftResolverLoop._fleet_candidates`) or any malformed key, so
+    a corrupt state entry can't crash a tick.
     """
     if not rollup_key.startswith("ADR-"):
         return None
     try:
         return int(rollup_key[4:])
+    except ValueError:
+        return None
+
+
+def _pr_num_from_fleet_key(rollup_key: str) -> int | None:
+    """Parse the PR number out of a ``FLEET-<pr>`` rollup key.
+
+    Returns ``None`` for non-fleet or malformed keys so a corrupt state
+    entry can't crash a tick (mirrors ``_adr_num_from_key``).
+    """
+    if not rollup_key.startswith("FLEET-"):
+        return None
+    try:
+        return int(rollup_key[6:])
     except ValueError:
         return None
 
@@ -246,9 +284,9 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
     def _candidates(self) -> list[tuple[str, int, list[int]]]:
         """Open ``ADR-NNNN`` rollups not yet triaged, as (key, issue#, PRs).
 
-        Skips ``FLEET-<pr>`` keys (see module docstring) and any rollup
-        already fingerprinted in the dedup store for its CURRENT issue
-        number.
+        Skips ``FLEET-<pr>`` keys — those have their own selection method,
+        :meth:`_fleet_candidates` — and any rollup already fingerprinted in
+        the dedup store for its CURRENT issue number.
         """
         seen = self._dedup.get()
         out: list[tuple[str, int, list[int]]] = []
@@ -264,6 +302,33 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
             if not pr_numbers:
                 continue
             out.append((rollup_key, issue_number, pr_numbers))
+        return out
+
+    def _fleet_candidates(self) -> list[tuple[str, int, int, list[int]]]:
+        """Open ``FLEET-<pr>`` rollups not yet triaged, as (key, issue#, pr#,
+        member ADR numbers) (#10457).
+
+        Only rollups filed WITH ``adr_numbers`` persisted are triageable — a
+        fleet rollup from before this change (or any malformed entry) has no
+        member ADRs to triage against and is left exactly as before: one-shot,
+        human-closed only. Also excludes any batch already fingerprinted in
+        the dedup store for its CURRENT issue number (mirrors ``_candidates``).
+        """
+        seen = self._dedup.get()
+        out: list[tuple[str, int, int, list[int]]] = []
+        for rollup_key, entry in self._state.all_adr_rollups().items():
+            pr_number = _pr_num_from_fleet_key(rollup_key)
+            if pr_number is None:
+                continue
+            issue_number = int(entry.get("issue_number", 0))
+            if not issue_number:
+                continue
+            if _dedup_key(rollup_key, issue_number) in seen:
+                continue
+            adr_numbers = [int(n) for n in entry.get("adr_numbers", [])]
+            if not adr_numbers:
+                continue
+            out.append((rollup_key, issue_number, pr_number, adr_numbers))
         return out
 
     async def _do_work(self) -> dict[str, Any] | None:
@@ -357,6 +422,34 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
             seen.add(_dedup_key(rollup_key, issue_number))
             self._dedup.set_all(seen)
 
+        fleet_candidates = self._fleet_candidates()
+        fleet_triaged = 0
+        fleet_closed = 0
+        fleet_errors = 0
+        fleet_skipped = 0
+
+        for rollup_key, issue_number, pr_number, adr_numbers in fleet_candidates:
+            if triaged + fleet_triaged >= max_per_tick:
+                break
+
+            outcome = await self._triage_fleet_batch(
+                issue_number, pr_number, adr_numbers
+            )
+            if outcome == "skipped":
+                fleet_skipped += 1
+                continue
+            if outcome == "error":
+                fleet_errors += 1
+                continue  # FAIL-CLOSED: no dedup entry, retried next tick
+
+            fleet_triaged += 1
+            if outcome == "closed":
+                fleet_closed += 1
+
+            seen = self._dedup.get()
+            seen.add(_dedup_key(rollup_key, issue_number))
+            self._dedup.set_all(seen)
+
         return {
             "status": "ok",
             "candidates": len(candidates),
@@ -366,7 +459,100 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
             "escalated": escalated,
             "errors": errors,
             "skipped": skipped,
+            "fleet_candidates": len(fleet_candidates),
+            "fleet_triaged": fleet_triaged,
+            "fleet_closed": fleet_closed,
+            "fleet_errors": fleet_errors,
+            "fleet_skipped": fleet_skipped,
         }
+
+    async def _triage_fleet_batch(
+        self, issue_number: int, pr_number: int, adr_numbers: list[int]
+    ) -> str:
+        """Triage every member ADR of one fleet batch against *pr_number*.
+
+        Returns ``'closed' | 'open' | 'skipped' | 'error'``. Fail-closed at
+        two levels: a missing member ADR (renumbered/deleted — 'skipped') or
+        a triage-call error ('error') leaves the WHOLE batch untriaged, no
+        partial resolution and no dedup mark, so it's retried in full next
+        tick. All member ADRs are validated to exist BEFORE any triage call
+        is spent, so a missing member never wastes an LLM call on the others.
+        Once every member triages successfully, the aggregate is 'closed'
+        only when ALL members classify CONSISTENT; otherwise 'open' — a
+        batched fleet issue stays one-shot/human-closed for any non-clean
+        verdict, matching ``AdrTouchpointAuditorLoop``'s existing fleet
+        close semantics. Either 'closed' or 'open' is a definitive outcome
+        and marks dedup (mirrors the per-ADR ESCALATE branch) — only a call
+        ERROR withholds it.
+        """
+        members: list[tuple[ADR, str]] = []
+        for adr_number in adr_numbers:
+            adr = self._find_adr(adr_number)
+            adr_markdown = self._read_adr_markdown(adr_number)
+            if adr is None or adr_markdown is None:
+                return "skipped"
+            members.append((adr, adr_markdown))
+
+        verdicts: list[TriageVerdict] = []
+        issue_labels = await self._fetch_issue_labels(issue_number)
+        for adr, adr_markdown in members:
+            pr_diff = await self._fetch_scoped_diff(pr_number, adr)
+            ctx = TriageContext(
+                adr_number=adr.number,
+                adr_title=adr.title,
+                adr_markdown=adr_markdown,
+                pr_number=pr_number,
+                pr_diff=pr_diff,
+                issue_number=issue_number,
+                issue_labels=tuple(issue_labels),
+            )
+            try:
+                verdict = await self._triage.classify(ctx)
+            except (AuthenticationError, CreditExhaustedError):
+                raise  # billing/auth signal — propagate, see per-ADR comment above
+            except (ValueError, RuntimeError) as exc:
+                logger.warning(
+                    "adr_drift_resolver: fleet triage failed for issue #%s "
+                    "ADR-%04d: %s",
+                    issue_number,
+                    adr.number,
+                    exc,
+                )
+                return "error"
+            verdicts.append(verdict)
+
+        if all(v.classification == DriftClassification.CONSISTENT for v in verdicts):
+            adr_numbers_in_order = [adr.number for adr, _ in members]
+            await self._resolve_fleet_consistent(
+                issue_number, adr_numbers_in_order, verdicts
+            )
+            return "closed"
+        return "open"
+
+    async def _resolve_fleet_consistent(
+        self,
+        issue_number: int,
+        adr_numbers: list[int],
+        verdicts: list[TriageVerdict],
+    ) -> None:
+        """ALL members CONSISTENT: one aggregate audit comment, close, no HITL."""
+        lines = [
+            "**ADR drift triage: CONSISTENT for all batched ADRs** "
+            "(automated, `adr_drift_resolver`)",
+            "",
+        ]
+        for adr_number, verdict in zip(adr_numbers, verdicts, strict=True):
+            lines.append(f"- ADR-{adr_number:04d}: {verdict.rationale}")
+        lines.extend(
+            [
+                "",
+                "_Closing — none of the batched ADRs' Decision/Context are "
+                "contradicted by the cited change. Reopen with evidence if "
+                "this is wrong._",
+            ]
+        )
+        await self._pr.post_comment(issue_number, "\n".join(lines))
+        await self._pr.close_issue(issue_number, reason="not planned")
 
     async def _resolve_consistent(
         self, issue_number: int, verdict: TriageVerdict

@@ -47,13 +47,21 @@ class AdrAuditStateMixin:
     # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
 
     def get_adr_rollup(self, adr_key: str) -> dict | None:
-        """Return ``{'issue_number': int, 'pr_numbers': list[int]}`` or ``None``."""
+        """Return ``{'issue_number': int, 'pr_numbers': list[int],
+        'adr_numbers': list[int]}`` or ``None``.
+
+        ``adr_numbers`` (#10457) is only ever non-empty for a ``FLEET-<pr>``
+        rollup — the member ADR numbers the resolver loop needs to triage
+        each one. It defaults to ``[]`` for per-ADR (``ADR-NNNN``) rollups
+        and for any rollup persisted before this field existed.
+        """
         entry = self._data.adr_rollup_issues.get(adr_key)
         if not entry:
             return None
         return {
             "issue_number": int(entry.get("issue_number", 0)),
             "pr_numbers": list(entry.get("pr_numbers", [])),
+            "adr_numbers": list(entry.get("adr_numbers", [])),
         }
 
     def all_adr_rollups(self) -> dict[str, dict]:
@@ -68,17 +76,24 @@ class AdrAuditStateMixin:
             key: {
                 "issue_number": int(entry.get("issue_number", 0)),
                 "pr_numbers": list(entry.get("pr_numbers", [])),
+                "adr_numbers": list(entry.get("adr_numbers", [])),
             }
             for key, entry in self._data.adr_rollup_issues.items()
         }
 
     def set_adr_rollup(
-        self, adr_key: str, *, issue_number: int, pr_numbers: list[int]
+        self,
+        adr_key: str,
+        *,
+        issue_number: int,
+        pr_numbers: list[int],
+        adr_numbers: list[int] | None = None,
     ) -> None:
         rollups = dict(self._data.adr_rollup_issues)
         rollups[adr_key] = {
             "issue_number": int(issue_number),
             "pr_numbers": sorted({int(n) for n in pr_numbers}),
+            "adr_numbers": sorted({int(n) for n in adr_numbers or []}),
         }
         self._data.adr_rollup_issues = rollups
         self.save()

@@ -320,7 +320,11 @@ class TestDedup:
 
 
 class TestCandidateSelection:
-    async def test_fleet_keys_are_skipped(self, loop_env) -> None:
+    async def test_fleet_keys_without_adr_numbers_are_skipped(self, loop_env) -> None:
+        """#10457 — a FLEET-<pr> rollup persisted before this change (or
+        otherwise missing ``adr_numbers``) can't be triaged; it's left for
+        the auditor's one-shot, human-closed-only fleet handling, exactly
+        like before this change."""
         cfg, state, pr, dedup, idx, triage = loop_env
         state.all_adr_rollups.return_value = {
             "FLEET-9603": {"issue_number": 77, "pr_numbers": [9603]},
@@ -330,6 +334,46 @@ class TestCandidateSelection:
         result = await loop._do_work()
 
         assert result["candidates"] == 0
+        assert result["fleet_candidates"] == 0
+        triage.classify.assert_not_called()
+
+    async def test_fleet_rollup_with_no_issue_number_is_skipped(self, loop_env) -> None:
+        """#10457 — a fleet rollup entry missing/zero ``issue_number`` (a
+        corrupt or partially-written state entry) can't be triaged; there is
+        no GitHub issue to act on."""
+        cfg, state, pr, dedup, idx, triage = loop_env
+        state.all_adr_rollups.return_value = {
+            "FLEET-9603": {
+                "issue_number": 0,
+                "pr_numbers": [9603],
+                "adr_numbers": [24],
+            },
+        }
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["fleet_candidates"] == 0
+        triage.classify.assert_not_called()
+
+    async def test_malformed_fleet_key_is_skipped_not_crashed(self, loop_env) -> None:
+        """#10457 — a corrupt ``FLEET-<pr>`` key with a non-numeric PR
+        component can't crash a tick; it's treated as neither a per-ADR nor
+        a fleet candidate."""
+        cfg, state, pr, dedup, idx, triage = loop_env
+        state.all_adr_rollups.return_value = {
+            "FLEET-not-a-number": {
+                "issue_number": 77,
+                "pr_numbers": [9603],
+                "adr_numbers": [24],
+            },
+        }
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["candidates"] == 0
+        assert result["fleet_candidates"] == 0
         triage.classify.assert_not_called()
 
     async def test_rollup_with_no_pr_numbers_is_skipped(self, loop_env) -> None:
@@ -387,3 +431,215 @@ class TestCandidateSelection:
         await loop._do_work()
 
         pr.get_pr_diff.assert_awaited_once_with(8501)
+
+
+class TestFleetTriage:
+    """#10457 — extend the CONSISTENT auto-close triage to fleet-batched
+    drift issues (previously one-shot / human-closed only). Every member
+    ADR of the batch is triaged against the SAME PR; the aggregate only
+    closes when ALL members classify CONSISTENT (fail-closed: a missing
+    member ADR or any triage-call error leaves the WHOLE batch untouched)."""
+
+    def _fleet_env(self, loop_env):
+        cfg, state, pr, dedup, idx, triage = loop_env
+        _write_adr(
+            Path(cfg.repo_root) / "docs" / "adr",
+            number=27,
+            title="beta",
+            related=["src/runner.py"],
+        )
+        state.all_adr_rollups.return_value = {
+            "FLEET-9603": {
+                "issue_number": 77,
+                "pr_numbers": [9603],
+                "adr_numbers": [24, 27],
+            },
+        }
+        return cfg, state, pr, dedup, idx, triage
+
+    async def test_all_consistent_closes_the_batched_issue(self, loop_env) -> None:
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        triage.classify = AsyncMock(
+            side_effect=[
+                _verdict(DriftClassification.CONSISTENT, rationale="alpha is fine"),
+                _verdict(DriftClassification.CONSISTENT, rationale="beta is fine"),
+            ]
+        )
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["fleet_candidates"] == 1
+        assert result["fleet_triaged"] == 1
+        assert result["fleet_closed"] == 1
+        pr.close_issue.assert_awaited_once_with(77, reason="not planned")
+        pr.post_comment.assert_awaited_once()
+        comment = pr.post_comment.await_args.args[1]
+        assert "alpha is fine" in comment
+        assert "beta is fine" in comment
+
+    async def test_one_non_consistent_member_leaves_issue_open(self, loop_env) -> None:
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        triage.classify = AsyncMock(
+            side_effect=[
+                _verdict(DriftClassification.CONSISTENT, rationale="alpha is fine"),
+                _verdict(
+                    DriftClassification.REAL_DRIFT,
+                    rationale="beta's decision actually changed",
+                    section="Decision",
+                ),
+            ]
+        )
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["fleet_triaged"] == 1
+        assert result["fleet_closed"] == 0
+        pr.close_issue.assert_not_called()
+        pr.post_comment.assert_not_called()
+        pr.add_labels.assert_not_called()
+        pr.update_issue_body.assert_not_called()
+
+    async def test_dedup_marked_when_batch_left_open_after_mixed_verdicts(
+        self, loop_env
+    ) -> None:
+        """A mixed-verdict batch ('left open', not closed) is still a
+        DEFINITIVE triage outcome — it must mark dedup so the batch isn't
+        re-triaged (and re-billed) every tick just because it didn't
+        auto-close. Only a call ERROR (separately tested) withholds the
+        dedup mark."""
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        triage.classify = AsyncMock(
+            side_effect=[
+                _verdict(DriftClassification.CONSISTENT, rationale="alpha is fine"),
+                _verdict(
+                    DriftClassification.REAL_DRIFT,
+                    rationale="beta's decision actually changed",
+                    section="Decision",
+                ),
+            ]
+        )
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        await loop._do_work()
+
+        dedup.set_all.assert_called_once()
+        written = dedup.set_all.call_args.args[0]
+        assert "adr_drift_resolver:FLEET-9603:77" in written
+
+    async def test_missing_member_adr_skips_whole_batch(self, loop_env) -> None:
+        """A renumbered/deleted member ADR skips the WHOLE batch without
+        spending any triage calls — mirrors the per-ADR missing-ADR skip."""
+        cfg, state, pr, dedup, idx, triage = loop_env
+        state.all_adr_rollups.return_value = {
+            "FLEET-9603": {
+                "issue_number": 77,
+                "pr_numbers": [9603],
+                "adr_numbers": [24, 9999],
+            },
+        }
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["fleet_skipped"] == 1
+        assert result["fleet_triaged"] == 0
+        triage.classify.assert_not_called()
+        pr.close_issue.assert_not_called()
+
+    async def test_triage_error_leaves_whole_batch_untriaged(self, loop_env) -> None:
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        triage.classify = AsyncMock(
+            side_effect=[
+                _verdict(DriftClassification.CONSISTENT, rationale="alpha is fine"),
+                RuntimeError("llm call failed"),
+            ]
+        )
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["fleet_errors"] == 1
+        assert result["fleet_closed"] == 0
+        pr.close_issue.assert_not_called()
+        dedup.set_all.assert_not_called()  # FAIL-CLOSED: retried next tick
+
+    async def test_credit_exhausted_propagates(self, loop_env) -> None:
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        triage.classify = AsyncMock(side_effect=CreditExhaustedError("out of credits"))
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        with pytest.raises(CreditExhaustedError):
+            await loop._do_work()
+
+    async def test_dedup_marked_after_definitive_resolution(self, loop_env) -> None:
+        """Both 'closed' (all CONSISTENT) and 'left open' (mixed verdicts)
+        are definitive triage outcomes — dedup is marked either way so the
+        batch isn't re-triaged every tick. Only a call ERROR (see above)
+        withholds the dedup mark."""
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        triage.classify = AsyncMock(
+            side_effect=[
+                _verdict(DriftClassification.CONSISTENT, rationale="alpha is fine"),
+                _verdict(DriftClassification.CONSISTENT, rationale="beta is fine"),
+            ]
+        )
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        await loop._do_work()
+
+        dedup.set_all.assert_called_once()
+        written = dedup.set_all.call_args.args[0]
+        assert "adr_drift_resolver:FLEET-9603:77" in written
+
+    async def test_max_triage_per_tick_is_shared_with_per_adr_triage(
+        self, loop_env
+    ) -> None:
+        """#10457 — the per-tick LLM-call budget (``adr_drift_resolver_max_
+        triage_per_tick``) is shared across BOTH the per-ADR and fleet
+        loops: a per-ADR candidate that already consumes the budget must
+        stop the fleet loop from spending any calls this tick, not just cap
+        each loop independently (which would double the effective budget)."""
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        cfg.adr_drift_resolver_max_triage_per_tick = 1
+        # A per-ADR candidate (ADR-0024, already seeded by loop_env) plus the
+        # fleet batch from _fleet_env — both present in the same tick.
+        state.all_adr_rollups.return_value = {
+            "ADR-0024": {"issue_number": 42, "pr_numbers": [8473]},
+            "FLEET-9603": {
+                "issue_number": 77,
+                "pr_numbers": [9603],
+                "adr_numbers": [24, 27],
+            },
+        }
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["triaged"] == 1
+        assert result["fleet_candidates"] == 1
+        assert result["fleet_triaged"] == 0
+        assert result["fleet_closed"] == 0
+        # Exactly the one call spent on the per-ADR candidate — the fleet
+        # batch's two member ADRs never got triaged this tick.
+        assert triage.classify.await_count == 1
+        pr.close_issue.assert_awaited_once_with(42, reason="not planned")
+
+    async def test_skips_already_triaged_fleet_batch(self, loop_env) -> None:
+        """The dedup-skip case flagged by test-adequacy on the prior attempt
+        (#10457): mirrors ``TestDedup.test_skips_already_triaged_issue`` for
+        the fleet path — a ``FLEET-<pr>`` batch already fingerprinted in the
+        dedup store for its CURRENT issue number is excluded from
+        ``_fleet_candidates`` — no re-triage, no re-spent LLM calls, every
+        tick."""
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        dedup.get.return_value = {"adr_drift_resolver:FLEET-9603:77"}
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["fleet_candidates"] == 0
+        assert result["fleet_triaged"] == 0
+        triage.classify.assert_not_called()
+        pr.close_issue.assert_not_called()
