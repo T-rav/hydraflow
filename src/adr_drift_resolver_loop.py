@@ -78,6 +78,12 @@ and aggregates fail-closed:
 - Both "closed" and "left open" are definitive outcomes and mark dedup
   (one triage attempt per batch issue lifetime, same fingerprint shape as
   the per-ADR path below); only a call ERROR withholds the mark.
+- The shared per-tick budget (``adr_drift_resolver_max_triage_per_tick``)
+  is gated per LLM CALL, not per batch: a batch spends one call per member
+  ADR, so a batch is only started when its full member count fits in what
+  is left of the tick's budget after the per-ADR loop above. A batch that
+  doesn't fit is deferred whole to next tick rather than starting it and
+  overshooting the configured budget partway through.
 
 ## Idempotency: one triage per rollup ISSUE, not per rollup ADR
 
@@ -427,9 +433,17 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
         fleet_closed = 0
         fleet_errors = 0
         fleet_skipped = 0
+        fleet_calls_spent = 0
 
         for rollup_key, issue_number, pr_number, adr_numbers in fleet_candidates:
-            if triaged + fleet_triaged >= max_per_tick:
+            # A batch spends one LLM call PER member ADR (not one call per
+            # batch, unlike the per-ADR loop above), so the shared budget is
+            # gated on the batch's full member count up front: a batch that
+            # wouldn't fit in what's left of max_per_tick is deferred whole
+            # to next tick rather than starting it and overshooting the
+            # configured per-tick call budget partway through.
+            remaining_budget = max_per_tick - (triaged + fleet_calls_spent)
+            if remaining_budget <= 0 or len(adr_numbers) > remaining_budget:
                 break
 
             outcome = await self._triage_fleet_batch(
@@ -438,6 +452,8 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
             if outcome == "skipped":
                 fleet_skipped += 1
                 continue
+
+            fleet_calls_spent += len(adr_numbers)
             if outcome == "error":
                 fleet_errors += 1
                 continue  # FAIL-CLOSED: no dedup entry, retried next tick

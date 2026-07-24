@@ -626,6 +626,29 @@ class TestFleetTriage:
         assert triage.classify.await_count == 1
         pr.close_issue.assert_awaited_once_with(42, reason="not planned")
 
+    async def test_batch_exceeding_remaining_budget_is_deferred_whole(
+        self, loop_env
+    ) -> None:
+        """#10457 — a batch spends one LLM call PER MEMBER ADR, not one call
+        per batch. With no per-ADR candidates competing for the budget, a
+        2-member batch must still not start when only 1 call's worth of
+        budget remains this tick — starting it would spend 2 calls against a
+        budget of 1, silently overshooting ``adr_drift_resolver_max_triage_
+        per_tick``. The whole batch is deferred to next tick instead."""
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        cfg.adr_drift_resolver_max_triage_per_tick = 1
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["fleet_candidates"] == 1
+        assert result["fleet_triaged"] == 0
+        assert result["fleet_closed"] == 0
+        assert result["fleet_skipped"] == 0
+        triage.classify.assert_not_called()
+        pr.close_issue.assert_not_called()
+        dedup.set_all.assert_not_called()
+
     async def test_skips_already_triaged_fleet_batch(self, loop_env) -> None:
         """The dedup-skip case flagged by test-adequacy on the prior attempt
         (#10457): mirrors ``TestDedup.test_skips_already_triaged_issue`` for
