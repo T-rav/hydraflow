@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10413
 source_phase: plan
 created_at: 2026-07-24T06:07:17.313502+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0494
 ---
 
 # Pure error-string classification bugs need only unit + regression tests

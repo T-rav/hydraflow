@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10413
 source_phase: plan
 created_at: 2026-07-24T06:07:17.313460+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0494
 ---
 
 # GitHub CLI self-review errors use "can not" (two words), not "cannot"

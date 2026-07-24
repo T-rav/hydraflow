@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10402
 source_phase: legacy-migrated
 created_at: 2026-07-24T06:42:01.880614+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10402 closed
 ---
 
 # Shipped with known gap — PR #10422
