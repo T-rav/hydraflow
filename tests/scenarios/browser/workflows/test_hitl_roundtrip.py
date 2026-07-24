@@ -8,11 +8,12 @@ Flow:
      (``with_orchestrator=False``).
   2. Before navigation, install route handlers:
        - GET /api/control/status  → ``{"status": "running", ...}``
-         so the React app renders the HITL tab instead of the idle message.
+         so the React app renders the HITLTable atop Outcomes instead of the
+         idle message.
        - GET /api/hitl            → the seeded HITL item for issue 208.
        - POST /api/hitl/208/skip  → ``{"status": "ok"}``, sets the item list
          empty on next refresh.
-  3. Navigate to ``/?tab=hitl``.
+  3. Navigate to the Outcomes tab, where HITL items render (#10482).
   4. Assert the row is visible.
   5. Click the row to expand the detail panel.
   6. Fill the correction textarea.
@@ -130,7 +131,7 @@ async def test_hitl_submit_advances_issue(world, page) -> None:
     await page.route("**/api/hitl/208/skip", _handle_hitl_skip)
 
     hitl = HitlPage(page, url)
-    await hitl.open()  # navigates to /?tab=hitl and waits for WS ready
+    await hitl.open()  # navigates to /?tab=outcomes and waits for WS ready
 
     # The HITL row must be visible now that status is "running".
     await expect(hitl.item(208)).to_be_visible(timeout=10_000)

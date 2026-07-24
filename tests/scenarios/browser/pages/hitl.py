@@ -1,4 +1,4 @@
-"""HITL tab — human-in-the-loop items awaiting corrections."""
+"""HITL items — human-in-the-loop corrections, surfaced at the top of Outcomes."""
 
 from __future__ import annotations
 
@@ -7,24 +7,15 @@ from .base import BasePage
 
 class HitlPage(BasePage):
     async def open(self) -> None:
-        """Navigate to the dashboard root and switch to the HITL tab.
+        """Navigate to the dashboard's Outcomes tab, where HITL items render.
 
-        The React app does not read the ``tab`` URL parameter — the active tab
-        is controlled by internal state only.  We navigate to ``/`` (so the
-        full app boots and the WS connection is established) and then click the
-        HITL tab button to switch the view.
-
-        The tab button is always rendered regardless of orchestrator status;
-        only the tab content differs (table vs. idle message).
+        HITL was merged into the Outcomes tab (#10482) — there is no
+        standalone "HITL" tab to click anymore. ``_initialTabFromUrl``
+        resolves ``?tab=outcomes`` directly (and still redirects a legacy
+        ``?tab=hitl`` deep link there too), so deep-link straight to it
+        instead of clicking a tab button by text.
         """
-        await self.goto("/")
-        # The HITL tab is a div[role="tab"] inside [data-testid="main-tabs"].
-        # Playwright's text locator finds it even when the badge span is present.
-        await (
-            self.page.locator('[data-testid="main-tabs"] [role="tab"]')
-            .filter(has_text="HITL")
-            .click()
-        )
+        await self.goto("/?tab=outcomes")
 
     def item(self, issue_number: int):
         """Row element for a HITL item (click to expand detail panel)."""
