@@ -57,6 +57,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "escape_ledger": (900, 604800),  # 15m min, 7d max (default 4h, #10367)
     "intervention_tally": (900, 604800),  # 15m min, 7d max (default 4h, #10369)
     "sampled_audit": (900, 604800),  # 15m min, 7d max (default 4h, #10370)
+    "second_order_vitals": (900, 604800),  # 15m min, 7d max (default 4h, #10373)
     "issue_refinement": (3600, 604800),  # 1h min, 7d max (default 24h, #9957)
     "health_monitor": (60, 86400),
     "dependabot_merge": (60, 86400),

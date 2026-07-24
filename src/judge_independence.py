@@ -85,6 +85,12 @@ _SELF_MOD_SUBSTRINGS: tuple[str, ...] = (
     "src/review_phase/",
     "src/judge_independence.py",
     "src/fail_open_monitor_loop.py",
+    # #10373: the green-while-dying monitor must not be quietly editable by the
+    # machinery it monitors — its loop, its pure engine package, and its state
+    # accessor are all self-modification class (independent verdict, fail-closed).
+    "src/second_order_vitals_loop.py",
+    "src/vitals/",
+    "src/state/_second_order_vitals.py",
     "src/convergence_gate.py",
     "src/escalation_gate.py",
     "src/precondition_gate.py",

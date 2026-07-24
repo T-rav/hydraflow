@@ -2364,6 +2364,16 @@ class StateData(BaseModel):
     sampled_audit_disagreement_history: list[dict[str, Any]] = Field(
         default_factory=list
     )
+    # SecondOrderVitalsLoop (#10373) — the capstone residual monitor's state.
+    # ``series_history`` is {series_name: [per-window reading, …]}, the bounded
+    # observation histories the Shewhart individuals charts are baselined from
+    # (this IS the baseline; sustained-window divergence needs the persisted
+    # series). ``last_verdict`` is the previous tick's verdict token so the
+    # single diverging alarm fires once on the transition into ``diverging``.
+    second_order_vitals_series_history: dict[str, list[float]] = Field(
+        default_factory=dict
+    )
+    second_order_vitals_last_verdict: str = Field(default="")
     last_updated: str | None = None
 
 

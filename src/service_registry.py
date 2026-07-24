@@ -133,6 +133,7 @@ from run_recorder import RunRecorder
 from runs_gc_loop import RunsGCLoop
 from sampled_audit_loop import SampledAuditLoop
 from sandbox_failure_fixer_loop import SandboxFailureFixerLoop
+from second_order_vitals_loop import SecondOrderVitalsLoop
 from security_patch_loop import SecurityPatchLoop  # noqa: TCH001
 from sentry_loop import SentryLoop  # noqa: TCH001 — used in dataclass field
 from shape_runner import ShapeRunner
@@ -337,6 +338,7 @@ class ServiceRegistry:
     escape_ledger_loop: EscapeLedgerLoop
     intervention_tally_loop: InterventionTallyLoop
     sampled_audit_loop: SampledAuditLoop
+    second_order_vitals_loop: SecondOrderVitalsLoop
     issue_refinement_loop: IssueRefinementLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
@@ -1439,6 +1441,12 @@ def build_services(
         dedup=sampled_audit_dedup,
         deps=loop_deps,
     )
+    second_order_vitals_loop = SecondOrderVitalsLoop(
+        config=config,
+        pr_manager=prs,
+        state=state,
+        deps=loop_deps,
+    )
     issue_refinement_dedup = DedupStore(
         "issue_refinement",
         config.data_root / "dedup" / "issue_refinement.json",
@@ -2027,6 +2035,7 @@ def build_services(
         escape_ledger_loop=escape_ledger_loop,
         intervention_tally_loop=intervention_tally_loop,
         sampled_audit_loop=sampled_audit_loop,
+        second_order_vitals_loop=second_order_vitals_loop,
         issue_refinement_loop=issue_refinement_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,
