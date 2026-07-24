@@ -21,6 +21,7 @@ from ci_sentinels import ci_timeout
 from config import HydraFlowConfig
 from events import EventBus, EventType
 from evidence_pack import GAP_REPRO_MANIFEST, RECORD_TYPE_EVIDENCE_PACK
+from execution import SimpleResult
 from models import PRInfo
 from repro_manifest import MANIFEST_HEADING, MANIFEST_SCHEMA, extract_manifest_block
 from staging_promotion_loop import StagingPromotionLoop
@@ -44,16 +45,29 @@ def _fake_evidence_compiler(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
 @pytest.fixture(autouse=True)
 def _fake_merged_pr_listing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the CH-4 reconcile sweep's gh boundary off the network for every
-    test: an empty merged-PR list means the sweep is a no-op. Tests that
-    exercise the sweep (or the policy label fetch) install their own
-    ``run_subprocess`` fake on top."""
+    """Keep the loop's raw-gh boundary off the network for every test with
+    benign empty responses: no merged PRs (CH-4 reconcile + G1 observed-advance
+    sweeps no-op, via the RAISING ``run_subprocess``), no staging check-runs
+    (named-gate sensor NOT green) and unknown gap (promotion-health gap None) via
+    the NON-RAISING ``run_subprocess_result``. Tests that exercise a specific read
+    install their own fakes on top (``_install_gh_fake``)."""
 
-    async def _empty_list(*cmd: str, **_kwargs: object) -> str:
-        assert cmd[:3] == ("gh", "pr", "list"), cmd
-        return "[]"
+    async def _default_run(*cmd: str, **_kwargs: object) -> str:
+        if cmd[:3] == ("gh", "pr", "list"):
+            return "[]"
+        raise AssertionError(f"unexpected run_subprocess command: {cmd}")
 
-    monkeypatch.setattr(subprocess_util, "run_subprocess", _empty_list)
+    async def _default_result(*cmd: str, **_kwargs: object) -> SimpleResult:
+        if cmd[:2] == ("gh", "api"):
+            path = cmd[2] if len(cmd) > 2 else ""
+            if "/check-runs" in path:
+                return SimpleResult(stdout=json.dumps({"check_runs": []}), returncode=0)
+            if "/compare/" in path:
+                return SimpleResult(stdout="", returncode=0)
+        raise AssertionError(f"unexpected run_subprocess_result command: {cmd}")
+
+    monkeypatch.setattr(subprocess_util, "run_subprocess", _default_run)
+    monkeypatch.setattr(subprocess_util, "run_subprocess_result", _default_result)
 
 
 def _make_cfg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> HydraFlowConfig:
@@ -832,7 +846,11 @@ class TestSentinelFidelity:
 
         result = await loop._do_work()
 
-        assert result == {"status": "ci_pending", "pr": 72}
+        # ci_pending, never a failure classification (no find_issue filed). The
+        # promotion-health signal (piece b) rides alongside on any operating tick.
+        assert result["status"] == "ci_pending"
+        assert result["pr"] == 72
+        assert "find_issue" not in result
         prs.close_issue.assert_not_called()
         assert state.get_consecutive_rc_failures() == 0
         assert _escalation_calls(prs) == []
@@ -1578,3 +1596,608 @@ class TestPolicyDenyDedup:
         assert prs.post_comment.await_count == 2
         commented_prs = [c.args[0] for c in prs.post_comment.await_args_list]
         assert commented_prs == [99, 100]
+
+
+_DEFAULT_CHECK_RUN_STARTED = "2026-07-23T00:00:00Z"
+
+
+def _write_canonical(repo_root: Path, contexts: list[str]) -> None:
+    """Materialize the canonical ``main`` ruleset the named-gate sensor reads.
+
+    ``_staging_ci_is_green`` resolves the required-on-RC gate NAMES from
+    ``branch_protection_audit.load_canonical`` (the on-disk contract at
+    ``<repo_root>/docs/standards/branch_protection``), so tests that exercise a
+    green sensor must write it under the config's ``repo_root`` (== tmp_path)."""
+    canonical_dir = repo_root / "docs" / "standards" / "branch_protection"
+    canonical_dir.mkdir(parents=True, exist_ok=True)
+    (canonical_dir / "main_ruleset.json").write_text(
+        json.dumps(
+            {
+                "name": "main protect",
+                "target": "branch",
+                "rules": [
+                    {
+                        "type": "required_status_checks",
+                        "parameters": {
+                            "required_status_checks": [{"context": c} for c in contexts]
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    (canonical_dir / "staging_ruleset.json").write_text(
+        json.dumps({"name": "staging protect", "target": "branch", "rules": []})
+    )
+
+
+def _install_gh_fake(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    merged_prs: list[dict] | None = None,
+    staging_gates: dict[str, str] | None = None,
+    gap: int | None = None,
+) -> None:
+    """Route the loop's raw-gh reads used by the G1 (#10353) paths:
+
+    - ``gh pr list`` (merged RC promotion PRs, ``_list_merged_promotion_prs``)
+    - ``gh api .../commits/{staging}/check-runs`` (named-gate conclusions on
+      staging HEAD, ``_staging_head_check_conclusions``)
+    - ``gh api compare`` (``main..staging`` gap, ``_main_staging_gap``)
+
+    Overrides the module autouse ``_fake_merged_pr_listing`` (last setattr wins).
+    ``gh pr list`` goes through the RAISING ``run_subprocess``; the check-runs and
+    compare reads go through the NON-RAISING ``run_subprocess_result``.
+    *staging_gates* maps ``check-name -> conclusion``; *gap* is the compare
+    ``ahead_by`` (``None`` => empty body, so the gap reads back as unknown).
+    """
+    check_runs = [
+        {
+            "name": name,
+            "conclusion": conclusion,
+            "started_at": _DEFAULT_CHECK_RUN_STARTED,
+        }
+        for name, conclusion in (staging_gates or {}).items()
+    ]
+
+    async def _run(*cmd: str, **_kwargs: object) -> str:
+        if cmd[:3] == ("gh", "pr", "list"):
+            return json.dumps(merged_prs or [])
+        raise AssertionError(f"unexpected run_subprocess command: {cmd}")
+
+    async def _result(*cmd: str, **_kwargs: object) -> SimpleResult:
+        if cmd[:2] == ("gh", "api"):
+            path = cmd[2] if len(cmd) > 2 else ""
+            if "/check-runs" in path:
+                return SimpleResult(
+                    stdout=json.dumps({"check_runs": check_runs}), returncode=0
+                )
+            if "/compare/" in path:
+                return SimpleResult(
+                    stdout="" if gap is None else str(gap), returncode=0
+                )
+        raise AssertionError(f"unexpected run_subprocess_result command: {cmd}")
+
+    monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+    monkeypatch.setattr(subprocess_util, "run_subprocess_result", _result)
+
+
+class TestObservedMainAdvanceClosesTrackers:
+    """G1 (#10353) piece (a): the RC trackers close when ``main`` is OBSERVED to
+    advance via a promotion the loop did NOT perform (a manual/operator merge),
+    not only on the loop's own merge call. This is the miss that left the
+    rc-promotion-stuck / rc_ci trackers open after a manual promotion this
+    session."""
+
+    RC_CI_ISSUE = 7001
+    ESCALATION_ISSUE = 8002
+
+    def _loop_with_open_trackers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, mark: int
+    ) -> tuple[StagingPromotionLoop, MagicMock, StateTracker]:
+        loop, prs = _make_loop(tmp_path, monkeypatch)
+        state = StateTracker(state_file=tmp_path / "s.json")
+        # Both rolling trackers OPEN + a live failure streak.
+        state.set_rollup_issue(
+            "staging_promotion:rc_ci",
+            issue_number=self.RC_CI_ISSUE,
+            content_hash="h",
+        )
+        state.set_rollup_issue(
+            "staging_promotion:rc_promotion_stuck",
+            issue_number=self.ESCALATION_ISSUE,
+            content_hash="h",
+        )
+        state.increment_consecutive_rc_failures()
+        state.increment_consecutive_rc_failures()
+        if mark:
+            state.set_last_observed_promotion_pr(mark)
+        loop._state = state  # type: ignore[attr-defined]
+        return loop, prs, state
+
+    @pytest.mark.asyncio
+    async def test_new_merged_rc_closes_both_trackers_and_resets_streak(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, state = self._loop_with_open_trackers(
+            tmp_path, monkeypatch, mark=100
+        )
+        _install_gh_fake(
+            monkeypatch,
+            merged_prs=[{"number": 150, "headRefName": "rc/2026-07-23-1200"}],
+        )
+        closed = await loop._reconcile_observed_main_advance()
+        assert closed == 2
+        assert state.get_rollup_issue("staging_promotion:rc_ci") is None
+        assert state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is None
+        assert state.get_consecutive_rc_failures() == 0
+        assert state.get_last_observed_promotion_pr() == 150
+        prs.close_issue.assert_any_await(self.RC_CI_ISSUE)
+        prs.close_issue.assert_any_await(self.ESCALATION_ISSUE)
+
+    @pytest.mark.asyncio
+    async def test_bootstrap_records_mark_without_closing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # mark == 0 (never observed) → record baseline, DO NOT close: the open
+        # trackers belong to the current red streak, not to a pre-existing merge.
+        loop, prs, state = self._loop_with_open_trackers(tmp_path, monkeypatch, mark=0)
+        _install_gh_fake(
+            monkeypatch,
+            merged_prs=[{"number": 150, "headRefName": "rc/2026-07-23-1200"}],
+        )
+        closed = await loop._reconcile_observed_main_advance()
+        assert closed is None
+        assert state.get_last_observed_promotion_pr() == 150
+        assert state.get_rollup_issue("staging_promotion:rc_ci") is not None
+        assert (
+            state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is not None
+        )
+        prs.close_issue.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_no_new_advance_is_a_noop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, state = self._loop_with_open_trackers(
+            tmp_path, monkeypatch, mark=150
+        )
+        _install_gh_fake(
+            monkeypatch,
+            merged_prs=[{"number": 150, "headRefName": "rc/2026-07-23-1200"}],
+        )
+        closed = await loop._reconcile_observed_main_advance()
+        assert closed is None
+        assert (
+            state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is not None
+        )
+        prs.close_issue.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_rc_merges_are_ignored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A merged main-base PR whose head is NOT an rc/* branch is not a
+        # promotion — it must not count as a main advance for tracker purposes.
+        loop, _prs, state = self._loop_with_open_trackers(
+            tmp_path, monkeypatch, mark=100
+        )
+        _install_gh_fake(
+            monkeypatch,
+            merged_prs=[{"number": 900, "headRefName": "fix/some-branch"}],
+        )
+        closed = await loop._reconcile_observed_main_advance()
+        assert closed is None
+        assert (
+            state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is not None
+        )
+
+    @pytest.mark.asyncio
+    async def test_noop_when_no_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs = _make_loop(tmp_path, monkeypatch)  # _state is None
+        _install_gh_fake(
+            monkeypatch,
+            merged_prs=[{"number": 150, "headRefName": "rc/x"}],
+        )
+        assert await loop._reconcile_observed_main_advance() is None
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_off_disables_the_sweep(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # rc_observed_advance_close_enabled=False (the sandbox air-gap pin): the
+        # sweep does NOT spawn `gh pr list` and never closes a tracker.
+        monkeypatch.setenv("HYDRAFLOW_RC_OBSERVED_ADVANCE_CLOSE_ENABLED", "false")
+        loop, prs, state = self._loop_with_open_trackers(
+            tmp_path, monkeypatch, mark=100
+        )
+        _install_gh_fake(
+            monkeypatch,
+            merged_prs=[{"number": 150, "headRefName": "rc/2026-07-23-1200"}],
+        )
+        closed = await loop._reconcile_observed_main_advance()
+        assert closed is None
+        assert (
+            state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is not None
+        )
+        prs.close_issue.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_do_work_manual_promotion_closes_trackers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end wiring: cadence not elapsed, no open PR, a manual promotion
+        merged out of band → the tick closes the trackers via the reconciler."""
+        loop, _prs, state = self._loop_with_open_trackers(
+            tmp_path, monkeypatch, mark=100
+        )
+        loop._record_last_rc(datetime.now(UTC))  # cadence fresh → not elapsed
+        _install_gh_fake(
+            monkeypatch,
+            merged_prs=[{"number": 151, "headRefName": "rc/2026-07-23-1300"}],
+        )
+        result = await loop._do_work()
+        assert result.get("trackers_closed") == 2
+        assert state.get_rollup_issue("staging_promotion:rc_promotion_stuck") is None
+        assert state.get_last_observed_promotion_pr() == 151
+
+
+class TestStagingCiGreenSensor:
+    """G1 (#10353) piece (a): the NAMED-BLOCKING-GATE staging sensor used by
+    auto-recut. Green iff every required-on-RC gate (read from the canonical
+    ruleset) concluded ``success`` on staging HEAD — not merely the branch's
+    latest run conclusion, which the advisory-on-staging / required-on-RC
+    asymmetry can leave green while a required gate is red."""
+
+    REQUIRED = ["Tests", "Sandbox (rc/* promotion PR full suite)"]
+
+    @pytest.mark.asyncio
+    async def test_all_required_gates_success_is_green(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs = _make_loop(tmp_path, monkeypatch)
+        _write_canonical(tmp_path, self.REQUIRED)
+        _install_gh_fake(
+            monkeypatch,
+            staging_gates={
+                "Tests": "success",
+                "Sandbox (rc/* promotion PR full suite)": "success",
+            },
+        )
+        assert await loop._staging_ci_is_green() is True
+
+    @pytest.mark.asyncio
+    async def test_required_gate_red_hidden_behind_branch_green_is_not_green(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The exact dead-time trap: a required-on-RC gate is RED on staging while
+        # other (advisory / unrelated) checks are green — the old branch-level
+        # "latest run conclusion" read could report the branch green. The
+        # named-gate sensor sees the specific required gate red → NOT green.
+        loop, _prs = _make_loop(tmp_path, monkeypatch)
+        _write_canonical(tmp_path, self.REQUIRED)
+        _install_gh_fake(
+            monkeypatch,
+            staging_gates={
+                "Tests": "success",
+                "Sandbox (rc/* promotion PR full suite)": "failure",
+                "Some Advisory Check": "success",
+            },
+        )
+        assert await loop._staging_ci_is_green() is False
+
+    @pytest.mark.asyncio
+    async def test_missing_required_gate_is_not_green(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A required gate that never reported a check-run on staging HEAD gives
+        # no positive confirmation → fail-closed (no recut).
+        loop, _prs = _make_loop(tmp_path, monkeypatch)
+        _write_canonical(tmp_path, self.REQUIRED)
+        _install_gh_fake(monkeypatch, staging_gates={"Tests": "success"})
+        assert await loop._staging_ci_is_green() is False
+
+    @pytest.mark.asyncio
+    async def test_undeterminable_gate_set_is_fail_closed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # No canonical ruleset on disk → the required-gate set is undeterminable;
+        # the sensor fails closed even though the check-runs it sees are green.
+        loop, _prs = _make_loop(tmp_path, monkeypatch)  # no _write_canonical
+        _install_gh_fake(monkeypatch, staging_gates={"Tests": "success"})
+        assert await loop._staging_ci_is_green() is False
+
+    @pytest.mark.asyncio
+    async def test_check_runs_read_failure_is_fail_closed_no_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The non-raising check-runs read returns a non-zero rc (gh failure / the
+        # loop-health air-gap) → no conclusions → every required gate absent →
+        # sensor fail-closes (False) without raising.
+        loop, _prs = _make_loop(tmp_path, monkeypatch)
+        _write_canonical(tmp_path, self.REQUIRED)
+
+        async def _result(*cmd: str, **_kwargs: object) -> SimpleResult:
+            if cmd[:2] == ("gh", "api") and "/check-runs" in cmd[2]:
+                return SimpleResult(stdout="", stderr="air-gapped", returncode=1)
+            raise AssertionError(f"unexpected gh command: {cmd}")
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess_result", _result)
+        assert await loop._staging_ci_is_green() is False
+
+    @pytest.mark.asyncio
+    async def test_rerun_latest_conclusion_wins(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # When a gate reran on the same HEAD, the most recent run's conclusion
+        # decides — a stale earlier failure must not mask a live success.
+        loop, _prs = _make_loop(tmp_path, monkeypatch)
+        _write_canonical(tmp_path, ["Tests"])
+
+        async def _result(*cmd: str, **_kwargs: object) -> SimpleResult:
+            if cmd[:2] == ("gh", "api") and "/check-runs" in cmd[2]:
+                return SimpleResult(
+                    stdout=json.dumps(
+                        {
+                            "check_runs": [
+                                {
+                                    "name": "Tests",
+                                    "conclusion": "failure",
+                                    "started_at": "2026-07-23T00:00:00Z",
+                                },
+                                {
+                                    "name": "Tests",
+                                    "conclusion": "success",
+                                    "started_at": "2026-07-23T01:00:00Z",
+                                },
+                            ]
+                        }
+                    ),
+                    returncode=0,
+                )
+            raise AssertionError(f"unexpected gh command: {cmd}")
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess_result", _result)
+        assert await loop._staging_ci_is_green() is True
+
+
+class TestAutoRecutDefaultOff:
+    """G1 (#10353) piece (c): auto-recut is behind a default-OFF flag — it
+    changes NO behaviour until ``HYDRAFLOW_RC_AUTO_RECUT_ENABLED`` is set."""
+
+    ESCALATION_ISSUE = 8002
+
+    def _stuck_loop(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        flag: bool,
+        seed_tracker: bool = True,
+    ) -> tuple[StagingPromotionLoop, MagicMock, StateTracker]:
+        monkeypatch.setenv(
+            "HYDRAFLOW_RC_AUTO_RECUT_ENABLED", "true" if flag else "false"
+        )
+        loop, prs = _make_loop(tmp_path, monkeypatch)
+        # The named-gate sensor resolves required gates from the canonical
+        # ruleset — one required gate ("Tests") is enough for these tests.
+        _write_canonical(tmp_path, ["Tests"])
+        state = StateTracker(state_file=tmp_path / "s.json")
+        if seed_tracker:
+            state.set_rollup_issue(
+                "staging_promotion:rc_promotion_stuck",
+                issue_number=self.ESCALATION_ISSUE,
+                content_hash="h",
+            )
+        loop._state = state  # type: ignore[attr-defined]
+        return loop, prs, state
+
+    @pytest.mark.asyncio
+    async def test_flag_off_never_recuts_even_when_stuck_and_green(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, _state = self._stuck_loop(tmp_path, monkeypatch, flag=False)
+        _install_gh_fake(monkeypatch, staging_gates={"Tests": "success"})
+        assert await loop._maybe_auto_recut() is None
+        prs.create_rc_branch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_flag_on_stuck_and_green_recuts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, _state = self._stuck_loop(tmp_path, monkeypatch, flag=True)
+        _install_gh_fake(monkeypatch, staging_gates={"Tests": "success"})
+        result = await loop._maybe_auto_recut()
+        assert result is not None
+        assert result.get("auto_recut") is True
+        assert result["status"] == "opened"
+        prs.create_rc_branch.assert_awaited_once()
+        prs.create_promotion_pr.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_flag_on_but_staging_red_does_not_recut(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, _state = self._stuck_loop(tmp_path, monkeypatch, flag=True)
+        _install_gh_fake(monkeypatch, staging_gates={"Tests": "failure"})
+        assert await loop._maybe_auto_recut() is None
+        prs.create_rc_branch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_flag_on_but_no_open_escalation_does_not_recut(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, _state = self._stuck_loop(
+            tmp_path, monkeypatch, flag=True, seed_tracker=False
+        )
+        _install_gh_fake(monkeypatch, staging_gates={"Tests": "success"})
+        assert await loop._maybe_auto_recut() is None
+        prs.create_rc_branch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_do_work_flag_off_reports_cadence_not_elapsed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, _state = self._stuck_loop(tmp_path, monkeypatch, flag=False)
+        loop._record_last_rc(datetime.now(UTC))  # cadence fresh → not elapsed
+        _install_gh_fake(monkeypatch, merged_prs=[], staging_gates={"Tests": "success"})
+        result = await loop._do_work()
+        assert result["status"] == "cadence_not_elapsed"
+        prs.create_rc_branch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_do_work_flag_on_recuts_ahead_of_cadence(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs, _state = self._stuck_loop(tmp_path, monkeypatch, flag=True)
+        loop._record_last_rc(datetime.now(UTC))  # cadence NOT elapsed
+        _install_gh_fake(monkeypatch, merged_prs=[], staging_gates={"Tests": "success"})
+        result = await loop._do_work()
+        assert result.get("auto_recut") is True
+        assert result["status"] == "opened"
+        prs.create_rc_branch.assert_awaited_once()
+
+
+class TestPromotionHealthSignal:
+    """G1 (#10353) piece (b): the promotion error-signal — `main..staging` gap +
+    days_since_last_successful_promotion + consecutive_rc_failures — surfaces as
+    observable state in the loop's BACKGROUND_WORKER_STATUS details, so promotion
+    health is measurable, not merely implied."""
+
+    def _stateful_loop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[StagingPromotionLoop, MagicMock, StateTracker]:
+        loop, prs = _make_loop(tmp_path, monkeypatch)
+        loop._record_last_rc(datetime.now(UTC))  # cadence fresh → not elapsed
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+        return loop, prs, state
+
+    @pytest.mark.asyncio
+    async def test_all_three_signals_surface_in_do_work(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, state = self._stateful_loop(tmp_path, monkeypatch)
+        state.increment_consecutive_rc_failures()
+        state.increment_consecutive_rc_failures()
+        state.set_last_successful_promotion_at(
+            (datetime.now(UTC) - timedelta(days=2)).isoformat()
+        )
+        _install_gh_fake(monkeypatch, merged_prs=[], gap=5)
+
+        result = await loop._do_work()
+
+        health = result["promotion_health"]
+        assert health["main_staging_gap"] == 5
+        assert health["consecutive_rc_failures"] == 2
+        assert 1.9 < health["days_since_last_successful_promotion"] < 2.1
+
+    @pytest.mark.asyncio
+    async def test_days_since_is_none_when_never_promoted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs, _state = self._stateful_loop(tmp_path, monkeypatch)
+        _install_gh_fake(monkeypatch, merged_prs=[], gap=0)
+        result = await loop._do_work()
+        health = result["promotion_health"]
+        assert health["days_since_last_successful_promotion"] is None
+        assert health["main_staging_gap"] == 0
+
+    @pytest.mark.asyncio
+    async def test_gap_none_and_no_spawn_when_health_flag_off(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The sandbox air-gap pin: flag OFF → the gap's `gh api compare` spawn is
+        # never reached; the two state-only signals still surface.
+        monkeypatch.setenv("HYDRAFLOW_RC_PROMOTION_HEALTH_ENABLED", "false")
+        loop, _prs, state = self._stateful_loop(tmp_path, monkeypatch)
+        state.increment_consecutive_rc_failures()
+
+        async def _run(*cmd: str, **_kwargs: object) -> str:
+            if cmd[:3] == ("gh", "pr", "list"):
+                return "[]"
+            raise AssertionError(f"unexpected run_subprocess command: {cmd}")
+
+        async def _result(*cmd: str, **_kwargs: object) -> SimpleResult:
+            if cmd[:2] == ("gh", "api") and "/compare/" in cmd[2]:
+                raise AssertionError("compare must NOT be read when health flag off")
+            raise AssertionError(f"unexpected run_subprocess_result command: {cmd}")
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+        monkeypatch.setattr(subprocess_util, "run_subprocess_result", _result)
+        result = await loop._do_work()
+        health = result["promotion_health"]
+        assert health["main_staging_gap"] is None
+        assert health["consecutive_rc_failures"] == 1
+
+    @pytest.mark.asyncio
+    async def test_no_health_key_when_state_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs = _make_loop(tmp_path, monkeypatch)  # _state is None
+        loop._record_last_rc(datetime.now(UTC))
+        result = await loop._do_work()
+        assert "promotion_health" not in result
+
+    @pytest.mark.asyncio
+    async def test_gap_read_failure_degrades_to_none_does_not_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A telemetry read must NEVER take down the tick. The non-raising
+        # run_subprocess_result returns a non-zero rc (e.g. the MockWorld
+        # loop-health harness's air-gap, or a gh 404) → the gap degrades to
+        # None and `_do_work` completes normally.
+        loop, _prs, _state = self._stateful_loop(tmp_path, monkeypatch)
+
+        async def _run(*cmd: str, **_kwargs: object) -> str:
+            if cmd[:3] == ("gh", "pr", "list"):
+                return "[]"
+            raise AssertionError(f"unexpected run_subprocess command: {cmd}")
+
+        async def _result(*cmd: str, **_kwargs: object) -> SimpleResult:
+            if cmd[:2] == ("gh", "api") and "/compare/" in cmd[2]:
+                return SimpleResult(stdout="", stderr="air-gapped", returncode=1)
+            raise AssertionError(f"unexpected run_subprocess_result command: {cmd}")
+
+        monkeypatch.setattr(subprocess_util, "run_subprocess", _run)
+        monkeypatch.setattr(subprocess_util, "run_subprocess_result", _result)
+        result = await loop._do_work()  # must not raise
+        assert result["promotion_health"]["main_staging_gap"] is None
+
+    @pytest.mark.asyncio
+    async def test_last_successful_promotion_recorded_on_promoted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, prs = _make_loop(
+            tmp_path,
+            monkeypatch,
+            open_promotion=_make_pr(number=77),
+            ci_result=(True, "ok"),
+            merge_result=True,
+        )
+        prs.get_pr_head_sha = AsyncMock(return_value="abc123")
+        state = StateTracker(state_file=tmp_path / "s.json")
+        loop._state = state  # type: ignore[attr-defined]
+
+        result = await loop._do_work()
+
+        assert result["status"] == "promoted"
+        assert state.get_last_successful_promotion_at() != ""
+
+    @pytest.mark.asyncio
+    async def test_last_successful_promotion_recorded_on_observed_advance(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        loop, _prs = _make_loop(tmp_path, monkeypatch)
+        state = StateTracker(state_file=tmp_path / "s.json")
+        state.set_last_observed_promotion_pr(100)  # baseline already bootstrapped
+        loop._state = state  # type: ignore[attr-defined]
+        _install_gh_fake(
+            monkeypatch,
+            merged_prs=[{"number": 150, "headRefName": "rc/2026-07-23-1200"}],
+        )
+        closed = await loop._reconcile_observed_main_advance()
+        assert closed == 0  # no open trackers, but main advanced
+        assert state.get_last_successful_promotion_at() != ""

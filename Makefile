@@ -73,7 +73,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial
+.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -784,3 +784,13 @@ sandbox-test:
 
 sandbox-shell:
 	docker compose -f docker-compose.sandbox.yml exec hydraflow /bin/bash
+
+## post-merge-smoke — full-machine sandbox smoke (s82). Boots the real server
+## (MockWorld at the ports) and drives one issue through BOTH the standard PR
+## path and the ADR-0042 RC promotion path in a single docker run. This is the
+## exact command CI's post-merge-smoke job invokes on every push to
+## staging/main (see .github/workflows/ci.yml), so this target reproduces that
+## gate locally. Scenario: tests/sandbox_scenarios/scenarios/s82_full_machine_rc_promotion.py
+post-merge-smoke:
+	@echo "$(BLUE)Running post-merge full-machine smoke (s82)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/sandbox_scenario.py run s82_full_machine_rc_promotion

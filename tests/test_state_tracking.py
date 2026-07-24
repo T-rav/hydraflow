@@ -121,6 +121,8 @@ class TestInitialization:
             "last_green_rc_sha",
             "last_rc_red_sha",
             "consecutive_rc_failures",
+            "last_observed_promotion_pr",
+            "last_successful_promotion_at",
             "managed_repos_onboarding_status",
             "onboarding_drafts",
             "principles_drift_attempts",
@@ -186,6 +188,18 @@ class TestInitialization:
             "refinement_open_proposals",
             # ErosionMetricsLoop (#10107, epic #10104) — last-processed-SHA cursor.
             "erosion_last_processed_sha",
+            # EscapeLedgerLoop (#10367) — escape-detection last-processed-SHA cursor.
+            "escape_ledger_last_processed_sha",
+            # InterventionTallyLoop (#10369) — attention-side last-processed-ts cursor.
+            "intervention_tally_last_processed_ts",
+            # SampledAuditLoop (#10370) — cursor + Shewhart governed-rate state.
+            "sampled_audit_last_processed_sha",
+            "sampled_audit_governed_rate",
+            "sampled_audit_disagreement_history",
+            # SecondOrderVitalsLoop (#10373) — per-series observation histories
+            # (the Shewhart baselines) + last verdict (diverging-episode edge).
+            "second_order_vitals_series_history",
+            "second_order_vitals_last_verdict",
         }
         assert set(d.keys()) == expected_keys
 

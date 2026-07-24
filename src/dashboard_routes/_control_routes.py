@@ -313,6 +313,31 @@ _bg_worker_defs = [
         "v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B). See #10107, epic #10104.",
     ),
     (
+        "fail_open_monitor",
+        "Fail-Open Monitor",
+        "Watches the judge fail-open ledger; applies a Shewhart control limit to the daily fail-open rate and files a hydraflow-find above-limit (Pattern B). Part of the judge-independence budget + fail-visible dispatch (#10371).",
+    ),
+    (
+        "escape_ledger",
+        "Escape Ledger",
+        "Falsification instrument (read-only, Pattern B): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. Never gates or fixes. See #10367.",
+    ),
+    (
+        "intervention_tally",
+        "Intervention Tally",
+        "Attention-side telemetry (read-only, Pattern B): senses human touches (steering/HITL/control-route/CLI), classifies them into a fixed taxonomy (mechanical + bounded cheap-LLM for free-text), and renders interventions-per-100-merges (same denominator as the escape ledger), the per-loop trust table, and loops-per-governor. Never gates or fixes. See #10369.",
+    ),
+    (
+        "sampled_audit",
+        "Sampled Audit",
+        "The silent-escape estimator (read-only, Pattern B): re-audits a governed random sample of merged PRs with a fresh adversarial context, records agree/disagree to audit_samples.jsonl, and renders the disagreement rate + confidence interval as a statistical bound on undetected escapes. Upheld disagreements cross-link into the escape ledger. Never gates, reverts, or fixes. See #10370.",
+    ),
+    (
+        "second_order_vitals",
+        "Second-order Vitals",
+        "The capstone residual monitor (read-only, Pattern B): reads the four instrument ledgers, gives each of five families its own Shewhart control limit, and computes the green-while-dying verdict (green/watch/diverging) — adverse drift across ≥3 families sustained over 2 windows while primary health is green. `diverging` files ONE never-batched find + HITL per episode; `watch` is a dashboard state change only. Never gates or fixes. See #10373.",
+    ),
+    (
         "adr_drift_resolver",
         "ADR Drift Resolver",
         "Triage-before-escalate for adr_touchpoint_auditor's ADR-drift rollups: one LLM call classifies each as consistent (auto-close), real/over/dead-citation drift (relabel hydraflow-find with an ADR-edit brief), or low-confidence (HITL, rare). Fail-closed — only a confident consistent verdict auto-closes. See #9976.",

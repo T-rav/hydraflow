@@ -48,6 +48,7 @@ from factory_metrics import (
     load_metrics,
 )
 from route_types import REPO_ALL, RepoSlugParam
+from vitals.report import latest_verdict_payload
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -276,6 +277,63 @@ def build_diagnostics_router(
     ) -> dict[str, Any]:
         events = _load(range, repo)
         return headline_metrics(events)
+
+    @router.get("/gauntlet-calibration")
+    def gauntlet_calibration(repo: RepoSlugParam = None) -> dict[str, Any]:
+        """Judge-independence + fail-visible dispatch calibration panel (#10371).
+
+        Reads the append-only fail-open ledger and returns the calibration
+        metrics: percent of classed merges carrying an independent verdict, the
+        fail-open rate + Shewhart control limit (and whether it is breached), the
+        independence-unavailable rate, and disagreement-by-family. This is the
+        dashboard panel's data source (the generated arch doc stays a
+        deterministic instrument spec).
+        """
+        import judge_independence as ji
+        from audit.metrics import calibration_metrics as sampled_audit_metrics
+        from audit.store import AuditSampleLedger
+
+        cfg = _config_for(repo) if repo is not None else config
+        records = ji.read_records(ji.ledger_path_for(cfg))
+        result = ji.calibration_metrics(records)
+        # Sampled adversarial re-audit (#10370): merge the silent-escape
+        # estimator's metrics from its own append-only ledger into the shared
+        # panel, alongside the judge-independence fail-open metrics.
+        samples = AuditSampleLedger(
+            cfg.diagnostics_dir / "audit_samples.jsonl"
+        ).read_all()
+        result["sampled_audit"] = sampled_audit_metrics(samples)
+        return result
+
+    @router.get("/second-order-vitals")
+    def second_order_vitals(repo: RepoSlugParam = None) -> dict[str, Any]:
+        """Green-while-dying residual monitor verdict (#10373).
+
+        Reads the append-only ``vitals.jsonl`` verdict history and returns the
+        latest vitals verdict — ``green | watch | diverging`` — with its
+        coverage (``n-of-5 reporting``) and the k-of-5 family tally. Read-only
+        (Pattern B): the loop computes and reports; this endpoint just surfaces
+        the most recent persisted verdict. With no history yet it returns an
+        honest ``green (0-of-5 reporting)`` rather than erroring.
+        """
+        cfg = _config_for(repo) if repo is not None else config
+        path = cfg.diagnostics_dir / "vitals.jsonl"
+        records: list[dict[str, Any]] = []
+        try:
+            text = path.read_text(encoding="utf-8") if path.exists() else ""
+        except OSError:
+            text = ""
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                records.append(obj)
+        return latest_verdict_payload(records)
 
     @router.get("/tools")
     def tools(

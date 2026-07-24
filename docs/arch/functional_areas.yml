@@ -79,6 +79,11 @@ areas:
       - ContractRefreshLoop
       - CorpusLearningLoop
       - ErosionMetricsLoop
+      - EscapeLedgerLoop
+      - FailOpenMonitorLoop
+      - InterventionTallyLoop
+      - SampledAuditLoop
+      - SecondOrderVitalsLoop
       - FakeCoverageAuditorLoop
       - FlakeTrackerLoop
       - LiveCorpusReplayLoop

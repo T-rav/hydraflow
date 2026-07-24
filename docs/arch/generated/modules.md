@@ -10,12 +10,15 @@ graph LR
     src_arch["src.arch"]
     src_arch_extractors["src.arch.extractors"]
     src_arch_generators["src.arch.generators"]
+    src_audit["src.audit"]
     src_auto_tighten["src.auto_tighten"]
     src_contracts["src.contracts"]
     src_dashboard_routes["src.dashboard_routes"]
     src_disturbance["src.disturbance"]
     src_disturbance_detectors["src.disturbance.detectors"]
     src_erosion["src.erosion"]
+    src_escape["src.escape"]
+    src_intervention["src.intervention"]
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
     src_observability["src.observability"]
@@ -27,26 +30,35 @@ graph LR
     src_sentry["src.sentry"]
     src_state["src.state"]
     src_telemetry["src.telemetry"]
-    src -- "6" --> src_arch
+    src_vitals["src.vitals"]
+    src -- "7" --> src_arch
+    src -- "9" --> src_audit
     src -- "14" --> src_auto_tighten
     src -- "30" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
-    src -- "9" --> src_erosion
+    src -- "16" --> src_erosion
+    src -- "10" --> src_escape
+    src -- "6" --> src_intervention
     src -- "1" --> src_observability
     src -- "16" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "57" --> src_state
+    src -- "61" --> src_state
     src -- "7" --> src_telemetry
+    src -- "4" --> src_vitals
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "14" --> src_arch
+    src_audit -- "1" --> src_escape
+    src_dashboard_routes -- "2" --> src_audit
     src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "2" --> src_state
+    src_dashboard_routes -- "1" --> src_vitals
     src_disturbance_detectors -- "1" --> src_arch
     src_disturbance_detectors -- "5" --> src_disturbance
     src_erosion -- "3" --> src_arch
+    src_intervention -- "3" --> src_escape
     src_mockworld_fakes -- "31" --> src_mockworld
     src_mockworld_fakes -- "1" --> src_telemetry
     src_preflight -- "1" --> src_runners
@@ -55,6 +67,10 @@ graph LR
     src_review_phase -- "1" --> src_state
     src_runners -- "1" --> src_preflight
     src_state -- "1" --> src
+    src_vitals -- "2" --> src_audit
+    src_vitals -- "1" --> src_erosion
+    src_vitals -- "2" --> src_escape
+    src_vitals -- "2" --> src_intervention
 ```
 
 <!-- arch:generated -->

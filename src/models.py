@@ -2256,6 +2256,19 @@ class StateData(BaseModel):
     # ``rc_consecutive_failure_escalation_threshold`` files one HITL escalation
     # so a multi-day pipeline stall can't pass unnoticed (#9359 hardening).
     consecutive_rc_failures: int = 0
+    # G1 (#10353): high-water mark of the newest merged rc/* promotion PR the
+    # loop has observed advancing ``main``. Lets StagingPromotionLoop close the
+    # RC-stuck trackers on ANY observed main advance (a manual/operator promotion
+    # merge included), not only on the loop's own merge call. Bootstrapped on the
+    # first observation so a fresh deploy against pre-existing merged RCs never
+    # false-closes an open tracker.
+    last_observed_promotion_pr: int = 0
+    # G1 (#10353): ISO-8601 timestamp of the most recent SUCCESSFUL staging→main
+    # promotion — this loop's own merge OR an observed out-of-band main advance.
+    # Feeds the promotion-health error-signal (days_since_last_successful_promotion)
+    # surfaced in StagingPromotionLoop's BACKGROUND_WORKER_STATUS telemetry so
+    # promotion staleness is measurable, not implied. "" = never yet observed.
+    last_successful_promotion_at: str = ""
     auto_reverts_in_cycle: int = 0
     auto_reverts_successful: int = 0
     flake_reruns_total: int = 0
@@ -2330,6 +2343,37 @@ class StateData(BaseModel):
     # back-analysis) on the first tick, mirroring log_ingest_cursor's
     # prime-on-first-tick convention.
     erosion_last_processed_sha: str = Field(default="")
+    # EscapeLedgerLoop (#10367) — base-branch HEAD SHA the escape detector last
+    # finished analyzing. Empty = never run; primed to current HEAD (no
+    # back-analysis) on the first tick, mirroring erosion_last_processed_sha.
+    escape_ledger_last_processed_sha: str = Field(default="")
+    # InterventionTallyLoop (#10369) — ISO-8601 timestamp the attention-side
+    # telemetry loop last processed the event/steering streams up to. Empty =
+    # never run; primed to NOW (no back-analysis) on the first tick, mirroring
+    # escape_ledger_last_processed_sha (a ts cursor, not a SHA — the source is
+    # an event stream, not a commit range).
+    intervention_tally_last_processed_ts: str = Field(default="")
+    # SampledAuditLoop (#10370) — the silent-escape estimator's cursor +
+    # governed-rate state. ``sha`` mirrors escape_ledger_last_processed_sha
+    # (prime-on-first-tick, no back-sample). ``governed_rate`` is the current
+    # Shewhart-governed sample rate (0.0 = unset → the loop uses the 5% base).
+    # ``disagreement_history`` is the bounded per-tick observation series the
+    # governor pools to build its control limit.
+    sampled_audit_last_processed_sha: str = Field(default="")
+    sampled_audit_governed_rate: float = Field(default=0.0)
+    sampled_audit_disagreement_history: list[dict[str, Any]] = Field(
+        default_factory=list
+    )
+    # SecondOrderVitalsLoop (#10373) — the capstone residual monitor's state.
+    # ``series_history`` is {series_name: [per-window reading, …]}, the bounded
+    # observation histories the Shewhart individuals charts are baselined from
+    # (this IS the baseline; sustained-window divergence needs the persisted
+    # series). ``last_verdict`` is the previous tick's verdict token so the
+    # single diverging alarm fires once on the transition into ``diverging``.
+    second_order_vitals_series_history: dict[str, list[float]] = Field(
+        default_factory=dict
+    )
+    second_order_vitals_last_verdict: str = Field(default="")
     last_updated: str | None = None
 
 

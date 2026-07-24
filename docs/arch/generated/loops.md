@@ -28,6 +28,8 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **EpicMonitorLoop** | `src.epic_monitor_loop` | 1800 | — | — | — |
 | **EpicSweeperLoop** | `src.epic_sweeper_loop` | 3600 | — | — | — |
 | **ErosionMetricsLoop** | `src.erosion_metrics_loop` | 14400 | — | — | — |
+| **EscapeLedgerLoop** | `src.escape_ledger_loop` | 14400 | — | — | — |
+| **FailOpenMonitorLoop** | `src.fail_open_monitor_loop` | 14400 | — | — | — |
 | **FakeCoverageAuditorLoop** | `src.fake_coverage_auditor_loop` | 604800 | — | — | — |
 | **FitnessScorecardLoop** | `src.fitness_scorecard_loop` | 86400 | — | BACKGROUND_WORKER_STATUS, LOOP_FITNESS_UPDATE | ADR-0029, ADR-0046 |
 | **FlakeTrackerLoop** | `src.flake_tracker_loop` | 14400 | — | — | — |
@@ -36,6 +38,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **GitHubCacheLoop** | `src.github_cache_loop` | 300 | — | — | — |
 | **HealthMonitorLoop** | `src.health_monitor_loop` | 7200 | — | SYSTEM_ALERT | — |
 | **HumanSteeringLoop** | `src.human_steering_loop` | — | — | — | ADR-0099 |
+| **InterventionTallyLoop** | `src.intervention_tally_loop` | 14400 | — | — | — |
 | **IssueRefinementLoop** | `src.issue_refinement_loop` | 86400 | — | ISSUE_REFINEMENT_UPDATE | — |
 | **LabelDriftWatcherLoop** | `src.label_drift_watcher_loop` | 600 | — | — | — |
 | **LiveCorpusReplayLoop** | `src.live_corpus_replay_loop` | 900 | — | — | — |
@@ -51,7 +54,9 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **ReportIssueLoop** | `src.report_issue_loop` | 30 | — | REPORT_UPDATE | — |
 | **RetrospectiveLoop** | `src.retrospective_loop` | 1800 | — | RETROSPECTIVE_UPDATE | — |
 | **RunsGCLoop** | `src.runs_gc_loop` | 3600 | — | SYSTEM_ALERT | — |
+| **SampledAuditLoop** | `src.sampled_audit_loop` | 14400 | — | — | — |
 | **SandboxFailureFixerLoop** | `src.sandbox_failure_fixer_loop` | 3600 | — | — | ADR-0049 |
+| **SecondOrderVitalsLoop** | `src.second_order_vitals_loop` | 14400 | — | — | — |
 | **SecurityPatchLoop** | `src.security_patch_loop` | 3600 | — | — | — |
 | **SentryLoop** | `src.sentry_loop` | 600 | — | — | — |
 | **SkillPromptEvalLoop** | `src.skill_prompt_eval_loop` | 604800 | — | — | — |

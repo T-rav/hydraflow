@@ -439,6 +439,18 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         )
         return FakeOutput(exit_code=0, stdout="", stderr="")
 
+    if method == "reopen_issue":
+        issue_number = int(args[0])
+        # Seed a closed issue, then assert reopen flips it back to open.
+        fake.add_issue(issue_number, "Test Issue", "body")
+        await fake.close_issue(issue_number)
+        reopened = await fake.reopen_issue(issue_number)
+        assert reopened, "FakeGitHub.reopen_issue unexpectedly returned False"
+        assert fake._issues[issue_number].state == "open", (
+            f"reopen_issue did not reopen issue #{issue_number}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
     if method == "expected_pr_title":
         issue_number = int(args[0])
         issue_title = str(args[1])
@@ -649,6 +661,17 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         fake.add_pr(number=pr_number, issue_number=1, branch="b")
         diffs = await fake.get_pr_recent_commit_diffs(pr_number)
         return FakeOutput(exit_code=0, stdout=f"{diffs}\n", stderr="")
+
+    if method == "get_pr_commit_messages":
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        # Seed a Closes-ref + Skip-Regression message so the returned text is
+        # the close-verification classifier's real input shape (#10358).
+        fake.set_pr_commit_messages(
+            pr_number, "fix: real bug\n\nCloses #1\n\nSkip-Regression: shipped in #900"
+        )
+        messages = await fake.get_pr_commit_messages(pr_number)
+        return FakeOutput(exit_code=0, stdout=f"{messages}\n", stderr="")
 
     # --- Workflow-run / CI-log / git-op / alerts cluster (#9768 slice 5) ---
 

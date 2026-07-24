@@ -270,3 +270,19 @@ docs/wiki/index.json
 # (#9599 groom 2026-07-19). Ignore it so the loop's rewrites cannot dirty the
 # tree; see scripts/check_runtime_cache_tracked.py.
 docs/arch/generated/loop-fitness.md
+
+# EscapeLedgerLoop rewrites these into the live repo root every tick
+# (src/escape_ledger_loop.py) — runtime reports, not arch-regen artifacts,
+# mirroring loop-fitness.md above (#10367).
+docs/arch/generated/escape-ledger.md
+docs/arch/generated/erosion-trends.md
+
+# InterventionTallyLoop rewrites this into the live repo root every tick
+# (src/intervention_tally_loop.py) — a runtime report, not an arch-regen
+# artifact, mirroring escape-ledger.md above (#10369).
+docs/arch/generated/intervention-tally.md
+
+# SecondOrderVitalsLoop rewrites this into the live repo root every tick
+# (src/second_order_vitals_loop.py) — a data-bearing runtime report, not an
+# arch-regen artifact, mirroring escape-ledger.md above (#10373).
+docs/arch/generated/second-order-vitals.md

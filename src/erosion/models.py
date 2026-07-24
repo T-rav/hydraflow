@@ -59,6 +59,36 @@ class ScatteredSymbol:
 
 
 @dataclass(frozen=True)
+class DuplicationFinding:
+    """Near-duplicate block density across a set of files — the sensor's reading.
+
+    v2 of epic #10104 (#10367): the duplication-density signal `erosion.scatter`
+    v1 explicitly deferred (see that module's docstring). ``duplicated_blocks``
+    counts normalized N-line windows that appear in two or more places;
+    ``total_lines`` is the non-blank line total the density is taken over.
+    Same purity contract as `erosion.spread.compute`: pure over explicit file
+    contents, no git dependency in the core.
+    """
+
+    duplicated_blocks: int
+    total_lines: int
+    block_lines: int
+    duplicate_groups: tuple[tuple[str, ...], ...] = ()  # sorted file-sets per group
+
+    @property
+    def total_kloc(self) -> float:
+        """Thousands of non-blank lines the density is measured over."""
+        return self.total_lines / 1000.0
+
+    @property
+    def density(self) -> float:
+        """Duplicated blocks per KLOC; 0.0 when nothing was measured."""
+        if self.total_lines == 0:
+            return 0.0
+        return self.duplicated_blocks / self.total_kloc
+
+
+@dataclass(frozen=True)
 class ScatterFinding:
     """One change's newly-added-symbol scatter footprint — the sensor's raw reading.
 

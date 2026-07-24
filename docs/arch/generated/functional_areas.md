@@ -55,11 +55,16 @@ flowchart LR
         trust_fleet_ContractRefreshLoop([ContractRefreshLoop])
         trust_fleet_CorpusLearningLoop([CorpusLearningLoop])
         trust_fleet_ErosionMetricsLoop([ErosionMetricsLoop])
+        trust_fleet_EscapeLedgerLoop([EscapeLedgerLoop])
+        trust_fleet_FailOpenMonitorLoop([FailOpenMonitorLoop])
         trust_fleet_FakeCoverageAuditorLoop([FakeCoverageAuditorLoop])
         trust_fleet_FlakeTrackerLoop([FlakeTrackerLoop])
+        trust_fleet_InterventionTallyLoop([InterventionTallyLoop])
         trust_fleet_LiveCorpusReplayLoop([LiveCorpusReplayLoop])
         trust_fleet_PrinciplesAuditLoop([PrinciplesAuditLoop])
         trust_fleet_RCBudgetLoop([RCBudgetLoop])
+        trust_fleet_SampledAuditLoop([SampledAuditLoop])
+        trust_fleet_SecondOrderVitalsLoop([SecondOrderVitalsLoop])
         trust_fleet_StagingBisectLoop([StagingBisectLoop])
         trust_fleet_TrustFleetSanityLoop([TrustFleetSanityLoop])
         trust_fleet_ConformanceRunnerPort[/ConformanceRunnerPort/]
@@ -170,11 +175,16 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 - `ContractRefreshLoop` — `src.contract_refresh_loop`
 - `CorpusLearningLoop` — `src.corpus_learning_loop`
 - `ErosionMetricsLoop` — `src.erosion_metrics_loop`
+- `EscapeLedgerLoop` — `src.escape_ledger_loop`
+- `FailOpenMonitorLoop` — `src.fail_open_monitor_loop`
 - `FakeCoverageAuditorLoop` — `src.fake_coverage_auditor_loop`
 - `FlakeTrackerLoop` — `src.flake_tracker_loop`
+- `InterventionTallyLoop` — `src.intervention_tally_loop`
 - `LiveCorpusReplayLoop` — `src.live_corpus_replay_loop`
 - `PrinciplesAuditLoop` — `src.principles_audit_loop`
 - `RCBudgetLoop` — `src.rc_budget_loop`
+- `SampledAuditLoop` — `src.sampled_audit_loop`
+- `SecondOrderVitalsLoop` — `src.second_order_vitals_loop`
 - `StagingBisectLoop` — `src.staging_bisect_loop`
 - `TrustFleetSanityLoop` — `src.trust_fleet_sanity_loop`
 

@@ -1,0 +1,29 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_commit_messages returns every commit message on a PR (headline +
+# body), joined by blank lines -- the in-process analogue of P10.7's
+# `git log %B` scan (`gh pr view <n> --json commits`). The close-verification
+# controller (#10358) reads it for the Skip-Regression: opt-out trailer and
+# Closes #N references. The dispatcher seeds a Closes-ref + Skip-Regression
+# message, so stdout is that seeded text.
+adapter: github
+interaction: get_pr_commit_messages
+recorded_at: '2026-07-23T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_commit_messages
+  args:
+  - '523'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: |
+    fix: real bug
+
+    Closes #1
+
+    Skip-Regression: shipped in #900
+  stderr: ''
+normalizers: []
+baseline_only: true

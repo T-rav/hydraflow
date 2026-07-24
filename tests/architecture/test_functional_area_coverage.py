@@ -215,7 +215,71 @@ _GRANDFATHERED_LOOPS: frozenset[str] = frozenset(
 # intake) that was considered and why it could not own the behaviour — the
 # same "name the intended HOST explicitly" discipline the memory doc asks for.
 # Empty is the healthy default: the first choice is always a workstream fix.
-_JUSTIFIED_NEW_LOOPS: dict[str, str] = {}
+_JUSTIFIED_NEW_LOOPS: dict[str, str] = {
+    # #10371: considered hosting the fail-open RATE monitor as a step in the
+    # review phase's post-verify path (where the per-event ledger IS written)
+    # and as an intake on DetectorCalibrationLoop. Rejected both: the Shewhart
+    # control limit is a function of the WHOLE ledger across all PRs/surfaces —
+    # no single PR's review phase can see the cross-PR rate — and
+    # DetectorCalibrationLoop mines hitl-escalation issues, a different data
+    # source. A per-tick rate monitor over the diagnostics ledger is genuinely
+    # standalone cross-cutting cadence work with no natural phase/loop host.
+    "FailOpenMonitorLoop": "cross-PR fail-open rate control limit; no phase sees it",
+    # EscapeLedgerLoop (#10367): a standalone outer-loop falsification
+    # instrument. Considered hosting it on SentryLoop (an existing intake) and
+    # on the triage phase, but rejected — the ledger spans FIVE detection
+    # sources (revert/hotfix/regression-pin/bug-issue git scans + Sentry) and
+    # needs its own base-branch commit cursor + cadence over the whole merge
+    # stream, which no single existing phase/loop observes. Sentry is only one
+    # source and appends to the same ledger via a hook, not a host.
+    "EscapeLedgerLoop": (
+        "outer-loop falsification instrument spanning 5 detection sources with "
+        "its own merged-commit cursor; SentryLoop/triage host rejected (single "
+        "source / no commit-stream cadence)"
+    ),
+    # InterventionTallyLoop (#10369): the attention-side twin of the escape
+    # ledger — a standalone outer-loop instrument that aggregates FOUR human-
+    # touch streams (steering + HITL + control-route + /hf CLI) on their own
+    # event-stream cursor + cadence. Considered hosting it on HumanSteeringLoop
+    # (an existing intake) and the HITL phase, but rejected — each sees only
+    # ONE of the four sources, and neither observes the whole cross-cutting
+    # human-load stream this trends against the shared per-100-merges denominator.
+    "InterventionTallyLoop": (
+        "attention-side falsification instrument aggregating 4 human-touch "
+        "streams on its own event cursor; HumanSteeringLoop/HITL-phase host "
+        "rejected (single source / no cross-cutting cadence)"
+    ),
+    # SampledAuditLoop (#10370): acceptance sampling applied to the gauntlet —
+    # a governed random sample of MERGED PRs re-audited post-merge. Considered
+    # hosting on the review phase and on EscapeLedgerLoop, both rejected: review
+    # is pre-merge (this is strictly post-merge, by design, so a fresh context
+    # sees the merged state), and the escape ledger is a MECHANICAL git scanner
+    # with no LLM budget / Shewhart rate governor / per-tick sampling cadence —
+    # bolting a governed LLM sampler onto it would fuse two independent
+    # instruments. It cross-LINKS into the escape ledger (upheld disagreements)
+    # rather than living inside it.
+    "SampledAuditLoop": (
+        "governed post-merge acceptance-sampling re-audit with its own LLM "
+        "budget + Shewhart rate governor + merged-PR cursor; review-phase host "
+        "rejected (pre-merge) and EscapeLedgerLoop host rejected (mechanical "
+        "scanner, no sampling cadence) — cross-links into the ledger instead"
+    ),
+    # SecondOrderVitalsLoop (#10373): the capstone residual monitor computing
+    # the JOINT green-while-dying condition across all four instruments. There
+    # is no workstream host by construction — it is the ONLY component that
+    # reads every instrument's ledger at once and correlates them; hosting it on
+    # any single instrument's loop (escape/intervention/audit/independence)
+    # would fuse the very signals it must keep independent, and no pipeline phase
+    # sees the cross-instrument residual. It has its own per-series baseline
+    # state + evaluation cadence + never-batched alarm — genuinely standalone
+    # cross-cutting cadence work.
+    "SecondOrderVitalsLoop": (
+        "cross-instrument residual monitor correlating all 4 instrument ledgers "
+        "against the primary gate; every single-instrument-loop host rejected "
+        "(would fuse the independent signals) and no phase sees the joint "
+        "residual — its own per-series baselines + never-batched alarm"
+    ),
+}
 
 
 def test_new_loops_justify_workstream_alternative(real_repo_root: Path):

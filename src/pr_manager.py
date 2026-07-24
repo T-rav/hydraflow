@@ -1985,6 +1985,34 @@ class PRManager:
             return False
         return True
 
+    async def reopen_issue(self, issue_number: int) -> bool:
+        """Reopen a closed GitHub issue. Returns False when the gh call failed.
+
+        ``gh issue reopen``. Fail-soft (no raise), matching
+        :meth:`close_issue` (#9812). Used by the close-verification controller
+        (#10358) to undo a false auto-close.
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            return True
+        try:
+            await self._run_gh(
+                "gh",
+                "issue",
+                "reopen",
+                str(issue_number),
+                "--repo",
+                self._repo,
+            )
+        except RuntimeError as exc:
+            logger.warning(
+                "Could not reopen issue #%d: %s",
+                issue_number,
+                exc,
+            )
+            return False
+        return True
+
     async def close_pr(self, pr_number: int) -> bool:
         """Close a GitHub pull request without merging it.
 
@@ -2744,6 +2772,45 @@ class PRManager:
                 "Could not get diff file names for PR #%d: %s", pr_number, exc
             )
             return []
+
+    async def get_pr_commit_messages(self, pr_number: int) -> str:
+        """Return every commit message on *pr_number*, joined by blank lines.
+
+        Headline + body per commit via ``gh pr view --json commits`` — the
+        in-process analogue of P10.7's ``git log %B`` scan. The
+        close-verification controller (#10358) reads it for the
+        ``Skip-Regression:`` opt-out trailer and ``Closes #N`` references.
+        Returns an empty string when no commits are available or on any
+        failure.
+        """
+        if self._config.dry_run:
+            return ""
+        try:
+            raw = await self._run_gh(
+                "gh",
+                "pr",
+                "view",
+                str(pr_number),
+                "--repo",
+                self._repo,
+                "--json",
+                "commits",
+            )
+            commits = json.loads(raw).get("commits") or []
+        except (RuntimeError, json.JSONDecodeError, KeyError) as exc:
+            logger.warning(
+                "Could not fetch commit messages for PR #%d: %s", pr_number, exc
+            )
+            return ""
+
+        messages: list[str] = []
+        for commit in commits:
+            headline = str(commit.get("messageHeadline") or "").strip()
+            body = str(commit.get("messageBody") or "").strip()
+            full = f"{headline}\n\n{body}".strip() if body else headline
+            if full:
+                messages.append(full)
+        return "\n\n".join(messages)
 
     async def get_pr_recent_commit_diffs(self, pr_number: int, *, n: int = 3) -> str:
         """Return a concatenated diff block for the last *n* commits on *pr_number*.

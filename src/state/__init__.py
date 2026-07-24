@@ -36,11 +36,13 @@ from ._disturbance import DisturbanceStateMixin
 from ._driver import DriverStateMixin
 from ._epic import EpicStateMixin
 from ._erosion_metrics import ErosionMetricsStateMixin
+from ._escape_ledger import EscapeLedgerStateMixin
 from ._fake_coverage import FakeCoverageStateMixin
 from ._flake_tracker import FlakeTrackerStateMixin
 from ._gc import StateGCMixin
 from ._hitl import HITLStateMixin
 from ._human_steering import HumanSteeringStateMixin
+from ._intervention_tally import InterventionTallyStateMixin
 from ._issue import IssueStateMixin
 from ._issue_refinement import IssueRefinementStateMixin
 from ._lifetime import LifetimeStatsMixin
@@ -56,7 +58,9 @@ from ._review import ReviewStateMixin
 from ._review_orphan import ReviewOrphanStateMixin
 from ._rollup_issues import RollupIssueStateMixin
 from ._route_back import RouteBackStateMixin
+from ._sampled_audit import SampledAuditStateMixin
 from ._sandbox_failure_fixer import SandboxFailureFixerStateMixin
+from ._second_order_vitals import SecondOrderVitalsStateMixin
 from ._security_patch import SecurityPatchStateMixin
 from ._sentry import SentryStateMixin
 from ._session import SessionStateMixin
@@ -127,6 +131,10 @@ class StateTracker(
     DriverStateMixin,
     IssueRefinementStateMixin,
     ErosionMetricsStateMixin,
+    EscapeLedgerStateMixin,
+    InterventionTallyStateMixin,
+    SampledAuditStateMixin,
+    SecondOrderVitalsStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 

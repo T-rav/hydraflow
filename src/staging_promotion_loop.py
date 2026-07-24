@@ -21,6 +21,7 @@ import ci_sentinels
 import evidence_pack
 import subprocess_util
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from branch_protection_audit import load_canonical, ruleset_required_contexts
 from config import HydraFlowConfig
 from dedup_store import DedupStore
 from events import EventType, HydraFlowEvent
@@ -58,6 +59,25 @@ _MERGED_RC_SCAN_LIMIT = 20
 # enough to signal the factory PROCESS itself was likely down (crash, host
 # reboot, deploy gap) rather than just landing on a routine tick late.
 _MISSED_CADENCE_ALERT_MULTIPLIER = 1.5
+
+# Rollup namespace + subjects for the RC trackers (single-sourced so the
+# green-path close, the observed-main-advance close (G1 #10353), and the
+# auto-recut trigger all agree on the same keys).
+_ROLLUP_NAMESPACE = "staging_promotion"
+_SUBJECT_RC_CI = "rc_ci"
+_SUBJECT_RC_PROMOTION_STUCK = "rc_promotion_stuck"
+
+# G1 (#10353) named-gate sensor: the required-on-main gate CONTEXT names live in
+# the canonical ruleset checked into the repo, kept in sync with live-main by
+# BranchProtectionAuditorLoop (ADR-0082). Reading the names from that contract
+# (instead of a second live ``gh api rules/branches/main`` spawn) reuses
+# branch_protection_audit and keeps the sensor's required set == the enforced
+# required set. RC PRs target ``main``, so main's required checks ARE the
+# required-on-RC gate set.
+_CANONICAL_RULESET_REL = ("docs", "standards", "branch_protection")
+_MAIN_RULESET_KEY = "main protect"
+# One page of check-runs covers a single commit's checks (>100 never occurs).
+_CHECK_RUNS_PAGE_SIZE = 100
 
 
 class StagingPromotionLoop(BaseBackgroundLoop):
@@ -111,7 +131,7 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         return RollupIssueManager(
             pr=self._prs,
             state=self._state,
-            namespace="staging_promotion",
+            namespace=_ROLLUP_NAMESPACE,
             labels=(
                 labels
                 if labels is not None
@@ -134,10 +154,16 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         existing = await self._prs.find_open_promotion_pr()
         if existing is not None:
             result = await self._handle_open_promotion(existing.number, existing.branch)
-        elif not self._cadence_elapsed():
-            result = {"status": "cadence_not_elapsed"}
-        else:
+        elif self._cadence_elapsed():
             result = await self._cut_new_rc()
+        else:
+            # G1 (#10353): normally we wait for the next cadence tick. But when
+            # the rc-promotion-stuck escalation is open AND the blocking gate has
+            # cleared on staging, re-cut a fresh RC immediately instead of
+            # stalling `main` for a full cadence. Default-OFF
+            # (rc_auto_recut_enabled) — inert until explicitly opted in.
+            recut = await self._maybe_auto_recut()
+            result = recut if recut is not None else {"status": "cadence_not_elapsed"}
 
         # CH-4 hardening: catch RCs merged outside this loop's own merge call
         # (operator force-merge, Monitor-driven merge, a merge that landed
@@ -145,10 +171,24 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         # never affects it — fail-open inside.
         reconciled = await self._reconcile_missing_packs()
 
+        # G1 (#10353): close the RC-stuck trackers on ANY observed main advance
+        # (a manual/operator promotion merge included), not only on the loop's
+        # own merge. Runs AFTER the promotion work; fail-open inside.
+        trackers_closed = await self._reconcile_observed_main_advance()
+
+        # G1 (#10353) piece (b): the promotion error-signal as observable state.
+        # Emitted every operating tick so promotion health is MEASURED, not
+        # implied. Fail-open inside; never affects the promotion work.
+        health = await self._promotion_health()
+
         if swept:
             result = {**result, "swept": swept}
         if reconciled:
             result = {**result, "packs_reconciled": reconciled}
+        if trackers_closed:
+            result = {**result, "trackers_closed": trackers_closed}
+        if health is not None:
+            result = {**result, "promotion_health": health}
         return result
 
     async def _handle_open_promotion(
@@ -227,6 +267,15 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             if merged:
                 logger.info("Promoted RC PR #%d to main", pr_number)
                 if self._state is not None:
+                    # Record the high-water mark for the observed-main-advance
+                    # reconciler (G1 #10353) so it never treats this loop's own
+                    # merge as an out-of-band advance on a later tick.
+                    self._state.set_last_observed_promotion_pr(pr_number)
+                    # G1 (#10353) piece (b): stamp the successful-promotion time
+                    # so days_since_last_successful_promotion is measurable.
+                    self._state.set_last_successful_promotion_at(
+                        datetime.now(UTC).isoformat()
+                    )
                     try:
                         head_sha = await self._prs.get_pr_head_sha(pr_number)
                     except Exception:  # noqa: BLE001
@@ -247,7 +296,7 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                     rollups = self._rollups()
                     if rollups is not None:
                         await rollups.resolve(
-                            "rc_ci",
+                            _SUBJECT_RC_CI,
                             comment=(
                                 f"RC promotion to {self._config.main_branch} "
                                 "succeeded — auto-closing."
@@ -259,7 +308,7 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                         # closed only via an unrelated PR body). Idempotent
                         # no-op when no escalation is tracked.
                         await rollups.resolve(
-                            "rc_promotion_stuck",
+                            _SUBJECT_RC_PROMOTION_STUCK,
                             comment=(
                                 f"RC promotion to {self._config.main_branch} "
                                 "succeeded — the consecutive-failure streak is "
@@ -513,6 +562,338 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                 numbers.add(record["pr_number"])
         return numbers
 
+    async def _reconcile_observed_main_advance(self) -> int | None:
+        """G1 (#10353): close the RC-stuck trackers when ``main`` is observed to
+        advance via a promotion merge this loop did not perform.
+
+        The green-path close in :meth:`_handle_open_promotion` fires only when
+        THIS loop's own ``merge_promotion_pr`` call returns True. A manual /
+        operator promotion (the human cuts + merges the rc/* PR themselves) then
+        leaves the ``rc_ci`` / ``rc_promotion_stuck`` trackers open forever —
+        exactly the miss this session's retro recorded. Each tick this reconciler
+        diffs the newest merged rc/* promotion PR against a persisted high-water
+        mark; a NEW one means main advanced, so it mirrors the green-path close
+        (reset the failure streak + resolve both trackers). Bootstrapped on the
+        first observation so a fresh deploy against pre-existing merged RCs never
+        false-closes a legitimately open tracker. Fail-open: a sweep error never
+        affects the tick's promotion work.
+
+        Kill-switch ``rc_observed_advance_close_enabled`` (default ON): the raw
+        ``gh pr list`` read bypasses FakeGitHub, so the sandbox disables this
+        sweep to stay air-gapped (see mockworld.sandbox_main.SANDBOX_SEAMS).
+        """
+        if self._state is None or not self._config.rc_observed_advance_close_enabled:
+            return None
+        try:
+            merged = await self._list_merged_promotion_prs()
+        except Exception as exc:
+            # Credit-exhaustion / likely-bug signals must propagate, not be
+            # swallowed by the fail-open guard (dark-factory §2.2).
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Observed-main-advance sweep: listing merged RC PRs failed: %s",
+                exc_detail(exc),
+                exc_info=True,
+            )
+            return None
+        if not merged:
+            return None
+        newest = max(pr_number for pr_number, _ in merged)
+        mark = self._state.get_last_observed_promotion_pr()
+        if mark == 0 or newest <= mark:
+            # Bootstrap (mark == 0): record the baseline WITHOUT closing — the
+            # open trackers (if any) belong to the current red streak, not to a
+            # pre-existing merge, so closing here would be a false close. The
+            # setter is monotonic, so the no-advance case (newest <= mark) is a
+            # harmless no-op.
+            self._state.set_last_observed_promotion_pr(newest)
+            return None
+        # main advanced via a promotion this loop did not record (manual cut,
+        # operator force-merge, a merge that landed after our call reported
+        # failure). Mirror the loop's own green-path close.
+        self._state.set_last_observed_promotion_pr(newest)
+        self._state.reset_consecutive_rc_failures()
+        # G1 (#10353) piece (b): an observed advance is a successful promotion —
+        # stamp it so days_since_last_successful_promotion tracks manual/operator
+        # merges too, not only the loop's own.
+        self._state.set_last_successful_promotion_at(datetime.now(UTC).isoformat())
+        rollups = self._rollups()
+        if rollups is None:
+            return None
+        closed = 0
+        comment = (
+            f"`{self._config.main_branch}` observed to advance via merged RC "
+            f"promotion PR #{newest} — auto-closing this tracker (G1 #10353)."
+        )
+        if await rollups.resolve(_SUBJECT_RC_CI, comment=comment):
+            closed += 1
+        if await rollups.resolve(_SUBJECT_RC_PROMOTION_STUCK, comment=comment):
+            closed += 1
+        if closed:
+            logger.info(
+                "Observed main advance (RC PR #%d) — closed %d RC tracker(s)",
+                newest,
+                closed,
+            )
+        return closed
+
+    async def _maybe_auto_recut(self) -> dict[str, Any] | None:
+        """G1 (#10353): re-cut a fresh RC ahead of cadence when the pipeline is
+        stuck but the blocking gate has cleared on staging.
+
+        Returns the ``_cut_new_rc`` result dict when it re-cuts, else ``None``
+        (the caller falls back to ``cadence_not_elapsed``). Gated by the
+        default-OFF ``rc_auto_recut_enabled`` flag, so it is fully inert until
+        explicitly opted in. Only fires when the ``rc_promotion_stuck``
+        escalation is currently OPEN (there is a real stall to clear) AND staging
+        CI is green again (the blocker the last RC tripped on is fixed). Called
+        only on the cadence-not-elapsed branch, so there is no open promotion PR
+        to collide with.
+        """
+        if not self._config.rc_auto_recut_enabled:
+            return None
+        if self._state is None:
+            return None
+        tracked = self._state.get_rollup_issue(
+            f"{_ROLLUP_NAMESPACE}:{_SUBJECT_RC_PROMOTION_STUCK}"
+        )
+        if not (tracked and tracked.get("issue_number")):
+            return None
+        try:
+            blocker_clear = await self._staging_ci_is_green()
+        except Exception as exc:
+            # Credit-exhaustion / likely-bug signals must propagate (dark-
+            # factory §2.2); any other probe failure is fail-closed (no recut).
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Auto-recut: staging CI probe failed: %s",
+                exc_detail(exc),
+                exc_info=True,
+            )
+            return None
+        if not blocker_clear:
+            return None
+        logger.info(
+            "Auto-recut (G1 #10353): rc_promotion_stuck open and staging CI "
+            "green — re-cutting a fresh RC ahead of cadence."
+        )
+        result = await self._cut_new_rc()
+        return {**result, "auto_recut": True}
+
+    async def _staging_ci_is_green(self) -> bool:
+        """Every required-on-RC gate concluded ``success`` on staging HEAD.
+
+        G1 (#10353) named-blocking-gate upgrade. The old sensor read the staging
+        branch's single latest workflow-run conclusion — but a gate that is
+        REQUIRED on the rc/*→``main`` PR yet merely ADVISORY on staging can be red
+        on staging while the branch's most-recent run still reports ``success``
+        (the advisory-on-staging / required-on-RC dead-time trap). That false
+        green is exactly what would let auto-recut cut an RC doomed to trip the
+        same blocking gate.
+
+        This sensor instead checks the SPECIFIC required-on-``main`` gate contexts
+        (:meth:`_required_rc_gate_names`, read from the canonical ruleset — the
+        same contract BranchProtectionAuditorLoop keeps in sync with live-main, so
+        no extra live spawn for the names) against their check-run conclusions on
+        the current staging HEAD. Green iff there is a non-empty required-gate set
+        AND every one concluded ``success``. Fail-closed on an undeterminable gate
+        set or a missing named check — the auto-recut actuator must have positive
+        confirmation the blocking gates cleared before it fires.
+
+        Consulted ONLY by the default-OFF auto-recut path; its raw ``gh api``
+        check-runs read is air-gapped in the sandbox via the
+        ``staging_promotion_loop`` config_disable seam (rc_auto_recut_enabled
+        pinned OFF).
+        """
+        required = self._required_rc_gate_names()
+        if not required:
+            # Undeterminable (missing/corrupt canonical) or genuinely no required
+            # gates: either way there is no positive blocker-clear signal, so
+            # fail-closed rather than recut blind.
+            logger.warning(
+                "Auto-recut sensor: no required-on-RC gate contexts resolved from "
+                "the canonical ruleset — treating staging as NOT green "
+                "(fail-closed)."
+            )
+            return False
+        conclusions = await self._staging_head_check_conclusions()
+        not_green = [
+            gate for gate in sorted(required) if conclusions.get(gate) != "success"
+        ]
+        if not_green:
+            logger.info(
+                "Auto-recut sensor: %d/%d required gate(s) not green on staging "
+                "HEAD (%s) — staging NOT green.",
+                len(not_green),
+                len(required),
+                ", ".join(not_green),
+            )
+            return False
+        return True
+
+    def _required_rc_gate_names(self) -> set[str]:
+        """Required-on-``main`` status-check contexts from the canonical ruleset.
+
+        Reuses branch_protection_audit (ADR-0082): the gate NAMES come from the
+        contract on disk, so no extra live spawn is needed and the set stays in
+        lockstep with the live-main required checks the BranchProtectionAuditorLoop
+        enforces. Returns an EMPTY set when the canonical cannot be loaded (missing
+        files / bad JSON); the caller treats empty as fail-closed.
+        """
+        canonical_dir = self._config.repo_root.joinpath(*_CANONICAL_RULESET_REL)
+        try:
+            canonical = load_canonical(canonical_dir)
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "Auto-recut sensor: could not load canonical rulesets from %s: %s",
+                canonical_dir,
+                exc_detail(exc),
+            )
+            return set()
+        return ruleset_required_contexts(canonical.get(_MAIN_RULESET_KEY))
+
+    async def _staging_head_check_conclusions(self) -> dict[str, str]:
+        """``{check-name: conclusion}`` for the check runs on staging HEAD.
+
+        One ``gh api .../commits/{staging}/check-runs`` read (30s tier) — no
+        PRPort method reads a commit's named check conclusions. When a check
+        reran (multiple runs for one name on the same commit) the most recent by
+        ``started_at`` wins, so a stale earlier run never masks the live verdict.
+
+        BEST-EFFORT: uses the NON-RAISING
+        :func:`subprocess_util.run_subprocess_result` and degrades to ``{}`` on a
+        non-zero exit — the caller (:meth:`_staging_ci_is_green`) then finds every
+        required gate absent and fail-closes (no recut), never raising.
+        """
+        result = await subprocess_util.run_subprocess_result(
+            "gh",
+            "api",
+            (
+                f"repos/{self._config.repo}/commits/"
+                f"{self._config.staging_branch}/check-runs"
+                f"?per_page={_CHECK_RUNS_PAGE_SIZE}"
+            ),
+            timeout=_GH_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            logger.debug(
+                "Auto-recut sensor: staging HEAD check-runs read unavailable "
+                "(rc=%d): %s",
+                result.returncode,
+                (result.stderr or "").strip(),
+            )
+            return {}
+        data = json.loads(result.stdout or "{}")
+        runs = data.get("check_runs") if isinstance(data, dict) else None
+        if not isinstance(runs, list):
+            return {}
+        latest: dict[str, str] = {}
+        latest_started: dict[str, str] = {}
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            name = run.get("name")
+            if not isinstance(name, str):
+                continue
+            started = str(run.get("started_at") or "")
+            if name not in latest_started or started >= latest_started[name]:
+                latest_started[name] = started
+                latest[name] = str(run.get("conclusion") or "")
+        return latest
+
+    async def _promotion_health(self) -> dict[str, Any] | None:
+        """G1 (#10353) piece (b): the promotion error-signal as observable state.
+
+        Emitted in the loop's BACKGROUND_WORKER_STATUS details each operating
+        tick so promotion health is MEASURED, not implied:
+
+        - ``main_staging_gap``: commits on ``staging`` not yet on ``main``
+          (``ahead_by``); the setpoint is 0.
+        - ``days_since_last_successful_promotion``: staleness of the last advance.
+        - ``consecutive_rc_failures``: the live failure streak.
+
+        Returns ``None`` when state is absent (state-less unit tests). The gap
+        read (a raw ``gh api compare`` spawn) is gated by
+        ``rc_promotion_health_enabled`` (default ON; pinned OFF in the sandbox
+        air-gap) — the two other signals are state-only and always surface.
+        Fail-open: a gap-read error leaves the gap ``None`` and never affects the
+        tick.
+        """
+        if self._state is None:
+            return None
+        gap: int | None = None
+        if self._config.rc_promotion_health_enabled:
+            gap = await self._main_staging_gap()
+        # Coerce to JSON-safe types: a health signal must never emit an
+        # un-serializable value (nor crash). ``consecutive`` is an int in prod;
+        # None-guarded so a non-int state stub degrades rather than propagating.
+        consecutive = self._state.get_consecutive_rc_failures()
+        return {
+            "main_staging_gap": gap,
+            "days_since_last_successful_promotion": (
+                self._days_since_last_successful_promotion()
+            ),
+            "consecutive_rc_failures": (
+                consecutive if isinstance(consecutive, int) else None
+            ),
+        }
+
+    def _days_since_last_successful_promotion(self) -> float | None:
+        """Fractional days since the last successful promotion, or ``None``.
+
+        Best-effort: a non-str stamp (an empty state, or a stub that returns a
+        non-string) degrades to ``None`` rather than raising ``TypeError`` out of
+        the telemetry read.
+        """
+        if self._state is None:
+            return None
+        stamp = self._state.get_last_successful_promotion_at()
+        if not isinstance(stamp, str) or not stamp:
+            return None
+        try:
+            when = datetime.fromisoformat(stamp)
+        except ValueError:
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - when).total_seconds() / 86400
+
+    async def _main_staging_gap(self) -> int | None:
+        """Commits on ``staging`` not yet on ``main`` (``ahead_by``), or ``None``.
+
+        BEST-EFFORT telemetry read: a health/observability sensor must never
+        take down the loop tick, so this uses the NON-RAISING
+        :func:`subprocess_util.run_subprocess_result` and degrades to ``None``
+        (gap unknown) on any non-zero exit or unparseable output — it never
+        raises out of ``_promotion_health`` / ``_do_work``. Gated by
+        ``rc_promotion_health_enabled`` (its only caller pins it OFF in the
+        sandbox air-gap; the MockWorld loop-health harness air-gaps subprocess
+        with an rc=1 result — degraded here, not a crash).
+        """
+        result = await subprocess_util.run_subprocess_result(
+            "gh",
+            "api",
+            (
+                f"repos/{self._config.repo}/compare/"
+                f"{self._config.main_branch}...{self._config.staging_branch}"
+            ),
+            "--jq",
+            ".ahead_by",
+            timeout=_GH_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            logger.debug(
+                "Promotion-health: main..staging gap read unavailable (rc=%d): %s",
+                result.returncode,
+                (result.stderr or "").strip(),
+            )
+            return None
+        text = (result.stdout or "").strip()
+        try:
+            return int(text)
+        except ValueError:
+            return None
+
     async def _file_failure_issue(self, pr_number: int, summary: str) -> int:
         # STABLE title (no PR number) so a single rolling issue tracks "promotion
         # CI is currently failing", updated in place each cadence tick and closed
@@ -533,7 +914,7 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         )
         rollups = self._rollups()
         if rollups is not None:
-            return await rollups.ensure("rc_ci", title=title, body=body)
+            return await rollups.ensure(_SUBJECT_RC_CI, title=title, body=body)
         # State-less fallback (unit tests): create_issue's exact-title dedup on
         # the now-stable title still prevents per-tick pile-up.
         try:
@@ -582,7 +963,9 @@ class StagingPromotionLoop(BaseBackgroundLoop):
         )
         rollups = self._rollups(labels=labels)
         if rollups is not None:
-            return await rollups.ensure("rc_promotion_stuck", title=title, body=body)
+            return await rollups.ensure(
+                _SUBJECT_RC_PROMOTION_STUCK, title=title, body=body
+            )
         # State-less fallback (unit tests): create_issue's exact-title dedup on
         # the now-stable title still prevents per-streak pile-up.
         try:

@@ -56,7 +56,10 @@ def _run_one(spec: CheckSpec, ctx: CheckContext) -> Finding:
 # runs in every open PR's CI, so its WARN blamed unrelated PRs and forced
 # consent-gated baseline advances for compliant work (#9902). Their WARN is
 # reported but never flips the exit code; per-PR enforcement is P10.6.
-TELEMETRY_CHECKS = frozenset({"P10.3"})
+# P10.7 is likewise a history scan (issue-close false-close detector, #10354):
+# it surfaces closes with no fix delta for re-triage but cannot blame the PR
+# under test, so it must never fail PR CI.
+TELEMETRY_CHECKS = frozenset({"P10.3", "P10.7"})
 
 
 def overall_exit_code(findings: list[Finding]) -> int:

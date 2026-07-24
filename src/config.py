@@ -237,6 +237,80 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_EROSION_METRICS_MAX_ISSUES_PER_TICK",
         3,
     ),
+    ("fail_open_monitor_interval", "HYDRAFLOW_FAIL_OPEN_MONITOR_INTERVAL", 14400),
+    (
+        "fail_open_monitor_max_issues_per_tick",
+        "HYDRAFLOW_FAIL_OPEN_MONITOR_MAX_ISSUES_PER_TICK",
+        2,
+    ),
+    ("escape_ledger_interval", "HYDRAFLOW_ESCAPE_LEDGER_INTERVAL", 14400),
+    (
+        "escape_ledger_max_issues_per_tick",
+        "HYDRAFLOW_ESCAPE_LEDGER_MAX_ISSUES_PER_TICK",
+        3,
+    ),
+    (
+        "escape_ledger_encoding_age_days",
+        "HYDRAFLOW_ESCAPE_LEDGER_ENCODING_AGE_DAYS",
+        14,
+    ),
+    ("intervention_tally_interval", "HYDRAFLOW_INTERVENTION_TALLY_INTERVAL", 14400),
+    (
+        "intervention_tally_max_classify_per_tick",
+        "HYDRAFLOW_INTERVENTION_TALLY_MAX_CLASSIFY_PER_TICK",
+        5,
+    ),
+    ("sampled_audit_interval", "HYDRAFLOW_SAMPLED_AUDIT_INTERVAL", 14400),
+    (
+        "sampled_audit_max_issues_per_tick",
+        "HYDRAFLOW_SAMPLED_AUDIT_MAX_ISSUES_PER_TICK",
+        3,
+    ),
+    (
+        "sampled_audit_token_budget_per_tick",
+        "HYDRAFLOW_SAMPLED_AUDIT_TOKEN_BUDGET_PER_TICK",
+        40000,
+    ),
+    (
+        "second_order_vitals_interval",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_INTERVAL",
+        14400,
+    ),
+    (
+        "second_order_vitals_window_days",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_WINDOW_DAYS",
+        7,
+    ),
+    (
+        "second_order_vitals_min_baseline_windows",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_MIN_BASELINE_WINDOWS",
+        8,
+    ),
+    (
+        "second_order_vitals_sustained_windows",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_SUSTAINED_WINDOWS",
+        2,
+    ),
+    (
+        "second_order_vitals_watch_k",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_WATCH_K",
+        2,
+    ),
+    (
+        "second_order_vitals_diverging_k",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_DIVERGING_K",
+        3,
+    ),
+    (
+        "second_order_vitals_history_max",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_HISTORY_MAX",
+        120,
+    ),
+    (
+        "second_order_vitals_min_merge_throughput",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_MIN_MERGE_THROUGHPUT",
+        1,
+    ),
     ("adr_drift_resolver_interval", "HYDRAFLOW_ADR_DRIFT_RESOLVER_INTERVAL", 3600),
     (
         "adr_drift_resolver_max_triage_per_tick",
@@ -473,11 +547,13 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
+    ("judge_independent_model", "HYDRAFLOW_JUDGE_INDEPENDENT_MODEL", ""),
     (
         "security_patch_severity_threshold",
         "HYDRAFLOW_SECURITY_PATCH_SEVERITY_THRESHOLD",
         "medium",
     ),
+    ("sampled_audit_model", "HYDRAFLOW_SAMPLED_AUDIT_MODEL", ""),
     ("dashboard_host", "HYDRAFLOW_DASHBOARD_HOST", "127.0.0.1"),
     ("test_command", "HYDRAFLOW_TEST_COMMAND", "make test"),
     ("docker_image", "HYDRAFLOW_DOCKER_IMAGE", "ghcr.io/t-rav/hydraflow-agent:latest"),
@@ -508,9 +584,15 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("otel_environment", "HF_ENV", "local"),
     ("issue_refinement_model", "HYDRAFLOW_ISSUE_REFINEMENT_MODEL", ""),
     ("skill_prompt_refine_model", "HYDRAFLOW_SKILL_PROMPT_REFINE_MODEL", ""),
+    ("intervention_tally_model", "HYDRAFLOW_INTERVENTION_TALLY_MODEL", ""),
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
+    (
+        "second_order_vitals_min_ci_pass_rate",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_MIN_CI_PASS_RATE",
+        0.5,
+    ),
     ("docker_cpu_limit", "HYDRAFLOW_DOCKER_CPU_LIMIT", 2.0),
     ("docker_spawn_delay", "HYDRAFLOW_DOCKER_SPAWN_DELAY", 2.0),
     ("visual_retry_delay", "HYDRAFLOW_VISUAL_RETRY_DELAY", 2.0),
@@ -615,6 +697,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
     ("evidence_pack_enabled", "HYDRAFLOW_EVIDENCE_PACK_ENABLED", True),
     ("merge_policy_enabled", "HYDRAFLOW_MERGE_POLICY_ENABLED", True),
+    (
+        "close_verification_enabled",
+        "HYDRAFLOW_CLOSE_VERIFICATION_ENABLED",
+        False,
+    ),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
     ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
     ("issue_cache_enabled", "HYDRAFLOW_ISSUE_CACHE_ENABLED", True),
@@ -689,6 +776,17 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", False),
+    ("rc_auto_recut_enabled", "HYDRAFLOW_RC_AUTO_RECUT_ENABLED", False),
+    (
+        "rc_observed_advance_close_enabled",
+        "HYDRAFLOW_RC_OBSERVED_ADVANCE_CLOSE_ENABLED",
+        True,
+    ),
+    (
+        "rc_promotion_health_enabled",
+        "HYDRAFLOW_RC_PROMOTION_HEALTH_ENABLED",
+        True,
+    ),
     ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
     (
         "shadow_corpus_coverage_pruning_enabled",
@@ -807,8 +905,53 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
+        "fail_open_monitor_loop_enabled",
+        "HYDRAFLOW_FAIL_OPEN_MONITOR_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "judge_independence_enabled",
+        "HYDRAFLOW_JUDGE_INDEPENDENCE_ENABLED",
+        False,
+    ),
+    (
+        "judge_self_mod_fail_closed_enabled",
+        "HYDRAFLOW_JUDGE_SELF_MOD_FAIL_CLOSED",
+        False,
+    ),
+    (
         "erosion_metrics_loop_enabled",
         "HYDRAFLOW_EROSION_METRICS_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "escape_ledger_loop_enabled",
+        "HYDRAFLOW_ESCAPE_LEDGER_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "intervention_tally_loop_enabled",
+        "HYDRAFLOW_INTERVENTION_TALLY_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "intervention_tally_classify_enabled",
+        "HYDRAFLOW_INTERVENTION_TALLY_CLASSIFY_ENABLED",
+        True,
+    ),
+    (
+        "sampled_audit_loop_enabled",
+        "HYDRAFLOW_SAMPLED_AUDIT_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "sampled_audit_reaudit_enabled",
+        "HYDRAFLOW_SAMPLED_AUDIT_REAUDIT_ENABLED",
+        True,
+    ),
+    (
+        "second_order_vitals_loop_enabled",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_LOOP_ENABLED",
         True,
     ),
     (
@@ -1165,6 +1308,38 @@ class HydraFlowConfig(BaseModel):
             "Treat a degraded verifier run (empty transcript / infra failure) "
             "as an OVERRIDE instead of keeping the finder's OK (fail-soft is "
             "the default)"
+        ),
+    )
+
+    # Judge-independence budget + fail-visible dispatch (#10371). The ledger
+    # and dashboard alarm are always live; these dials gate the merge-outcome-
+    # changing behaviours (opt-in until validated) and configure the second
+    # model family that satisfies the independence budget.
+    judge_independence_enabled: bool = Field(
+        default=False,
+        description=(
+            "Route classed (structural/security/migration/self-mod) changes' "
+            "post-verify verdict to an independent model family (#10371). "
+            "Merge-outcome-changing, so opt-in; the fail-open ledger + alarm "
+            "stay live regardless of this flag."
+        ),
+    )
+    judge_self_mod_fail_closed_enabled: bool = Field(
+        default=False,
+        description=(
+            "Fail-CLOSED for the self-modification class (#10371): a fail-open "
+            "or a missing independent verdict on the factory's own instruments "
+            "(gauntlet/gates/detectors/merge policy/this policy) STOPs the "
+            "merge and escalates to HITL instead of passing. Opt-in."
+        ),
+    )
+    judge_independent_model: str = Field(
+        default="",
+        description=(
+            "Model from a family OUTSIDE the implementing roster that satisfies "
+            "the judge-independence budget (#10371). Empty = no second family "
+            "configured → degraded mode (same-family verdict, ledgered). A model "
+            "whose family is inside the roster does not count as independent."
         ),
     )
 
@@ -1768,6 +1943,222 @@ class HydraFlowConfig(BaseModel):
             "volume, not a durable backlog."
         ),
     )
+    fail_open_monitor_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "FailOpenMonitorLoop cycle interval in seconds (#10371: watches the "
+            "fail-open ledger's rate against a Shewhart control limit and files "
+            "a hydraflow-find above-limit; default 4h)."
+        ),
+    )
+    fail_open_monitor_max_issues_per_tick: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        description=(
+            "Max hydraflow-find issues FailOpenMonitorLoop files in one tick "
+            "(#10371). A rate limit on filing volume, not a durable backlog."
+        ),
+    )
+    escape_ledger_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "EscapeLedgerLoop cycle interval in seconds (#10367: post-merge "
+            "escape detection + erosion trend surfaces; v1 provisional "
+            "cadence, default 4h)"
+        ),
+    )
+    escape_ledger_max_issues_per_tick: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Finding-rate budget: max HITL/hydraflow-find issues "
+            "EscapeLedgerLoop files in one tick for low-confidence or "
+            "aging-unencoded escapes (#10367). Ledger RECORDING is never "
+            "capped — only issue filing, so the instrument does not over-file."
+        ),
+    )
+    escape_ledger_encoding_age_days: int = Field(
+        default=14,
+        ge=1,
+        le=90,
+        description=(
+            "How long an escape may stay `encoded_as: none-yet` before "
+            "EscapeLedgerLoop surfaces it for human triage (#10367). Every "
+            "escape should terminate in an encoding (test/lesson/detector/ADR)."
+        ),
+    )
+    intervention_tally_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "InterventionTallyLoop cycle interval in seconds (#10369: "
+            "attention-side telemetry — human touches per 100 merges + "
+            "loops-per-governor; v1 provisional cadence, default 4h)"
+        ),
+    )
+    intervention_tally_max_classify_per_tick: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description=(
+            "Budget: max free-text steering directives InterventionTallyLoop "
+            "sends to the cheap LLM in one tick (#10369). Bounds classification "
+            "spend under a synthetic flood; over budget, rows keep their raw "
+            "text at low confidence for later re-label. Recording is never "
+            "capped — only LLM classification."
+        ),
+    )
+    sampled_audit_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "SampledAuditLoop cycle interval in seconds (#10370: sampled "
+            "adversarial re-audit — the silent-escape estimator; v1 provisional "
+            "cadence, default 4h)."
+        ),
+    )
+    sampled_audit_max_issues_per_tick: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Finding-rate budget: max hydraflow-find issues SampledAuditLoop "
+            "files in one tick for re-audit disagreements (#10370). Sample "
+            "RECORDING is never capped — only issue filing, so the instrument "
+            "does not over-file."
+        ),
+    )
+    sampled_audit_token_budget_per_tick: int = Field(
+        default=40000,
+        ge=0,
+        le=5_000_000,
+        description=(
+            "Per-tick token budget cap on adversarial re-audit spend (#10370). "
+            "Sampling is the point; exhaustive re-review is an explicit "
+            "non-goal, so the selected sample is trimmed to what this budget "
+            "covers. 0 audits nothing (sampling still records governance)."
+        ),
+    )
+    sampled_audit_model: str = Field(
+        default="",
+        description=(
+            "Model the SampledAuditLoop adversarial re-auditor runs on "
+            "(#10370/#10371 independence policy). Point it at a DIFFERENT family "
+            "from the implementing agent when the roster allows; empty falls "
+            "back to the background model (a fresh same-family context)."
+        ),
+    )
+    second_order_vitals_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "SecondOrderVitalsLoop cycle interval in seconds (#10373: the "
+            "capstone residual monitor over the instrument set — green-while-"
+            "dying detection; v1 provisional cadence, default 4h). Each tick is "
+            "one evaluation window for the sustained-window divergence logic."
+        ),
+    )
+    second_order_vitals_window_days: int = Field(
+        default=7,
+        ge=1,
+        le=90,
+        description=(
+            "Trailing window (days) the SecondOrderVitalsLoop reads each "
+            "instrument's series over for one per-window observation (#10373). "
+            "Escapes/interventions/audit/independence are windowed by their own "
+            "timestamps; erosion is taken from its latest monthly trend row."
+        ),
+    )
+    second_order_vitals_min_baseline_windows: int = Field(
+        default=8,
+        ge=2,
+        le=1000,
+        description=(
+            "How many observations a series must accumulate before it carries a "
+            "Shewhart control limit and its family counts as *reporting* "
+            "(#10373). A limit from one or two points is noise; below this the "
+            "family degrades honestly to `n-of-5 reporting`, never a false green."
+        ),
+    )
+    second_order_vitals_sustained_windows: int = Field(
+        default=2,
+        ge=1,
+        le=100,
+        description=(
+            "How many CONSECUTIVE windows a family must stay above its control "
+            "limit before it counts toward the k-of-5 divergence tally (#10373). "
+            "The anti-flap half of the design — single-window blips never fire."
+        ),
+    )
+    second_order_vitals_watch_k: int = Field(
+        default=2,
+        ge=1,
+        le=5,
+        description=(
+            "k-of-5: number of instrument families sustained above their control "
+            "limits (with primary health green) for the `watch` verdict (#10373). "
+            "`watch` is a dashboard state change only — no issue is filed."
+        ),
+    )
+    second_order_vitals_diverging_k: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description=(
+            "k-of-5: number of instrument families sustained above their control "
+            "limits (with primary health green) for the `diverging` verdict — the "
+            "green-while-dying alarm (#10373). Files ONE find + HITL per episode."
+        ),
+    )
+    second_order_vitals_history_max: int = Field(
+        default=120,
+        ge=8,
+        le=100000,
+        description=(
+            "Max per-series observations SecondOrderVitalsLoop retains (#10373). "
+            "Bounds the persisted baseline so the state file cannot grow without "
+            "limit; the oldest windows fall off the front."
+        ),
+    )
+    second_order_vitals_min_merge_throughput: int = Field(
+        default=1,
+        ge=0,
+        le=100000,
+        description=(
+            "Merge-throughput floor (merges in the window) for primary health to "
+            "count as green (#10373). An idle factory is not green-while-dying; "
+            "below this the monitor stays silent."
+        ),
+    )
+    second_order_vitals_min_ci_pass_rate: float = Field(
+        default=0.5,
+        ge=0.0,
+        description=(
+            "CI first-pass-rate floor for primary health to count as green "
+            "(#10373). Read from the existing factory-health signal (never a "
+            "re-derivation); below this the primary gates are not themselves "
+            "green and the divergence monitor stays silent. Normally in [0,1]; "
+            "a floor above 1.0 simply holds the monitor silent on the CI axis."
+        ),
+    )
+    second_order_vitals_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for SecondOrderVitalsLoop (#10373: the "
+            "capstone residual monitor, read-only ADR-0029 Pattern B). Computes "
+            "the green-while-dying verdict and reports it; never remediates, "
+            "gates ordinary merges, or files fix PRs."
+        ),
+    )
     adr_drift_resolver_interval: int = Field(
         default=3600,
         ge=900,
@@ -1870,6 +2261,23 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Enforce docs/standards/factory_autonomy/policy.yaml before "
             "autonomous merges (CH-3)."
+        ),
+    )
+
+    # G3 close-verification controller (#10358): the actuator half of the
+    # close-verification loop. P10.7 (#10356) DETECTS a false auto-close (an
+    # issue closed by a PR carrying neither a non-test source change nor a
+    # tests/regressions/ delta — the #10223 signature, with the same
+    # Skip-Regression: opt-out). When ON, a post-merge observer REOPENS the
+    # closed issue and re-triages it (re-applies find_label) so a delta-less
+    # "done" is actually driven to a fix. Default-OFF and fully inert until
+    # enabled — same rollout discipline as the G1 auto-recut actuator.
+    close_verification_enabled: bool = Field(
+        default=False,
+        description=(
+            "Reopen + re-triage an issue a merged PR closed without a fix "
+            "delta (the #10223 false-close signature). Default-off actuator "
+            "for the P10.7 detector (#10358)."
         ),
     )
 
@@ -2918,6 +3326,43 @@ class HydraFlowConfig(BaseModel):
     rc_branch_prefix: str = Field(
         default="rc/",
         description="Prefix for release-candidate branch names",
+    )
+    rc_auto_recut_enabled: bool = Field(
+        default=False,
+        description=(
+            "G1 (#10353): when true, StagingPromotionLoop re-cuts a fresh RC "
+            "ahead of the normal cadence once the rc-promotion-stuck escalation "
+            "is open AND staging CI is green again (the blocking gate cleared). "
+            "Default OFF — inert until explicitly enabled; the live blocker-clear "
+            "signal needs validation against a real RC before opt-in."
+        ),
+    )
+    rc_observed_advance_close_enabled: bool = Field(
+        default=True,
+        description=(
+            "G1 (#10353): when true, StagingPromotionLoop closes the RC-stuck "
+            "trackers whenever `main` is observed to advance via a merged rc/* "
+            "promotion PR (a manual/operator merge included), not only on the "
+            "loop's own merge. Default ON (live). Kill-switch: the sandbox turns "
+            "it OFF because the observed-advance sweep reads merged PRs via a raw "
+            "`gh pr list` that bypasses FakeGitHub and would hang the air-gapped "
+            "network (same class as evidence_pack / approval_records)."
+        ),
+    )
+    rc_promotion_health_enabled: bool = Field(
+        default=True,
+        description=(
+            "G1 (#10353): when true, StagingPromotionLoop emits the promotion "
+            "error-signal — the `main..staging` commit gap + "
+            "days_since_last_successful_promotion + consecutive_rc_failures — in "
+            "its BACKGROUND_WORKER_STATUS telemetry each tick, so promotion "
+            "health is measurable, not implied. Default ON (read-only "
+            "observability). Kill-switch: the sandbox turns it OFF because the "
+            "gap read spawns a raw `gh api compare` that bypasses FakeGitHub and "
+            "would hang the air-gapped network (same class as evidence_pack / "
+            "rc_observed_advance_close). The two other signals are state-only and "
+            "always surface."
+        ),
     )
     staging_promotion_interval: int = Field(
         default=300,
@@ -4625,6 +5070,70 @@ class HydraFlowConfig(BaseModel):
             "Defaults ON but conservative — the sensors' own baseline/"
             "threshold defaults keep it quiet until an operator snapshots "
             "a real repo-specific baseline."
+        ),
+    )
+    fail_open_monitor_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for FailOpenMonitorLoop (#10371: fail-open "
+            "ledger rate → Shewhart control limit → hydraflow-find). Defaults "
+            "ON but conservative — a control limit needs several days of ledger "
+            "history before it can fire, so the loop is quiet until then."
+        ),
+    )
+    escape_ledger_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for EscapeLedgerLoop (#10367: post-merge "
+            "escape ledger + erosion trend surfaces, read-only ADR-0029 "
+            "Pattern B). Records escapes and renders trend reports; the "
+            "finding-rate budget bounds any issue filing."
+        ),
+    )
+    intervention_tally_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for InterventionTallyLoop (#10369: "
+            "attention-side telemetry, read-only ADR-0029 Pattern B). Senses "
+            "+ records human touches (steering/HITL/control-route/CLI) and "
+            "renders the rate report; never gates, blocks, or fixes."
+        ),
+    )
+    intervention_tally_classify_enabled: bool = Field(
+        default=True,
+        description=(
+            "Whether InterventionTallyLoop may send free-text steering "
+            "directives to the cheap LLM for classification (#10369). OFF "
+            "keeps free-text rows at low confidence with raw text preserved; "
+            "the air-gapped sandbox pins this OFF (config_disable seam) so no "
+            "classification spawn is reachable there."
+        ),
+    )
+    intervention_tally_model: str = Field(
+        default="",
+        description=(
+            "Model for InterventionTallyLoop's free-text steering "
+            "classification (#10369); empty falls back to background_model, "
+            "then 'sonnet'. Also stamped as each row's model_version_context."
+        ),
+    )
+    sampled_audit_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for SampledAuditLoop (#10370: sampled "
+            "adversarial re-audit — the silent-escape estimator, read-only "
+            "ADR-0029 Pattern B). Samples merged PRs, re-audits, records, and "
+            "files disagreements; never gates, reverts, or opens fix PRs."
+        ),
+    )
+    sampled_audit_reaudit_enabled: bool = Field(
+        default=True,
+        description=(
+            "Gates the SampledAuditLoop adversarial re-audit LLM spawn (#10370). "
+            "Default ON; the air-gapped sandbox pins it OFF "
+            "(mockworld.sandbox_main._apply_sandbox_config_overrides) so the "
+            "config_disable seam is TRUE — no real `claude` is reachable on the "
+            "sandbox network. The loop still samples-and-ticks + governs."
         ),
     )
     adr_drift_resolver_loop_enabled: bool = Field(

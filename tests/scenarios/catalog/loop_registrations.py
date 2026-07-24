@@ -126,6 +126,227 @@ def _build_erosion_metrics(ports: dict[str, Any], config: Any, deps: Any) -> Any
     )
 
 
+def _build_fail_open_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build FailOpenMonitorLoop for scenarios (#10371).
+
+    ``dedup`` defaults to a clean-slate MagicMock (no prior filed breach
+    fingerprints), mirroring the ErosionMetricsLoop builder. The loop reads the
+    fail-open ledger from ``config.diagnostics_dir`` on disk (written by the
+    PostVerifyAdvisor), not through the ``github`` port, so scenarios exercising
+    the breach path seed that ledger file directly — see
+    ``tests/scenarios/test_fail_open_monitor_scenario.py``.
+    """
+    from fail_open_monitor_loop import FailOpenMonitorLoop
+
+    dedup = ports.get("fail_open_monitor_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["fail_open_monitor_dedup"] = dedup
+
+    return FailOpenMonitorLoop(
+        config=config,
+        pr_manager=ports["github"],
+        dedup=dedup,
+        deps=deps,
+    )
+
+
+def _build_escape_ledger(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build EscapeLedgerLoop for scenarios (#10367).
+
+    Mirrors ``_build_erosion_metrics``: ``state`` defaults to a MagicMock
+    whose last-processed-SHA cursor is a clean-slate in-memory string (the
+    first tick primes the baseline, matching production's fresh-install
+    behavior), and ``dedup`` defaults to a clean-slate MagicMock. The loop's
+    escape detection (``commits_for_range``) and erosion trend datapoints run
+    against ``config.repo_root`` on disk, not through the ``github`` port, so
+    scenarios exercising detection need a real git repo fixture there — see
+    ``tests/scenarios/test_escape_ledger_scenario.py``.
+    """
+    from escape_ledger_loop import EscapeLedgerLoop  # noqa: PLC0415
+
+    state = ports.get("escape_ledger_state")
+    if state is None:
+        state = MagicMock()
+        cursor: dict[str, str] = {"sha": ""}
+
+        def _get_sha() -> str:
+            return cursor["sha"]
+
+        def _set_sha(sha: str) -> None:
+            cursor["sha"] = sha
+
+        state.get_escape_ledger_last_processed_sha.side_effect = _get_sha
+        state.set_escape_ledger_last_processed_sha.side_effect = _set_sha
+        ports["escape_ledger_state"] = state
+
+    dedup = ports.get("escape_ledger_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["escape_ledger_dedup"] = dedup
+
+    return EscapeLedgerLoop(
+        config=config,
+        pr_manager=ports["github"],
+        state=state,
+        dedup=dedup,
+        deps=deps,
+    )
+
+
+def _build_sampled_audit(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build SampledAuditLoop for scenarios (#10370).
+
+    Mirrors ``_build_escape_ledger``: ``state`` defaults to a MagicMock whose
+    SHA cursor + governed-rate + disagreement-history are clean-slate in-memory
+    values (the first tick primes the cursor, matching a fresh install), and
+    ``dedup`` defaults to a clean-slate MagicMock. The loop samples merged PRs
+    from ``config.repo_root`` on disk (``merged_changes_for_range``); its
+    adversarial re-audit is an injected ``auditor`` fake so no scenario shells
+    out to a real ``claude`` — see ``tests/scenarios/test_sampled_audit_scenario.py``.
+    """
+    from sampled_audit_loop import SampledAuditLoop  # noqa: PLC0415
+
+    state = ports.get("sampled_audit_state")
+    if state is None:
+        state = MagicMock()
+        store: dict[str, Any] = {"sha": "", "rate": 0.0, "history": []}
+
+        state.get_sampled_audit_last_processed_sha.side_effect = lambda: store["sha"]
+        state.set_sampled_audit_last_processed_sha.side_effect = lambda sha: (
+            store.__setitem__("sha", sha)
+        )
+        state.get_sampled_audit_governed_rate.side_effect = lambda: store["rate"]
+        state.set_sampled_audit_governed_rate.side_effect = lambda rate: (
+            store.__setitem__("rate", rate)
+        )
+        state.get_sampled_audit_disagreement_history.side_effect = lambda: list(
+            store["history"]
+        )
+        state.set_sampled_audit_disagreement_history.side_effect = lambda h: (
+            store.__setitem__("history", list(h))
+        )
+        ports["sampled_audit_state"] = state
+
+    dedup = ports.get("sampled_audit_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["sampled_audit_dedup"] = dedup
+
+    return SampledAuditLoop(
+        config=config,
+        pr_manager=ports["github"],
+        state=state,
+        dedup=dedup,
+        deps=deps,
+        auditor=ports.get("sampled_audit_auditor"),
+    )
+
+
+def _build_intervention_tally(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build InterventionTallyLoop for scenarios (#10369).
+
+    ``state`` defaults to a MagicMock whose last-processed-ts cursor is a
+    clean-slate in-memory string (the first tick primes the baseline, matching
+    production's fresh-install behavior) and whose ``get_all_human_steering``
+    returns any seeded steering map (default empty). ``dedup`` defaults to a
+    clean-slate MagicMock. The loop senses steering from state and HITL /
+    governor actions from ``config.event_log_path`` on disk, not through the
+    ``github`` port — see ``tests/scenarios/test_intervention_tally_scenario.py``.
+    The free-text cheap-LLM path is injected as a fake so no scenario shells
+    out to a real ``claude``.
+    """
+    from intervention_tally_loop import InterventionTallyLoop  # noqa: PLC0415
+
+    state = ports.get("intervention_tally_state")
+    if state is None:
+        state = MagicMock()
+        cursor: dict[str, str] = {"ts": ""}
+
+        def _get_ts() -> str:
+            return cursor["ts"]
+
+        def _set_ts(ts: str) -> None:
+            cursor["ts"] = ts
+
+        state.get_intervention_tally_last_processed_ts.side_effect = _get_ts
+        state.set_intervention_tally_last_processed_ts.side_effect = _set_ts
+        state.get_all_human_steering.return_value = ports.get(
+            "intervention_tally_steering", {}
+        )
+        ports["intervention_tally_state"] = state
+
+    dedup = ports.get("intervention_tally_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["intervention_tally_dedup"] = dedup
+
+    classifier = ports.get("intervention_tally_classifier")
+
+    return InterventionTallyLoop(
+        config=config,
+        state=state,
+        dedup=dedup,
+        deps=deps,
+        classifier_llm=classifier,
+    )
+
+
+def _build_second_order_vitals(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build SecondOrderVitalsLoop for scenarios (#10373).
+
+    ``state`` defaults to a MagicMock backing the per-series observation
+    histories + last-verdict in an in-memory store (a fresh install starts with
+    empty histories, so the first ticks degrade honestly to ``n-of-5
+    reporting``). The primary-health gate is injected via
+    ``second_order_vitals_primary_health`` so the scenario controls the green
+    precondition without a git/telemetry dependency; default is a green reading.
+    The loop reads the four instruments' ledgers from ``config.diagnostics_dir``
+    on disk and files its single divergence alarm through the ``github`` port —
+    see ``tests/scenarios/test_second_order_vitals_scenario.py``.
+    """
+    from second_order_vitals_loop import SecondOrderVitalsLoop  # noqa: PLC0415
+    from vitals.observe import PrimaryHealth  # noqa: PLC0415
+
+    state = ports.get("second_order_vitals_state")
+    if state is None:
+        state = MagicMock()
+        store: dict[str, Any] = {"history": {}, "verdict": ""}
+
+        state.get_second_order_vitals_series_history.side_effect = lambda: {
+            k: list(v) for k, v in store["history"].items()
+        }
+        state.set_second_order_vitals_series_history.side_effect = lambda h: (
+            store.__setitem__("history", {k: list(v) for k, v in h.items()})
+        )
+        state.get_second_order_vitals_last_verdict.side_effect = lambda: store[
+            "verdict"
+        ]
+        state.set_second_order_vitals_last_verdict.side_effect = lambda v: (
+            store.__setitem__("verdict", v)
+        )
+        ports["second_order_vitals_state"] = state
+
+    reader = ports.get("second_order_vitals_primary_health")
+    if reader is None:
+        # Default: primary health GREEN (the green-while-dying precondition), so
+        # a scenario that seeds adverse drift produces watch/diverging.
+        def reader(_now: Any, _window_days: int) -> PrimaryHealth:
+            return PrimaryHealth(ci_pass_rate=1.0, merge_throughput=100)
+
+    return SecondOrderVitalsLoop(
+        config=config,
+        pr_manager=ports["github"],
+        state=state,
+        deps=deps,
+        primary_health_reader=reader,
+    )
+
+
 def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build IssueRefinementLoop for scenarios (#9957).
 
@@ -2007,6 +2228,11 @@ _BUILDERS: dict[str, Any] = {
     "gate_health": _build_gate_health,
     "pr_red_repair": _build_pr_red_repair,
     "erosion_metrics": _build_erosion_metrics,
+    "fail_open_monitor": _build_fail_open_monitor,
+    "escape_ledger": _build_escape_ledger,
+    "intervention_tally": _build_intervention_tally,
+    "sampled_audit": _build_sampled_audit,
+    "second_order_vitals": _build_second_order_vitals,
     "issue_refinement": _build_issue_refinement,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,

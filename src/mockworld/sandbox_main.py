@@ -119,6 +119,33 @@ SANDBOX_SEAMS: dict[str, str] = {
     # loop no sandbox scenario exercises, so the whole loop is config-disabled
     # below rather than seeding those reads.
     "flake_tracker_loop": "config_disable",
+    # StagingPromotionLoop's raw-gh reads bypass FakeGitHub and hang the
+    # air-gapped network (#10353): ``_list_merged_promotion_prs`` (`gh pr list`,
+    # reached by the evidence reconcile AND the G1 observed-main-advance sweep),
+    # ``_staging_head_check_conclusions`` (`gh api .../check-runs`, reached only by
+    # the G1 named-gate auto-recut sensor), and ``_main_staging_gap`` (`gh api
+    # compare`, reached only by the G1 promotion-health signal). Every feature
+    # flag that reaches them is pinned OFF in ``_apply_sandbox_config_overrides``
+    # (evidence_pack_enabled, rc_observed_advance_close_enabled,
+    # rc_auto_recut_enabled, rc_promotion_health_enabled), so no spawn is
+    # reachable — the sandbox still exercises the cut→monitor→merge path (s82).
+    "staging_promotion_loop": "config_disable",
+    # InterventionTallyLoop's only spawn is the cheap-LLM classification of
+    # free-text steering directives (``run_lightweight_agent``), gated by
+    # ``intervention_tally_classify_enabled``. That flag is pinned OFF in
+    # ``_apply_sandbox_config_overrides`` so the classifier path is never
+    # reached on the air-gapped network — the sensing/recording path (event
+    # log + steering state, no spawn) still runs, and the idle-poll scenario
+    # (s84) exercises the loop end-to-end without any real ``claude`` (#10369).
+    "intervention_tally_loop": "config_disable",
+    # SampledAuditLoop's adversarial re-audit is a real ``run_lightweight_agent``
+    # (``claude``) spawn — the exact s51/s56 wedge class on the air-gapped
+    # network. ``sampled_audit_reaudit_enabled`` is pinned OFF in
+    # ``_apply_sandbox_config_overrides`` so ``_sample_and_audit`` returns before
+    # the spawn; the loop still primes its cursor + ticks (s86 idle-poll), it
+    # just never re-audits. The full sample→audit→cross-link path is covered by
+    # the Tier-1 MockWorld scenario with an injected fake auditor (#10370).
+    "sampled_audit_loop": "config_disable",
 }
 
 
@@ -172,14 +199,41 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # loop, so disable it wholesale (retires the grandfathered _download_junit
     # spawn and air-gaps the new xdist-audit read).
     object.__setattr__(config, "flake_tracker_loop_enabled", False)
-    # StagingPromotionLoop's CH-4 evidence machinery (#10309): once a scenario
-    # seeds ``staging_enabled`` the loop's every tick runs the reconcile sweep
-    # (``_list_merged_promotion_prs`` — a raw ``gh pr list`` subprocess, the
-    # grandfathered spawn in test_sandbox_seam_completeness) and each promoted
-    # RC triggers the pack compiler. Both reach the network; both have their
-    # own unit tests. The sandbox exercises the cut→monitor→merge promotion
-    # path itself (s82).
+    # StagingPromotionLoop's raw-gh reads (#10309/#10353): once a scenario seeds
+    # ``staging_enabled`` the loop's every tick can reach ``gh`` subprocesses that
+    # bypass FakeGitHub — ``_list_merged_promotion_prs`` (`gh pr list`),
+    # ``_staging_head_check_conclusions`` (`gh api .../check-runs`), and
+    # ``_main_staging_gap`` (`gh api compare`). Four flags gate every path to
+    # them; pin all four OFF so the ``staging_promotion_loop`` config_disable
+    # seam is TRUE (no reachable spawn), while the sandbox still exercises the
+    # cut→monitor→merge promotion path itself (s82):
+    #   - evidence_pack_enabled: the CH-4 reconcile sweep + pack compiler.
+    #   - rc_observed_advance_close_enabled (G1): the observed-main-advance
+    #     tracker-close sweep — the OTHER caller of _list_merged_promotion_prs,
+    #     not gated by evidence_pack_enabled.
+    #   - rc_auto_recut_enabled (G1): the only caller of the named-gate sensor
+    #     (_staging_head_check_conclusions) — already default-OFF; pinned here so
+    #     the seam is not merely aspirational.
+    #   - rc_promotion_health_enabled (G1): the only caller of _main_staging_gap
+    #     (the compare read); the health signal's two other fields are state-only.
+    # All four have their own unit tests.
     object.__setattr__(config, "evidence_pack_enabled", False)
+    object.__setattr__(config, "rc_observed_advance_close_enabled", False)
+    object.__setattr__(config, "rc_auto_recut_enabled", False)
+    object.__setattr__(config, "rc_promotion_health_enabled", False)
+    # InterventionTallyLoop (#10369): its ONLY spawn is the cheap-LLM
+    # classification of free-text steering directives. Pin the classify flag
+    # OFF so that path is unreachable on the air-gapped network (the
+    # ``intervention_tally_loop`` config_disable seam); the loop still senses +
+    # records from the event log / steering state (no spawn) and heartbeats.
+    object.__setattr__(config, "intervention_tally_classify_enabled", False)
+    # SampledAuditLoop (#10370): the adversarial re-audit shells out to a real
+    # ``claude`` (``run_lightweight_agent``) that hangs on the air-gapped
+    # network — the s51/s56 wedge class. Pin the re-audit spawn OFF so the
+    # ``sampled_audit_loop`` config_disable seam is TRUE; the loop still primes
+    # its cursor + heartbeats (s86 idle-poll), it just never re-audits. The
+    # sample→audit→cross-link path has its own unit + MockWorld scenario cover.
+    object.__setattr__(config, "sampled_audit_reaudit_enabled", False)
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:

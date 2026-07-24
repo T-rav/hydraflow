@@ -1,0 +1,278 @@
+"""Pure escape detection (#10367) + a thin git adapter.
+
+``detect_escapes`` is the pure core: it reads a list of ``CommitInfo`` and
+returns one ``EscapeCandidate`` per commit that carries a post-merge-defect
+signal — mirroring ``erosion.spread.compute``'s purity contract (explicit
+inputs, no git, unit-testable with synthetic data). ``commits_for_range`` and
+``commit_committed_at`` are the thin ``git log`` adapters that materialize
+``CommitInfo`` for a real commit range; the pure core never shells out.
+
+Detection sources (v1, decided): revert commits, regression-pin commits
+(a new file under ``tests/regressions/``), hotfix commits referencing a prior
+merge, and bug-issue fixes (a ``fix`` commit closing ``#N``). Sentry-sourced
+escapes are attributed in the ``SentryLoop`` flow, not here. Exactly one
+candidate is emitted per commit — the strongest signal wins by precedence
+(revert > regression-pin > hotfix > bug-issue), so a merged revert / hotfix /
+regression-pin each produce exactly one ledger row.
+"""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+from escape import attribution
+from escape.models import (
+    AttributionConfidence,
+    AttributionMethod,
+    CommitInfo,
+    DetectionSource,
+    EscapeCandidate,
+)
+
+_GIT_TIMEOUT_S = 60
+
+# NUL separates commits (`-z`); 0x1f separates fields within a commit. Neither
+# appears in a sha / ISO date / subject / body, so the split is unambiguous
+# even across multi-line bodies.
+_COMMIT_SEP = "\x00"
+_FIELD_SEP = "\x1f"
+_LOG_FORMAT = f"%H{_FIELD_SEP}%cI{_FIELD_SEP}%s{_FIELD_SEP}%b"
+
+# Marker line prefix for the added-paths pass (distinct from any real path).
+_SHA_MARKER = "\x1eESCSHA\x1e"
+
+
+def _fix_subject(subject: str) -> bool:
+    """True for a conventional-commit fix subject (``fix:`` / ``fix(scope):``)."""
+    head = subject.strip().lower()
+    return head.startswith(("fix:", "fix(", "fix!:", "bug:", "bugfix"))
+
+
+def _origin_pointer(commit: CommitInfo) -> tuple[str, int | None]:
+    """Extract the best originating-merge pointer + PR number from *commit*.
+
+    Prefers a stated sha (resolvable to a merge time so
+    ``time_to_detection_hours`` can be populated) over a ``#N`` closing-keyword
+    reference. Returns ``(originating_ref, originating_pr)``; ``originating_ref``
+    is a bare sha, ``#N``, or ``""`` when nothing was found.
+    """
+    text = f"{commit.subject}\n{commit.body}"
+    fixes = attribution.extract_fixes_refs(text)
+    pr = fixes[0] if fixes else None
+    shas = attribution.extract_referenced_shas(commit.body, exclude=commit.sha)
+    if shas:
+        return shas[0], pr
+    if pr is not None:
+        return f"#{pr}", pr
+    return "", pr
+
+
+def _classify(commit: CommitInfo) -> EscapeCandidate | None:
+    """Return the single strongest escape candidate for *commit*, or ``None``.
+
+    Precedence (decided): revert > regression-pin > hotfix > bug-issue. Pure.
+    """
+    subject, body = commit.subject, commit.body
+
+    if attribution.is_revert(subject, body):
+        reverted = attribution.parse_reverted_sha(body) or ""
+        confidence: AttributionConfidence = "high" if reverted else "medium"
+        return EscapeCandidate(
+            detection_source="revert",
+            detection_ref=commit.sha,
+            detected_at=commit.committed_at,
+            attribution_method="revert-parse",
+            attribution_confidence=confidence,
+            originating_ref=reverted,
+            notes="Revert commit — reverses a prior merged change.",
+        )
+
+    if attribution.adds_regression_pin(commit.added_paths):
+        ref, pr = _origin_pointer(commit)
+        return EscapeCandidate(
+            detection_source="regression-pin",
+            detection_ref=commit.sha,
+            detected_at=commit.committed_at,
+            attribution_method="regression-pin",
+            attribution_confidence="medium",
+            originating_ref=ref,
+            originating_pr=pr,
+            notes="Adds a tests/regressions/ pin for a post-merge failure.",
+        )
+
+    if attribution.is_hotfix(subject, body):
+        ref, pr = _origin_pointer(commit)
+        method: AttributionMethod = (
+            "fixes-chain" if pr is not None else "blame-intersect"
+        )
+        conf: AttributionConfidence = "medium" if ref else "low"
+        return EscapeCandidate(
+            detection_source="hotfix",
+            detection_ref=commit.sha,
+            detected_at=commit.committed_at,
+            attribution_method=method,
+            attribution_confidence=conf,
+            originating_ref=ref,
+            originating_pr=pr,
+            notes="Hotfix referencing a prior merged change.",
+        )
+
+    if _fix_subject(subject):
+        ref, pr = _origin_pointer(commit)
+        if pr is not None:
+            return EscapeCandidate(
+                detection_source="bug-issue",
+                detection_ref=commit.sha,
+                detected_at=commit.committed_at,
+                attribution_method="fixes-chain",
+                attribution_confidence="low",
+                originating_ref=ref,
+                originating_pr=pr,
+                notes=(
+                    "Fix commit closing an issue — bug-issue escape pending a "
+                    "human bug-label confirmation (HITL)."
+                ),
+            )
+
+    return None
+
+
+def detect_escapes(commits: list[CommitInfo]) -> list[EscapeCandidate]:
+    """Pure: one ``EscapeCandidate`` per commit carrying an escape signal.
+
+    Order-preserving over *commits*. No git, no I/O — the thin adapters
+    below feed it real commit ranges; unit tests feed it synthetic data.
+    """
+    candidates: list[EscapeCandidate] = []
+    for commit in commits:
+        candidate = _classify(commit)
+        if candidate is not None:
+            candidates.append(candidate)
+    return candidates
+
+
+def _run_git(repo_root: Path, args: list[str]) -> str | None:
+    """Run a read-only ``git`` command, returning stdout or ``None`` on failure.
+
+    Failure-tolerant like every git adapter in this family (missing git,
+    non-zero exit, timeout, non-repo all return ``None``). Raw
+    ``subprocess.run`` mirrors ``erosion.spread.changed_files_for_range``'s
+    convention — a local read-only git op, not the fleet-gated spawn path
+    the sandbox seam guard covers.
+    """
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def _added_paths_for_range(repo_root: Path, commit_range: str) -> dict[str, list[str]]:
+    """Map each commit sha in *commit_range* to the paths it ADDED (status ``A``)."""
+    out = _run_git(
+        repo_root,
+        [
+            "log",
+            commit_range,
+            "--reverse",
+            "--diff-filter=A",
+            "--name-only",
+            f"--pretty=format:{_SHA_MARKER}%H",
+        ],
+    )
+    added: dict[str, list[str]] = {}
+    if not out:
+        return added
+    current: str | None = None
+    for line in out.splitlines():
+        if line.startswith(_SHA_MARKER):
+            current = line[len(_SHA_MARKER) :].strip()
+            added.setdefault(current, [])
+            continue
+        stripped = line.strip()
+        if current is not None and stripped:
+            added[current].append(stripped)
+    return added
+
+
+def commits_for_range(repo_root: Path, commit_range: str) -> list[CommitInfo] | None:
+    """Materialize ``CommitInfo`` for every commit in *commit_range*.
+
+    Thin ``git log`` adapter — NOT part of the pure detector. Returns
+    ``None`` on any git failure so callers distinguish "no commits" (``[]``)
+    from "couldn't read" (``None``); ``[]`` when the range is empty.
+    """
+    out = _run_git(
+        repo_root,
+        ["log", commit_range, "--reverse", "-z", f"--pretty=format:{_LOG_FORMAT}"],
+    )
+    if out is None:
+        return None
+    added_map = _added_paths_for_range(repo_root, commit_range)
+    commits: list[CommitInfo] = []
+    for chunk in out.split(_COMMIT_SEP):
+        if not chunk.strip():
+            continue
+        parts = chunk.split(_FIELD_SEP)
+        if len(parts) < 4:
+            continue
+        sha, committed_at, subject, body = parts[0], parts[1], parts[2], parts[3]
+        sha = sha.strip()
+        if not sha:
+            continue
+        commits.append(
+            CommitInfo(
+                sha=sha,
+                subject=subject,
+                body=body,
+                committed_at=committed_at.strip(),
+                added_paths=tuple(added_map.get(sha, [])),
+            )
+        )
+    return commits
+
+
+def commit_committed_at(repo_root: Path, sha: str) -> str | None:
+    """Return *sha*'s committer date (ISO-8601), or ``None`` on any git failure."""
+    out = _run_git(repo_root, ["show", "-s", "--format=%cI", sha])
+    if out is None:
+        return None
+    stamp = out.strip()
+    return stamp or None
+
+
+def count_commits_since(repo_root: Path, days: int) -> int | None:
+    """Count commits reachable from HEAD in the last *days* — merge-volume proxy.
+
+    Used as the denominator for ``escapes per 100 merges``. A rolling count
+    of merged changes; ``None`` on git failure.
+    """
+    out = _run_git(
+        repo_root, ["rev-list", "--count", f"--since={days}.days.ago", "HEAD"]
+    )
+    if out is None:
+        return None
+    try:
+        return int(out.strip())
+    except ValueError:
+        return None
+
+
+__all__ = [
+    "AttributionMethod",
+    "DetectionSource",
+    "commit_committed_at",
+    "commits_for_range",
+    "count_commits_since",
+    "detect_escapes",
+]

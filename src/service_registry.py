@@ -63,8 +63,11 @@ from epic import EpicCompletionChecker, EpicManager
 from epic_monitor_loop import EpicMonitorLoop
 from epic_sweeper_loop import EpicSweeperLoop
 from erosion_metrics_loop import ErosionMetricsLoop
+from escape.ledger import EscapeLedger
+from escape_ledger_loop import EscapeLedgerLoop
 from events import EventBus
 from execution import SubprocessRunner
+from fail_open_monitor_loop import FailOpenMonitorLoop
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
 from fitness_scorecard_loop import FitnessScorecardLoop
 from flake_tracker_loop import FlakeTrackerLoop
@@ -78,6 +81,7 @@ from hitl_phase import HITLPhase
 from hitl_runner import HITLRunner
 from human_steering_loop import HumanSteeringLoop
 from implement_phase import ImplementPhase
+from intervention_tally_loop import InterventionTallyLoop
 from issue_cache import IssueCache
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
 from issue_refinement_loop import IssueRefinementLoop
@@ -127,7 +131,9 @@ from reviewer import ReviewRunner
 from route_back import RouteBackCoordinator
 from run_recorder import RunRecorder
 from runs_gc_loop import RunsGCLoop
+from sampled_audit_loop import SampledAuditLoop
 from sandbox_failure_fixer_loop import SandboxFailureFixerLoop
+from second_order_vitals_loop import SecondOrderVitalsLoop
 from security_patch_loop import SecurityPatchLoop  # noqa: TCH001
 from sentry_loop import SentryLoop  # noqa: TCH001 — used in dataclass field
 from shape_runner import ShapeRunner
@@ -328,6 +334,11 @@ class ServiceRegistry:
     gate_health_loop: GateHealthLoop
     pr_red_repair_loop: PrRedRepairLoop
     erosion_metrics_loop: ErosionMetricsLoop
+    fail_open_monitor_loop: FailOpenMonitorLoop
+    escape_ledger_loop: EscapeLedgerLoop
+    intervention_tally_loop: InterventionTallyLoop
+    sampled_audit_loop: SampledAuditLoop
+    second_order_vitals_loop: SecondOrderVitalsLoop
     issue_refinement_loop: IssueRefinementLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
@@ -1332,6 +1343,9 @@ def build_services(
         credentials=credentials,
         dedup=sentry_dedup,
         state=state,
+        # Sentry-attributed escapes append a row to the same escape ledger
+        # EscapeLedgerLoop writes (#10367); agent-research / low confidence.
+        escape_ledger=EscapeLedger(config.diagnostics_dir / "escape_ledger.jsonl"),
     )
     log_ingest_dedup = DedupStore(
         "log_ingest_filed_sighashes",
@@ -1383,6 +1397,54 @@ def build_services(
         pr_manager=prs,
         state=state,
         dedup=erosion_metrics_dedup,
+        deps=loop_deps,
+    )
+    fail_open_monitor_dedup = DedupStore(
+        "fail_open_monitor_filed_breaches",
+        config.data_root / "dedup" / "fail_open_monitor_filed.json",
+    )
+    fail_open_monitor_loop = FailOpenMonitorLoop(
+        config=config,
+        pr_manager=prs,
+        dedup=fail_open_monitor_dedup,
+        deps=loop_deps,
+    )
+    escape_ledger_dedup = DedupStore(
+        "escape_ledger_recorded",
+        config.data_root / "dedup" / "escape_ledger.json",
+    )
+    escape_ledger_loop = EscapeLedgerLoop(
+        config=config,
+        pr_manager=prs,
+        state=state,
+        dedup=escape_ledger_dedup,
+        deps=loop_deps,
+    )
+    intervention_tally_dedup = DedupStore(
+        "intervention_tally_recorded",
+        config.data_root / "dedup" / "intervention_tally.json",
+    )
+    intervention_tally_loop = InterventionTallyLoop(
+        config=config,
+        state=state,
+        dedup=intervention_tally_dedup,
+        deps=loop_deps,
+    )
+    sampled_audit_dedup = DedupStore(
+        "sampled_audit_filed_findings",
+        config.data_root / "dedup" / "sampled_audit.json",
+    )
+    sampled_audit_loop = SampledAuditLoop(
+        config=config,
+        pr_manager=prs,
+        state=state,
+        dedup=sampled_audit_dedup,
+        deps=loop_deps,
+    )
+    second_order_vitals_loop = SecondOrderVitalsLoop(
+        config=config,
+        pr_manager=prs,
+        state=state,
         deps=loop_deps,
     )
     issue_refinement_dedup = DedupStore(
@@ -1969,6 +2031,11 @@ def build_services(
         gate_health_loop=gate_health_loop,
         pr_red_repair_loop=pr_red_repair_loop,
         erosion_metrics_loop=erosion_metrics_loop,
+        fail_open_monitor_loop=fail_open_monitor_loop,
+        escape_ledger_loop=escape_ledger_loop,
+        intervention_tally_loop=intervention_tally_loop,
+        sampled_audit_loop=sampled_audit_loop,
+        second_order_vitals_loop=second_order_vitals_loop,
         issue_refinement_loop=issue_refinement_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,
