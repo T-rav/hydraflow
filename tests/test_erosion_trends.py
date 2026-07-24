@@ -112,6 +112,13 @@ class TestMonthlyTrends:
 
 
 class TestTrendStore:
+    """``TrendStore`` inherits ``read_all``/``append`` from the shared
+    ``AppendOnlyJsonlLedger`` base (#10403) — exercised directly against
+    ``TrendStore`` (not just the generic base fixture in
+    ``test_jsonl_ledger.py``) so a future change to the domain wiring can't
+    silently drop coverage of the inherited path.
+    """
+
     def test_append_and_read_roundtrip(self, tmp_path: Path) -> None:
         store = TrendStore(tmp_path / "erosion_trends.jsonl")
         dp = ChangeDatapoint("2026-01", 4, 3, 1, 10.0)
@@ -120,3 +127,35 @@ class TestTrendStore:
 
     def test_missing_file_is_empty(self, tmp_path: Path) -> None:
         assert TrendStore(tmp_path / "nope.jsonl").read_all() == []
+
+    def test_append_multiple_preserves_order(self, tmp_path: Path) -> None:
+        store = TrendStore(tmp_path / "erosion_trends.jsonl")
+        store.append(ChangeDatapoint("2026-01", 1, 1, 0, 0.0))
+        store.append(ChangeDatapoint("2026-02", 2, 2, 0, 0.0))
+        assert [dp.month for dp in store.read_all()] == ["2026-01", "2026-02"]
+
+    def test_malformed_line_is_skipped(self, tmp_path: Path) -> None:
+        path = tmp_path / "erosion_trends.jsonl"
+        path.write_text(
+            '{"month": "2026-01", "files_touched": 1, "modules_crossed": 1, '
+            '"scatter_findings": 0, "duplication_density": 0.0}\n'
+            "not json\n",
+            encoding="utf-8",
+        )
+        store = TrendStore(path)
+        assert [dp.month for dp in store.read_all()] == ["2026-01"]
+
+    def test_append_creates_parent_directory(self, tmp_path: Path) -> None:
+        nested = tmp_path / "nested" / "dir" / "erosion_trends.jsonl"
+        store = TrendStore(nested)
+        store.append(ChangeDatapoint("2026-01", 1, 1, 0, 0.0))
+        assert nested.exists()
+
+    def test_path_property_returns_constructed_path(self, tmp_path: Path) -> None:
+        target = tmp_path / "erosion_trends.jsonl"
+        assert TrendStore(target).path == target
+
+    def test_has_no_id_based_dedup(self) -> None:
+        """``ChangeDatapoint`` has no stable id — ``TrendStore`` must not
+        gain ``existing_ids`` from the shared base."""
+        assert not hasattr(TrendStore, "existing_ids")

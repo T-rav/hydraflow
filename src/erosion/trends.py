@@ -18,12 +18,13 @@ instrument. This module makes it standing:
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from jsonl_ledger import AppendOnlyJsonlLedger
 
 logger = logging.getLogger("hydraflow.erosion_trends")
 
@@ -139,34 +140,13 @@ def render_erosion_trends_markdown(rows: list[MonthlyTrendRow]) -> str:
     return "\n".join(lines) + "\n"
 
 
-class TrendStore:
-    """Append-only JSONL store for erosion trend datapoints (one per change)."""
+class TrendStore(AppendOnlyJsonlLedger[ChangeDatapoint]):
+    """Append-only JSONL store for erosion trend datapoints (one per change).
+
+    Subclasses the shared ``AppendOnlyJsonlLedger`` base (#10403) rather than
+    ``IdentifiedJsonlLedger`` — datapoints have no stable id to dedup on, one
+    row is recorded per change.
+    """
 
     def __init__(self, path: Path) -> None:
-        self._path = path
-
-    @property
-    def path(self) -> Path:
-        return self._path
-
-    def read_all(self) -> list[ChangeDatapoint]:
-        if not self._path.exists():
-            return []
-        rows: list[ChangeDatapoint] = []
-        for raw_line in self._path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-            except json.JSONDecodeError:
-                logger.warning("TrendStore: skipping malformed datapoint line")
-                continue
-            if isinstance(raw, dict):
-                rows.append(ChangeDatapoint.from_json_dict(raw))
-        return rows
-
-    def append(self, datapoint: ChangeDatapoint) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(datapoint.to_json_dict(), sort_keys=False) + "\n")
+        super().__init__(path, ChangeDatapoint, logger=logger)

@@ -15,12 +15,12 @@ import logging
 from pathlib import Path
 
 from intervention.models import InterventionRecord
-from jsonl_ledger import JsonlLedger
+from jsonl_ledger import IdentifiedJsonlLedger
 
 logger = logging.getLogger("hydraflow.intervention_tally")
 
 
-class InterventionLedger(JsonlLedger[InterventionRecord]):
+class InterventionLedger(IdentifiedJsonlLedger[InterventionRecord]):
     """Append-only reader/writer over one intervention-ledger JSONL file."""
 
     def __init__(self, path: Path) -> None:

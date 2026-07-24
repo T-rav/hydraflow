@@ -14,12 +14,12 @@ import logging
 from pathlib import Path
 
 from audit.models import AuditSample
-from jsonl_ledger import JsonlLedger
+from jsonl_ledger import IdentifiedJsonlLedger
 
 logger = logging.getLogger("hydraflow.sampled_audit")
 
 
-class AuditSampleLedger(JsonlLedger[AuditSample]):
+class AuditSampleLedger(IdentifiedJsonlLedger[AuditSample]):
     """Append-only reader/writer over one ``audit_samples.jsonl`` file."""
 
     def __init__(self, path: Path) -> None:
