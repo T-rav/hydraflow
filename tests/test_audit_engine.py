@@ -220,6 +220,22 @@ class TestGovernance:
             assert DEFAULT_FLOOR <= rate <= DEFAULT_CEILING
         assert rate < climbed
 
+    def test_widen_fires_at_realistic_small_per_tick_samples(self) -> None:
+        # Realistic volume: 5% of a handful of merges = a few samples per tick.
+        # Sustained real disagreement (2/3 per tick, far above the 5% target)
+        # MUST widen — the old latest-subgroup UCL (~0.5 at n=3) never tripped,
+        # so the rate decayed to the floor instead.
+        history = [DisagreementObservation(3, 2) for _ in range(6)]
+        assert govern_rate(history, current_rate=DEFAULT_BASE_RATE) > DEFAULT_BASE_RATE
+
+    def test_ucl_uses_pooled_not_latest_subgroup_size(self) -> None:
+        # The UCL's sampling variance must come from the POOLED window sample
+        # size, not just the (tiny) latest subgroup — otherwise sigma is so wide
+        # the widen branch never fires at realistic per-tick volumes.
+        latest_only = [DisagreementObservation(2, 0)]  # pooled n = 2
+        pooled_window = [DisagreementObservation(2, 0) for _ in range(20)]  # n = 40
+        assert upper_control_limit(pooled_window) < upper_control_limit(latest_only)
+
     def test_upper_control_limit_defaults_to_target_when_no_samples(self) -> None:
         from audit.governance import TARGET_DISAGREEMENT_RATE
 
@@ -248,6 +264,23 @@ class TestBudget:
     def test_zero_budget_audits_nothing(self) -> None:
         backlog = [_change(pr=i, sha=f"s{i:039d}") for i in range(5)]
         assert within_budget(backlog, token_budget=0) == []
+
+    def test_large_single_path_diff_charges_diff_and_output(self) -> None:
+        # A single-path change still embeds up to the full truncated diff window
+        # (~3000 tokens) plus the completion; the estimate must charge both, not
+        # the old 2000 + 400*1 = 2400 that ignored diff body + output tokens.
+        from audit.budget import (
+            _CHARS_PER_TOKEN,
+            _OUTPUT_TOKENS,
+            MAX_DIFF_CONTEXT_CHARS,
+        )
+
+        single = estimate_audit_tokens(_change(paths=("src/one_big_file.py",)))
+        diff_tokens = MAX_DIFF_CONTEXT_CHARS // _CHARS_PER_TOKEN
+        # The worst-case diff window and the output allowance are both counted.
+        assert single >= diff_tokens + _OUTPUT_TOKENS
+        # …and it is a genuine over-count vs the discredited 2400-token estimate.
+        assert single > 2400
 
 
 # --- metrics ---------------------------------------------------------------
@@ -369,8 +402,17 @@ class TestDisposition:
     def test_not_planned_close_is_refuted(self) -> None:
         assert reconcile_disposition("NOT_PLANNED", []) == "refuted"
 
-    def test_completed_close_is_upheld(self) -> None:
-        assert reconcile_disposition("COMPLETED", []) == "upheld"
+    def test_completed_close_with_upheld_label_is_upheld(self) -> None:
+        assert reconcile_disposition("COMPLETED", ["audit-upheld"]) == "upheld"
+
+    def test_incidental_close_without_label_stays_pending(self) -> None:
+        # A plain close with NO adjudication label (e.g. a stale/dup sweeper
+        # closing the hydraflow-find issue) must NOT be inferred as upheld —
+        # that would fabricate a silent escape-ledger row. It stays pending
+        # until a human applies an explicit audit-upheld / audit-refuted label.
+        assert reconcile_disposition("COMPLETED", []) == "pending"
+        assert reconcile_disposition("CLOSED", []) == "pending"
+        assert reconcile_disposition("MERGED", []) == "pending"
 
 
 # --- no-verdict-contamination ---------------------------------------------

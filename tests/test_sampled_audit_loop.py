@@ -9,6 +9,7 @@ governed-rate persistence, and reraise_on_credit_or_bug in the audit except.
 
 from __future__ import annotations
 
+import inspect
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -16,10 +17,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from audit.models import AUDIT_INPUT_SOURCES
+from audit.models import AUDIT_INPUT_SOURCES, MergedChange
 from audit.store import AuditSampleLedger
 from escape.ledger import EscapeLedger
-from sampled_audit_loop import SampledAuditLoop, parse_audit_response
+from sampled_audit_loop import (
+    SampledAuditLoop,
+    build_audit_prompt,
+    parse_audit_response,
+)
 from subprocess_util import CreditExhaustedError
 from tests.helpers import make_bg_loop_deps
 
@@ -169,6 +174,59 @@ class TestParseResponse:
     def test_malformed_fails_soft_to_agree(self) -> None:
         # A malformed response must NEVER inflate the disagreement bound.
         assert parse_audit_response("garbage no json")[0] == "agree"
+
+
+# --- build_audit_prompt no-contamination ----------------------------------
+
+
+class TestBuildAuditPrompt:
+    """Direct no-contamination guard on the sole adversarial prompt builder.
+
+    The instrument's independence rests on the auditor NEVER seeing the original
+    gauntlet verdicts. A change that threads verdict/approval data into the
+    prompt (a new arg, or dumping ``change.body``) would silently invalidate the
+    disagreement bound while passing every OTHER test — the record's
+    ``input_sources`` manifest is asserted separately and would still read clean.
+    These lock the produced prompt STRING to only diff + spec/issue + repo-state.
+    """
+
+    def _change(self, *, body: str = "") -> MergedChange:
+        return MergedChange(
+            pr_number=4242,
+            merge_sha="deadbeefcafe0000",
+            subject="feat(core): add widget (#4242)",
+            changed_paths=("src/widget.py", "tests/test_widget.py"),
+            merged_at="2026-07-23T00:00:00+00:00",
+            body=body,
+        )
+
+    def test_prompt_carries_the_declared_input_sources(self) -> None:
+        diff = "diff --git a/src/widget.py b/src/widget.py\n+SENTINEL_DIFF_BODY\n"
+        prompt = build_audit_prompt(self._change(), diff)
+        # merged diff, repo-state (changed paths), and the linked spec/issue
+        # (PR number + subject) — the three declared AUDIT_INPUT_SOURCES.
+        assert "SENTINEL_DIFF_BODY" in prompt
+        assert "src/widget.py" in prompt
+        assert "#4242" in prompt
+        assert "add widget" in prompt
+
+    def test_original_verdict_in_body_never_leaks(self) -> None:
+        # change.body is a realistic contamination vector (free text that could
+        # carry a gauntlet verdict); the builder must not dump it into the prompt.
+        verdict = "GAUNTLET_VERDICT=APPROVED score=0.98 reviewer=judge-A"
+        prompt = build_audit_prompt(self._change(body=verdict), diff="")
+        assert verdict not in prompt
+        assert "APPROVED" not in prompt
+        assert "0.98" not in prompt
+
+    def test_signature_excludes_any_verdict_input(self) -> None:
+        # Threading the original verdict in would require a new parameter; the
+        # builder accepts ONLY the change + diff, so it fails the moment a
+        # verdict/approval/score arg is added — forcing a conscious decision.
+        params = list(inspect.signature(build_audit_prompt).parameters)
+        assert params == ["change", "diff"]
+        banned = ("verdict", "approv", "gauntlet", "score", "review")
+        assert not any(any(b in p.lower() for b in banned) for p in params)
 
 
 # --- kill-switches ---------------------------------------------------------
@@ -349,10 +407,11 @@ class TestReconcile:
         await loop._do_work()
         assert EscapeLedger(loop._escape_ledger_path).read_all() == []
 
-        # Adjudication closes the find issue as upheld; tick 2 (no new commits)
-        # reconciles it into the escape ledger.
+        # Adjudication closes the find issue as upheld with the EXPLICIT
+        # audit-upheld label (a bare close no longer infers upheld); tick 2
+        # (no new commits) reconciles it into the escape ledger.
         prs.get_issue_state = AsyncMock(return_value="COMPLETED")
-        prs.get_issue_labels = AsyncMock(return_value=[])
+        prs.get_issue_labels = AsyncMock(return_value=["audit-upheld"])
         result2 = await loop._do_work()
         assert result2["status"] == "no_new_commits"
 
@@ -392,14 +451,38 @@ class TestReconcile:
 
 class TestGovernance:
     async def test_governed_rate_persisted_each_tick(self, tmp_path: Path) -> None:
+        # An AUDITED tick (rate 1.0 → the change is selected) records exactly one
+        # disagreement observation and keeps the governed rate within
+        # [floor, ceiling]. (The empty-tick case — which must NOT record a
+        # sampled=0 observation — is covered by test_empty_tick_skips_governance.)
         repo = _init_repo(tmp_path)
         base, _head_sha = _seed_merged_pr(repo)
-        state = _make_state(initial_sha=base, rate=0.05)
+        state = _make_state(initial_sha=base, rate=1.0)
         loop = _make_loop(tmp_path, repo, auditor=_FakeAuditor(_AGREE), state=state)
         await loop._do_work()
-        # A quiet (agree) tick records an observation and narrows the rate.
         assert len(state._store["history"]) == 1
-        assert state._store["rate"] <= 0.05
+        assert state._store["history"][0]["sampled"] == 1
+        assert 0.02 <= state._store["rate"] <= 0.20
+
+    async def test_empty_tick_skips_governance(self, tmp_path: Path) -> None:
+        # A tick that AUDITS NOTHING (re-audit seam off here) must not append a
+        # sampled=0 observation — that would narrow the rate on no information,
+        # decaying it toward the floor on every quiet tick.
+        repo = _init_repo(tmp_path)
+        base, head = _seed_merged_pr(repo)
+        state = _make_state(initial_sha=base, rate=0.05)
+        loop = _make_loop(
+            tmp_path,
+            repo,
+            auditor=_FakeAuditor(_AGREE),
+            state=state,
+            sampled_audit_reaudit_enabled=False,
+        )
+        result = await loop._do_work()
+        assert result["sampled"] == 0
+        assert state._store["history"] == []  # governance skipped, no obs recorded
+        assert state._store["rate"] == 0.05  # rate untouched
+        assert state._store["sha"] == head  # cursor still advances + tick heartbeats
 
 
 # --- reraise_on_credit_or_bug ---------------------------------------------
