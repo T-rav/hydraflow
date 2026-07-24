@@ -12,6 +12,12 @@ single diverging alarm):
 * ``second_order_vitals_last_verdict`` — the previous tick's verdict token, so
   the diverging alarm fires exactly once on the transition INTO ``diverging``
   (the episode boundary) and not every subsequent tick while it persists.
+* ``second_order_vitals_last_observation_ts`` — ISO time the last per-window
+  observation was appended. The loop ticks many times per window, so a new
+  observation is recorded only once ``window_days`` have elapsed since this
+  stamp; that decoupling is what keeps successive history points from
+  overlapping (each is an independent, disjoint-window read), so
+  ``sustained_windows`` reflects N genuinely distinct windows.
 """
 
 from __future__ import annotations
@@ -48,4 +54,11 @@ class SecondOrderVitalsStateMixin:
 
     def set_second_order_vitals_last_verdict(self, verdict: str) -> None:
         self._data.second_order_vitals_last_verdict = verdict
+        self.save()
+
+    def get_second_order_vitals_last_observation_ts(self) -> str:
+        return self._data.second_order_vitals_last_observation_ts
+
+    def set_second_order_vitals_last_observation_ts(self, ts: str) -> None:
+        self._data.second_order_vitals_last_observation_ts = ts
         self.save()

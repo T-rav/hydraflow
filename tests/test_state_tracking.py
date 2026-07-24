@@ -197,9 +197,11 @@ class TestInitialization:
             "sampled_audit_governed_rate",
             "sampled_audit_disagreement_history",
             # SecondOrderVitalsLoop (#10373) — per-series observation histories
-            # (the Shewhart baselines) + last verdict (diverging-episode edge).
+            # (the Shewhart baselines), last verdict (diverging-episode edge),
+            # and the last-observation timestamp (non-overlapping window cursor).
             "second_order_vitals_series_history",
             "second_order_vitals_last_verdict",
+            "second_order_vitals_last_observation_ts",
         }
         assert set(d.keys()) == expected_keys
 
