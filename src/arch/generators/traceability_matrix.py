@@ -28,6 +28,7 @@ import subprocess
 from pathlib import Path
 
 from arch._models import TraceCommitInfo
+from git_timeouts import GIT_READONLY_TIMEOUT_S
 from traceability import normalize_req_id
 
 #: How many PR-squash-merge commits form the adoption-measurement window.
@@ -116,11 +117,6 @@ def parse_trace_commits(
     return commits
 
 
-#: Timeout for the git subprocess calls below — same rationale as
-#: ``arch.runner._run`` (thread-pool exhaustion guard, PR #8454 class).
-_GIT_TIMEOUT_S = 60
-
-
 def _run_git(repo_root: Path, *args: str) -> str | None:
     """Run one git command; ``None`` on any failure (rc != 0, timeout, no git)."""
     try:
@@ -130,7 +126,7 @@ def _run_git(repo_root: Path, *args: str) -> str | None:
             capture_output=True,
             text=True,
             check=False,
-            timeout=_GIT_TIMEOUT_S,
+            timeout=GIT_READONLY_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
         return None

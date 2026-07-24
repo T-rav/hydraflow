@@ -39,8 +39,7 @@ from pathlib import Path
 from arch._models import ModuleGraph
 from erosion.models import ScatteredSymbol, ScatterFinding
 from erosion.spread import _module_for_file
-
-_GIT_TIMEOUT_S = 60
+from git_timeouts import GIT_READONLY_TIMEOUT_S
 
 #: Default K: a newly-added symbol must appear in at least this many
 #: DISTINCT modules for one change to be flagged as "scattered." This is
@@ -149,7 +148,7 @@ def added_symbols_for_range(
             capture_output=True,
             text=True,
             check=False,
-            timeout=_GIT_TIMEOUT_S,
+            timeout=GIT_READONLY_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
         return None

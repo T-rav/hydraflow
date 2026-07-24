@@ -75,6 +75,7 @@ from escape.metrics import low_confidence, unencoded_aging
 from escape.models import EscapeCandidate, EscapeRecord
 from escape.report import render_escape_ledger_markdown
 from exception_classify import reraise_on_credit_or_bug
+from git_timeouts import GIT_READONLY_TIMEOUT_S
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
 
 if TYPE_CHECKING:
@@ -82,9 +83,6 @@ if TYPE_CHECKING:
     from state import StateTracker
 
 logger = logging.getLogger("hydraflow.escape_ledger")
-
-# Local, read-only git op — same bound as erosion's git adapters. Resolves HEAD.
-_GIT_TIMEOUT_S = 60
 
 _ISSUE_LABELS = ["hydraflow-find", "escape-ledger"]
 
@@ -113,7 +111,7 @@ def _current_head_sha(repo_root: Path) -> str | None:
             capture_output=True,
             text=True,
             check=False,
-            timeout=_GIT_TIMEOUT_S,
+            timeout=GIT_READONLY_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
         return None

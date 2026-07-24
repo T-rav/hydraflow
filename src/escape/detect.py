@@ -29,8 +29,7 @@ from escape.models import (
     DetectionSource,
     EscapeCandidate,
 )
-
-_GIT_TIMEOUT_S = 60
+from git_timeouts import GIT_READONLY_TIMEOUT_S
 
 # NUL separates commits (`-z`); 0x1f separates fields within a commit. Neither
 # appears in a sha / ISO date / subject / body, so the split is unambiguous
@@ -168,7 +167,7 @@ def _run_git(repo_root: Path, args: list[str]) -> str | None:
             capture_output=True,
             text=True,
             check=False,
-            timeout=_GIT_TIMEOUT_S,
+            timeout=GIT_READONLY_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
         return None
