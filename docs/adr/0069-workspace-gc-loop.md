@@ -31,6 +31,7 @@ Kill-switch: `enabled_cb("workspace_gc")` AND `config.workspace_gc_loop_enabled`
 - Worktree leaks become self-healing; operators do not need to run manual `git worktree prune` commands.
 - The pipeline's active-workspace view in `StateTracker` reflects reality within one GC interval.
 - The 20-per-cycle cap means large backlogs drain gradually; acceptable because GC is low-priority background work.
+- **Retry-window safety contract:** a worktree is never collected while an in-flight attempt may still be committing into it. `_is_safe_to_gc` (and the orphan-branch phase) consult `_in_retry_window`, which skips whenever *either* the implementation counter (`get_issue_attempts`) *or* the `auto_agent` convergence-ledger counter (`get_auto_agent_attempts`) is in-window (`0 < attempts < max`). Both counters are bumped before a run and cleared on success/close, so between those moments the issue is absent from every active set even though a live session owns the worktree. Consulting only the implementation counter let GC sweep an actively-running auto-agent worktree and lose its unpushed commits (#10459, the #10403 race). The residual last-attempt gap (`attempts == max` on the final run) is the same theoretical window the implementation guard has always had; fully closing it needs a live session lock/heartbeat, tracked separately.
 
 ## Alternatives considered
 

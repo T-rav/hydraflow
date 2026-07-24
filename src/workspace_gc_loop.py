@@ -126,18 +126,14 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             return safe_to_gc
 
         # Skip issues that still have retries remaining.  Between the moment
-        # an implementation fails and the next retry picks up the issue, the
-        # issue is temporarily not in any active set.  Without this guard the
-        # GC can destroy the worktree in that window, causing the retry to
-        # start from a blank checkout and produce zero commits.
-        attempts = self._state.get_issue_attempts(issue_number)
-        max_attempts = self._config.max_issue_attempts
-        if 0 < attempts < max_attempts:
+        # an attempt is bumped (before each run) and the moment it succeeds or
+        # closes (which clears the counter), the issue is temporarily not in
+        # any active set.  Without this guard the GC can destroy the worktree
+        # in that window, causing the in-flight session to lose its unpushed
+        # commits (implementation retry #6413; auto-agent session #10459).
+        if self._in_retry_window(issue_number):
             logger.debug(
-                "GC: #%d has %d/%d attempts — retries remaining, skipping",
-                issue_number,
-                attempts,
-                max_attempts,
+                "GC: #%d has an in-flight retry window — skipping", issue_number
             )
             return safe_to_gc
 
@@ -176,6 +172,25 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                     )
 
         return safe_to_gc
+
+    def _in_retry_window(self, issue_number: int) -> bool:
+        """True while any in-flight attempt may still be committing to the worktree.
+
+        Two independent attempt counters can each hold an in-flight session:
+        the *implementation* counter (``get_issue_attempts``) and the
+        *auto_agent* convergence-ledger counter (``get_auto_agent_attempts``).
+        Both are bumped *before* a run and cleared on success/close, so between
+        those two moments the issue is absent from every active set even though
+        a live session owns the worktree. GC must skip while either counter is
+        in-window (``0 < attempts < max``); consulting only the implementation
+        counter let the GC sweep an actively-running auto-agent worktree and
+        lose its unpushed commits (#10459, the #10403 race).
+        """
+        impl_attempts = self._state.get_issue_attempts(issue_number)
+        if 0 < impl_attempts < self._config.max_issue_attempts:
+            return True
+        aa_attempts = self._state.get_auto_agent_attempts(issue_number)
+        return 0 < aa_attempts < self._config.auto_agent_max_attempts
 
     async def _issue_has_pipeline_label(self, issue_number: int) -> bool:
         pipeline_labels = {
@@ -333,9 +348,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                     continue
                 if self._is_in_pipeline and self._is_in_pipeline(issue_number):
                     continue
-                max_attempts = self._config.max_issue_attempts
-                attempts = self._state.get_issue_attempts(issue_number)
-                if 0 < attempts < max_attempts:
+                if self._in_retry_window(issue_number):
                     continue
                 if await self._issue_has_pipeline_label(issue_number):
                     continue

@@ -95,6 +95,7 @@ class TestL2WorkspaceGCCleansStale:
         state.get_active_branches.return_value = {}
         state.get_hitl_cause.return_value = None
         state.get_issue_attempts.return_value = 0
+        state.get_auto_agent_attempts.return_value = 0
         _seed_ports(world, workspace_gc_state=state)
 
         run_subprocess = AsyncMock(return_value="")
@@ -110,6 +111,50 @@ class TestL2WorkspaceGCCleansStale:
         )
         assert 200 not in world._workspace.destroyed, (
             "workspace_gc should NOT destroy the active-issue worktree"
+        )
+
+    async def test_active_auto_agent_worktree_preserved(self, tmp_path):
+        """#10459: an in-flight auto-agent session's worktree survives a GC pass
+        even when the issue is absent from the active-issue set — while a
+        genuinely-closed worktree in the same pass is still swept."""
+        world = MockWorld(tmp_path)
+
+        # Issue 300 is closed (stale); 400's issue is open with an in-flight
+        # auto-agent session that has NOT been observed in the active set yet
+        # (the #10403 race window).
+        IssueBuilder().numbered(300).labeled("hydraflow-done").at(world)
+        IssueBuilder().numbered(400).labeled("hydraflow-implementing").at(world)
+        world.github.issue(300).state = "closed"
+
+        await world._workspace.create(300, "agent/issue-300")
+        await world._workspace.create(400, "agent/issue-400")
+
+        state = MagicMock()
+        state.get_active_workspaces.return_value = {
+            300: "agent/issue-300",
+            400: "agent/issue-400",
+        }
+        # NOTE: 400 is deliberately NOT in the active set — the guard must rely
+        # solely on the auto-agent attempt counter to preserve it.
+        state.get_active_issue_numbers.return_value = set()
+        state.get_active_branches.return_value = {}
+        state.get_hitl_cause.return_value = None
+        state.get_issue_attempts.return_value = 0
+        # In-flight auto-agent attempt for 400 only (max default is 3).
+        state.get_auto_agent_attempts.side_effect = lambda n: 1 if n == 400 else 0
+        _seed_ports(world, workspace_gc_state=state)
+
+        run_subprocess = AsyncMock(return_value="")
+        run_subprocess.side_effect = ["closed", ""]
+
+        with patch("workspace_gc_loop.run_subprocess", run_subprocess):
+            await world.run_with_loops(["workspace_gc"], cycles=1)
+
+        assert 300 in world._workspace.destroyed, (
+            "workspace_gc should have destroyed the closed-issue worktree"
+        )
+        assert 400 not in world._workspace.destroyed, (
+            "workspace_gc must NOT destroy the active auto-agent worktree (#10459)"
         )
 
 
