@@ -247,6 +247,8 @@ def test_bare_citation_of_non_infra_module_still_drifts(tmp_path: Path) -> None:
         "src/contract_recording.py",
         "src/contract_diff.py",
         "src/contract_refresh_loop.py",
+        "src/review_advisor.py",
+        "src/review_phase/_phase.py",
     ],
 )
 def test_recurring_fp_module_bare_citation_does_not_drift(
@@ -258,6 +260,10 @@ def test_recurring_fp_module_bare_citation_does_not_drift(
     # implementation churn and must NOT drift — the recurring source of the
     # "ADR drift unresolved after 3" HITL escalations. An ADR that genuinely
     # owns a symbol in one of these still cites it at :Symbol granularity.
+    # 2026-07-24 (#10411): review_advisor.py/review_phase/_phase.py joined —
+    # the next-highest-churn review-path modules, bare-cited as dependency
+    # pointers by ADR-0059/0094/0095/0102 and others; every review-path PR was
+    # drifting a batch of those ADRs.
     adr_dir = tmp_path / "adr"
     adr_dir.mkdir()
     _write_adr(
@@ -512,3 +518,133 @@ def test_fleet_drift_batch_is_immutable(fleet_index: ADRIndex) -> None:
     with pytest.raises(AttributeError):  # frozen dataclass
         batch.pr_number = 1  # type: ignore[misc]
     assert isinstance(batch, FleetDriftBatch)
+
+
+# --- #10411: churn/fan-out-derived shared-infra auto-suppression ---
+# The manual `_SHARED_INFRA_MODULES` allowlist grows one module at a time
+# (whack-a-mole). A `src/` file bare-cited by >= `shared_infra_fanout_threshold`
+# live (Accepted/Proposed) ADRs is automatically treated as shared infra —
+# same suppression effect, derived from citation fan-out instead of a
+# hand-maintained list. Threshold is opt-in (default `None` disables it) so
+# every pre-existing test above keeps its exact prior behavior unchanged.
+
+
+def _write_n_bare_citing_adrs(
+    adr_dir: Path, *, start_number: int, count: int, path: str
+) -> None:
+    for i in range(count):
+        _write_adr(
+            adr_dir,
+            number=start_number + i,
+            title=f"fanout{i}",
+            status="Accepted",
+            related_files=[path],
+        )
+
+
+def test_fanout_below_threshold_still_drifts(tmp_path: Path) -> None:
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_n_bare_citing_adrs(adr_dir, start_number=200, count=3, path="src/widget.py")
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/widget.py"],
+        shared_infra_fanout_threshold=4,
+    )
+    assert sorted(f.adr.number for f in findings) == [200, 201, 202]
+
+
+def test_fanout_at_threshold_suppresses_all_contributors(tmp_path: Path) -> None:
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_n_bare_citing_adrs(adr_dir, start_number=210, count=4, path="src/widget.py")
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/widget.py"],
+        shared_infra_fanout_threshold=4,
+    )
+    assert findings == []
+
+
+def test_symbol_citation_unaffected_by_other_adrs_bare_fanout(tmp_path: Path) -> None:
+    """A genuinely symbol-owning ADR still drifts even when 4 OTHER ADRs
+    bare-cite the same file and push its fan-out to (and past) the
+    threshold — those 4 are suppressed, the symbol-owning one is not."""
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_n_bare_citing_adrs(adr_dir, start_number=220, count=4, path="src/widget.py")
+    _write_adr(
+        adr_dir,
+        number=230,
+        title="owns a widget symbol",
+        status="Accepted",
+        related_files=["src/widget.py:Widget.render"],
+    )
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/widget.py:Widget.render"],
+        shared_infra_fanout_threshold=4,
+    )
+    assert [f.adr.number for f in findings] == [230]
+
+
+def test_shared_infra_allowlist_wins_regardless_of_threshold(tmp_path: Path) -> None:
+    """The manual allowlist still suppresses even with a very high threshold
+    (fan-out of 1 never reaches it) — the two suppression paths are OR'd."""
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_adr(
+        adr_dir,
+        number=240,
+        title="depends on config",
+        status="Accepted",
+        related_files=["src/config.py"],
+    )
+    findings = compute_drift(
+        ADRIndex(adr_dir),
+        pr_number=1,
+        changed_files=["src/config.py"],
+        shared_infra_fanout_threshold=100,
+    )
+    assert findings == []
+
+
+def test_fanout_threshold_defaults_to_disabled(tmp_path: Path) -> None:
+    """Omitting the kwarg entirely preserves pre-#10411 behavior: no
+    fan-out-derived suppression, however high the fan-out."""
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_n_bare_citing_adrs(adr_dir, start_number=250, count=10, path="src/widget.py")
+    findings = compute_drift(
+        ADRIndex(adr_dir), pr_number=1, changed_files=["src/widget.py"]
+    )
+    assert len(findings) == 10
+
+
+def test_compute_drift_by_adr_threads_fanout_threshold(tmp_path: Path) -> None:
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_n_bare_citing_adrs(adr_dir, start_number=260, count=4, path="src/widget.py")
+    rollups = compute_drift_by_adr(
+        ADRIndex(adr_dir),
+        [(1, ["src/widget.py"])],
+        shared_infra_fanout_threshold=4,
+    )
+    assert rollups == []
+
+
+def test_partition_fleet_drift_threads_fanout_threshold(tmp_path: Path) -> None:
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    _write_n_bare_citing_adrs(adr_dir, start_number=270, count=4, path="src/widget.py")
+    per_adr, batches = partition_fleet_drift(
+        ADRIndex(adr_dir),
+        [(1, ["src/widget.py"])],
+        fleet_threshold=4,
+        shared_infra_fanout_threshold=4,
+    )
+    assert per_adr == []
+    assert batches == []

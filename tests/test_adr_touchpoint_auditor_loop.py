@@ -265,6 +265,11 @@ async def test_one_pr_drifting_8_adrs_files_one_batched_issue(
     state.set_adr_rollup.assert_called_once()
     assert state.set_adr_rollup.call_args.args[0] == "FLEET-8500"
     assert state.set_adr_rollup.call_args.kwargs["pr_numbers"] == [8500]
+    # #10411 — member ADR numbers persist so the resolver loop can triage
+    # each one individually without re-deriving them from a re-scan.
+    assert state.set_adr_rollup.call_args.kwargs["adr_numbers"] == [
+        100 + i for i in range(8)
+    ]
     last_dedup = dedup.set_all.call_args.args[0]
     assert "adr_touchpoint_auditor:FLEET-8500" in last_dedup
     assert not any("ADR-01" in key for key in last_dedup)
@@ -317,6 +322,54 @@ async def test_below_threshold_pr_still_files_per_adr_rollups(
     recorded_keys = [c.args[0] for c in state.set_adr_rollup.call_args_list]
     assert recorded_keys == ["ADR-0100", "ADR-0101", "ADR-0102"]
     assert not any(k.startswith("FLEET-") for k in recorded_keys)
+
+
+async def test_shared_infra_fanout_threshold_suppresses_per_adr_rollups(
+    loop_env, monkeypatch
+) -> None:
+    """#10411 — the config threshold is threaded into the drift computation:
+    2 ADRs bare-citing the SAME file, with the threshold set to 2, are
+    auto-suppressed as shared infra — no per-ADR rollup filed for either."""
+    cfg, state, pr, dedup, idx = loop_env
+    cfg.adr_drift_shared_infra_fanout_threshold = 2
+    adr_dir = cfg.repo_root / "docs" / "adr"
+    for i in range(2):
+        _write_adr(
+            adr_dir,
+            number=110 + i,
+            title=f"fanout{i}",
+            related=["src/shared_thing.py"],
+        )
+    from adr_index import ADRIndex  # noqa: PLC0415
+
+    idx = ADRIndex(adr_dir)
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+
+    async def fake_list(_cursor):
+        return [
+            {
+                "number": 8600,
+                "mergedAt": "2026-05-07T20:00:00Z",
+                "files": [{"path": "src/shared_thing.py"}],
+            }
+        ]
+
+    monkeypatch.setattr(loop, "_list_recent_merged_prs", fake_list)
+    monkeypatch.setattr(loop, "_reconcile_closed_escalations", AsyncMock())
+
+    stats = await loop._do_work()
+    assert stats["filed"] == 0
+    pr.create_issue.assert_not_called()
+    state.set_adr_rollup.assert_not_called()
 
 
 async def test_three_prs_drifting_same_adr_file_one_rollup(
@@ -1015,6 +1068,53 @@ async def test_open_fleet_rollup_left_alone_by_stale_reconcile(loop_env) -> None
     fetch.assert_not_awaited()
 
 
+async def test_stale_rollup_reconcile_threads_shared_infra_fanout_threshold(
+    loop_env,
+) -> None:
+    """#10411 — the config threshold reaches the recompute inside
+    ``_reconcile_stale_rollups`` too (not just the main scan): once 2 OTHER
+    ADRs also bare-cite the same file and the threshold is set to 2, the
+    recompute over the rollup's own tracked PR finds no drift and the
+    stale per-ADR rollup closes."""
+    cfg, state, pr, dedup, idx = loop_env
+    cfg.adr_drift_shared_infra_fanout_threshold = 2
+    adr_dir = cfg.repo_root / "docs" / "adr"
+    for i in range(2):
+        _write_adr(
+            adr_dir,
+            number=120 + i,
+            title=f"fanout{i}",
+            related=["src/shared_thing.py"],
+        )
+    from adr_index import ADRIndex  # noqa: PLC0415
+
+    idx = ADRIndex(adr_dir)
+
+    state.all_adr_rollups.return_value = {
+        "ADR-0120": {"issue_number": 900, "pr_numbers": [8600]},
+    }
+    pr.get_issue_state = AsyncMock(return_value="OPEN")
+
+    stop = asyncio.Event()
+    loop = AdrTouchpointAuditorLoop(
+        config=cfg,
+        state=state,
+        pr_manager=pr,
+        dedup=dedup,
+        adr_index=idx,
+        deps=_deps(stop),
+    )
+    loop._fetch_pr_changed_files = AsyncMock(  # type: ignore[method-assign]
+        return_value=["src/shared_thing.py"]
+    )
+
+    closed = await loop._reconcile_stale_rollups(
+        drifting_adrs=set(), adrs_resolved_this_tick=set()
+    )
+    assert closed == 1
+    state.clear_adr_rollup.assert_called_with("ADR-0120")
+
+
 async def test_closed_fleet_escalation_clears_dedup_and_state(loop_env) -> None:
     """The shared escalation reconciler handles FLEET-<pr> subjects: closing
     a fleet escalation clears its dedup key, attempts, and rollup state."""
@@ -1097,3 +1197,38 @@ def test_adr_0056_amendment_matches_config_knob() -> None:
     # The amendment cites the new pure symbols so ADR-0056 stays self-covered.
     assert "partition_fleet_drift" in text
     assert "FleetDriftBatch" in text
+
+
+def test_landing_pr_shape_does_not_drift_adr_0056_for_10411() -> None:
+    """Self-coverage: a diff shaped like the #10411 landing PR (adr_drift +
+    the auditor loop + the ADR audit state mixin + the amended ADR-0056
+    file) yields zero drift findings for ADR-0056."""
+    from adr_drift import compute_drift  # noqa: PLC0415
+    from adr_index import ADRIndex  # noqa: PLC0415
+
+    idx = ADRIndex(_repo_root() / "docs" / "adr")
+    findings = compute_drift(
+        idx,
+        pr_number=10411,
+        changed_files=[
+            "src/adr_drift.py",
+            "src/adr_touchpoint_auditor_loop.py",
+            "src/state/_adr_audit.py",
+            "src/config.py",
+            "docs/adr/0056-adr-touchpoint-gate-to-caretaker-loop.md",
+        ],
+    )
+    assert 56 not in {f.adr.number for f in findings}
+
+
+def test_adr_0056_shared_infra_fanout_amendment_matches_config_knob() -> None:
+    """Doc↔config parity for the #10411 fan-out-threshold amendment."""
+    text = (
+        _repo_root() / "docs" / "adr" / "0056-adr-touchpoint-gate-to-caretaker-loop.md"
+    ).read_text()
+    assert "adr_drift_shared_infra_fanout_threshold" in text
+    assert "default 4" in text
+    cfg = HydraFlowConfig()
+    assert cfg.adr_drift_shared_infra_fanout_threshold == 4
+    assert "_citation_drifts" in text
+    assert "AdrAuditStateMixin.set_adr_rollup" in text

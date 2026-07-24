@@ -466,6 +466,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         4,
     ),
     (
+        "adr_drift_shared_infra_fanout_threshold",
+        "HYDRAFLOW_ADR_DRIFT_SHARED_INFRA_FANOUT_THRESHOLD",
+        4,
+    ),
+    (
         "adr_conformance_interval",
         "HYDRAFLOW_ADR_CONFORMANCE_INTERVAL",
         86400,
@@ -4078,6 +4083,18 @@ class HydraFlowConfig(BaseModel):
             "Distinct-ADR count at which a single PR's drift findings collapse "
             "into ONE batched fleet rollup issue instead of N per-ADR rollups "
             "(#9662 cross-cutting caretaker-fleet sweeps)"
+        ),
+    )
+    adr_drift_shared_infra_fanout_threshold: int = Field(
+        default=4,
+        ge=2,
+        le=100,
+        description=(
+            "Live (Accepted/Proposed) ADR count at which a bare-cited src/ "
+            "module is automatically treated as shared infra (suppressed from "
+            "drift the same as `_SHARED_INFRA_MODULES`) — churn-derived, so "
+            "the next high-churn shared module doesn't need a manual allowlist "
+            "edit (#10411)"
         ),
     )
 

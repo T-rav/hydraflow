@@ -146,7 +146,11 @@ def test_right_sized_adr_symbol_cites_are_inert_to_file_only_diff(number: int) -
 
     for path in qualified:
         # Empty changed-symbol set == what production's file-level diff supplies.
-        assert not _citation_drifts(adr, path, frozenset()), (
+        # fanout/fanout_threshold are irrelevant here (#10411): this citation is
+        # symbol-qualified, so the fan-out gate never applies to it.
+        assert not _citation_drifts(
+            adr, path, frozenset(), fanout=0, fanout_threshold=None
+        ), (
             f"ADR-{number:04d} citation {path} drifts on a file-only diff "
             f"despite being symbol-qualified"
         )

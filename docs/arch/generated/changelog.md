@@ -6,6 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `2d39c89` — Fixes #10400: ADR-0012 bare-cites src/epic.py — same drift false-po... (#10430) (#10430) *(2026-07-24)*
+- `9c01d59` — Fixes #10402: Erosion: symbol `_GIT_TIMEOUT_S` scattered across 3 m... (#10422) (#10422) *(2026-07-24)*
+- `f66b0a0` — feat(adr): surface unenforced-decision debt + flag weak enforcements (#10421) (#10421) *(2026-07-24)*
+- `b482e52` — fix(labels): strip stage labels on close + OPEN-filter dispatch + drift-watcher check (#10394) (#10417) (#10417) *(2026-07-24)*
 - `5ee1477` — feat(ul): entry-evidence — 13 new entry links across 11 terms (#10412) (#10412) *(2026-07-23)*
 - `856435d` — feat(ul): entry-evidence — 6 new entry links across 6 terms (#10407) (#10407) *(2026-07-23)*
 - `dce4307` — feat(ul): entry-evidence — 4 new entry links across 4 terms (#10389) (#10389) *(2026-07-23)*
