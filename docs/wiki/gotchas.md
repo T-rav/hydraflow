@@ -217,7 +217,7 @@ Selectively re-raise critical exceptions (AuthenticationError, CreditExhaustedEr
 
 Example: Timeouts logged as WARNING; auth errors propagated immediately.
 
-**Why:** Swallowing auth errors silently breaks subsequent API calls; failing fast on credit exhaustion prevents budget waste.
+**Why:** Swallowing auth errors silently breaks subsequent API calls; failing fast on `CreditExhaustedError` prevents budget waste.
 
 
 ```json:entry
