@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -72,3 +74,44 @@ def test_ring_buffer_length_and_window_bounded_by_max_len(values, max_len):
     expected = values[-max_len:] if values else []
     assert len(s.window("signal")) == min(len(values), max_len)
     assert s.window("signal") == expected
+
+
+def test_jsonl_round_trip(tmp_path: Path):
+    clk = FakeClock()
+    p = tmp_path / "sig.jsonl"
+    s1 = HistoricSignalStore(clock=clk, path=p)
+    s1.record("x", 1.0, tags={"k": "v"})
+    s1.record("x", 2.0)
+    # New store over the same file reloads history.
+    s2 = HistoricSignalStore(clock=clk, path=p)
+    assert s2.window("x") == [1.0, 2.0]
+
+
+def test_reload_prunes_by_age(tmp_path: Path):
+    clk = FakeClock()
+    p = tmp_path / "sig.jsonl"
+    s1 = HistoricSignalStore(max_age_s=10.0, clock=clk, path=p)
+    s1.record("x", 1.0)
+    clk.advance(100.0)
+    s2 = HistoricSignalStore(max_age_s=10.0, clock=clk, path=p)
+    assert s2.window("x") == []  # stale sample dropped on reload
+
+
+def test_in_memory_when_no_path(tmp_path: Path):
+    s = HistoricSignalStore(clock=FakeClock(), path=None)
+    s.record("x", 1.0)
+    assert not list(tmp_path.iterdir())  # nothing written
+
+
+def test_reload_skips_corrupt_lines(tmp_path: Path):
+    clk = FakeClock()
+    p = tmp_path / "sig.jsonl"
+    p.write_text(
+        "not json at all\n"
+        '{"signal": "x", "ts": 0.0, "value": 1.0, "tags": {}}\n'
+        '{"signal": "x", "value": "oops"}\n'
+        "\n",
+        encoding="utf-8",
+    )
+    s = HistoricSignalStore(clock=clk, path=p)
+    assert s.window("x") == [1.0]
