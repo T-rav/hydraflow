@@ -265,6 +265,11 @@ async def test_one_pr_drifting_8_adrs_files_one_batched_issue(
     state.set_adr_rollup.assert_called_once()
     assert state.set_adr_rollup.call_args.args[0] == "FLEET-8500"
     assert state.set_adr_rollup.call_args.kwargs["pr_numbers"] == [8500]
+    # #10457 — member ADR numbers persist so the resolver loop can triage
+    # each one individually.
+    assert state.set_adr_rollup.call_args.kwargs["adr_numbers"] == [
+        100 + i for i in range(8)
+    ]
     last_dedup = dedup.set_all.call_args.args[0]
     assert "adr_touchpoint_auditor:FLEET-8500" in last_dedup
     assert not any("ADR-01" in key for key in last_dedup)
