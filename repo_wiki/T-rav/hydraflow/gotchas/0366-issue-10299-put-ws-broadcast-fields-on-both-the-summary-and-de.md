@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10299
 source_phase: plan
 created_at: 2026-07-22T17:49:09.980167+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0370
 ---
 
 # Put WS-broadcast fields on both the summary and detail model, not detail-only

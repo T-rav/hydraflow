@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10290
 source_phase: plan
 created_at: 2026-07-22T17:18:40.189893+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0370
 ---
 
 # Mirror park_issue with a *_infra variant when the failure needs a distinct comment

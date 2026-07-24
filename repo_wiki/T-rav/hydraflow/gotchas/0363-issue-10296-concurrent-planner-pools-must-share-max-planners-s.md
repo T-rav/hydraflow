@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10296
 source_phase: plan
 created_at: 2026-07-22T17:44:18.122239+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0370
 ---
 
 # Concurrent planner pools must share max_planners semaphore, including gap review

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10236
 source_phase: plan
 created_at: 2026-07-22T17:17:17.227674+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0567
 ---
 
 # detect_staleness floor: max(multiplier*interval, interval+max_cycle_s)
