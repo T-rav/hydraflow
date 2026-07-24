@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10408
 source_phase: plan
 created_at: 2026-07-24T05:56:46.873228+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0388
 ---
 
 # clean -fd (not -fdx) in factory sync preserves .venv and gitignored caches

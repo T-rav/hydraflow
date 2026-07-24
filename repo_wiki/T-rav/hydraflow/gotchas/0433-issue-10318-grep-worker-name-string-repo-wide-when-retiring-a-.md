@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10318
 source_phase: plan
 created_at: 2026-07-24T04:19:41.513812+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0446
 ---
 
 # Grep worker-name string repo-wide when retiring a loop, not just its .py file

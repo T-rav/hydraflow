@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10400
 source_phase: plan
 created_at: 2026-07-24T05:41:19.861289+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0446
 ---
 
 # Reuse the parametrized harness in test_issue_9419_9421_adr_drift.py for new ADR right-sizing cases

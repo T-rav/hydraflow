@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10318
 source_phase: plan
 created_at: 2026-07-24T04:19:41.513801+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0446
 ---
 
 # Consolidating a loop: retain its state counters/config caps, drop only cadence
