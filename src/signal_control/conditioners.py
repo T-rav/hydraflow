@@ -7,7 +7,7 @@ current state. Pure: no I/O, no factory imports, no inline clock.
 from __future__ import annotations
 
 import statistics
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 
@@ -146,3 +146,24 @@ class AdaptiveThreshold:
             return x != med
         robust_sigma = mad * self._MAD_TO_SIGMA
         return abs(x - med) / robust_sigma >= self.z
+
+
+@dataclass
+class Corroborator:
+    """Independently re-observe a signal before acting on it.
+
+    ``probe`` is a cheap live check; ``confirm()`` requires ``required``
+    consecutive ``True`` observations. Any high-blast-radius signal (credit
+    exhaustion, "sensor broke", "loop wedged") must corroborate before driving
+    an irreversible action.
+    """
+
+    probe: Callable[[], bool]
+    required: int
+
+    def __post_init__(self) -> None:
+        if self.required < 1:
+            raise ValueError(f"required must be >= 1, got {self.required}")
+
+    def confirm(self) -> bool:
+        return all(self.probe() for _ in range(self.required))

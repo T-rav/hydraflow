@@ -135,3 +135,36 @@ def test_adaptive_threshold_ignores_single_outlier_in_baseline():
     at = AdaptiveThreshold(z=3.0, min_samples=8)
     baseline = [10.0, 11.0, 9.0, 10.5, 9.5, 10.2, 9.8, 999.0]
     assert at.is_anomalous(20.0, baseline) is True
+
+
+from signal_control.conditioners import Corroborator
+
+
+def test_corroborator_confirms_when_all_probes_true():
+    calls = {"n": 0}
+
+    def probe() -> bool:
+        calls["n"] += 1
+        return True
+
+    c = Corroborator(probe=probe, required=3)
+    assert c.confirm() is True
+    assert calls["n"] == 3
+
+
+def test_corroborator_short_circuits_on_first_false():
+    seq = iter([True, False, True])
+    calls = {"n": 0}
+
+    def probe() -> bool:
+        calls["n"] += 1
+        return next(seq)
+
+    c = Corroborator(probe=probe, required=3)
+    assert c.confirm() is False
+    assert calls["n"] == 2  # stopped at the False
+
+
+def test_corroborator_rejects_bad_required():
+    with pytest.raises(ValueError):
+        Corroborator(probe=lambda: True, required=0)
