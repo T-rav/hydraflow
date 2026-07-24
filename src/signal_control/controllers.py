@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from circuit_breaker import CircuitBreaker  # re-export; see Task 10
 
-__all__ = ["AimdController", "CircuitBreaker"]
+__all__ = ["AimdController", "CircuitBreaker", "PidController"]
 
 
 @dataclass
@@ -60,3 +60,40 @@ class AimdController:
     @property
     def cap(self) -> int:
         return self._cap
+
+
+@dataclass
+class PidController:
+    """PID controller with clamping anti-windup and output saturation.
+
+    General controller for a continuous actuator (e.g. loop cadence). The
+    integral term is clamped so it can never demand an output beyond
+    ``[out_lo, out_hi]`` — preventing the "wind-up" lag where a saturated
+    integrator keeps commanding past the limit long after the error flips.
+    """
+
+    kp: float
+    ki: float
+    kd: float
+    out_lo: float
+    out_hi: float
+    _integral: float = field(default=0.0, init=False)
+    _prev_error: float | None = field(default=None, init=False)
+
+    def __post_init__(self) -> None:
+        if self.out_hi < self.out_lo:
+            raise ValueError(
+                f"out_hi ({self.out_hi}) must be >= out_lo ({self.out_lo})"
+            )
+
+    def update(self, error: float) -> float:
+        self._integral += error
+        # Anti-windup: clamp the integral so ki*integral stays within the span.
+        if self.ki != 0.0:
+            i_lo = self.out_lo / self.ki
+            i_hi = self.out_hi / self.ki
+            self._integral = max(min(self._integral, max(i_lo, i_hi)), min(i_lo, i_hi))
+        derivative = 0.0 if self._prev_error is None else (error - self._prev_error)
+        self._prev_error = error
+        raw = self.kp * error + self.ki * self._integral + self.kd * derivative
+        return max(self.out_lo, min(self.out_hi, raw))
