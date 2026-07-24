@@ -36,3 +36,37 @@ def test_generator_consumes_calibration_metrics_shape():
     # Wiring check: the metrics dict the module produces renders without error.
     out = render_gauntlet_calibration(ji.calibration_metrics([]))
     assert "Gauntlet Calibration" in out
+
+
+def test_spec_version_includes_sampled_audit_section():
+    """The sampled-adversarial re-audit (#10370) section is co-rendered here."""
+    out = render_gauntlet_calibration(None)
+    assert "Sampled adversarial re-audit (#10370)" in out
+    assert "audit_samples.jsonl" in out
+    assert "detection_source: sampled-audit" in out
+    # Deterministic spec version shows the no-samples placeholder, not counts.
+    assert "no samples recorded yet" in out
+
+
+def test_populated_report_renders_sampled_audit_observations():
+    from audit.metrics import calibration_metrics as sa_metrics
+    from audit.models import AUDIT_INPUT_SOURCES, AuditSample
+
+    samples = [
+        AuditSample(
+            id="1",
+            audited_at="2026-07-23T00:00:00+00:00",
+            pr_number=1,
+            merge_sha="abc",
+            blast_radius_class="gauntlet",
+            verdict="disagree",
+            findings="x",
+            input_sources=AUDIT_INPUT_SOURCES,
+            auditor_model="gpt",
+            sample_rate=0.1,
+            disposition="upheld",
+        )
+    ]
+    out = render_gauntlet_calibration({"sampled_audit": sa_metrics(samples)})
+    assert "Sampled re-audit observations" in out
+    assert "| samples audited | 1 |" in out

@@ -2353,6 +2353,17 @@ class StateData(BaseModel):
     # escape_ledger_last_processed_sha (a ts cursor, not a SHA — the source is
     # an event stream, not a commit range).
     intervention_tally_last_processed_ts: str = Field(default="")
+    # SampledAuditLoop (#10370) — the silent-escape estimator's cursor +
+    # governed-rate state. ``sha`` mirrors escape_ledger_last_processed_sha
+    # (prime-on-first-tick, no back-sample). ``governed_rate`` is the current
+    # Shewhart-governed sample rate (0.0 = unset → the loop uses the 5% base).
+    # ``disagreement_history`` is the bounded per-tick observation series the
+    # governor pools to build its control limit.
+    sampled_audit_last_processed_sha: str = Field(default="")
+    sampled_audit_governed_rate: float = Field(default=0.0)
+    sampled_audit_disagreement_history: list[dict[str, Any]] = Field(
+        default_factory=list
+    )
     last_updated: str | None = None
 
 

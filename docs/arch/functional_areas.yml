@@ -82,6 +82,7 @@ areas:
       - EscapeLedgerLoop
       - FailOpenMonitorLoop
       - InterventionTallyLoop
+      - SampledAuditLoop
       - FakeCoverageAuditorLoop
       - FlakeTrackerLoop
       - LiveCorpusReplayLoop

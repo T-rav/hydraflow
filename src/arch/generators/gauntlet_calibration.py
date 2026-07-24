@@ -29,7 +29,7 @@ _PREAMBLE = (
     "much independent scrutiny merged changes actually carried, and how loudly "
     "the evidence path fails when a judge is unavailable. Shared instrument "
     "surface for the judge-independence budget + fail-visible dispatch (#10371) "
-    "and the sampled-adversarial re-audit (#10367).\n\n"
+    "and the sampled-adversarial re-audit (#10370).\n\n"
     "**This artifact is deterministic-from-source (instrument spec + schema).** "
     "Live values render on the dashboard panel (`/api/diagnostics/"
     "gauntlet-calibration`), which reads the append-only ledger at "
@@ -104,6 +104,60 @@ def _disagreement_table(metrics: dict[str, Any] | None) -> str:
     return header + rows + "\n\n"
 
 
+_SAMPLED_AUDIT_DEFS = (
+    "## Sampled adversarial re-audit (#10370)\n\n"
+    "The silent-escape estimator: a governed random sample of merged PRs is "
+    "re-reviewed by a FRESH adversarial context (the auditor sees only the "
+    "merged diff + linked spec/issue + repo state — never the original "
+    "verdicts). The disagreement rate is a statistical bound on the UNDETECTED "
+    "escape rate — the complement to the escape ledger's *detected* count. "
+    "Read-only (ADR-0029 Pattern B): post-merge only, never gates, reverts, or "
+    "opens fix PRs.\n\n"
+    "| metric | definition |\n|---|---|\n"
+    "| disagreement rate + 95% CI | share of audited samples the adversarial "
+    "re-audit flagged `disagree`, with a Wilson-score interval — the headline "
+    "statistical bound on silent escapes (a small-sample CI, since sampling is "
+    "the point) |\n"
+    "| governed sample rate | the Shewhart-governed sampling fraction: widened "
+    "toward a 20% ceiling above the disagreement control limit, narrowed toward "
+    "a 2% floor when quiet (5% base), stratified by blast-radius class |\n"
+    "| auditor false-alarm rate | refuted disagreements / adjudicated "
+    "disagreements — an auditor that over-fires gets its own alarm budget "
+    "tightened |\n"
+    "| per-gate-class calibration | sampled / disagreement / upheld counts per "
+    "blast-radius class (routine / structural / security / migration / gauntlet) "
+    "— which gate the upheld escapes implicate |\n\n"
+    "**Ledger schema.** Append-only "
+    "`<data_root>/diagnostics/audit_samples.jsonl` — one row per sampled merge "
+    "(`verdict`, `findings`, an `input_sources` manifest proving no-verdict "
+    "contamination, `disposition`). An UPHELD disagreement cross-links into the "
+    "escape ledger (`detection_source: sampled-audit`); a REFUTED one increments "
+    "the false-alarm series.\n\n"
+)
+
+
+def _sampled_audit_table(metrics: dict[str, Any] | None) -> str:
+    sa = (metrics or {}).get("sampled_audit") or {}
+    if not sa:
+        return (
+            "### Sampled re-audit observations\n\n"
+            "_(no samples recorded yet — live values render on the dashboard "
+            "panel)_\n\n"
+        )
+    lines = [
+        "### Sampled re-audit observations\n",
+        "| measure | value |",
+        "|---|---|",
+        f"| samples audited | {sa.get('samples', 0)} |",
+        f"| disagreement rate | {sa.get('disagreement_rate', 0)} |",
+        f"| 95% CI | {sa.get('ci_lower', 0)} – {sa.get('ci_upper', 0)} |",
+        f"| auditor false-alarm rate | {sa.get('false_alarm_rate', 0)} |",
+        f"| governed sample rate | {sa.get('governed_rate', 0)} |",
+        "",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def render_gauntlet_calibration(metrics: dict[str, Any] | None = None) -> str:
     """Render the gauntlet-calibration markdown report.
 
@@ -118,5 +172,7 @@ def render_gauntlet_calibration(metrics: dict[str, Any] | None = None) -> str:
         + _SELF_MOD_NOTE
         + _pct_table(metrics)
         + _disagreement_table(metrics)
+        + _SAMPLED_AUDIT_DEFS
+        + _sampled_audit_table(metrics)
         + _FOOTER
     )

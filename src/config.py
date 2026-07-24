@@ -260,6 +260,17 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_INTERVENTION_TALLY_MAX_CLASSIFY_PER_TICK",
         5,
     ),
+    ("sampled_audit_interval", "HYDRAFLOW_SAMPLED_AUDIT_INTERVAL", 14400),
+    (
+        "sampled_audit_max_issues_per_tick",
+        "HYDRAFLOW_SAMPLED_AUDIT_MAX_ISSUES_PER_TICK",
+        3,
+    ),
+    (
+        "sampled_audit_token_budget_per_tick",
+        "HYDRAFLOW_SAMPLED_AUDIT_TOKEN_BUDGET_PER_TICK",
+        40000,
+    ),
     ("adr_drift_resolver_interval", "HYDRAFLOW_ADR_DRIFT_RESOLVER_INTERVAL", 3600),
     (
         "adr_drift_resolver_max_triage_per_tick",
@@ -502,6 +513,7 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
         "HYDRAFLOW_SECURITY_PATCH_SEVERITY_THRESHOLD",
         "medium",
     ),
+    ("sampled_audit_model", "HYDRAFLOW_SAMPLED_AUDIT_MODEL", ""),
     ("dashboard_host", "HYDRAFLOW_DASHBOARD_HOST", "127.0.0.1"),
     ("test_command", "HYDRAFLOW_TEST_COMMAND", "make test"),
     ("docker_image", "HYDRAFLOW_DOCKER_IMAGE", "ghcr.io/t-rav/hydraflow-agent:latest"),
@@ -880,6 +892,16 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "intervention_tally_classify_enabled",
         "HYDRAFLOW_INTERVENTION_TALLY_CLASSIFY_ENABLED",
+        True,
+    ),
+    (
+        "sampled_audit_loop_enabled",
+        "HYDRAFLOW_SAMPLED_AUDIT_LOOP_ENABLED",
+        True,
+    ),
+    (
+        "sampled_audit_reaudit_enabled",
+        "HYDRAFLOW_SAMPLED_AUDIT_REAUDIT_ENABLED",
         True,
     ),
     (
@@ -1941,6 +1963,47 @@ class HydraFlowConfig(BaseModel):
             "spend under a synthetic flood; over budget, rows keep their raw "
             "text at low confidence for later re-label. Recording is never "
             "capped — only LLM classification."
+        ),
+    )
+    sampled_audit_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "SampledAuditLoop cycle interval in seconds (#10370: sampled "
+            "adversarial re-audit — the silent-escape estimator; v1 provisional "
+            "cadence, default 4h)."
+        ),
+    )
+    sampled_audit_max_issues_per_tick: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Finding-rate budget: max hydraflow-find issues SampledAuditLoop "
+            "files in one tick for re-audit disagreements (#10370). Sample "
+            "RECORDING is never capped — only issue filing, so the instrument "
+            "does not over-file."
+        ),
+    )
+    sampled_audit_token_budget_per_tick: int = Field(
+        default=40000,
+        ge=0,
+        le=5_000_000,
+        description=(
+            "Per-tick token budget cap on adversarial re-audit spend (#10370). "
+            "Sampling is the point; exhaustive re-review is an explicit "
+            "non-goal, so the selected sample is trimmed to what this budget "
+            "covers. 0 audits nothing (sampling still records governance)."
+        ),
+    )
+    sampled_audit_model: str = Field(
+        default="",
+        description=(
+            "Model the SampledAuditLoop adversarial re-auditor runs on "
+            "(#10370/#10371 independence policy). Point it at a DIFFERENT family "
+            "from the implementing agent when the roster allows; empty falls "
+            "back to the background model (a fresh same-family context)."
         ),
     )
     adr_drift_resolver_interval: int = Field(
@@ -4899,6 +4962,25 @@ class HydraFlowConfig(BaseModel):
             "Model for InterventionTallyLoop's free-text steering "
             "classification (#10369); empty falls back to background_model, "
             "then 'sonnet'. Also stamped as each row's model_version_context."
+        ),
+    )
+    sampled_audit_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for SampledAuditLoop (#10370: sampled "
+            "adversarial re-audit — the silent-escape estimator, read-only "
+            "ADR-0029 Pattern B). Samples merged PRs, re-audits, records, and "
+            "files disagreements; never gates, reverts, or opens fix PRs."
+        ),
+    )
+    sampled_audit_reaudit_enabled: bool = Field(
+        default=True,
+        description=(
+            "Gates the SampledAuditLoop adversarial re-audit LLM spawn (#10370). "
+            "Default ON; the air-gapped sandbox pins it OFF "
+            "(mockworld.sandbox_main._apply_sandbox_config_overrides) so the "
+            "config_disable seam is TRUE — no real `claude` is reachable on the "
+            "sandbox network. The loop still samples-and-ticks + governs."
         ),
     )
     adr_drift_resolver_loop_enabled: bool = Field(

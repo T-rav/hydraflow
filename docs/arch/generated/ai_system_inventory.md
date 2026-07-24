@@ -56,7 +56,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 | `HYDRAFLOW_ADR_DRIFT_RESOLVER` | `adr_drift_resolver_tool` | `adr_drift_resolver_model` |
 
-## Background loops (62)
+## Background loops (63)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -108,6 +108,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `report_issue` | `ReportIssueLoop` | Caretaking | `report_issue_model` | ✅ | HITL escalation | Processes queued bug reports into GitHub issues via the configured agent. |
 | `retrospective` | `RetrospectiveLoop` | Caretaking | — | — | HITL escalation | Captures post-merge outcomes and identifies recurring delivery patterns. |
 | `runs_gc` | `RunsGCLoop` | Caretaking | — | — | — | Purges expired pipeline run artifacts per TTL and size-cap config; keeps the runs store from growing unbounded. |
+| `sampled_audit` | `SampledAuditLoop` | Trust Fleet | `background_model`, `sampled_audit_model` | ✅ | — | The silent-escape estimator (read-only, Pattern B): re-audits a governed random sample of merged PRs with a fresh adversarial context, records agree/disagree to audit_samples.jsonl, and renders the disagreement rate + confidence interval as a statistical bound on undetected escapes. Upheld disagreements cross-link into the escape ledger. Never gates, reverts, or fixes. See #10370. |
 | `sandbox_failure_fixer` | `SandboxFailureFixerLoop` | Auto-Agent (HITL Pre-Flight) | `model` | — | HITL escalation | Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent |
 | `security_patch` | `SecurityPatchLoop` | Caretaking | — | — | — | Polls Dependabot alerts and files issues for fixable vulnerabilities. |
 | `sentry_ingest` | `SentryLoop` | Caretaking | `sentry_model` | ✅ | HITL escalation | Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline. |

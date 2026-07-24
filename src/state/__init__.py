@@ -58,6 +58,7 @@ from ._review import ReviewStateMixin
 from ._review_orphan import ReviewOrphanStateMixin
 from ._rollup_issues import RollupIssueStateMixin
 from ._route_back import RouteBackStateMixin
+from ._sampled_audit import SampledAuditStateMixin
 from ._sandbox_failure_fixer import SandboxFailureFixerStateMixin
 from ._security_patch import SecurityPatchStateMixin
 from ._sentry import SentryStateMixin
@@ -131,6 +132,7 @@ class StateTracker(
     ErosionMetricsStateMixin,
     EscapeLedgerStateMixin,
     InterventionTallyStateMixin,
+    SampledAuditStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 

@@ -63,6 +63,7 @@ flowchart LR
         trust_fleet_LiveCorpusReplayLoop([LiveCorpusReplayLoop])
         trust_fleet_PrinciplesAuditLoop([PrinciplesAuditLoop])
         trust_fleet_RCBudgetLoop([RCBudgetLoop])
+        trust_fleet_SampledAuditLoop([SampledAuditLoop])
         trust_fleet_StagingBisectLoop([StagingBisectLoop])
         trust_fleet_TrustFleetSanityLoop([TrustFleetSanityLoop])
         trust_fleet_ConformanceRunnerPort[/ConformanceRunnerPort/]
@@ -181,6 +182,7 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 - `LiveCorpusReplayLoop` — `src.live_corpus_replay_loop`
 - `PrinciplesAuditLoop` — `src.principles_audit_loop`
 - `RCBudgetLoop` — `src.rc_budget_loop`
+- `SampledAuditLoop` — `src.sampled_audit_loop`
 - `StagingBisectLoop` — `src.staging_bisect_loop`
 - `TrustFleetSanityLoop` — `src.trust_fleet_sanity_loop`
 

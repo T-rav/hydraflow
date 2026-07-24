@@ -131,6 +131,7 @@ from reviewer import ReviewRunner
 from route_back import RouteBackCoordinator
 from run_recorder import RunRecorder
 from runs_gc_loop import RunsGCLoop
+from sampled_audit_loop import SampledAuditLoop
 from sandbox_failure_fixer_loop import SandboxFailureFixerLoop
 from security_patch_loop import SecurityPatchLoop  # noqa: TCH001
 from sentry_loop import SentryLoop  # noqa: TCH001 — used in dataclass field
@@ -335,6 +336,7 @@ class ServiceRegistry:
     fail_open_monitor_loop: FailOpenMonitorLoop
     escape_ledger_loop: EscapeLedgerLoop
     intervention_tally_loop: InterventionTallyLoop
+    sampled_audit_loop: SampledAuditLoop
     issue_refinement_loop: IssueRefinementLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
@@ -1426,6 +1428,17 @@ def build_services(
         dedup=intervention_tally_dedup,
         deps=loop_deps,
     )
+    sampled_audit_dedup = DedupStore(
+        "sampled_audit_filed_findings",
+        config.data_root / "dedup" / "sampled_audit.json",
+    )
+    sampled_audit_loop = SampledAuditLoop(
+        config=config,
+        pr_manager=prs,
+        state=state,
+        dedup=sampled_audit_dedup,
+        deps=loop_deps,
+    )
     issue_refinement_dedup = DedupStore(
         "issue_refinement",
         config.data_root / "dedup" / "issue_refinement.json",
@@ -2013,6 +2026,7 @@ def build_services(
         fail_open_monitor_loop=fail_open_monitor_loop,
         escape_ledger_loop=escape_ledger_loop,
         intervention_tally_loop=intervention_tally_loop,
+        sampled_audit_loop=sampled_audit_loop,
         issue_refinement_loop=issue_refinement_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,

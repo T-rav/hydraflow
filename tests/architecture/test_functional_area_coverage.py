@@ -249,6 +249,21 @@ _JUSTIFIED_NEW_LOOPS: dict[str, str] = {
         "streams on its own event cursor; HumanSteeringLoop/HITL-phase host "
         "rejected (single source / no cross-cutting cadence)"
     ),
+    # SampledAuditLoop (#10370): acceptance sampling applied to the gauntlet —
+    # a governed random sample of MERGED PRs re-audited post-merge. Considered
+    # hosting on the review phase and on EscapeLedgerLoop, both rejected: review
+    # is pre-merge (this is strictly post-merge, by design, so a fresh context
+    # sees the merged state), and the escape ledger is a MECHANICAL git scanner
+    # with no LLM budget / Shewhart rate governor / per-tick sampling cadence —
+    # bolting a governed LLM sampler onto it would fuse two independent
+    # instruments. It cross-LINKS into the escape ledger (upheld disagreements)
+    # rather than living inside it.
+    "SampledAuditLoop": (
+        "governed post-merge acceptance-sampling re-audit with its own LLM "
+        "budget + Shewhart rate governor + merged-PR cursor; review-phase host "
+        "rejected (pre-merge) and EscapeLedgerLoop host rejected (mechanical "
+        "scanner, no sampling cadence) — cross-links into the ledger instead"
+    ),
 }
 
 

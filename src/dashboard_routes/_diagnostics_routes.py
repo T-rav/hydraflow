@@ -289,10 +289,20 @@ def build_diagnostics_router(
         deterministic instrument spec).
         """
         import judge_independence as ji
+        from audit.metrics import calibration_metrics as sampled_audit_metrics
+        from audit.store import AuditSampleLedger
 
         cfg = _config_for(repo) if repo is not None else config
         records = ji.read_records(ji.ledger_path_for(cfg))
-        return ji.calibration_metrics(records)
+        result = ji.calibration_metrics(records)
+        # Sampled adversarial re-audit (#10370): merge the silent-escape
+        # estimator's metrics from its own append-only ledger into the shared
+        # panel, alongside the judge-independence fail-open metrics.
+        samples = AuditSampleLedger(
+            cfg.diagnostics_dir / "audit_samples.jsonl"
+        ).read_all()
+        result["sampled_audit"] = sampled_audit_metrics(samples)
+        return result
 
     @router.get("/tools")
     def tools(
