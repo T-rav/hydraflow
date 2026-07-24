@@ -834,6 +834,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("dependabot_merge_loop_enabled", "HYDRAFLOW_DEPENDABOT_MERGE_LOOP_ENABLED", True),
     ("diagnostic_loop_enabled", "HYDRAFLOW_DIAGNOSTIC_LOOP_ENABLED", True),
+    (
+        "diagnostic_exhausted_routes_autofix",
+        "HYDRAFLOW_DIAGNOSTIC_EXHAUSTED_ROUTES_AUTOFIX",
+        True,
+    ),
     ("diagram_loop_enabled", "HYDRAFLOW_DIAGRAM_LOOP_ENABLED", True),
     ("entry_evidence_enabled", "HYDRAFLOW_ENTRY_EVIDENCE_ENABLED", True),
     ("epic_monitor_loop_enabled", "HYDRAFLOW_EPIC_MONITOR_LOOP_ENABLED", True),
@@ -4942,6 +4947,19 @@ class HydraFlowConfig(BaseModel):
             "three named blockers landed: #9888 (false-positive cooldown), "
             "#10001 (CREDIT_PROSE_SCAN opt-out + HITL comment dedup), and "
             "#9879/#10018 (gate off-thread + bounded diagnosis prompt)."
+        ),
+    )
+    diagnostic_exhausted_routes_autofix: bool = Field(
+        default=True,
+        description=(
+            "When the DiagnosticLoop's attempt budget is exhausted, route the "
+            "issue straight to the Auto-Agent autofix stage (hydraflow-hitl-"
+            "autofix) instead of the human-visible hydraflow-hitl queue "
+            "(#10411/#10403): attempts-exhausted is an auto-resolvable too-big/"
+            "wrong-strategy signal, not a human-judgment need. The Auto-Agent "
+            "decomposes/retries and pages a human (human-required) only if it "
+            "too exhausts. Set False to restore the pre-#10411 human-visible "
+            "escalation."
         ),
     )
     diagram_loop_enabled: bool = Field(
