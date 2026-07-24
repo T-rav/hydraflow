@@ -1,0 +1,18 @@
+---
+id: 0945
+topic: testing
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-24T23:41:31.239153+00:00
+status: active
+corroborations: 1
+supersedes: 0847,0848,0849,0850,0851,0852,0853,0854,0855,0856,0857,0858,0859,0860,0861,0862,0863,0864,0865,0866,0867,0868,0869,0870,0871,0872,0873,0874,0875,0876,0877,0878,0879,0880,0881,0882,0883,0884,0885,0886,0887,0888,0889,0890,0891,0892,0893,0894,0895
+---
+
+# Wiki-lint drift regressions must assert the full live-wiki lint
+
+Assert `lint_paraphrases(TermStore(terms).list(), docs/wiki) == []` across the entire live wiki, not just the one flagged term file.
+
+Example: `tests/regressions/test_issue_10464.py` mirrors and reinforces `tests/test_seed_terms.py::test_paraphrase_lint_runs_against_live_wiki`, and surfaces any other latent paraphrase drift already present on the branch before merge.
+
+**Why:** a narrowly-scoped regression test would pass while leaving other undetected alias collisions to break CI on a later PR.

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10464
 source_phase: plan
 created_at: 2026-07-24T15:39:21.687953+00:00
-status: active
+status: superseded
 corroborations: 2
+superseded_by: 0897
 ---
 
 # Regression tests for wiki-lint drift should assert the full live-wiki lint, not one term
