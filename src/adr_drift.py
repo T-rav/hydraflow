@@ -81,6 +81,12 @@ def _split_path_symbol(entry: str) -> tuple[str, str | None]:
 #     cited as dependency pointers by ADR-0047/0052) were the remaining recurring
 #     "ADR drift unresolved after 3" HITL escalations — added here so normal
 #     in-scope churn stops re-firing them.
+#   * 2026-07-24 (#10455, epic #10454): the review pipeline (review_advisor,
+#     review_phase/_phase) and the base_background_loop base class — bare-cited
+#     as dependency pointers by many review/loop ADRs — were the current
+#     high-churn gap (~15 FPs across #10388/#10405/#10406, plus the
+#     base_background_loop FP class #10441/#10443). The systemic churn-derived
+#     replacement for this hand-maintained allowlist is tracked in #10456.
 _SHARED_INFRA_MODULES = frozenset(
     {
         "src/config.py",
@@ -100,6 +106,12 @@ _SHARED_INFRA_MODULES = frozenset(
         "src/contract_recording.py",
         "src/contract_diff.py",
         "src/contract_refresh_loop.py",
+        # Review pipeline + base-loop dependency-pointer citations — high-churn
+        # implementation surface many review/loop ADRs bare-cite; the current
+        # dominant FP source (#10388/#10405/#10406, base-loop #10441/#10443).
+        "src/review_advisor.py",
+        "src/review_phase/_phase.py",
+        "src/base_background_loop.py",
     }
 )
 

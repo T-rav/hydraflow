@@ -14,12 +14,12 @@ import logging
 from pathlib import Path
 
 from escape.models import EscapeRecord
-from jsonl_ledger import JsonlLedger
+from jsonl_ledger import IdentifiedJsonlLedger
 
 logger = logging.getLogger("hydraflow.escape_ledger")
 
 
-class EscapeLedger(JsonlLedger[EscapeRecord]):
+class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
     """Append-only reader/writer over one escape-ledger JSONL file."""
 
     def __init__(self, path: Path) -> None:

@@ -28,6 +28,7 @@ graph LR
     fitnessscorecardloop["FitnessScorecardLoop<br/><i>loop</i>"]
     flaketrackerloop["FlakeTrackerLoop<br/><i>loop</i>"]
     githubcacheloop["GitHubCacheLoop<br/><i>loop</i>"]
+    hitlitem["HITLItem<br/><i>entity</i>"]
     livecorpusreplayloop["LiveCorpusReplayLoop<br/><i>loop</i>"]
     loopfitness["LoopFitness<br/><i>value_object</i>"]
     mergestatewatcherloop["MergeStateWatcherLoop<br/><i>loop</i>"]
@@ -55,6 +56,7 @@ graph LR
     disturbancedampenerloop["DisturbanceDampenerLoop<br/><i>loop</i>"]
     error["Error<br/><i>control_role</i>"]
     eventbus["EventBus<br/><i>service</i>"]
+    githubdatacache["GitHubDataCache<br/><i>service</i>"]
     governor["Governor<br/><i>control_role</i>"]
     humansteeringloop["HumanSteeringLoop<br/><i>control_role</i>"]
     hydraflowconfig["HydraFlowConfig<br/><i>aggregate</i>"]
@@ -248,10 +250,16 @@ graph LR
   githubcacheloop -->|implements| basebackgroundloop
   githubcacheloop -->|depends_on| governor
   githubcacheloop -->|depends_on| prmanager
+  githubdatacache -->|depends_on| dependabotmergeloop
+  githubdatacache -->|depends_on| flaketrackerloop
+  githubdatacache -->|depends_on| rcbudgetloop
   governor -->|depends_on| eventbus
   governor -->|depends_on| hydraflowconfig
   governor -->|depends_on| fitnesscontext
   governor -->|depends_on| loopfitness
+  hitlitem -->|depends_on| githubcacheloop
+  hitlitem -->|depends_on| prport
+  hitlitem -->|depends_on| prmanager
   humansteeringloop -->|depends_on| fitnesscontext
   humansteeringloop -->|depends_on| governor
   humansteeringloop -->|depends_on| basebackgroundloop

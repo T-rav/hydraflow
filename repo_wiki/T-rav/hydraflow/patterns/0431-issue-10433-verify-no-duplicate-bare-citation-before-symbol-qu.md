@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10433
 source_phase: plan
 created_at: 2026-07-24T10:22:54.781348+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0432
 ---
 
 # Verify no duplicate bare citation before symbol-qualifying an ADR line

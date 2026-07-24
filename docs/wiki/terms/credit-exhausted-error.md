@@ -4,7 +4,7 @@ name: "CreditExhaustedError"
 kind: "domain_event"
 bounded_context: "shared-kernel"
 code_anchor: "src/subprocess_util.py:CreditExhaustedError"
-aliases: ["credit exhaustion", "exhausted billing signal", "billing-limit signal"]
+aliases: []
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}]
 evidence: []
 superseded_by: null
