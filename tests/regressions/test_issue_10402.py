@@ -24,10 +24,14 @@ audit git call) into the shared constant — those stay separate per
 
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
+from pathlib import Path
 
 import git_timeouts
+
+SRC_DIR = Path(__file__).resolve().parent.parent.parent / "src"
 
 # The seven modules #10402 consolidated onto git_timeouts.GIT_READONLY_TIMEOUT_S.
 _CONSOLIDATED_MODULES = [
@@ -41,21 +45,37 @@ _CONSOLIDATED_MODULES = [
 ]
 
 
+def _module_level_assigned_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    return names
+
+
 def test_shared_constant_value_unchanged() -> None:
     """The consolidated value must preserve the pre-#10402 behaviour."""
     assert git_timeouts.GIT_READONLY_TIMEOUT_S == 60
 
 
-def test_no_module_redefines_git_timeout_s() -> None:
-    """A local `_GIT_TIMEOUT_S` module constant in any of the seven call
-    sites is the scatter coming back."""
-    for module_name in _CONSOLIDATED_MODULES:
-        module = importlib.import_module(module_name)
-        assert not hasattr(module, "_GIT_TIMEOUT_S"), (
-            f"{module_name}._GIT_TIMEOUT_S is back — #10402 consolidated "
-            f"this onto git_timeouts.GIT_READONLY_TIMEOUT_S; do not "
-            f"reintroduce a local module constant"
-        )
+def test_no_src_module_redefines_git_timeout_s() -> None:
+    """Runtime AST scan of the full ``src/`` tree — not just the seven
+    originally-scattered files — for a reintroduced ``_GIT_TIMEOUT_S``
+    module-level constant. A hardcoded file list would miss the scatter
+    reappearing in a module that didn't exist at #10402 fix time."""
+    offenders: list[str] = []
+    for path in sorted(SRC_DIR.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        if "_GIT_TIMEOUT_S" in _module_level_assigned_names(tree):
+            offenders.append(str(path.relative_to(SRC_DIR)))
+
+    assert not offenders, (
+        "a local `_GIT_TIMEOUT_S` module constant reappeared — #10402 "
+        "consolidated this onto git_timeouts.GIT_READONLY_TIMEOUT_S; do not "
+        f"reintroduce a local module constant. Offending modules: {offenders}"
+    )
 
 
 def test_all_consolidated_modules_import_shared_constant() -> None:
