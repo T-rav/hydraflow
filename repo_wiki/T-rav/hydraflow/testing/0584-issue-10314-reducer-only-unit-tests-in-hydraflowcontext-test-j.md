@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10314
 source_phase: plan
 created_at: 2026-07-22T18:34:32.045609+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0593
 ---
 
 # Reducer-only unit tests in HydraFlowContext.test.jsx skip MockWorld/sandbox layers

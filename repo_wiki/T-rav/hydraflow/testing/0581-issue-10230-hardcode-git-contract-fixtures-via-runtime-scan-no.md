@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10230
 source_phase: plan
 created_at: 2026-07-22T18:13:39.968020+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0593
 ---
 
 # Hardcode git contract fixtures via runtime scan, not literal strings

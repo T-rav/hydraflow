@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10307
 source_phase: plan
 created_at: 2026-07-24T04:05:15.039825+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0373
 ---
 
 # Use theme.red/theme.yellow tokens in StreamCard.jsx, never literal hex

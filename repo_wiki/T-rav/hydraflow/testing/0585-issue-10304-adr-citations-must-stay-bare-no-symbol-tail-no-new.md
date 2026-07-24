@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10304
 source_phase: plan
 created_at: 2026-07-24T03:55:27.919578+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0593
 ---
 
 # ADR citations must stay bare — no `:Symbol` tail, no new source_files entries

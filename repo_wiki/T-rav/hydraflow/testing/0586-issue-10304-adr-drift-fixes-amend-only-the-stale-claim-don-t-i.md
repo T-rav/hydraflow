@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10304
 source_phase: plan
 created_at: 2026-07-24T03:55:27.919587+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0593
 ---
 
 # ADR drift fixes: amend only the stale claim, don't import the cited PR's full decision
