@@ -23,14 +23,45 @@ import signal
 from typing import Any, TypeGuard
 
 
+def _self_pids() -> frozenset[int]:
+    """Live/self PIDs that a freshly spawned child can never legitimately be.
+
+    Every HydraFlow subprocess uses ``start_new_session=True``, so a real
+    reapable child is its own group leader with a brand-new pid — it can never
+    equal ``1`` (init/namespace-PID-1), the runner's own pid, its parent's pid,
+    or the runner's process-GROUP id. A fabricated/mocked ``.pid`` can equal any
+    of them, and ``os.killpg`` against one SIGKILLs a live, sensitive group:
+    ``killpg(1)`` tears down init (delivered on a root Linux CI container; a
+    benign ``EPERM`` on non-root macOS, which is why the bug is invisible
+    locally), and ``killpg(getpgrp())``/``killpg(getpid())`` SIGKILL the test
+    runner's own process group mid-suite — the #10393 ``Coverage (trailing)``
+    hang. Excluding them is purely defensive and can never reject a legitimate
+    grandchild group. Total by contract (``is_real_pid`` runs before the
+    ``kill_process_group`` suppression), so the lookups are wrapped.
+    """
+    pids = {1}
+    for getter in (os.getpid, os.getppid, os.getpgrp):
+        with contextlib.suppress(OSError):
+            pids.add(getter())
+    return frozenset(pids)
+
+
 def is_real_pid(pid: object) -> TypeGuard[int]:
-    """True only for a genuine positive integer pid.
+    """True only for a genuine positive integer pid safe to ``os.killpg``.
 
     ``bool`` is excluded explicitly (``True`` is an ``int`` and passes a
     naive ``isinstance`` check); ``0`` targets the caller's own group and
-    negative values are pgid syntax — never signal any of them.
+    negative values are pgid syntax — never signal any of them. Live/self
+    pids (``1``, this process, its parent, its process group — see
+    ``_self_pids``) are excluded so a fabricated ``.pid`` can never make the
+    reaper SIGKILL init or the runner's own group (#10393).
     """
-    return isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+    return (
+        isinstance(pid, int)
+        and not isinstance(pid, bool)
+        and pid > 0
+        and pid not in _self_pids()
+    )
 
 
 def kill_process_group(proc: object, sig: signal.Signals = signal.SIGKILL) -> None:
