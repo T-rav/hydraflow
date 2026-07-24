@@ -88,6 +88,16 @@ async def check_and_alert_unpushed_branches(
                         "kind": "unpushed_local_branches",
                         "branches": [b.branch for b in branches],
                         "detail": detail,
+                        # `message` is the field the dashboard banner renders
+                        # (SystemAlertPayload); `severity` keeps this benign,
+                        # informational condition yellow instead of the red
+                        # default (#10486).
+                        "message": (
+                            f"{len(branches)} local branch(es) have "
+                            "committed-but-unpushed work (invisible to the "
+                            f"factory until pushed): {detail}"
+                        ),
+                        "severity": "warning",
                     },
                 )
             )
