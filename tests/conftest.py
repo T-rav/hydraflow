@@ -330,6 +330,41 @@ def _restore_phase_utils_memory_seams():
 
 
 @pytest.fixture(autouse=True)
+def _restore_auto_pr_seams():
+    """Contain the ``auto_pr`` module-global seams that some loop builders patch.
+
+    The generate-in-worktree loop builders (``_build_corpus_learning`` /
+    ``_build_contract_refresh`` in ``tests/scenarios/catalog/loop_registrations``)
+    inject their stub by assigning ``auto_pr.generate_and_open_pr_async`` /
+    ``auto_pr.open_automated_pr_async`` directly — the seams those loops
+    lazily import at call time. This fixture used to live only in
+    ``tests/scenarios/conftest.py`` (#10111), which contained the leak within
+    ``tests/scenarios`` but left every other module unprotected. Under
+    ``-n auto --dist loadscope``, ``tests/test_auto_pr_preflight.py`` can share
+    an xdist worker with a corpus-learning/contract-refresh scenario; its
+    ``from auto_pr import generate_and_open_pr_async`` binds whatever the
+    module attribute currently is, so a leaked stub silently no-ops the
+    pre-flight gate (0 tool calls, status always "opened", no ``AutoPrError``)
+    for every test after it in that worker (#10433 CI investigation).
+    Snapshot + restore both seams around EVERY test so the mutation can't
+    escape the test that made it, regardless of which module runs next.
+    """
+    import auto_pr
+
+    saved = (
+        auto_pr.generate_and_open_pr_async,
+        auto_pr.open_automated_pr_async,
+    )
+    try:
+        yield
+    finally:
+        (
+            auto_pr.generate_and_open_pr_async,
+            auto_pr.open_automated_pr_async,
+        ) = saved
+
+
+@pytest.fixture(autouse=True)
 def _disable_hitl_summary_autowarm(config) -> None:
     """Keep route tests deterministic unless a test explicitly opts in."""
     config.transcript_summarization_enabled = False
