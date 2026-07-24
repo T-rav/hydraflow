@@ -12,9 +12,19 @@ outcomes feed calibration (decided):
 ``reconcile_disposition`` is the pure mechanical rule mapping a filed find
 issue's resolved state + labels to a disposition — mirroring the escape
 ledger's mechanical-first attribution. The adjudication actors (a human, or a
-downstream fix/close) mark the issue: an ``audit-refuted`` label (or a
-not-planned close) means the auditor was wrong; any other closed state means the
-disagreement was upheld. An open issue stays ``pending``. Never raises.
+downstream fix/close) mark the issue: an ``audit-upheld`` label (or a
+not-planned close read as a dismissal) resolves it, an ``audit-refuted`` label
+means the auditor was wrong.
+
+**Upheld requires an explicit signal.** An ``upheld`` disposition cross-links a
+row into the escape ledger — the instrument's headline "escapes" count — so it
+must never be fabricated. A find issue can be closed INCIDENTALLY by an
+unrelated loop (stale/dup sweeper) with no adjudication label; defaulting such a
+plain close to ``upheld`` would silently inflate the escape count. So only an
+explicit ``audit-upheld`` label yields ``upheld``. A closed-but-unlabelled issue
+stays ``pending`` (unadjudicated — it inflates neither the escape count nor the
+auditor's false-alarm rate, and reconciles once a human applies a label). An
+open issue stays ``pending``. Never raises.
 """
 
 from __future__ import annotations
@@ -33,8 +43,11 @@ def reconcile_disposition(issue_state: str, labels: list[str]) -> str:
 
     Pure and label-first so it is unit-testable without GitHub. Precedence:
     an explicit ``audit-refuted``/``audit-upheld`` label wins; otherwise a
-    not-planned close reads as refuted and any other closed state as upheld;
-    an open issue stays pending.
+    not-planned close reads as a dismissal (refuted); an open issue OR a plain
+    closed issue with no adjudication label stays ``pending`` — ``upheld``
+    (which fabricates an escape-ledger row) is NEVER inferred from a bare close,
+    only from the explicit ``audit-upheld`` label, so an incidental stale/dup
+    close by another loop cannot inflate the escape count.
     """
     lowered = {label.lower() for label in labels}
     if REFUTED_LABEL in lowered:
@@ -43,10 +56,10 @@ def reconcile_disposition(issue_state: str, labels: list[str]) -> str:
         return "upheld"
 
     state = (issue_state or "").strip().upper().replace("-", "_")
-    if state in ("OPEN", ""):
-        return "pending"
     if state in _NOT_PLANNED_STATES:
         return "refuted"
-    # COMPLETED / CLOSED / MERGED / any other resolved state: the disagreement
-    # drove a real change → upheld.
-    return "upheld"
+    # OPEN, unresolved, OR a plain close with no adjudication label: NOT enough
+    # signal to call it an escape. Stay pending until a human applies an
+    # explicit audit-upheld / audit-refuted label. An incidental close must not
+    # cross into the escape ledger.
+    return "pending"

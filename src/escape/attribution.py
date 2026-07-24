@@ -28,8 +28,20 @@ _FIXES_RE = re.compile(
 # A bare `#123` cross-reference (weaker than a closing keyword).
 _HASH_REF_RE = re.compile(r"(?<![\w/])#(\d+)\b")
 
-# A hex sha reference of 7-40 chars, word-bounded.
+# A hex sha reference of 7-40 chars, word-bounded. A real git sha is effectively
+# random hex, so it (almost) always mixes digits AND a-f letters; requiring both
+# (checked below) rejects the bogus matches a bare hex class produces — pure
+# 7+ digit numbers (issue/line counts) and all-letter English words that happen
+# to be hex (``decade``, ``facade``, ``deface``…).
 _SHA_REF_RE = re.compile(r"\b([0-9a-f]{7,40})\b")
+_HAS_DIGIT_RE = re.compile(r"[0-9]")
+_HAS_HEX_LETTER_RE = re.compile(r"[a-f]")
+
+
+def _looks_like_sha(token: str) -> bool:
+    """True when *token* mixes a digit AND an a-f letter — a real-sha shape."""
+    return bool(_HAS_DIGIT_RE.search(token) and _HAS_HEX_LETTER_RE.search(token))
+
 
 # Conventional-commit / free-text hotfix framing.
 _HOTFIX_RE = re.compile(r"\bhot[\s-]?fix\b", re.IGNORECASE)
@@ -78,10 +90,17 @@ def extract_hash_refs(text: str) -> list[int]:
 
 
 def extract_referenced_shas(text: str, *, exclude: str = "") -> list[str]:
-    """Return hex-sha references in *text*, excluding *exclude* (self-ref)."""
+    """Return hex-sha references in *text*, excluding *exclude* (self-ref).
+
+    Only tokens with a real-sha shape (a digit AND an a-f letter) are returned,
+    so a pure-digit number or an all-letter hex-looking word is not mistaken for
+    an originating merge sha (which would mis-attribute an escape).
+    """
     seen: list[str] = []
     for match in _SHA_REF_RE.finditer(text):
         sha = match.group(1)
+        if not _looks_like_sha(sha):
+            continue
         if exclude and (
             sha == exclude or exclude.startswith(sha) or sha.startswith(exclude)
         ):

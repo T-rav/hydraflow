@@ -32,6 +32,8 @@ def render_escape_ledger_markdown(
     """Render the full escape-ledger report as Markdown."""
     rolling = metrics.rolling_escape_count(records, now, days=30)
     rate = metrics.escapes_per_100_merges(rolling, merge_count_30d)
+    confirmed_rolling = metrics.rolling_confirmed_escape_count(records, now, days=30)
+    confirmed_rate = metrics.escapes_per_100_merges(confirmed_rolling, merge_count_30d)
     ttd = metrics.time_to_detection_stats(records)
     encoded = metrics.encoded_summary(records)
     months = metrics.monthly_series(records)
@@ -50,11 +52,20 @@ def render_escape_ledger_markdown(
 
     lines.append("## Headline")
     lines.append("")
+    lines.append(
+        "> **Confirmed** = high/medium mechanical-attribution confidence. The "
+        "confirmed rate excludes low-confidence `bug-issue` (`fix: … fixes #N`) "
+        "closes, which in a fix-heavy repo would otherwise conflate ordinary "
+        "issue resolution with real gate escapes."
+    )
+    lines.append("")
     lines.append("| metric | value |")
     lines.append("|---|---|")
-    lines.append(f"| escapes (rolling 30d) | {rolling} |")
+    lines.append(f"| escapes (rolling 30d, all confidence) | {rolling} |")
+    lines.append(f"| confirmed escapes (rolling 30d) | {confirmed_rolling} |")
     lines.append(f"| merged changes (rolling 30d) | {merge_count_30d} |")
-    lines.append(f"| **escapes per 100 merges** | **{rate:.2f}** |")
+    lines.append(f"| **confirmed escapes per 100 merges** | **{confirmed_rate:.2f}** |")
+    lines.append(f"| escapes per 100 merges (all confidence) | {rate:.2f} |")
     lines.append(f"| total recorded escapes | {encoded.total} |")
     lines.append(f"| encoded / unencoded | {encoded.encoded} / {encoded.unencoded} |")
     lines.append("")

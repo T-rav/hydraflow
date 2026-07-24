@@ -134,7 +134,7 @@ def _build_fail_open_monitor(ports: dict[str, Any], config: Any, deps: Any) -> A
     fail-open ledger from ``config.diagnostics_dir`` on disk (written by the
     PostVerifyAdvisor), not through the ``github`` port, so scenarios exercising
     the breach path seed that ledger file directly — see
-    ``tests/scenarios/test_fail_open_monitor_scenario.py``.
+    ``tests/scenarios/test_judge_independence_scenario.py``.
     """
     from fail_open_monitor_loop import FailOpenMonitorLoop
 
