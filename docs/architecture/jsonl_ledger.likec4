@@ -1,6 +1,15 @@
 // Issue #10404 — Erosion: `existing_ids` scattered across audit/escape/intervention.
-// Root shape: three near-identical append-only JSONL ledger classes.
-// Proposed: extract generic JsonlLedger[T] base; keep named concrete subclasses.
+// Extended #10403 (split) / #10451 (this diagram): `append` + `read_all` were ALSO
+// reimplemented by TrendStore (src/erosion/trends.py), the fourth append-only store.
+// TrendStore's row type `ChangeDatapoint` has NO stable per-row id, so it cannot join
+// the dedup base. Fix: split the single JsonlLedger[T] into a TWO-TIER hierarchy —
+//   AppendOnlyJsonlLedger[S]  — path/read_all/append              (PLAIN tier; S: JsonlRow)
+//   IdentifiedJsonlLedger[T]  — adds existing_ids(); extends ↑    (DEDUP  tier; T: Recordable)
+// TrendStore joins the PLAIN tier; the three id-bearing ledgers join the DEDUP tier.
+//
+// #10403 has landed on staging: src/jsonl_ledger.py now defines AppendOnlyJsonlLedger /
+// IdentifiedJsonlLedger, and TrendStore/AuditSampleLedger/EscapeLedger/InterventionLedger
+// all subclass accordingly. The TO-BE view below matches shipped code, not a future target.
 
 specification {
   element module
@@ -8,10 +17,11 @@ specification {
   element method
   element loop
   relationship uses
+  relationship extends
 }
 
 model {
-  // ---- AS-IS: triplicated ledger classes (one per instrument domain) ----
+  // ---- AS-IS: four stores each reimplementing read_all / append (± existing_ids) ----
   audit = module 'audit' {
     auditStore = klass 'AuditSampleLedger (src/audit/store.py)' {
       description 'read_all + existing_ids + append + update_dispositions'
@@ -33,40 +43,65 @@ model {
     }
     ivModel = klass 'InterventionRecord (id, from_json_dict, to_json_dict)'
   }
+  // TrendStore — fourth append-only store; predates the base, reimplements read_all+append.
+  // No stable id -> cannot dedup -> this is what drove the two-tier split.
+  erosion = module 'erosion' {
+    trendStore = klass 'TrendStore (src/erosion/trends.py)' {
+      description 'read_all + append; NO existing_ids (ChangeDatapoint has no id)'
+    }
+    cdModel = klass 'ChangeDatapoint (from_json_dict, to_json_dict; NO id)'
+  }
 
-  // ---- Callers (dedup-on-tick) ----
+  // ---- Callers (dedup-on-tick + read) ----
   escapeLoop = loop 'EscapeLedgerLoop'          { -> escapeLedger uses 'existing_ids() for dedup' }
   auditLoop  = loop 'SampledAuditLoop'          { -> auditStore uses 'existing_ids() for dedup' }
   ivLoop     = loop 'InterventionTallyLoop'     { -> ivLedger uses 'existing_ids() for dedup' }
   sentry     = loop 'SentryLoop'                { -> escapeLedger uses 'existing_ids()' }
-  vitals     = loop 'vitals.observe'            { -> escapeLedger uses 'read_all()' }
+  vitals     = loop 'vitals.observe'            {
+    -> escapeLedger uses 'read_all()'
+    -> trendStore uses 'read_all() -> compute_monthly_trends'
+  }
 
   auditStore -> auditModel uses
   escapeLedger -> escapeModel uses
   ivLedger -> ivModel uses
+  trendStore -> cdModel uses
 
-  // ---- TO-BE: shared generic base (neutral top-level infra) ----
+  // ---- TO-BE: two-tier shared base (neutral top-level infra, src/jsonl_ledger.py) ----
   shared = module 'shared-infra' {
-    base = klass 'JsonlLedger[T] (src/jsonl_ledger.py) NEW' {
-      description 'read_all + existing_ids + append defined ONCE; T bound by Recordable'
+    rowProto = klass 'JsonlRow Protocol (to_json_dict, from_json_dict)'
+    idProto  = klass 'Recordable Protocol (JsonlRow + id())'
+    appendBase = klass 'AppendOnlyJsonlLedger[S]  NEW' {
+      description 'path + read_all + append defined ONCE; PLAIN tier; S bound by JsonlRow'
+    }
+    identBase = klass 'IdentifiedJsonlLedger[T]  NEW' {
+      description 'adds existing_ids(); DEDUP tier; extends AppendOnly; T bound by Recordable'
       m_ids_base = method 'existing_ids() -> set[str]  [single definition]'
     }
-    proto = klass 'Recordable Protocol (id, from_json_dict, to_json_dict)'
   }
-  base -> proto uses
-  auditStore -> base uses 'subclasses JsonlLedger[AuditSample]; keeps update_dispositions'
-  escapeLedger -> base uses 'subclasses JsonlLedger[EscapeRecord]'
-  ivLedger -> base uses 'subclasses JsonlLedger[InterventionRecord]'
+  idProto -> rowProto extends 'Recordable = JsonlRow + id'
+  identBase -> appendBase extends 'dedup tier extends plain tier'
+  appendBase -> rowProto uses 'S: JsonlRow'
+  identBase -> idProto uses 'T: Recordable'
+
+  // PLAIN tier member (no id):
+  trendStore -> appendBase extends 'subclasses AppendOnlyJsonlLedger[ChangeDatapoint]'
+  // DEDUP tier members (id-bearing) — rebased from the old single JsonlLedger[T]:
+  auditStore -> identBase extends 'IdentifiedJsonlLedger[AuditSample]; keeps update_dispositions'
+  escapeLedger -> identBase extends 'IdentifiedJsonlLedger[EscapeRecord]'
+  ivLedger -> identBase extends 'IdentifiedJsonlLedger[InterventionRecord]'
 }
 
 views {
   view asis {
-    title 'AS-IS — existing_ids triplicated across 3 domains'
-    include audit, escape, intervention, escapeLoop, auditLoop, ivLoop, sentry, vitals, *
+    title 'AS-IS — read_all/append reimplemented across 4 stores (existing_ids across 3)'
+    include audit, escape, intervention, erosion,
+            escapeLoop, auditLoop, ivLoop, sentry, vitals, *
   }
   view tobe {
-    title 'TO-BE — generic JsonlLedger[T] base, one existing_ids definition'
-    include shared, audit, escape, intervention, base, proto,
-            auditStore, escapeLedger, ivLedger, *
+    title 'TO-BE — two-tier base: AppendOnly (plain, +TrendStore) + Identified (dedup, x3)'
+    include shared, audit, escape, intervention, erosion,
+            appendBase, identBase, rowProto, idProto,
+            auditStore, escapeLedger, ivLedger, trendStore, cdModel, *
   }
 }
