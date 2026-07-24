@@ -8,11 +8,21 @@ so callers have a single import point.
 
 from __future__ import annotations
 
+import enum
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from circuit_breaker import CircuitBreaker  # re-export; see Task 10
 
-__all__ = ["AimdController", "CircuitBreaker", "PidController"]
+__all__ = [
+    "AimdController",
+    "CircuitBreaker",
+    "PidController",
+    "RetryController",
+    "RetryOutcome",
+    "RetryResult",
+    "RetryStatus",
+]
 
 
 @dataclass
@@ -97,3 +107,53 @@ class PidController:
         self._prev_error = error
         raw = self.kp * error + self.ki * self._integral + self.kd * derivative
         return max(self.out_lo, min(self.out_hi, raw))
+
+
+class RetryStatus(enum.Enum):
+    SUCCESS = "success"
+    RETRYABLE = "retryable"
+    TERMINAL = "terminal"
+
+
+@dataclass(frozen=True)
+class RetryOutcome:
+    status: RetryStatus
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class RetryResult:
+    succeeded: bool
+    attempts: int
+    terminal: bool
+    history: list[RetryOutcome]
+
+
+@dataclass
+class RetryController:
+    """Bounded fix-retry policy — try up to ``max_attempts`` times.
+
+    Each attempt returns a :class:`RetryOutcome`. SUCCESS stops immediately;
+    TERMINAL short-circuits (don't burn remaining attempts on an unfixable
+    failure); RETRYABLE loops until the budget is exhausted. The actual
+    fix work (rebase, re-poll CI) is injected as the ``attempt`` coroutine.
+    """
+
+    max_attempts: int
+
+    def __post_init__(self) -> None:
+        if self.max_attempts < 1:
+            raise ValueError(f"max_attempts must be >= 1, got {self.max_attempts}")
+
+    async def run(
+        self, attempt: Callable[[int], Awaitable[RetryOutcome]]
+    ) -> RetryResult:
+        history: list[RetryOutcome] = []
+        for n in range(1, self.max_attempts + 1):
+            outcome = await attempt(n)
+            history.append(outcome)
+            if outcome.status is RetryStatus.SUCCESS:
+                return RetryResult(True, n, False, history)
+            if outcome.status is RetryStatus.TERMINAL:
+                return RetryResult(False, n, True, history)
+        return RetryResult(False, self.max_attempts, False, history)

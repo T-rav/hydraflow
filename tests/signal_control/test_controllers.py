@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from signal_control.controllers import AimdController, PidController
+from signal_control.controllers import (
+    AimdController,
+    PidController,
+    RetryController,
+    RetryOutcome,
+    RetryStatus,
+)
 
 
 def test_aimd_multiplicative_decrease_on_breach():
@@ -70,3 +76,88 @@ def test_pid_output_always_within_bounds_and_no_windup(errors):
     for _ in range(1000):
         pid.update(100.0)  # saturate high
     assert pid.update(-100.0) < 10.0
+
+
+@pytest.mark.asyncio
+async def test_retry_stops_on_success():
+    async def attempt(n: int) -> RetryOutcome:
+        return RetryOutcome(RetryStatus.SUCCESS)
+
+    r = await RetryController(max_attempts=2).run(attempt)
+    assert r.succeeded is True and r.attempts == 1 and r.terminal is False
+
+
+@pytest.mark.asyncio
+async def test_retry_exhausts_then_gives_up():
+    calls = {"n": 0}
+
+    async def attempt(n: int) -> RetryOutcome:
+        calls["n"] += 1
+        return RetryOutcome(RetryStatus.RETRYABLE, detail=f"try {n}")
+
+    r = await RetryController(max_attempts=2).run(attempt)
+    assert r.succeeded is False and r.attempts == 2 and r.terminal is False
+    assert calls["n"] == 2
+    assert [o.detail for o in r.history] == ["try 1", "try 2"]
+
+
+@pytest.mark.asyncio
+async def test_retry_short_circuits_on_terminal():
+    calls = {"n": 0}
+
+    async def attempt(n: int) -> RetryOutcome:
+        calls["n"] += 1
+        return RetryOutcome(RetryStatus.TERMINAL, detail="hard conflict")
+
+    r = await RetryController(max_attempts=5).run(attempt)
+    assert r.succeeded is False and r.terminal is True and r.attempts == 1
+    assert calls["n"] == 1  # did not burn remaining attempts
+
+
+def test_retry_rejects_bad_max_attempts():
+    with pytest.raises(ValueError):
+        RetryController(max_attempts=0)
+
+
+@settings(max_examples=50)
+@given(
+    outcomes=st.lists(st.sampled_from(list(RetryStatus)), min_size=0, max_size=15),
+    max_attempts=st.integers(min_value=1, max_value=10),
+)
+@pytest.mark.asyncio
+async def test_retry_property_bounded_and_stops_at_first_terminal_event(
+    outcomes, max_attempts
+):
+    """Property: run() never exceeds max_attempts, stops at the first
+    SUCCESS/TERMINAL, and attempts always equals len(history).
+
+    A hypothesis-generated sequence of statuses is popped one-per-attempt;
+    once exhausted, further attempts report RETRYABLE (so a short generated
+    sequence still lets the controller run out its full budget).
+    """
+    sequence = list(outcomes)
+
+    async def attempt(n: int) -> RetryOutcome:
+        status = sequence.pop(0) if sequence else RetryStatus.RETRYABLE
+        return RetryOutcome(status, detail=f"attempt-{n}")
+
+    result = await RetryController(max_attempts=max_attempts).run(attempt)
+
+    # Bound: never more than max_attempts, and attempts always matches history.
+    assert result.attempts <= max_attempts
+    assert result.attempts == len(result.history)
+
+    # First-stop semantics: only the last recorded outcome may be
+    # SUCCESS/TERMINAL — everything before it must have been RETRYABLE.
+    for outcome in result.history[:-1]:
+        assert outcome.status is RetryStatus.RETRYABLE
+
+    last = result.history[-1]
+    if result.succeeded:
+        assert last.status is RetryStatus.SUCCESS
+    elif result.terminal:
+        assert last.status is RetryStatus.TERMINAL
+    else:
+        # Neither succeeded nor terminal -> the budget ran out.
+        assert result.attempts == max_attempts
+        assert last.status is RetryStatus.RETRYABLE
