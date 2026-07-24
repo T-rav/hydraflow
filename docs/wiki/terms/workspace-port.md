@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/ports.py:WorkspacePort"
 aliases: ["workspace port", "worktree port", "git workspace port"]
 related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}]
-evidence: ["01KQP0HK6TCK1CTRYANSJ8NRSW", "01KRBX2N4QP7VW8FGH3J5YD0M6"]
+evidence: ["01KQNZNK5DWPQ75W9HBCJX2DJF", "01KQP0HK6TCK1CTRYANSJ8NRSW", "01KRBX2N4QP7VW8FGH3J5YD0M6"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668789+00:00"
-updated_at: "2026-07-18T03:15:16.509128+00:00"
+updated_at: "2026-07-24T05:34:07.706352+00:00"
 ---
 
 ## Definition

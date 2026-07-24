@@ -98,6 +98,7 @@ from erosion.scatter_baseline import load_scatter_baseline
 from erosion.spread import changed_files_for_range
 from erosion.spread import compute as spread_compute
 from exception_classify import reraise_on_credit_or_bug
+from git_timeouts import GIT_READONLY_TIMEOUT_S
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
 
 if TYPE_CHECKING:
@@ -107,10 +108,6 @@ if TYPE_CHECKING:
     from state import StateTracker
 
 logger = logging.getLogger("hydraflow.erosion_metrics")
-
-# Local, read-only git op — same bound as erosion.spread/scatter's own
-# _GIT_TIMEOUT_S (their thin git adapters); this one just resolves HEAD.
-_GIT_TIMEOUT_S = 60
 
 _ISSUE_LABELS = ["hydraflow-find", "erosion-metrics"]
 
@@ -138,7 +135,7 @@ def _current_head_sha(repo_root: Path) -> str | None:
             capture_output=True,
             text=True,
             check=False,
-            timeout=_GIT_TIMEOUT_S,
+            timeout=GIT_READONLY_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
         return None

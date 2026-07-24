@@ -61,7 +61,14 @@ def individuals_limits(baseline: list[float]) -> tuple[float, float]:
 
 
 def breaches_upper(value: float, baseline: list[float], *, min_windows: int) -> bool:
-    """Whether *value* sits above the UCL computed over *baseline*.
+    """Whether *value* sits STRICTLY above the 3σ UCL computed over *baseline*.
+
+    This is the ONE breach predicate the whole capstone shares: the verdict
+    engine's :func:`vitals.verdict._series_sustained_breach` tests each of a
+    series' monitored recent windows through this exact function, so the
+    "above the 3σ upper control limit" boundary — above the LIMIT, not merely
+    above the baseline mean — is defined in a single place and cannot drift
+    between the control chart and the verdict.
 
     Returns ``False`` — never a breach — until *baseline* has at least
     ``min_windows`` observations: a control limit computed from one or two

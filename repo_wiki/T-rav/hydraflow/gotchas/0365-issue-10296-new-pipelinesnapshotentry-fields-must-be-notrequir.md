@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10296
 source_phase: plan
 created_at: 2026-07-22T17:44:18.122262+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0370
 ---
 
 # New PipelineSnapshotEntry fields must be NotRequired to stay wire-compatible

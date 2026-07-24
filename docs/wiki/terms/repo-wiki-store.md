@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/repo_wiki.py:RepoWikiStore"
 aliases: ["repo wiki store", "wiki store", "per-repo wiki"]
 related: [{"kind": "depends_on", "target": "01KY4QF8BE4Y5782543MPQNDQ0"}]
-evidence: ["01KQP0AJ4Z2MY1EXMWW9BTXN99", "01KRBX2N4QP7VW8FGH3J5YD0M3"]
+evidence: ["01KQNZNK5DWPQ75W9HBCJX2DJ0", "01KQP0AJ4Z2MY1EXMWW9BTXN99", "01KRBX2N4QP7VW8FGH3J5YD0M3"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-05T03:35:36.668780+00:00"
-updated_at: "2026-07-22T15:07:38.028195+00:00"
+updated_at: "2026-07-24T05:34:07.706352+00:00"
 ---
 
 ## Definition

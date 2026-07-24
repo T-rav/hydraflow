@@ -947,6 +947,27 @@ class LabelDrift(BaseModel):
     )
 
 
+class ClosedStageLabelDrift(BaseModel):
+    """A CLOSED issue that still carries one or more active pipeline-stage labels.
+
+    Belt-and-suspenders for #10394: a GitHub-native ``Closes #N``
+    auto-close (or any close that bypassed
+    ``PRManager.close_issue``'s label strip) can leave a closed issue
+    tagged ``hydraflow-ready`` / ``hydraflow-plan`` /
+    ``hydraflow-in-progress`` etc. A label-scan dispatcher queues by
+    label presence, so the stale label re-dispatches shipped work. The
+    ``LabelDriftWatcherLoop`` (ADR-0088) detects these and strips the
+    stale labels. Terminal markers (``fixed`` / ``verify``) are not
+    reported — see ``HydraFlowConfig.dispatchable_stage_labels``.
+    """
+
+    issue: int = Field(description="Closed issue number carrying stale stage labels")
+    stale_labels: list[str] = Field(
+        min_length=1,
+        description="Active pipeline-stage labels still present on the closed issue",
+    )
+
+
 # --- HITL ---
 
 
@@ -2370,10 +2391,17 @@ class StateData(BaseModel):
     # (this IS the baseline; sustained-window divergence needs the persisted
     # series). ``last_verdict`` is the previous tick's verdict token so the
     # single diverging alarm fires once on the transition into ``diverging``.
+    # ``last_observation_ts`` is the ISO time the last per-window observation was
+    # appended: the loop ticks far more often than one window, so an observation
+    # is recorded only once ``window_days`` have elapsed since this stamp — that
+    # is what keeps successive history points NON-overlapping (independent
+    # windows) so ``sustained_windows`` means N genuinely distinct windows, not N
+    # heavily-overlapping trailing reads of the same lingering event.
     second_order_vitals_series_history: dict[str, list[float]] = Field(
         default_factory=dict
     )
     second_order_vitals_last_verdict: str = Field(default="")
+    second_order_vitals_last_observation_ts: str = Field(default="")
     last_updated: str | None = None
 
 

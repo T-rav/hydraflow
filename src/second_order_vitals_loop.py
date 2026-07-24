@@ -13,10 +13,14 @@ instruments are independent estimates, and a sustained residual between them is
 the fault signal.
 
 Each tick it reads the four instruments' own ledgers/series (IMPORTING their
-metric functions — one source of truth, never a divergent re-derivation),
-computes one scalar per-window observation for each of the FIVE input families,
-appends it to that series' persisted history, and evaluates the divergence
-condition:
+metric functions — one source of truth, never a divergent re-derivation) and
+evaluates the divergence condition. It records a new scalar per-window
+observation for each of the FIVE input families only once a full
+``window_days`` has elapsed since the last one — the loop's tick cadence
+(default 4h) is far finer than the evaluation window (default 7d), so appending
+every tick would stack ~97%-overlapping reads; the once-per-window cursor keeps
+successive observations disjoint (independent windows) so ``sustained_windows``
+means N genuinely distinct windows. The divergence condition:
 
 * each series carries its own Shewhart individuals-chart control limit
   (baseline primed from the series' own history once it has enough windows);
@@ -56,7 +60,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -196,17 +200,35 @@ class SecondOrderVitalsLoop(BaseBackgroundLoop):
     def _append_observations(
         self, now: datetime, window_days: int
     ) -> dict[str, list[float]]:
-        """Read the instruments, append one reading per present series, persist.
+        """Append one reading per present series — but only ONCE per window.
+
+        Cadence vs window: the loop ticks far more often than one ``window_days``
+        window (default 4h tick vs a 7d window), so appending a trailing-window
+        reading on EVERY tick would stack ~97%-overlapping observations. Two
+        pathologies follow: a single lingering event reads as many consecutive
+        "sustained" windows (so ``sustained_windows`` collapses to roughly one
+        tick interval), and the moving-range σ̂ is deflated by the autocorrelation
+        between overlapping reads (limits too tight). So an observation is
+        recorded only once a full ``window_days`` has elapsed since the last one
+        (:meth:`_due_for_observation`): successive history points then cover
+        DISJOINT windows — independent samples — so ``sustained_windows`` means N
+        genuinely distinct windows, exactly the spec's "sustained 2 windows"
+        intent. Between observations the loop still re-evaluates the unchanged
+        history each tick (report freshness + the idempotent diverging-edge alarm).
 
         Absent series (no ledger written yet) read ``None`` and are skipped so
         the coverage stays honest; present series get one appended observation,
         with each series' history bounded to ``history_max`` so it can never grow
         without limit.
         """
+        histories = self._state.get_second_order_vitals_series_history()
+        if not self._due_for_observation(now, window_days):
+            # Not yet a fresh, non-overlapping window — re-evaluate the existing
+            # history unchanged rather than stacking a duplicate overlapping read.
+            return histories
         readings = gather_series_readings(
             self._config, now=now, window_days=window_days
         )
-        histories = self._state.get_second_order_vitals_series_history()
         history_max = int(self._config.second_order_vitals_history_max)
         for series, value in readings.items():
             if value is None:
@@ -215,7 +237,28 @@ class SecondOrderVitalsLoop(BaseBackgroundLoop):
             hist.append(float(value))
             histories[series] = hist[-history_max:]
         self._state.set_second_order_vitals_series_history(histories)
+        self._state.set_second_order_vitals_last_observation_ts(now.isoformat())
         return histories
+
+    def _due_for_observation(self, now: datetime, window_days: int) -> bool:
+        """Whether a full ``window_days`` has elapsed since the last observation.
+
+        ``True`` on the first-ever observation (no stamp yet) and thereafter only
+        once the new trailing window no longer overlaps the previous one, so
+        successive appended observations are independent, disjoint-window reads.
+        An unparseable stamp fails toward observing (never silently freeze the
+        series on a corrupt timestamp).
+        """
+        last = self._state.get_second_order_vitals_last_observation_ts()
+        if not last:
+            return True
+        try:
+            last_ts = datetime.fromisoformat(last)
+        except ValueError:
+            return True
+        if last_ts.tzinfo is None:
+            last_ts = last_ts.replace(tzinfo=now.tzinfo)
+        return (now - last_ts) >= timedelta(days=window_days)
 
     # --- primary-health gate ---------------------------------------------
 

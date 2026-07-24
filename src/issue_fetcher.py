@@ -40,6 +40,20 @@ class IssueFetcher:
         self._pr_cache_fetched_at: datetime | None = None
 
     @staticmethod
+    def _is_open(payload: dict[str, Any]) -> bool:
+        """Return True when a normalized issue payload is in the OPEN state.
+
+        Defense-in-depth for #10394: the label-scan queries already pin
+        ``state=open`` server-side, but the gh REST ``--cache`` can serve a
+        stale OPEN snapshot of an issue that has since been closed (and a
+        GitHub-native ``Closes #N`` auto-close never strips its stage
+        labels). A closed issue that still carries ``hydraflow-ready`` must
+        never be dispatched, so drop anything not currently OPEN here — the
+        one client-side choke point every label-scan fetch flows through.
+        """
+        return str(payload.get("state", "open")).lower() == "open"
+
+    @staticmethod
     def _normalize_labels(raw: list[Any]) -> list[str]:
         """Flatten label dicts (``{"name": "..."}`` from gh CLI) to plain strings."""
         return [lbl["name"] if isinstance(lbl, dict) else str(lbl) for lbl in raw]
@@ -264,7 +278,11 @@ class IssueFetcher:
                 "GitHub issue fetch incomplete due to rate limiting or API errors"
             )
 
-        issues = [GitHubIssue.model_validate(raw) for raw in seen.values()]
+        issues = [
+            GitHubIssue.model_validate(raw)
+            for raw in seen.values()
+            if self._is_open(raw)
+        ]
         if self._config.collaborator_check_enabled:
             collaborators = await self._get_collaborators()
             issues = self._filter_non_collaborators(issues, collaborators)
@@ -413,7 +431,9 @@ class IssueFetcher:
                 if isinstance(number, int) and number not in seen:
                     seen[number] = self._normalize_graphql_issue(node)
 
-        issues = [GitHubIssue.model_validate(v) for v in seen.values()]
+        issues = [
+            GitHubIssue.model_validate(v) for v in seen.values() if self._is_open(v)
+        ]
         if self._config.collaborator_check_enabled:
             collaborators = await self._get_collaborators()
             issues = self._filter_non_collaborators(issues, collaborators)

@@ -8,27 +8,30 @@ const args = process.argv.slice(2)
 const projectRoot = path.resolve(__dirname, '..')
 const registerShim = path.join(projectRoot, 'src/test/register-encoding-lite.cjs')
 const vitestBin = path.join(projectRoot, 'node_modules/vitest/vitest.mjs')
-const vitestJsdomChunk = path.join(
-  projectRoot,
-  'node_modules/vitest/dist/chunks/index.CyBMJtT7.js',
-)
+const vitestChunksDir = path.join(projectRoot, 'node_modules/vitest/dist/chunks')
 
 const existingNodeOptions = process.env.NODE_OPTIONS ? `${process.env.NODE_OPTIONS} ` : ''
 const patchedNodeOptions = `${existingNodeOptions}--require=${registerShim}`.trim()
 
+// Vitest's build emits content-hashed chunk filenames (e.g. index.CyBMJtT7.js),
+// so the hash changes on every Vitest upgrade. Search by content instead of a
+// pinned filename so this keeps working across version bumps.
 function ensureJsdomPatch() {
-  let content
+  let entries
   try {
-    content = fs.readFileSync(vitestJsdomChunk, 'utf8')
+    entries = fs.readdirSync(vitestChunksDir)
   } catch (err) {
-    console.warn('[hf] warning: unable to patch Vitest jsdom chunk', err)
+    console.warn('[hf] warning: unable to read Vitest chunks directory', err)
     return
   }
-  if (!content.includes('runScripts = "dangerously"')) {
-    return
+  for (const entry of entries) {
+    if (!entry.endsWith('.js')) continue
+    const chunkPath = path.join(vitestChunksDir, entry)
+    const content = fs.readFileSync(chunkPath, 'utf8')
+    if (!content.includes('runScripts = "dangerously"')) continue
+    const patched = content.replace(/runScripts = "dangerously"/g, 'runScripts = void 0')
+    fs.writeFileSync(chunkPath, patched, 'utf8')
   }
-  const patched = content.replace(/runScripts = "dangerously"/g, 'runScripts = void 0')
-  fs.writeFileSync(vitestJsdomChunk, patched, 'utf8')
 }
 
 ensureJsdomPatch()

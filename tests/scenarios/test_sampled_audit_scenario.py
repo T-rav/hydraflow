@@ -175,8 +175,11 @@ class TestSampledAuditScenario:
         find_issue = AuditSampleLedger(loop._samples_path).read_all()[0].find_issue
         assert find_issue
 
-        # Adjudication upholds it (closed COMPLETED); tick 2 reconciles into the
-        # escape ledger as a sampled-audit detection.
+        # Adjudication upholds it with the EXPLICIT audit-upheld label (a bare
+        # close no longer infers upheld — that would let an incidental stale/dup
+        # close fabricate an escape); tick 2 reconciles it into the escape ledger
+        # as a sampled-audit detection.
+        await github.add_labels(find_issue, ["audit-upheld"])
         await github.close_issue(find_issue)
         result2 = await loop._do_work()
         assert result2["status"] == "no_new_commits"

@@ -403,6 +403,32 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         stdout = _json.dumps([d.model_dump(mode="json") for d in drifts]) + "\n"
         return FakeOutput(exit_code=0, stdout=stdout, stderr="")
 
+    if method == "find_closed_stage_labeled_issues":
+        import json as _json
+
+        # #10394: a CLOSED issue that still carries an active pipeline-stage
+        # label (the #10314 native-close gap) is reported so the
+        # LabelDriftWatcherLoop can strip it. Terminal markers stay off the
+        # report.
+        fake.add_issue(
+            701,
+            "Closed but still labelled",
+            "body",
+            labels=["hydraflow-ready", "hydraflow-fixed"],
+            state="closed",
+        )
+        stale = await fake.find_closed_stage_labeled_issues()
+        assert [d.issue for d in stale] == [701], (
+            f"find_closed_stage_labeled_issues returned unexpected issues: "
+            f"{[d.issue for d in stale]}"
+        )
+        assert stale[0].stale_labels == ["hydraflow-ready"], (
+            f"expected only the active stage label reported, got "
+            f"{stale[0].stale_labels}"
+        )
+        stdout = _json.dumps([d.model_dump(mode="json") for d in stale]) + "\n"
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
     # --- PR review / label-mutation cluster (#9768 slice 3) ---
 
     if method == "add_pr_labels":

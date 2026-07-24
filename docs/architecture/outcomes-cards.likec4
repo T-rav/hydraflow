@@ -1,0 +1,95 @@
+// Issue #10306 — Move epics off pipeline view onto Outcomes tab as issue+epic cards
+// C4 model of the HydraFlow dashboard UI change area.
+
+specification {
+  element person
+  element system
+  element container
+  element component
+  element endpoint
+
+  tag moved     // logic relocated by this issue
+  tag new       // net-new in this issue
+  tag removed   // deleted from its old home
+}
+
+model {
+  operator = person 'Operator' 'Watches the factory dashboard'
+
+  hydraflow = system 'HydraFlow' {
+
+    ui = container 'Dashboard UI' 'React SPA (vite)' {
+
+      app = component 'App / Tabs' 'App.jsx' {
+        description 'Renders TABS: issues | outcomes | hitl | atlas | system'
+      }
+
+      ctx = component 'HydraFlowContext' 'context/HydraFlowContext.jsx' {
+        description 'WS + REST store. Exposes epics[], issueHistory, config, pipelineIssues'
+      }
+
+      stream = component 'StreamView' 'components/StreamView.jsx' {
+        description 'Issues tab: PipelineFlow + per-stage StreamCards only (epics removed)'
+      }
+
+      epicPanelOld = component 'EpicOverviewPanel (+EpicRow)' 'was StreamView.jsx' {
+        #removed
+        description 'Full-width vertical epic status rows — DELETED from pipeline view'
+      }
+
+      outcomes = component 'OutcomesPanel' 'components/IssueHistoryPanel.jsx' {
+        #moved
+        description 'Outcomes tab: epic card grid (new) rendered above the existing sortable issue-outcome table (issue rows unchanged)'
+      }
+
+      epicCard = component 'EpicOutcomeCard(s)' 'components/EpicOutcomeCards.jsx' {
+        #new
+        description 'Epic card: progress bar, counts, execution-state badge, expandable to child issues already present on the epic object'
+      }
+    }
+
+    api = container 'Dashboard API' 'FastAPI' {
+      epEpics = endpoint '/api/epics' 'epic progress rollups, includes children[] used by the card expand view'
+      epHistory = endpoint '/api/issues/history' 'issue outcomes + inference stats'
+    }
+  }
+
+  // relationships
+  operator -> app 'clicks Outcomes tab'
+  app -> stream 'renders (issues tab)'
+  app -> outcomes 'renders (outcomes tab, gated on running)'
+
+  ctx -> epEpics 'poll → epics[] (incl. children)'
+  ctx -> epHistory 'poll → issueHistory'
+
+  stream -> ctx 'reads pipelineIssues, config'
+  outcomes -> ctx 'reads epics[], issueHistory'
+  outcomes -> epicCard 'one per epic'
+
+  // deleted edge (documented)
+  stream -> epicPanelOld 'REMOVED mount'
+}
+
+views {
+  view context {
+    title 'Context — dashboard change area'
+    include operator, hydraflow, ui, api
+  }
+
+  view components {
+    title 'Component map — Outcomes card grid'
+    include *
+    include ui.*, api.*
+    style epicPanelOld { color muted }
+  }
+
+  view expandFlow {
+    title 'Dynamic — expand an epic card'
+    include operator, app, outcomes, epicCard
+    operator -> app 'open Outcomes tab'
+    app -> outcomes 'render card grid'
+    outcomes -> epicCard 'render epic card w/ progress + children from epics[]'
+    operator -> epicCard 'click chevron'
+    epicCard -> operator 'show child issue list (local state toggle, no fetch)'
+  }
+}

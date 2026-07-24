@@ -2063,8 +2063,11 @@ class HydraFlowConfig(BaseModel):
         description=(
             "SecondOrderVitalsLoop cycle interval in seconds (#10373: the "
             "capstone residual monitor over the instrument set — green-while-"
-            "dying detection; v1 provisional cadence, default 4h). Each tick is "
-            "one evaluation window for the sustained-window divergence logic."
+            "dying detection; v1 provisional cadence, default 4h). Decoupled from "
+            "the evaluation window: the loop ticks at this cadence for report "
+            "freshness and the diverging-edge alarm, but records a NEW per-window "
+            "observation only once `second_order_vitals_window_days` has elapsed, "
+            "so successive observations cover disjoint (non-overlapping) windows."
         ),
     )
     second_order_vitals_window_days: int = Field(
@@ -2075,7 +2078,12 @@ class HydraFlowConfig(BaseModel):
             "Trailing window (days) the SecondOrderVitalsLoop reads each "
             "instrument's series over for one per-window observation (#10373). "
             "Escapes/interventions/audit/independence are windowed by their own "
-            "timestamps; erosion is taken from its latest monthly trend row."
+            "timestamps; erosion is taken from its latest monthly trend row. This "
+            "is ALSO the observation cadence: a new observation is appended only "
+            "once this many days have elapsed since the last, so consecutive "
+            "observations are independent, non-overlapping windows — which is what "
+            "makes `sustained_windows` count genuinely distinct windows rather "
+            "than the same lingering event re-read across overlapping ticks."
         ),
     )
     second_order_vitals_min_baseline_windows: int = Field(
@@ -2096,7 +2104,11 @@ class HydraFlowConfig(BaseModel):
         description=(
             "How many CONSECUTIVE windows a family must stay above its control "
             "limit before it counts toward the k-of-5 divergence tally (#10373). "
-            "The anti-flap half of the design — single-window blips never fire."
+            "The anti-flap half of the design — single-window blips never fire. "
+            "Windows here are the independent, non-overlapping observation windows "
+            "(see `second_order_vitals_window_days`), so this is roughly "
+            "`sustained_windows * window_days` of real elapsed persistence, not N "
+            "adjacent ticks."
         ),
     )
     second_order_vitals_watch_k: int = Field(
@@ -5299,6 +5311,23 @@ class HydraFlowConfig(BaseModel):
         # so an issue can never get stuck claimed (ADR-0002).
         result.extend(self.in_progress_label)
         return result
+
+    @property
+    def dispatchable_stage_labels(self) -> list[str]:
+        """Active pipeline-stage labels whose presence makes an issue a
+        dispatch candidate — ``all_pipeline_labels`` minus the terminal
+        markers (``fixed`` / ``verify``).
+
+        A CLOSED issue must never keep one of these: a label-scan
+        dispatcher (ready/plan/review/hitl work-picker) queues by label
+        presence, so a stale active stage label left on a closed issue
+        causes duplicate re-dispatch of already-shipped work (#10394).
+        Terminal labels are preserved — they record shipped/verified
+        state and no loop dispatches on them. Derived from the single
+        ``all_pipeline_labels`` source, never a parallel hardcoded list.
+        """
+        terminal = {*self.fixed_label, *self.verify_label}
+        return [lbl for lbl in self.all_pipeline_labels if lbl not in terminal]
 
     @property
     def log_dir(self) -> Path:

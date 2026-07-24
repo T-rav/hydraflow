@@ -35,6 +35,7 @@ from arch.extractors.modules import extract_module_graph
 from arch.extractors.ports import extract_ports
 from arch.generators.adr_conformance import render_adr_conformance
 from arch.generators.adr_cross_reference import render_adr_cross_reference
+from arch.generators.adr_enforcement import render_adr_enforcement
 from arch.generators.ai_system_inventory import render_ai_system_inventory
 from arch.generators.changelog import render_changelog
 from arch.generators.coverage_matrix import render_coverage_matrix
@@ -66,6 +67,7 @@ _ARTIFACT_FILES = [
     "ubiquitous-language.md",
     "ubiquitous-language-context-map.md",
     "adr-conformance.md",
+    "adr-enforcement.md",
     "ai_system_inventory.md",
     "traceability_matrix.md",
     "gauntlet-calibration.md",
@@ -165,6 +167,7 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
         "changelog.md": render_changelog(_git_log_changelog(repo_root)),
         "coverage_matrix.md": render_coverage_matrix(loops, ports, repo_root=repo_root),
         "adr-conformance.md": render_adr_conformance(adrs),
+        "adr-enforcement.md": render_adr_enforcement(adrs, repo_root=repo_root),
         "ai_system_inventory.md": render_ai_system_inventory(
             loops, repo_root=repo_root
         ),

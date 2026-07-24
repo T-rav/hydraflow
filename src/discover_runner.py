@@ -1,4 +1,4 @@
-"""Discover runner — product research agent for vague/broad issues."""
+"""Discover runner — planner-invoked discovery research helper (ADR-0107)."""
 
 from __future__ import annotations
 
@@ -111,12 +111,17 @@ def _take_mockworld_pending_queries(
 
 
 class DiscoverRunner(BaseRunner):
-    """Launches a Claude agent to research the product space for a vague issue.
+    """Launches an agent to research a vague/broad/escalated issue before planning.
 
-    Unlike the research runner (which explores the codebase), this runner
-    explores the external product landscape: competitors, user needs,
-    market gaps, and opportunities. It uses web search tools to gather
-    real-world data and synthesizes findings into a structured brief.
+    ADR-0107 made this a general planner-invoked helper — issues land here
+    for being low-clarity, escalated, or cycled back, not for being
+    "product" work specifically. The brief it produces must satisfy the
+    ``discover-completeness`` rubric (§4.10): named *Intent*, *Affected
+    area*, *Acceptance criteria*, *Open questions*, and *Known unknowns*
+    sections, grounded in the codebase via Glob/Grep/Read. For issues that
+    are genuinely user-facing product features, it additionally researches
+    the external competitive/user landscape (WebSearch); internal
+    engineering/tooling issues skip that optional research.
     """
 
     _log = logger
@@ -498,7 +503,7 @@ class DiscoverRunner(BaseRunner):
             )
 
     def _build_command(self, _worktree_path=None) -> list[str]:  # type: ignore[override]
-        """Construct the CLI invocation for product discovery.
+        """Construct the CLI invocation for discovery research.
 
         Uses the planner model (opus) for deep thinking — discovery
         needs thorough reasoning, not fast classification.
@@ -511,15 +516,27 @@ class DiscoverRunner(BaseRunner):
         )
 
     def _build_prompt(self, task: Task, *, guidance: str = "") -> str:
-        """Build the product discovery prompt with deep product thinking frameworks.
+        """Build the discovery research prompt (ADR-0107 general-purpose helper).
+
+        The produced ``research_brief`` must satisfy the
+        ``discover-completeness`` rubric (§4.10,
+        :func:`discover_completeness.build_discover_completeness_prompt`) —
+        named *Intent* / *Affected area* / *Acceptance criteria* /
+        *Open questions* / *Known unknowns* sections. Product-specific
+        research (competitors, user needs, opportunities) is framed as
+        optional, gated on the issue actually being a user-facing feature,
+        since ADR-0107 routes ordinary engineering/tooling issues through
+        this same helper.
 
         ``guidance`` (ADR-0099 #4) is live operator steering for this
         issue; folded in fenced via :func:`fenced_steering_guidance`,
         which returns ``""`` when there is no guidance so behavior is
         unchanged when the feature is off.
         """
-        prompt = f"""You are a senior product strategist conducting deep discovery research.
-Think through the tradeoffs carefully before producing your analysis.
+        prompt = f"""You are conducting discovery research to ground the plan that
+follows. The planner routed this issue here because it is low-clarity,
+broad, escalated, or has cycled back from a later stage — your job is to
+reduce that ambiguity before implementation planning starts.
 
 ## Issue #{task.id}: {task.title}
 
@@ -527,67 +544,83 @@ Think through the tradeoffs carefully before producing your analysis.
 
 ## Your Mission
 
-This is a BROAD product request. Your job is NOT to plan implementation.
-Your job is to produce a BEST-IN-CLASS product discovery brief — the kind
-a top PM at Stripe or Figma would produce before committing to a direction.
+Your job is NOT to plan implementation. Your job is to produce a
+discovery brief the planner can act on directly. Issues land here as
+often for being internal engineering/tooling work (a lint rule, a config
+knob, a parser fix) as for being user-facing product features — decide
+which this is from the issue body before you start researching, and
+do not force a "product" framing onto an engineering issue.
 
-## Deep Discovery Framework
+## Required Brief Structure
 
-Work through each step with genuine depth. Don't just list things — analyze.
+Your ``research_brief`` MUST contain the following five sections, each
+under its own markdown heading, in this order, using this exact wording
+(an automated rubric parses these headings — do not rename, merge, or
+skip any of them, even when a section ends up thin):
 
-### Step 1: Problem Decomposition (Jobs-to-be-Done)
+### Intent
 
-Before researching solutions, deeply understand the PROBLEM:
-- What is the core job the user is trying to get done?
-- What are the functional, emotional, and social dimensions?
-- What are the "struggling moments" — when does the current approach fail?
-- What would "perfect" look like from the user's perspective?
-- Who are the different user personas and how do their needs differ?
+Restate what is actually being asked and why, in your own words — not a
+copy of the issue body. Narrow the scope, name the specific behavior
+change requested, and surface anything the issue leaves implicit.
 
-### Step 2: Competitive Landscape (use WebSearch)
+### Affected area
 
-Research existing solutions thoroughly. For each significant competitor:
-- **What they do well** — their core insight or innovation
-- **Where they fall short** — genuine weaknesses, not just "could be better"
-- **Their positioning** — who they serve and how they talk about it
-- **Business model** — how they monetize (impacts what they prioritize)
-- **User sentiment** — search for reviews on G2, Capterra, Reddit, HN, Twitter
+Use Glob/Grep/Read to explore the CODEBASE and name the concrete
+touchpoints: files, modules, functions/classes, config fields, or ADRs
+this issue would touch. Prefer file paths and symbol names you actually
+verified over guesses — if the issue names a file, confirm it (or
+correct it if the real touchpoint differs).
 
-Don't just list competitors. Identify the **strategic gaps** — what is
-NOBODY doing well? Where is the market underserved?
+### Acceptance criteria
 
-### Step 3: Design Thinking — User Journey Analysis
+A bulleted list (3+ items). Every bullet MUST name an observable,
+testable outcome — a metric, a CLI exit code, a parsed field, a UI
+state, a benchmark threshold. Vague aspirations ("it's better", "users
+are happier") are not acceptable.
 
-Map the end-to-end user experience in this problem space:
-- What triggers the user to seek a solution?
-- What is their current workflow (even if manual/hacky)?
-- Where are the friction points and drop-off moments?
-- What delights them in existing solutions?
-- What would a 10x better experience look like?
+### Open questions
 
-### Step 4: Market & Timing Analysis
+A bulleted list. If the issue text hedges at all ("maybe", "could be",
+"not sure", "it depends", "we might", "possibly", "unclear", "tbd",
+"optional", "deferred"), you MUST surface at least one concrete open
+question grounded in that hedge — do not silently resolve the ambiguity
+yourself.
 
-Think about WHY NOW:
-- What has changed that creates a new opportunity?
-- Technology shifts (new APIs, AI capabilities, platform changes)?
-- Market shifts (remote work, regulatory changes, user expectations)?
-- What's the window of opportunity?
+### Known unknowns
 
-### Step 5: Technical Feasibility Scan
+What you could not determine from the codebase and issue alone: blocking
+dependencies, unresolved design choices, missing config, prerequisite
+work that has not landed yet.
 
-Use Glob/Grep/Read to explore the CODEBASE for:
-- What existing infrastructure could be leveraged?
-- What patterns and conventions already exist?
-- What would be hard vs easy to build given the current architecture?
+Each section needs real content — at least 50 characters of prose, or 3+
+bullets. At least one section must add information that is NOT already
+stated in the issue body (a file path you found, a related ADR, a
+numeric threshold, a constraint) — a brief that only paraphrases the
+issue fails review.
 
-### Step 6: Opportunity Synthesis
+## Optional: Product & Market Research
 
-Synthesize everything above into clear, actionable opportunities.
-Each opportunity should be:
-- **Specific** — not "make it better" but "solve group scheduling for teams of 5-15"
-- **Differentiated** — why this angle vs what exists
-- **Feasible** — grounded in what can actually be built
-- **Impactful** — addresses a real pain point with evidence
+Only when this issue is genuinely a user-facing product feature (not an
+internal engineering/tooling change), extend your research with:
+
+- **Competitive landscape** — if you have WebSearch, research existing
+  solutions: what they do well, where they fall short, how they position
+  and monetize. Cite sources.
+- **User needs** — the jobs-to-be-done, friction points, and personas
+  affected.
+- **Opportunities** — genuinely divergent directions worth a human
+  choosing between, each specific, differentiated, and feasible. Only
+  list an opportunity if it is a real alternative — do not pad the list
+  to hit a count. The planner treats 2+ opportunities as a signal to ask
+  a human to pick a direction, so a route with one clear feasible path
+  forward should return zero or one opportunities, not manufactured
+  choices.
+
+Skip this section entirely (return empty arrays for ``competitors`` /
+``user_needs`` / ``opportunities``) for internal engineering/tooling
+issues — do not force competitor or persona research onto a lint rule or
+config change.
 
 ## Required Output
 
@@ -596,10 +629,10 @@ Each opportunity should be:
 ```json
 {{
   "issue_number": {task.id},
-  "research_brief": "3-4 paragraph executive summary: problem insight, market landscape, key opportunities, and recommended focus areas",
-  "competitors": ["Competitor — what they do, their core strength, and their key weakness"],
-  "user_needs": ["Need — evidence from research, affected persona, severity"],
-  "opportunities": ["Opportunity — why viable, differentiation angle, feasibility assessment"]
+  "research_brief": "Markdown containing the five required sections: ## Intent / ## Affected area / ## Acceptance criteria / ## Open questions / ## Known unknowns",
+  "competitors": ["Competitor — what they do, their core strength, and their key weakness (product-facing issues only)"],
+  "user_needs": ["Need — evidence, affected persona, severity (product-facing issues only)"],
+  "opportunities": ["Opportunity — why viable, differentiation angle, feasibility assessment (product-facing issues only)"]
 }}
 ```
 
@@ -607,11 +640,12 @@ Each opportunity should be:
 
 ## Research Quality Standards
 
-- FIRST, check if you have WebSearch and WebFetch tools available.
-  - If YES: Use them extensively. Cite sources. Research at least 5 competitors.
-  - If NO: State "NOTE: Web search unavailable — analysis based on general knowledge.
-    Verify before making decisions." Still apply the frameworks above deeply.
-- Use Glob/Grep/Read to explore the codebase for technical feasibility.
+- Use Glob/Grep/Read to ground the Affected area section in the real
+  codebase — do not guess file paths or symbol names.
+- If you have WebSearch/WebFetch and this is a product-facing issue, use
+  them; otherwise state "NOTE: Web search unavailable — analysis based on
+  general knowledge. Verify before making decisions." and continue
+  without it.
 - Quality over quantity — 3 deep insights beat 10 shallow bullet points.
 - Challenge your own assumptions — what could you be wrong about?
 

@@ -1,0 +1,55 @@
+// Issue #10402 — consolidate the scattered `_GIT_TIMEOUT_S = 60` read-only
+// git-op timeout tier into one shared leaf constant, keeping the two
+// deliberately-distinct tiers (5s fast-fail, 120s audit) separate.
+
+specification {
+  element module {
+    style { shape rectangle }
+  }
+  element constant {
+    style { shape storage; color green }
+  }
+  element tier {
+    style { shape storage; color amber }
+  }
+  relationship imports
+}
+
+model {
+  // --- Proposed shared home (NEW) ---
+  shared = constant 'git_timeouts.GIT_READONLY_TIMEOUT_S = 60' {
+    description 'NEW leaf module. One home for the read-only local git-op tier.'
+  }
+
+  // --- The 7 scattered read-only adapters (all currently define _GIT_TIMEOUT_S = 60) ---
+  auditDetect       = module 'audit/detect.py'                   { description 'thin git log adapter (#10370)' }
+  escapeDetect      = module 'escape/detect.py'                  { description 'thin git log adapter (#10367)' }
+  escapeLedger      = module 'escape_ledger_loop.py'             { description 'caretaker: resolves HEAD' }
+  erosionSpread     = module 'erosion/spread.py'                 { description 'thin git diff --name-only adapter' }
+  erosionScatter    = module 'erosion/scatter.py'               { description 'thin git diff -U0 adapter' }
+  erosionMetrics    = module 'erosion_metrics_loop.py'          { description 'loop: resolves HEAD' }
+  traceMatrix       = module 'arch/generators/traceability_matrix.py' { description 'thin git log adapter' }
+
+  // --- Deliberately-distinct tiers (NOT consolidated) ---
+  fastFail = tier 'git_revision._GIT_TIMEOUT_SECS = 5' {
+    description 'Fast-fail: status endpoint must never hang. Different value/purpose — stays put.'
+  }
+  auditTier = tier 'principles_audit_loop._GIT_TIMEOUT_SECONDS = 120' {
+    description 'Audit git tier, pinned by tests/regressions/test_issue_9555.py — stays put.'
+  }
+
+  auditDetect    -> shared 'imports'
+  escapeDetect   -> shared 'imports'
+  escapeLedger   -> shared 'imports'
+  erosionSpread  -> shared 'imports'
+  erosionScatter -> shared 'imports'
+  erosionMetrics -> shared 'imports'
+  traceMatrix    -> shared 'imports'
+}
+
+views {
+  view consolidation {
+    title 'Issue #10402 — read-only git-timeout consolidation'
+    include *
+  }
+}

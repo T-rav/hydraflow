@@ -574,3 +574,75 @@ class TestFindLabelDriftEscalatedWithResolvingPR:
             drift = await mgr.find_label_drift()
 
         assert drift == []
+
+
+class TestFindClosedStageLabeledIssues:
+    """PRManager.find_closed_stage_labeled_issues — #10394 caretaker scan.
+
+    A CLOSED issue that still carries an active pipeline-stage label would
+    be re-dispatched by a label-scan work-picker. This scan reports them so
+    the LabelDriftWatcherLoop can strip the stale labels.
+    """
+
+    @pytest.mark.asyncio
+    async def test_reports_closed_issue_with_active_stage_label(
+        self, config, event_bus
+    ) -> None:
+        mgr = make_pr_manager(config, event_bus)
+        active = config.ready_label[0]
+        terminal = config.fixed_label[0]
+        issues_json = json.dumps(
+            [
+                # closed, still carries an active stage label + a terminal one
+                {"number": 10314, "labels": [{"name": active}, {"name": terminal}]},
+                # closed but only terminal → not reported
+                {"number": 999, "labels": [{"name": terminal}]},
+            ]
+        )
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(side_effect=_gh_responder({("issue", "list"): issues_json})),
+        ):
+            drift = await mgr.find_closed_stage_labeled_issues()
+
+        assert len(drift) == 1
+        assert drift[0].issue == 10314
+        assert drift[0].stale_labels == [active]
+        assert terminal not in drift[0].stale_labels
+
+    @pytest.mark.asyncio
+    async def test_search_is_scoped_to_closed_and_stage_labels(
+        self, config, event_bus
+    ) -> None:
+        """The gh search must pin ``is:closed`` and OR the dispatchable labels."""
+        mgr = make_pr_manager(config, event_bus)
+        captured: dict[str, tuple] = {}
+
+        async def _side_effect(*args, **kwargs):
+            captured["args"] = args
+            return "[]"
+
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(side_effect=_side_effect),
+        ):
+            await mgr.find_closed_stage_labeled_issues()
+
+        args = captured["args"]
+        assert "issue" in args and "list" in args
+        search = args[args.index("--search") + 1]
+        assert search.startswith("is:closed label:")
+        assert config.ready_label[0] in search
+
+    @pytest.mark.asyncio
+    async def test_empty_when_no_closed_stage_labeled_issues(
+        self, config, event_bus
+    ) -> None:
+        mgr = make_pr_manager(config, event_bus)
+        with patch(
+            "pr_manager.run_subprocess_with_retry",
+            new=AsyncMock(side_effect=_gh_responder({("issue", "list"): "[]"})),
+        ):
+            drift = await mgr.find_closed_stage_labeled_issues()
+        assert drift == []

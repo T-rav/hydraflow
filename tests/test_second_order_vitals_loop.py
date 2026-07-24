@@ -10,6 +10,8 @@ suppresses the alarm, the config kill-switch, and the deterministic report +
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,11 @@ from vitals.models import (
 )
 from vitals.observe import PrimaryHealth
 
+# A non-flat baseline: mean 11, 3σ UCL ≈ 16.32. A reading of 14 is above the
+# mean but inside the band (must not breach); 30 is above the UCL (must breach).
+_NONFLAT_BASE = [10.0, 12.0, 10.0, 12.0, 10.0, 12.0, 14.0]
+_NONFLAT_BASE_HOT = [10.0, 12.0, 10.0, 12.0, 10.0, 12.0, 30.0]
+
 _THREE = (SERIES_ESCAPES, SERIES_INTERVENTION_CORRECTIONS, SERIES_AUDIT_DISAGREEMENT)
 _TWO = (SERIES_ESCAPES, SERIES_INTERVENTION_CORRECTIONS)
 
@@ -33,10 +40,14 @@ class _FakeState:
     """In-memory backing for the two vitals state fields."""
 
     def __init__(
-        self, history: dict[str, list[float]] | None = None, last: str = ""
+        self,
+        history: dict[str, list[float]] | None = None,
+        last: str = "",
+        last_obs_ts: str = "",
     ) -> None:
         self._history = {k: list(v) for k, v in (history or {}).items()}
         self._last = last
+        self._last_obs_ts = last_obs_ts
 
     def get_second_order_vitals_series_history(self) -> dict[str, list[float]]:
         return {k: list(v) for k, v in self._history.items()}
@@ -51,6 +62,12 @@ class _FakeState:
 
     def set_second_order_vitals_last_verdict(self, verdict: str) -> None:
         self._last = verdict
+
+    def get_second_order_vitals_last_observation_ts(self) -> str:
+        return self._last_obs_ts
+
+    def set_second_order_vitals_last_observation_ts(self, ts: str) -> None:
+        self._last_obs_ts = ts
 
 
 class _FakePR:
@@ -227,6 +244,99 @@ class TestSelfModificationClass:
         ):
             classes = ji.classify_paths([path])
             assert ji.is_self_modification(classes), path
+
+
+class TestThreeSigmaBandAtLoopLevel:
+    """The 3σ band is load-bearing through the whole tick, not just the pure
+    engine. A reading above the baseline MEAN but inside the band must not move
+    the verdict; only a reading above the UCL diverges. These fail if the band
+    is deleted (14 > mean 11 would then read as a three-family divergence).
+    """
+
+    async def test_reading_within_band_stays_green(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_readings(monkeypatch, _THREE, 14.0)
+        # 7-pt non-flat baseline; the appended 14 makes recent = [14, 14],
+        # both above the mean (11) but below the UCL (≈16.32) → no breach.
+        state = _FakeState({name: list(_NONFLAT_BASE) for name in _THREE})
+        prs = _FakePR()
+        loop = _build_loop(tmp_path, state=state, prs=prs)
+
+        result = await loop._do_work()
+
+        assert result["verdict"] == "green"
+        assert result["k"] == 0
+        assert prs.calls == []
+
+    async def test_reading_above_ucl_diverges(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_readings(monkeypatch, _THREE, 30.0)
+        # recent = [30, 30], both above the UCL (≈16.32) → a genuine breach.
+        state = _FakeState({name: list(_NONFLAT_BASE_HOT) for name in _THREE})
+        prs = _FakePR()
+        loop = _build_loop(tmp_path, state=state, prs=prs)
+
+        result = await loop._do_work()
+
+        assert result["verdict"] == "diverging"
+        assert result["k"] == 3
+        assert result["filed"] == 1
+
+
+class TestNonOverlappingObservationWindows:
+    """Finding #2: the loop ticks far more often than one window, so an
+    observation is recorded only once a full ``window_days`` has elapsed —
+    successive history points cover disjoint windows, and a single lingering
+    event cannot masquerade as N sustained windows.
+    """
+
+    async def test_tick_within_window_does_not_append(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_readings(monkeypatch, _THREE, 5.0)
+        state = _FakeState()
+        loop = _build_loop(tmp_path, state=state, prs=_FakePR())
+        window_days = 7
+        t0 = datetime(2026, 1, 1, tzinfo=UTC)
+
+        # First observation (no stamp yet) → appends.
+        h0 = loop._append_observations(t0, window_days)
+        assert len(h0[SERIES_ESCAPES]) == 1
+        # A tick one hour later is still inside the same window → NO new append.
+        h1 = loop._append_observations(t0 + timedelta(hours=1), window_days)
+        assert len(h1[SERIES_ESCAPES]) == 1  # cursor did not advance
+        # Once a full window has elapsed → a new, disjoint observation lands.
+        h2 = loop._append_observations(
+            t0 + timedelta(days=window_days, hours=1), window_days
+        )
+        assert len(h2[SERIES_ESCAPES]) == 2
+
+    async def test_single_lingering_event_reads_one_window_not_two(
+        self, tmp_path: Path
+    ) -> None:
+        # One escape event, read via the REAL escape metric. With non-overlapping
+        # windows it counts in exactly ONE window (1.0) and is gone from the next
+        # (0.0) — it can never read as two sustained high windows.
+        window_days = 7
+        t_event = datetime(2026, 3, 1, tzinfo=UTC)
+        diag = tmp_path / "data" / "diagnostics"
+        diag.mkdir(parents=True, exist_ok=True)
+        (diag / "escape_ledger.jsonl").write_text(
+            json.dumps({"id": "e0", "detected_at": t_event.isoformat()}) + "\n"
+        )
+        state = _FakeState()
+        loop = _build_loop(tmp_path, state=state, prs=_FakePR())
+
+        # First observation just after the event → in-window (1.0).
+        loop._append_observations(t_event + timedelta(hours=1), window_days)
+        # A second observation one full window later → the trailing window no
+        # longer covers the event, so it reads 0.0, not another sustained 1.0.
+        h2 = loop._append_observations(
+            t_event + timedelta(days=window_days, hours=1), window_days
+        )
+        assert h2[SERIES_ESCAPES] == [1.0, 0.0]
 
 
 class TestSurfaces:
