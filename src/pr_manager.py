@@ -1380,9 +1380,16 @@ class PRManager:
         except RuntimeError as exc:
             err_msg = str(exc)
             err_lower = err_msg.lower()
+            # GitHub rejects a bot approving/requesting-changes on its own PR.
+            # Match the STABLE core phrase only — the prefix flips between
+            # "cannot" and "can not" across API surfaces (the live GraphQL error
+            # is "Review Can not approve your own pull request"), and matching
+            # the exact spacing leaked a scary WARNING + return False instead of
+            # the intended graceful self-review fallback (merge still proceeds on
+            # green; no approval is required on staging).
             if (
-                "can not request changes on your own pull request" in err_lower
-                or "cannot approve your own pull request" in err_lower
+                "request changes on your own pull request" in err_lower
+                or "approve your own pull request" in err_lower
             ):
                 logger.info(
                     "Cannot submit %s review on own PR #%d — falling back to comment",
