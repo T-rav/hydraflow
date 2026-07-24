@@ -182,7 +182,6 @@ A frozen value object that bundles raw infrastructure secrets — GitHub token, 
 ## CreditExhaustedError
 
 **Kind:** `domain_event` · **Context:** `shared-kernel` · **Anchor:** `src/subprocess_util.py:CreditExhaustedError` · **Confidence:** `accepted`
-**Aliases:** `credit exhaustion`, `exhausted billing signal`, `billing-limit signal`
 
 CreditExhaustedError signals that a gh/git/claude subprocess call failed because the underlying API billing account (Anthropic, or a one-shot OpenAI-compatible backend such as openrouter/zai/kimi) has run out of credits. It carries the billing-provider identity and an optional resume_at UTC reset time so the orchestrator can scope the resulting pause to only the loops routed to that provider — a Claude cap must not halt z.ai/kimi background workers and vice-versa. Every subprocess-spawning runner's broad except block must route this exception through reraise_on_credit_or_bug so it halts attempt-budget consumption instead of being silently swallowed and retried against an exhausted billing signal.
 
