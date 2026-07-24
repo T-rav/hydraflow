@@ -15,7 +15,7 @@ from adr_drift import (
     compute_drift_by_adr,
     partition_fleet_drift,
 )
-from adr_index import ADR, ADRIndex
+from adr_index import ADR, ADRIndex, parse_adr_file
 
 
 def _write_adr(
@@ -296,6 +296,37 @@ def test_real_adrs_do_not_drift_on_dependency_only_touches() -> None:
         f"dependency-only touches drifted ADRs {drifted}; the cited module(s) "
         "must be shared-infra or symbol-qualified in the owning ADR"
     )
+
+
+def test_adr_0019_issue_fetcher_citation_is_symbol_qualified() -> None:
+    # Regression for #10433: ADR-0019 bare-cited `src/issue_fetcher.py`, so
+    # any touch of that file (including unrelated changes, e.g. #10417's
+    # `IssueFetcher._is_open` filter) drifted the ADR. Pin that the parser
+    # now sees a non-empty, symbol-qualified citation for the file.
+    repo_root = Path(__file__).resolve().parents[1]
+    adr_path = (
+        repo_root
+        / "docs"
+        / "adr"
+        / "0019-background-task-delegation-abstraction-layer.md"
+    )
+    adr = parse_adr_file(adr_path)
+    assert adr.source_symbols.get("src/issue_fetcher.py") == frozenset(
+        {"IssueFetcher._get_collaborators"}
+    )
+
+
+def test_adr_0019_does_not_drift_on_file_only_touch_of_issue_fetcher() -> None:
+    # Regression for #10433: a file-only diff (no symbol evidence — the
+    # production shape) of `src/issue_fetcher.py` must no longer drift
+    # ADR-0019 now that the citation is symbol-qualified.
+    repo_root = Path(__file__).resolve().parents[1]
+    idx = ADRIndex(repo_root / "docs" / "adr")
+    findings = compute_drift(
+        idx, pr_number=10417, changed_files=["src/issue_fetcher.py"]
+    )
+    drifted = sorted({f.adr.number for f in findings})
+    assert 19 not in drifted
 
 
 def test_adr_file_in_diff_helper(adr_index: ADRIndex) -> None:
