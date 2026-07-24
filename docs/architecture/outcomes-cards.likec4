@@ -39,28 +39,17 @@ model {
 
       outcomes = component 'OutcomesPanel' 'components/IssueHistoryPanel.jsx' {
         #moved
-        description 'Outcomes tab: card grid of epic + issue cards (was a sortable table)'
+        description 'Outcomes tab: epic card grid (new) rendered above the existing sortable issue-outcome table (issue rows unchanged)'
       }
 
-      epicCard = component 'EpicOutcomeCard' 'components/OutcomeCard.jsx' {
+      epicCard = component 'EpicOutcomeCard(s)' 'components/EpicOutcomeCards.jsx' {
         #new
-        description 'Epic card: progress bar, counts, success rate, expandable children'
-      }
-
-      issueCard = component 'IssueOutcomeCard' 'components/OutcomeCard.jsx' {
-        #new
-        description 'Issue card: outcome badge, stage progress, PR/token/timing counts'
-      }
-
-      fmt = component 'outcomeFormat util' 'utils/outcomeFormat.js' {
-        #new
-        description 'Shared formatters + outcome color/badge maps extracted from OutcomesPanel'
+        description 'Epic card: progress bar, counts, execution-state badge, expandable to child issues already present on the epic object'
       }
     }
 
     api = container 'Dashboard API' 'FastAPI' {
-      epEpics = endpoint '/api/epics' 'epic progress rollups'
-      epEpicDetail = endpoint '/api/epics/{n}' 'child issues of one epic'
+      epEpics = endpoint '/api/epics' 'epic progress rollups, includes children[] used by the card expand view'
       epHistory = endpoint '/api/issues/history' 'issue outcomes + inference stats'
     }
   }
@@ -70,17 +59,12 @@ model {
   app -> stream 'renders (issues tab)'
   app -> outcomes 'renders (outcomes tab, gated on running)'
 
-  ctx -> epEpics 'poll → epics[]'
+  ctx -> epEpics 'poll → epics[] (incl. children)'
   ctx -> epHistory 'poll → issueHistory'
 
   stream -> ctx 'reads pipelineIssues, config'
   outcomes -> ctx 'reads epics[], issueHistory'
   outcomes -> epicCard 'one per epic'
-  outcomes -> issueCard 'one per filtered outcome item'
-  epicCard -> epEpicDetail 'lazy fetch children on expand'
-  epicCard -> fmt 'uses'
-  issueCard -> fmt 'uses'
-  outcomes -> fmt 'uses'
 
   // deleted edge (documented)
   stream -> epicPanelOld 'REMOVED mount'
@@ -101,12 +85,11 @@ views {
 
   view expandFlow {
     title 'Dynamic — expand an epic card'
-    include operator, app, outcomes, epicCard, epEpicDetail
+    include operator, app, outcomes, epicCard
     operator -> app 'open Outcomes tab'
     app -> outcomes 'render card grid'
-    outcomes -> epicCard 'render epic card w/ progress from epics[]'
+    outcomes -> epicCard 'render epic card w/ progress + children from epics[]'
     operator -> epicCard 'click chevron'
-    epicCard -> epEpicDetail 'GET children (once)'
-    epicCard -> operator 'show child issue list'
+    epicCard -> operator 'show child issue list (local state toggle, no fetch)'
   }
 }
