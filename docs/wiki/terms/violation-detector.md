@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/disturbance/detectors/base.py:ViolationDetector"
 aliases: []
 related: []
-evidence: []
+evidence: ["BUILD-PREFLIGHT-SIX-CI-REDS-001"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T21:10:16.212892+00:00"
-updated_at: "2026-07-01T21:10:16.212894+00:00"
+updated_at: "2026-07-24T05:18:12.365095+00:00"
 ---
 
 ## Definition
