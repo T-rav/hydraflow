@@ -161,3 +161,16 @@ async def test_retry_property_bounded_and_stops_at_first_terminal_event(
         # Neither succeeded nor terminal -> the budget ran out.
         assert result.attempts == max_attempts
         assert last.status is RetryStatus.RETRYABLE
+
+
+def test_circuit_breaker_reexported_is_the_canonical_one():
+    import circuit_breaker as cb
+    from signal_control.controllers import CircuitBreaker
+
+    assert CircuitBreaker is cb.CircuitBreaker
+
+    breaker = CircuitBreaker(name="t", max_failures=2)
+    assert breaker.allow_request() is True
+    breaker.record_failure()
+    breaker.record_failure()
+    assert breaker.allow_request() is False  # OPEN
