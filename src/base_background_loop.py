@@ -15,6 +15,7 @@ import zlib
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, ClassVar
 
 from config import HydraFlowConfig
@@ -349,9 +350,7 @@ class BaseBackgroundLoop(abc.ABC):
             # run_on_startup is already True (which forces an immediate run)
             # or infer from the interval_cb / enabled state.
             # For a clean implementation, we use a file-based timestamp.
-            ts_path = (
-                self._config.data_root / "memory" / f".{self._worker_name}_last_run"
-            )
+            ts_path = self._last_run_path()
             if not ts_path.exists():
                 return False
             last_run_str = ts_path.read_text().strip()
@@ -368,12 +367,46 @@ class BaseBackgroundLoop(abc.ABC):
             )
             return False
 
+    def _last_run_path(self) -> Path:
+        """Durable per-worker ``last_run`` marker, shared by the catch-up gate,
+        the restart cadence guard, and the record-after-cycle write."""
+        return self._config.data_root / "memory" / f".{self._worker_name}_last_run"
+
+    def _remaining_interval_after_last_run(self) -> float:
+        """Seconds still owed on the interval since the persisted ``last_run``.
+
+        ``0`` when there is no marker (first-ever boot — run now) or the read
+        fails. Used by :meth:`run` to defer the first cycle across restarts:
+        the while loop runs a cycle BEFORE its first sleep, so without this a
+        non-``run_on_startup`` loop would fire on every process restart,
+        ignoring its own cadence (the entry-evidence UL-PR pile-up: the server
+        restarts often and each reboot re-ran the 24h loop, opening a fresh
+        PR). A stale marker (elapsed >= interval) returns ``0`` so the missed
+        cycle still runs immediately — that path is owned by
+        :meth:`_should_run_catchup`, this only handles "ran recently".
+        """
+        try:
+            ts_path = self._last_run_path()
+            if not ts_path.exists():
+                return 0.0
+            last_run_str = ts_path.read_text().strip()
+            if not last_run_str:
+                return 0.0
+            last_run = datetime.fromisoformat(last_run_str)
+            if last_run.tzinfo is None:
+                last_run = last_run.replace(tzinfo=UTC)
+            elapsed = (datetime.now(UTC) - last_run).total_seconds()
+            return max(0.0, float(self._get_interval()) - elapsed)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "%s: remaining-interval read failed", self._worker_name, exc_info=True
+            )
+            return 0.0
+
     def _record_last_run(self) -> None:
         """Persist the current timestamp for missed-cycle detection on restart."""
         try:
-            ts_path = (
-                self._config.data_root / "memory" / f".{self._worker_name}_last_run"
-            )
+            ts_path = self._last_run_path()
             ts_path.parent.mkdir(parents=True, exist_ok=True)
             ts_path.write_text(datetime.now(UTC).isoformat())
         except Exception:  # noqa: BLE001
@@ -439,6 +472,24 @@ class BaseBackgroundLoop(abc.ABC):
                     self._worker_name.replace("_", " ").capitalize(),
                 )
             self._record_last_run()
+        else:
+            # Restart cadence guard: the while loop below runs a cycle as its
+            # FIRST action (before sleeping), so on a frequently-restarting
+            # server a non-run_on_startup loop would re-fire on every reboot,
+            # ignoring its durable cadence (the entry-evidence UL-PR pile-up).
+            # If the persisted marker shows we ran less than an interval ago,
+            # sleep out the remainder first. A trigger cuts it short (run now);
+            # a stop request ends the loop.
+            remaining = self._remaining_interval_after_last_run()
+            if remaining > 0:
+                logger.debug(
+                    "%s: deferring first cycle %.0fs to honor cadence across restart",
+                    self._worker_name,
+                    remaining,
+                )
+                await self._sleep_or_trigger(remaining)
+                if self._stop_event.is_set():
+                    return
 
         while not self._stop_event.is_set():
             interval = self._get_interval()
