@@ -207,6 +207,15 @@ export function StreamCard({ issue, intent, defaultExpanded, onRequestChanges, t
               PR #{issue.pr.number}
             </a>
           )}
+          {issue.epicNumber > 0 && (
+            <span
+              style={styles.epicChip}
+              title={`Part of Epic #${issue.epicNumber}`}
+              data-testid={`epic-chip-${issue.issueNumber}`}
+            >
+              {issue.pr ? '/ ' : ''}Epic #{issue.epicNumber}
+            </span>
+          )}
           <span style={styles.arrow}>{expanded ? '\u25BE' : '\u25B8'}</span>
         </div>
       </div>
@@ -450,6 +459,12 @@ const styles = {
     color: theme.accent,
     textDecoration: 'none',
     whiteSpace: 'nowrap',
+  },
+  epicChip: {
+    fontSize: 10,
+    color: theme.textMuted,
+    whiteSpace: 'nowrap',
+    fontWeight: 600,
   },
   issueLink: {
     fontSize: 12,
