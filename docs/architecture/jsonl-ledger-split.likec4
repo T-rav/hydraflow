@@ -1,0 +1,86 @@
+// Fix for #10403 — the two-tier JsonlLedger split, landed via #10446.
+// Captures the class/module topology around src/jsonl_ledger.py and its four
+// consumer ledgers, before and after the two-tier base split.
+
+specification {
+  element module {
+    style { shape rectangle }
+  }
+  element klass {
+    style { shape rectangle }
+  }
+  element protocol {
+    style { shape rectangle; color muted }
+  }
+  relationship subclasses
+  relationship imports
+}
+
+model {
+  ledgerbase = module 'jsonl_ledger' {
+    title 'src/jsonl_ledger.py'
+    description 'Shared append-only JSONL base(s)'
+
+    // --- BEFORE: single base requiring a stable per-row id ---
+    jsonlLedger_old = klass 'JsonlLedger[T]' {
+      description 'BEFORE: single base — path/read_all/append + existing_ids() dedup; T bound to Recordable (requires .id)'
+    }
+
+    // --- AFTER: two-tier split ---
+    jsonlRow = protocol 'JsonlRow' {
+      description 'AFTER: structural row contract — to_json_dict / from_json_dict only'
+    }
+    recordable = protocol 'Recordable' {
+      description 'AFTER: JsonlRow + stable .id (enables existing_ids dedup)'
+    }
+    appendOnly = klass 'AppendOnlyJsonlLedger[S]' {
+      description 'AFTER: path / read_all / append only (no dedup). S bound to JsonlRow'
+    }
+    identified = klass 'IdentifiedJsonlLedger[T]' {
+      description 'AFTER: extends AppendOnlyJsonlLedger, adds existing_ids(). T bound to Recordable'
+    }
+
+    identified -> appendOnly 'subclasses'
+    recordable -> jsonlRow 'extends'
+  }
+
+  trends = module 'erosion.trends' {
+    title 'src/erosion/trends.py'
+    trendStore = klass 'TrendStore' {
+      description 'One ChangeDatapoint per change; NO stable id -> no dedup'
+    }
+  }
+  auditStore = module 'audit.store' {
+    title 'src/audit/store.py'
+    auditLedger = klass 'AuditSampleLedger' { description 'AuditSample rows, id-deduped' }
+  }
+  escapeMod = module 'escape.ledger' {
+    title 'src/escape/ledger.py'
+    escapeLedger = klass 'EscapeLedger' { description 'EscapeRecord rows, id-deduped' }
+  }
+  interventionMod = module 'intervention.ledger' {
+    title 'src/intervention/ledger.py'
+    interventionLedger = klass 'InterventionLedger' { description 'InterventionRecord rows, id-deduped' }
+  }
+
+  // AFTER wiring — the change #10446 landed:
+  trendStore -> appendOnly 'subclasses (NEW #10403 — drops re-implemented read_all/append)'
+  auditLedger -> identified 'subclasses (was JsonlLedger)'
+  escapeLedger -> identified 'subclasses (was JsonlLedger)'
+  interventionLedger -> identified 'subclasses (was JsonlLedger)'
+}
+
+views {
+  view componentAfter {
+    title 'JSONL ledger topology — AFTER two-tier split (#10403, landed via #10446)'
+    include *
+    include ledgerbase.*, trends.*, auditStore.*, escapeMod.*, interventionMod.*
+    autoLayout TopBottom
+  }
+
+  view baseOnly {
+    title 'jsonl_ledger.py — two-tier base class hierarchy'
+    include ledgerbase, ledgerbase.*
+    autoLayout TopBottom
+  }
+}
