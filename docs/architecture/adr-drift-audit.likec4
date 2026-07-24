@@ -1,0 +1,52 @@
+// ADR-0056 touchpoint-drift audit pipeline — context for issue #10433.
+// Root cause: ADR-0019 bare-cites src/issue_fetcher.py, so ANY file touch
+// drifts it. Fix: symbol-qualify the citation so file-only churn no longer fires.
+
+specification {
+  element system
+  element container
+  element component
+  element datastore
+}
+
+model {
+  merged_pr = component 'Merged PR #10417' {
+    description 'Diff touches src/issue_fetcher.py (adds IssueFetcher._is_open, an OPEN-state dispatch filter — unrelated to ADR-0019 decision)'
+  }
+
+  factory = system 'HydraFlow ADR-Drift Audit' {
+    adr_index = container 'ADRIndex (src/adr_index.py)' {
+      description 'parse_adr_file(): _SOURCE_FILE_CITATION_RE extracts `src/x.py[:Symbol]` citations into source_symbols. Bare citation => empty symbol set => drifts on any touch.'
+    }
+    drift = container 'adr_drift.py (pure)' {
+      description 'compute_drift / _citation_drifts. Bare citation drifts on any file touch (unless in _SHARED_INFRA_MODULES); symbol-qualified drifts only on symbol-level evidence — absent in production (file-only diffs).'
+    }
+    auditor = container 'ADRTouchpointAuditorLoop (src/adr_touchpoint_auditor_loop.py)' {
+      description 'Runs compute_drift_by_adr over merged PRs; files per-ADR rollup issue when cited module changed but ADR not in same diff. Auto-closes when ADR file later appears in a diff.'
+    }
+    pre_validator = container 'adr_pre_validator.py' {
+      description 'Conformance gate: AST-resolves cited :Symbol against source. IssueFetcher._get_collaborators MUST exist for the qualified citation to pass.'
+    }
+    adr_doc = datastore 'docs/adr/0019-*.md' {
+      description 'Related section line 121 cites src/issue_fetcher.py (collaborator cache TTL pattern). Currently BARE — target of the fix.'
+    }
+    rollup = datastore 'Issue #10433' {
+      description 'ADR drift rollup — the artifact this plan resolves.'
+    }
+  }
+
+  merged_pr -> auditor 'diff scanned on merge'
+  adr_doc -> adr_index 'citations parsed'
+  adr_index -> drift 'source_symbols'
+  auditor -> drift 'compute_drift_by_adr'
+  drift -> rollup 'files false-positive rollup (bare citation)'
+  adr_doc -> pre_validator 'symbol citation AST-checked'
+}
+
+views {
+  view drift_context {
+    title 'ADR-0019 drift: cause and fix surface'
+    include *
+    include merged_pr, factory.*
+  }
+}
