@@ -24,8 +24,8 @@ from pathlib import Path, PurePosixPath
 from arch._models import ModuleGraph
 from arch.extractors.modules import package_of
 from erosion.models import SpreadFinding
+from git_timeouts import GIT_READONLY_TIMEOUT_S
 
-_GIT_TIMEOUT_S = 60
 _SRC_DIRNAME = "src"
 
 # Used only for lexical path arithmetic inside `package_of`
@@ -99,7 +99,7 @@ def changed_files_for_range(repo_root: Path, commit_range: str) -> list[str] | N
             capture_output=True,
             text=True,
             check=False,
-            timeout=_GIT_TIMEOUT_S,
+            timeout=GIT_READONLY_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
         return None

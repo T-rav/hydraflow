@@ -16,8 +16,7 @@ import subprocess
 from pathlib import Path
 
 from audit.models import MergedChange
-
-_GIT_TIMEOUT_S = 60
+from git_timeouts import GIT_READONLY_TIMEOUT_S
 
 _COMMIT_SEP = "\x00"
 _FIELD_SEP = "\x1f"
@@ -49,7 +48,7 @@ def _run_git(repo_root: Path, args: list[str]) -> str | None:
             capture_output=True,
             text=True,
             check=False,
-            timeout=_GIT_TIMEOUT_S,
+            timeout=GIT_READONLY_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
         return None
