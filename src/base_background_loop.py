@@ -397,7 +397,10 @@ class BaseBackgroundLoop(abc.ABC):
                 last_run = last_run.replace(tzinfo=UTC)
             elapsed = (datetime.now(UTC) - last_run).total_seconds()
             return max(0.0, float(self._get_interval()) - elapsed)
-        except Exception:  # noqa: BLE001
+        except (OSError, ValueError, TypeError):
+            # OSError: marker read; ValueError: bad timestamp; TypeError: a
+            # test-double interval that isn't a real number. Any of these →
+            # treat as "no durable cadence to honor" and run now.
             logger.debug(
                 "%s: remaining-interval read failed", self._worker_name, exc_info=True
             )
