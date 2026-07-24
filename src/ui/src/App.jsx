@@ -13,7 +13,9 @@ import { ProjectView } from './components/ProjectView'
 import { theme } from './theme'
 import { canonicalRepoSlug } from './constants'
 
-const TABS = ['issues', 'hitl', 'outcomes', 'atlas', 'system']
+// HITL merged into the Outcomes screen (#hitl-into-outcomes): there is no
+// separate 'hitl' tab — HITL items render at the top of Outcomes.
+const TABS = ['issues', 'outcomes', 'atlas', 'system']
 
 const TAB_LABELS = {
   issues: 'Work Stream',
@@ -32,6 +34,8 @@ function _initialTabFromUrl() {
   // land on the parent (the panel reads its own sub param).
   if (requested === 'loop-fitness') return 'system'
   if (requested === 'adr-conformance') return 'atlas'
+  // HITL merged into Outcomes — old ?tab=hitl deep links land there.
+  if (requested === 'hitl') return 'outcomes'
   if (requested && TABS.includes(requested)) return requested
   return 'issues'
 }
@@ -208,7 +212,7 @@ function AppContent() {
   const handleRequestChanges = useCallback(async (issueNumber, feedback, stage) => {
     const ok = await requestChanges(issueNumber, feedback, stage)
     if (ok) {
-      setActiveTab('hitl')
+      setActiveTab('outcomes')
     }
     return ok
   }, [requestChanges])
@@ -250,8 +254,8 @@ function AppContent() {
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTab(tab) } }}
               style={activeTab === tab ? tabActiveStyle : tabInactiveStyle}
             >
-              {tab === 'hitl' ? (
-                <>HITL{hitlItems?.length > 0 && <span style={hitlBadgeStyle}>{hitlItems.length}</span>}</>
+              {tab === 'outcomes' ? (
+                <>Outcomes{hitlItems?.length > 0 && <span style={hitlBadgeStyle}>{hitlItems.length}</span>}</>
               ) : TAB_LABELS[tab]}
             </div>
           ))}
@@ -268,13 +272,15 @@ function AppContent() {
           )}
           {activeTab === 'outcomes' && (
             orchestratorStatus === 'running'
-              ? <OutcomesPanel />
+              ? (
+                <>
+                  {hitlItems?.length > 0 && (
+                    <HITLTable items={hitlItems} onRefresh={refreshHitl} />
+                  )}
+                  <OutcomesPanel />
+                </>
+              )
               : <div style={idleMessage}>Pipeline is not running — outcomes data may be stale.</div>
-          )}
-          {activeTab === 'hitl' && (
-            orchestratorStatus === 'running'
-              ? <HITLTable items={hitlItems} onRefresh={refreshHitl} />
-              : <div style={idleMessage}>Pipeline is not running — HITL actions are unavailable.</div>
           )}
           {activeTab === 'atlas' && <AtlasExplorer />}
           {activeTab === 'system' && (
