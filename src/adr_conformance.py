@@ -295,6 +295,188 @@ def resolve_check(check: Check, repo_root: Path) -> bool:
     return False  # prose is unresolvable by design
 
 
+class EnforcementClass(StrEnum):
+    """How firmly an Accepted ADR's decision is bound to a runnable check.
+
+    Inverts ADR conformance from the citation-drift firehose (a post-merge
+    stream of flags over the unenforceable tail) to the load-bearing
+    question: does the ADR's named enforcement resolve to a *real*
+    machine-checkable artifact, or is it unenforced-decision debt?
+
+    - ``REAL`` — the ADR is ``enforced`` and at least one of its typed
+      checks resolves to an existing, side-effect-free artifact that
+      genuinely asserts (a ``pytest:`` node/module carrying an assertion, or
+      a ``make:`` guard target).
+    - ``WEAK`` — the decision has an ``**Enforced by:**`` pointer but it is
+      not a real machine check: a ``manual`` prose pointer (a review-checklist
+      sentence), or an ``enforced`` ADR whose typed checks don't resolve /
+      are mutating.
+    - ``MISSING`` — no ``**Enforced by:**`` check at all (e.g. a bare
+      ``decision-of-record`` ADR). The decision is recorded but nothing on
+      disk fails when it is violated.
+
+    ``WEAK`` + ``MISSING`` together are the *unenforced-decision debt*. The
+    *assertion-strength* signal (``check_is_tautological`` — a resolving but
+    hollow check) is deliberately NOT folded in here: it is a soft, advisory
+    flag surfaced separately in the debt report, never a hard-fail, because a
+    conservative heuristic must not gate CI on its own false positives.
+    """
+
+    REAL = "REAL"
+    WEAK = "WEAK"
+    MISSING = "MISSING"
+
+
+# Assertion-signal name prefixes/idioms scanned in a resolved pytest node's
+# body. A check whose target function/module contains NONE of these (and no
+# bare ``assert``) is *tautological*: it resolves (so ADR-0100's existing
+# ratchet stays green) yet asserts nothing, so the "decision" it claims to
+# enforce could drift without ever turning the check red. Conservative by
+# construction — biased toward calling a check STRONG so real tests that
+# delegate their assertion to a helper (``verify_*``, ``expect_*``, custom
+# ``check_*``) are never mis-flagged as weak.
+_ASSERT_NAME_RE = re.compile(
+    r"^(assert|verify|expect|ensure|require|raises|warns|fail|check_|should_)"
+)
+
+
+def _callee_name(call: ast.Call) -> str:
+    f = call.func
+    if isinstance(f, ast.Attribute):
+        return f.attr
+    if isinstance(f, ast.Name):
+        return f.id
+    return ""
+
+
+def _node_asserts(node: ast.AST) -> bool:
+    """True if *node* (a function, class, or whole module AST) contains any
+    assertion signal: a bare ``assert``, a ``pytest.raises``/``warns``/``fail``
+    (as a call OR a ``with`` context manager), a unittest/mock ``assert*``
+    call, or a call to a helper whose name reads as an assertion idiom
+    (``verify_*``, ``expect_*``, ``ensure_*``, ``require_*``, ``check_*``,
+    ``should_*``)."""
+    for n in ast.walk(node):
+        if isinstance(n, ast.Assert):
+            return True
+        if isinstance(n, ast.Call) and _ASSERT_NAME_RE.match(_callee_name(n)):
+            return True
+        if isinstance(n, (ast.With, ast.AsyncWith)):
+            for item in n.items:
+                ctx = item.context_expr
+                if isinstance(ctx, ast.Call) and _ASSERT_NAME_RE.match(
+                    _callee_name(ctx)
+                ):
+                    return True
+    return False
+
+
+def _resolve_pytest_node_ast(repo_root: Path, target: str) -> ast.AST | None:
+    """Return the AST of the specific node a ``pytest:`` target names, or None.
+
+    ``tests/foo.py`` (module-only) → the whole ``ast.Module``.
+    ``tests/foo.py::test_x`` → that function's ``FunctionDef``.
+    ``tests/foo.py::TestC::test_x`` → that method's ``FunctionDef`` (a direct
+    child of ``TestC``). Anything deeper, unresolvable, or unparseable → None.
+    Mirrors ``_pytest_node_defined``'s resolution semantics so the strength
+    signal is defined over exactly the nodes the ADR-0100 ratchet accepts.
+    """
+    file_part, _, name_part = target.partition("::")
+    path = repo_root / file_part
+    if not path.is_file():
+        return None
+    try:
+        tree = ast.parse(path.read_text())
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return None
+    if not name_part:
+        return tree  # module-only citation: strength is over the whole module
+    segments = name_part.split("::")
+    if len(segments) > 2:
+        return None
+    if len(segments) == 1:
+        wanted = _PARAM_SUFFIX_RE.sub("", segments[0])
+        return _named_node(tree, wanted)
+    class_name, method_part = segments
+    wanted_method = _PARAM_SUFFIX_RE.sub("", method_part)
+    return _class_child_node(tree, class_name, wanted_method)
+
+
+def _named_node(tree: ast.Module, wanted: str) -> ast.AST | None:
+    for n in tree.body:
+        if (
+            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and n.name == wanted
+        ):
+            return n
+    return None
+
+
+def _class_child_node(
+    tree: ast.Module, class_name: str, wanted_method: str
+) -> ast.AST | None:
+    for cls in tree.body:
+        if isinstance(cls, ast.ClassDef) and cls.name == class_name:
+            for m in cls.body:
+                if (
+                    isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and m.name == wanted_method
+                ):
+                    return m
+    return None
+
+
+def check_is_tautological(check: Check, repo_root: Path) -> bool:
+    """True when a ``pytest:`` check RESOLVES to a real node yet that node
+    asserts nothing — a green-but-hollow guard.
+
+    Conservative: returns True only for a ``pytest:`` check whose target node
+    is found AND contains no assertion signal (see ``_node_asserts``).
+    Non-pytest checks, prose, and unresolvable targets return False — this
+    flag is exclusively about *resolved-but-hollow* pytest enforcement, not
+    about resolution (ADR-0100's ratchet already owns resolution)."""
+    if check.kind != "pytest":
+        return False
+    node = _resolve_pytest_node_ast(repo_root, check.target)
+    if node is None:
+        return False
+    return not _node_asserts(node)
+
+
+def has_real_enforcement(adr: ADR, repo_root: Path) -> bool:
+    """True when *adr* is ``enforced`` and carries at least one resolving,
+    non-mutating, non-prose typed check — ADR-0100's ``enforced`` bar.
+
+    This is the robust, non-heuristic predicate the ratchet hard-fails on.
+    It deliberately does NOT apply the tautology heuristic: assertion-strength
+    is advisory only (surfaced in the debt report), never a CI gate.
+    """
+    if classify_enforcement(adr.enforcement) is not ConformanceKind.ENFORCED:
+        return False
+    return any(
+        chk.kind != "prose"
+        and not is_mutating(chk, repo_root)
+        and resolve_check(chk, repo_root)
+        for chk in adr.enforced_by
+    )
+
+
+def classify_adr_enforcement(adr: ADR, repo_root: Path) -> EnforcementClass:
+    """Classify an Accepted ADR as REAL / WEAK / MISSING (see EnforcementClass).
+
+    Pure over ``adr`` + the on-disk repo; reuses ADR-0100's ``resolve_check``
+    / ``is_mutating`` so this never forks the parser or the resolver. REAL iff
+    ``has_real_enforcement``; an ADR with no ``**Enforced by:**`` checks is
+    MISSING; anything else (a ``manual`` prose pointer, or ``enforced`` checks
+    that don't resolve) is WEAK.
+    """
+    if not adr.enforced_by:
+        return EnforcementClass.MISSING
+    if has_real_enforcement(adr, repo_root):
+        return EnforcementClass.REAL
+    return EnforcementClass.WEAK
+
+
 _WORST = {
     CheckOutcome.PASS: 0,
     CheckOutcome.SKIPPED: 0,
