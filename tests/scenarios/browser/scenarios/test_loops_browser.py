@@ -158,6 +158,7 @@ async def test_l2_workspace_gc_cleans_stale(world, page) -> None:
     state.get_active_branches.return_value = {}
     state.get_hitl_cause.return_value = None
     state.get_issue_attempts.return_value = 0
+    state.get_auto_agent_attempts.return_value = 0
     _seed_ports(world, workspace_gc_state=state)
 
     run_subprocess = AsyncMock(return_value="")

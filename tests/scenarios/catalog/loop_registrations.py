@@ -554,6 +554,7 @@ def _build_workspace_gc(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         state.get_active_branches.return_value = {}
         state.get_hitl_cause.return_value = None
         state.get_issue_attempts.return_value = 0
+        state.get_auto_agent_attempts.return_value = 0
         ports["workspace_gc_state"] = state
     return WorkspaceGCLoop(
         config=config,
