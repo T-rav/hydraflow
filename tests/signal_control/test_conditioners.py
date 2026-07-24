@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+import statistics
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -115,6 +118,40 @@ def test_cusum_resets_after_firing():
     assert c.pos == 0.0 and c.neg == 0.0
 
 
+@given(
+    threshold=st.floats(min_value=0.1, max_value=100.0),
+    xs=st.lists(st.floats(min_value=-0.4, max_value=0.4), min_size=1, max_size=200),
+)
+def test_cusum_never_fires_when_deviation_strictly_inside_slack(threshold, xs):
+    # slack=0.5 with |dev| <= 0.4: dev - slack < 0 and dev + slack > 0 on every
+    # step, so both accumulators are driven back toward (and clamped at) zero
+    # and can never cross +/-threshold, regardless of threshold's value.
+    c = Cusum(threshold=threshold, slack=0.5)
+    fired = [c.update(x, mean=0.0) for x in xs]
+    assert not any(fired)
+    assert c.pos == 0.0
+    assert c.neg == 0.0
+
+
+@given(
+    slack=st.floats(min_value=0.0, max_value=5.0),
+    threshold=st.floats(min_value=0.1, max_value=20.0),
+    delta=st.floats(min_value=0.1, max_value=5.0),
+)
+def test_cusum_fires_eventually_on_sustained_shift_beyond_slack(
+    slack, threshold, delta
+):
+    # A constant shift strictly greater than slack grows the positive
+    # accumulator by exactly `delta` per step (dev - slack == delta > 0), so
+    # it is guaranteed to exceed `threshold` within ceil(threshold/delta)+1
+    # steps -- compute a safe upper bound and assert it fires by then.
+    shift = slack + delta
+    c = Cusum(threshold=threshold, slack=slack)
+    steps = math.ceil(threshold / delta) + 2
+    fired = [c.update(shift, mean=0.0) for _ in range(steps)]
+    assert any(fired)
+
+
 from signal_control.conditioners import AdaptiveThreshold
 
 
@@ -135,6 +172,35 @@ def test_adaptive_threshold_ignores_single_outlier_in_baseline():
     at = AdaptiveThreshold(z=3.0, min_samples=8)
     baseline = [10.0, 11.0, 9.0, 10.5, 9.5, 10.2, 9.8, 999.0]
     assert at.is_anomalous(20.0, baseline) is True
+
+
+@given(
+    baseline=st.lists(
+        st.floats(
+            min_value=-1000.0, max_value=1000.0, allow_nan=False, allow_infinity=False
+        ),
+        min_size=8,
+        max_size=30,
+    ),
+    d1=st.floats(
+        min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False
+    ),
+    d2=st.floats(
+        min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False
+    ),
+)
+def test_adaptive_threshold_monotonic_in_distance_from_median(baseline, d1, d2):
+    # The decision is abs(x - median) / robust_sigma >= z: for a fixed
+    # baseline (so a fixed median and robust_sigma), the score is monotonic
+    # non-decreasing in the distance from the median. So the point farther
+    # from the median can never be *less* anomalous than the closer one.
+    at = AdaptiveThreshold(z=2.0, min_samples=8)
+    near, far = min(d1, d2), max(d1, d2)
+    med = statistics.median(baseline)
+    x_near = med + near
+    x_far = med + far
+    if at.is_anomalous(x_near, baseline):
+        assert at.is_anomalous(x_far, baseline)
 
 
 from signal_control.conditioners import Corroborator
@@ -168,3 +234,25 @@ def test_corroborator_short_circuits_on_first_false():
 def test_corroborator_rejects_bad_required():
     with pytest.raises(ValueError):
         Corroborator(probe=lambda: True, required=0)
+
+
+@given(data=st.data())
+def test_corroborator_confirm_calls_probe_at_most_required_times(data):
+    # For any boolean probe sequence, confirm() must call probe() at most
+    # `required` times (the all(...) generator is capped by range(required)
+    # and short-circuits on the first False), and its result must equal
+    # all(...) over exactly the first `required` observations.
+    bools = data.draw(st.lists(st.booleans(), min_size=1, max_size=20))
+    required = data.draw(st.integers(min_value=1, max_value=len(bools)))
+    calls = {"n": 0}
+    it = iter(bools)
+
+    def probe() -> bool:
+        calls["n"] += 1
+        return next(it)
+
+    c = Corroborator(probe=probe, required=required)
+    result = c.confirm()
+
+    assert calls["n"] <= required
+    assert result == all(bools[:required])

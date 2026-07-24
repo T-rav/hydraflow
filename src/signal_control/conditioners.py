@@ -9,6 +9,7 @@ from __future__ import annotations
 import statistics
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 
 @dataclass
@@ -135,7 +136,7 @@ class AdaptiveThreshold:
 
     z: float
     min_samples: int = 8
-    _MAD_TO_SIGMA: float = 1.4826  # MAD * this ~= stddev for normal data
+    _MAD_TO_SIGMA: ClassVar[float] = 1.4826  # MAD * this ~= stddev for normal data
 
     def is_anomalous(self, x: float, baseline: Sequence[float]) -> bool:
         if len(baseline) < self.min_samples:
