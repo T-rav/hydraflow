@@ -56,3 +56,51 @@ def test_emits_forward_and_reverse_tables():
     reverse_section = md.split("## Module → ADRs", 1)[1]
     assert "ADR-0001" in reverse_section
     assert "ADR-0002" in reverse_section
+
+
+def _adr(number: int, source_symbols: dict[str, frozenset[str]]) -> ADR:
+    return ADR(
+        number=number,
+        title=f"adr-{number}",
+        status="Accepted",
+        summary="",
+        source_files=frozenset(source_symbols),
+        source_symbols=source_symbols,
+    )
+
+
+def test_symbol_granularity_nudges_section_always_present_and_empty_renders_none():
+    # #10458 — the soft nudge section is always emitted; with no qualifying
+    # ADRs it renders "None." so its presence never depends on the corpus.
+    idx = ADRRefIndex(adr_to_modules=[])
+    md = render_adr_cross_reference(idx, [])
+    assert "## Symbol-Granularity Nudges" in md
+    section = md.split("## Symbol-Granularity Nudges", 1)[1]
+    assert "None." in section
+
+
+def test_symbol_granularity_nudges_renders_bare_shared_infra_citation():
+    # #10458 — an ADR bare-citing a shared-infra module appears with a
+    # `path:Symbol` re-cite suggestion; a symbol-qualified citer does not.
+    idx = ADRRefIndex(adr_to_modules=[])
+    adrs = [
+        _adr(1, {"src/config.py": frozenset()}),  # bare shared-infra -> nudged
+        _adr(2, {"src/models.py": frozenset({"HydraFlowConfig"})}),  # symbol -> not
+        _adr(3, {"src/ordinary.py": frozenset()}),  # ordinary bare -> not nudged
+    ]
+    md = render_adr_cross_reference(idx, adrs)
+    section = md.split("## Symbol-Granularity Nudges", 1)[1]
+    assert "ADR-0001" in section
+    assert "`src/config.py:<Symbol>`" in section
+    assert "ADR-0002" not in section
+    assert "src/ordinary.py" not in section
+
+
+def test_symbol_granularity_nudge_placeholder_does_not_render_html_tag():
+    # The `<Symbol>` placeholder lives inside a code span; it must render as
+    # literal text, never leak an HTML tag / link into the strict-mode site.
+    idx = ADRRefIndex(adr_to_modules=[])
+    md = render_adr_cross_reference(idx, [_adr(1, {"src/config.py": frozenset()})])
+    html = markdown.markdown(md, extensions=["tables"])
+    assert "<a href" not in html
+    assert "<symbol>" not in html.lower()
