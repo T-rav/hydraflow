@@ -6,6 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `46e7a8b` — Merge remote-tracking branch 'origin/staging' into archheal-ul-proposer-0524a5cf-20260724161658 *(2026-07-24)*
+- `25b0df2` — fix(ul): drop over-broad prose aliases from CreditExhaustedError term (#10466) (#10466) *(2026-07-24)*
+- `36f9322` — feat(ul): term-proposer batch — 2 drafts *(2026-07-24)*
+- `c0821c9` — Fixes #10403: Erosion: symbol `append` scattered across 4 modules (#10446) (#10446) *(2026-07-24)*
 - `af958b0` — feat(ul): term-proposer batch — 3 drafts (#10439) (#10439) *(2026-07-24)*
 - `2d39c89` — Fixes #10400: ADR-0012 bare-cites src/epic.py — same drift false-po... (#10430) (#10430) *(2026-07-24)*
 - `9c01d59` — Fixes #10402: Erosion: symbol `_GIT_TIMEOUT_S` scattered across 3 m... (#10422) (#10422) *(2026-07-24)*
