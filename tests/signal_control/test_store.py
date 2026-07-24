@@ -115,3 +115,20 @@ def test_reload_skips_corrupt_lines(tmp_path: Path):
     )
     s = HistoricSignalStore(clock=clk, path=p)
     assert s.window("x") == [1.0]
+
+
+def test_reload_survives_missing_signal_and_bad_tags(tmp_path: Path):
+    # Binding requirement: _reload() must NEVER crash construction on a
+    # corrupt line, even when the line is valid JSON with parseable ts/value
+    # but a missing "signal" key or a non-dict-convertible "tags" value.
+    clk = FakeClock()
+    p = tmp_path / "sig.jsonl"
+    p.write_text(
+        '{"ts": 5.0, "value": 3.0}\n'  # missing "signal" -> KeyError if unguarded
+        '{"signal": "x", "ts": 1.0, "value": 1.0}\n'  # valid line
+        '{"signal": "x", "ts": 5.0, "value": 1.0, "tags": "oops"}\n'  # bad tags -> ValueError
+        "\n",
+        encoding="utf-8",
+    )
+    s = HistoricSignalStore(clock=clk, path=p)  # must not raise
+    assert s.window("x") == [1.0]  # only the valid line contributed

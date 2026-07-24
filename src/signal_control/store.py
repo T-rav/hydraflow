@@ -85,12 +85,14 @@ class HistoricSignalStore:
             try:
                 rec = json.loads(stripped)
                 ts, value = float(rec["ts"]), float(rec["value"])
+                if ts < cutoff:
+                    continue
+                buf = self._signals.setdefault(
+                    rec["signal"], deque(maxlen=self._max_len)
+                )
+                buf.append(Sample(ts, value, dict(rec.get("tags") or {})))
             except (json.JSONDecodeError, KeyError, TypeError, ValueError):
                 continue  # skip a corrupt line, never fail the boot
-            if ts < cutoff:
-                continue
-            buf = self._signals.setdefault(rec["signal"], deque(maxlen=self._max_len))
-            buf.append(Sample(ts, value, dict(rec.get("tags") or {})))
 
     def _values(self, signal: str, age_s: float | None) -> list[float]:
         buf = self._signals.get(signal)
