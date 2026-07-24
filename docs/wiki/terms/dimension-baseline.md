@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/disturbance/registry.py:DimensionSpec"
 aliases: []
 related: [{"kind": "depends_on", "target": "01KWFR9AWM3NX19D0C1W10NNMM"}]
-evidence: []
+evidence: ["BUILD-PREFLIGHT-SIX-CI-REDS-001"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T21:10:16.212905+00:00"
-updated_at: "2026-07-18T19:31:17.682213+00:00"
+updated_at: "2026-07-24T05:34:07.706352+00:00"
 ---
 
 ## Definition

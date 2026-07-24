@@ -947,6 +947,27 @@ class LabelDrift(BaseModel):
     )
 
 
+class ClosedStageLabelDrift(BaseModel):
+    """A CLOSED issue that still carries one or more active pipeline-stage labels.
+
+    Belt-and-suspenders for #10394: a GitHub-native ``Closes #N``
+    auto-close (or any close that bypassed
+    ``PRManager.close_issue``'s label strip) can leave a closed issue
+    tagged ``hydraflow-ready`` / ``hydraflow-plan`` /
+    ``hydraflow-in-progress`` etc. A label-scan dispatcher queues by
+    label presence, so the stale label re-dispatches shipped work. The
+    ``LabelDriftWatcherLoop`` (ADR-0088) detects these and strips the
+    stale labels. Terminal markers (``fixed`` / ``verify``) are not
+    reported — see ``HydraFlowConfig.dispatchable_stage_labels``.
+    """
+
+    issue: int = Field(description="Closed issue number carrying stale stage labels")
+    stale_labels: list[str] = Field(
+        min_length=1,
+        description="Active pipeline-stage labels still present on the closed issue",
+    )
+
+
 # --- HITL ---
 
 

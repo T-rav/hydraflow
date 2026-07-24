@@ -63,8 +63,19 @@ fi
 # whole point (runtime caches are gitignored; real artifacts land via PRs).
 echo "[factory] syncing $WORKSPACE -> origin/$BRANCH"
 git -C "$WORKSPACE" fetch origin --prune
-git -C "$WORKSPACE" checkout "$BRANCH"
+# Force-discard ALL working-tree churn so the sync can never be aborted by a
+# stray dirty tracked file. A plain `git checkout` refuses to overwrite local
+# modifications and, under `set -e` (line 18), that abort skips the reset below
+# — silently stranding the factory on a stale boot while a previously-launched
+# server keeps running (e.g. an agent-left `pyproject.toml` coverage bump pinned
+# the factory 51+ commits behind, spinning on already-closed issues; #10408).
+# `-f` discards the conflicting change; `reset --hard` aligns to the remote tip;
+# `clean -fd` drops untracked agent leftovers (review_logs/, stray
+# tests/regressions/test_issue_*.py) WITHOUT `-x`, so gitignored caches/.venv
+# survive and nested worktrees are left untouched.
+git -C "$WORKSPACE" checkout -f "$BRANCH"
 git -C "$WORKSPACE" reset --hard "origin/$BRANCH"
+git -C "$WORKSPACE" clean -fd
 
 # Reuse the dev checkout's .env (tokens + runtime config) so the factory has the
 # same credentials/settings. Copied each launch so the two stay in sync.

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10307
 source_phase: plan
 created_at: 2026-07-24T04:05:15.039814+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0593
 ---
 
 # Test HITL-status color on a non-hitl stage key, not the hitl key

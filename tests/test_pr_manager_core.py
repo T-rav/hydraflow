@@ -2394,6 +2394,24 @@ class TestWaitForCiEdgeCases:
 
 
 class TestCloseIssue:
+    @staticmethod
+    def _close_call_args(mock_create):
+        """Return the argv of the ``gh issue close`` call among all calls.
+
+        close_issue also reads the issue's labels afterward to strip any
+        stale pipeline-stage label (#10394), so the close is no longer the
+        only subprocess call.
+        """
+        for call in mock_create.call_args_list:
+            argv = (
+                call[0][0]
+                if call[0] and isinstance(call[0][0], (list, tuple))
+                else call[0]
+            )
+            if "close" in argv:
+                return argv
+        raise AssertionError("no `gh issue close` call was made")
+
     @pytest.mark.asyncio
     async def test_close_issue_calls_gh_issue_close(self, config, event_bus):
         manager = make_pr_manager(config, event_bus)
@@ -2402,8 +2420,7 @@ class TestCloseIssue:
         with patch("asyncio.create_subprocess_exec", mock_create):
             await manager.close_issue(42)
 
-        assert mock_create.call_count == 1
-        args = mock_create.call_args[0]
+        args = self._close_call_args(mock_create)
         assert args[0] == "gh"
         assert "issue" in args
         assert "close" in args
@@ -2419,7 +2436,7 @@ class TestCloseIssue:
         with patch("asyncio.create_subprocess_exec", mock_create):
             await manager.close_issue(42)
 
-        args = mock_create.call_args[0]
+        args = self._close_call_args(mock_create)
         assert "--reason" not in args
 
     @pytest.mark.asyncio
@@ -2432,10 +2449,47 @@ class TestCloseIssue:
         with patch("asyncio.create_subprocess_exec", mock_create):
             await manager.close_issue(42, reason="not planned")
 
-        args = mock_create.call_args[0]
+        args = self._close_call_args(mock_create)
         assert "--reason" in args
         assert "not planned" in args
         assert args.index("--reason") + 1 == args.index("not planned")
+
+    @pytest.mark.asyncio
+    async def test_close_issue_strips_stale_stage_labels(self, config, event_bus):
+        """#10394: after a successful close, any active pipeline-stage label
+        still on the issue is removed so a label-scan dispatcher can't
+        re-queue already-shipped work. Terminal ``hydraflow-fixed`` stays."""
+        manager = make_pr_manager(config, event_bus)
+        active = config.ready_label[0]  # a dispatchable stage label
+        claim = config.in_progress_label[0]  # also dispatchable
+        terminal = config.fixed_label[0]  # terminal — must be preserved
+        removed: list[str] = []
+
+        def _create(*args: str, **_kw):
+            argv = list(args)
+            proc = AsyncMock()
+            proc.returncode = 0
+            stdout = b""
+            if "view" in argv and "labels" in argv:
+                # get_issue_labels → newline-separated label names
+                stdout = f"{active}\n{terminal}\n{claim}\n".encode()
+            elif "DELETE" in argv:
+                # remove_label DELETE .../issues/<n>/labels/<name>
+                from urllib.parse import unquote
+
+                removed.append(unquote(argv[2].rsplit("/", 1)[-1]))
+            proc.communicate = AsyncMock(return_value=(stdout, b""))
+            proc.wait = AsyncMock(return_value=0)
+            return proc
+
+        mock_create = AsyncMock(side_effect=_create)
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            ok = await manager.close_issue(42)
+
+        assert ok is True
+        assert active in removed
+        assert claim in removed
+        assert terminal not in removed, "terminal label must be preserved"
 
     @pytest.mark.asyncio
     async def test_close_issue_dry_run_skips_command(self, dry_config, event_bus):

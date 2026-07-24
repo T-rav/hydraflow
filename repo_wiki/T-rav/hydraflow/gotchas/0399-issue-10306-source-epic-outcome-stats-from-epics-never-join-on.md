@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10306
 source_phase: plan
 created_at: 2026-07-24T03:48:07.536838+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0402
 ---
 
 # Source epic outcome stats from epics[], never join on issueHistory.epic

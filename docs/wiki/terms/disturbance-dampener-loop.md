@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/disturbance_dampener_loop.py:DisturbanceDampenerLoop"
 aliases: []
 related: [{"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KWFR9AWM3NX19D0C1W10NNMN"}, {"kind": "depends_on", "target": "01JZ9FK3C0M03HYR42BF33W0C3"}, {"kind": "depends_on", "target": "01JZ9FK3C0M01HYR42BF11W0A1"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
-evidence: []
+evidence: ["BUILD-PREFLIGHT-SIX-CI-REDS-001"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T21:10:16.212647+00:00"
-updated_at: "2026-07-18T19:31:17.682213+00:00"
+updated_at: "2026-07-24T05:18:12.365095+00:00"
 ---
 
 ## Definition

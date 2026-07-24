@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10302
 source_phase: plan
 created_at: 2026-07-24T03:55:54.536766+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0593
 ---
 
 # AST regression tests on function names need whole-token matching

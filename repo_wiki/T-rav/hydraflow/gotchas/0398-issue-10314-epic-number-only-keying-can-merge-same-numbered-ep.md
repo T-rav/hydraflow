@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10314
 source_phase: plan
 created_at: 2026-07-22T18:34:32.045598+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0402
 ---
 
 # epic_number-only keying can merge same-numbered epics across repos under repo=__all__
