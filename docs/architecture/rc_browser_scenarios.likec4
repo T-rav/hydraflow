@@ -1,0 +1,123 @@
+// Issue #10487 — RC promotion red: "Browser Scenarios" job.
+// Two independent test-code drifts against production changes bundled in the RC.
+
+specification {
+  element system
+  element container
+  element component
+  element testsuite
+  relationship drift {
+    style { color red, line dotted }
+  }
+}
+
+model {
+  rc = system 'RC Promotion CI' {
+    description 'staging -> main promotion gate (ADR-0042)'
+
+    browserJob = container 'Browser Scenarios job' {
+      description 'make scenario-browser — 2 failed / 50 passed'
+      technology 'pytest + playwright'
+    }
+  }
+
+  prod = system 'Production code (staging)' {
+    gcLoop = container 'WorkspaceGCLoop' {
+      description 'src/workspace_gc_loop.py'
+
+      isSafeToGc = component '_is_safe_to_gc()'
+      retryWindow = component '_in_retry_window()' {
+        description 'reads TWO counters: get_issue_attempts + get_auto_agent_attempts'
+      }
+    }
+
+    ui = container 'Dashboard UI' {
+      description 'src/ui/src/App.jsx'
+
+      tabs = component 'TABS tablist' {
+        description "['issues','outcomes','atlas','system'] — no 'hitl' entry"
+      }
+      initialTab = component '_initialTabFromUrl()' {
+        description "maps ?tab=hitl -> 'outcomes' (deep-link back-compat)"
+      }
+      hitlTable = component 'HITLTable' {
+        description 'renders at top of Outcomes when running && items>0'
+      }
+    }
+  }
+
+  tests = system 'Browser scenario suite' {
+    gcTest = testsuite 'test_l2_workspace_gc_cleans_stale' {
+      description 'tests/scenarios/browser/scenarios/test_loops_browser.py'
+    }
+    hitlPage = testsuite 'HitlPage.open()' {
+      description 'tests/scenarios/browser/pages/hitl.py'
+    }
+    hitlTest = testsuite 'test_hitl_submit_advances_issue' {
+      description 'tests/scenarios/browser/workflows/test_hitl_roundtrip.py'
+    }
+    refTest = testsuite 'MockWorld reference L2' {
+      description 'tests/scenarios/test_loops.py — ALREADY stubs both counters'
+    }
+  }
+
+  // --- failure 1: unstubbed counter ---
+  isSafeToGc -> retryWindow 'guards in-flight retry'
+  gcTest -> retryWindow 'MagicMock state stubs get_issue_attempts only' {
+    style { color red }
+  }
+  retryWindow -> gcTest 'TypeError: int < MagicMock' {
+    style { color red, line dashed }
+  }
+  refTest -> retryWindow 'stubs BOTH counters (correct parity target)'
+
+  // --- failure 2: merged tab ---
+  hitlTest -> hitlPage 'open()'
+  hitlPage -> tabs 'clicks [role=tab] has_text="HITL"' {
+    style { color red }
+  }
+  tabs -> hitlPage 'no such tab -> 30s Locator.click timeout' {
+    style { color red, line dashed }
+  }
+  initialTab -> hitlTable 'renders HITL items under Outcomes'
+
+  browserJob -> gcTest 'runs'
+  browserJob -> hitlTest 'runs'
+  rc -> browserJob 'blocks promotion while red'
+}
+
+views {
+  view index {
+    title 'Issue #10487 — why the RC Browser Scenarios job is red'
+    include *
+    autoLayout TopBottom
+  }
+
+  view gcFailure of gcLoop {
+    title 'Failure 1 — WorkspaceGC retry-window counter not stubbed'
+    include *, gcTest, refTest
+    autoLayout LeftRight
+  }
+
+  view hitlFailure of ui {
+    title 'Failure 2 — HITL tab merged into Outcomes, page object stale'
+    include *, hitlPage, hitlTest
+    autoLayout LeftRight
+  }
+
+  dynamic view gcFailureFlow {
+    title 'Dynamic — int < MagicMock TypeError path'
+    gcTest -> isSafeToGc 'run_with_loops(["workspace_gc"])'
+    isSafeToGc -> retryWindow 'issue not active/HITL/pipeline'
+    retryWindow -> retryWindow 'impl_attempts=0 -> falls through'
+    retryWindow -> gcTest 'get_auto_agent_attempts -> bare MagicMock -> TypeError'
+  }
+
+  dynamic view hitlFailureFlow {
+    title 'Dynamic — HITL tab click timeout path'
+    hitlTest -> hitlPage 'open()'
+    hitlPage -> ui 'goto("/")'
+    hitlPage -> tabs 'locator(role=tab).filter(has_text="HITL").click()'
+    tabs -> hitlPage 'HITL absent from TABS -> timeout 30000ms'
+  }
+}
