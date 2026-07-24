@@ -28,6 +28,7 @@ from ubiquitous_language import (
     render_context_map,
     render_glossary,
     resolve_anchor,
+    strip_wiki_prose_aliases,
     validate_draft,
 )
 
@@ -277,6 +278,61 @@ class TestParaphraseLint:
         ]
         violations = lint_paraphrases(terms, wiki)
         assert violations == []
+
+
+class TestStripWikiProseAliases:
+    def test_returns_empty_for_no_aliases(self, tmp_path: Path) -> None:
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        (wiki / "patterns.md").write_text("Some prose.")
+        assert strip_wiki_prose_aliases([], wiki) == []
+
+    def test_drops_alias_matching_live_prose(self, tmp_path: Path) -> None:
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        (wiki / "dark-factory.md").write_text(
+            "...retried against an exhausted billing signal."
+        )
+        result = strip_wiki_prose_aliases(["exhausted billing signal"], wiki)
+        assert result == []
+
+    def test_keeps_alias_with_no_prose_collision(self, tmp_path: Path) -> None:
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        (wiki / "dark-factory.md").write_text("Unrelated prose entirely.")
+        result = strip_wiki_prose_aliases(["billing-limit signal"], wiki)
+        assert result == ["billing-limit signal"]
+
+    def test_mixed_aliases_only_conflicting_ones_dropped(self, tmp_path: Path) -> None:
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        (wiki / "dark-factory.md").write_text(
+            "...retried against an exhausted billing signal."
+        )
+        (wiki / "gotchas.md").write_text(
+            "failing fast on credit exhaustion prevents budget waste."
+        )
+        result = strip_wiki_prose_aliases(
+            ["credit exhaustion", "exhausted billing signal", "billing-limit signal"],
+            wiki,
+        )
+        assert result == ["billing-limit signal"]
+
+    def test_missing_wiki_root_returns_aliases_unchanged(self, tmp_path: Path) -> None:
+        missing = tmp_path / "does-not-exist"
+        result = strip_wiki_prose_aliases(["credit exhaustion"], missing)
+        assert result == ["credit exhaustion"]
+
+    def test_alias_only_inside_terms_dir_is_not_a_collision(
+        self, tmp_path: Path
+    ) -> None:
+        """terms/ files DEFINE aliases — they aren't prose collisions."""
+        wiki = tmp_path / "wiki"
+        terms_dir = wiki / "terms"
+        terms_dir.mkdir(parents=True)
+        (terms_dir / "some-term.md").write_text('aliases: ["credit exhaustion"]')
+        result = strip_wiki_prose_aliases(["credit exhaustion"], wiki)
+        assert result == ["credit exhaustion"]
 
 
 class TestReverseCoverageLint:
@@ -895,6 +951,78 @@ class TestValidateDraft:
         )
         assert term is None
         assert "incomplete" in reason.lower() or "definition" in reason.lower()
+
+    def test_wiki_root_strips_aliases_colliding_with_live_prose(
+        self, tmp_path: Path
+    ) -> None:
+        """The #10466 prevention: a drafted alias that's already generic wiki
+        prose is dropped from the resulting Term instead of shipping and
+        failing lint_paraphrases on the next CI run."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "foo.py").write_text("class FooLoop:\n    pass\n")
+        index = build_symbol_index(src)
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        (wiki / "dark-factory.md").write_text(
+            "...retried against an exhausted billing signal."
+        )
+        candidate = Candidate(
+            name="FooLoop",
+            code_anchor="src/foo.py:FooLoop",
+            signals=("S1",),
+            imports_seen=0,
+            importing_term_anchors=(),
+        )
+        draft = TermDraft(
+            include=True,
+            definition="A test loop draft whose alias collides with wiki prose.",
+            kind=TermKind.LOOP,
+            bounded_context=BoundedContext.SHARED_KERNEL,
+            aliases=["exhausted billing signal", "foo loop"],
+            invariants=[],
+            depends_on_anchors=[],
+        )
+        term, reason = validate_draft(
+            candidate,
+            draft,
+            existing_terms=[],
+            symbol_index=index,
+            wiki_root=wiki,
+        )
+        assert reason is None
+        assert term is not None
+        assert term.aliases == ["foo loop"]
+
+    def test_no_wiki_root_leaves_aliases_unchanged(self, tmp_path: Path) -> None:
+        """Backward-compatible default: callers that don't pass wiki_root get
+        the draft's aliases verbatim (no stripping)."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "foo.py").write_text("class FooLoop:\n    pass\n")
+        index = build_symbol_index(src)
+        candidate = Candidate(
+            name="FooLoop",
+            code_anchor="src/foo.py:FooLoop",
+            signals=("S1",),
+            imports_seen=0,
+            importing_term_anchors=(),
+        )
+        draft = TermDraft(
+            include=True,
+            definition="A test loop draft with no wiki_root supplied.",
+            kind=TermKind.LOOP,
+            bounded_context=BoundedContext.SHARED_KERNEL,
+            aliases=["foo loop"],
+            invariants=[],
+            depends_on_anchors=[],
+        )
+        term, reason = validate_draft(
+            candidate, draft, existing_terms=[], symbol_index=index
+        )
+        assert reason is None
+        assert term is not None
+        assert term.aliases == ["foo loop"]
 
 
 class TestControlRoleKind:

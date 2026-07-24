@@ -124,6 +124,38 @@ class TestTermProposerLoopFlow:
         assert result["opened_pr"] is True
 
     @pytest.mark.asyncio
+    async def test_drafted_alias_colliding_with_live_wiki_prose_is_stripped(
+        self, synthetic_repo: Path
+    ) -> None:
+        """#10464/#10466: a proposer-drafted alias that's already generic
+        prose in the live wiki must not ship — it would fail
+        lint_paraphrases on the very next CI run. _do_work must pass the
+        repo's wiki_root into validate_draft so the alias is stripped
+        before the term file is written."""
+        (synthetic_repo / "docs" / "wiki" / "patterns.md").write_text(
+            "...retried against an exhausted billing signal."
+        )
+        loop, llm_client, port = _build_loop(
+            synthetic_repo,
+            fake_llm_response={
+                "include": True,
+                "definition": "BarRunner is the test runner used to verify wiki-prose alias stripping.",
+                "kind": "runner",
+                "bounded_context": "builder",
+                "aliases": ["exhausted billing signal", "bar runner"],
+                "invariants": [],
+                "depends_on_anchors": [],
+            },
+        )
+        result = await loop._do_work()
+        assert len(llm_client.calls) == 1
+        assert len(port.calls) == 1
+        term_file = next(iter(port.calls[0]["files"].values()))
+        assert '"bar runner"' in term_file
+        assert "exhausted billing signal" not in term_file
+        assert result["validated"] == 1
+
+    @pytest.mark.asyncio
     async def test_invalid_draft_from_llm_dropped(
         self, synthetic_repo: Path, caplog: pytest.LogCaptureFixture
     ) -> None:

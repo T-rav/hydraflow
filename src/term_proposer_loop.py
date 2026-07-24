@@ -281,7 +281,11 @@ class TermProposerLoop(BaseBackgroundLoop):
             drafted += 1
 
             term, reason = validate_draft(
-                candidate, draft, existing_terms=existing_terms, symbol_index=index
+                candidate,
+                draft,
+                existing_terms=existing_terms,
+                symbol_index=index,
+                wiki_root=terms_root.parent,
             )
             if term is None:
                 # No dedup on validation rejection — same rationale as above.

@@ -369,6 +369,22 @@ def lint_anchor_resolution(terms: list[Term], src_root: Path) -> list[str]:
     return failures
 
 
+def _wiki_prose_texts(wiki_root: Path) -> list[tuple[Path, str]]:
+    """Read wiki/*.md prose as lowercased text, excluding wiki/terms/.
+
+    The terms/ subdirectory DEFINEs aliases (frontmatter); it isn't prose
+    to lint. Shared by lint_paraphrases and strip_wiki_prose_aliases so
+    both walk the same file set with one regex.
+    """
+    if not wiki_root.is_dir():
+        return []
+    return [
+        (path, path.read_text(encoding="utf-8").lower())
+        for path in sorted(wiki_root.rglob("*.md"))
+        if "terms" not in path.relative_to(wiki_root).parts
+    ]
+
+
 def lint_paraphrases(terms: list[Term], wiki_root: Path) -> list[str]:
     """Scan wiki/*.md (excluding wiki/terms/) for alias usage.
 
@@ -376,18 +392,13 @@ def lint_paraphrases(terms: list[Term], wiki_root: Path) -> list[str]:
     word-boundary match. The terms/ subdirectory is excluded — those
     files DEFINE aliases.
     """
-    if not wiki_root.is_dir():
-        return []
     alias_map: dict[str, str] = {}
     for term in terms:
         for alias in term.aliases:
             alias_map[alias.lower()] = term.name
 
     violations: list[str] = []
-    for path in sorted(wiki_root.rglob("*.md")):
-        if "terms" in path.relative_to(wiki_root).parts:
-            continue
-        text = path.read_text(encoding="utf-8").lower()
+    for path, text in _wiki_prose_texts(wiki_root):
         for alias, canonical in alias_map.items():
             pattern = re.compile(rf"\b{re.escape(alias)}\b")
             if pattern.search(text):
@@ -395,6 +406,24 @@ def lint_paraphrases(terms: list[Term], wiki_root: Path) -> list[str]:
                     f"{path.relative_to(wiki_root)}: '{alias}' should be '{canonical}'"
                 )
     return violations
+
+
+def strip_wiki_prose_aliases(aliases: list[str], wiki_root: Path) -> list[str]:
+    """Drop aliases that already appear as prose in wiki_root.
+
+    Prevents the #10466 class of drift: a proposer-drafted alias that's
+    generic English describing a concept (e.g. "exhausted billing signal")
+    collides with existing wiki prose the moment the term lands, failing
+    lint_paraphrases on the very next CI run. Aliases with no live-prose
+    collision pass through unchanged.
+    """
+    texts = [text for _, text in _wiki_prose_texts(wiki_root)]
+    kept: list[str] = []
+    for alias in aliases:
+        pattern = re.compile(rf"\b{re.escape(alias.lower())}\b")
+        if not any(pattern.search(text) for text in texts):
+            kept.append(alias)
+    return kept
 
 
 _LOAD_BEARING_SUFFIXES = ("Loop", "Runner", "Port", "Adapter")
@@ -639,6 +668,7 @@ def validate_draft(  # noqa: PLR0911 — linear F1 guards, each with its own fai
     *,
     existing_terms: list[Term],
     symbol_index: dict[str, list[str]],
+    wiki_root: Path | None = None,
 ) -> tuple[Term | None, str | None]:
     """Validate a draft. Returns (Term, None) on success or (None, reason) on rejection.
 
@@ -649,6 +679,10 @@ def validate_draft(  # noqa: PLR0911 — linear F1 guards, each with its own fai
     - collision: draft name (case-insensitive) matches an existing term's name
     - alias: any draft alias matches an existing term's canonical name (lowercased)
     - depends_on: any depends_on_anchors entry isn't in {t.code_anchor for t in existing_terms}
+
+    When wiki_root is given, draft aliases that already appear as prose in
+    the live wiki (outside wiki_root/terms/) are silently dropped rather
+    than rejecting the whole draft — see strip_wiki_prose_aliases (#10466).
     """
     if not draft.include:
         return None, f"skipped by LLM: {draft.skip_reason or 'no reason given'}"
@@ -686,6 +720,10 @@ def validate_draft(  # noqa: PLR0911 — linear F1 guards, each with its own fai
         for dep in draft.depends_on_anchors
     ]
 
+    aliases = draft.aliases
+    if wiki_root is not None:
+        aliases = strip_wiki_prose_aliases(aliases, wiki_root)
+
     now_iso = datetime.now(UTC).isoformat()
     return (
         Term(
@@ -696,7 +734,7 @@ def validate_draft(  # noqa: PLR0911 — linear F1 guards, each with its own fai
             invariants=draft.invariants,
             code_anchor=candidate.code_anchor,
             related=related_rels,
-            aliases=draft.aliases,
+            aliases=aliases,
             # Auto-grown terms ship as `accepted` — the LLM-inclusion judgment
             # plus F1 validation is the gate (chunks 2 + 2.5). A two-phase
             # `proposed` → `accepted` lifecycle would add complexity (the
