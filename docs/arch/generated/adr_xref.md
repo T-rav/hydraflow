@@ -296,4 +296,73 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.workspace` | ADR-0003, ADR-0009, ADR-0010, ADR-0055 |
 | `src.workspace_gc_loop` | ADR-0069 |
 
+## Symbol-Granularity Nudges
+
+Non-blocking authoring aid (#10458): each ADR below bare-cites a high-churn shared-infra module, so the citation is suppressed from ADR drift detection (read as a dependency pointer, not a decision anchor). If the ADR owns a specific symbol there, re-cite it at `path:Symbol` granularity so genuine changes to that symbol still drift. This is a suggestion only — never a CI gate.
+
+| ADR | Bare citation | Suggested re-cite |
+|---|---|---|
+| ADR-0005 | `src/pr_manager.py` | `src/pr_manager.py:<Symbol>` |
+| ADR-0006 | `src/repo_runtime.py` | `src/repo_runtime.py:<Symbol>` |
+| ADR-0007 | `src/dashboard.py` | `src/dashboard.py:<Symbol>` |
+| ADR-0007 | `src/repo_runtime.py` | `src/repo_runtime.py:<Symbol>` |
+| ADR-0008 | `src/dashboard.py` | `src/dashboard.py:<Symbol>` |
+| ADR-0012 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0012 | `src/post_merge_handler.py` | `src/post_merge_handler.py:<Symbol>` |
+| ADR-0013 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0013 | `src/pr_manager.py` | `src/pr_manager.py:<Symbol>` |
+| ADR-0015 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0015 | `src/post_merge_handler.py` | `src/post_merge_handler.py:<Symbol>` |
+| ADR-0016 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0016 | `src/post_merge_handler.py` | `src/post_merge_handler.py:<Symbol>` |
+| ADR-0019 | `src/post_merge_handler.py` | `src/post_merge_handler.py:<Symbol>` |
+| ADR-0033 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0034 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0035 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0036 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0037 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0038 | `src/dashboard.py` | `src/dashboard.py:<Symbol>` |
+| ADR-0038 | `src/repo_runtime.py` | `src/repo_runtime.py:<Symbol>` |
+| ADR-0038 | `src/server.py` | `src/server.py:<Symbol>` |
+| ADR-0044 | `src/ports.py` | `src/ports.py:<Symbol>` |
+| ADR-0045 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0045 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0045 | `src/pr_manager.py` | `src/pr_manager.py:<Symbol>` |
+| ADR-0047 | `src/contract_diff.py` | `src/contract_diff.py:<Symbol>` |
+| ADR-0047 | `src/contract_recording.py` | `src/contract_recording.py:<Symbol>` |
+| ADR-0047 | `src/contract_refresh_loop.py` | `src/contract_refresh_loop.py:<Symbol>` |
+| ADR-0050 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0050 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0052 | `src/contract_diff.py` | `src/contract_diff.py:<Symbol>` |
+| ADR-0052 | `src/contract_recording.py` | `src/contract_recording.py:<Symbol>` |
+| ADR-0055 | `src/base_background_loop.py` | `src/base_background_loop.py:<Symbol>` |
+| ADR-0055 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0055 | `src/pr_manager.py` | `src/pr_manager.py:<Symbol>` |
+| ADR-0055 | `src/server.py` | `src/server.py:<Symbol>` |
+| ADR-0059 | `src/review_advisor.py` | `src/review_advisor.py:<Symbol>` |
+| ADR-0059 | `src/review_phase/_phase.py` | `src/review_phase/_phase.py:<Symbol>` |
+| ADR-0064 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0064 | `src/post_merge_handler.py` | `src/post_merge_handler.py:<Symbol>` |
+| ADR-0065 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0066 | `src/ports.py` | `src/ports.py:<Symbol>` |
+| ADR-0067 | `src/ports.py` | `src/ports.py:<Symbol>` |
+| ADR-0068 | `src/ports.py` | `src/ports.py:<Symbol>` |
+| ADR-0070 | `src/ports.py` | `src/ports.py:<Symbol>` |
+| ADR-0088 | `src/pr_manager.py` | `src/pr_manager.py:<Symbol>` |
+| ADR-0094 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0094 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0094 | `src/review_advisor.py` | `src/review_advisor.py:<Symbol>` |
+| ADR-0094 | `src/review_phase/_phase.py` | `src/review_phase/_phase.py:<Symbol>` |
+| ADR-0095 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0095 | `src/review_advisor.py` | `src/review_advisor.py:<Symbol>` |
+| ADR-0095 | `src/review_phase/_phase.py` | `src/review_phase/_phase.py:<Symbol>` |
+| ADR-0098 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0102 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0102 | `src/review_phase/_phase.py` | `src/review_phase/_phase.py:<Symbol>` |
+| ADR-0103 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0103 | `src/review_advisor.py` | `src/review_advisor.py:<Symbol>` |
+| ADR-0106 | `src/base_background_loop.py` | `src/base_background_loop.py:<Symbol>` |
+| ADR-0106 | `src/config.py` | `src/config.py:<Symbol>` |
+| ADR-0108 | `src/models.py` | `src/models.py:<Symbol>` |
+
 <!-- arch:generated -->

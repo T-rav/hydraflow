@@ -8,10 +8,14 @@ import pytest
 
 from adr_drift import (
     AdrRollupEntry,
+    CitationNudge,
     DriftFinding,
     FleetDriftBatch,
     _adr_file_in_diff,
     _bare_citation_fanout,
+    _citation_drifts,
+    _is_shared_infra,
+    bare_infra_citation_nudges,
     compute_drift,
     compute_drift_by_adr,
     partition_fleet_drift,
@@ -462,6 +466,142 @@ def test_fanout_threshold_threads_through_compute_drift_by_adr(
         shared_infra_fanout_threshold=4,
     )
     assert rollups == []
+
+
+def _adr_with_symbols(number: int, source_symbols: dict[str, frozenset[str]]) -> ADR:
+    """Build a minimal ADR carrying only the citation data the nudge reads."""
+    return ADR(
+        number=number,
+        title=f"adr-{number}",
+        status="Accepted",
+        summary="",
+        source_files=frozenset(source_symbols),
+        source_symbols=source_symbols,
+    )
+
+
+def test_bare_shared_infra_citation_yields_one_nudge() -> None:
+    # #10458 — an ADR bare-citing a known shared-infra module gets nudged to
+    # re-cite at :Symbol granularity.
+    adr = _adr_with_symbols(500, {"src/config.py": frozenset()})
+    nudges = bare_infra_citation_nudges([adr])
+    assert nudges == [
+        CitationNudge(
+            adr_number=500,
+            path="src/config.py",
+            suggestion="src/config.py:<Symbol>",
+        )
+    ]
+
+
+def test_symbol_qualified_shared_infra_citation_yields_no_nudge() -> None:
+    # The ADR already cites at :Symbol granularity, so it already drifts
+    # correctly — nothing to nudge.
+    adr = _adr_with_symbols(501, {"src/config.py": frozenset({"HydraFlowConfig"})})
+    assert bare_infra_citation_nudges([adr]) == []
+
+
+def test_bare_non_shared_infra_citation_yields_no_nudge() -> None:
+    # A bare citation to an ordinary src/ module still drifts on any touch, so
+    # there is nothing to nudge (no suppression to compensate for).
+    adr = _adr_with_symbols(502, {"src/some_feature.py": frozenset()})
+    assert bare_infra_citation_nudges([adr]) == []
+
+
+def test_non_src_bare_citation_yields_no_nudge() -> None:
+    # The shared-infra rule is scoped to src/ modules; a docs/ citation is out
+    # of scope even if bare.
+    adr = _adr_with_symbols(503, {"docs/whatever.md": frozenset()})
+    assert bare_infra_citation_nudges([adr]) == []
+
+
+def test_high_fanout_bare_citation_is_nudged_when_threshold_given() -> None:
+    # #10456 forward-compat: a churn-derived shared-infra module (>= threshold
+    # live bare citations) is nudged too, on top of the manual allowlist.
+    adrs = [_adr_with_symbols(n, {"src/hot.py": frozenset()}) for n in range(600, 604)]
+    nudged_paths = {
+        (n.adr_number, n.path)
+        for n in bare_infra_citation_nudges(adrs, shared_infra_fanout_threshold=4)
+    }
+    assert nudged_paths == {(n, "src/hot.py") for n in range(600, 604)}
+    # Default (threshold=None) uses the manual allowlist only — src/hot.py is
+    # not on it, so no nudge.
+    assert bare_infra_citation_nudges(adrs) == []
+
+
+def test_nudges_sorted_by_adr_number_then_path() -> None:
+    adrs = [
+        _adr_with_symbols(
+            700, {"src/pr_manager.py": frozenset(), "src/config.py": frozenset()}
+        ),
+        _adr_with_symbols(699, {"src/models.py": frozenset()}),
+    ]
+    result = [(n.adr_number, n.path) for n in bare_infra_citation_nudges(adrs)]
+    assert result == [
+        (699, "src/models.py"),
+        (700, "src/config.py"),
+        (700, "src/pr_manager.py"),
+    ]
+
+
+def test_empty_input_yields_empty_nudge_list() -> None:
+    assert bare_infra_citation_nudges([]) == []
+
+
+def test_nudges_couple_exactly_to_shared_infra_suppression() -> None:
+    # Single-source-of-truth invariant (#10458): the nudge fires on exactly the
+    # bare (ADR, path) pairs `_citation_drifts` suppresses as shared infra.
+    # Both route through `_is_shared_infra`, so they can never diverge — this
+    # pins that coupling across allowlist AND fan-out branches.
+    threshold = 4
+    adrs = [
+        # allowlist bare -> suppressed -> nudged
+        _adr_with_symbols(800, {"src/config.py": frozenset()}),
+        # ordinary bare, low fan-out -> drifts -> not nudged
+        _adr_with_symbols(801, {"src/lonely.py": frozenset()}),
+        # symbol-qualified allowlist -> drifts on its symbol -> not nudged
+        _adr_with_symbols(802, {"src/config.py": frozenset({"HydraFlowConfig"})}),
+    ]
+    # Push src/hot.py over the fan-out threshold with 4 bare citers.
+    adrs += [_adr_with_symbols(n, {"src/hot.py": frozenset()}) for n in range(810, 814)]
+
+    nudged_pairs = {
+        (n.adr_number, n.path)
+        for n in bare_infra_citation_nudges(
+            adrs, shared_infra_fanout_threshold=threshold
+        )
+    }
+
+    expected_suppressed: set[tuple[int, str]] = set()
+    for adr in adrs:
+        for path, cited in adr.source_symbols.items():
+            if cited or not path.startswith("src/"):
+                continue  # only bare src/ citations are eligible for suppression
+            fanout = _bare_citation_fanout(path, adrs)
+            drifts = _citation_drifts(
+                adr,
+                path,
+                frozenset(),
+                fanout=fanout,
+                fanout_threshold=threshold,
+            )
+            if not drifts:  # suppressed as shared infra
+                expected_suppressed.add((adr.number, path))
+
+    assert nudged_pairs == expected_suppressed
+    # Sanity: the invariant is non-trivial — it actually caught some pairs.
+    assert expected_suppressed
+
+
+def test_is_shared_infra_allowlist_and_fanout_branches() -> None:
+    # Allowlist membership alone suppresses, regardless of fan-out.
+    assert _is_shared_infra("src/config.py")
+    # Ordinary module: only the fan-out branch can suppress.
+    assert not _is_shared_infra("src/hot.py")
+    assert not _is_shared_infra("src/hot.py", fanout=3, fanout_threshold=4)
+    assert _is_shared_infra("src/hot.py", fanout=4, fanout_threshold=4)
+    # threshold=None disables the derived branch entirely.
+    assert not _is_shared_infra("src/hot.py", fanout=99, fanout_threshold=None)
 
 
 def test_adr_file_in_diff_helper(adr_index: ADRIndex) -> None:

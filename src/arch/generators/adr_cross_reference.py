@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from adr_drift import bare_infra_citation_nudges
 from adr_index import ADR
 from arch._models import ADRRefIndex
 
@@ -14,6 +15,34 @@ _PREAMBLE = (
     'Powers "Why this exists" backlinks across the site.\n\n'
 )
 _FOOTER = "\n\n{{ARCH_FOOTER}}\n"
+
+_NUDGE_PREAMBLE = (
+    "Non-blocking authoring aid (#10458): each ADR below bare-cites a "
+    "high-churn shared-infra module, so the citation is suppressed from ADR "
+    "drift detection (read as a dependency pointer, not a decision anchor). "
+    "If the ADR owns a specific symbol there, re-cite it at `path:Symbol` "
+    "granularity so genuine changes to that symbol still drift. This is a "
+    "suggestion only — never a CI gate.\n\n"
+)
+
+
+def _render_symbol_granularity_nudges(adrs: list[ADR] | None) -> str:
+    """Render the soft ``## Symbol-Granularity Nudges`` section (#10458).
+
+    Always emitted (renders ``None.`` when empty) so its presence never
+    depends on the ADR corpus. Uses the manual shared-infra allowlist only
+    (``shared_infra_fanout_threshold`` left at its default) to keep the
+    generated artifact deterministic and independent of runtime config.
+    """
+    section = "\n\n## Symbol-Granularity Nudges\n\n" + _NUDGE_PREAMBLE
+    nudges = bare_infra_citation_nudges(adrs or [])
+    if not nudges:
+        return section + "None.\n"
+    section += "| ADR | Bare citation | Suggested re-cite |\n|---|---|---|\n"
+    section += "\n".join(
+        f"| ADR-{n.adr_number:04d} | `{n.path}` | `{n.suggestion}` |" for n in nudges
+    )
+    return section
 
 
 def render_adr_cross_reference(idx: ADRRefIndex, adrs: list[ADR] | None = None) -> str:
@@ -46,4 +75,6 @@ def render_adr_cross_reference(idx: ADRRefIndex, adrs: list[ADR] | None = None) 
         for m, adrs in sorted(reverse.items())
     )
 
-    return _HEADER + _PREAMBLE + fwd + rev + _FOOTER
+    nudges = _render_symbol_granularity_nudges(adrs)
+
+    return _HEADER + _PREAMBLE + fwd + rev + nudges + _FOOTER

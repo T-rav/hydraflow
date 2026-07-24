@@ -133,6 +133,32 @@ def _bare_citation_fanout(path: str, adrs: Iterable[ADR]) -> int:
     return sum(1 for adr in adrs if not adr.source_symbols.get(path, frozenset()))
 
 
+def _is_shared_infra(
+    path: str,
+    *,
+    fanout: int = 0,
+    fanout_threshold: int | None = None,
+) -> bool:
+    """Single source of truth: is a *bare* citation to *path* treated as a
+    high-churn shared-infra dependency pointer?
+
+    True when either the manual :data:`_SHARED_INFRA_MODULES` allowlist names
+    *path*, or (once #10456 threads a threshold) *path* is bare-cited by at
+    least *fanout_threshold* live ADRs. The two conditions are OR'd, matching
+    :func:`_citation_drifts`. ``fanout_threshold=None`` disables the derived
+    branch, leaving only the manual allowlist.
+
+    Both the drift-suppression path (:func:`_citation_drifts`, which does NOT
+    drift such a bare citation) and the authoring nudge
+    (:func:`bare_infra_citation_nudges`, #10458, which suggests re-citing at
+    ``:Symbol`` granularity) route through this one predicate so they can never
+    diverge — the nudge fires on exactly the bare citations suppression covers.
+    """
+    if path in _SHARED_INFRA_MODULES:
+        return True
+    return fanout_threshold is not None and fanout >= fanout_threshold
+
+
 def _citation_drifts(
     adr: ADR,
     path: str,
@@ -169,10 +195,82 @@ def _citation_drifts(
     """
     cited_symbols = adr.source_symbols.get(path, frozenset())
     if not cited_symbols:
-        if path in _SHARED_INFRA_MODULES:
-            return False
-        return not (fanout_threshold is not None and fanout >= fanout_threshold)
+        return not _is_shared_infra(
+            path, fanout=fanout, fanout_threshold=fanout_threshold
+        )
     return bool(cited_symbols & changed_symbols)
+
+
+@dataclass(frozen=True)
+class CitationNudge:
+    """A non-blocking authoring nudge (#10458).
+
+    ADR *adr_number* bare-cites *path*, a high-churn shared-infra module, so
+    the citation is *silently suppressed* from drift detection (it is read as
+    a dependency pointer, not a decision anchor — see
+    :func:`_is_shared_infra`). If the ADR genuinely owns a specific symbol
+    there, re-citing it at *suggestion* granularity (``path:Symbol``) restores
+    drift on real changes to that symbol without re-flagging unrelated churn.
+
+    Pure authoring aid: it changes no drift-detection behaviour and is never a
+    CI gate — it is surfaced only as a soft section in the generated ADR
+    cross-reference report.
+    """
+
+    adr_number: int
+    path: str
+    suggestion: str
+
+
+def bare_infra_citation_nudges(
+    adrs: Iterable[ADR],
+    *,
+    shared_infra_fanout_threshold: int | None = None,
+) -> list[CitationNudge]:
+    """Flag every bare citation of a shared-infra module for a ``:Symbol`` nudge.
+
+    Returns one :class:`CitationNudge` per ``(ADR, path)`` pair where the ADR
+    bare-cites (empty cited-symbol set) a ``src/`` module that
+    :func:`_is_shared_infra` treats as a dependency pointer — i.e. exactly the
+    bare citations :func:`_citation_drifts` suppresses. Nudge and suppression
+    share the one :func:`_is_shared_infra` predicate, so #10456's churn-derived
+    set flows to both without either drifting from the other.
+
+    ``shared_infra_fanout_threshold`` mirrors :func:`compute_drift`: when
+    given, a ``src/`` path bare-cited by at least that many of *adrs* is also
+    nudged (churn-derived), on top of the manual allowlist. ``None`` (the
+    default — the offline generator has no config) restricts nudges to the
+    manual :data:`_SHARED_INFRA_MODULES` set, which is correct, just narrower.
+
+    Output is sorted by ``(adr_number, path)`` for deterministic rendering.
+    """
+    adr_list = list(adrs)
+    nudges: list[CitationNudge] = []
+    for adr in adr_list:
+        for path, cited_symbols in adr.source_symbols.items():
+            # Symbol-qualified citations already drift correctly — leave them.
+            if cited_symbols:
+                continue
+            # The shared-infra rule (allowlist + fan-out) is scoped to ``src/``
+            # modules, matching ``compute_drift``'s ``src_paths`` filter.
+            if not path.startswith("src/"):
+                continue
+            fanout = _bare_citation_fanout(path, adr_list)
+            if not _is_shared_infra(
+                path,
+                fanout=fanout,
+                fanout_threshold=shared_infra_fanout_threshold,
+            ):
+                continue
+            nudges.append(
+                CitationNudge(
+                    adr_number=adr.number,
+                    path=path,
+                    suggestion=f"{path}:<Symbol>",
+                )
+            )
+    nudges.sort(key=lambda n: (n.adr_number, n.path))
+    return nudges
 
 
 def compute_drift(
