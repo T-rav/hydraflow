@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10434
 source_phase: plan
 created_at: 2026-07-24T10:19:32.942771+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0432
 ---
 
 # adr_index.py collapses :Symbol citations to bare if any bare token remains

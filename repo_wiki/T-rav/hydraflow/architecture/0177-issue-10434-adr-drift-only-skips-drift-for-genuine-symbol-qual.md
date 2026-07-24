@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10434
 source_phase: plan
 created_at: 2026-07-24T10:19:32.942793+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: drift_detected: src/foo.py
 ---
 
 # adr_drift only skips drift for genuine :Symbol-qualified citations

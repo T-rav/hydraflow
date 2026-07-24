@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10433
 source_phase: plan
 created_at: 2026-07-24T10:22:54.781365+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0754
 ---
 
 # ADR drift regressions need paired file-only-no-drift + symbol-still-drifts assertions
