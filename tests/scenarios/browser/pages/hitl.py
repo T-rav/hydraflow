@@ -7,24 +7,15 @@ from .base import BasePage
 
 class HitlPage(BasePage):
     async def open(self) -> None:
-        """Navigate to the dashboard root and switch to the HITL tab.
+        """Navigate to the merged Outcomes surface where HITL items render.
 
-        The React app does not read the ``tab`` URL parameter — the active tab
-        is controlled by internal state only.  We navigate to ``/`` (so the
-        full app boots and the WS connection is established) and then click the
-        HITL tab button to switch the view.
-
-        The tab button is always rendered regardless of orchestrator status;
-        only the tab content differs (table vs. idle message).
+        HITL no longer has a standalone tab — items render at the top of the
+        Outcomes tab (see ``src/ui/src/App.jsx``). The React app's
+        ``_initialTabFromUrl()`` reads the ``tab`` URL parameter and redirects
+        the old ``?tab=hitl`` deep link to ``outcomes``, so navigating there
+        directly lands on the right view without any tab click.
         """
-        await self.goto("/")
-        # The HITL tab is a div[role="tab"] inside [data-testid="main-tabs"].
-        # Playwright's text locator finds it even when the badge span is present.
-        await (
-            self.page.locator('[data-testid="main-tabs"] [role="tab"]')
-            .filter(has_text="HITL")
-            .click()
-        )
+        await self.goto("/?tab=hitl")
 
     def item(self, issue_number: int):
         """Row element for a HITL item (click to expand detail panel)."""

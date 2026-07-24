@@ -8,7 +8,8 @@ Flow:
      (``with_orchestrator=False``).
   2. Before navigation, install route handlers:
        - GET /api/control/status  → ``{"status": "running", ...}``
-         so the React app renders the HITL tab instead of the idle message.
+         so the React app renders the HITL table on the Outcomes tab instead
+         of the idle message.
        - GET /api/hitl            → the seeded HITL item for issue 208.
        - POST /api/hitl/208/skip  → ``{"status": "ok"}``, sets the item list
          empty on next refresh.
