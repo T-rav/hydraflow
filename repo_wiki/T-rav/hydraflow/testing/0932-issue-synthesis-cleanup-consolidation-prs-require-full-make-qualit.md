@@ -1,0 +1,18 @@
+---
+id: 0932
+topic: testing
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-24T22:10:19.627041+00:00
+status: active
+corroborations: 1
+supersedes: 0847,0848,0849,0850,0851,0852,0853,0854,0855,0856,0857,0858,0859,0860,0861,0862,0863,0864,0865,0866,0867,0868,0869,0870,0871,0872,0873,0874,0875,0876,0877,0878,0879,0880,0881,0882,0883,0884,0885,0886,0887,0888,0889,0890,0891,0892,0893,0894,0895
+---
+
+# Cleanup/consolidation PRs require full `make quality`, not a targeted subset
+
+Cleanup/consolidation/refactor PRs touching multiple modules must run full `make quality` (ruff, pyright, tests, jscpd), never a file-targeted pytest subset.
+
+Example: for the `src/jsonl_ledger.py` unification (#10403), full quality was required rather than only `tests/test_escape_ledger.py`/`test_intervention_tally.py`/`test_erosion_trends.py` in isolation, plus `tests/test_audit_sample_store.py` was added since `AuditSampleLedger` had only indirect coverage; same for the #10411 ADR-drift fan-out suppression, over targeted runs of `test_adr_drift.py`/`test_adr_touchpoint_auditor_loop.py`/`test_adr_drift_resolver_loop.py`; and for the ledger-subclass refactor touching `src/audit/store.py`, `src/escape/ledger.py`, `src/intervention/ledger.py`, `src/erosion/trends.py`, over a `test_jsonl_ledger.py`+`test_erosion_trends.py`-only run.
+
+**Why:** PR #8460 shipped after a 211-test targeted-file pass went green, but `tests/test_audit_prompts.py` and `tests/test_repo_wiki_loop_pr.py` had 7 failures the subset missed, forcing hotfix PR #8463 — cross-module refactors have wider blast radius than their diff.

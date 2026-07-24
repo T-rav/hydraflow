@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10464
 source_phase: plan
 created_at: 2026-07-24T15:39:21.687885+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0763
 ---
 
 # TermProposerLoop can break CI via paraphrase collisions with wiki prose
