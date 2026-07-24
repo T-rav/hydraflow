@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10384
 source_phase: plan
 created_at: 2026-07-24T04:55:51.365329+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0632
 ---
 
 # Test ADR drift fixes against the real docs/adr tree via ADRIndex/compute_drift, not fixtures

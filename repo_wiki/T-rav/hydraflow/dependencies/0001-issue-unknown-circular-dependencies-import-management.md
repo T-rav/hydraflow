@@ -4,7 +4,8 @@ topic: dependencies
 source_issue: unknown
 source_phase: synthesis
 created_at: 2026-04-10T06:57:24.154748+00:00
-status: active
+status: superseded
+superseded_by: 0006
 ---
 
 # Circular Dependencies & Import Management

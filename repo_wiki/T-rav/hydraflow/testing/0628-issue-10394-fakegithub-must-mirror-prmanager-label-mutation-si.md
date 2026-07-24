@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10394
 source_phase: plan
 created_at: 2026-07-24T05:04:19.027229+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0632
 ---
 
 # FakeGitHub must mirror PRManager label-mutation side effects exactly
