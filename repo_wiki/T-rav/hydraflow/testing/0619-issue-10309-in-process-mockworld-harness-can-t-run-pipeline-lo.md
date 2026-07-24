@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10309
 source_phase: plan
 created_at: 2026-07-24T04:15:22.309952+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0632
 ---
 
 # In-process MockWorld harness can't run pipeline + loops together — use sandbox for that

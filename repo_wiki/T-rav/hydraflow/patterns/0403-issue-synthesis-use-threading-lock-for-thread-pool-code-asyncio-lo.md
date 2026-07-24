@@ -1,0 +1,15 @@
+---
+id: 0403
+topic: patterns
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-24T09:02:15.937037+00:00
+status: superseded
+corroborations: 1
+supersedes: 0388,0389,0390,0391,0392,0393,0394,0395,0396,0397,0398,0399,0400,0401
+superseded_by: 0416
+---
+
+# Use threading.Lock for thread-pool code; asyncio.Lock for coroutines only
+
+Use `threading.Lock` (not `asyncio.Lock`) for state shared with code running via `asyncio.to_thread()` or called from both sync and async contexts; reserve `asyncio.Lock` for coordinating pure coroutines. Example: `self._lock = threading.Lock()` for a cache shared between thread-pool workers. See also: ADR-0001 — five concurrent async loops. **Why:** `asyncio.Lock` is not thread-safe — acquiring it from a thread pool raises or silently corrupts state.

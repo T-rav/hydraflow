@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10393
 source_phase: plan
 created_at: 2026-07-24T04:45:18.082087+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0632
 ---
 
 # MockWorld scenario N/A when the fake subprocess runner can't fabricate the trigger condition

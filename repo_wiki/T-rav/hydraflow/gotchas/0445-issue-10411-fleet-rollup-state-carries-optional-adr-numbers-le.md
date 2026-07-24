@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10411
 source_phase: plan
 created_at: 2026-07-24T05:57:06.014392+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0446
 ---
 
 # Fleet rollup state carries optional `adr_numbers` — legacy entries read as empty, not missing

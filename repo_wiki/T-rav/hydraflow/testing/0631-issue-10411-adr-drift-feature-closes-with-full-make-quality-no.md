@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10411
 source_phase: plan
 created_at: 2026-07-24T05:57:06.014408+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0632
 ---
 
 # ADR-drift feature closes with full `make quality`, not targeted test files, per cleanup-blast-radius rule

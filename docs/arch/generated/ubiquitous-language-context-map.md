@@ -49,6 +49,7 @@ graph LR
     botprport["BotPRPort<br/><i>port</i>"]
     controller["Controller<br/><i>control_role</i>"]
     credentials["Credentials<br/><i>value_object</i>"]
+    creditexhaustederror["CreditExhaustedError<br/><i>domain_event</i>"]
     dedupstore["DedupStore<br/><i>service</i>"]
     dimensionbaseline["DimensionBaseline<br/><i>control_role</i>"]
     disturbancedampenerloop["DisturbanceDampenerLoop<br/><i>loop</i>"]
@@ -72,6 +73,8 @@ graph LR
     steeringchannel["SteeringChannel<br/><i>control_role</i>"]
     steeringstate["SteeringState<br/><i>control_role</i>"]
     subprocessrunner["SubprocessRunner<br/><i>port</i>"]
+    term["Term<br/><i>entity</i>"]
+    termstore["TermStore<br/><i>service</i>"]
     tribalwikistore["TribalWikiStore<br/><i>service</i>"]
     violationdetector["ViolationDetector<br/><i>control_role</i>"]
     workspaceport["WorkspacePort<br/><i>port</i>"]
@@ -149,6 +152,7 @@ graph LR
   corpuslearningloop -->|depends_on| governor
   corpuslearningloop -->|depends_on| prmanager
   corpuslearningloop -->|depends_on| dedupstore
+  creditexhaustederror -->|depends_on| basebackgroundloop
   dedupstore -->|depends_on| adrcouncilreviewer
   dedupstore -->|depends_on| adrtouchpointauditorloop
   dedupstore -->|depends_on| contractrefreshloop
