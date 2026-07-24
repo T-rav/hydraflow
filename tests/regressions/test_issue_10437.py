@@ -25,7 +25,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ADR_DIR = _REPO_ROOT / "docs" / "adr"
 
 
-def _write_adr(adr_dir: Path, *, number: int, title: str, related_files: list[str]) -> None:
+def _write_adr(
+    adr_dir: Path, *, number: int, title: str, related_files: list[str]
+) -> None:
     related = ", ".join(f"`{f}`" for f in related_files)
     body = (
         f"# ADR-{number:04d}: {title}\n\n"
