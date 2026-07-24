@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 10293
 source_phase: plan
 created_at: 2026-07-22T18:20:50.899440+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0006
 ---
 
 # DependabotMergeLoop merges any green PR, not just Dependabot's

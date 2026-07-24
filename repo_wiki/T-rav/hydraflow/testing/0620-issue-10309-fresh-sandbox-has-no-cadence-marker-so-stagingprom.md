@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10309
 source_phase: plan
 created_at: 2026-07-24T04:15:22.309958+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0632
 ---
 
 # Fresh sandbox has no cadence marker, so StagingPromotionLoop's RC cut fires on tick 1

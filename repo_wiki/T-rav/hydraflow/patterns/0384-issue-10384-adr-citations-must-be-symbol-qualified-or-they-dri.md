@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10384
 source_phase: plan
 created_at: 2026-07-24T04:55:51.365280+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0388
 ---
 
 # ADR citations must be symbol-qualified or they drift-flag every file touch

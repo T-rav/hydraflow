@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10403
 source_phase: plan
 created_at: 2026-07-24T05:36:17.563792+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0388
 ---
 
 # Ledger refactors must preserve byte-identical JSONL output

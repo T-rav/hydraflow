@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10403
 source_phase: plan
 created_at: 2026-07-24T05:36:17.563779+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0632
 ---
 
 # Keep store-specific methods on the subclass, not the shared ledger base

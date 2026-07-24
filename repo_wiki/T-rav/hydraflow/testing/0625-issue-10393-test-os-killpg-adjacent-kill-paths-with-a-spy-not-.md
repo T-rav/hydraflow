@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10393
 source_phase: plan
 created_at: 2026-07-24T04:45:18.082080+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0632
 ---
 
 # Test os.killpg-adjacent kill paths with a spy, not a live signal, for host-agnostic CI

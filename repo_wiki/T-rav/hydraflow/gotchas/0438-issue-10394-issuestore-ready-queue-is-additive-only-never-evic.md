@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10394
 source_phase: plan
 created_at: 2026-07-24T05:04:19.026996+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0446
 ---
 
 # IssueStore ready queue is additive-only — never evicts on poll
