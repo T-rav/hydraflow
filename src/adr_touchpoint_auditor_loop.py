@@ -577,7 +577,13 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             for n in pr_numbers:
                 files = await self._fetch_pr_changed_files(n)
                 pr_diffs.append((n, files))
-            recomputed = compute_drift_by_adr(self._adr_index, pr_diffs)
+            recomputed = compute_drift_by_adr(
+                self._adr_index,
+                pr_diffs,
+                shared_infra_fanout_threshold=(
+                    self._config.adr_drift_shared_infra_fanout_threshold
+                ),
+            )
             if any(e.adr.number == adr_num for e in recomputed):
                 continue  # still genuinely drifts — leave the rollup open
             await self._close_and_clear_rollup(rollup_key, issue_number)
@@ -701,6 +707,9 @@ class AdrTouchpointAuditorLoop(BaseBackgroundLoop):
             self._adr_index,
             pr_diffs,
             fleet_threshold=self._config.adr_drift_fleet_batch_threshold,
+            shared_infra_fanout_threshold=(
+                self._config.adr_drift_shared_infra_fanout_threshold
+            ),
         )
         drifting_adrs = {entry.adr.number for entry in rollups}
         drifting_adrs |= {n for batch in fleet_batches for n in batch.adr_numbers}
