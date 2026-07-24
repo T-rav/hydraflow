@@ -44,7 +44,7 @@ import math
 import re
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -545,6 +545,45 @@ def daily_fail_open_counts(records: Sequence[dict[str, object]]) -> dict[str, in
         if day is not None:
             counts[day] += 1
     return dict(counts)
+
+
+def rolling_kind_count(
+    records: Sequence[dict[str, object]],
+    now: datetime,
+    *,
+    days: int,
+    kind: str,
+) -> int:
+    """Count independence-ledger records of *kind* in the trailing *days* window.
+
+    The rolling-window counterpart of :func:`daily_fail_open_counts` (which
+    buckets per UTC day for the c-chart). The second-order vitals capstone reads
+    ONE per-window observation per series, so it needs the count of a single
+    ``kind`` (``fail_open`` / ``independence_unavailable``) whose ``ts`` falls in
+    ``[now - days, now]``. Owning this windowed count HERE — beside the ledger it
+    reads — lets the capstone obtain the independence reading by import (one
+    source of truth), rather than re-deriving the window/kind filter itself, the
+    same way it reads escapes/interventions/audit from their owners' metrics.
+    Records with a missing/unparseable or out-of-window ``ts`` are skipped; a
+    naive timestamp is interpreted in *now*'s timezone.
+    """
+    cutoff = now - timedelta(days=days)
+    count = 0
+    for r in records:
+        if r.get("kind") != kind:
+            continue
+        raw = r.get("ts")
+        if not isinstance(raw, str):
+            continue
+        try:
+            ts = datetime.fromisoformat(raw)
+        except ValueError:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=now.tzinfo)
+        if cutoff <= ts <= now:
+            count += 1
+    return count
 
 
 def shewhart_c_chart_ucl(counts: Sequence[float]) -> float:

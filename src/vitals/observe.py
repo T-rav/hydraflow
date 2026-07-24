@@ -126,24 +126,24 @@ def gather_series_readings(
     else:
         readings[SERIES_AUDIT_DISAGREEMENT] = None
 
-    # 5) Independence — fail-open + independence-unavailable events in the window
-    #    (judge-independence fail-open ledger).
+    # 5) Independence — fail-open + independence-unavailable events in the window,
+    #    read via the owner's own windowed-count metric (one source of truth, the
+    #    same import discipline the other four families use — never a divergent
+    #    re-derivation of the window/kind filter here).
     ji_path = ji.ledger_path_for(config)
     if ji_path.exists():
         ji_records = ji.read_records(ji_path)
-        windowed_ji = [
-            r
-            for r in ji_records
-            if _within_window(str(r.get("ts", "")), now, window_days)
-        ]
         readings[SERIES_FAIL_OPEN] = float(
-            sum(1 for r in windowed_ji if r.get("kind") == ji.KIND_FAIL_OPEN)
+            ji.rolling_kind_count(
+                ji_records, now, days=window_days, kind=ji.KIND_FAIL_OPEN
+            )
         )
         readings[SERIES_INDEPENDENCE_UNAVAILABLE] = float(
-            sum(
-                1
-                for r in windowed_ji
-                if r.get("kind") == ji.KIND_INDEPENDENCE_UNAVAILABLE
+            ji.rolling_kind_count(
+                ji_records,
+                now,
+                days=window_days,
+                kind=ji.KIND_INDEPENDENCE_UNAVAILABLE,
             )
         )
     else:

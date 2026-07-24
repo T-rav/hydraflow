@@ -8,6 +8,7 @@ spikes and single-series noise never fire.
 
 from __future__ import annotations
 
+from vitals.control import individuals_limits
 from vitals.models import (
     FAMILY_AUDIT,
     FAMILY_ESCAPES,
@@ -26,6 +27,7 @@ from vitals.verdict import (
     VERDICT_DIVERGING,
     VERDICT_GREEN,
     VERDICT_WATCH,
+    _series_sustained_breach,
     evaluate_vitals,
 )
 
@@ -54,6 +56,25 @@ _ALL_SINGLE = (
     SERIES_FAIL_OPEN,
     SERIES_INDEPENDENCE_UNAVAILABLE,
 )
+
+# A genuinely NON-FLAT baseline: mean (centre) = 11.0, MR̄ = 2.0 → σ̂ = 2/1.128,
+# so the 3σ UCL ≈ 16.32. A value of 14 sits ABOVE the mean but INSIDE the band
+# (must not breach); 30 sits above the UCL (must breach). This is the fixture the
+# all-zero baselines elsewhere cannot express — with σ̂=0 the band collapses and a
+# breach degenerates to ``value > 0``.
+_NONFLAT_BASE = [10.0, 12.0, 10.0, 12.0, 10.0, 12.0]
+_WITHIN_BAND = 14.0
+_ABOVE_UCL = 30.0
+_THREE_FAMILY_SERIES = (
+    SERIES_ESCAPES,
+    SERIES_INTERVENTION_CORRECTIONS,
+    SERIES_AUDIT_DISAGREEMENT,
+)
+
+
+def _nonflat(recent: float) -> list[float]:
+    """The non-flat baseline followed by two sustained windows at ``recent``."""
+    return [*_NONFLAT_BASE, recent, recent]
 
 
 def _all_flat() -> dict[str, list[float]]:
@@ -154,3 +175,83 @@ class TestHonestDegradation:
         assert v.reporting_families == 0
         assert v.verdict == VERDICT_GREEN
         assert v.coverage_label == "0-of-5 reporting"
+
+
+class TestThreeSigmaBandIsLoadBearing:
+    """The 3σ band must be REAL, not decorative.
+
+    Every other fixture here uses an all-zero baseline, where σ̂ = 0 collapses
+    centre == UCL == 0 and "breach" degenerates to ``value > 0`` — the whole
+    ``centre + 3σ̂`` band could be deleted (compare to the mean instead of the
+    UCL) undetected. These tests use a NON-flat baseline where the mean and the
+    UCL genuinely differ, so a value above the mean but inside the band must NOT
+    breach and only a value above the UCL does. They FAIL if the band is removed.
+    """
+
+    def test_baseline_band_has_real_width(self) -> None:
+        centre, ucl = individuals_limits(_NONFLAT_BASE)
+        assert centre == 11.0
+        assert ucl > 16.0  # ≈ 16.32; comfortably wider than the mean
+        # The chosen probe values straddle the band: 14 inside, 30 above.
+        assert centre < _WITHIN_BAND < ucl
+        assert ucl < _ABOVE_UCL
+
+    def test_value_within_band_does_not_sustained_breach(self) -> None:
+        # recent = [14, 14]: above the mean (11) but below the UCL (≈16.32).
+        assert not _series_sustained_breach(
+            _nonflat(_WITHIN_BAND), min_baseline_windows=3, sustained_windows=2
+        )
+
+    def test_value_above_ucl_sustained_breaches(self) -> None:
+        # recent = [30, 30]: above the UCL → a genuine sustained breach.
+        assert _series_sustained_breach(
+            _nonflat(_ABOVE_UCL), min_baseline_windows=3, sustained_windows=2
+        )
+
+    def test_one_window_above_one_within_is_not_sustained(self) -> None:
+        # recent = [30 (above UCL), 14 (within band)] → not ALL above → no breach.
+        h = [*_NONFLAT_BASE, _ABOVE_UCL, _WITHIN_BAND]
+        assert not _series_sustained_breach(
+            h, min_baseline_windows=3, sustained_windows=2
+        )
+
+    def test_evaluate_within_band_is_green_above_ucl_is_diverging(self) -> None:
+        # Three families with a non-flat baseline. Within-band recent windows →
+        # k=0 green; above-UCL recent windows → k=3 diverging. If the band were
+        # removed, the within-band case (14 > mean 11) would read as diverging.
+        within = _all_flat()
+        for name in _THREE_FAMILY_SERIES:
+            within[name] = _nonflat(_WITHIN_BAND)
+        v_within = evaluate_vitals(
+            within, primary_health_green=True, thresholds=_THRESHOLDS
+        )
+        assert v_within.k == 0
+        assert v_within.verdict == VERDICT_GREEN
+
+        above = _all_flat()
+        for name in _THREE_FAMILY_SERIES:
+            above[name] = _nonflat(_ABOVE_UCL)
+        v_above = evaluate_vitals(
+            above, primary_health_green=True, thresholds=_THRESHOLDS
+        )
+        assert v_above.k == 3
+        assert v_above.verdict == VERDICT_DIVERGING
+
+
+class TestReportingRequiresPrimedFrozenBaseline:
+    """A family reports only once its FROZEN baseline (not raw window count) is
+    primed — the points the control limit is actually computed from. Gating on
+    raw windows overstated readiness by ``sustained_windows``.
+    """
+
+    def test_reporting_counts_frozen_baseline_not_raw_windows(self) -> None:
+        # min_baseline_windows=3, sustained_windows=2. A 4-point history has a
+        # frozen baseline of only 2 points (< 3): its limit is noise, so the
+        # family must NOT be reporting even though raw windows (4) ≥ 3.
+        four = {SERIES_ESCAPES: [0.0, 0.0, 0.0, 5.0]}
+        v4 = evaluate_vitals(four, primary_health_green=True, thresholds=_THRESHOLDS)
+        assert v4.reporting_families == 0
+        # One more point → the frozen baseline is 3 points → now reporting.
+        five = {SERIES_ESCAPES: [0.0, 0.0, 0.0, 0.0, 5.0]}
+        v5 = evaluate_vitals(five, primary_health_green=True, thresholds=_THRESHOLDS)
+        assert v5.reporting_families == 1
