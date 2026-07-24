@@ -1,0 +1,96 @@
+// ADR-0056 ADR-drift touchpoint auditor — topology around issue #10437.
+// The false positive: ADR-0106 bare-cites the high-churn loop base class as a
+// dependency pointer; an implementation-only touch (PR #10414 cadence fix)
+// drifts it. Fix: add src/base_background_loop.py to _SHARED_INFRA_MODULES.
+
+specification {
+  element system
+  element container
+  element component
+  element datastore
+  element external
+  tag change      // touched by the fix
+  tag falsepos    // node where the false positive originates
+}
+
+model {
+  pr = external 'Merged PR #10414' {
+    description 'Durable-cadence restart fix; touches src/base_background_loop.py only (no ADR file).'
+  }
+  gh = external 'GitHub (gh CLI)' {
+    description 'Supplies FILE-level diffs only — no symbol evidence.'
+  }
+
+  auditor = system 'ADR Touchpoint Auditor (ADR-0056)' {
+    loop = container 'ADRTouchpointAuditorLoop' {
+      description 'src/adr_touchpoint_auditor_loop.py — per-ADR rollup (#8987); files/updates one issue per drifted ADR; reconcile auto-closes obsolete rollups.'
+
+      scan = component 'main scan' {
+        description 'compute_drift_by_adr over PRs merged since cursor; files _file_drift_rollup.'
+      }
+      reconcile = component '_reconcile_stale_rollups' {
+        description 'Re-fetches a tracked rollup OWN PR diffs, recomputes drift; empty => obsolete => close+clear. Auto-closes when _SHARED_INFRA_MODULES gains a module.'
+      }
+    }
+
+    drift = container 'adr_drift.py' #change {
+      description 'src/adr_drift.py — drift computation + shared-infra exemption.'
+      shared = component '_SHARED_INFRA_MODULES' #change {
+        description 'Allowlist of high-churn bare-cited dependency-pointer modules. FIX: add src/base_background_loop.py.'
+      }
+      citationRule = component '_citation_drifts' #falsepos {
+        description 'Bare citation drifts on ANY touch UNLESS path in _SHARED_INFRA_MODULES; symbol-qualified citation drifts only on matching symbol evidence.'
+      }
+      compute = component 'compute_drift / _by_adr' {
+        description 'Skips ADR if its file is in the diff; else emits DriftFinding per drifted cited path.'
+      }
+    }
+
+    index = container 'adr_index.py' {
+      description 'src/adr_index.py — parses docs/adr/*.md.'
+      parse = component 'parse_adr_file' {
+        description 'Regex extracts `src/..py` (bare) vs `src/..py:Symbol` citations into source_symbols; a bare cite collapses symbol cites for that file.'
+      }
+    }
+  }
+
+  adr0106 = datastore 'docs/adr/0106-*.md' {
+    description 'Bare-cites `src/base_background_loop.py` for the per-cycle watchdog (BaseBackgroundLoop._execute_cycle). Decision it owns lives in src/event_loop_watchdog.py.'
+  }
+  prPort = external 'PRPort' {
+    description 'Files/updates/closes the hydraflow-find + loop-stalled rollup issue #10437.'
+  }
+
+  // Flow
+  pr -> gh 'merged'
+  gh -> scan 'file-only changed paths'
+  scan -> compute 'compute drift'
+  compute -> citationRule 'per cited path'
+  citationRule -> shared 'is path exempt?'
+  parse -> citationRule 'source_symbols (bare vs symbol)'
+  adr0106 -> parse 'indexed'
+  scan -> prPort 'file rollup (FALSE POSITIVE today)'
+  reconcile -> compute 'recompute over OWN PRs'
+  reconcile -> prPort 'close+clear when empty (after fix)'
+}
+
+views {
+  view index_view {
+    title 'ADR-drift auditor — components (issue #10437 change area)'
+    include *
+    include auditor.*
+    include drift.*, index.*, loop.*
+  }
+
+  dynamic view falsePositiveFlow {
+    title 'False-positive path and the fix (issue #10437)'
+    pr -> gh 'PR #10414 merges (base_background_loop.py only)'
+    gh -> scan 'file-only diff'
+    scan -> compute 'compute_drift'
+    compute -> citationRule 'ADR-0106 bare-cites the file'
+    citationRule -> shared 'path NOT in allowlist -> drifts (BUG)'
+    scan -> prPort 'files rollup #10437 (false positive)'
+    reconcile -> shared 'after fix: path IS in allowlist'
+    reconcile -> prPort 'recompute empty -> auto-close #10437'
+  }
+}
