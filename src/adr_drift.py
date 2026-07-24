@@ -100,6 +100,11 @@ _SHARED_INFRA_MODULES = frozenset(
         "src/contract_recording.py",
         "src/contract_diff.py",
         "src/contract_refresh_loop.py",
+        # High-churn loop base class — bare-cited as prior-art dependency by
+        # ADR-0106 (#10437); restart-cadence/watchdog churn in the shared
+        # base is implementation detail, not a change to any one ADR's
+        # decision.
+        "src/base_background_loop.py",
     }
 )
 
