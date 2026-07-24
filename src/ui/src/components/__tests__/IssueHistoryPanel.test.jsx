@@ -559,22 +559,21 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
       children: [],
     }
 
-    it('renders epic outcome cards above the issue table when epics are present', () => {
+    it('does not render the top-bit epic outcome cards — epics are a row-grouping instead', () => {
+      // Per operator feedback: the "top bit" EpicOutcomeCards was removed; epics
+      // now live on the Outcomes screen only as a row-grouping (select "epic" in
+      // the Group-by control). The issue rows still render.
       mockUseHydraFlow.mockReturnValue({
         issueHistory: makePayload(),
         selectedRepoSlug: null,
         epics: [epic],
       })
       render(<OutcomesPanel />)
-      // Epic card section + this epic's card and progress render on the tab.
-      expect(screen.getByTestId('epic-outcome-cards')).toBeInTheDocument()
-      expect(screen.getByTestId('epic-outcome-card-30001')).toBeInTheDocument()
-      expect(screen.getByTestId('epic-progress-30001').textContent).toContain('2/4 done')
-      // The issue rows still render below.
+      expect(screen.queryByTestId('epic-outcome-cards')).not.toBeInTheDocument()
       expect(screen.getByText('Fix auth cache')).toBeInTheDocument()
     })
 
-    it('renders no epic card section when there are no epics', () => {
+    it('does not render the top-bit epic outcome cards when there are no epics either', () => {
       mockUseHydraFlow.mockReturnValue({
         issueHistory: makePayload(),
         selectedRepoSlug: null,
