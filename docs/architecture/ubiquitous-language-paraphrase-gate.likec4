@@ -1,0 +1,89 @@
+// Issue #10464 — RC promotion staging→main red on paraphrase-lint drift.
+// Topology of the Ubiquitous-Language term lifecycle and the two gates that
+// disagree on paraphrase severity, which lets a landmine alias merge to staging
+// then redden every staging→main promotion.
+
+specification {
+  element system
+  element loop
+  element func {
+    style { shape rectangle }
+  }
+  element store {
+    style { shape cylinder }
+  }
+  element datafile {
+    style { shape document }
+  }
+  element gate {
+    style { shape rectangle; color amber }
+  }
+  element test {
+    style { shape rectangle; color green }
+  }
+}
+
+model {
+  ul = system 'Ubiquitous Language Subsystem (ADR-0053/0054/0057)' {
+
+    proposer = loop 'TermProposerLoop' {
+      description 'Auto-drafts Terms from load-bearing code symbols (ADR-0054)'
+    }
+    llm = func 'TermProposerLLM.draft' {
+      description 'LLM emits definition + aliases (lowercase paraphrases)'
+    }
+    validate = func 'validate_draft()' {
+      description 'F1 acceptance gate: anchor / name / alias-vs-canonical-name checks. MISSING: alias-vs-live-wiki-prose check'
+    }
+    lint = func 'lint_paraphrases()' {
+      description 'Scans docs/wiki/*.md (excl terms/) for any term alias as a word-boundary match; one violation string per hit'
+    }
+
+    termsDir = store 'docs/wiki/terms/' {
+      description 'One file per Term; excluded from paraphrase scan'
+    }
+    termFile = datafile 'credit-exhausted-error.md' {
+      description 'Auto-added term; aliases=[credit exhaustion, exhausted billing signal, billing-limit signal]'
+    }
+    wikiProse = datafile 'dark-factory.md / gotchas.md' {
+      description 'Pre-existing prose containing "exhausted billing signal" and "credit exhaustion"'
+    }
+
+    scriptGate = gate 'scripts/lint_ubiquitous_language.py' {
+      description 'arch-regen.yml gate on PRs. Paraphrases are WARN-ONLY (return 0). Merges landmine to staging clean.'
+    }
+    suiteTest = test 'test_paraphrase_lint_runs_against_live_wiki' {
+      description 'Full Tests/Coverage suite on rc/* promotion PRs. asserts violations == [] — HARD FAIL.'
+    }
+
+    // --- proposal path ---
+    proposer -> llm 'drafts term'
+    llm -> validate 'TermDraft (with aliases)'
+    validate -> termsDir 'writes accepted Term'
+    termsDir -> termFile 'contains'
+
+    // --- lint path ---
+    lint -> termFile 'reads aliases'
+    lint -> wikiProse 'scans for alias matches'
+
+    // --- the two disagreeing gates ---
+    scriptGate -> lint 'calls (WARN only)'
+    suiteTest -> lint 'calls (asserts == [])'
+  }
+}
+
+views {
+  view index {
+    title 'UL paraphrase gate — component view'
+    include *
+    autoLayout TopBottom
+  }
+
+  view proposalToRed {
+    title 'Failure path: landmine alias → staging clean → promotion red'
+    include
+      ul.proposer, ul.llm, ul.validate, ul.termFile,
+      ul.wikiProse, ul.lint, ul.scriptGate, ul.suiteTest
+    autoLayout LeftRight
+  }
+}

@@ -1,0 +1,46 @@
+// Issue #10464 — dynamic view of the failure and the two-part fix.
+// P1 reconciles the existing drift (unblocks the next RC promotion);
+// P2 hardens validate_draft so the proposer cannot re-mint landmine aliases.
+
+specification {
+  element actor
+  element step
+}
+
+model {
+  failure = actor 'Failure sequence (before fix)'
+  fix = actor 'Fix sequence (after P1 + P2)'
+
+  dynamic view failurePath {
+    title 'Why staging→main promotion reddens every cadence tick'
+
+    step1 = actor 'TermProposerLoop drafts CreditExhaustedError'
+    step2 = actor 'validate_draft accepts (no wiki-prose alias check)'
+    step3 = actor 'Term merges to staging — arch-regen lint only WARNS'
+    step4 = actor 'StagingPromotionLoop cuts rc/* PR (staging→main)'
+    step5 = actor 'Full Tests + Coverage run paraphrase lint (HARD FAIL)'
+    step6 = actor 'CI Gate rollup fails; promotion PR auto-closed; #10464 opens'
+
+    step1 -> step2 'aliases=[credit exhaustion, exhausted billing signal, ...]'
+    step2 -> step3 'accepted Term written'
+    step3 -> step4 'next cadence tick'
+    step4 -> step5 'lint_paraphrases returns 2 violations'
+    step5 -> step6 'assert violations == [] fails'
+  }
+
+  dynamic view fixPath {
+    title 'Two-part fix'
+
+    p1 = actor 'P1: drop colliding aliases from credit-exhausted-error.md'
+    p1b = actor 'lint_paraphrases returns []'
+    p1c = actor 'Regression test tests/regressions/test_issue_10464.py goes GREEN'
+    p1d = actor 'Next rc/* promotion CI passes; #10464 auto-closes'
+    p2 = actor 'P2: validate_draft strips aliases matching live wiki prose'
+    p2b = actor 'Future proposer batches cannot re-mint landmine aliases'
+
+    p1 -> p1b 'remaining alias billing-limit signal is prose-safe'
+    p1b -> p1c
+    p1c -> p1d
+    p2 -> p2b 'recurrence prevented at the source'
+  }
+}
