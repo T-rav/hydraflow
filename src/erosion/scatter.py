@@ -49,14 +49,18 @@ DEFAULT_SCATTER_THRESHOLD = 3
 
 # Light line-regexes over a diff's added (`+`) lines — NOT a full AST parse,
 # since a diff hunk is a source fragment, not standalone-parseable source.
-# Deliberately narrow: top-level-*looking* `def`/`class`/ALL_CAPS-assignment
-# lines only (indentation is not required, so methods match too — a v1
-# simplification). Dunder names (`__init__`, `__repr__`, ...) are excluded
-# below; they're structural boilerplate, not "concept" names, and would
-# otherwise dominate the signal with noise.
-_DEF_RE = re.compile(r"^\s*def\s+(\w+)\s*\(")
-_CLASS_RE = re.compile(r"^\s*class\s+(\w+)\s*[:\(]")
-_CONST_RE = re.compile(r"^\s*([A-Z_][A-Z0-9_]*)\s*(?::[^=]+)?=(?!=)")
+# TOP-LEVEL (column-0) `def`/`class`/ALL_CAPS-assignment lines only: a
+# concept is a MODULE-LEVEL function/class/constant independently reinvented
+# across modules. Indented `def`/`class` are METHODS/nested defs — common
+# interface names (`append`, `get`, `run`, ...) that many classes share
+# legitimately, NOT concept scatter; matching them was the #10403 false
+# positive (`append` "scattered across 4 modules" was just 4 classes each
+# with a `def append` method). Requiring no leading whitespace excludes them
+# while genuine module-level scatter (e.g. a duplicated `_GIT_TIMEOUT_S`
+# constant) still flags. Dunder names are excluded below as boilerplate.
+_DEF_RE = re.compile(r"^def\s+(\w+)\s*\(")
+_CLASS_RE = re.compile(r"^class\s+(\w+)\s*[:\(]")
+_CONST_RE = re.compile(r"^([A-Z_][A-Z0-9_]*)\s*(?::[^=]+)?=(?!=)")
 _DIFF_NEW_FILE_HEADER_RE = re.compile(r"^\+\+\+ b/(.+)$")
 
 
