@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10304
 source_phase: plan
 created_at: 2026-07-24T03:55:27.919605+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0402
 ---
 
 # `make arch-regen` after ADR edits: commit only if it actually changes output

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-24T04:10:17.167705+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0356,0357,0358,0359,0360,0361,0362,0363
+superseded_by: 0373
 ---
 
 # Source cycle timeouts from BGWorkerManager.cycle_timeout, not new config

@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10314
 source_phase: plan
 created_at: 2026-07-22T18:34:32.045541+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0402
 ---
 
 # EPICS/epic_update reducer cases replace payloads instead of merging by epic_number

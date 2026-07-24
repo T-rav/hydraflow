@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10304
 source_phase: plan
 created_at: 2026-07-24T03:55:27.919597+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0593
 ---
 
 # Drift regressions in tests/regressions/ pair a red content-check with a green mechanism-check
