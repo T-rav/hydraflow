@@ -141,24 +141,6 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
   )
 }
 
-function EpicContainer({ epicNumber, issues, children }) {
-  const activeCount = issues.filter(i => i.overallStatus === 'active').length
-  return (
-    <div style={epicContainerStyles.wrapper}>
-      <div style={epicContainerStyles.header}>
-        <span style={epicContainerStyles.badge}>Epic #{epicNumber}</span>
-        <span style={epicContainerStyles.progress}>
-          {activeCount} / {issues.length} active
-        </span>
-        {activeCount > 0 && <span style={epicContainerStyles.pulse} />}
-      </div>
-      <div style={epicContainerStyles.children}>
-        {children}
-      </div>
-    </div>
-  )
-}
-
 function StageSection({ stage, issues, workerCount, workerCap, queuedCount, intentMap, onRequestChanges, open, onToggle, enabled, dotColor, workers, prs }) {
   const safeIssues = issues || []
   const failedCount = safeIssues.filter(i => i.overallStatus === 'failed').length
@@ -212,47 +194,20 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
           data-testid={`stage-dot-${stage.key}`}
         />
       </div>
-      {open && (() => {
-        // Group epic children by epicNumber, keep standalone separate
-        const epicGroups = {}
-        const standalone = []
-        for (const issue of safeIssues) {
-          if (issue.isEpicChild && issue.epicNumber > 0) {
-            if (!epicGroups[issue.epicNumber]) epicGroups[issue.epicNumber] = []
-            epicGroups[issue.epicNumber].push(issue)
-          } else {
-            standalone.push(issue)
-          }
-        }
-        return (
-          <>
-            {standalone.map(issue => (
-              <StreamCard
-                key={`${issue.repo}#${issue.issueNumber}`}
-                issue={issue}
-                intent={intentMap.get(issue.issueNumber)}
-                defaultExpanded={issue.overallStatus === 'active'}
-                onRequestChanges={onRequestChanges}
-                transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber, issue.repo)}
-              />
-            ))}
-            {Object.entries(epicGroups).map(([epicNum, epicIssues]) => (
-              <EpicContainer key={`epic-${epicNum}`} epicNumber={Number(epicNum)} issues={epicIssues}>
-                {epicIssues.map(issue => (
-                  <StreamCard
-                    key={`${issue.repo}#${issue.issueNumber}`}
-                    issue={issue}
-                    intent={intentMap.get(issue.issueNumber)}
-                    defaultExpanded={issue.overallStatus === 'active'}
-                    onRequestChanges={onRequestChanges}
-                    transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber, issue.repo)}
-                  />
-                ))}
-              </EpicContainer>
-            ))}
-          </>
-        )
-      })()}
+      {open && safeIssues.map(issue => (
+        // Epic children render as flat cards (no EpicContainer grouping) —
+        // the epic is shown inline on the card (the "Epic #N" chip), so the
+        // pipeline flow stays a flat per-stage list. Epic roll-ups live on the
+        // Outcomes screen.
+        <StreamCard
+          key={`${issue.repo}#${issue.issueNumber}`}
+          issue={issue}
+          intent={intentMap.get(issue.issueNumber)}
+          defaultExpanded={issue.overallStatus === 'active'}
+          onRequestChanges={onRequestChanges}
+          transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber, issue.repo)}
+        />
+      ))}
     </div>
   )
 }
@@ -698,42 +653,6 @@ const forkStyles = {
   fork: styles.flowFork,
   forkTop: styles.flowForkTop,
   forkArrow: styles.flowForkArrow,
-}
-
-const epicContainerStyles = {
-  wrapper: {
-    borderLeft: `3px solid ${theme.purple}`,
-    background: theme.surfaceInset,
-    borderRadius: 8,
-    marginBottom: 4,
-    overflow: 'hidden',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '4px 12px',
-    background: theme.purpleSubtle,
-  },
-  badge: {
-    fontSize: 10,
-    fontWeight: 700,
-    color: theme.purple,
-  },
-  progress: {
-    fontSize: 10,
-    color: theme.textMuted,
-  },
-  pulse: {
-    ...dotBase,
-    width: 6,
-    height: 6,
-    background: theme.purple,
-    animation: PULSE_ANIMATION,
-  },
-  children: {
-    padding: 4,
-  },
 }
 
 // Pre-computed section opacity variants (avoids object spread in StageSection render)
