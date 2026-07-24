@@ -11,7 +11,7 @@ superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-06-20T14:18:05.961056+00:00"
-updated_at: "2026-07-24T05:18:12.365095+00:00"
+updated_at: "2026-07-24T05:34:07.706352+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-06-20T14:18:05.960978+00:00"
 proposal_signals: ["S2"]

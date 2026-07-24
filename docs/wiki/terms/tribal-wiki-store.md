@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/tribal_wiki.py:TribalWikiStore"
 aliases: ["tribal wiki", "global wiki", "cross-repo wiki"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K6"}]
-evidence: []
+evidence: ["01KQNZNK5DWPQ75W9HBCJX2DJ6"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-18T17:05:01.692894+00:00"
-updated_at: "2026-07-18T21:32:02.711923+00:00"
+updated_at: "2026-07-24T05:34:07.706352+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-07-18T17:05:01.692844+00:00"
 proposal_signals: ["S2"]
