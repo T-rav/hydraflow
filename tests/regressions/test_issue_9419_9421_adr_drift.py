@@ -1,7 +1,9 @@
-"""Regression test for the ADR-drift right-sizing of 5 stuck-HITL ADRs.
+"""Regression test for the ADR-drift right-sizing of stuck-HITL ADRs.
 
 Closes #9417 (ADR-0024) / #9419 (ADR-0045) / #9420 (ADR-0050) /
-#9421 (ADR-0064) / #9447 (ADR-0044).
+#9421 (ADR-0064) / #9447 (ADR-0044). Extended by #10400 (ADR-0012),
+which right-sized the same bare `src/epic.py (...)` pattern for the
+epic-merge-coordination ADR.
 
 Background — the mechanism in ``src/adr_drift.py`` + ``src/adr_index.py``:
 an ADR that *bare*-cites a ``src/foo.py`` (no ``:Symbol`` tail) drifts on
@@ -13,7 +15,7 @@ citation never auto-drifts in prod (the #9176 design). ``_SHARED_INFRA_MODULES``
 (config/models/ports/post_merge_handler/pr_manager) are additionally exempt
 even when bare.
 
-These 5 ADRs each carried bare, high-churn, non-infra citations that
+These ADRs each carried bare, high-churn, non-infra citations that
 re-drifted on incidental code churn and produced the stuck-HITL drift
 escalations. The right-sizing converted those bare citations to
 symbol-qualified form (mirroring PR #9405). This test drives the *real*
@@ -47,8 +49,9 @@ from adr_index import ADR, ADRIndex, parse_adr_file
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ADR_DIR = _REPO_ROOT / "docs" / "adr"
 
-# ADR number -> markdown filename for the 5 right-sized ADRs.
+# ADR number -> markdown filename for the right-sized ADRs.
 _RIGHT_SIZED = {
+    12: "0012-epic-merge-coordination-architecture.md",
     24: "0024-implementation-retry-recovery-architecture.md",
     44: "0044-hydraflow-principles.md",
     45: "0045-trust-architecture-hardening.md",
@@ -65,6 +68,17 @@ _DELIBERATELY_BARE = {
     "src/adversarial_labels.py",
     "src/plan_council_prompts.py",
     "src/discovery_council_prompts.py",
+}
+
+# Known-remaining bare citations left out of scope by a right-sizing fix
+# for a *different* file in the same ADR. Pinned per-ADR so an unrelated
+# future PR that also right-sizes these doesn't silently need this test
+# updated as a surprise.
+_KNOWN_REMAINING_BARE = {
+    # ADR-0012 (#10400) right-sized only its `src/epic.py` citation;
+    # the sibling bare `src/epic_monitor_loop.py` citation (line 188) is
+    # a separate, out-of-scope drift source left for its own fix.
+    "src/epic_monitor_loop.py",
 }
 
 
@@ -103,9 +117,10 @@ def test_right_sized_adr_does_not_drift_on_file_level_churn(number: int) -> None
     # different, out-of-scope ADR), so filter to this ADR's own drift.
     own = [find for find in findings if find.adr.number == number]
     drifted_files = {f for find in own for f in find.changed_cited_files}
-    # Anything that drifts must be a deliberately-bare data/prompt module;
-    # nothing symbol-qualified and nothing shared-infra may drift.
-    unexpected = drifted_files - _DELIBERATELY_BARE
+    # Anything that drifts must be a deliberately-bare data/prompt module
+    # or a known-remaining out-of-scope bare citation; nothing
+    # symbol-qualified and nothing shared-infra may drift.
+    unexpected = drifted_files - _DELIBERATELY_BARE - _KNOWN_REMAINING_BARE
     assert not unexpected, (
         f"ADR-{number:04d} still drifts on file-level churn of {sorted(unexpected)} "
         f"— these should be symbol-qualified (or shared-infra exempt)"
@@ -157,6 +172,7 @@ def test_adr_0064_data_modules_still_drift_by_design() -> None:
 def test_parse_picks_up_qualified_symbols_for_each_right_sized_adr() -> None:
     """Smoke: the real parser records the symbol tails we wrote into the ADRs."""
     expected_symbol_owner = {
+        12: ("src/epic.py", "EpicManager.on_child_approved"),
         24: ("src/implement_phase.py", "ImplementPhase"),
         44: ("src/orchestrator.py", "HydraFlowOrchestrator"),
         45: ("src/trust_fleet_sanity_loop.py", "TrustFleetSanityLoop"),
