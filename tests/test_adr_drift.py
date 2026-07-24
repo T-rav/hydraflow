@@ -329,6 +329,21 @@ def test_adr_0019_does_not_drift_on_file_only_touch_of_issue_fetcher() -> None:
     assert 19 not in drifted
 
 
+def test_adr_0019_still_drifts_on_symbol_touch_of_issue_fetcher() -> None:
+    # Regression for #10433: symbol-qualifying the ADR-0019 citation must not
+    # suppress genuine drift. A diff naming the qualified symbol
+    # (IssueFetcher._get_collaborators) must still drift ADR-0019.
+    repo_root = Path(__file__).resolve().parents[1]
+    idx = ADRIndex(repo_root / "docs" / "adr")
+    findings = compute_drift(
+        idx,
+        pr_number=10433,
+        changed_files=["src/issue_fetcher.py:IssueFetcher._get_collaborators"],
+    )
+    drifted = sorted({f.adr.number for f in findings})
+    assert 19 in drifted
+
+
 def test_adr_file_in_diff_helper(adr_index: ADRIndex) -> None:
     adr = next(a for a in adr_index.adrs() if a.number == 1)
     assert _adr_file_in_diff(adr, ["docs/adr/0001-alpha.md"])
