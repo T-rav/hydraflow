@@ -1,7 +1,6 @@
 import React, { useMemo, useState, useRef, useCallback } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
-import { EpicOutcomeCards } from './EpicOutcomeCards'
 
 const RANGE_PRESETS = [
   { key: '24h', label: '24h', hours: 24 },
@@ -235,7 +234,7 @@ function sortItems(items, sortColumn, sortDirection) {
 }
 
 export function OutcomesPanel() {
-  const { issueHistory, epics } = useHydraFlow()
+  const { issueHistory } = useHydraFlow()
   const [preset, setPreset] = useState('all')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
@@ -243,6 +242,9 @@ export function OutcomesPanel() {
   const [outcomeFilter, setOutcomeFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [epicOnly, setEpicOnly] = useState(false)
+  // Epics live on the Outcomes screen as a grouping OVER the rows (the top-bit
+  // EpicOutcomeCards was removed); select "epic" in the Group-by control to see
+  // it. Default stays 'none' so sort/flat views are unchanged.
   const [groupBy, setGroupBy] = useState('none')
   const [expanded, setExpanded] = useState({})
   const [collapsedGroups, setCollapsedGroups] = useState(new Set())
@@ -639,7 +641,6 @@ export function OutcomesPanel() {
 
   return (
     <div style={styles.container}>
-      <EpicOutcomeCards epics={epics} />
       <div style={styles.controls}>
         <div style={styles.controlGroup}>
           <span style={styles.controlLabel}>Range</span>
