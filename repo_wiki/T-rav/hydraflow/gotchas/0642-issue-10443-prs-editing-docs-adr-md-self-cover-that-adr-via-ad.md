@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10443
 source_phase: plan
 created_at: 2026-07-24T11:10:04.090365+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0643
 ---
 
 # PRs editing docs/adr/*.md self-cover that ADR via _adr_file_in_diff

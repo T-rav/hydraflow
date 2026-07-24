@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10444
 source_phase: plan
 created_at: 2026-07-24T10:56:36.678061+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: drift_detected: src/….py
 ---
 
 # ADR `.py::Symbol` (double colon) citations silently drop from source_files

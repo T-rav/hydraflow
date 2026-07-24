@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10444
 source_phase: plan
 created_at: 2026-07-24T10:56:36.678104+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0643
 ---
 
 # ADR citation regex is `.py`-only; `.js::` cites are inert, not bugs

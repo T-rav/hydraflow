@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10444
 source_phase: plan
 created_at: 2026-07-24T10:56:36.678111+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0798
 ---
 
 # Doc-typo ADR fixes still need parser-consumer regression tests, not just the ADR edit
