@@ -237,6 +237,18 @@ _JUSTIFIED_NEW_LOOPS: dict[str, str] = {
         "its own merged-commit cursor; SentryLoop/triage host rejected (single "
         "source / no commit-stream cadence)"
     ),
+    # InterventionTallyLoop (#10369): the attention-side twin of the escape
+    # ledger — a standalone outer-loop instrument that aggregates FOUR human-
+    # touch streams (steering + HITL + control-route + /hf CLI) on their own
+    # event-stream cursor + cadence. Considered hosting it on HumanSteeringLoop
+    # (an existing intake) and the HITL phase, but rejected — each sees only
+    # ONE of the four sources, and neither observes the whole cross-cutting
+    # human-load stream this trends against the shared per-100-merges denominator.
+    "InterventionTallyLoop": (
+        "attention-side falsification instrument aggregating 4 human-touch "
+        "streams on its own event cursor; HumanSteeringLoop/HITL-phase host "
+        "rejected (single source / no cross-cutting cadence)"
+    ),
     # SampledAuditLoop (#10370): acceptance sampling applied to the gauntlet —
     # a governed random sample of MERGED PRs re-audited post-merge. Considered
     # hosting on the review phase and on EscapeLedgerLoop, both rejected: review

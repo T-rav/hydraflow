@@ -42,6 +42,7 @@ from ._flake_tracker import FlakeTrackerStateMixin
 from ._gc import StateGCMixin
 from ._hitl import HITLStateMixin
 from ._human_steering import HumanSteeringStateMixin
+from ._intervention_tally import InterventionTallyStateMixin
 from ._issue import IssueStateMixin
 from ._issue_refinement import IssueRefinementStateMixin
 from ._lifetime import LifetimeStatsMixin
@@ -130,6 +131,7 @@ class StateTracker(
     IssueRefinementStateMixin,
     ErosionMetricsStateMixin,
     EscapeLedgerStateMixin,
+    InterventionTallyStateMixin,
     SampledAuditStateMixin,
 ):
     """JSON-file backed state for crash recovery.

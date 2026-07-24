@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `d32a740` — merge origin/staging into feat/10370-sampled-audit-loop *(2026-07-23)*
+- `3428cd6` — feat(evidence): judge-independence budget + fail-visible dispatch (#10371) (#10376) (#10376) *(2026-07-23)*
 - `f1969f7` — feat(instruments): sampled adversarial re-audit — silent-escape estimator (#10370) (#10370) *(2026-07-23)*
 - `f166e7f` — feat(instruments): escape ledger + erosion trend surfaces (#10367) (#10375) (#10375) *(2026-07-23)*
 - `db16faf` — feat(hygiene): close-verification controller — reopen+retriage false auto-close, default-off (#10358) (#10364) (#10364) *(2026-07-23)*

@@ -276,3 +276,8 @@ docs/arch/generated/loop-fitness.md
 # mirroring loop-fitness.md above (#10367).
 docs/arch/generated/escape-ledger.md
 docs/arch/generated/erosion-trends.md
+
+# InterventionTallyLoop rewrites this into the live repo root every tick
+# (src/intervention_tally_loop.py) — a runtime report, not an arch-regen
+# artifact, mirroring escape-ledger.md above (#10369).
+docs/arch/generated/intervention-tally.md

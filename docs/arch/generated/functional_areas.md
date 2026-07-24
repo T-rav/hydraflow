@@ -59,6 +59,7 @@ flowchart LR
         trust_fleet_FailOpenMonitorLoop([FailOpenMonitorLoop])
         trust_fleet_FakeCoverageAuditorLoop([FakeCoverageAuditorLoop])
         trust_fleet_FlakeTrackerLoop([FlakeTrackerLoop])
+        trust_fleet_InterventionTallyLoop([InterventionTallyLoop])
         trust_fleet_LiveCorpusReplayLoop([LiveCorpusReplayLoop])
         trust_fleet_PrinciplesAuditLoop([PrinciplesAuditLoop])
         trust_fleet_RCBudgetLoop([RCBudgetLoop])
@@ -177,6 +178,7 @@ The trust-architecture hardening fleet (ADR-0045) — RC promotion gate, staging
 - `FailOpenMonitorLoop` — `src.fail_open_monitor_loop`
 - `FakeCoverageAuditorLoop` — `src.fake_coverage_auditor_loop`
 - `FlakeTrackerLoop` — `src.flake_tracker_loop`
+- `InterventionTallyLoop` — `src.intervention_tally_loop`
 - `LiveCorpusReplayLoop` — `src.live_corpus_replay_loop`
 - `PrinciplesAuditLoop` — `src.principles_audit_loop`
 - `RCBudgetLoop` — `src.rc_budget_loop`
