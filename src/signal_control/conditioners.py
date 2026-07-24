@@ -83,3 +83,40 @@ class Persistence:
     @property
     def streak(self) -> int:
         return self._streak
+
+
+@dataclass
+class Cusum:
+    """Two-sided CUSUM change-point detector.
+
+    Fires when the process sustainably shifts from ``mean`` — distinguishes a
+    real regime change from noise, which a fixed threshold cannot. ``slack``
+    (the reference value ``k``) is the per-step deadband absorbing normal noise.
+    """
+
+    threshold: float
+    slack: float = 0.0
+    _pos: float = field(default=0.0, init=False)
+    _neg: float = field(default=0.0, init=False)
+
+    def __post_init__(self) -> None:
+        if self.threshold <= 0.0:
+            raise ValueError(f"threshold must be > 0, got {self.threshold}")
+
+    def update(self, x: float, mean: float) -> bool:
+        dev = x - mean
+        self._pos = max(0.0, self._pos + dev - self.slack)
+        self._neg = min(0.0, self._neg + dev + self.slack)
+        fired = self._pos > self.threshold or self._neg < -self.threshold
+        if fired:
+            self._pos = 0.0
+            self._neg = 0.0
+        return fired
+
+    @property
+    def pos(self) -> float:
+        return self._pos
+
+    @property
+    def neg(self) -> float:
+        return self._neg

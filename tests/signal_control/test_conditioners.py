@@ -89,3 +89,27 @@ def test_persistence_fires_iff_streak_reaches_k(n, k):
     p = Persistence(k=k)
     fired = [p.update(True) for _ in range(n)]
     assert all(fired[i] == (i + 1 >= k) for i in range(n))
+
+
+from signal_control.conditioners import Cusum
+
+
+def test_cusum_ignores_zero_mean_noise():
+    c = Cusum(threshold=5.0, slack=0.5)
+    # Alternating +/-1 around mean 0 never accumulates past the slack.
+    fired = [c.update(1.0 if i % 2 == 0 else -1.0, mean=0.0) for i in range(200)]
+    assert not any(fired)
+
+
+def test_cusum_fires_on_sustained_upward_shift():
+    c = Cusum(threshold=5.0, slack=0.5)
+    fired = [c.update(2.0, mean=0.0) for _ in range(10)]  # sustained +2 vs mean 0
+    assert any(fired)
+
+
+def test_cusum_resets_after_firing():
+    c = Cusum(threshold=3.0, slack=0.0)
+    for _ in range(10):
+        c.update(2.0, mean=0.0)
+    # after a fire, accumulators are cleared
+    assert c.pos == 0.0 and c.neg == 0.0
