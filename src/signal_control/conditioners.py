@@ -34,3 +34,32 @@ class Ewma:
     @property
     def value(self) -> float | None:
         return self._value
+
+
+@dataclass
+class SchmittHysteresis:
+    """Two-threshold trigger: trip at ``trip_high``, clear only at ``clear_low``.
+
+    Kills flapping — a signal must decisively recover before the alarm resets.
+    """
+
+    trip_high: float
+    clear_low: float
+    _tripped: bool = field(default=False, init=False)
+
+    def __post_init__(self) -> None:
+        if not self.clear_low < self.trip_high:
+            raise ValueError(
+                f"clear_low ({self.clear_low}) must be < trip_high ({self.trip_high})"
+            )
+
+    def update(self, x: float) -> bool:
+        if not self._tripped and x >= self.trip_high:
+            self._tripped = True
+        elif self._tripped and x <= self.clear_low:
+            self._tripped = False
+        return self._tripped
+
+    @property
+    def tripped(self) -> bool:
+        return self._tripped
