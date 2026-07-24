@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# find_closed_stage_labeled_issues (#10394) reports CLOSED issues that still
+# carry an active pipeline-stage label — the #10314 GitHub-native `Closes #N`
+# auto-close gap that a label-scan dispatcher would re-queue. The dispatcher
+# seeds one closed issue at hydraflow-ready + hydraflow-fixed and asserts only
+# the active stage label is reported (the terminal hydraflow-fixed marker is
+# preserved, never flagged). No live timestamp, so no normalizer.
+adapter: github
+interaction: find_closed_stage_labeled_issues
+recorded_at: '2026-07-23T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: find_closed_stage_labeled_issues
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"issue": 701, "stale_labels": ["hydraflow-ready"]}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

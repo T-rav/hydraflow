@@ -68,3 +68,27 @@ class TestLabelDriftWatcherLoopScenario:
         assert "hydraflow-hitl" in issue.labels
         assert len(issue.comments) == 1
         assert "escalated_with_resolving_pr" in issue.comments[0]
+
+    async def test_closed_issue_with_stale_stage_label_is_stripped(self, tmp_path):
+        """#10394: a CLOSED issue that still carries an active stage label (the
+        #10314 GitHub-native ``Closes #N`` auto-close gap) gets the label
+        stripped by the watcher, so a label-scan dispatcher can't re-queue the
+        already-shipped work. Runs the real loop through MockWorld's FakeGitHub."""
+        world = MockWorld(tmp_path)
+        # Closed but still labelled hydraflow-ready — exactly the #10314 state.
+        world.github.add_issue(
+            10314,
+            "already shipped and closed",
+            "body",
+            labels=["hydraflow-ready"],
+            state="closed",
+        )
+
+        stats = await world.run_with_loops(["label_drift_watcher"], cycles=1)
+
+        assert stats["label_drift_watcher"]["closed_stale_detected"] == 1
+        assert stats["label_drift_watcher"]["closed_stale_stripped"] == 1
+        issue = world.github.issue(10314)
+        assert "hydraflow-ready" not in issue.labels
+        assert len(issue.comments) == 1
+        assert "10394" in issue.comments[0]
