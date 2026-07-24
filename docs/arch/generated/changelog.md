@@ -6,6 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `055267e` — fix(adr): single-colon ADR-0049 citations so drift coverage parses (#10481) (#10481) *(2026-07-24)*
+- `6c3cb69` — feat(adr): nudge bare shared-infra citations toward :Symbol granularity (#10479) (#10479) *(2026-07-24)*
+- `ee56677` — fix(gc): guard active auto-agent worktrees from stale-worktree GC (#10476) (#10476) *(2026-07-24)*
+- `7150d37` — Fixes #10457: Fleet-batch ADR-drift triage auto-close (#10474) (#10474) *(2026-07-24)*
 - `23a02b7` — feat(ul): term-proposer batch — 2 drafts (#10465) (#10465) *(2026-07-24)*
 - `25b0df2` — fix(ul): drop over-broad prose aliases from CreditExhaustedError term (#10466) (#10466) *(2026-07-24)*
 - `c0821c9` — Fixes #10403: Erosion: symbol `append` scattered across 4 modules (#10446) (#10446) *(2026-07-24)*
