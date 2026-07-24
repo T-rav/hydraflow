@@ -1,0 +1,92 @@
+// Issue #10440 — ADR double-colon source-file citation is unparseable (dead drift coverage)
+// Topology of how ADR source-file citations flow into the P2 drift gate,
+// and where an unparseable `::` citation silently drops coverage.
+
+specification {
+  element system
+  element component
+  element file
+  element regex
+  element gate
+  tag bug
+  tag fix
+  tag guard
+}
+
+model {
+  adrs = system 'ADR corpus' {
+    description 'docs/adr/*.md — Accepted/Proposed ADRs cite source files as `src/foo.py:Symbol`'
+
+    adr0049 = file 'ADR-0049 md' {
+      description 'trust-loop-kill-switch-convention.md — cites base_background_loop.py + bg_worker_manager.py'
+      #bug
+    }
+    adr0004 = file 'ADR-0004 md' {
+      description 'agent-cli-as-runtime.md — line 34 cites agent_cli.py:build_agent_command()'
+      #bug
+    }
+  }
+
+  index = system 'adr_index.py' {
+    description 'Parses ADRs into the ADR model consumed by the drift gate'
+
+    strictRe = regex 'STRICT _SOURCE_FILE_CITATION_RE' {
+      description '`(src/[^`:\\s]+\\.py)(?::([A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*))?` — single optional :Symbol tail; a `::` or `()` tail matches NOTHING'
+    }
+    parse = component 'parse_adr_file / scan_adr_directory' {
+      description 'Runs strictRe.findall over raw text -> ADR.source_files + ADR.source_symbols'
+    }
+    model_sf = component 'ADR.source_files / source_symbols' {
+      description 'frozenset of cited src/ paths + per-file symbol sets'
+    }
+  }
+
+  drift = gate 'P2 drift gate' {
+    description 'adr_drift.py adrs_touching(path) — fires when a PR touches a file cited by a live ADR. Absent path => gate can NEVER fire.'
+  }
+
+  citExist = system 'test_adr_source_citations_exist.py' {
+    description 'EXISTING ratchet — iterates PARSED source_files only; an unparseable token never enters its worklist -> the gap this issue closes'
+  }
+
+  newGuard = system 'NEW unparseable-citation ratchet' {
+    description 'lenient candidate regex over raw ADR text vs strictRe.fullmatch parity; skips globs; empty grandfather; fails closed'
+    #guard
+  }
+
+  regr = system 'tests/regressions/test_issue_10440.py' {
+    description 'ADR-0049-specific regression: base_background_loop.py must land in source_files; no `.py::` token'
+    #fix
+  }
+
+  // data flow
+  adr0049 -> strictRe 'raw `::LoopDeps` / `::BGWorkerManager.is_enabled` -> UNMATCHED'
+  adr0004 -> strictRe 'raw `build_agent_command()` -> UNMATCHED (parens)'
+  strictRe -> parse 'findall'
+  parse -> model_sf 'populates'
+  model_sf -> drift 'keys the gate'
+  model_sf -> citExist 'checks parsed paths only (blind to dead tokens)'
+  adr0049 -> regr 'asserts subject module present'
+  adrs -> newGuard 'raw-text token parity'
+  newGuard -> strictRe 'fullmatch each candidate'
+}
+
+views {
+  view context {
+    title 'Issue #10440 — dead-citation flow (context)'
+    include *
+    autoLayout TopBottom
+  }
+
+  view brokenPath {
+    title 'Where coverage silently drops'
+    include adr0049, adr0004, strictRe, parse, model_sf, drift, citExist
+    autoLayout LeftRight
+  }
+
+  view fix {
+    title 'Fix: repoint citations + install token-parity ratchet'
+    include adrs, adr0049, adr0004, strictRe, newGuard, regr, model_sf, drift
+    autoLayout TopBottom
+  }
+}

@@ -31,7 +31,7 @@ on the configured `planner_tool` / `implement_tool` / `review_tool`. HydraFlow
 constructs the prompt, passes it to the subprocess, streams stdout, and parses
 structured markers from the transcript.
 
-`src/agent_cli.py:build_agent_command()` constructs the correct invocation for
+`src/agent_cli.py:build_agent_command` constructs the correct invocation for
 the configured tool. The same `BaseRunner._execute()` method handles streaming
 for all tools.
 

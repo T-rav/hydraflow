@@ -71,8 +71,8 @@ The dark-factory review agent dispatched for any PR >500 lines touching `src/*_l
 
 ## Related
 
-- `src/base_background_loop.py::LoopDeps` — the dataclass that carries `enabled_cb` to each loop.
-- `src/bg_worker_manager.py::BGWorkerManager.is_enabled` — the backing implementation.
+- `src/base_background_loop.py:LoopDeps` — the dataclass that carries `enabled_cb` to each loop.
+- `src/bg_worker_manager.py:BGWorkerManager.is_enabled` — the backing implementation.
 - `src/ui/src/constants.js::EDITABLE_INTERVAL_WORKERS` — the list of loops the System tab exposes for toggling.
 - `tests/test_*_loop.py` — test fixtures that stub `enabled_cb` to exercise the disabled branch.
 

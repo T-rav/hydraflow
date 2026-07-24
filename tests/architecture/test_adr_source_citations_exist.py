@@ -26,13 +26,25 @@ Scope decisions:
   * ``_GRANDFATHER`` holds not-yet-repointed dead paths so the ratchet can be
     landed green and burned down later. It is empty today (everything
     resolvable was repointed in #9649) and may only SHRINK.
+
+Issue #10440 closed a gap in the ratchet above: it only ever iterated
+*parsed* citations (``adr.source_files``), so a citation that fails to
+parse at all — a doubled ``::``, a trailing ``()`` — was invisible to it.
+``test_no_unparseable_source_citations`` below extracts every backtick
+`` `src/...py...` `` -shaped token from a live ADR's raw text with a
+deliberately looser regex, then asserts each one fullmatches
+``adr_index._SOURCE_FILE_CITATION_RE`` (the strict runtime regex). A token
+that fails is dead on arrival: it never reaches ``source_files``, so the
+drift gate silently never fires for it. ``_UNPARSEABLE_GRANDFATHER`` mirrors
+``_GRANDFATHER`` above (empty by design; may only shrink).
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
-from adr_index import scan_adr_directory
+from adr_index import _SOURCE_FILE_CITATION_RE, scan_adr_directory
 
 # Paths deliberately absent from the tree, documented by their citing ADR.
 _PERMANENT_ALLOWLIST: frozenset[str] = frozenset(
@@ -49,6 +61,16 @@ _PERMANENT_ALLOWLIST: frozenset[str] = frozenset(
 _GRANDFATHER: frozenset[str] = frozenset()
 
 _LIVE_STATUSES = frozenset({"Accepted", "Proposed"})
+
+# Deliberately looser than adr_index._SOURCE_FILE_CITATION_RE: matches ANY
+# backtick-wrapped span that starts with `src/` and contains `.py`, so it
+# also catches malformed citations (a doubled `::`, a trailing `()`) that
+# the strict regex silently refuses to match at all.
+_LENIENT_SRC_TOKEN_RE = re.compile(r"`(src/[^`]*\.py[^`]*)`")
+
+# Not-yet-repointed unparseable tokens. May only SHRINK. Empty by design
+# (#10440 repointed every token found when this ratchet was introduced).
+_UNPARSEABLE_GRANDFATHER: frozenset[str] = frozenset()
 
 
 def _is_glob(path: str) -> bool:
@@ -69,6 +91,30 @@ def _cited_paths_by_adr(adr_dir: Path) -> list[tuple[int, str]]:
             if _is_glob(path):
                 continue
             pairs.append((adr.number, path))
+    return pairs
+
+
+def _adr_number_from_filename(name: str) -> int | None:
+    match = re.match(r"(\d{4})-", name)
+    return int(match.group(1)) if match else None
+
+
+def _unparseable_tokens_by_adr(adr_dir: Path) -> list[tuple[int, str]]:
+    """(adr_number, raw_token) for every lenient `src/...py...` token in a
+    live ADR's raw text that does NOT fullmatch the strict citation regex."""
+    statuses = {adr.number: adr.status for adr in scan_adr_directory(adr_dir)}
+    pairs: list[tuple[int, str]] = []
+    for path in sorted(adr_dir.glob("*.md")):
+        number = _adr_number_from_filename(path.name)
+        if number is None or statuses.get(number) not in _LIVE_STATUSES:
+            continue
+        text = path.read_text()
+        for token in _LENIENT_SRC_TOKEN_RE.findall(text):
+            if _is_glob(token):
+                continue
+            if _SOURCE_FILE_CITATION_RE.fullmatch(f"`{token}`"):
+                continue
+            pairs.append((number, token))
     return pairs
 
 
@@ -127,4 +173,37 @@ def test_permanent_allowlist_entries_are_cited_by_a_live_adr(
     assert orphaned == [], (
         "These permanent-allowlist paths are no longer cited by any live ADR — "
         "delete them from _PERMANENT_ALLOWLIST:\n  " + "\n  ".join(orphaned)
+    )
+
+
+def test_no_unparseable_source_citations(real_repo_root: Path) -> None:
+    """No live ADR may contain a `src/...py`-shaped citation token that fails
+    to fullmatch the strict runtime regex (#10440)."""
+    adr_dir = real_repo_root / "docs" / "adr"
+    unparseable = [
+        (number, token)
+        for number, token in _unparseable_tokens_by_adr(adr_dir)
+        if token not in _UNPARSEABLE_GRANDFATHER
+    ]
+    assert unparseable == [], (
+        "Live ADRs contain backtick `src/...py` tokens that fail to parse as "
+        "source-file citations (e.g. a doubled `::` or a trailing `()`). An "
+        "unparseable citation silently drops out of source_files, so the P2 "
+        "drift gate can never fire for it. Fix the citation syntax (a single "
+        "`:Symbol` tail, no trailing parens).\n  "
+        + "\n  ".join(f"ADR-{n:04d}: `{t}`" for n, t in unparseable)
+    )
+
+
+def test_unparseable_grandfather_entries_still_unparseable(
+    real_repo_root: Path,
+) -> None:
+    """The grandfather list may only shrink: an entry that now parses cleanly
+    must be removed."""
+    adr_dir = real_repo_root / "docs" / "adr"
+    still_bad = {token for _number, token in _unparseable_tokens_by_adr(adr_dir)}
+    resolved = sorted(_UNPARSEABLE_GRANDFATHER - still_bad)
+    assert resolved == [], (
+        "These grandfathered unparseable tokens now parse cleanly — remove "
+        "them from _UNPARSEABLE_GRANDFATHER:\n  " + "\n  ".join(resolved)
     )
