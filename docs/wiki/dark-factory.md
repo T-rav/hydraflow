@@ -87,8 +87,8 @@ context for free) OR replicate explicitly:
   shouldn't burn the per-issue attempt cap.
 - **`reraise_on_credit_or_bug(exc)`** in the broad `except` to propagate
   `CreditExhaustedError` and terminal `AuthenticationError` from
-  `subprocess_util`. Without this, the loop continues ticking against an
-  exhausted billing signal.
+  `subprocess_util`. Without this, the loop continues ticking after a
+  `CreditExhaustedError` instead of pausing.
 - **`PromptTelemetry.record(source=...)`** on every attempt for cost rollup
   attribution. Use a unique `source` string so the dashboard can break out
   spend per runner.
