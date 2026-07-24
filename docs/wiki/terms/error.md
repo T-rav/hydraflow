@@ -6,12 +6,12 @@ bounded_context: "shared-kernel"
 code_anchor: "src/harness_insights.py:FailureRecord"
 aliases: []
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KT3WKPR5MN8QJ14CF77W6K3"}, {"kind": "depends_on", "target": "01KY4QF8BE4Y5782543MPQNDQ0"}]
-evidence: []
+evidence: ["01KQP0HK6TCK1CTRYANSJ8NRSH"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T02:34:42.393475+00:00"
-updated_at: "2026-07-22T15:07:38.028195+00:00"
+updated_at: "2026-07-24T03:43:34.624929+00:00"
 ---
 
 ## Definition
