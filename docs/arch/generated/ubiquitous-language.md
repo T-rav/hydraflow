@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_66 terms across 3 bounded contexts._
+_69 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -178,6 +178,18 @@ A frozen value object that bundles raw infrastructure secrets — GitHub token, 
 **Invariants:**
 - Immutable once constructed (frozen=True); no field may be mutated after build.
 - Never serialized as part of domain state — kept separate from HydraFlowConfig by design.
+
+## CreditExhaustedError
+
+**Kind:** `domain_event` · **Context:** `shared-kernel` · **Anchor:** `src/subprocess_util.py:CreditExhaustedError` · **Confidence:** `accepted`
+**Aliases:** `credit exhaustion`, `exhausted billing signal`, `billing-limit signal`
+
+CreditExhaustedError signals that a gh/git/claude subprocess call failed because the underlying API billing account (Anthropic, or a one-shot OpenAI-compatible backend such as openrouter/zai/kimi) has run out of credits. It carries the billing-provider identity and an optional resume_at UTC reset time so the orchestrator can scope the resulting pause to only the loops routed to that provider — a Claude cap must not halt z.ai/kimi background workers and vice-versa. Every subprocess-spawning runner's broad except block must route this exception through reraise_on_credit_or_bug so it halts attempt-budget consumption instead of being silently swallowed and retried against an exhausted billing signal.
+
+**Invariants:**
+- Subprocess-spawning runners MUST call reraise_on_credit_or_bug(exc) in their broad except block, or CreditExhaustedError is silently eaten and the loop burns attempt budget against an exhausted billing signal.
+- Carries provider (defaulting to "anthropic") so the orchestrator scopes the credit pause to only loops routed to the same provider, never cross-halting other providers.
+- resume_at, when parseable from subprocess error output, tells the orchestrator when credits are expected to reset.
 
 ## DedupStore
 
@@ -698,6 +710,18 @@ A source-agnostic work item abstraction representing tasks from any source (GitH
 - URLs validated as empty or http(s):// via AfterValidator
 - Timestamps validated as empty or ISO 8601 format
 
+## Term
+
+**Kind:** `entity` · **Context:** `shared-kernel` · **Anchor:** `src/ubiquitous_language.py:Term` · **Confidence:** `accepted`
+**Aliases:** `ul term`, `glossary term`
+
+Term is the first-class domain entity representing a single ubiquitous-language concept in HydraFlow: a canonical name, kind (aggregate/entity/service/loop/etc.), bounded context, one-paragraph definition, code anchor, and typed relations to other terms. Each Term is persisted as one markdown file under docs/wiki/terms/, carries a proposed → accepted → deprecated confidence lifecycle, and is grown and groomed by the UL caretaker loops (TermProposerLoop, EdgeProposerLoop, EntryEvidenceLoop, TermPrunerLoop) that keep the glossary a living artifact per ADR-0053.
+
+**Invariants:**
+- id defaults to a freshly generated ULID, giving each Term a stable identity independent of its name
+- confidence moves through a closed lifecycle: proposed → accepted → deprecated
+- code_anchor must resolve to a module:symbol pair so the term stays traceable to real code
+
 ## TermPrunerLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/term_pruner_loop.py:TermPrunerLoop` · **Confidence:** `accepted`
@@ -710,6 +734,16 @@ Caretaker background loop that autonomously prunes stale terms from the ubiquito
 - Opens at most one PR per tick, bundling all eligible terms into a single `hydraflow-ul-deprecated`-labelled PR.
 - `ReviewPhase` skips routing for PRs carrying `TERM_PRUNER_PR_LABEL` so the deprecation PR is not sent through the agent pipeline.
 - Companion to `TermProposerLoop`: together they implement the two-tick grow/prune cycle that keeps `make lint-ul` anchor-resolution green without human intervention.
+
+## TermStore
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/ubiquitous_language.py:TermStore` · **Confidence:** `accepted`
+**Aliases:** `term repository`
+
+TermStore is the persistence service for the ubiquitous-language glossary — it reads and lists Term entities from their one-file-per-term markdown representation under docs/wiki/terms/, giving the UL caretaker loops (TermProposerLoop, EdgeProposerLoop, EntryEvidenceLoop, TermPrunerLoop) a single canonical way to load and enumerate the term corpus rather than each loop parsing term files itself.
+
+**Invariants:**
+- Each Term corresponds to exactly one markdown file under docs/wiki/terms/, following the frontmatter + prose format written by dump_term_file
 
 ## TribalWikiStore
 
