@@ -149,6 +149,16 @@ logger = logging.getLogger("hydraflow.review_phase")
 # fires (#8988).
 _INSIGHT_DEDUP_WINDOW = timedelta(hours=1)
 
+# #10371: the ADR-review surface has no unified diff — the ADR draft lives in
+# the issue body, so ``judge_independence.classify_diff`` reads no ``+++ b/``
+# headers and would return "unclassed", silently denying the ADR the
+# independent verdict it requires. But reviewing an ADR is the canonical
+# STRUCTURAL (ADR-touching) change in the #10371 spec, so the surface declares
+# the ADR corpus path explicitly for blast-radius classification. The literal
+# ``docs/adr/`` substring is what ``judge_independence`` matches for the
+# STRUCTURAL class (see ``_STRUCTURAL_SUBSTRINGS``).
+_ADR_REVIEW_CLASSIFICATION_PATHS: tuple[str, ...] = ("docs/adr/",)
+
 
 class ReviewPhase:
     """Runs reviewer agents on PRs, merging approved ones inline."""
@@ -1496,6 +1506,7 @@ class ReviewPhase:
         issue_number: int,
         log_pr_number: int | None = None,
         lens: Literal["correctness", "security", "spec"] | None = None,
+        classification_paths: list[str] | None = None,
     ) -> PostVerifyResult | None:
         """Run a single post-verify advisor invocation for ``surface``.
 
@@ -1525,6 +1536,13 @@ class ReviewPhase:
         receives the PR number. When unset, both fall back to
         ``issue_number`` — the convention for surfaces with no PR (ADR
         review, wiki ingest).
+
+        ``classification_paths`` (#10371) is threaded into
+        :class:`PostVerifyInput` for blast-radius classification on surfaces
+        whose ``diff`` is not a unified diff (no ``+++ b/`` headers) — most
+        importantly ``adr_review``, whose ADR draft lives in the issue body.
+        Defaults to ``None`` (empty), which keeps the ordinary diff-only
+        classification path unchanged.
         """
         from review_advisor import (  # noqa: PLC0415
             PostVerifyAdvisor,
@@ -1598,6 +1616,7 @@ class ReviewPhase:
                     issue_number=issue_number,
                     lens=lens,
                     human_guidance=human_guidance,
+                    classification_paths=classification_paths or [],
                 )
             )
         except Exception as exc:
@@ -1951,6 +1970,11 @@ class ReviewPhase:
             executor_verdict_summary=executor_verdict_summary,
             pre_flight_plan=self._advisor_pre_flight_plan.get(("adr_review", issue.id)),
             issue_number=issue.id,
+            # #10371: the ADR body carries no unified-diff headers; declare the
+            # ADR corpus path so the change classifies as STRUCTURAL (and, with
+            # the independence flag on, routes to an independent judge family)
+            # instead of silently falling through as "unclassed".
+            classification_paths=list(_ADR_REVIEW_CLASSIFICATION_PATHS),
         )
         if pv_result is None or pv_result.verdict != "VETO":
             return None

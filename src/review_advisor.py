@@ -165,6 +165,17 @@ class PostVerifyInput(BaseModel):
     # via :func:`fenced_steering_guidance`. Empty when the feature is off
     # or no guidance was posted — the fold is then a no-op.
     human_guidance: str = ""
+    # #10371 blast-radius classification hint. Extra paths unioned with the
+    # paths parsed from ``diff`` when classifying the change (judge-independence
+    # budget). Load-bearing for surfaces whose "diff" is NOT a unified diff and
+    # therefore carries no ``+++ b/`` / ``diff --git`` headers for
+    # ``classify_diff`` to read — most importantly the ADR-review surface, where
+    # the ADR draft lives in the issue body. Reviewing an ADR is the canonical
+    # STRUCTURAL (ADR-touching) change per the #10371 spec, so the caller
+    # declares the paths the review pertains to rather than letting a header-less
+    # body silently classify as "unclassed" (which would deny it an independent
+    # verdict). Empty (default) keeps the ordinary path byte-for-byte unchanged.
+    classification_paths: list[str] = Field(default_factory=list)
 
 
 # Signals shorter than this are too generic to validate against — short
@@ -253,19 +264,13 @@ def resolve_model(surface: str, role: str, default: str) -> str:
 # Judge-independence budget + fail-visible dispatch (#10371). The LEDGER and
 # dashboard ALARM are always live (a fail-open must never be silent). The two
 # behaviours that change a MERGE OUTCOME are feature-flagged OFF by default so
-# they are opt-in until validated:
-#   * routing a classed change's verdict to an independent model family
-#     (HYDRAFLOW_JUDGE_INDEPENDENCE_ENABLED)
-#   * the self-modification fail-closed STOP / HITL escalation
-#     (HYDRAFLOW_JUDGE_SELF_MOD_FAIL_CLOSED)
-def env_judge_independence_enabled() -> bool:
-    """Master switch for routing classed changes to an independent judge family."""
-    return _env_truthy(os.environ.get("HYDRAFLOW_JUDGE_INDEPENDENCE_ENABLED")) is True
-
-
-def env_self_mod_fail_closed_enabled() -> bool:
-    """Switch for the self-modification fail-closed STOP + HITL escalation."""
-    return _env_truthy(os.environ.get("HYDRAFLOW_JUDGE_SELF_MOD_FAIL_CLOSED")) is True
+# they are opt-in until validated: routing a classed change's verdict to an
+# independent model family, and the self-modification fail-closed STOP / HITL
+# escalation. The single source of truth for both flags is the config layer
+# (``HydraFlowConfig.judge_independence_enabled`` /
+# ``judge_self_mod_fail_closed_enabled``, env-mapped in ``config.py``); the
+# resolved booleans are threaded into :class:`PostVerifyAdvisor` at construction
+# by ``review_phase``. This module never reads the env vars directly.
 
 
 class PreFlightTrigger:
@@ -643,7 +648,14 @@ class PostVerifyAdvisor:
         # #10371: classify the diff's blast radius once. Unclassed changes take
         # exactly the pre-#10371 path (the spec's non-goal: the ordinary review
         # path is untouched). Classification is cheap and side-effect-free.
+        # ``classification_paths`` (default empty) is unioned in for surfaces
+        # whose "diff" is not a unified diff — e.g. the ADR-review surface, whose
+        # header-less ADR body would otherwise classify as "unclassed" and be
+        # denied the independent verdict it (as a structural/ADR-touching change)
+        # requires.
         classes = ji.classify_diff(inp.diff)
+        if inp.classification_paths:
+            classes = classes | ji.classify_paths(inp.classification_paths)
         # Independence routing (flagged). Resolves the model this pass dispatches
         # to (an independent family for classed changes when available) and may
         # short-circuit self-modification changes to a HITL escalation when no
