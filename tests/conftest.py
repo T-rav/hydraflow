@@ -310,9 +310,9 @@ def _restore_phase_utils_memory_seams():
     attribute is left pointing at a stale ``AsyncMock``, so a LATER test's own
     ``with patch(...)`` never rebinds the value the code under test resolves, and
     that test's mock is "awaited 0 times". Snapshot + restore contains the leak
-    regardless of which test caused it (mirrors ``_restore_auto_pr_seams`` in
-    tests/scenarios/conftest.py). Fixes the whole memory-suggestion category
-    under -n auto (#10119 and the phase_utils flake).
+    regardless of which test caused it (mirrors ``_restore_auto_pr_seams``
+    below). Fixes the whole memory-suggestion category under -n auto
+    (#10119 and the phase_utils flake).
     """
     import phase_utils
 
