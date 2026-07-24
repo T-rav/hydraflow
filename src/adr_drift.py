@@ -86,7 +86,11 @@ def _split_path_symbol(entry: str) -> tuple[str, str | None]:
 #     as dependency pointers by many review/loop ADRs — were the current
 #     high-churn gap (~15 FPs across #10388/#10405/#10406, plus the
 #     base_background_loop FP class #10441/#10443). The systemic churn-derived
-#     replacement for this hand-maintained allowlist is tracked in #10456.
+#     replacement for this hand-maintained allowlist landed in #10456 — see
+#     :func:`_bare_citation_fanout` and the ``fanout_threshold`` path in
+#     :func:`_citation_drifts`, which suppress a bare citation once enough
+#     live ADRs bare-cite the same module, no hand-edit required. The two
+#     paths are OR'd: this allowlist still applies independently.
 _SHARED_INFRA_MODULES = frozenset(
     {
         "src/config.py",
@@ -116,7 +120,27 @@ _SHARED_INFRA_MODULES = frozenset(
 )
 
 
-def _citation_drifts(adr: ADR, path: str, changed_symbols: frozenset[str]) -> bool:
+def _bare_citation_fanout(path: str, adrs: Iterable[ADR]) -> int:
+    """Count how many of *adrs* cite *path* bare (empty cited-symbol set).
+
+    A symbol-qualified citation for the same file doesn't count — only a
+    bare citation is subject to the any-touch-drifts rule this fan-out
+    gates, so only bare citations should count toward the threshold. This
+    is the churn signal behind the derived shared-infra suppression
+    (#10456): a ``src/`` module that many live ADRs bare-cite is, by that
+    fan-out alone, a dependency pointer rather than any one ADR's decision.
+    """
+    return sum(1 for adr in adrs if not adr.source_symbols.get(path, frozenset()))
+
+
+def _citation_drifts(
+    adr: ADR,
+    path: str,
+    changed_symbols: frozenset[str],
+    *,
+    fanout: int = 0,
+    fanout_threshold: int | None = None,
+) -> bool:
     """Decide whether *path* drifts *adr* given the symbols changed in it.
 
     Symbol-aware (#9176):
@@ -126,17 +150,28 @@ def _citation_drifts(adr: ADR, path: str, changed_symbols: frozenset[str]) -> bo
       behaviour the P2 gate and the existing drift tests rely on — except
       for the cross-cutting :data:`_SHARED_INFRA_MODULES`, where a bare
       citation is treated as a dependency mention and does *not* drift
-      (it must be cited at ``:Symbol`` granularity to drift).
+      (it must be cited at ``:Symbol`` granularity to drift). A bare
+      citation is *also* suppressed when *path* is bare-cited by at least
+      *fanout_threshold* live ADRs (#10456) — a churn-derived equivalent
+      of the manual allowlist that self-derives suppression for the next
+      high-churn shared module without a hand-edit. The two paths are
+      OR'd: either the allowlist OR the fan-out threshold suppresses.
+      ``fanout_threshold=None`` disables the derived suppression, leaving
+      only the manual allowlist (byte-identical prior behaviour).
     * **Symbol-qualified citation** (non-empty cited-symbol set) → drifts
       only when a symbol the diff reports as changed for this file
       matches one of the cited symbols.  A file-only diff (no symbol
       evidence) therefore does *not* drift a symbol-granular citation, so
       unrelated churn in a high-churn shared module no longer flags the
-      ADR — the systemic false positive behind #9176.
+      ADR — the systemic false positive behind #9176. Fan-out is
+      irrelevant here: a genuinely symbol-owning ADR still drifts
+      regardless of how many *other* ADRs bare-cite the same file.
     """
     cited_symbols = adr.source_symbols.get(path, frozenset())
     if not cited_symbols:
-        return path not in _SHARED_INFRA_MODULES
+        if path in _SHARED_INFRA_MODULES:
+            return False
+        return not (fanout_threshold is not None and fanout >= fanout_threshold)
     return bool(cited_symbols & changed_symbols)
 
 
@@ -144,6 +179,8 @@ def compute_drift(
     adr_index: ADRIndex,
     pr_number: int,
     changed_files: Iterable[str],
+    *,
+    shared_infra_fanout_threshold: int | None = None,
 ) -> list[DriftFinding]:
     """Return drift findings for one PR's file diff.
 
@@ -153,6 +190,13 @@ def compute_drift(
     any change to the file.  ``changed_files`` entries may optionally carry
     a ``:Symbol`` tail to supply symbol evidence; bare paths — the
     production case — supply none.
+
+    ``shared_infra_fanout_threshold`` (#10456): when given, a ``src/`` path
+    bare-cited by at least this many live (Accepted/Proposed) ADRs is
+    treated as shared infra — the same suppression as
+    :data:`_SHARED_INFRA_MODULES` but derived from citation fan-out instead
+    of a hand-maintained list. ``None`` (the default) disables this derived
+    suppression, preserving prior behaviour exactly.
 
     Findings are sorted by ADR number for deterministic output.
     """
@@ -172,8 +216,15 @@ def compute_drift(
     adr_hits: dict[int, tuple[ADR, list[str]]] = {}
     for path, adrs in by_path.items():
         changed_symbols = frozenset(changed_by_path.get(path, set()))
+        fanout = _bare_citation_fanout(path, adrs)
         for adr in adrs:
-            if not _citation_drifts(adr, path, changed_symbols):
+            if not _citation_drifts(
+                adr,
+                path,
+                changed_symbols,
+                fanout=fanout,
+                fanout_threshold=shared_infra_fanout_threshold,
+            ):
                 continue
             slot = adr_hits.setdefault(adr.number, (adr, []))
             slot[1].append(path)
@@ -231,6 +282,8 @@ def _aggregate_by_adr(findings: Iterable[DriftFinding]) -> list[AdrRollupEntry]:
 def compute_drift_by_adr(
     adr_index: ADRIndex,
     pr_diffs: Iterable[tuple[int, Iterable[str]]],
+    *,
+    shared_infra_fanout_threshold: int | None = None,
 ) -> list[AdrRollupEntry]:
     """Group per-PR drift findings into one rollup entry per drifted ADR.
 
@@ -241,11 +294,19 @@ def compute_drift_by_adr(
     A PR whose diff includes the ADR's own file is silently skipped for
     that ADR — drift on that pair is considered resolved by the same PR
     (matches ``compute_drift``'s per-PR semantics).
+
+    ``shared_infra_fanout_threshold`` is threaded straight through to each
+    :func:`compute_drift` call — see its docstring (#10456).
     """
     return _aggregate_by_adr(
         finding
         for pr_number, changed_files in pr_diffs
-        for finding in compute_drift(adr_index, pr_number, changed_files)
+        for finding in compute_drift(
+            adr_index,
+            pr_number,
+            changed_files,
+            shared_infra_fanout_threshold=shared_infra_fanout_threshold,
+        )
     )
 
 
@@ -275,6 +336,7 @@ def partition_fleet_drift(
     pr_diffs: Iterable[tuple[int, Iterable[str]]],
     *,
     fleet_threshold: int,
+    shared_infra_fanout_threshold: int | None = None,
 ) -> tuple[list[AdrRollupEntry], list[FleetDriftBatch]]:
     """Split drift findings into per-ADR rollups + per-PR fleet batches (#9662).
 
@@ -289,6 +351,9 @@ def partition_fleet_drift(
     file is in the PR's diff contributes no finding and does not count
     toward the threshold. Batches are sorted by PR number; entries within a
     batch by ADR number (deterministic output).
+
+    ``shared_infra_fanout_threshold`` is threaded straight through to each
+    :func:`compute_drift` call — see its docstring (#10456).
     """
     if fleet_threshold < 2:
         raise ValueError(
@@ -298,7 +363,12 @@ def partition_fleet_drift(
     per_adr_findings: list[DriftFinding] = []
     batches: list[FleetDriftBatch] = []
     for pr_number, changed_files in pr_diffs:
-        findings = compute_drift(adr_index, pr_number, changed_files)
+        findings = compute_drift(
+            adr_index,
+            pr_number,
+            changed_files,
+            shared_infra_fanout_threshold=shared_infra_fanout_threshold,
+        )
         # ``compute_drift`` emits at most one finding per ADR, sorted by ADR
         # number — so ``len(findings)`` IS the distinct-ADR count.
         if len(findings) >= fleet_threshold:
