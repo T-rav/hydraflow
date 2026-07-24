@@ -264,6 +264,21 @@ _JUSTIFIED_NEW_LOOPS: dict[str, str] = {
         "rejected (pre-merge) and EscapeLedgerLoop host rejected (mechanical "
         "scanner, no sampling cadence) — cross-links into the ledger instead"
     ),
+    # SecondOrderVitalsLoop (#10373): the capstone residual monitor computing
+    # the JOINT green-while-dying condition across all four instruments. There
+    # is no workstream host by construction — it is the ONLY component that
+    # reads every instrument's ledger at once and correlates them; hosting it on
+    # any single instrument's loop (escape/intervention/audit/independence)
+    # would fuse the very signals it must keep independent, and no pipeline phase
+    # sees the cross-instrument residual. It has its own per-series baseline
+    # state + evaluation cadence + never-batched alarm — genuinely standalone
+    # cross-cutting cadence work.
+    "SecondOrderVitalsLoop": (
+        "cross-instrument residual monitor correlating all 4 instrument ledgers "
+        "against the primary gate; every single-instrument-loop host rejected "
+        "(would fuse the independent signals) and no phase sees the joint "
+        "residual — its own per-series baselines + never-batched alarm"
+    ),
 }
 
 

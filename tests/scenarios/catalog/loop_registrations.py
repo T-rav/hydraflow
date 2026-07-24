@@ -296,6 +296,57 @@ def _build_intervention_tally(ports: dict[str, Any], config: Any, deps: Any) -> 
     )
 
 
+def _build_second_order_vitals(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build SecondOrderVitalsLoop for scenarios (#10373).
+
+    ``state`` defaults to a MagicMock backing the per-series observation
+    histories + last-verdict in an in-memory store (a fresh install starts with
+    empty histories, so the first ticks degrade honestly to ``n-of-5
+    reporting``). The primary-health gate is injected via
+    ``second_order_vitals_primary_health`` so the scenario controls the green
+    precondition without a git/telemetry dependency; default is a green reading.
+    The loop reads the four instruments' ledgers from ``config.diagnostics_dir``
+    on disk and files its single divergence alarm through the ``github`` port —
+    see ``tests/scenarios/test_second_order_vitals_scenario.py``.
+    """
+    from second_order_vitals_loop import SecondOrderVitalsLoop  # noqa: PLC0415
+    from vitals.observe import PrimaryHealth  # noqa: PLC0415
+
+    state = ports.get("second_order_vitals_state")
+    if state is None:
+        state = MagicMock()
+        store: dict[str, Any] = {"history": {}, "verdict": ""}
+
+        state.get_second_order_vitals_series_history.side_effect = lambda: {
+            k: list(v) for k, v in store["history"].items()
+        }
+        state.set_second_order_vitals_series_history.side_effect = lambda h: (
+            store.__setitem__("history", {k: list(v) for k, v in h.items()})
+        )
+        state.get_second_order_vitals_last_verdict.side_effect = lambda: store[
+            "verdict"
+        ]
+        state.set_second_order_vitals_last_verdict.side_effect = lambda v: (
+            store.__setitem__("verdict", v)
+        )
+        ports["second_order_vitals_state"] = state
+
+    reader = ports.get("second_order_vitals_primary_health")
+    if reader is None:
+        # Default: primary health GREEN (the green-while-dying precondition), so
+        # a scenario that seeds adverse drift produces watch/diverging.
+        def reader(_now: Any, _window_days: int) -> PrimaryHealth:
+            return PrimaryHealth(ci_pass_rate=1.0, merge_throughput=100)
+
+    return SecondOrderVitalsLoop(
+        config=config,
+        pr_manager=ports["github"],
+        state=state,
+        deps=deps,
+        primary_health_reader=reader,
+    )
+
+
 def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build IssueRefinementLoop for scenarios (#9957).
 
@@ -2181,6 +2232,7 @@ _BUILDERS: dict[str, Any] = {
     "escape_ledger": _build_escape_ledger,
     "intervention_tally": _build_intervention_tally,
     "sampled_audit": _build_sampled_audit,
+    "second_order_vitals": _build_second_order_vitals,
     "issue_refinement": _build_issue_refinement,
     "dependabot_merge": _build_dependabot_merge,
     "pr_unsticker": _build_pr_unsticker,

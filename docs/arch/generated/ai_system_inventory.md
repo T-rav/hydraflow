@@ -56,7 +56,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 | `HYDRAFLOW_ADR_DRIFT_RESOLVER` | `adr_drift_resolver_tool` | `adr_drift_resolver_model` |
 
-## Background loops (63)
+## Background loops (64)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -110,6 +110,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `runs_gc` | `RunsGCLoop` | Caretaking | — | — | — | Purges expired pipeline run artifacts per TTL and size-cap config; keeps the runs store from growing unbounded. |
 | `sampled_audit` | `SampledAuditLoop` | Trust Fleet | `background_model`, `sampled_audit_model` | ✅ | — | The silent-escape estimator (read-only, Pattern B): re-audits a governed random sample of merged PRs with a fresh adversarial context, records agree/disagree to audit_samples.jsonl, and renders the disagreement rate + confidence interval as a statistical bound on undetected escapes. Upheld disagreements cross-link into the escape ledger. Never gates, reverts, or fixes. See #10370. |
 | `sandbox_failure_fixer` | `SandboxFailureFixerLoop` | Auto-Agent (HITL Pre-Flight) | `model` | — | HITL escalation | Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent |
+| `second_order_vitals` | `SecondOrderVitalsLoop` | Trust Fleet | — | — | HITL escalation | The capstone residual monitor (read-only, Pattern B): reads the four instrument ledgers, gives each of five families its own Shewhart control limit, and computes the green-while-dying verdict (green/watch/diverging) — adverse drift across ≥3 families sustained over 2 windows while primary health is green. `diverging` files ONE never-batched find + HITL per episode; `watch` is a dashboard state change only. Never gates or fixes. See #10373. |
 | `security_patch` | `SecurityPatchLoop` | Caretaking | — | — | — | Polls Dependabot alerts and files issues for fixable vulnerabilities. |
 | `sentry_ingest` | `SentryLoop` | Caretaking | `sentry_model` | ✅ | HITL escalation | Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline. |
 | `skill_prompt_eval` | `SkillPromptEvalLoop` | Caretaking | `background_model`, `skill_prompt_refine_model` | — | HITL escalation; PR review + merge gate | Weekly adversarial-corpus gate against built-in skills; flags PASS→FAIL regressions. |

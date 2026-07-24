@@ -48,6 +48,7 @@ from factory_metrics import (
     load_metrics,
 )
 from route_types import REPO_ALL, RepoSlugParam
+from vitals.report import latest_verdict_payload
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -303,6 +304,36 @@ def build_diagnostics_router(
         ).read_all()
         result["sampled_audit"] = sampled_audit_metrics(samples)
         return result
+
+    @router.get("/second-order-vitals")
+    def second_order_vitals(repo: RepoSlugParam = None) -> dict[str, Any]:
+        """Green-while-dying residual monitor verdict (#10373).
+
+        Reads the append-only ``vitals.jsonl`` verdict history and returns the
+        latest vitals verdict — ``green | watch | diverging`` — with its
+        coverage (``n-of-5 reporting``) and the k-of-5 family tally. Read-only
+        (Pattern B): the loop computes and reports; this endpoint just surfaces
+        the most recent persisted verdict. With no history yet it returns an
+        honest ``green (0-of-5 reporting)`` rather than erroring.
+        """
+        cfg = _config_for(repo) if repo is not None else config
+        path = cfg.diagnostics_dir / "vitals.jsonl"
+        records: list[dict[str, Any]] = []
+        try:
+            text = path.read_text(encoding="utf-8") if path.exists() else ""
+        except OSError:
+            text = ""
+        for raw in text.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                records.append(obj)
+        return latest_verdict_payload(records)
 
     @router.get("/tools")
     def tools(

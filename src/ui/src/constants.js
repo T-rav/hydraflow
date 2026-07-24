@@ -251,7 +251,7 @@ export const WORKER_PRESETS = {
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health', 'issue_refinement', 'pr_red_repair', 'erosion_metrics', 'fail_open_monitor', 'escape_ledger', 'intervention_tally', 'sampled_audit', 'adr_drift_resolver'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health', 'issue_refinement', 'pr_red_repair', 'erosion_metrics', 'fail_open_monitor', 'escape_ledger', 'intervention_tally', 'sampled_audit', 'second_order_vitals', 'adr_drift_resolver'])
 
 /**
  * Preset options for the per-loop watchdog-timeout override (#9503).
@@ -316,6 +316,7 @@ export const SYSTEM_WORKER_INTERVALS = {
   escape_ledger: 14400,
   intervention_tally: 14400,
   sampled_audit: 14400,
+  second_order_vitals: 14400,
   issue_refinement: 86400,
   label_drift_watcher: 600,
   triage_retry: 86400,
@@ -404,6 +405,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'escape_ledger', label: 'Escape Ledger', description: 'Falsification instrument (read-only, Pattern B — never opens a fix PR): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. See #10367.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
   { key: 'intervention_tally', label: 'Intervention Tally', description: 'Attention-side telemetry (read-only, Pattern B — never opens a fix PR): senses human touches (steering/HITL/control-route/CLI), classifies them into a fixed taxonomy (mechanical + bounded cheap-LLM for free-text, confidence recorded), and renders interventions-per-100-merges (same denominator as the escape ledger), the per-loop trust table, and loops-per-governor. See #10369.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
   { key: 'sampled_audit', label: 'Sampled Audit', description: 'The silent-escape estimator (read-only, Pattern B — never opens a fix PR): re-audits a governed random sample of merged PRs with a fresh adversarial context, records agree/disagree to audit_samples.jsonl, and renders the disagreement rate + confidence interval as a statistical bound on undetected escapes. Upheld disagreements cross-link into the escape ledger. See #10370.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
+  { key: 'second_order_vitals', label: 'Second-order Vitals', description: 'The capstone residual monitor (read-only, Pattern B — never opens a fix PR): reads the four instrument ledgers, gives each of five families its own Shewhart control limit, and computes the green-while-dying verdict (green/watch/diverging) — adverse drift across ≥3 families sustained over 2 windows while primary health is green. `diverging` files ONE never-batched find + HITL per episode; `watch` is a dashboard state change only. See #10373.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
   { key: 'issue_refinement', label: 'Issue Refinement', description: 'Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue. Auto-closes confirmed duplicates and relabels safe priority deltas.', color: theme.orange, group: 'repo_health', tags: ['hygiene'] },
 ]
 

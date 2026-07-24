@@ -281,3 +281,8 @@ docs/arch/generated/erosion-trends.md
 # (src/intervention_tally_loop.py) — a runtime report, not an arch-regen
 # artifact, mirroring escape-ledger.md above (#10369).
 docs/arch/generated/intervention-tally.md
+
+# SecondOrderVitalsLoop rewrites this into the live repo root every tick
+# (src/second_order_vitals_loop.py) — a data-bearing runtime report, not an
+# arch-regen artifact, mirroring escape-ledger.md above (#10373).
+docs/arch/generated/second-order-vitals.md

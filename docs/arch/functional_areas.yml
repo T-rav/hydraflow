@@ -83,6 +83,7 @@ areas:
       - FailOpenMonitorLoop
       - InterventionTallyLoop
       - SampledAuditLoop
+      - SecondOrderVitalsLoop
       - FakeCoverageAuditorLoop
       - FlakeTrackerLoop
       - LiveCorpusReplayLoop

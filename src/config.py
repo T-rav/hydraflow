@@ -271,6 +271,46 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_SAMPLED_AUDIT_TOKEN_BUDGET_PER_TICK",
         40000,
     ),
+    (
+        "second_order_vitals_interval",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_INTERVAL",
+        14400,
+    ),
+    (
+        "second_order_vitals_window_days",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_WINDOW_DAYS",
+        7,
+    ),
+    (
+        "second_order_vitals_min_baseline_windows",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_MIN_BASELINE_WINDOWS",
+        8,
+    ),
+    (
+        "second_order_vitals_sustained_windows",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_SUSTAINED_WINDOWS",
+        2,
+    ),
+    (
+        "second_order_vitals_watch_k",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_WATCH_K",
+        2,
+    ),
+    (
+        "second_order_vitals_diverging_k",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_DIVERGING_K",
+        3,
+    ),
+    (
+        "second_order_vitals_history_max",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_HISTORY_MAX",
+        120,
+    ),
+    (
+        "second_order_vitals_min_merge_throughput",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_MIN_MERGE_THROUGHPUT",
+        1,
+    ),
     ("adr_drift_resolver_interval", "HYDRAFLOW_ADR_DRIFT_RESOLVER_INTERVAL", 3600),
     (
         "adr_drift_resolver_max_triage_per_tick",
@@ -548,6 +588,11 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
 ]
 
 _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
+    (
+        "second_order_vitals_min_ci_pass_rate",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_MIN_CI_PASS_RATE",
+        0.5,
+    ),
     ("docker_cpu_limit", "HYDRAFLOW_DOCKER_CPU_LIMIT", 2.0),
     ("docker_spawn_delay", "HYDRAFLOW_DOCKER_SPAWN_DELAY", 2.0),
     ("visual_retry_delay", "HYDRAFLOW_VISUAL_RETRY_DELAY", 2.0),
@@ -902,6 +947,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "sampled_audit_reaudit_enabled",
         "HYDRAFLOW_SAMPLED_AUDIT_REAUDIT_ENABLED",
+        True,
+    ),
+    (
+        "second_order_vitals_loop_enabled",
+        "HYDRAFLOW_SECOND_ORDER_VITALS_LOOP_ENABLED",
         True,
     ),
     (
@@ -2004,6 +2054,109 @@ class HydraFlowConfig(BaseModel):
             "(#10370/#10371 independence policy). Point it at a DIFFERENT family "
             "from the implementing agent when the roster allows; empty falls "
             "back to the background model (a fresh same-family context)."
+        ),
+    )
+    second_order_vitals_interval: int = Field(
+        default=14400,
+        ge=900,
+        le=604800,
+        description=(
+            "SecondOrderVitalsLoop cycle interval in seconds (#10373: the "
+            "capstone residual monitor over the instrument set — green-while-"
+            "dying detection; v1 provisional cadence, default 4h). Each tick is "
+            "one evaluation window for the sustained-window divergence logic."
+        ),
+    )
+    second_order_vitals_window_days: int = Field(
+        default=7,
+        ge=1,
+        le=90,
+        description=(
+            "Trailing window (days) the SecondOrderVitalsLoop reads each "
+            "instrument's series over for one per-window observation (#10373). "
+            "Escapes/interventions/audit/independence are windowed by their own "
+            "timestamps; erosion is taken from its latest monthly trend row."
+        ),
+    )
+    second_order_vitals_min_baseline_windows: int = Field(
+        default=8,
+        ge=2,
+        le=1000,
+        description=(
+            "How many observations a series must accumulate before it carries a "
+            "Shewhart control limit and its family counts as *reporting* "
+            "(#10373). A limit from one or two points is noise; below this the "
+            "family degrades honestly to `n-of-5 reporting`, never a false green."
+        ),
+    )
+    second_order_vitals_sustained_windows: int = Field(
+        default=2,
+        ge=1,
+        le=100,
+        description=(
+            "How many CONSECUTIVE windows a family must stay above its control "
+            "limit before it counts toward the k-of-5 divergence tally (#10373). "
+            "The anti-flap half of the design — single-window blips never fire."
+        ),
+    )
+    second_order_vitals_watch_k: int = Field(
+        default=2,
+        ge=1,
+        le=5,
+        description=(
+            "k-of-5: number of instrument families sustained above their control "
+            "limits (with primary health green) for the `watch` verdict (#10373). "
+            "`watch` is a dashboard state change only — no issue is filed."
+        ),
+    )
+    second_order_vitals_diverging_k: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description=(
+            "k-of-5: number of instrument families sustained above their control "
+            "limits (with primary health green) for the `diverging` verdict — the "
+            "green-while-dying alarm (#10373). Files ONE find + HITL per episode."
+        ),
+    )
+    second_order_vitals_history_max: int = Field(
+        default=120,
+        ge=8,
+        le=100000,
+        description=(
+            "Max per-series observations SecondOrderVitalsLoop retains (#10373). "
+            "Bounds the persisted baseline so the state file cannot grow without "
+            "limit; the oldest windows fall off the front."
+        ),
+    )
+    second_order_vitals_min_merge_throughput: int = Field(
+        default=1,
+        ge=0,
+        le=100000,
+        description=(
+            "Merge-throughput floor (merges in the window) for primary health to "
+            "count as green (#10373). An idle factory is not green-while-dying; "
+            "below this the monitor stays silent."
+        ),
+    )
+    second_order_vitals_min_ci_pass_rate: float = Field(
+        default=0.5,
+        ge=0.0,
+        description=(
+            "CI first-pass-rate floor for primary health to count as green "
+            "(#10373). Read from the existing factory-health signal (never a "
+            "re-derivation); below this the primary gates are not themselves "
+            "green and the divergence monitor stays silent. Normally in [0,1]; "
+            "a floor above 1.0 simply holds the monitor silent on the CI axis."
+        ),
+    )
+    second_order_vitals_loop_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for SecondOrderVitalsLoop (#10373: the "
+            "capstone residual monitor, read-only ADR-0029 Pattern B). Computes "
+            "the green-while-dying verdict and reports it; never remediates, "
+            "gates ordinary merges, or files fix PRs."
         ),
     )
     adr_drift_resolver_interval: int = Field(

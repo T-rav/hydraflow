@@ -60,6 +60,7 @@ from ._rollup_issues import RollupIssueStateMixin
 from ._route_back import RouteBackStateMixin
 from ._sampled_audit import SampledAuditStateMixin
 from ._sandbox_failure_fixer import SandboxFailureFixerStateMixin
+from ._second_order_vitals import SecondOrderVitalsStateMixin
 from ._security_patch import SecurityPatchStateMixin
 from ._sentry import SentryStateMixin
 from ._session import SessionStateMixin
@@ -133,6 +134,7 @@ class StateTracker(
     EscapeLedgerStateMixin,
     InterventionTallyStateMixin,
     SampledAuditStateMixin,
+    SecondOrderVitalsStateMixin,
 ):
     """JSON-file backed state for crash recovery.
 
