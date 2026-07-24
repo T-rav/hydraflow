@@ -15,7 +15,7 @@ citation never auto-drifts in prod (the #9176 design). ``_SHARED_INFRA_MODULES``
 (config/models/ports/post_merge_handler/pr_manager) are additionally exempt
 even when bare.
 
-These 5 ADRs each carried bare, high-churn, non-infra citations that
+These ADRs each carried bare, high-churn, non-infra citations that
 re-drifted on incidental code churn and produced the stuck-HITL drift
 escalations. The right-sizing converted those bare citations to
 symbol-qualified form (mirroring PR #9405). This test drives the *real*
