@@ -6,6 +6,8 @@ current state. Pure: no I/O, no factory imports, no inline clock.
 
 from __future__ import annotations
 
+import statistics
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 
@@ -120,3 +122,27 @@ class Cusum:
     @property
     def neg(self) -> float:
         return self._neg
+
+
+@dataclass
+class AdaptiveThreshold:
+    """Anomaly = far from the baseline's robust center, in MAD units.
+
+    Uses median + MAD (median absolute deviation) so a handful of outliers in
+    the baseline can't inflate the scale. Below ``min_samples`` it returns
+    ``False`` (fail safe: thin history never reads as anomalous).
+    """
+
+    z: float
+    min_samples: int = 8
+    _MAD_TO_SIGMA: float = 1.4826  # MAD * this ~= stddev for normal data
+
+    def is_anomalous(self, x: float, baseline: Sequence[float]) -> bool:
+        if len(baseline) < self.min_samples:
+            return False
+        med = statistics.median(baseline)
+        mad = statistics.median([abs(s - med) for s in baseline])
+        if mad == 0.0:
+            return x != med
+        robust_sigma = mad * self._MAD_TO_SIGMA
+        return abs(x - med) / robust_sigma >= self.z

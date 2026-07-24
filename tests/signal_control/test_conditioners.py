@@ -113,3 +113,25 @@ def test_cusum_resets_after_firing():
         c.update(2.0, mean=0.0)
     # after a fire, accumulators are cleared
     assert c.pos == 0.0 and c.neg == 0.0
+
+
+from signal_control.conditioners import AdaptiveThreshold
+
+
+def test_adaptive_threshold_insufficient_history_is_not_anomalous():
+    at = AdaptiveThreshold(z=3.0, min_samples=8)
+    assert at.is_anomalous(1000.0, baseline=[1.0, 2.0, 3.0]) is False
+
+
+def test_adaptive_threshold_flags_robust_outlier():
+    at = AdaptiveThreshold(z=3.0, min_samples=8)
+    baseline = [10.0, 11.0, 9.0, 10.5, 9.5, 10.2, 9.8, 10.1]
+    assert at.is_anomalous(50.0, baseline) is True
+    assert at.is_anomalous(10.3, baseline) is False
+
+
+def test_adaptive_threshold_ignores_single_outlier_in_baseline():
+    # MAD is robust: one wild value in the baseline must not blow up the scale.
+    at = AdaptiveThreshold(z=3.0, min_samples=8)
+    baseline = [10.0, 11.0, 9.0, 10.5, 9.5, 10.2, 9.8, 999.0]
+    assert at.is_anomalous(20.0, baseline) is True
