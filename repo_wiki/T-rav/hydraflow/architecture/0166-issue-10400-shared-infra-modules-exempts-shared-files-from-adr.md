@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10400
 source_phase: plan
 created_at: 2026-07-24T05:41:19.861275+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10400 closed
 ---
 
 # `_SHARED_INFRA_MODULES` exempts shared files from ADR drift regardless of citation form
