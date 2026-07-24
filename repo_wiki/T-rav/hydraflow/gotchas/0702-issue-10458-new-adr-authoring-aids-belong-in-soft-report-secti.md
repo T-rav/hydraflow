@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10458
 source_phase: plan
 created_at: 2026-07-24T13:01:26.369166+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0704
 ---
 
 # New ADR-authoring aids belong in soft report sections, not CI gates

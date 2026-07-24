@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10449
 source_phase: plan
 created_at: 2026-07-24T12:33:05.988863+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0847
 ---
 
 # Gate landings on full `make quality`, never a file-targeted pytest subset
