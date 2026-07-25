@@ -22,10 +22,18 @@ from scripts.hydraflow_audit.runner import overall_exit_code, run_checks
 
 @pytest.fixture(autouse=True)
 def _isolate_registry() -> Iterator[None]:
-    """Each test starts with an empty check registry."""
+    """Each test starts with an empty check registry.
+
+    Restores the pre-test registry (real `@register(...)` checks registered
+    at import time) on teardown rather than leaving it empty — those
+    decorators only fire once per process, so a bare `_clear_for_tests()`
+    here would permanently wipe every real check for the rest of the
+    worker's test run (#10499).
+    """
+    snapshot = registry._snapshot_for_tests()
     registry._clear_for_tests()
     yield
-    registry._clear_for_tests()
+    registry._restore_for_tests(snapshot)
 
 
 @pytest.fixture

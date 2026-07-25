@@ -5,7 +5,7 @@ source_issue: 10498
 source_phase: plan
 created_at: 2026-07-25T01:51:29.166471+00:00
 status: active
-corroborations: 1
+corroborations: 2
 ---
 
 # EscapeLedger needs last-row-wins supersession, never in-place rewrites
