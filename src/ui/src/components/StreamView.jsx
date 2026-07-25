@@ -67,7 +67,13 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
   const renderFlowStage = (group) => (
     <div style={styles.flowStage} key={group.stage.key}>
       <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
-      <span style={styles.flowCount} data-testid={`flow-count-${group.stage.key}`}>{counts.perStage[group.stage.key].issues} · {counts.perStage[group.stage.key].prs} PR</span>
+      <span
+        style={styles.flowCount}
+        data-testid={`flow-count-${group.stage.key}`}
+        title={`${counts.perStage[group.stage.key].issues} issue(s), ${counts.perStage[group.stage.key].prs} PR(s) in ${group.stage.label}`}
+      >
+        {counts.perStage[group.stage.key].issues} · {counts.perStage[group.stage.key].prs} PR
+      </span>
       {group.issues.length > 0 && (
         <div style={styles.flowDots}>
           {group.issues.slice(0, FLOW_DOT_CAP).map(issue => {
@@ -111,7 +117,13 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
   return (
     <div style={styles.flowContainer} data-testid="pipeline-flow">
       <span style={styles.flowTitle}>Pipeline Flow</span>
-      <span style={styles.flowTotal} data-testid="flow-total">{counts.total.issues} issues · {counts.total.prs} PRs</span>
+      <span
+        style={styles.flowTotal}
+        data-testid="flow-total"
+        title={`${counts.total.issues} issue(s) and ${counts.total.prs} PR(s) across the whole pipeline`}
+      >
+        {counts.total.issues} issues · {counts.total.prs} PRs
+      </span>
       {queueStrategy && (
         <span
           style={styles.queueStrategyBadge}
