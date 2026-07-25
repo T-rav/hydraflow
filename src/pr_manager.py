@@ -26,7 +26,6 @@ from models import (
     CICheckPayload,
     ClosedStageLabelDrift,
     CodeScanningAlert,
-    Crate,
     GitHubIssue,
     GitHubIssueSummary,
     HITLItem,
@@ -198,9 +197,9 @@ class PRManager:
         """Register a ``(issue_number, new_label)`` callback fired after each
         successful :meth:`swap_pipeline_labels` add (#9842).
 
-        Internal wiring plumbing (like ``IssueStore.set_crate_manager``) —
-        deliberately NOT on :class:`ports.PRPort`; service_registry gates the
-        call on attribute presence so port fakes stay untouched.
+        Internal wiring plumbing deliberately NOT on :class:`ports.PRPort`;
+        service_registry gates the call on attribute presence so port fakes
+        stay untouched.
         """
         self._pipeline_label_listener = listener
 
@@ -3058,9 +3057,14 @@ class PRManager:
 
         #8786 Phase 13: routed through the contracts boundary helper in
         lenient mode against ``GhCheckRun``. The helper logs WARN on
-        shape drift (e.g. a new check state enum value, removed
-        detailsUrl) and falls back to the raw dict so the existing
-        downstream processing keeps working.
+        shape drift (e.g. a new check state enum value, a renamed URL
+        field) and falls back to the raw dict so the existing downstream
+        processing keeps working.
+
+        #10510: the ``gh pr checks --json`` URL field is ``link`` — the
+        older ``detailsUrl`` name was removed and requesting it makes the
+        whole call fail (``Unknown JSON field: "detailsUrl"``), so every
+        poll 3x-retried and returned no failed runs.
         """
         from contracts.boundary import field_or, parse_list_with_shape  # noqa: PLC0415
         from contracts.shapes import GhCheckRun  # noqa: PLC0415
@@ -3073,7 +3077,7 @@ class PRManager:
             "--repo",
             self._repo,
             "--json",
-            "name,state,detailsUrl",
+            "name,state,link",
         )
         results = parse_list_with_shape(raw, GhCheckRun)
 
@@ -3082,7 +3086,7 @@ class PRManager:
         for r in results:
             name = str(field_or(r, "name", "unknown"))
             state = str(field_or(r, "state", "")).upper()
-            details_url = str(field_or(r, "details_url", "", dict_key="detailsUrl"))
+            details_url = str(field_or(r, "details_url", "", dict_key="link"))
             if state in self._PASSING_STATES or state in self._PENDING_STATES:
                 continue
             if not details_url:
@@ -4138,140 +4142,3 @@ class PRManager:
     ) -> int:
         """Implement :class:`task_source.TaskTransitioner` — create a new issue."""
         return await self.create_issue(title, body, labels)
-
-    # --- milestone (crate) management ---
-
-    def _parse_milestone(self, raw: dict[str, Any]) -> Crate:
-        """Parse a GitHub milestone JSON object into a Crate model."""
-        return Crate(
-            number=raw.get("number") or 0,
-            title=raw.get("title", ""),
-            description=raw.get("description") or "",
-            due_on=raw.get("due_on") or None,
-            state=raw.get("state", "open"),
-            open_issues=raw.get("open_issues", 0),
-            closed_issues=raw.get("closed_issues", 0),
-            created_at=raw.get("created_at", ""),
-            updated_at=raw.get("updated_at", ""),
-        )
-
-    async def list_milestones(self, state: str = "all") -> list[Crate]:
-        """List all milestones for the repo (paginated)."""
-        self._assert_repo()
-        raw = await self._run_gh(
-            "gh",
-            "api",
-            f"repos/{self._repo}/milestones",
-            "--method",
-            "GET",
-            "-f",
-            f"state={state}",
-            "-f",
-            "per_page=100",
-            "--paginate",
-        )
-        items = json.loads(raw) if raw.strip() else []
-        return [self._parse_milestone(m) for m in items]
-
-    async def create_milestone(
-        self, title: str, description: str = "", due_on: str | None = None
-    ) -> Crate:
-        """Create a new GitHub milestone."""
-        self._assert_repo()
-        if self._config.dry_run:
-            logger.info("[dry-run] Would create milestone: %s", title)
-            return Crate(number=0, title=title, description=description, state="open")
-        cmd: list[str] = [
-            "gh",
-            "api",
-            f"repos/{self._repo}/milestones",
-            "-X",
-            "POST",
-            "-f",
-            f"title={title}",
-        ]
-        if description:
-            cmd.extend(["-f", f"description={description}"])
-        if due_on:
-            cmd.extend(["-f", f"due_on={due_on}"])
-        raw = await self._run_gh(*cmd)
-        return self._parse_milestone(json.loads(raw))
-
-    async def update_milestone(self, milestone_number: int, **fields: Any) -> Crate:
-        """Update a GitHub milestone. Accepted fields: title, description, due_on, state."""
-        self._assert_repo()
-        if self._config.dry_run:
-            logger.info("[dry-run] Would update milestone #%d", milestone_number)
-            return Crate(number=milestone_number, title=fields.get("title", ""))
-        cmd: list[str] = [
-            "gh",
-            "api",
-            f"repos/{self._repo}/milestones/{milestone_number}",
-            "-X",
-            "PATCH",
-        ]
-        for key, value in fields.items():
-            if value is None:
-                # -F sends raw JSON values; use for null to clear fields like due_on
-                cmd.extend(["-F", f"{key}=null"])
-            else:
-                cmd.extend(["-f", f"{key}={value}"])
-        raw = await self._run_gh(*cmd)
-        return self._parse_milestone(json.loads(raw))
-
-    async def delete_milestone(self, milestone_number: int) -> None:
-        """Delete a GitHub milestone."""
-        self._assert_repo()
-        if self._config.dry_run:
-            logger.info("[dry-run] Would delete milestone #%d", milestone_number)
-            return
-        await self._run_gh(
-            "gh",
-            "api",
-            f"repos/{self._repo}/milestones/{milestone_number}",
-            "-X",
-            "DELETE",
-        )
-
-    async def set_issue_milestone(
-        self, issue_number: int, milestone_number: int | None
-    ) -> None:
-        """Assign or clear a milestone on an issue."""
-        self._assert_repo()
-        if self._config.dry_run:
-            logger.info(
-                "[dry-run] Would set milestone %s on issue #%d",
-                milestone_number,
-                issue_number,
-            )
-            return
-        # -F sends the value as a typed JSON field (number or null)
-        value = str(milestone_number) if milestone_number is not None else "null"
-        await self._run_gh(
-            "gh",
-            "api",
-            f"repos/{self._repo}/issues/{issue_number}",
-            "-X",
-            "PATCH",
-            "-F",
-            f"milestone={value}",
-        )
-
-    async def list_milestone_issues(
-        self, milestone_number: int
-    ) -> list[dict[str, Any]]:
-        """List issues assigned to a milestone (paginated)."""
-        self._assert_repo()
-        raw = await self._run_gh(
-            "gh",
-            "api",
-            f"repos/{self._repo}/issues",
-            "-f",
-            f"milestone={milestone_number}",
-            "-f",
-            "state=all",
-            "-f",
-            "per_page=100",
-            "--paginate",
-        )
-        return json.loads(raw) if raw.strip() else []

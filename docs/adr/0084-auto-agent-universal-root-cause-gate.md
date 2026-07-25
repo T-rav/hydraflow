@@ -112,5 +112,5 @@ The following files carry this ADR's decisions and must be kept in sync with any
 - `src/models.py:StateData` — new `escalation_attempts: dict[str, int]` (global per-issue counter).
 - `src/config.py:HydraFlowConfig` — `auto_agent_skip_sublabels` (shrunk), stuck-label registry, global escalation cap field.
 - `src/issue_store.py:IssueStore` — `human-required` made visible so core phases skip it.
-- `src/pr_manager.py:swap_pipeline_labels` — clears `human-required` via `all_pipeline_labels`.
+- `src/pr_manager.py:PRManager.swap_pipeline_labels` — clears `human-required` via `all_pipeline_labels`.
 - `src/base_background_loop.py:BaseBackgroundLoop` — host for the shared `BaseEscalationMixin`.

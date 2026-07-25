@@ -138,6 +138,14 @@ class TestUrlValidation:
         tl = IssueTimeline(issue_number=1, pr_url="https://github.com/pr/1")
         assert tl.pr_url == "https://github.com/pr/1"
 
+    def test_pipeline_issue_hitl_visited_defaults_false(self) -> None:
+        pi = PipelineIssue(issue_number=1)
+        assert pi.hitl_visited is False
+
+    def test_pipeline_issue_hitl_visited_round_trips_true(self) -> None:
+        pi = PipelineIssue(issue_number=1, status="merged", hitl_visited=True)
+        assert pi.hitl_visited is True
+
     def test_issue_timeline_rejects_invalid_pr_url(self) -> None:
         with pytest.raises(
             ValidationError, match="URL must be empty or start with http"

@@ -1,0 +1,39 @@
+// Issue #10515 — Dynamic view: how one issue reaches each terminal bucket in
+// the Fake, and which status the entry carries out after the fix.
+// Note: the active bucket (snap -> entry, active path) still diverges from
+// the real IssueStore, which stamps "active" via _snapshot_active rather
+// than PROCESSING — that divergence is out of scope for #10515 and untouched
+// here.
+
+specification {
+  element component
+}
+
+model {
+  gh = component 'FakeGitHub' {
+    description 'Seeded issues + labels; source of hydraflow-hitl membership.'
+  }
+  fakestore = component 'FakeIssueStore' {
+    description '_stage_for(labels) -> stage; get_hitl_issues(); mark_merged() -> _merged_numbers.'
+  }
+  snap = component 'FakeIssueStore.get_pipeline_snapshot' {
+    description 'Builds per-stage buckets via local _entry(num, status) helper.'
+  }
+  entry = component 'PipelineSnapshotEntry' {
+    description 'TypedDict: issue_number, title, url, status.'
+  }
+
+  gh -> fakestore 'labels: hydraflow-hitl -> STAGE_HITL'
+  fakestore -> snap 'get_hitl_issues() / _merged_numbers'
+  snap -> entry 'queued -> QUEUED; in-flight -> PROCESSING (correct)'
+  snap -> entry 'active -> PROCESSING (diverges from real "active"; out of scope)'
+  snap -> entry 'hitl bucket -> HITL (fixed by #10515)'
+  snap -> entry 'merged bucket -> MERGED (fixed by #10515)'
+}
+
+views {
+  view flow {
+    title 'FakeIssueStore snapshot construction — status per bucket'
+    include *
+  }
+}

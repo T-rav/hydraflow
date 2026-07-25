@@ -45,9 +45,13 @@ REAP_TESTS := tests/regressions/test_reap_processlookuperror.py \
   tests/regressions/test_issue_9641_unified_group_kill.py \
   tests/regressions/test_hostrunner_reap_grandchildren.py
 # Paths run SERIALLY (excluded from the parallel run). review_phase_metrics:
-# leaked review_advisor mock (#10119). REAP_TESTS: subprocess-group reap races.
+# leaked review_advisor mock (#10119). test_auto_pr_preflight: a mock from
+# another test bleeds into the shared xdist worker (the runner patch is not
+# applied → gate runs 0 commands, plus a pydantic TypeAdapter AttributeError
+# from a MagicMock-contaminated type) — passes single-threaded (#10500).
+# REAP_TESTS: subprocess-group reap races.
 # Everything else — including tests/scenarios (#10111) — parallelizes.
-PYTEST_SERIAL_PATHS ?= tests/test_review_phase_metrics.py $(REAP_TESTS)
+PYTEST_SERIAL_PATHS ?= tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py $(REAP_TESTS)
 PYTEST_SERIAL_IGNORE := $(addprefix --ignore=,$(PYTEST_SERIAL_PATHS))
 
 # Runtime overrides (used by `make hot`)

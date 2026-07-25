@@ -160,8 +160,6 @@ async def test_merge_update_event_reflected_in_outcomes_panel(world, page) -> No
                 "source_calls": {},
                 "linked_issues": [],
                 "epic": None,
-                "crate_title": None,
-                "crate_number": None,
             }
         ],
         "totals": {},

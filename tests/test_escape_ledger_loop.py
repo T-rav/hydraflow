@@ -18,8 +18,11 @@ import pytest
 
 from escape.models import EscapeRecord
 from escape_ledger_loop import (
+    SURFACE_REASON_AGING,
+    SURFACE_REASON_LOW_CONFIDENCE,
     EscapeLedgerLoop,
     _current_head_sha,
+    _render_finding,
     select_findings_to_surface,
     surfacing_fingerprint,
 )
@@ -122,7 +125,7 @@ def _make_loop(
 
 
 def _record(
-    rid: str, *, confidence: str = "low", encoded_as: str = "none-yet"
+    rid: str, *, confidence: str = "low", encoded_as: str = "none-yet", notes: str = ""
 ) -> EscapeRecord:
     return EscapeRecord(
         id=rid,
@@ -136,7 +139,7 @@ def _record(
         attribution_method="fixes-chain",
         attribution_confidence=confidence,
         encoded_as=encoded_as,
-        notes="",
+        notes=notes,
     )
 
 
@@ -292,6 +295,35 @@ class TestRecordEscapes:
 # ---------------------------------------------------------------------------
 
 
+class TestRenderFinding:
+    def test_body_surfaces_closing_ref_via_notes_when_originating_pr_is_none(
+        self,
+    ) -> None:
+        # originating_pr is never populated for a bug-issue row (#10498) — the
+        # rendered HITL finding must still give a human an attribution lead
+        # via notes, or the finding points at nothing.
+        record = _record(
+            "bug-issue:9196f74",
+            notes="Fix commit closing #10449 — bug-issue escape pending a "
+            "human bug-label confirmation (HITL).",
+        )
+        _title, body = _render_finding(record, SURFACE_REASON_LOW_CONFIDENCE)
+        assert "| originating_pr | — |" in body
+        assert "#10449" in body
+
+    def test_body_renders_em_dash_for_empty_notes(self) -> None:
+        record = _record("bug-issue:x", notes="")
+        _title, body = _render_finding(record, SURFACE_REASON_LOW_CONFIDENCE)
+        assert "| notes | — |" in body
+
+    def test_title_reflects_aging_reason_even_for_low_confidence_row(self) -> None:
+        # A low-confidence + none-yet row surfaced for the AGING criterion (#10503)
+        # must read as aging, not infer "low-confidence" from the row's confidence.
+        record = _record("bug-issue:y", confidence="low", encoded_as="none-yet")
+        title, _body = _render_finding(record, SURFACE_REASON_AGING)
+        assert "aged past the encoding threshold" in title
+
+
 class TestFindingRateBudget:
     def test_flood_is_capped_at_max_per_tick(self) -> None:
         from datetime import UTC, datetime
@@ -312,16 +344,52 @@ class TestFindingRateBudget:
         from datetime import UTC, datetime
 
         now = datetime(2026, 6, 1, tzinfo=UTC)
-        recs = [_record("bug-issue:a"), _record("bug-issue:b")]
+        # Encoded rows are low-confidence but NOT aging, so only the
+        # low-confidence reason is in play — a clean check that a row already
+        # surfaced for a reason is skipped for that reason.
+        recs = [
+            _record("bug-issue:a", encoded_as="regression-test"),
+            _record("bug-issue:b", encoded_as="regression-test"),
+        ]
         to_file, capped = select_findings_to_surface(
             recs,
             now=now,
             aging_threshold_hours=24 * 14,
-            already_surfaced={surfacing_fingerprint("bug-issue:a")},
+            already_surfaced={
+                surfacing_fingerprint("bug-issue:a", SURFACE_REASON_LOW_CONFIDENCE)
+            },
             max_per_tick=5,
         )
-        assert {r.id for r in to_file} == {"bug-issue:b"}
+        assert {rec.id for rec, _reason in to_file} == {"bug-issue:b"}
+        assert {reason for _rec, reason in to_file} == {SURFACE_REASON_LOW_CONFIDENCE}
         assert capped is False
+
+    async def test_surface_stores_reason_scoped_key_and_refires_on_other_reason(
+        self, tmp_path: Path
+    ) -> None:
+        # Issue #10503: a row already surfaced for low-confidence must STILL file
+        # an aging finding once it ages, and the caller must store the
+        # aging-scoped fingerprint.
+        from escape.ledger import EscapeLedger
+
+        repo = _init_repo(tmp_path)
+        rid = "bug-issue:aged"
+        dedup = _make_dedup({surfacing_fingerprint(rid, SURFACE_REASON_LOW_CONFIDENCE)})
+        loop = _make_loop(tmp_path, repo, dedup=dedup)
+        # detected long ago + none-yet => aging past the default 14-day threshold.
+        EscapeLedger(loop._ledger_path).append(
+            _record(rid, confidence="low", encoded_as="none-yet")
+        )
+
+        filed, capped = await loop._surface_findings()
+
+        assert filed == 1
+        assert capped is False
+        loop._prs.create_issue.assert_awaited_once()
+        assert surfacing_fingerprint(rid, SURFACE_REASON_AGING) in dedup._store
+        # Both reason budgets now spent → next tick files nothing.
+        filed_again, _capped = await loop._surface_findings()
+        assert filed_again == 0
 
     async def test_surface_reraises_credit_exhausted(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)

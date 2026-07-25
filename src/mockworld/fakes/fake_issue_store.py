@@ -9,7 +9,7 @@ concrete-only methods the orchestrator dispatches via
 ``cast("IssueStore", self._svc.store)`` (``start``, ``clear_active``,
 ``get_active_issues``, ``get_queue_stats``, ``get_pipeline_snapshot``,
 ``is_in_pipeline``, ``get_merged_numbers``, ``get_cached``,
-``get_hitl_issues``, ``get_uncrated_issues``, ``set_crate_manager``).
+``get_hitl_issues``).
 
 Implementation strategy:
 
@@ -110,6 +110,10 @@ class FakeIssueStore:
         self._in_flight: dict[int, str] = {}
         # Merged issues for snapshot reporting
         self._merged_numbers: set[int] = set()
+        # Issues ever observed in HITL, even after they've since left it
+        # (resolved, merged, etc). Folded in by get_hitl_issues() as a side
+        # effect of every poll — mirrors IssueStore._hitl_visited (#10509).
+        self._hitl_visited: set[int] = set()
         # Per-stage throughput counters
         self._processed_count: dict[str, int] = {
             STAGE_FIND: 0,
@@ -126,9 +130,6 @@ class FakeIssueStore:
             "snapshot_entries": 0,
         }
         self._last_poll_ts: str | None = None
-        # Crate manager — set later by service_registry; the Fake doesn't
-        # use it but exposes the setter so the wiring path doesn't fork.
-        self._crate_manager: Any = None
 
     @classmethod
     def from_seed(cls, seed: MockWorldSeed, event_bus: EventBus) -> FakeIssueStore:
@@ -225,19 +226,6 @@ class FakeIssueStore:
         except Exception:  # noqa: BLE001
             logger.debug("FakeIssueStore.refresh publish failed", exc_info=True)
 
-    def set_crate_manager(self, cm: Any) -> None:
-        """Store the crate manager (Fake doesn't use it but signature must match)."""
-        self._crate_manager = cm
-
-    def get_uncrated_issues(self) -> list[Task]:
-        """Return queued tasks with no crate metadata. Fake has none, so [].
-
-        Production CrateManager assigns ``milestone_number`` in metadata; the
-        Fake doesn't simulate milestones. Returning an empty list keeps the
-        crate-management code path quiet.
-        """
-        return []
-
     # ------------------------------------------------------------------
     # Queue accessors
     # ------------------------------------------------------------------
@@ -255,11 +243,13 @@ class FakeIssueStore:
         return self._take(STAGE_REVIEW, max_count)
 
     def get_hitl_issues(self) -> set[int]:
-        return {
+        current = {
             issue.number
             for issue in self._github._issues.values()
             if issue.state == "open" and self._stage_for(issue) == STAGE_HITL
         }
+        self._hitl_visited.update(current)
+        return current
 
     def _take(self, stage: str, max_count: int) -> list[Task]:
         tasks = self._queued_for_stage(stage)[:max_count]
@@ -399,13 +389,16 @@ class FakeIssueStore:
     def get_pipeline_snapshot(self) -> dict[str, list[PipelineSnapshotEntry]]:
         snapshot: dict[str, list[PipelineSnapshotEntry]] = {}
 
-        def _entry(num: int, status: str) -> PipelineSnapshotEntry:
+        def _entry(
+            num: int, status: str, *, hitl_visited: bool = False
+        ) -> PipelineSnapshotEntry:
             issue = self._github._issues.get(num)
             return PipelineSnapshotEntry(
                 issue_number=num,
                 title=issue.title if issue else f"Issue #{num}",
                 url="",
                 status=status,
+                hitl_visited=hitl_visited,
             )
 
         for stage in (
@@ -432,12 +425,20 @@ class FakeIssueStore:
             if entries:
                 snapshot[stage] = entries
 
+        # get_hitl_issues() also folds the current HITL set into
+        # _hitl_visited, so it must run before the merged entries below are
+        # built.
+        hitl_now = self.get_hitl_issues()
         snapshot[STAGE_HITL] = [
-            _entry(num, PipelineIssueStatus.PROCESSING)
-            for num in self.get_hitl_issues()
+            _entry(num, PipelineIssueStatus.HITL, hitl_visited=True) for num in hitl_now
         ]
         snapshot[STAGE_MERGED] = [
-            _entry(num, PipelineIssueStatus.PROCESSING) for num in self._merged_numbers
+            _entry(
+                num,
+                PipelineIssueStatus.MERGED,
+                hitl_visited=num in self._hitl_visited,
+            )
+            for num in self._merged_numbers
         ]
         return snapshot
 

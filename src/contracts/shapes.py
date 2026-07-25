@@ -91,7 +91,8 @@ class GhCheckRun(BaseModel):
     name: str
     state: _GhCheckState | None = None
     conclusion: _GhCheckConclusion | None = None
-    details_url: str | None = Field(default=None, alias="detailsUrl")
+    # #10510: gh renamed the URL field ``detailsUrl`` -> ``link``.
+    details_url: str | None = Field(default=None, alias="link")
 
 
 class GhPRSummary(BaseModel):

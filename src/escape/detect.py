@@ -18,6 +18,7 @@ regression-pin each produce exactly one ledger row.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
@@ -29,7 +30,10 @@ from escape.models import (
     DetectionSource,
     EscapeCandidate,
 )
+from false_close import has_skip_regression, product_paths
 from git_timeouts import GIT_READONLY_TIMEOUT_S
+
+logger = logging.getLogger("hydraflow.escape_ledger")
 
 # NUL separates commits (`-z`); 0x1f separates fields within a commit. Neither
 # appears in a sha / ISO date / subject / body, so the split is unambiguous
@@ -39,7 +43,15 @@ _FIELD_SEP = "\x1f"
 _LOG_FORMAT = f"%H{_FIELD_SEP}%cI{_FIELD_SEP}%s{_FIELD_SEP}%b"
 
 # Marker line prefix for the added-paths pass (distinct from any real path).
-_SHA_MARKER = "\x1eESCSHA\x1e"
+# Built from `\x01` (SOH), NOT a Unicode line-boundary character -- unlike
+# `\x1e` (Record Separator), which `str.splitlines()` treats as its own line
+# break and would shred the marker into pieces before any line could match
+# it whole (#10499). `_added_paths_for_range` below also avoids
+# `str.splitlines()` entirely for the same reason: `git log` output uses
+# bare `\n` line endings, so an explicit `str.split("\n")` is both correct
+# and immune to any future marker/path colliding with `splitlines()`'s wider
+# line-boundary set (\v, \f, \x1c, \x1d, \x1e, \x85, U+2028, U+2029).
+_SHA_MARKER = "\x01ESCSHA\x01"
 
 
 def _fix_subject(subject: str) -> bool:
@@ -49,22 +61,27 @@ def _fix_subject(subject: str) -> bool:
 
 
 def _origin_pointer(commit: CommitInfo) -> tuple[str, int | None]:
-    """Extract the best originating-merge pointer + PR number from *commit*.
+    """Extract the best originating pointer + closing ref from *commit*.
 
     Prefers a stated sha (resolvable to a merge time so
     ``time_to_detection_hours`` can be populated) over a ``#N`` closing-keyword
-    reference. Returns ``(originating_ref, originating_pr)``; ``originating_ref``
-    is a bare sha, ``#N``, or ``""`` when nothing was found.
+    reference. Returns ``(originating_ref, closes_ref)``; ``originating_ref``
+    is a bare sha, ``#N``, or ``""`` when nothing was found. ``closes_ref`` is
+    the number a GitHub closing keyword (``Fixes``/``Closes``/``Resolves #N``)
+    names — the issue/PR THIS commit closes, which points downstream at
+    resolved work, never upstream at the merge that introduced the defect.
+    Callers use it only to select ``attribution_method``/gate emission; it must
+    never be written to ``EscapeCandidate.originating_pr``.
     """
     text = f"{commit.subject}\n{commit.body}"
     fixes = attribution.extract_fixes_refs(text)
-    pr = fixes[0] if fixes else None
+    closes_ref = fixes[0] if fixes else None
     shas = attribution.extract_referenced_shas(commit.body, exclude=commit.sha)
     if shas:
-        return shas[0], pr
-    if pr is not None:
-        return f"#{pr}", pr
-    return "", pr
+        return shas[0], closes_ref
+    if closes_ref is not None:
+        return f"#{closes_ref}", closes_ref
+    return "", closes_ref
 
 
 def _classify(commit: CommitInfo) -> EscapeCandidate | None:
@@ -88,7 +105,7 @@ def _classify(commit: CommitInfo) -> EscapeCandidate | None:
         )
 
     if attribution.adds_regression_pin(commit.added_paths):
-        ref, pr = _origin_pointer(commit)
+        ref = _origin_pointer(commit)[0]
         return EscapeCandidate(
             detection_source="regression-pin",
             detection_ref=commit.sha,
@@ -96,16 +113,21 @@ def _classify(commit: CommitInfo) -> EscapeCandidate | None:
             attribution_method="regression-pin",
             attribution_confidence="medium",
             originating_ref=ref,
-            originating_pr=pr,
             notes="Adds a tests/regressions/ pin for a post-merge failure.",
         )
 
     if attribution.is_hotfix(subject, body):
-        ref, pr = _origin_pointer(commit)
+        ref, closes_ref = _origin_pointer(commit)
         method: AttributionMethod = (
-            "fixes-chain" if pr is not None else "blame-intersect"
+            "fixes-chain" if closes_ref is not None else "blame-intersect"
         )
         conf: AttributionConfidence = "medium" if ref else "low"
+        hotfix_notes = "Hotfix referencing a prior merged change."
+        if closes_ref is not None:
+            # originating_pr is never populated here (see _origin_pointer's
+            # docstring) — closes_ref is the only pointer a human reviewing
+            # the HITL finding has, so it must survive somewhere on the row.
+            hotfix_notes += f" Closes #{closes_ref}."
         return EscapeCandidate(
             detection_source="hotfix",
             detection_ref=commit.sha,
@@ -113,13 +135,37 @@ def _classify(commit: CommitInfo) -> EscapeCandidate | None:
             attribution_method=method,
             attribution_confidence=conf,
             originating_ref=ref,
-            originating_pr=pr,
-            notes="Hotfix referencing a prior merged change.",
+            notes=hotfix_notes,
         )
 
     if _fix_subject(subject):
-        ref, pr = _origin_pointer(commit)
-        if pr is not None:
+        # A commit that declares itself behaviour-neutral (the P10.6/P10.7
+        # Skip-Regression opt-out trailer) AND carries no product-source
+        # delta is not a post-merge defect — e.g. a docs-only diagram
+        # refresh. Scoped to this branch only: reverts/hotfixes must still
+        # be recorded even if their body happens to carry the trailer.
+        #
+        # Paths-scoped, not trailer-only (#10498 review): the trailer alone
+        # also covers legitimate non-docs opt-outs (a flaky-test fix, a
+        # config-only fix, a fix already covered by an existing test) that
+        # ARE real escapes — gating on the trailer alone would silently
+        # under-count them, the one failure mode a falsification instrument
+        # must never have. When ``changed_paths`` is unknown (empty — a
+        # synthetic ``CommitInfo`` or an adapter that hasn't populated it)
+        # the gate fails OPEN: still record the candidate rather than guess.
+        if (
+            has_skip_regression(f"{subject}\n{body}")
+            and commit.changed_paths
+            and not product_paths(list(commit.changed_paths))
+        ):
+            logger.info(
+                "EscapeLedger: suppressed bug-issue candidate %s "
+                "(Skip-Regression trailer, no product-source delta)",
+                commit.sha,
+            )
+            return None
+        ref, closes_ref = _origin_pointer(commit)
+        if closes_ref is not None:
             return EscapeCandidate(
                 detection_source="bug-issue",
                 detection_ref=commit.sha,
@@ -127,10 +173,13 @@ def _classify(commit: CommitInfo) -> EscapeCandidate | None:
                 attribution_method="fixes-chain",
                 attribution_confidence="low",
                 originating_ref=ref,
-                originating_pr=pr,
+                # originating_pr is never populated for this branch (closes_ref
+                # points downstream at the closed issue, not upstream at the
+                # introducing merge) — closes_ref must survive here or the
+                # HITL finding gives a human no attribution lead at all.
                 notes=(
-                    "Fix commit closing an issue — bug-issue escape pending a "
-                    "human bug-label confirmation (HITL)."
+                    f"Fix commit closing #{closes_ref} — bug-issue escape "
+                    "pending a human bug-label confirmation (HITL)."
                 ),
             )
 
@@ -178,30 +227,60 @@ def _run_git(repo_root: Path, args: list[str]) -> str | None:
 
 def _added_paths_for_range(repo_root: Path, commit_range: str) -> dict[str, list[str]]:
     """Map each commit sha in *commit_range* to the paths it ADDED (status ``A``)."""
-    out = _run_git(
-        repo_root,
-        [
-            "log",
-            commit_range,
-            "--reverse",
-            "--diff-filter=A",
-            "--name-only",
-            f"--pretty=format:{_SHA_MARKER}%H",
-        ],
-    )
-    added: dict[str, list[str]] = {}
+    return _paths_for_range(repo_root, commit_range, diff_filter="A")
+
+
+def _changed_paths_for_range(
+    repo_root: Path, commit_range: str
+) -> dict[str, list[str]]:
+    """Map each commit sha in *commit_range* to every path it touched (any status).
+
+    Feeds ``CommitInfo.changed_paths`` — the Skip-Regression gate's
+    product-source check (#10498). Mirrors ``audit.detect._changed_paths_for_range``.
+    """
+    return _paths_for_range(repo_root, commit_range, diff_filter=None)
+
+
+def _paths_for_range(
+    repo_root: Path, commit_range: str, *, diff_filter: str | None
+) -> dict[str, list[str]]:
+    """Map each commit sha in *commit_range* to its touched paths.
+
+    ``diff_filter="A"`` restricts to paths the commit ADDED (regression-pin
+    signal); ``None`` returns every path the commit touched, any status
+    (Skip-Regression gate's product-source check, #10498).
+    """
+    args = [
+        # core.quotepath defaults to true, which octal-escapes non-ASCII
+        # path bytes (e.g. `"tests/regressions/test_\303\251.py"`) and
+        # would defeat `adds_regression_pin`'s startswith() check below;
+        # disable it so name-only output round-trips real UTF-8 paths.
+        "-c",
+        "core.quotepath=false",
+        "log",
+        commit_range,
+        "--reverse",
+    ]
+    if diff_filter is not None:
+        args.append(f"--diff-filter={diff_filter}")
+    args += ["--name-only", f"--pretty=format:{_SHA_MARKER}%H"]
+    out = _run_git(repo_root, args)
+    paths: dict[str, list[str]] = {}
     if not out:
-        return added
+        return paths
     current: str | None = None
-    for line in out.splitlines():
+    # `git log` output uses bare `\n` line endings; split explicitly rather
+    # than `str.splitlines()`, whose wider line-boundary set (see
+    # `_SHA_MARKER` above) can shred a marker or path apart mid-line (#10499).
+    for line in out.split("\n"):
         if line.startswith(_SHA_MARKER):
             current = line[len(_SHA_MARKER) :].strip()
-            added.setdefault(current, [])
+            paths.setdefault(current, [])
             continue
         stripped = line.strip()
         if current is not None and stripped:
-            added[current].append(stripped)
-    return added
+            paths[current].append(stripped)
+    return paths
 
 
 def commits_for_range(repo_root: Path, commit_range: str) -> list[CommitInfo] | None:
@@ -218,6 +297,7 @@ def commits_for_range(repo_root: Path, commit_range: str) -> list[CommitInfo] | 
     if out is None:
         return None
     added_map = _added_paths_for_range(repo_root, commit_range)
+    changed_map = _changed_paths_for_range(repo_root, commit_range)
     commits: list[CommitInfo] = []
     for chunk in out.split(_COMMIT_SEP):
         if not chunk.strip():
@@ -236,6 +316,7 @@ def commits_for_range(repo_root: Path, commit_range: str) -> list[CommitInfo] | 
                 body=body,
                 committed_at=committed_at.strip(),
                 added_paths=tuple(added_map.get(sha, [])),
+                changed_paths=tuple(changed_map.get(sha, [])),
             )
         )
     return commits

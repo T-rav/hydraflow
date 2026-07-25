@@ -1543,100 +1543,6 @@ class TestEagerTransitionProtection:
         assert stats.in_flight_count == 3
 
 
-# ── Crate Gate ────────────────────────────────────────────────────────
-
-
-class TestCrateGate:
-    """_take_from_queue skips issues not in the active crate."""
-
-    def test_take_skips_non_crated_issues_when_crate_manager_set(self) -> None:
-        from unittest.mock import MagicMock
-
-        store = _make_store()
-        cm = MagicMock()
-        cm.active_crate_number = 42
-        cm.is_in_active_crate.return_value = False
-        store.set_crate_manager(cm)
-
-        task = TaskFactory.create(id=1, tags=["hydraflow-plan"])
-        store._route_issues([task])
-
-        result = store.get_plannable(10)
-        assert result == []
-        # Task should still be in the queue (skipped, not discarded)
-        assert 1 in store._queue_members[STAGE_PLAN]
-
-    def test_take_allows_crated_issues(self) -> None:
-        from unittest.mock import MagicMock
-
-        store = _make_store()
-        cm = MagicMock()
-        cm.active_crate_number = 42
-        cm.is_in_active_crate.return_value = True
-        store.set_crate_manager(cm)
-
-        task = TaskFactory.create(id=2, tags=["hydraflow-plan"])
-        store._route_issues([task])
-
-        result = store.get_plannable(10)
-        assert len(result) == 1
-        assert result[0].id == 2
-
-    def test_take_works_without_crate_manager(self) -> None:
-        """When no crate manager is set, all issues pass through."""
-        store = _make_store()
-
-        task = TaskFactory.create(id=3, tags=["hydraflow-plan"])
-        store._route_issues([task])
-
-        result = store.get_plannable(10)
-        assert len(result) == 1
-
-    def test_triage_not_gated_by_crate(self) -> None:
-        """Triage (FIND) queue ignores the crate gate — issues always triage."""
-        from unittest.mock import MagicMock
-
-        store = _make_store()
-        cm = MagicMock()
-        cm.active_crate_number = 42
-        cm.is_in_active_crate.return_value = False
-        store.set_crate_manager(cm)
-
-        task = TaskFactory.create(id=10, tags=["hydraflow-find"])
-        store._route_issues([task])
-
-        result = store.get_triageable(10)
-        assert len(result) == 1
-        assert result[0].id == 10
-
-    def test_take_ignores_crate_gate_without_active_crate(self) -> None:
-        from unittest.mock import MagicMock
-
-        store = _make_store()
-        cm = MagicMock()
-        cm.active_crate_number = None
-        cm.is_in_active_crate.return_value = False
-        store.set_crate_manager(cm)
-
-        task = TaskFactory.create(id=11, tags=["hydraflow-plan"])
-        store._route_issues([task])
-
-        result = store.get_plannable(10)
-        assert len(result) == 1
-        assert result[0].id == 11
-
-    def test_get_uncrated_issues_returns_tasks_without_milestone(self) -> None:
-        store = _make_store()
-        task_crated = TaskFactory.create(id=1, tags=["hydraflow-plan"])
-        task_crated.metadata["milestone_number"] = 5
-        task_uncrated = TaskFactory.create(id=2, tags=["hydraflow-plan"])
-        store._route_issues([task_crated, task_uncrated])
-
-        uncrated = store.get_uncrated_issues()
-        assert len(uncrated) == 1
-        assert uncrated[0].id == 2
-
-
 # ── Additive-only queue (no eviction) ────────────────────────────────
 
 
@@ -1862,3 +1768,84 @@ class TestMergedTracking:
         store = _make_store()
         stats = store.get_queue_stats()
         assert stats.queue_depth[STAGE_MERGED] == 0
+
+
+# ── HITL Visited Tracking (#10509) ─────────────────────────────────────
+# A merged issue that never escalated must be distinguishable from one that
+# escalated and was later resolved back into the pipeline — the dashboard's
+# stage timeline renders "Needs Human" hollow vs filled based on this signal.
+
+
+class TestHitlVisitedTracking:
+    def test_routing_to_hitl_marks_visited(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=70, tags=["hydraflow-hitl"])
+        store._route_issues([issue])
+
+        assert 70 in store._hitl_visited
+
+    def test_enqueue_transition_to_hitl_marks_visited(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=71, tags=["hydraflow-plan"])
+        store._route_issues([issue])
+
+        store.enqueue_transition(issue, "hitl")
+
+        assert 71 in store._hitl_visited
+
+    def test_visited_flag_persists_after_issue_leaves_hitl(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=72, tags=["hydraflow-hitl"])
+        store._route_issues([issue])
+        assert 72 in store._hitl_numbers
+
+        # Labels caught up — issue routed back into the review queue.
+        resolved = TaskFactory.create(id=72, tags=["hydraflow-review"])
+        store._route_issues([resolved])
+
+        assert 72 not in store._hitl_numbers
+        assert 72 in store._hitl_visited
+
+    def test_issue_never_escalated_is_not_marked_visited(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=73, tags=["hydraflow-review"])
+        store._route_issues([issue])
+
+        assert 73 not in store._hitl_visited
+
+    def test_build_cached_entry_stamps_hitl_visited_true(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=74, tags=["hydraflow-hitl"])
+        store._route_issues([issue])
+
+        entry = store._build_cached_entry(74, "merged")
+
+        assert entry.get("hitl_visited") is True
+
+    def test_build_cached_entry_stamps_hitl_visited_false_by_default(self) -> None:
+        store = _make_store()
+        entry = store._build_cached_entry(999, "active")
+
+        assert entry.get("hitl_visited") is False
+
+    def test_snapshot_merged_entry_reflects_true_hitl_history(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=75, tags=["hydraflow-hitl"])
+        store._route_issues([issue])
+        store.mark_merged(75)
+
+        snapshot = store.get_pipeline_snapshot()
+        merged_entries = [e for e in snapshot[STAGE_MERGED] if e["issue_number"] == 75]
+
+        assert len(merged_entries) == 1
+        assert merged_entries[0].get("hitl_visited") is True
+
+    def test_snapshot_merged_entry_false_when_never_escalated(self) -> None:
+        store = _make_store()
+        store.mark_merged(76)
+
+        snapshot = store.get_pipeline_snapshot()
+        merged_entries = [e for e in snapshot[STAGE_MERGED] if e["issue_number"] == 76]
+
+        assert len(merged_entries) == 1
+        assert merged_entries[0].get("hitl_visited") is False

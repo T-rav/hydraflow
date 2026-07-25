@@ -1,57 +1,57 @@
 {
-  "regenerated_at": "2026-07-24T18:32:36.857486+00:00",
-  "commit_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9",
+  "regenerated_at": "2026-07-25T20:01:46.699068+00:00",
+  "commit_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656",
   "artifacts": {
     "loops.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "ports.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "labels.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "modules.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "events.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "adr_xref.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "mockworld.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "changelog.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "coverage_matrix.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "adr-conformance.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "adr-enforcement.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "ai_system_inventory.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "traceability_matrix.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "gauntlet-calibration.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "functional_areas.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "ubiquitous-language.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     },
     "ubiquitous-language-context-map.md": {
-      "source_sha": "fec0cc50ccc8d2a3afed8ed9b6cbc0ee2609fdb9"
+      "source_sha": "dc406e9bb1fba4d7bd5fd56d4734672110c8b656"
     }
   }
 }

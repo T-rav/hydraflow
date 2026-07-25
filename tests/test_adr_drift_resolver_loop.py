@@ -78,6 +78,9 @@ def loop_env(tmp_path: Path):
         data_root=tmp_path,
         repo="hydra/hydraflow",
         repo_root=tmp_path,
+        # Loop now defaults OFF (#10540); force ON so this behavioural fixture
+        # exercises the resolver rather than short-circuiting config_disabled.
+        adr_drift_resolver_loop_enabled=True,
     )
 
     state = MagicMock()

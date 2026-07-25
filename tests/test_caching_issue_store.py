@@ -345,7 +345,7 @@ class TestEnrichRead:
         the live task. Constructing a fresh Task from the cached
         payload (instead of model_copy) would silently drop these
         fields and break downstream readers like
-        plan_phase / crate_manager that read task.metadata."""
+        plan_phase that read task.metadata."""
         decorator, _, _ = _build(tmp_path)
         # First call populates the cache.
         await decorator.enrich_with_comments(_task(42))

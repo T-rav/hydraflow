@@ -1094,8 +1094,6 @@ def create_router(
             "issue_url": issue_url,
             "status": "unknown",
             "epic": "",
-            "crate_number": None,
-            "crate_title": "",
             "linked_issues": {},
             "prs": {},
             "session_ids": set(),
@@ -1153,8 +1151,6 @@ def create_router(
             issue_url=str(row.get("issue_url", "")),
             status=_coerce_history_status(row_status),
             epic=str(row.get("epic", "")),
-            crate_number=row.get("crate_number"),
-            crate_title=str(row.get("crate_title", "")),
             linked_issues=linked_issues,
             prs=pr_rows,
             session_ids=sorted(str(s) for s in row.get("session_ids", set()) if str(s)),
@@ -1258,9 +1254,6 @@ def create_router(
                         ):
                             row["epic"] = s
                             break
-                milestone_num = _coerce_int(event.data.get("milestone_number"))
-                if milestone_num > 0 and not row.get("crate_number"):
-                    row["crate_number"] = milestone_num
 
             if event.type == EventType.PR_CREATED:
                 pr_number = _coerce_int(event.data.get("pr"))
@@ -1338,7 +1331,7 @@ def create_router(
             )
         return items
 
-    async def _apply_enrichment_and_crate_titles(
+    async def _apply_enrichment_and_sort(
         items: list[IssueHistoryEntry],
         issue_rows: dict[int, dict[str, Any]],
         requested_status: str,
@@ -1346,12 +1339,11 @@ def create_router(
         use_unfiltered: bool,
         *,
         cfg: HydraFlowConfig,
-        bus: EventBus,
         state: StateTracker,
         repo_slug: str,
         use_cache: bool,
     ) -> list[IssueHistoryEntry]:
-        """Enrich items via GitHub and backfill crate titles from milestones.
+        """Enrich items via GitHub, sort, and backfill epic/outcome fields.
 
         Runs against the runtime's own *cfg*/*state*/PR manager. The persistent
         ``_history_cache`` (enriched-issue set + cached rows) is keyed to the
@@ -1392,8 +1384,8 @@ def create_router(
                 issue_rows, requested_status, query_text, state, repo_slug
             )
 
-        # Sort before crate-title backfill so milestone fetches are done
-        # after ordering.  The caller applies the page limit after returning.
+        # Sort after enrichment.  The caller applies the page limit after
+        # returning.
         items.sort(
             key=lambda item: (
                 item.last_seen or "",
@@ -1402,46 +1394,6 @@ def create_router(
             ),
             reverse=True,
         )
-
-        # Populate crate titles from milestones for items that have a
-        # crate_number but no title yet.
-        needs_title = any(i.crate_number and not i.crate_title for i in items)
-        if needs_title:
-            try:
-                # ``list_milestones`` is concrete-only on PRManager.
-                manager = _pr_manager_for(cfg, bus)
-                milestones = await cast("PRManager", manager).list_milestones(
-                    state="all"
-                )
-                title_map = {m.number: m.title for m in milestones}
-                items = [
-                    i.model_copy(
-                        update={"crate_title": title_map.get(i.crate_number, "")}
-                    )
-                    if i.crate_number and not i.crate_title
-                    else i
-                    for i in items
-                ]
-                # Also backfill into the raw rows so the cache carries titles.
-                backfilled = False
-                for i in items:
-                    if i.crate_number and i.crate_title:
-                        raw = issue_rows.get(i.issue_number)
-                        if raw is not None and raw.get("crate_title") != i.crate_title:
-                            raw["crate_title"] = i.crate_title
-                            backfilled = True
-                if (
-                    backfilled
-                    and use_cache
-                    and use_unfiltered
-                    and _history_cache.get("issue_rows") is not None
-                ):
-                    _history_cache["issue_rows"] = copy.deepcopy(issue_rows)
-                    _save_history_cache()
-            except Exception:
-                logger.warning(
-                    "Failed to fetch milestones for crate titles", exc_info=True
-                )
 
         # Backfill epic field from state's epic tracking when not already set.
         epic_states = state.get_all_epic_states()
@@ -1518,9 +1470,6 @@ def create_router(
                     "",
                 )
                 row["epic"] = epic
-            ms_num = _coerce_int(getattr(issue, "milestone_number", None))
-            if ms_num > 0 and not row.get("crate_number"):
-                row["crate_number"] = ms_num
             for link in parse_task_links(issue.body or ""):
                 try:
                     tid = int(link.target_id)
@@ -1929,11 +1878,6 @@ def create_router(
 
     _register_epics(router, ctx)
 
-    # --- Crate routes (extracted to _crates_routes.py) ---
-    from dashboard_routes._crates_routes import register as _register_crates
-
-    _register_crates(router, ctx)
-
     # --- Wiki routes (Phase 5 of git-backed repo wiki) ---
     from dashboard_routes._wiki_routes import register as _register_wiki
 
@@ -2214,15 +2158,14 @@ def create_router(
             issue_rows, requested_status, query_text, state, repo_slug
         )
 
-        # Enrich via GitHub, backfill crate titles, sort.
-        items = await _apply_enrichment_and_crate_titles(
+        # Enrich via GitHub, sort, backfill epic/outcome fields.
+        items = await _apply_enrichment_and_sort(
             items,
             issue_rows,
             requested_status,
             query_text,
             use_unfiltered,
             cfg=cfg,
-            bus=bus,
             state=state,
             repo_slug=repo_slug,
             use_cache=use_cache,

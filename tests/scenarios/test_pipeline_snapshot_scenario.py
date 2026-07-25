@@ -135,3 +135,68 @@ class TestPipelineSnapshotScenario:
         assert all(
             e.type != EventType.PIPELINE_SNAPSHOT for e in replayed_on_reconnect
         ), "PIPELINE_SNAPSHOT must not enter WS reconnect replay (get_history)"
+
+
+class TestHitlVisitedSnapshotScenario:
+    """#10509: ``hitl_visited`` must survive the real store→bus PIPELINE_SNAPSHOT
+    push for a merged issue, not just the bare-``IssueStore`` unit tier.
+
+    ``tests/test_issue_store.py::TestHitlVisitedTracking`` and
+    ``tests/regressions/test_hitl_visited_merged_stage_timeline_10509.py``
+    cover the mechanics against a bare ``IssueStore``. This scenario proves the
+    same signal reaches the live event bus the dashboard WS subscribes to,
+    driving the *real* store wired into a ``MockWorld`` harness end-to-end —
+    the integration leg the unit tier can't see.
+    """
+
+    async def test_merged_snapshot_carries_hitl_visited_after_real_escalation(
+        self, mock_world
+    ) -> None:
+        world = mock_world
+        harness = world.harness
+        store = harness.store
+        bus = harness.bus
+
+        queue = bus.subscribe()
+
+        # Escalate to HITL, then a human resolves it and labels move the
+        # issue back into the pipeline...
+        escalated = TaskFactory.create(id=930, tags=["hydraflow-hitl"])
+        store._route_issues([escalated])
+        recovered = TaskFactory.create(id=930, tags=["hydraflow-review"])
+        store._route_issues([recovered])
+
+        # ...and it eventually merges.
+        store.mark_merged(930)
+        await _drain_snapshot_flush(store)
+
+        snaps = _drain_snapshots(queue)
+        assert snaps, "mark_merged must push a PIPELINE_SNAPSHOT to the bus"
+        merged_entries = snaps[-1].data["stages"]["merged"]
+        entry = next(e for e in merged_entries if e["issue_number"] == 930)
+
+        assert entry["status"] == "merged"
+        assert entry.get("hitl_visited") is True
+
+    async def test_merged_snapshot_hitl_visited_false_when_never_escalated(
+        self, mock_world
+    ) -> None:
+        world = mock_world
+        harness = world.harness
+        store = harness.store
+        bus = harness.bus
+
+        queue = bus.subscribe()
+
+        issue = TaskFactory.create(id=931, tags=["hydraflow-review"])
+        store._route_issues([issue])
+        store.mark_merged(931)
+        await _drain_snapshot_flush(store)
+
+        snaps = _drain_snapshots(queue)
+        assert snaps, "mark_merged must push a PIPELINE_SNAPSHOT to the bus"
+        merged_entries = snaps[-1].data["stages"]["merged"]
+        entry = next(e for e in merged_entries if e["issue_number"] == 931)
+
+        assert entry["status"] == "merged"
+        assert entry.get("hitl_visited") is False

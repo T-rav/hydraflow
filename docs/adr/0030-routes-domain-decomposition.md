@@ -21,12 +21,13 @@ Extracted 70 route handlers into 7 domain-specific files, each exporting a `regi
 | Module | Routes | Scope |
 |--------|--------|-------|
 | `_epic_routes.py` | 3 | Epic tracking and release |
-| `_crates_routes.py` | 9 | Crate CRUD, items, active, advance |
 | `_hitl_routes.py` | 9 | HITL management, human-input |
 | `_control_routes.py` | 13 | Pipeline control, admin tasks, bot-pr settings |
 | `_metrics_routes.py` | 12 | Metrics, insights, runs, artifacts |
 | `_reports_routes.py` | 5 | Bug report submission and tracking |
 | `_state_routes.py` | 19 | Runtimes, repos, filesystem, GitHub |
+
+> Note: the original extraction produced 7 domain files. `_crates_routes.py` (the crate/milestone domain, 9 routes) was removed in #10512 when the dormant crate subsystem was retired; the `register(router, ctx)` pattern is unchanged for the remaining domains.
 
 ### Why `register()` over `include_router()`
 

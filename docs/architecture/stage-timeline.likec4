@@ -1,0 +1,153 @@
+// Issue #10509 — Work Stream stage timeline: merged issues show HITL filled and Merged hollow
+// Topology of the pipeline-snapshot data flow from IssueStore to the per-issue
+// stage timeline rendered by StreamCard.StageRow.
+
+specification {
+  element system
+  element container
+  element component
+  element store
+  element datum
+
+  relationship emits
+  relationship reads
+}
+
+model {
+  hydraflow = system 'HydraFlow' {
+
+    backend = container 'Python Backend' {
+      technology 'Python / FastAPI'
+
+      issueStore = component 'IssueStore' {
+        description 'src/issue_store.py — owns queue/active/hitl/merged sets'
+      }
+      hitlNumbers = store '_hitl_numbers' {
+        description 'set[int] — CURRENT hitl residents; discarded on exit (l.317/325/416/419)'
+      }
+      mergedNumbers = store '_merged_numbers' {
+        description 'set[int] — additive, never discarded (l.144/616)'
+      }
+      hitlVisited = store '_hitl_visited (NEW)' {
+        description 'set[int] — additive provenance: ever escalated to HITL'
+      }
+      snapshotBuilders = component 'snapshot builders' {
+        description '_snapshot_queued / _snapshot_active / _snapshot_hitl / _snapshot_merged / _snapshot_in_flight'
+      }
+      cachedEntry = component '_build_cached_entry' {
+        description 'issue_store.py:787 — single chokepoint stamping status onto an entry'
+      }
+      entryModel = datum 'PipelineSnapshotEntry' {
+        description 'models.py:3274 TypedDict — wire shape; + hitl_visited: NotRequired[bool]'
+      }
+      pipelineIssue = datum 'PipelineIssue' {
+        description 'models.py:2569 frozen BaseModel — status: PipelineIssueStatus (queued|active|processing|hitl|merged); + hitl_visited: bool = False'
+      }
+      route = component 'GET /api/pipeline' {
+        description 'dashboard_routes/_routes.py:1802 — validates entries into PipelineIssue, tags repo'
+      }
+    }
+
+    fakes = container 'MockWorld fakes' {
+      technology 'Python'
+      fakeStore = component 'FakeIssueStore' {
+        description 'src/mockworld/fakes/fake_issue_store.py — hitl/merged entries emit HITL/MERGED + hitl_visited (fidelity parity with IssueStore)'
+      }
+    }
+
+    ui = container 'Dashboard UI' {
+      technology 'React'
+
+      constants = component 'PIPELINE_STAGES' {
+        description 'src/ui/src/constants.js:52 — stage metadata; + conditional: true on hitl'
+      }
+      timeline = component 'useTimeline' {
+        description 'src/ui/src/hooks/useTimeline.js — STAGE_KEYS, STAGE_META, EVENT_TO_STAGE (no hitl entry)'
+      }
+      tracks = component 'pipelineTracks' {
+        description 'src/ui/src/utils/pipelineTracks.js — precedent for deriving behaviour from stage properties'
+      }
+      stageStatus = component 'stageStatus (NEW util)' {
+        description 'src/ui/src/utils/stageStatus.js — buildSyntheticStages + status vocabulary mapping'
+      }
+      streamView = component 'StreamView.toStreamIssue' {
+        description 'src/ui/src/components/StreamView.jsx:267 — the ONE place every card stages map is fabricated'
+      }
+      streamCard = component 'StreamCard.StageRow' {
+        description 'src/ui/src/components/StreamCard.jsx:28 — status -> node fill / connector / badge'
+      }
+      statusDot = component 'StreamCard.StatusDot' {
+        description 'src/ui/src/components/StreamCard.jsx:8 — card header dot, driven by overallStatus'
+      }
+    }
+  }
+
+  // --- data flow -----------------------------------------------------------
+  hydraflow.backend.issueStore -> hydraflow.backend.hitlNumbers 'add on escalate / discard on exit'
+  hydraflow.backend.issueStore -> hydraflow.backend.hitlVisited 'add on escalate (never discard)'
+  hydraflow.backend.issueStore -> hydraflow.backend.mergedNumbers 'add on mark_merged'
+  hydraflow.backend.snapshotBuilders -> hydraflow.backend.cachedEntry 'per issue_number + status'
+  hydraflow.backend.cachedEntry -> hydraflow.backend.hitlVisited 'reads membership -> hitl_visited flag'
+  hydraflow.backend.cachedEntry -> hydraflow.backend.entryModel 'produces'
+  hydraflow.backend.route -> hydraflow.backend.snapshotBuilders 'get_pipeline_snapshot()'
+  hydraflow.backend.route -> hydraflow.backend.pipelineIssue 'model_validate(entry)'
+  hydraflow.fakes.fakeStore -> hydraflow.backend.entryModel 'produces (scenario tier)'
+
+  hydraflow.ui.streamView -> hydraflow.backend.route 'pipelineIssues via REST poll + WS PIPELINE_SNAPSHOT'
+  hydraflow.ui.streamView -> hydraflow.ui.stageStatus 'delegates synthetic stage construction'
+  hydraflow.ui.stageStatus -> hydraflow.ui.constants 'reads conditional / terminal stage properties'
+  hydraflow.ui.stageStatus -> hydraflow.ui.timeline 'STAGE_KEYS ordering'
+  hydraflow.ui.tracks -> hydraflow.ui.constants 'existing property-driven precedent'
+  hydraflow.ui.streamView -> hydraflow.ui.streamCard 'issue.stages'
+  hydraflow.ui.streamView -> hydraflow.ui.statusDot 'issue.overallStatus'
+}
+
+views {
+  view index {
+    title 'Issue #10509 — pipeline snapshot to stage timeline'
+    include *
+    include hydraflow.backend.*
+    include hydraflow.ui.*
+    include hydraflow.fakes.*
+    autoLayout LeftRight
+  }
+
+  view uiSlice of hydraflow.ui {
+    title 'UI slice — where the stage map is fabricated and rendered'
+    include *
+    autoLayout TopBottom
+  }
+
+  view backendSlice of hydraflow.backend {
+    title 'Backend slice — HITL provenance and snapshot entry construction'
+    include *
+    autoLayout TopBottom
+  }
+
+  dynamic view mergedIssueRender {
+    title 'Dynamic — a merged issue that never escalated renders its timeline'
+
+    hydraflow.backend.issueStore -> hydraflow.backend.snapshotBuilders 'merged bucket contains #N'
+    hydraflow.backend.snapshotBuilders -> hydraflow.backend.cachedEntry 'status="merged"'
+    hydraflow.backend.cachedEntry -> hydraflow.backend.entryModel 'hitl_visited=False (#N not in _hitl_visited)'
+    hydraflow.backend.entryModel -> hydraflow.backend.route 'entry dict'
+    hydraflow.backend.route -> hydraflow.ui.streamView 'PipelineIssue{status: merged, hitl_visited: false}'
+    hydraflow.ui.streamView -> hydraflow.ui.stageStatus 'buildSyntheticStages(pipeIssue, "merged")'
+    hydraflow.ui.stageStatus -> hydraflow.ui.streamCard 'hitl: pending (hollow), merged: done (filled)'
+
+    autoLayout LeftRight
+  }
+
+  dynamic view escalatedThenMerged {
+    title 'Dynamic — an issue that escalated to HITL and later merged keeps its HITL history'
+
+    hydraflow.backend.issueStore -> hydraflow.backend.hitlVisited 'escalation records #N permanently'
+    hydraflow.backend.issueStore -> hydraflow.backend.hitlNumbers 'exit from HITL discards #N here only'
+    hydraflow.backend.issueStore -> hydraflow.backend.mergedNumbers 'mark_merged(#N)'
+    hydraflow.backend.cachedEntry -> hydraflow.backend.entryModel 'status="merged", hitl_visited=True'
+    hydraflow.backend.entryModel -> hydraflow.ui.stageStatus 'via /api/pipeline'
+    hydraflow.ui.stageStatus -> hydraflow.ui.streamCard 'hitl: done (filled), merged: done (filled)'
+
+    autoLayout LeftRight
+  }
+}

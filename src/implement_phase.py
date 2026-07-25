@@ -301,28 +301,16 @@ class ImplementPhase:
         callers that pass an explicit list are assumed to have done
         their own gating.
         """
-        if issues is None and self._precondition_gate is not None:
-            # Drain + gate at the start of the cycle. Issues that fail
-            # the gate are routed back via the coordinator inside
-            # filter_and_route — they do not appear in the gated list.
-            from stage_preconditions import Stage  # noqa: PLC0415
-
-            drained: list[Task] = []
-            while True:
-                batch = self._store.get_implementable(8)
-                if not batch:
-                    break
-                drained.extend(batch)
-            issues = await self._precondition_gate.filter_and_route(
-                drained, Stage.READY
-            )
-
+        # Declared before the branches so both assignments conform to one
+        # type (the pool accepts a sync or async supply — #10511).
+        supply: Callable[[], list[Task] | Awaitable[list[Task]]]
         if issues is not None:
-            # Fixed list mode — process exactly these issues
+            # Fixed-list mode — the caller provided an explicit, already-gated
+            # list (it has done its own gating). Feed the pool one at a time.
             items_iter = iter(issues)
             exhausted = False
 
-            def _supply_fixed() -> list[Task]:
+            async def _supply_fixed() -> list[Task]:
                 nonlocal exhausted
                 if exhausted:
                     return []
@@ -331,13 +319,44 @@ class ImplementPhase:
                     exhausted = True
                     return []
                 return [item]
+
+            supply = _supply_fixed
         else:
+            # Live-refill from the store on every slot open (#10511). Pull one
+            # ready issue at a time and, when a precondition gate is configured,
+            # gate it inline: gate failures are routed back (relabeled out of
+            # the ready stage) and their in-flight claim released, so a long
+            # build no longer starves newly-ready work of the free slot. This
+            # restores the #10312 mid-run refill intent for the gated path,
+            # which the old drain-once-then-fixed-list approach defeated.
+            # implement now shares the same live get_X(1) refill as triage and
+            # plan (which already did). review keeps its bespoke loop because
+            # its no-work items self-re-enqueue and it needs a work-based idle
+            # break — see _do_review_work.
             issues = []
 
-            def _supply_fixed() -> list[Task]:
-                batch = self._store.get_implementable(1)
-                issues.extend(batch)
-                return batch
+            async def _supply_live() -> list[Task]:
+                from stage_preconditions import Stage  # noqa: PLC0415
+
+                while True:
+                    batch = self._store.get_implementable(1)
+                    if not batch:
+                        return []
+                    if self._precondition_gate is None:
+                        issues.extend(batch)
+                        return batch
+                    gated = await self._precondition_gate.filter_and_route(
+                        batch, Stage.READY
+                    )
+                    if gated:
+                        issues.extend(gated)
+                        return gated
+                    # Gate failure: filter_and_route already routed it back.
+                    # Release the in-flight claim get_implementable took so it
+                    # doesn't leak, then keep pulling — the next may pass.
+                    release_batch_in_flight(self._store, {t.id for t in batch})
+
+            supply = _supply_live
 
         async def _worker(idx: int, issue: Task) -> WorkerResult:
             if self._stop_event.is_set():
@@ -398,7 +417,7 @@ class ImplementPhase:
                         await self._release_claim(issue.id)
 
         all_results = await run_refilling_pool(
-            supply_fn=_supply_fixed,
+            supply_fn=supply,
             worker_fn=_worker,
             max_concurrent=self._config.max_workers,
             stop_event=self._stop_event,
@@ -1361,15 +1380,55 @@ class ImplementPhase:
     ) -> WorkerResult:
         """Handle the case where implementation succeeded but no PR exists.
 
-        If the branch has no diff from main, escalates to HITL.  Otherwise
-        marks as failed for retry.
+        If the branch has no diff from main, escalates to HITL.  Otherwise the
+        work was really committed and pushed — the PR-open step just never ran
+        (e.g. a long local verification step got reaped by a subprocess timeout
+        AFTER commit+push but BEFORE ``gh pr create``; issue #10493). Recover
+        idempotently instead of discarding the delivered work: re-check for an
+        open PR, then open one from the already-pushed branch, mirroring the
+        happy path. Only a genuine PR-open failure falls through to the "mark
+        failed / retry" path (which would rebuild the work from scratch).
         """
         has_diff = await self._prs.branch_has_diff_from_main(result.branch)
         if not has_diff:
             return await self._escalate_no_changes_to_hitl(issue, result)
 
+        # Idempotent recovery (#10493): the branch carries a real diff and is
+        # already pushed on origin, so deliver it rather than bouncing the
+        # issue back to hydraflow-ready for a full rebuild. A PR may have been
+        # created since the initial resolve; otherwise open one now from the
+        # pushed branch (the same call the happy path uses in _resolve_pr).
+        pr = await self._prs.find_open_pr_for_branch(
+            result.branch, issue_number=issue.id
+        )
+        if pr is None or pr.number <= 0:
+            gh_issue = GitHubIssue.from_task(issue)
+            pr = await self._prs.create_pr(gh_issue, result.branch)
+
+        if pr is not None and pr.number > 0:
+            logger.info(
+                "Recovered PR #%d for issue #%d from already-pushed branch %s "
+                "(no PR existed after successful implementation)",
+                pr.number,
+                issue.id,
+                result.branch,
+            )
+            # Mirror the happy-path post-create state marking so the delivered
+            # work advances to review instead of being rebuilt: enqueue +
+            # drive the review transition, bump the session counter, and mark
+            # the issue "success" (what _handle_successful_push's caller does).
+            self._store.enqueue_transition(issue, "review")
+            await self._transitioner.transition(issue.id, "review", pr_number=pr.number)
+            self._state.increment_session_counter("implemented")
+            self._state.mark_issue(issue.id, "success")
+            result.success = True
+            result.pr_info = pr
+            result.error = None
+            return result
+
         logger.warning(
-            "Implementation succeeded for issue #%d but no open PR exists for branch %s",
+            "Implementation succeeded for issue #%d but PR recovery failed for "
+            "branch %s — keeping in ready queue for retry",
             issue.id,
             result.branch,
         )

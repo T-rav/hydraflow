@@ -4,9 +4,9 @@ import { PIPELINE_STAGES } from '../constants'
 /** Canonical stage keys in lifecycle order. */
 export const STAGE_KEYS = PIPELINE_STAGES.map(s => s.key)
 
-/** Map stage key → { color, subtleColor, label, role }. */
+/** Map stage key → { color, subtleColor, label, role, conditional }. */
 export const STAGE_META = Object.fromEntries(
-  PIPELINE_STAGES.map(s => [s.key, { color: s.color, subtleColor: s.subtleColor, label: s.label, role: s.role }])
+  PIPELINE_STAGES.map(s => [s.key, { color: s.color, subtleColor: s.subtleColor, label: s.label, role: s.role, conditional: s.conditional }])
 )
 
 /**
@@ -19,6 +19,11 @@ const EVENT_TO_STAGE = {
   worker_update: 'implement',
   review_update: 'review',
   merge_update: 'merged',
+  // HITL bus traffic drives the "Needs Human" stage. Stage status is derived
+  // from event.data.status by the shared logic below (escalated → 'hitl',
+  // running → 'active', done/failed → resolved), matching the other stages.
+  hitl_escalation: 'hitl',
+  hitl_update: 'hitl',
 }
 
 /** Map worker `source` field (from transcript_line) to stage key. */

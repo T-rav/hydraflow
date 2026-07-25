@@ -545,20 +545,6 @@ class TestEpicPayloads:
         assert p["action"] == "released"
 
 
-class TestCratePayloads:
-    def test_crate_activated_payload_carries_crate_number(self) -> None:
-        from models import CrateActivatedPayload
-
-        p: CrateActivatedPayload = {"crate_number": 1}
-        assert p["crate_number"] == 1
-
-    def test_crate_completed_payload_carries_crate_number(self) -> None:
-        from models import CrateCompletedPayload
-
-        p: CrateCompletedPayload = {"crate_number": 1}
-        assert p["crate_number"] == 1
-
-
 class TestOrchestratorStatusCreditsPausedUntil:
     """Verify credits_paused_until is accepted by OrchestratorStatusPayload."""
 
