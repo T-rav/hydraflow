@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
-from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Generator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, TypeVar
 
@@ -44,16 +45,26 @@ def _sentry_transaction(op: str, name: str) -> Generator[None, None, None]:
         yield
 
 
-def _fill_pending_slots(
-    supply_fn: Callable[[], list[T]],
+async def _fill_pending_slots(
+    supply_fn: Callable[[], list[T] | Awaitable[list[T]]],
     worker_fn: Callable[[int, T], Coroutine[Any, Any, T_Result]],
     pending: dict[asyncio.Task[T_Result], int],
     max_concurrent: int,
     worker_id_counter: int,
 ) -> int:
-    """Fill available pool slots from supply_fn, returning updated counter."""
+    """Fill available pool slots from supply_fn, returning updated counter.
+
+    ``supply_fn`` may be sync (returns a list) or async (returns an
+    awaitable list). An async supply lets a stage live-pull + gate from
+    the store on every refill instead of draining once up front — so a
+    long-running worker no longer starves newly-ready work of a free
+    slot (#10511, restoring the mid-run refill intent of #10312 for the
+    gated path).
+    """
     while len(pending) < max_concurrent:
         new_items = supply_fn()
+        if inspect.isawaitable(new_items):
+            new_items = await new_items
         if not new_items:
             break
         free = max_concurrent - len(pending)
@@ -139,7 +150,7 @@ async def run_concurrent_batch(
 
 
 async def run_refilling_pool(
-    supply_fn: Callable[[], list[T]],
+    supply_fn: Callable[[], list[T] | Awaitable[list[T]]],
     worker_fn: Callable[[int, T], Coroutine[Any, Any, T_Result]],
     max_concurrent: int,
     stop_event: asyncio.Event,
@@ -171,7 +182,7 @@ async def run_refilling_pool(
 
     try:
         while not stop_event.is_set():
-            worker_id_counter = _fill_pending_slots(
+            worker_id_counter = await _fill_pending_slots(
                 supply_fn, worker_fn, pending, max_concurrent, worker_id_counter
             )
             if not pending:
