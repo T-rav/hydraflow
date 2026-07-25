@@ -52,6 +52,10 @@ class AimdController:
             raise ValueError(
                 f"decrease_factor must be in (0, 1), got {self.decrease_factor}"
             )
+        if self.increase_step < 0:
+            raise ValueError(f"increase_step must be >= 0, got {self.increase_step}")
+        if self.hold_ticks < 1:
+            raise ValueError(f"hold_ticks must be >= 1, got {self.hold_ticks}")
         self._cap = self.start
 
     def update(self, *, breached: bool, headroom: bool) -> int:

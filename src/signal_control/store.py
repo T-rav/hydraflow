@@ -36,6 +36,8 @@ class HistoricSignalStore:
     ) -> None:
         if max_len < 1:
             raise ValueError(f"max_len must be >= 1, got {max_len}")
+        if max_age_s <= 0:
+            raise ValueError(f"max_age_s must be > 0, got {max_age_s}")
         self._max_len = max_len
         self._max_age_s = max_age_s
         self._clock = clock
@@ -50,9 +52,10 @@ class HistoricSignalStore:
         buf = self._signals.get(signal)
         if buf is None:
             buf = self._signals[signal] = deque(maxlen=self._max_len)
-        buf.append(Sample(self._clock(), float(value), dict(tags or {})))
+        sample = Sample(self._clock(), float(value), dict(tags or {}))
+        buf.append(sample)
         self._prune(buf)
-        self._persist(signal, buf[-1])
+        self._persist(signal, sample)
 
     def _prune(self, buf: deque[Sample]) -> None:
         cutoff = self._clock() - self._max_age_s

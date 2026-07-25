@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -17,6 +18,13 @@ class FakeClock:
 
     def advance(self, dt: float) -> None:
         self.t += dt
+
+
+def test_rejects_bad_max_age_s():
+    with pytest.raises(ValueError):
+        HistoricSignalStore(max_age_s=0, clock=FakeClock())
+    with pytest.raises(ValueError):
+        HistoricSignalStore(max_age_s=-1.0, clock=FakeClock())
 
 
 def test_record_and_window():

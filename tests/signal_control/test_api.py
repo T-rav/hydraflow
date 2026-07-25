@@ -13,6 +13,7 @@ def test_public_api_surface():
         "PidController",
         "RetryController",
         "RetryOutcome",
+        "RetryResult",
         "RetryStatus",
         "CircuitBreaker",
         "HistoricSignalStore",

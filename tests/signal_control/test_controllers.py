@@ -51,6 +51,13 @@ def test_aimd_rejects_bad_bounds():
         AimdController(lo=1, hi=8, start=99)
 
 
+def test_aimd_rejects_bad_ramp_params():
+    with pytest.raises(ValueError):
+        AimdController(lo=2, hi=16, start=8, increase_step=-10, hold_ticks=1)
+    with pytest.raises(ValueError):
+        AimdController(lo=2, hi=16, start=8, increase_step=1, hold_ticks=0)
+
+
 def test_pid_proportional_response_sign():
     pid = PidController(kp=1.0, ki=0.0, kd=0.0, out_lo=-10.0, out_hi=10.0)
     assert pid.update(3.0) == 3.0

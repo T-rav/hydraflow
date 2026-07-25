@@ -20,6 +20,7 @@ from signal_control.controllers import (
     PidController,
     RetryController,
     RetryOutcome,
+    RetryResult,
     RetryStatus,
 )
 from signal_control.store import HistoricSignalStore
@@ -35,6 +36,7 @@ __all__ = [
     "PidController",
     "RetryController",
     "RetryOutcome",
+    "RetryResult",
     "RetryStatus",
     "CircuitBreaker",
     "HistoricSignalStore",
