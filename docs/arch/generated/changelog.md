@@ -6,7 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `f50db86` — Merge remote-tracking branch 'origin/staging' into feat/provider-split-zai-harness *(2026-07-25)*
+- `92d4244` — fix(quality): resolve gemini/pi-gut fallout in the full suite *(2026-07-25)*
 - `ed09a33` — docs(adr): ADR-0109 provider/harness backend split (supersedes agentic=Claude-only) *(2026-07-25)*
+- `58b5cdc` — Fixes #10540, #10533: violation-based ADR citation conformance gate; retire activity-drift (#10547) (#10547) *(2026-07-25)*
 - `306cc57` — Fixes #10515: FakeIssueStore stamps HITL and merged snapshot entrie... (#10528) (#10528) *(2026-07-25)*
 - `585f69e` — Fixes #10509: Work Stream stage timeline: merged issues show HITL f... (#10529) (#10529) *(2026-07-25)*
 - `204d2e1` — feat(ul): term-proposer batch — 1 drafts (#10514) (#10514) *(2026-07-25)*
