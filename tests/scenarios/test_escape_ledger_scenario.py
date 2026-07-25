@@ -59,6 +59,22 @@ def _seed_revert(repo: Path) -> tuple[str, str]:
     return base_sha, _head(repo)
 
 
+def _seed_skip_regression_docs_commit(repo: Path) -> tuple[str, str]:
+    base_sha = _head(repo)
+    (repo / "docs.likec4").write_text("diagram v2\n")
+    _git(repo, "add", "-A")
+    _git(
+        repo,
+        "commit",
+        "-q",
+        "-m",
+        "fix(erosion): refresh diagram\n\n"
+        "No source or behavior change.\n\n"
+        "Skip-Regression: no code change\n\nCloses #10449.",
+    )
+    return base_sha, _head(repo)
+
+
 def _make_state(initial_sha: str) -> Any:
     from unittest.mock import MagicMock
 
@@ -146,3 +162,96 @@ class TestEscapeLedgerScenario:
         from escape.ledger import EscapeLedger
 
         assert len(EscapeLedger(loop._ledger_path).read_all()) == 1
+
+    async def test_skip_regression_docs_commit_files_no_hitl_finding(
+        self, tmp_path: Path
+    ) -> None:
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base_sha, _head_sha = _seed_skip_regression_docs_commit(repo)
+
+        state = _make_state(base_sha)
+        loop = _build_loop(tmp_path, repo, github, state)
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ok"
+        assert result["escapes_recorded"] == 0
+        assert result["filed"] == 0
+
+    async def test_resolved_row_renders_as_encoded_in_report(
+        self, tmp_path: Path
+    ) -> None:
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base_sha, _head_sha = _seed_revert(repo)
+
+        state = _make_state(base_sha)
+        loop = _build_loop(tmp_path, repo, github, state)
+
+        first = await loop._do_work()
+        assert first["escapes_recorded"] == 1
+
+        from escape.ledger import EscapeLedger
+
+        ledger = EscapeLedger(loop._ledger_path)
+        (record,) = ledger.read_all()
+        resolved = ledger.append_resolution(
+            record.id, encoded_as="detector", notes="resolved"
+        )
+        assert resolved is not None
+
+        loop._render_reports(repo)
+
+        report_path = repo / "docs/arch/generated/escape-ledger.md"
+        text = report_path.read_text(encoding="utf-8")
+        # the collapse must be applied: exactly one recorded escape, encoded
+        # as `detector` — not double-counted as both none-yet and detector
+        assert "| total recorded escapes | 1 |" in text
+        assert "| encoded / unencoded | 1 / 0 |" in text
+
+    async def test_surface_findings_reads_through_the_collapse(
+        self, tmp_path: Path
+    ) -> None:
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        state = _make_state(_head(repo))
+        loop = _build_loop(tmp_path, repo, github, state)
+
+        from escape.ledger import EscapeLedger
+        from escape.models import EscapeRecord
+
+        ledger = EscapeLedger(loop._ledger_path)
+        ledger.append(
+            EscapeRecord(
+                id="bug-issue:abc123",
+                detected_at="2026-01-01T00:00:00+00:00",
+                detection_source="bug-issue",
+                detection_ref="abc123",
+                originating_pr=None,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="fixes-chain",
+                attribution_confidence="low",
+                encoded_as="none-yet",
+                notes="",
+            )
+        )
+        # resolved BEFORE any tick ever surfaced it — the dedup store's
+        # `already_surfaced` set is empty, so only the collapse (not the
+        # one-shot surfacing fingerprint) can exclude it here.
+        ledger.append_resolution(
+            "bug-issue:abc123",
+            encoded_as="detector",
+            attribution_confidence="high",
+            notes="confirmed not an escape",
+        )
+
+        filed, capped = await loop._surface_findings()
+
+        assert filed == 0
+        assert capped is False

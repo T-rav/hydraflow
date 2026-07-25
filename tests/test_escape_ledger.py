@@ -42,6 +42,7 @@ def _record(
     ttd: float | None = 24.0,
     confidence: str = "high",
     encoded_as: str = "none-yet",
+    notes: str = "",
 ) -> EscapeRecord:
     return EscapeRecord(
         id=rid,
@@ -55,7 +56,7 @@ def _record(
         attribution_method="revert-parse",
         attribution_confidence=confidence,
         encoded_as=encoded_as,
-        notes="",
+        notes=notes,
     )
 
 
@@ -193,7 +194,11 @@ class TestDetect:
         (cand,) = detect_escapes([commit])
         assert cand.detection_source == "hotfix"
         assert cand.attribution_method == "fixes-chain"
-        assert cand.originating_pr == 4242
+        # `Fixes #N` is a closing keyword pointing at downstream work (the
+        # issue this commit closes), never the merge that introduced the
+        # defect — it must not be written to originating_pr (#10498).
+        assert cand.originating_pr is None
+        assert cand.originating_ref == "#4242"
 
     def test_bug_issue_fix_is_low_confidence(self) -> None:
         commit = _commit(
@@ -204,7 +209,46 @@ class TestDetect:
         (cand,) = detect_escapes([commit])
         assert cand.detection_source == "bug-issue"
         assert cand.attribution_confidence == "low"
-        assert cand.originating_pr == 777
+        assert cand.originating_pr is None
+        assert cand.originating_ref == "#777"
+
+    def test_bug_issue_skip_regression_trailer_is_not_an_escape(self) -> None:
+        # A `fix(...)` commit that declares itself behaviour-neutral via the
+        # P10.6/P10.7 opt-out trailer (e.g. a docs-only diagram refresh) is
+        # not a post-merge defect (#10498).
+        commit = _commit(
+            "9196f74",
+            subject="fix(erosion): refresh the arch diagram",
+            body=(
+                "No source or behavior change.\n\n"
+                "Skip-Regression: no code change\n\nCloses #10449."
+            ),
+        )
+        assert detect_escapes([commit]) == []
+
+    def test_revert_with_skip_regression_trailer_still_recorded(self) -> None:
+        # The Skip-Regression gate must be scoped to the bug-issue branch
+        # only — a revert carrying the trailer in its body is still a real
+        # escape and must still be recorded (pre-mortem risk: over-broad gate).
+        commit = _commit(
+            "aaaa111",
+            subject='Revert "feat: risky"',
+            body="This reverts commit bbbb222cccc.\n\nSkip-Regression: n/a",
+        )
+        (cand,) = detect_escapes([commit])
+        assert cand.detection_source == "revert"
+
+    def test_regression_pin_closing_ref_not_recorded_as_originating_pr(self) -> None:
+        commit = _commit(
+            "aaaa111",
+            subject="fix: pin the boot regression",
+            body="Fixes #55.",
+            added_paths=("tests/regressions/test_boot.py",),
+        )
+        (cand,) = detect_escapes([commit])
+        assert cand.detection_source == "regression-pin"
+        assert cand.originating_pr is None
+        assert cand.originating_ref == "#55"
 
     def test_plain_commit_is_not_an_escape(self) -> None:
         commit = _commit("aaaa111", subject="feat: add a feature", body="new thing")
@@ -258,6 +302,80 @@ class TestEscapeLedger:
         path.write_text('{"id": "a"}\nnot json\n{"id": "b"}\n', encoding="utf-8")
         ledger = EscapeLedger(path)
         assert {r.id for r in ledger.read_all()} == {"a", "b"}
+
+    def test_read_latest_equals_read_all_when_no_resolutions(
+        self, tmp_path: Path
+    ) -> None:
+        ledger = EscapeLedger(tmp_path / "escape_ledger.jsonl")
+        rec = _record("revert:deadbeef")
+        ledger.append(rec)
+        assert ledger.read_latest() == ledger.read_all() == [rec]
+
+    def test_append_resolution_preserves_provenance_by_default(
+        self, tmp_path: Path
+    ) -> None:
+        ledger = EscapeLedger(tmp_path / "escape_ledger.jsonl")
+        original = _record(
+            "bug-issue:9196f74",
+            source="bug-issue",
+            confidence="low",
+            encoded_as="none-yet",
+            notes="pending human review",
+        )
+        ledger.append(original)
+
+        resolution = ledger.append_resolution(
+            "bug-issue:9196f74", encoded_as="detector"
+        )
+
+        assert resolution is not None
+        assert resolution.id == original.id
+        assert resolution.detection_source == original.detection_source
+        assert resolution.detected_at == original.detected_at
+        assert resolution.encoded_as == "detector"
+        # notes/confidence carry forward untouched when not overridden
+        assert resolution.notes == "pending human review"
+        assert resolution.attribution_confidence == "low"
+
+    def test_append_resolution_can_override_confidence_and_notes(
+        self, tmp_path: Path
+    ) -> None:
+        ledger = EscapeLedger(tmp_path / "escape_ledger.jsonl")
+        ledger.append(_record("bug-issue:x", confidence="low"))
+
+        resolution = ledger.append_resolution(
+            "bug-issue:x",
+            encoded_as="detector",
+            attribution_confidence="medium",
+            notes="false positive; see #10498",
+        )
+
+        assert resolution is not None
+        assert resolution.attribution_confidence == "medium"
+        assert resolution.notes == "false positive; see #10498"
+
+    def test_append_resolution_is_append_only(self, tmp_path: Path) -> None:
+        ledger = EscapeLedger(tmp_path / "escape_ledger.jsonl")
+        original = _record("bug-issue:9196f74", encoded_as="none-yet")
+        ledger.append(original)
+
+        resolution = ledger.append_resolution(
+            "bug-issue:9196f74", encoded_as="detector"
+        )
+
+        # both lines survive on disk — the original is never rewritten
+        assert ledger.read_all() == [original, resolution]
+        # id-dedup still sees exactly one id despite two lines
+        assert ledger.existing_ids() == {"bug-issue:9196f74"}
+        # derived reads collapse to the resolution, not the original
+        assert ledger.read_latest() == [resolution]
+
+    def test_append_resolution_unknown_id_returns_none_and_appends_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        ledger = EscapeLedger(tmp_path / "escape_ledger.jsonl")
+        assert ledger.append_resolution("nope:1", encoded_as="detector") is None
+        assert ledger.read_all() == []
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +486,25 @@ class TestMetrics:
             _record("a:2", confidence="high"),
         ]
         assert {r.id for r in metrics.low_confidence(recs)} == {"a:1"}
+
+    def test_latest_by_id_empty_list(self) -> None:
+        assert metrics.latest_by_id([]) == []
+
+    def test_latest_by_id_collapses_to_last_appended_row(self) -> None:
+        original = _record("a:1", encoded_as="none-yet", confidence="low")
+        other = _record("b:2", encoded_as="none-yet")
+        resolution = _record("a:1", encoded_as="detector", confidence="medium")
+
+        collapsed = metrics.latest_by_id([original, other, resolution])
+
+        # order of first appearance is preserved; content is the latest row
+        assert [r.id for r in collapsed] == ["a:1", "b:2"]
+        assert collapsed[0].encoded_as == "detector"
+        assert collapsed[0].attribution_confidence == "medium"
+
+    def test_latest_by_id_identity_when_no_duplicate_ids(self) -> None:
+        recs = [_record("a:1"), _record("b:2"), _record("c:3")]
+        assert metrics.latest_by_id(recs) == recs
 
 
 # ---------------------------------------------------------------------------

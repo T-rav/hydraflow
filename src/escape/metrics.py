@@ -225,3 +225,22 @@ def unencoded_aging(
 def low_confidence(records: list[EscapeRecord]) -> list[EscapeRecord]:
     """Rows whose mechanical attribution is ``low`` — escalate to HITL."""
     return [r for r in records if r.attribution_confidence == "low"]
+
+
+def latest_by_id(records: list[EscapeRecord]) -> list[EscapeRecord]:
+    """Collapse *records* to one row per id — the latest-appended row wins.
+
+    The ledger is append-only; a human resolution is recorded as a NEW row
+    sharing the original's id (``EscapeLedger.append_resolution``). Every
+    derived read (rate, encoding, aging) must run through this collapse, or a
+    resolved escape is double-counted as both its original and resolved
+    state. Order of first appearance in *records* is preserved; the content
+    kept per id is whichever record appeared last.
+    """
+    latest: dict[str, EscapeRecord] = {}
+    order: list[str] = []
+    for record in records:
+        if record.id not in latest:
+            order.append(record.id)
+        latest[record.id] = record
+    return [latest[rid] for rid in order]

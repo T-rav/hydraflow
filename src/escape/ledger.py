@@ -6,6 +6,12 @@ The store is deliberately dumb: it appends, reads all, and exposes the set of
 already-recorded ids so the caretaker loop dedups a re-detected escape to
 exactly one row (idempotent across ticks and restarts). It never mutates or
 rewrites existing lines — the ledger is an audit trail, not a mutable table.
+
+A human resolution (confirmed attribution / an encoding) is recorded the same
+way: ``append_resolution`` appends a NEW row sharing the original's id rather
+than rewriting it. ``read_latest`` gives derived reads (metrics, report, HITL
+surfacing) a single current view per id by collapsing to the latest-appended
+row (#10498).
 """
 
 from __future__ import annotations
@@ -13,7 +19,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from escape.models import EscapeRecord
+from escape.metrics import latest_by_id
+from escape.models import EncodedAs, EscapeRecord
 from jsonl_ledger import IdentifiedJsonlLedger
 
 logger = logging.getLogger("hydraflow.escape_ledger")
@@ -24,3 +31,46 @@ class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
 
     def __init__(self, path: Path) -> None:
         super().__init__(path, EscapeRecord, logger=logger)
+
+    def read_latest(self) -> list[EscapeRecord]:
+        """One row per id — the latest-appended row wins (supersession read)."""
+        return latest_by_id(self.read_all())
+
+    def append_resolution(
+        self,
+        escape_id: str,
+        *,
+        encoded_as: EncodedAs,
+        attribution_confidence: str | None = None,
+        notes: str | None = None,
+    ) -> EscapeRecord | None:
+        """Append a resolution row for *escape_id*, or ``None`` if unknown.
+
+        Builds the new row from the latest existing row for *escape_id*,
+        carrying forward every detection/attribution field and overriding
+        only the human-decided terminal fields — the original line on disk
+        is never touched, only a new one is appended.
+        """
+        original = next((r for r in self.read_latest() if r.id == escape_id), None)
+        if original is None:
+            return None
+        resolution = EscapeRecord(
+            id=original.id,
+            detected_at=original.detected_at,
+            detection_source=original.detection_source,
+            detection_ref=original.detection_ref,
+            originating_pr=original.originating_pr,
+            originating_merge_sha=original.originating_merge_sha,
+            merged_at=original.merged_at,
+            time_to_detection_hours=original.time_to_detection_hours,
+            attribution_method=original.attribution_method,
+            attribution_confidence=(
+                attribution_confidence
+                if attribution_confidence is not None
+                else original.attribution_confidence
+            ),
+            encoded_as=encoded_as,
+            notes=notes if notes is not None else original.notes,
+        )
+        self.append(resolution)
+        return resolution

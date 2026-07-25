@@ -29,6 +29,7 @@ from escape.models import (
     DetectionSource,
     EscapeCandidate,
 )
+from false_close import has_skip_regression
 from git_timeouts import GIT_READONLY_TIMEOUT_S
 
 # NUL separates commits (`-z`); 0x1f separates fields within a commit. Neither
@@ -49,22 +50,27 @@ def _fix_subject(subject: str) -> bool:
 
 
 def _origin_pointer(commit: CommitInfo) -> tuple[str, int | None]:
-    """Extract the best originating-merge pointer + PR number from *commit*.
+    """Extract the best originating pointer + closing ref from *commit*.
 
     Prefers a stated sha (resolvable to a merge time so
     ``time_to_detection_hours`` can be populated) over a ``#N`` closing-keyword
-    reference. Returns ``(originating_ref, originating_pr)``; ``originating_ref``
-    is a bare sha, ``#N``, or ``""`` when nothing was found.
+    reference. Returns ``(originating_ref, closes_ref)``; ``originating_ref``
+    is a bare sha, ``#N``, or ``""`` when nothing was found. ``closes_ref`` is
+    the number a GitHub closing keyword (``Fixes``/``Closes``/``Resolves #N``)
+    names — the issue/PR THIS commit closes, which points downstream at
+    resolved work, never upstream at the merge that introduced the defect.
+    Callers use it only to select ``attribution_method``/gate emission; it must
+    never be written to ``EscapeCandidate.originating_pr``.
     """
     text = f"{commit.subject}\n{commit.body}"
     fixes = attribution.extract_fixes_refs(text)
-    pr = fixes[0] if fixes else None
+    closes_ref = fixes[0] if fixes else None
     shas = attribution.extract_referenced_shas(commit.body, exclude=commit.sha)
     if shas:
-        return shas[0], pr
-    if pr is not None:
-        return f"#{pr}", pr
-    return "", pr
+        return shas[0], closes_ref
+    if closes_ref is not None:
+        return f"#{closes_ref}", closes_ref
+    return "", closes_ref
 
 
 def _classify(commit: CommitInfo) -> EscapeCandidate | None:
@@ -88,7 +94,7 @@ def _classify(commit: CommitInfo) -> EscapeCandidate | None:
         )
 
     if attribution.adds_regression_pin(commit.added_paths):
-        ref, pr = _origin_pointer(commit)
+        ref = _origin_pointer(commit)[0]
         return EscapeCandidate(
             detection_source="regression-pin",
             detection_ref=commit.sha,
@@ -96,14 +102,13 @@ def _classify(commit: CommitInfo) -> EscapeCandidate | None:
             attribution_method="regression-pin",
             attribution_confidence="medium",
             originating_ref=ref,
-            originating_pr=pr,
             notes="Adds a tests/regressions/ pin for a post-merge failure.",
         )
 
     if attribution.is_hotfix(subject, body):
-        ref, pr = _origin_pointer(commit)
+        ref, closes_ref = _origin_pointer(commit)
         method: AttributionMethod = (
-            "fixes-chain" if pr is not None else "blame-intersect"
+            "fixes-chain" if closes_ref is not None else "blame-intersect"
         )
         conf: AttributionConfidence = "medium" if ref else "low"
         return EscapeCandidate(
@@ -113,13 +118,19 @@ def _classify(commit: CommitInfo) -> EscapeCandidate | None:
             attribution_method=method,
             attribution_confidence=conf,
             originating_ref=ref,
-            originating_pr=pr,
             notes="Hotfix referencing a prior merged change.",
         )
 
     if _fix_subject(subject):
-        ref, pr = _origin_pointer(commit)
-        if pr is not None:
+        # A commit that declares itself behaviour-neutral (the P10.6/P10.7
+        # Skip-Regression opt-out trailer) is not a post-merge defect, even
+        # when its subject carries a `fix(...)` prefix — e.g. a docs-only
+        # diagram refresh. Scoped to this branch only: reverts/hotfixes must
+        # still be recorded even if their body happens to carry the trailer.
+        if has_skip_regression(f"{subject}\n{body}"):
+            return None
+        ref, closes_ref = _origin_pointer(commit)
+        if closes_ref is not None:
             return EscapeCandidate(
                 detection_source="bug-issue",
                 detection_ref=commit.sha,
@@ -127,7 +138,6 @@ def _classify(commit: CommitInfo) -> EscapeCandidate | None:
                 attribution_method="fixes-chain",
                 attribution_confidence="low",
                 originating_ref=ref,
-                originating_pr=pr,
                 notes=(
                     "Fix commit closing an issue — bug-issue escape pending a "
                     "human bug-label confirmation (HITL)."
