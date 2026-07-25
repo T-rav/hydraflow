@@ -45,7 +45,14 @@ class CommitInfo:
 
     ``added_paths`` are repo-root-relative paths this commit *added* (git
     diff ``A`` status), used only for the regression-pin signal (a new file
-    under ``tests/regressions/``). ``committed_at`` is an ISO-8601 timestamp.
+    under ``tests/regressions/``). ``changed_paths`` are every path this
+    commit touched (any status) — used to scope the Skip-Regression gate to
+    genuinely product-source-empty commits (#10498) rather than trusting the
+    trailer alone, which a legitimate non-docs opt-out (flaky-test fix,
+    config-only fix) also carries. Empty when unknown (a synthetic
+    ``CommitInfo`` or an adapter that hasn't populated it), in which case the
+    gate fails open rather than guessing. ``committed_at`` is an ISO-8601
+    timestamp.
     """
 
     sha: str
@@ -53,6 +60,7 @@ class CommitInfo:
     body: str
     committed_at: str
     added_paths: tuple[str, ...] = ()
+    changed_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

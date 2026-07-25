@@ -24,6 +24,7 @@ def _commit(
     body: str = "",
     committed_at: str = "2026-01-02T00:00:00+00:00",
     added_paths: tuple[str, ...] = (),
+    changed_paths: tuple[str, ...] = (),
 ) -> CommitInfo:
     return CommitInfo(
         sha=sha,
@@ -31,6 +32,7 @@ def _commit(
         body=body,
         committed_at=committed_at,
         added_paths=added_paths,
+        changed_paths=changed_paths,
     )
 
 
@@ -199,6 +201,9 @@ class TestDetect:
         # defect — it must not be written to originating_pr (#10498).
         assert cand.originating_pr is None
         assert cand.originating_ref == "#4242"
+        # originating_pr is gone, so the closing ref must survive somewhere
+        # on the row or a human reading the HITL finding has no lead at all.
+        assert "#4242" in cand.notes
 
     def test_bug_issue_fix_is_low_confidence(self) -> None:
         commit = _commit(
@@ -211,11 +216,16 @@ class TestDetect:
         assert cand.attribution_confidence == "low"
         assert cand.originating_pr is None
         assert cand.originating_ref == "#777"
+        # same attribution-lead requirement as the hotfix case above — this
+        # is the exact case issue #10498's HITL finding renders.
+        assert "#777" in cand.notes
 
     def test_bug_issue_skip_regression_trailer_is_not_an_escape(self) -> None:
         # A `fix(...)` commit that declares itself behaviour-neutral via the
-        # P10.6/P10.7 opt-out trailer (e.g. a docs-only diagram refresh) is
-        # not a post-merge defect (#10498).
+        # P10.6/P10.7 opt-out trailer AND carries no product-source delta
+        # (e.g. a docs-only diagram refresh) is not a post-merge defect
+        # (#10498). The gate is paths-scoped, not trailer-only — see the
+        # next two tests for the discriminating cases.
         commit = _commit(
             "9196f74",
             subject="fix(erosion): refresh the arch diagram",
@@ -223,8 +233,47 @@ class TestDetect:
                 "No source or behavior change.\n\n"
                 "Skip-Regression: no code change\n\nCloses #10449."
             ),
+            changed_paths=("docs/arch/diagram.likec4",),
         )
         assert detect_escapes([commit]) == []
+
+    def test_skip_regression_trailer_with_product_source_change_is_still_recorded(
+        self,
+    ) -> None:
+        # The Skip-Regression trailer alone is NOT sufficient to suppress: it
+        # also legitimately covers a flaky-test fix, a config-only fix, or a
+        # fix already covered by an existing test — real escapes. Gating on
+        # the trailer alone would silently under-count them, which is the one
+        # failure mode a falsification instrument must never have (#10498
+        # review). A product-source change (non-test, non-docs) alongside the
+        # trailer must still produce a candidate.
+        commit = _commit(
+            "b0b0b0b",
+            subject="fix(health): worker-stall sweep escalates in sandbox",
+            body=(
+                "Config-only change; no Python-unit-testable surface.\n\n"
+                "Skip-Regression: sandbox e2e is the regression guard\n\n"
+                "Closes #9001."
+            ),
+            changed_paths=("src/mockworld/sandbox_main.py",),
+        )
+        (cand,) = detect_escapes([commit])
+        assert cand.detection_source == "bug-issue"
+
+    def test_skip_regression_trailer_with_unknown_changed_paths_fails_open(
+        self,
+    ) -> None:
+        # changed_paths is empty when unknown (a synthetic CommitInfo, or an
+        # adapter that hasn't populated it) — the gate must fail OPEN (still
+        # record) rather than guess, since guessing wrong in the suppress
+        # direction is unrecoverable for this instrument (#10498 review).
+        commit = _commit(
+            "c0c0c0c",
+            subject="fix(erosion): refresh the arch diagram",
+            body="Skip-Regression: no code change\n\nCloses #10449.",
+        )
+        (cand,) = detect_escapes([commit])
+        assert cand.detection_source == "bug-issue"
 
     def test_revert_with_skip_regression_trailer_still_recorded(self) -> None:
         # The Skip-Regression gate must be scoped to the bug-issue branch
@@ -376,6 +425,24 @@ class TestEscapeLedger:
         ledger = EscapeLedger(tmp_path / "escape_ledger.jsonl")
         assert ledger.append_resolution("nope:1", encoded_as="detector") is None
         assert ledger.read_all() == []
+
+    def test_read_latest_collapses_a_three_row_chain_to_the_last(
+        self, tmp_path: Path
+    ) -> None:
+        # detect -> resolve -> re-resolve: three lines sharing one id. A
+        # detected_at-based collapse would tie (append_resolution carries
+        # detected_at forward unchanged on every row); only file-position
+        # ordering discriminates this case.
+        ledger = EscapeLedger(tmp_path / "escape_ledger.jsonl")
+        ledger.append(_record("bug-issue:9196f74", encoded_as="none-yet"))
+        ledger.append_resolution("bug-issue:9196f74", encoded_as="detector")
+        final = ledger.append_resolution(
+            "bug-issue:9196f74", encoded_as="stored-lesson", notes="re-resolved"
+        )
+
+        assert len(ledger.read_all()) == 3
+        assert ledger.read_latest() == [final]
+        assert ledger.read_latest()[0].encoded_as == "stored-lesson"
 
 
 # ---------------------------------------------------------------------------

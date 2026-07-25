@@ -17,6 +17,7 @@ row (#10498).
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 from escape.metrics import latest_by_id
@@ -54,23 +55,13 @@ class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
         original = next((r for r in self.read_latest() if r.id == escape_id), None)
         if original is None:
             return None
-        resolution = EscapeRecord(
-            id=original.id,
-            detected_at=original.detected_at,
-            detection_source=original.detection_source,
-            detection_ref=original.detection_ref,
-            originating_pr=original.originating_pr,
-            originating_merge_sha=original.originating_merge_sha,
-            merged_at=original.merged_at,
-            time_to_detection_hours=original.time_to_detection_hours,
-            attribution_method=original.attribution_method,
-            attribution_confidence=(
-                attribution_confidence
-                if attribution_confidence is not None
-                else original.attribution_confidence
-            ),
-            encoded_as=encoded_as,
-            notes=notes if notes is not None else original.notes,
-        )
+        overrides: dict[str, object] = {"encoded_as": encoded_as}
+        if attribution_confidence is not None:
+            overrides["attribution_confidence"] = attribution_confidence
+        if notes is not None:
+            overrides["notes"] = notes
+        # `replace()`, not a hand-enumerated kwarg list: a future EscapeRecord
+        # field must be carried forward automatically, not silently dropped.
+        resolution = replace(original, **overrides)
         self.append(resolution)
         return resolution

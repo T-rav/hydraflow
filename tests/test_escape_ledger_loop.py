@@ -20,6 +20,7 @@ from escape.models import EscapeRecord
 from escape_ledger_loop import (
     EscapeLedgerLoop,
     _current_head_sha,
+    _render_finding,
     select_findings_to_surface,
     surfacing_fingerprint,
 )
@@ -122,7 +123,7 @@ def _make_loop(
 
 
 def _record(
-    rid: str, *, confidence: str = "low", encoded_as: str = "none-yet"
+    rid: str, *, confidence: str = "low", encoded_as: str = "none-yet", notes: str = ""
 ) -> EscapeRecord:
     return EscapeRecord(
         id=rid,
@@ -136,7 +137,7 @@ def _record(
         attribution_method="fixes-chain",
         attribution_confidence=confidence,
         encoded_as=encoded_as,
-        notes="",
+        notes=notes,
     )
 
 
@@ -290,6 +291,28 @@ class TestRecordEscapes:
 # ---------------------------------------------------------------------------
 # Finding-rate budget (pure) + surfacing
 # ---------------------------------------------------------------------------
+
+
+class TestRenderFinding:
+    def test_body_surfaces_closing_ref_via_notes_when_originating_pr_is_none(
+        self,
+    ) -> None:
+        # originating_pr is never populated for a bug-issue row (#10498) — the
+        # rendered HITL finding must still give a human an attribution lead
+        # via notes, or the finding points at nothing.
+        record = _record(
+            "bug-issue:9196f74",
+            notes="Fix commit closing #10449 — bug-issue escape pending a "
+            "human bug-label confirmation (HITL).",
+        )
+        _title, body = _render_finding(record)
+        assert "| originating_pr | — |" in body
+        assert "#10449" in body
+
+    def test_body_renders_em_dash_for_empty_notes(self) -> None:
+        record = _record("bug-issue:x", notes="")
+        _title, body = _render_finding(record)
+        assert "| notes | — |" in body
 
 
 class TestFindingRateBudget:

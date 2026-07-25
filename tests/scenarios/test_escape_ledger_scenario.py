@@ -61,7 +61,12 @@ def _seed_revert(repo: Path) -> tuple[str, str]:
 
 def _seed_skip_regression_docs_commit(repo: Path) -> tuple[str, str]:
     base_sha = _head(repo)
-    (repo / "docs.likec4").write_text("diagram v2\n")
+    # Under docs/ — false_close.product_paths excludes this path, so the
+    # paths-scoped Skip-Regression gate (#10498 review) actually fires. A
+    # top-level docs.likec4 (no directory prefix) would NOT be excluded and
+    # would defeat the point of this fixture.
+    (repo / "docs").mkdir(exist_ok=True)
+    (repo / "docs" / "diagram.likec4").write_text("diagram v2\n")
     _git(repo, "add", "-A")
     _git(
         repo,

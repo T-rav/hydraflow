@@ -37,6 +37,8 @@ def test_docs_only_fix_with_skip_regression_trailer_is_not_an_escape() -> None:
             "diagram.\n\nSkip-Regression: no code change\n\nCloses #10449."
         ),
         committed_at="2026-07-24T12:01:02-06:00",
+        # the real commit's diff: docs/architecture/jsonl_ledger.likec4 only.
+        changed_paths=("docs/architecture/jsonl_ledger.likec4",),
     )
     assert detect_escapes([commit]) == []
 
