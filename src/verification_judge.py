@@ -593,6 +593,7 @@ Diff excerpt:
             ),
             issue_number=issue_number,
             issue_labels=issue_labels,
+            provider=self._config.verification_judge_provider,
         )
 
     def terminate(self) -> None:

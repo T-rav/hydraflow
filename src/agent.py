@@ -59,6 +59,7 @@ class AgentRunner(BaseRunner):
 
     _log = logger
     _phase_name: ClassVar[str] = "implement"
+    PROVIDER_FIELD: ClassVar[str | None] = "implementation_provider"
 
     _SELF_CHECK_CHECKLIST = """
 ## Self-Check Before Committing

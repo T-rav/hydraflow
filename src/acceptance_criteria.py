@@ -107,6 +107,7 @@ class AcceptanceCriteriaGenerator:
             issue_number=issue_number,
             pr_number=pr_number,
             issue_labels=issue.labels,
+            provider=self._config.ac_provider,
         )
 
         criteria = self._extract_criteria(transcript, issue_number, pr_number)
@@ -246,6 +247,7 @@ Diff summary:
                 issue_number=issue_number,
                 pr_number=pr_number,
                 issue_labels=issue.labels,
+                provider=self._config.ac_provider,
             )
 
         async def execute_debug(cmd: list[str], p: str) -> str:
@@ -266,6 +268,7 @@ Diff summary:
                 issue_number=issue_number,
                 pr_number=pr_number,
                 issue_labels=issue.labels,
+                provider=self._config.ac_provider,
             )
 
         return await run_precheck_context(

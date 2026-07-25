@@ -46,6 +46,7 @@ class PlannerRunner(BaseRunner):
 
     _log = logger
     _phase_name: ClassVar[str] = "plan"
+    PROVIDER_FIELD: ClassVar[str | None] = "planner_provider"
 
     async def plan(
         self,
