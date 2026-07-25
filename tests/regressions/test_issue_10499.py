@@ -19,6 +19,16 @@ Fix: a marker built from a non-line-boundary control character
 ``str.splitlines()`` — `git log` output uses bare ``\\n`` line endings, and
 ``splitlines()``'s wider boundary set is exactly what caused this bug, so it
 is the wrong tool for parsing marker-delimited git output in general.
+
+``audit.detect._changed_paths_for_range`` (#10370) is the same defect class:
+it built its marker from ``\\x1eAUDITSHA\\x1e`` and scanned with
+``str.splitlines()`` too, so ``MergedChange.changed_paths`` was always ``()``
+in production — silently disabling ``audit.stratify.classify_blast_radius``'s
+path-based elevation (gauntlet / migration / security / structural all
+require a non-empty ``changed_paths`` match) for every sampled-audit merge.
+``audit.detect`` and ``escape.detect`` are known scatter siblings (see
+``tests/regressions/test_issue_10402.py``), so this was fixed alongside the
+``escape.detect`` fix rather than left for a follow-up.
 """
 
 from __future__ import annotations
@@ -27,6 +37,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from audit.detect import _changed_paths_for_range, merged_changes_for_range
 from escape.detect import _added_paths_for_range, commits_for_range, detect_escapes
 
 
@@ -141,3 +152,32 @@ class TestRegressionPinDetectionEndToEnd:
         pin_candidates = [c for c in candidates if c.detection_source == "regression-pin"]
         assert len(pin_candidates) == 1
         assert pin_candidates[0].detection_ref == head_sha
+
+
+class TestAuditDetectSameDefectClass:
+    """``audit.detect`` shared the ``\\x1eMARKER\\x1e`` + ``splitlines()`` bug —
+    fixed alongside ``escape.detect`` since both are scatter siblings."""
+
+    def test_changed_paths_for_range_maps_single_commit(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        base_sha = _head(repo)
+        sha = _add_file(repo, "src/mod.py", "def f(): return 1\n", "feat: add mod (#7)")
+
+        changed = _changed_paths_for_range(repo, f"{base_sha}..{sha}")
+
+        assert changed == {sha: ["src/mod.py"]}
+
+    def test_merged_changes_for_range_populates_changed_paths(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        base_sha = _head(repo)
+        sha = _add_file(
+            repo, "src/gauntlet.py", "def g(): return 1\n", "feat: touch gauntlet (#9)"
+        )
+
+        changes = merged_changes_for_range(repo, f"{base_sha}..{sha}")
+
+        assert changes is not None
+        assert len(changes) == 1
+        assert changes[0].changed_paths == ("src/gauntlet.py",)

@@ -21,7 +21,12 @@ from git_timeouts import GIT_READONLY_TIMEOUT_S
 _COMMIT_SEP = "\x00"
 _FIELD_SEP = "\x1f"
 _LOG_FORMAT = f"%H{_FIELD_SEP}%cI{_FIELD_SEP}%s{_FIELD_SEP}%b"
-_SHA_MARKER = "\x1eAUDITSHA\x1e"
+
+# Built from `\x01` (SOH), NOT a Unicode line-boundary character -- unlike
+# `\x1e` (Record Separator), which `str.splitlines()` treats as its own line
+# break and would shred the marker into pieces before any line could match it
+# whole (see escape.detect._SHA_MARKER, #10499 — the same defect class).
+_SHA_MARKER = "\x01AUDITSHA\x01"
 
 # Squash-merge subject ``... (#1234)`` and merge-commit ``Merge pull request #1234``.
 _SQUASH_PR_RE = re.compile(r"\(#(\d+)\)\s*$")
@@ -76,7 +81,10 @@ def _changed_paths_for_range(
     if not out:
         return changed
     current: str | None = None
-    for line in out.splitlines():
+    # `git log` output uses bare `\n` line endings; split explicitly rather
+    # than `str.splitlines()`, whose wider line-boundary set can shred a
+    # marker or path apart mid-line (#10499).
+    for line in out.split("\n"):
         if line.startswith(_SHA_MARKER):
             current = line[len(_SHA_MARKER) :].strip()
             changed.setdefault(current, [])
