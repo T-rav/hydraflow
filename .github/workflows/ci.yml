@@ -300,12 +300,17 @@ jobs:
       # by the _restore_loop_catalog_registry autouse fixture and OTel state is
       # reset per test, so scenarios are xdist-safe.
       - name: Run tests (fast, parallel — no coverage)
-        # Only tests/test_review_phase_metrics.py stays xdist-unsafe here (a
-        # leaked review_advisor client mock, #10119) — excluded and run serially
-        # below. Keep in sync with the Makefile PYTEST_SERIAL_PATHS.
-        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/test_review_phase_metrics.py -n auto --dist loadscope --reruns 2 --reruns-delay 1
+        # xdist-unsafe files excluded here and run serially below:
+        #   tests/test_review_phase_metrics.py — leaked review_advisor client
+        #     mock (#10119).
+        #   tests/test_auto_pr_preflight.py — a mock from another test bleeds
+        #     into the shared worker (runner patch not applied → 0 commands, and
+        #     a pydantic TypeAdapter AttributeError from a MagicMock-contaminated
+        #     type); passes single-threaded (#10500).
+        # Keep in sync with the Makefile PYTEST_SERIAL_PATHS.
+        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/test_review_phase_metrics.py --ignore=tests/test_auto_pr_preflight.py -n auto --dist loadscope --reruns 2 --reruns-delay 1
       - name: Run serial (xdist-unsafe) tests
-        run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py
+        run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py
 
   # Trailing coverage gate (Tier 2a). Coverage is SINGLE-THREADED (xdist + --cov
   # is finicky) and therefore too slow for the PR merge path, so it runs OFF the
