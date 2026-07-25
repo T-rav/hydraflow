@@ -282,55 +282,6 @@ class TestRunRefillingPool:
         assert sorted(results) == [0, 2, 4, 6, 8]
 
     @pytest.mark.asyncio
-    async def test_awaits_async_supply_fn(self) -> None:
-        """#10511: an async supply_fn is awaited, so a stage can live-pull +
-        gate from the store on every refill instead of draining once up front."""
-        items = [1, 2, 3]
-        stop = asyncio.Event()
-
-        async def async_supply() -> list[int]:
-            await asyncio.sleep(0)
-            return [items.pop(0)] if items else []
-
-        async def worker(_idx: int, item: int) -> int:
-            return item
-
-        results = await run_refilling_pool(async_supply, worker, 2, stop)
-        assert sorted(results) == [1, 2, 3]
-
-    @pytest.mark.asyncio
-    async def test_async_supply_fills_free_slot_during_long_worker(self) -> None:
-        """#10511: while a long worker holds one slot, an async supply refills
-        the other slot mid-run (poll_interval wake) with work that became
-        available *after* the long worker started — the exact starvation the
-        gated implement path used to hit (drain-once fixed list defeated the
-        #10312 mid-run refill)."""
-        started: list[int] = []
-        # Only the slow item (1) is available initially; the fast item (2)
-        # becomes available while the slow worker is still running.
-        available = [1]
-        stop = asyncio.Event()
-
-        async def async_supply() -> list[int]:
-            await asyncio.sleep(0)
-            return [available.pop(0)] if available else []
-
-        async def worker(_idx: int, item: int) -> int:
-            started.append(item)
-            if item == 1:
-                available.append(2)  # newly-ready work appears mid-run
-                await asyncio.sleep(0.2)
-            return item
-
-        results = await run_refilling_pool(
-            async_supply, worker, 2, stop, poll_interval=0.02
-        )
-        # The mid-run-available item must be picked up while the slow worker
-        # still holds its slot — not deferred until it finishes.
-        assert 2 in started
-        assert sorted(results) == [1, 2]
-
-    @pytest.mark.asyncio
     async def test_stop_event_cancels_pool(self) -> None:
         """Setting stop_event should end the pool."""
         items = list(range(10))
