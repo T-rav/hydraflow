@@ -121,9 +121,28 @@ def _current_head_sha(repo_root: Path) -> str | None:
     return sha or None
 
 
-def surfacing_fingerprint(escape_id: str) -> str:
-    """Stable dedup key for a filed HITL/find issue about one escape."""
-    return f"surfaced:{escape_id}"
+# Surfacing reasons. Each is a SEPARATE one-shot budget per escape id: a row
+# surfaced once for ``low-confidence`` must still be surfacable when it later
+# ages (issue #10503), so the two criteria carry distinct reason-scoped
+# fingerprints (``surfaced:low-confidence:<id>`` vs ``surfaced:aging:<id>``).
+SURFACE_REASON_LOW_CONFIDENCE = "low-confidence"
+SURFACE_REASON_AGING = "aging"
+
+_SURFACE_REASON_TEXT = {
+    SURFACE_REASON_LOW_CONFIDENCE: "low-confidence attribution needs a human label",
+    SURFACE_REASON_AGING: "unencoded escape has aged past the encoding threshold",
+}
+
+
+def surfacing_fingerprint(escape_id: str, reason: str) -> str:
+    """Stable dedup key for a filed HITL/find issue about one escape.
+
+    Scoped to the surfacing *reason* so each eligibility criterion keeps its own
+    one-shot budget (issue #10503): a row surfaced once for ``low-confidence``
+    still surfaces later when it ages, because ``surfaced:aging:<id>`` is a
+    distinct key from ``surfaced:low-confidence:<id>``.
+    """
+    return f"surfaced:{reason}:{escape_id}"
 
 
 def select_findings_to_surface(
@@ -133,26 +152,35 @@ def select_findings_to_surface(
     aging_threshold_hours: float,
     already_surfaced: set[str],
     max_per_tick: int,
-) -> tuple[list[EscapeRecord], bool]:
-    """Pure finding-rate budget: which escapes to surface, capped per tick.
+) -> tuple[list[tuple[EscapeRecord, str]], bool]:
+    """Pure finding-rate budget: which (escape, reason) pairs to surface, capped.
 
     Eligible = low-confidence attributions (need a human label) + ``none-yet``
-    rows older than *aging_threshold_hours* (should have been encoded by now),
-    deduped by id and excluding anything already surfaced. Returns
-    ``(to_file, capped)`` where ``to_file`` is at most *max_per_tick* rows and
-    ``capped`` is True when eligible exceeded the cap. This caps issue filing
-    under a synthetic flood — recording rows is never capped, only filing.
+    rows older than *aging_threshold_hours* (should have been encoded by now).
+    Each criterion is a SEPARATE one-shot budget: a row eligible under BOTH
+    criteria can surface once per reason (never collapsed by id), and a
+    (record, reason) pair is skipped only when its reason-scoped fingerprint is
+    already in *already_surfaced* — repeat noise from the SAME reason stays
+    suppressed. Returns ``(to_file, capped)`` where ``to_file`` is at most
+    *max_per_tick* ``(record, reason)`` pairs and ``capped`` is True when
+    eligible exceeded the cap. This caps issue filing under a synthetic flood —
+    recording rows is never capped, only filing.
     """
-    eligible: list[EscapeRecord] = []
-    seen: set[str] = set()
+    eligible: list[tuple[EscapeRecord, str]] = []
+    seen: set[tuple[str, str]] = set()
     aging = unencoded_aging(records, now, threshold_hours=aging_threshold_hours)
-    for record in [*low_confidence(records), *aging]:
-        if record.id in seen:
+    candidates: list[tuple[EscapeRecord, str]] = [
+        *((r, SURFACE_REASON_LOW_CONFIDENCE) for r in low_confidence(records)),
+        *((r, SURFACE_REASON_AGING) for r in aging),
+    ]
+    for record, reason in candidates:
+        key = (record.id, reason)
+        if key in seen:
             continue
-        seen.add(record.id)
-        if surfacing_fingerprint(record.id) in already_surfaced:
+        seen.add(key)
+        if surfacing_fingerprint(record.id, reason) in already_surfaced:
             continue
-        eligible.append(record)
+        eligible.append((record, reason))
     capped = len(eligible) > max_per_tick
     return eligible[:max_per_tick], capped
 
@@ -375,22 +403,23 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
             max_per_tick=max_issues,
         )
         filed = 0
-        for record in to_file:
-            title, body = _render_finding(record)
+        for record, reason in to_file:
+            title, body = _render_finding(record, reason)
             try:
                 await self._prs.create_issue(title, body, labels=_ISSUE_LABELS)
             except Exception as exc:
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
-                    "EscapeLedger: failed to surface finding %s",
+                    "EscapeLedger: failed to surface finding %s (%s)",
                     record.id,
+                    reason,
                     exc_info=True,
                 )
                 continue
-            seen = seen | {surfacing_fingerprint(record.id)}
+            seen = seen | {surfacing_fingerprint(record.id, reason)}
             self._dedup.set_all(seen)
             filed += 1
-            logger.info("EscapeLedger: surfaced finding %s", record.id)
+            logger.info("EscapeLedger: surfaced finding %s (%s)", record.id, reason)
         if capped:
             logger.warning(
                 "EscapeLedger: per-tick finding cap (%d) reached; remaining "
@@ -418,16 +447,20 @@ def _short(sha: str) -> str:
     return sha[:7] if sha else "—"
 
 
-def _render_finding(record: EscapeRecord) -> tuple[str, str]:
-    """Render (title, body) for a HITL/find issue about one escape."""
-    reason = (
-        "low-confidence attribution needs a human label"
-        if record.attribution_confidence == "low"
-        else "unencoded escape has aged past the encoding threshold"
+def _render_finding(record: EscapeRecord, reason: str) -> tuple[str, str]:
+    """Render (title, body) for a HITL/find issue about one escape.
+
+    *reason* is the surfacing criterion (``SURFACE_REASON_*``) that made the row
+    eligible this tick; the title reflects it so an aging finding reads as aging
+    even for a low-confidence row (issue #10503), rather than inferring the text
+    from ``attribution_confidence``.
+    """
+    reason_text = _SURFACE_REASON_TEXT.get(
+        reason, "unencoded escape has aged past the encoding threshold"
     )
     title = (
         f"Escape ledger: {record.detection_source} escape "
-        f"`{record.detection_ref[:12]}` — {reason}"
+        f"`{record.detection_ref[:12]}` — {reason_text}"
     )
     body = (
         "## Evidence (EscapeLedgerLoop, automated)\n\n"
