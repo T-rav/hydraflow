@@ -106,19 +106,13 @@ def _route_prompt_to_cmd(cmd: list[str], prompt: str) -> tuple[list[str], int]:
     ``asyncio.subprocess.PIPE`` (caller must write *prompt* to stdin).
     """
     use_codex_exec = len(cmd) >= 2 and cmd[0] == "codex" and cmd[1] == "exec"
-    use_pi_print = cmd and cmd[0] == "pi" and ("-p" in cmd or "--print" in cmd)
-    use_claude_print = cmd and cmd[0] == "claude" and "-p" in cmd
-    # Gemini CLI only supports -p (no --print alias).
-    use_gemini_print = cmd and cmd[0] == "gemini" and "-p" in cmd
-    use_prompt_arg = (
-        use_codex_exec or use_pi_print or use_claude_print or use_gemini_print
-    )
+    use_claude_print = bool(cmd) and cmd[0] == "claude" and "-p" in cmd
+    use_prompt_arg = use_codex_exec or use_claude_print
     if use_prompt_arg:
-        if use_claude_print or use_pi_print or use_gemini_print:
-            # Claude / Pi / Gemini all require the prompt immediately after
-            # -p/--print; placing it at the end causes CLI errors.
-            flag = "-p" if "-p" in cmd else "--print"
-            idx = cmd.index(flag)
+        if use_claude_print:
+            # Claude requires the prompt immediately after -p; placing it at
+            # the end causes CLI errors.
+            idx = cmd.index("-p")
             cmd_to_run = [*cmd[: idx + 1], prompt, *cmd[idx + 1 :]]
         else:
             # Codex exec: prompt is a trailing positional argument.
@@ -367,13 +361,7 @@ async def stream_claude_process(
         stderr_task = asyncio.create_task(proc.stderr.read())
 
         parser = StreamParser()
-        _backend = "claude"
-        if cmd and cmd[0] == "codex":
-            _backend = "codex"
-        elif cmd and cmd[0] == "gemini":
-            _backend = "gemini"
-        elif cmd and cmd[0] == "pi":
-            _backend = "pi"
+        _backend = "codex" if cmd and cmd[0] == "codex" else "claude"
         activity_parser = get_activity_parser(_backend)
 
         return await asyncio.wait_for(

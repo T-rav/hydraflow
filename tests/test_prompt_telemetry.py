@@ -185,7 +185,7 @@ class TestPromptTelemetry:
     def test_record_marks_usage_unavailable_when_backend_reports_none(self, telemetry):
         telemetry.record(
             source="triage",
-            tool="pi",
+            tool="codex",
             model="gpt-5.3-codex",
             issue_number=9,
             pr_number=0,

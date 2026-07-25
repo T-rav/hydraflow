@@ -1030,7 +1030,7 @@ _DEPRECATED_ENV_REVERSE: dict[str, str] = {
     v: k for k, v in _DEPRECATED_ENV_ALIASES.items()
 }
 
-_ALLOWED_TOOLS_COMBO: set[str] = {"claude", "codex", "gemini", "pi"}
+_ALLOWED_TOOLS_COMBO: set[str] = {"claude", "codex"}
 
 
 def _parse_combo(env_key: str, value: str) -> tuple[str, str]:
@@ -1252,7 +1252,7 @@ class HydraFlowConfig(BaseModel):
             )
         return v
 
-    system_tool: Literal["inherit", "claude", "codex", "gemini", "pi"] = Field(
+    system_tool: Literal["inherit", "claude", "codex"] = Field(
         default="inherit",
         description="Optional global default tool for system agents; 'inherit' keeps per-agent defaults",
     )
@@ -1260,7 +1260,7 @@ class HydraFlowConfig(BaseModel):
         default="",
         description="Optional global default model for system agents; empty keeps per-agent defaults",
     )
-    background_tool: Literal["inherit", "claude", "codex", "gemini", "pi"] = Field(
+    background_tool: Literal["inherit", "claude", "codex"] = Field(
         default="inherit",
         description="Optional global default tool for background workers; 'inherit' keeps per-worker defaults",
     )
@@ -1268,7 +1268,7 @@ class HydraFlowConfig(BaseModel):
         default="",
         description="Optional global default model for background workers; empty keeps per-worker defaults",
     )
-    implementation_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    implementation_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for implementation agents",
     )
@@ -1284,7 +1284,7 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Review configuration
-    review_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    review_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for review agents",
     )
@@ -1293,7 +1293,7 @@ class HydraFlowConfig(BaseModel):
     # Independent test-adequacy verifier (#9546): a second-opinion pass with a
     # model that MUST stay independent of review_model — a shared model would
     # defeat the second opinion (the finder grading its own homework).
-    test_adequacy_verifier_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    test_adequacy_verifier_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for the independent test-adequacy verifier pass",
     )
@@ -2373,7 +2373,7 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-plan"],
         description="Labels for issues needing plans (OR logic)",
     )
-    planner_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    planner_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for planning agents",
     )
@@ -2383,7 +2383,7 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         description="Max fix attempts per TDD REFACTOR sub-agent before reporting failure",
     )
-    triage_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    triage_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for triage agents",
     )
@@ -2604,7 +2604,7 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Agent prompt configuration
-    subskill_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    subskill_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for low-tier subskill/tool-chain passes",
     )
@@ -2622,7 +2622,7 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Enable automatic escalation to debug model when low-tier prechecks signal risk/ambiguity",
     )
-    debug_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    debug_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for debug escalation passes",
     )
@@ -3029,7 +3029,7 @@ class HydraFlowConfig(BaseModel):
         default="haiku",
         description="Model for wiki compilation and synthesis",
     )
-    wiki_compilation_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    wiki_compilation_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for wiki compilation",
     )
@@ -3255,7 +3255,7 @@ class HydraFlowConfig(BaseModel):
         default="haiku",
         description="Cheap model for summarising agent transcripts into structured learnings",
     )
-    transcript_summary_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    transcript_summary_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for transcript summarization",
     )
@@ -3266,7 +3266,7 @@ class HydraFlowConfig(BaseModel):
         description="Max transcript characters to send for summarization (truncated from end)",
     )
     # Report issue worker
-    report_issue_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    report_issue_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for report-issue worker",
     )
@@ -3274,7 +3274,7 @@ class HydraFlowConfig(BaseModel):
         default="opus",
         description="Model for report-issue worker (codebase research + structured issue creation)",
     )
-    sentry_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    sentry_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for sentry_loop ingestion worker",
     )
@@ -3282,7 +3282,7 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for sentry_loop ingestion worker (issue triage + filing from Sentry events) — sonnet is sufficient; the task is stack-trace parsing + issue filing, not deep reasoning. Opus was 4-5× the cost for no measurable quality win.",
     )
-    adr_drift_resolver_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    adr_drift_resolver_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
     )
@@ -3867,7 +3867,7 @@ class HydraFlowConfig(BaseModel):
         le=5,
         description="Maximum deliberation rounds before forcing a decision",
     )
-    adr_review_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    adr_review_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for the ADR council review orchestrator",
     )
@@ -3889,11 +3889,11 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for acceptance criteria generation (post-merge)",
     )
-    ac_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    ac_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for acceptance criteria generation",
     )
-    verification_judge_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    verification_judge_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for verification judge agents",
     )
@@ -4212,7 +4212,7 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for the term-proposer / entry-evidence drafters.",
     )
-    term_proposer_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    term_proposer_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for the term-proposer drafters (claude path only).",
     )
@@ -5669,7 +5669,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
 # Model prefix → required tool. Any model starting with a listed prefix
 # MUST pair with the given tool; any other pairing is rejected.
 _MODEL_TOOL_REQUIRED: list[tuple[str, str]] = [
-    ("gemini", "gemini"),
     ("gpt-", "codex"),
     ("o1", "codex"),
     ("o3", "codex"),

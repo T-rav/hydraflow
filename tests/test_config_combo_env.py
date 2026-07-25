@@ -3,28 +3,29 @@
 from __future__ import annotations
 
 import os
+from typing import get_args
 from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
 
+import config as config_module
 from config import HydraFlowConfig, _parse_combo
 
 
-def test_triage_tool_accepts_gemini() -> None:
-    cfg = HydraFlowConfig(triage_tool="gemini", triage_model="gemini-3.1-pro-preview")
-    assert cfg.triage_tool == "gemini"
-    assert cfg.triage_model == "gemini-3.1-pro-preview"
+def test_no_gemini_or_pi_tool_literal_in_config() -> None:
+    """gemini/pi are gutted — no *_tool Literal nor the combo allowlist admits them."""
+    for name, field in HydraFlowConfig.model_fields.items():
+        if name.endswith("_tool"):
+            args = get_args(field.annotation)
+            assert "gemini" not in args, name
+            assert "pi" not in args, name
+    assert {"claude", "codex"} == config_module._ALLOWED_TOOLS_COMBO
 
 
-def test_implementation_tool_accepts_gemini() -> None:
-    cfg = HydraFlowConfig(implementation_tool="gemini", model="gemini-3.1-pro-preview")
-    assert cfg.implementation_tool == "gemini"
-
-
-def test_system_tool_accepts_gemini() -> None:
-    cfg = HydraFlowConfig(system_tool="gemini", system_model="gemini-3.1-pro-preview")
-    assert cfg.system_tool == "gemini"
+def test_system_tool_accepts_codex() -> None:
+    cfg = HydraFlowConfig(system_tool="codex", system_model="gpt-5-codex")
+    assert cfg.system_tool == "codex"
 
 
 def test_invalid_tool_rejected() -> None:
@@ -36,10 +37,10 @@ def test_parse_combo_basic() -> None:
     assert _parse_combo("HYDRAFLOW_IMPLEMENT", "claude:opus") == ("claude", "opus")
 
 
-def test_parse_combo_gemini() -> None:
-    assert _parse_combo("HYDRAFLOW_TRIAGE", "gemini:gemini-3.1-pro-preview") == (
-        "gemini",
-        "gemini-3.1-pro-preview",
+def test_parse_combo_codex() -> None:
+    assert _parse_combo("HYDRAFLOW_TRIAGE", "codex:gpt-5-codex") == (
+        "codex",
+        "gpt-5-codex",
     )
 
 
@@ -63,12 +64,10 @@ def test_parse_combo_empty_model_raises() -> None:
 
 
 def test_combo_env_sets_triage_tool_and_model() -> None:
-    with patch.dict(
-        os.environ, {"HYDRAFLOW_TRIAGE": "gemini:gemini-3.1-pro-preview"}, clear=False
-    ):
+    with patch.dict(os.environ, {"HYDRAFLOW_TRIAGE": "codex:gpt-5-codex"}, clear=False):
         cfg = HydraFlowConfig()
-        assert cfg.triage_tool == "gemini"
-        assert cfg.triage_model == "gemini-3.1-pro-preview"
+        assert cfg.triage_tool == "codex"
+        assert cfg.triage_model == "gpt-5-codex"
 
 
 def test_combo_env_sets_implementation_tool_and_model() -> None:
@@ -141,22 +140,17 @@ def test_legacy_debug_escalation_env_var_is_ignored() -> None:
         )
 
 
-def test_harmonize_rejects_gemini_flash_model() -> None:
+def test_harmonize_rejects_flash_model() -> None:
     with pytest.raises(ValueError, match="flash"):
         HydraFlowConfig(
-            implementation_tool="gemini",
-            model="gemini-3-flash-preview",
+            implementation_tool="codex",
+            model="gpt-5-flash",
         )
 
 
-def test_harmonize_rejects_flash_in_triage() -> None:
-    with pytest.raises(ValueError, match="flash"):
-        HydraFlowConfig(triage_tool="gemini", triage_model="gemini-3-flash-preview")
-
-
-def test_harmonize_rejects_claude_model_on_gemini_tool() -> None:
+def test_harmonize_rejects_claude_model_on_codex_tool() -> None:
     with pytest.raises(ValueError, match="mismatched"):
-        HydraFlowConfig(implementation_tool="gemini", model="opus")
+        HydraFlowConfig(implementation_tool="codex", model="opus")
 
 
 def test_harmonize_rejects_codex_model_on_claude_tool() -> None:
@@ -167,11 +161,6 @@ def test_harmonize_rejects_codex_model_on_claude_tool() -> None:
 def test_harmonize_allows_claude_opus() -> None:
     cfg = HydraFlowConfig(implementation_tool="claude", model="opus")
     assert cfg.model == "opus"
-
-
-def test_harmonize_allows_gemini_pro() -> None:
-    cfg = HydraFlowConfig(implementation_tool="gemini", model="gemini-3.1-pro-preview")
-    assert cfg.model == "gemini-3.1-pro-preview"
 
 
 def test_harmonize_allows_codex_gpt() -> None:

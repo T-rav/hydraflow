@@ -65,7 +65,7 @@ _UNAMBIGUOUS_SPAWN_MARKERS = frozenset(
 # agent argv in the same scope (mirrors tests/_spawn_audit.py's
 # `has_agent_argv` heuristic) — otherwise every git-calling loop would be a
 # false positive.
-_AGENT_TOOLS = frozenset({"claude", "codex", "gemini", "pi"})
+_AGENT_TOOLS = frozenset({"claude", "codex"})
 
 _RERAISE_HELPER = "reraise_on_credit_or_bug"
 _CREDIT_AUTH_NAMES = frozenset({"CreditExhaustedError", "AuthenticationError"})
