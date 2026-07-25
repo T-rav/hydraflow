@@ -924,19 +924,23 @@ class PRManager:
             return False
 
     async def update_pr_branch(self, pr_number: int, *, method: str = "rebase") -> bool:
-        """Rebase the PR head onto its target branch via GitHub's API.
+        """Update the PR head onto its target branch via GitHub's API.
 
         Wraps ``PUT /repos/{owner}/{repo}/pulls/{n}/update-branch`` with
-        ``update_method=rebase``. Returns True when GitHub successfully
-        updates the head ref (HTTP 202), False on conflict (HTTP 422) or
-        any other failure. The factory's "process-driven merge" pattern
-        uses this to recover when ``merge_pr`` / ``merge_promotion_pr``
-        fail because the head fell behind target.
+        ``update_method=<method>``. *method* is ``"rebase"`` (rewrites the head
+        SHAs onto target) or ``"merge"`` (SHA-preserving — merges target into the
+        head; GitHub's own default). :meth:`merge_promotion_pr` recovery uses
+        ``"merge"`` so RC SHAs survive and ``main`` stays an ancestor of
+        ``staging`` (#10552); the squash-based :meth:`merge_pr` recovery uses the
+        ``"rebase"`` default. Returns True when GitHub successfully updates the
+        head ref (HTTP 202), False on conflict (HTTP 422) or any other failure.
+        The factory's "process-driven merge" pattern uses this to recover when
+        ``merge_pr`` / ``merge_promotion_pr`` fail because the head fell behind
+        target.
 
-        Real conflicts (overlap that GitHub can't auto-rebase) surface
-        as False; callers fall through to their existing failure paths
-        (find-issue, HITL release) — we never auto-resolve conflict
-        markers locally.
+        Real conflicts (overlap that GitHub can't auto-resolve) surface as
+        False; callers fall through to their existing failure paths (find-issue,
+        HITL release) — we never auto-resolve conflict markers locally.
         """
         self._assert_repo()
         if self._config.dry_run:
@@ -999,13 +1003,22 @@ class PRManager:
         self,
         pr_number: int,
         *,
+        method: str = "rebase",
         ci_timeout: int = 300,
         ci_poll_interval: int = 30,
     ) -> bool:
-        """Try to rebase the PR head and re-poll CI. Returns True only when
-        both succeed (caller should retry merge). False = give up: the
-        rebase hit a real conflict, or post-rebase CI failed."""
-        if not await self.update_pr_branch(pr_number):
+        """Update the PR head onto its target via *method* and re-poll CI.
+
+        *method* selects GitHub's ``update_method``: ``"rebase"`` (default, used
+        by the squash-based :meth:`merge_pr` recovery — squash discards pre-merge
+        SHAs anyway) or ``"merge"`` (used by :meth:`merge_promotion_pr` recovery,
+        which MUST preserve the RC commit SHAs so ``main`` stays an ancestor of
+        ``staging`` — see #10552).
+
+        Returns True only when both the update and post-update CI succeed (caller
+        should retry merge). False = give up: the update hit a real conflict, or
+        post-update CI failed."""
+        if not await self.update_pr_branch(pr_number, method=method):
             return False
         # Fresh stop_event: this is a one-shot recovery, not bound to the
         # caller's loop lifecycle.
@@ -1024,8 +1037,13 @@ class PRManager:
         the growing-diff problem a squash-merged promotion PR would create
         on the next RC cycle. See ADR-0042.
 
-        When ``auto_rebase=True`` and the merge fails, attempts one
-        rebase-via-GitHub + re-poll-CI + retry-merge cycle before giving up.
+        When ``auto_rebase=True`` and the merge fails (the RC head is behind
+        ``main`` by the main-only synthetic ``chore(rc)`` + merge commits),
+        attempts one recovery cycle before giving up: update the RC branch onto
+        ``main`` via ``update_method=merge`` — SHA-preserving, so ``main`` stays
+        an ancestor of ``staging`` — then re-poll CI and retry the merge. A
+        rebase-update here would rewrite every RC SHA and permanently diverge
+        ``main`` from ``staging`` (see #10552).
         """
         self._assert_repo()
         if self._config.dry_run:
@@ -1062,7 +1080,7 @@ class PRManager:
                 if (
                     attempt == 0
                     and auto_rebase
-                    and await self._rebase_and_recheck_ci(pr_number)
+                    and await self._rebase_and_recheck_ci(pr_number, method="merge")
                 ):
                     continue
                 return False
