@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10515
 source_phase: review
 created_at: 2026-07-25T09:50:02.028832+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0954
 ---
 
 # Consult hydraflow-review-advisor before escalating severity on borderline findings

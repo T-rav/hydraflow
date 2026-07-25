@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10499
 source_phase: review
 created_at: 2026-07-25T06:08:03.278819+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10499 closed
 ---
 
 # src/escape/detect.py and src/audit/detect.py are twin modules — fix both together
