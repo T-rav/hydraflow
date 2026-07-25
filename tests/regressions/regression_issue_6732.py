@@ -35,9 +35,8 @@ def _make_reviewer(tmp_path: Path) -> ADRCouncilReviewer:
     from events import EventBus
 
     bus = EventBus()
-    prs = MagicMock()
     runner = MagicMock()
-    return ADRCouncilReviewer(config, bus, prs, runner)
+    return ADRCouncilReviewer(config, bus, runner)
 
 
 def _write_proposed_adr(adr_dir: Path, number: int = 99) -> Path:

@@ -83,11 +83,8 @@ def adr_reviewer():
 
     Uses the production subprocess runner so the model under test matches what
     would ship; ``apply_provider_override`` lets you A/B a candidate backend via
-    HYDRAFLOW_EVAL_PROVIDER / _MODEL (a no-op runs on the config default). The
-    council session does not touch the pr_manager, so a MagicMock stands in.
+    HYDRAFLOW_EVAL_PROVIDER / _MODEL (a no-op runs on the config default).
     """
-    from unittest.mock import MagicMock
-
     from adr_reviewer import ADRCouncilReviewer
     from config import HydraFlowConfig
     from events import EventBus
@@ -100,7 +97,7 @@ def adr_reviewer():
         provider_field="adr_review_provider",
         model_field="adr_review_model",
     )
-    return ADRCouncilReviewer(config, EventBus(), MagicMock(), get_default_runner())
+    return ADRCouncilReviewer(config, EventBus(), get_default_runner())
 
 
 @pytest.mark.evals
