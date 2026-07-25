@@ -2405,7 +2405,7 @@ class TestCloseIssue:
         for call in mock_create.call_args_list:
             argv = (
                 call[0][0]
-                if call[0] and isinstance(call[0][0], (list, tuple))
+                if call[0] and isinstance(call[0][0], list | tuple)
                 else call[0]
             )
             if "close" in argv:
@@ -2613,8 +2613,8 @@ class TestFetchCiFailureLogs:
         manager = make_pr_manager(config, event_bus)
         checks_json = json.dumps(
             [
-                {"name": "Build", "state": "SUCCESS", "detailsUrl": ""},
-                {"name": "Lint", "state": "SUCCESS", "detailsUrl": ""},
+                {"name": "Build", "state": "SUCCESS", "link": ""},
+                {"name": "Lint", "state": "SUCCESS", "link": ""},
             ]
         )
         mock_create = SubprocessMockBuilder().with_stdout(checks_json).build()
@@ -2626,14 +2626,14 @@ class TestFetchCiFailureLogs:
 
     @pytest.mark.asyncio
     async def test_fetches_log_for_failed_check(self, config, event_bus):
-        """Fetches log output for a failed check with a valid detailsUrl."""
+        """Fetches log output for a failed check with a valid link."""
         manager = make_pr_manager(config, event_bus)
         checks_json = json.dumps(
             [
                 {
                     "name": "Build & Test",
                     "state": "FAILURE",
-                    "detailsUrl": "https://github.com/org/repo/actions/runs/12345/job/67890",
+                    "link": "https://github.com/org/repo/actions/runs/12345/job/67890",
                 },
             ]
         )
@@ -2665,11 +2665,11 @@ class TestFetchCiFailureLogs:
 
     @pytest.mark.asyncio
     async def test_handles_missing_details_url(self, config, event_bus):
-        """Check without detailsUrl is skipped gracefully."""
+        """Check without link is skipped gracefully."""
         manager = make_pr_manager(config, event_bus)
         checks_json = json.dumps(
             [
-                {"name": "External", "state": "FAILURE", "detailsUrl": ""},
+                {"name": "External", "state": "FAILURE", "link": ""},
             ]
         )
         mock_create = SubprocessMockBuilder().with_stdout(checks_json).build()
@@ -2702,12 +2702,12 @@ class TestFetchCiFailureLogs:
                 {
                     "name": "Test (py3.11)",
                     "state": "FAILURE",
-                    "detailsUrl": "https://github.com/org/repo/actions/runs/12345/job/111",
+                    "link": "https://github.com/org/repo/actions/runs/12345/job/111",
                 },
                 {
                     "name": "Test (py3.12)",
                     "state": "FAILURE",
-                    "detailsUrl": "https://github.com/org/repo/actions/runs/12345/job/222",
+                    "link": "https://github.com/org/repo/actions/runs/12345/job/222",
                 },
             ]
         )
@@ -2743,7 +2743,7 @@ class TestFetchCiFailureLogs:
                 {
                     "name": "External",
                     "state": "FAILURE",
-                    "detailsUrl": "https://external-ci.example.com/builds/42",
+                    "link": "https://external-ci.example.com/builds/42",
                 },
             ]
         )
@@ -2763,7 +2763,7 @@ class TestFetchCiFailureLogs:
                 {
                     "name": "Build",
                     "state": "FAILURE",
-                    "detailsUrl": "https://github.com/org/repo/actions/runs/99999/job/1",
+                    "link": "https://github.com/org/repo/actions/runs/99999/job/1",
                 },
             ]
         )
