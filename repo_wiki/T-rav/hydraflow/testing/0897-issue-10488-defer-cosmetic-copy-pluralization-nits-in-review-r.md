@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10488
 source_phase: review
 created_at: 2026-07-25T00:38:26.060862+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10488 closed
 ---
 
 # Defer cosmetic copy/pluralization nits in review rather than unilaterally rewriting seeded test strings

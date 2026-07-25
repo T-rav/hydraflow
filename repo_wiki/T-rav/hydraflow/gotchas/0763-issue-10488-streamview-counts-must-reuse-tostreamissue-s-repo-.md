@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10488
 source_phase: review
 created_at: 2026-07-25T00:38:26.060759+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10488 closed
 ---
 
 # StreamView counts must reuse toStreamIssue's repo-qualified join, not re-lookup
