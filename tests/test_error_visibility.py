@@ -1,4 +1,4 @@
-"""Tests for issue #2401 — improved error visibility in dashboard, metrics, and crate modules."""
+"""Tests for issue #2401 — improved error visibility in dashboard and metrics modules."""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from events import EventBus
 
 # ---------------------------------------------------------------------------
 # _is_likely_disconnect helper
@@ -55,31 +53,6 @@ class TestIsLikelyDisconnect:
             pass
 
         assert self._call(ConnectionClosedOK()) is True
-
-
-# ---------------------------------------------------------------------------
-# dashboard_routes: milestone fetch log level
-# ---------------------------------------------------------------------------
-
-
-class TestMilestoneFetchLogLevel:
-    """Milestone fetch failure should log at WARNING, not DEBUG."""
-
-    def test_source_uses_warning_not_debug(self) -> None:
-        """Verify the except block uses logger.warning for milestone fetch."""
-        import inspect
-
-        import dashboard_routes
-
-        source = inspect.getsource(dashboard_routes.create_router)
-        # Find the milestone fetch handler
-        idx = source.find("Failed to fetch milestones for crate titles")
-        assert idx != -1, "Expected log message not found in create_router"
-        # Check that the preceding logger call is .warning, not .debug
-        context = source[max(0, idx - 80) : idx]
-        assert "logger.warning" in context, (
-            f"Expected logger.warning before milestone message, got: {context!r}"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -448,69 +421,4 @@ class TestMetricsManagerExcInfo:
 
         assert "Could not fetch GitHub label counts" in caplog.text
         # exc_info=True means the traceback is included
-        assert "RuntimeError" in caplog.text
-
-
-# ---------------------------------------------------------------------------
-# crate_manager: exc_info on warnings
-# ---------------------------------------------------------------------------
-
-
-class TestCrateManagerExcInfo:
-    """Crate manager warnings should include exc_info=True."""
-
-    def _make_manager(self, *, active_crate: int | None = None):
-        from crate_manager import CrateManager
-        from tests.helpers import ConfigFactory
-
-        config = ConfigFactory.create()
-
-        st = MagicMock()
-        st.get_active_crate_number.return_value = active_crate
-        st.set_active_crate_number = MagicMock()
-
-        pr_manager = AsyncMock()
-        bus = EventBus()
-        cm = CrateManager(config, st, pr_manager, bus)
-        return cm, st, pr_manager, bus
-
-    @pytest.mark.asyncio
-    async def test_milestone_list_failure_logs_warning_with_exc_info(
-        self, caplog
-    ) -> None:
-        """list_milestones failure in _next_crate_title logs WARNING with exc_info."""
-        cm, _, pr_mgr, _ = self._make_manager()
-        pr_mgr.list_milestones = AsyncMock(side_effect=RuntimeError("API down"))
-
-        with caplog.at_level(logging.WARNING, logger="hydraflow.crate_manager"):
-            title = await cm._next_crate_title()
-
-        assert "Could not list milestones" in caplog.text
-        assert "RuntimeError" in caplog.text
-        # Should still return a valid title
-        assert title  # non-empty
-
-    @pytest.mark.asyncio
-    async def test_issue_milestone_assign_failure_logs_with_exc_info(
-        self, caplog
-    ) -> None:
-        """set_issue_milestone failure logs WARNING with exc_info."""
-        from models import Crate
-        from tests.conftest import TaskFactory
-
-        cm, _, pr_mgr, _ = self._make_manager()
-        pr_mgr.list_milestones = AsyncMock(return_value=[])
-        pr_mgr.create_milestone = AsyncMock(
-            return_value=Crate(number=1, title="test", open_issues=0, state="open")
-        )
-        pr_mgr.set_issue_milestone = AsyncMock(
-            side_effect=RuntimeError("assign failed")
-        )
-
-        tasks = [TaskFactory.create(id=10)]
-
-        with caplog.at_level(logging.WARNING, logger="hydraflow.crate_manager"):
-            await cm.auto_package_if_needed(tasks)
-
-        assert "Failed to assign issue" in caplog.text
         assert "RuntimeError" in caplog.text

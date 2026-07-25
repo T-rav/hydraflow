@@ -2129,7 +2129,6 @@ class StateData(BaseModel):
     epic_states: dict[str, EpicState] = Field(default_factory=dict)
     releases: dict[str, Release] = Field(default_factory=dict)
     baseline_audit: dict[str, list[BaselineAuditRecord]] = Field(default_factory=dict)
-    active_crate_number: int | None = None
     bead_mappings: dict[str, dict[str, str]] = Field(default_factory=dict)
     completed_timelines: dict[str, CompletedTimeline] = Field(default_factory=dict)
     digest_hashes: dict[str, str] = Field(default_factory=dict)
@@ -2512,48 +2511,6 @@ class ChangelogEntry(BaseModel):
     summary: str = ""
     issue_number: int = 0
     pr_number: int = 0
-
-
-class Crate(BaseModel):
-    """A GitHub milestone used as a delivery work package (crate)."""
-
-    number: int
-    title: str
-    description: str = ""
-    due_on: str | None = None
-    state: str = "open"
-    open_issues: int = 0
-    closed_issues: int = 0
-    created_at: IsoTimestamp = ""
-    updated_at: IsoTimestamp = ""
-
-
-class CrateCreateRequest(BaseModel):
-    """Request body for POST /api/crates."""
-
-    title: str
-    description: str = ""
-    due_on: str | None = None
-
-
-class CrateUpdateRequest(BaseModel):
-    """Request body for PATCH /api/crates/{number}.
-
-    Fields use a sentinel pattern: only fields present in the request JSON
-    are forwarded to GitHub.  Sending ``"due_on": null`` explicitly clears
-    the milestone due date.
-    """
-
-    title: str | None = None
-    description: str | None = None
-    due_on: str | None = None
-    state: Literal["open", "closed"] | None = None
-
-
-class CrateItemsRequest(BaseModel):
-    """Request body for POST/DELETE /api/crates/{number}/items."""
-
-    issue_numbers: list[int] = Field(default_factory=list)
 
 
 class PipelineIssueStatus(StrEnum):
@@ -3137,20 +3094,6 @@ class EpicUpdatePayload(TypedDict, total=False):
     repo: str
 
 
-class CrateActivatedPayload(TypedDict, total=False):
-    """Payload for ``EventType.CRATE_ACTIVATED``."""
-
-    crate_number: int
-    repo: str
-
-
-class CrateCompletedPayload(TypedDict, total=False):
-    """Payload for ``EventType.CRATE_COMPLETED``."""
-
-    crate_number: int
-    repo: str
-
-
 class PlannerUpdatePayload(TypedDict, total=False):
     """Payload for ``EventType.PLANNER_UPDATE``."""
 
@@ -3593,8 +3536,6 @@ class IssueHistoryEntry(BaseModel):
     issue_url: HttpUrl = ""
     status: str = "unknown"
     epic: str = ""
-    crate_number: int | None = None
-    crate_title: str = ""
     linked_issues: list[IssueHistoryLink] = Field(default_factory=list)
     prs: list[IssueHistoryPR] = Field(default_factory=list)
     session_ids: list[str] = Field(default_factory=list)

@@ -174,14 +174,6 @@ class TestIssueStateMixin:
         t.clear_verification_issue(1)
         assert t.get_verification_issue(1) is None
 
-    def test_crate_number(self, tmp_path: Path) -> None:
-        t = make_tracker(tmp_path)
-        assert t.get_active_crate_number() is None
-        t.set_active_crate_number(5)
-        assert t.get_active_crate_number() == 5
-        t.set_active_crate_number(None)
-        assert t.get_active_crate_number() is None
-
     def test_mark_pr(self, tmp_path: Path) -> None:
         t = make_tracker(tmp_path)
         t.mark_pr(101, "approved")
