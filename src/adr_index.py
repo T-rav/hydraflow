@@ -390,6 +390,15 @@ class ADRIndex:
         self._cached: list[ADR] | None = None
         self._fingerprint: tuple[float, ...] = ()
 
+    @property
+    def adr_dir(self) -> Path:
+        """The ADR directory this index scans (``docs/adr``).
+
+        Exposed so citation-conformance tooling can derive the repo root
+        (``adr_dir.parent.parent``) without reaching into a private attr.
+        """
+        return self._adr_dir
+
     def adrs(self) -> list[ADR]:
         fingerprint = self._compute_fingerprint()
         if self._cached is None or fingerprint != self._fingerprint:

@@ -62,6 +62,9 @@ def loop_env(tmp_path: Path):
         data_root=tmp_path,
         repo="hydra/hydraflow",
         repo_root=tmp_path,
+        # Loop now defaults OFF (#10540); force ON so this behavioural fixture
+        # exercises the auditor rather than short-circuiting config_disabled.
+        adr_touchpoint_auditor_loop_enabled=True,
     )
     state = _state_mock()
     pr = AsyncMock()

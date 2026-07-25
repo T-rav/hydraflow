@@ -66,6 +66,8 @@ def _build_loop(tmp_path: Path, *, rollups: dict, dedup_keys: set):
         data_root=tmp_path,
         repo="hydra/hydraflow",
         repo_root=tmp_path,
+        # Loop now defaults OFF (#10540); force ON for this regression pin.
+        adr_touchpoint_auditor_loop_enabled=True,
     )
 
     state = MagicMock()

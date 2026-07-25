@@ -115,14 +115,14 @@ Because it is a marker and not a stage, it is absent from the stage-routing map
 
 ## Related
 
-- `src/pr_manager.py:swap_pipeline_labels` — atomic swap implementation
-- `src/config.py:all_pipeline_labels` — the full label set (stage labels +
+- `src/pr_manager.py:PRManager.swap_pipeline_labels` — atomic swap implementation
+- `src/config.py:HydraFlowConfig.all_pipeline_labels` — the full label set (stage labels +
   orthogonal markers `human-required`, `in_progress_label`)
-- `src/config.py:in_progress_label` — the `hydraflow-in-progress` build-claim
+- `src/config.py:HydraFlowConfig.in_progress_label` — the `hydraflow-in-progress` build-claim
   marker (#10168)
-- `src/implement_phase.py:_claim_issue` / `_release_claim` — stamp/clear the
+- `src/implement_phase.py:ImplementPhase._claim_issue` / `_release_claim` — stamp/clear the
   claim at build start / build exit (#10168)
-- `src/issue_store.py:_is_eligible` — skips issues carrying the claim marker (#10168)
+- `src/issue_store.py:IssueStore._is_eligible` — skips issues carrying the claim marker (#10168)
 - `tests/test_state_machine.py` — property-based invariant tests
 - `tests/regressions/test_issue_10168_inprogress_claim_label.py` — build-claim
   marker regression (#10168)
