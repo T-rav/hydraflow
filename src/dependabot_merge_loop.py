@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from comment_formatter import SelfReviewError
 from config import HydraFlowConfig
 from dedup_store import DedupStore
 from events import EventType, HydraFlowEvent
@@ -404,17 +405,30 @@ class DependabotMergeLoop(BaseBackgroundLoop):
                     )
                     continue
 
-                # CI green — approve and merge
-                await self._prs.submit_review(
-                    pr.pr,
-                    ReviewVerdict.APPROVE,
-                    (
-                        "CI passed — auto-merging shepherded human-prefix PR "
-                        "(#9889 class 5; add the no-auto-merge label to opt out)."
-                        if self._is_human_shepherd_pr(pr)
-                        else "CI passed — auto-merging bot PR."
-                    ),
-                )
+                # CI green — approve (best-effort) and merge. The bot cannot
+                # approve its OWN PR (GitHub blocks self-review), and the base
+                # branch requires 0 approving reviews anyway, so a
+                # ``SelfReviewError`` must never abort the merge — otherwise
+                # every bot caretaker PR (wiki/UL/pricing) piles up unmerged
+                # and the loop errors each cycle (#10526). Approving a *human*
+                # shepherd's PR is not self-review and still records normally.
+                try:
+                    await self._prs.submit_review(
+                        pr.pr,
+                        ReviewVerdict.APPROVE,
+                        (
+                            "CI passed — auto-merging shepherded human-prefix PR "
+                            "(#9889 class 5; add the no-auto-merge label to opt out)."
+                            if self._is_human_shepherd_pr(pr)
+                            else "CI passed — auto-merging bot PR."
+                        ),
+                    )
+                except SelfReviewError:
+                    logger.debug(
+                        "Bot PR #%d: cannot self-approve; base requires 0 "
+                        "approvals — proceeding to merge (#10526).",
+                        pr.pr,
+                    )
                 merge_ok = await self._prs.merge_pr(pr.pr, auto_rebase=True)
                 if merge_ok:
                     merged += 1
