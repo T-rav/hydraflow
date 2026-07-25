@@ -11,6 +11,11 @@ from typing import TYPE_CHECKING
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from exception_classify import reraise_on_credit_or_bug
+from subprocess_util import (
+    CreditExhaustedError,
+    is_credit_exhaustion,
+    parse_credit_resume_time,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -180,6 +185,21 @@ class DiagnosticRunner(BaseRunner):
 
         parsed = _extract_json(transcript)
         if parsed is None:
+            # #10536: the diagnose agent hit a usage/credit limit and returned
+            # no structured output. That is an INFRA failure, not a genuine
+            # "not fixable" verdict — a fabricated ``fixable=False`` here gets
+            # escalated to HITL (scattering every credit-starved issue into the
+            # human queue) and, worse, never triggers the orchestrator's global
+            # credit-pause. Raise ``CreditExhaustedError`` so it propagates
+            # through ``reraise_on_credit_or_bug`` to ``_handle_credit_exhaustion``
+            # and the whole factory pauses until the limit resets. The CLI only
+            # raises the error on some paths; the no-JSON-with-credit-text path
+            # is the one that leaked (weekly limit → soft failure).
+            if transcript and is_credit_exhaustion(transcript):
+                raise CreditExhaustedError(
+                    "Diagnostic agent hit a usage/credit limit — no structured output",
+                    resume_at=parse_credit_resume_time(transcript),
+                )
             return DiagnosisResult(
                 root_cause=transcript[:500] if transcript else "No output",
                 severity=Severity.P2_FUNCTIONAL,
