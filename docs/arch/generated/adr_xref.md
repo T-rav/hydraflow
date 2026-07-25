@@ -303,23 +303,18 @@ Non-blocking authoring aid (#10458): each ADR below bare-cites a high-churn shar
 | ADR | Bare citation | Suggested re-cite |
 |---|---|---|
 | ADR-0005 | `src/pr_manager.py` | `src/pr_manager.py:<Symbol>` |
-| ADR-0006 | `src/repo_runtime.py` | `src/repo_runtime.py:<Symbol>` |
 | ADR-0007 | `src/dashboard.py` | `src/dashboard.py:<Symbol>` |
 | ADR-0007 | `src/repo_runtime.py` | `src/repo_runtime.py:<Symbol>` |
 | ADR-0008 | `src/dashboard.py` | `src/dashboard.py:<Symbol>` |
 | ADR-0012 | `src/models.py` | `src/models.py:<Symbol>` |
 | ADR-0012 | `src/post_merge_handler.py` | `src/post_merge_handler.py:<Symbol>` |
-| ADR-0013 | `src/models.py` | `src/models.py:<Symbol>` |
-| ADR-0013 | `src/pr_manager.py` | `src/pr_manager.py:<Symbol>` |
 | ADR-0015 | `src/models.py` | `src/models.py:<Symbol>` |
 | ADR-0015 | `src/post_merge_handler.py` | `src/post_merge_handler.py:<Symbol>` |
 | ADR-0016 | `src/models.py` | `src/models.py:<Symbol>` |
 | ADR-0016 | `src/post_merge_handler.py` | `src/post_merge_handler.py:<Symbol>` |
 | ADR-0019 | `src/post_merge_handler.py` | `src/post_merge_handler.py:<Symbol>` |
-| ADR-0033 | `src/config.py` | `src/config.py:<Symbol>` |
 | ADR-0034 | `src/config.py` | `src/config.py:<Symbol>` |
 | ADR-0035 | `src/config.py` | `src/config.py:<Symbol>` |
-| ADR-0036 | `src/config.py` | `src/config.py:<Symbol>` |
 | ADR-0037 | `src/models.py` | `src/models.py:<Symbol>` |
 | ADR-0038 | `src/dashboard.py` | `src/dashboard.py:<Symbol>` |
 | ADR-0038 | `src/repo_runtime.py` | `src/repo_runtime.py:<Symbol>` |

@@ -180,6 +180,17 @@ def _normalize_enforcement(raw: str) -> str:
     return low if low in _KNOWN_ENFORCEMENT else "unknown"
 
 
+LIVE_ADR_STATUSES = frozenset({"Accepted", "Proposed"})
+"""Statuses that count as "in effect" for citation/drift enforcement.
+
+Superseded/Deprecated ADRs are frozen history — their citations may
+legitimately point at code that has since changed or been removed, so
+nothing that scopes to "live" ADRs (``ADRIndex.adrs_touching``,
+``adr_citation_resolve.unresolved_citations``, ``adr_drift.bare_infra_citation_nudges``)
+should touch them. Single source of truth so those call sites can never
+diverge on what "live" means."""
+
+
 @dataclass(frozen=True)
 class ADR:
     number: int
@@ -201,6 +212,11 @@ class ADR:
     """enforced | manual | decision-of-record | unknown (ADR-0100)."""
     enforced_by: tuple[Check, ...] = ()
     """Typed checks parsed from **Enforced by:**; () for decision-of-record."""
+
+    @property
+    def is_live(self) -> bool:
+        """True for Accepted/Proposed — see :data:`LIVE_ADR_STATUSES`."""
+        return self.status in LIVE_ADR_STATUSES
 
 
 def parse_adr_file(path: Path) -> ADR:
@@ -420,7 +436,7 @@ class ADRIndex:
         """
         if not paths:
             return {}
-        live = [a for a in self.adrs() if a.status in ("Accepted", "Proposed")]
+        live = [a for a in self.adrs() if a.is_live]
         result: dict[str, list[ADR]] = {}
         for path in paths:
             hits = [a for a in live if path in a.source_files]

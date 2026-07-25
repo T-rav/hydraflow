@@ -468,12 +468,17 @@ def test_fanout_threshold_threads_through_compute_drift_by_adr(
     assert rollups == []
 
 
-def _adr_with_symbols(number: int, source_symbols: dict[str, frozenset[str]]) -> ADR:
+def _adr_with_symbols(
+    number: int,
+    source_symbols: dict[str, frozenset[str]],
+    *,
+    status: str = "Accepted",
+) -> ADR:
     """Build a minimal ADR carrying only the citation data the nudge reads."""
     return ADR(
         number=number,
         title=f"adr-{number}",
-        status="Accepted",
+        status=status,
         summary="",
         source_files=frozenset(source_symbols),
         source_symbols=source_symbols,
@@ -513,6 +518,28 @@ def test_non_src_bare_citation_yields_no_nudge() -> None:
     # of scope even if bare.
     adr = _adr_with_symbols(503, {"docs/whatever.md": frozenset()})
     assert bare_infra_citation_nudges([adr]) == []
+
+
+@pytest.mark.parametrize("status", ["Superseded", "Deprecated", "Unknown"])
+def test_non_live_adr_bare_citation_yields_no_nudge(status: str) -> None:
+    # #10565 -- drift-suppression (ADRIndex.adrs_touching) never touches a
+    # non-live ADR in the first place, so there is nothing for the nudge to
+    # "exactly mirror" for one. A Superseded/Deprecated/Unknown ADR that
+    # bare-cites a shared-infra module must not be nudged.
+    adr = _adr_with_symbols(504, {"src/config.py": frozenset()}, status=status)
+    assert bare_infra_citation_nudges([adr]) == []
+
+
+def test_fanout_excludes_non_live_adrs_from_count() -> None:
+    # #10565 -- the fan-out that feeds the nudge's shared-infra derivation must
+    # count only live bare-citers, matching compute_drift's adrs_touching
+    # scope. 3 live + 1 non-live bare citer of the same module must NOT cross
+    # a threshold of 4 (the non-live citer doesn't count).
+    adrs = [_adr_with_symbols(n, {"src/hot.py": frozenset()}) for n in range(600, 603)]
+    adrs.append(
+        _adr_with_symbols(603, {"src/hot.py": frozenset()}, status="Superseded")
+    )
+    assert bare_infra_citation_nudges(adrs, shared_infra_fanout_threshold=4) == []
 
 
 def test_high_fanout_bare_citation_is_nudged_when_threshold_given() -> None:
@@ -564,6 +591,16 @@ def test_nudges_couple_exactly_to_shared_infra_suppression() -> None:
     ]
     # Push src/hot.py over the fan-out threshold with 4 bare citers.
     adrs += [_adr_with_symbols(n, {"src/hot.py": frozenset()}) for n in range(810, 814)]
+    # #10565: non-live ADRs mixed in — drift-suppression (ADRIndex.adrs_touching)
+    # never sees these, so they must never be nudged and must never contribute
+    # to any other ADR's fan-out either. This is the exact blind spot that let
+    # the bug ship green: every fixture ADR used to hardcode status="Accepted".
+    adrs.append(
+        _adr_with_symbols(820, {"src/config.py": frozenset()}, status="Superseded")
+    )
+    adrs.append(
+        _adr_with_symbols(821, {"src/hot.py": frozenset()}, status="Deprecated")
+    )
 
     nudged_pairs = {
         (n.adr_number, n.path)
@@ -571,13 +608,16 @@ def test_nudges_couple_exactly_to_shared_infra_suppression() -> None:
             adrs, shared_infra_fanout_threshold=threshold
         )
     }
+    assert 820 not in {number for number, _ in nudged_pairs}
+    assert 821 not in {number for number, _ in nudged_pairs}
 
+    live_adrs = [a for a in adrs if a.is_live]
     expected_suppressed: set[tuple[int, str]] = set()
-    for adr in adrs:
+    for adr in live_adrs:
         for path, cited in adr.source_symbols.items():
             if cited or not path.startswith("src/"):
                 continue  # only bare src/ citations are eligible for suppression
-            fanout = _bare_citation_fanout(path, adrs)
+            fanout = _bare_citation_fanout(path, live_adrs)
             drifts = _citation_drifts(
                 adr,
                 path,
