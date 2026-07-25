@@ -129,7 +129,12 @@ class TestAddedPathsForRange:
 
         added = _added_paths_for_range(repo, f"{seed}..{modify_sha}")
 
-        assert added.get(modify_sha, []) == []
+        # `git log --diff-filter=A` omits the marker line entirely for a
+        # commit with no matching diff entries, so the commit never becomes
+        # a key at all — assert the full empty mapping, not just a `.get()`
+        # fallback that would pass even if `modify_sha` mapped to garbage.
+        assert added == {}
+        assert modify_sha not in added
 
 
 class TestRegressionPinDetectionEndToEnd:

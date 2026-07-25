@@ -1,22 +1,25 @@
-// Issue #10499 — dynamic view of the mis-detection, traced against the REAL
-// escaped commit 055267e7b2b7 ("fix(adr): single-colon ADR-0049 citations…").
+// Issue #10499 (postmortem, now FIXED) — dynamic view of the mis-detection
+// that misclassified the escaped commit 055267e7b2b7 ("fix(adr): single-colon
+// ADR-0049 citations…").
 //
 // That commit ADDS tests/regressions/test_issue_10440.py, so `_classify`'s
 // decided precedence (revert > regression-pin > hotfix > bug-issue) should
-// yield regression-pin / medium confidence — which NEVER reaches the
+// have yielded regression-pin / medium confidence — which NEVER reaches the
 // low-confidence HITL surface. Instead the ledger recorded bug-issue / low
 // and filed issue #10499 asking a human to finish the attribution by hand.
 //
-// Reproduced read-only against the live repo:
+// Reproduced read-only against the live repo, before the fix:
 //   _added_paths_for_range(repo, '055267e7b2b7^..055267e7b2b7') -> {}
 //   commits_for_range(...)[0].added_paths                       -> ()
 //   detect_escapes(...)[0]  -> bug-issue / low / fixes-chain
 //
-// Blast radius: added_paths is () for EVERY commit in EVERY range, so the
-// regression-pin detection source is unreachable dead code in production and
-// every regression-pin commit degrades into a spurious low-confidence HITL
-// issue — the over-filing failure mode escape_ledger_loop's own docstring
-// warns about.
+// Blast radius (pre-fix): added_paths was () for EVERY commit in EVERY range,
+// so the regression-pin detection source was unreachable dead code in
+// production and every regression-pin commit degraded into a spurious
+// low-confidence HITL issue — the over-filing failure mode
+// escape_ledger_loop's own docstring warns about. The `s1`-`s7actual` steps
+// below trace the pre-fix (broken) path; `s7expected` is the corrected
+// outcome the fix now produces.
 
 specification {
   element step
@@ -71,7 +74,7 @@ model {
 
 views {
   view detectionFlow of pipeline {
-    title '#10499 — how a regression-pin commit degrades into a low-confidence bug-issue HITL row'
+    title '#10499 (fixed) — how a regression-pin commit used to degrade into a low-confidence bug-issue HITL row'
     include *
   }
 }

@@ -1,7 +1,9 @@
-// Issue #10499 — escape-ledger regression-pin detection is unreachable.
-// The git adapter `_added_paths_for_range` shreds its own 0x1e sha-marker on
-// str.splitlines(), so CommitInfo.added_paths is ALWAYS () in production and
-// `_classify` can never reach the regression-pin branch.
+// Issue #10499 (postmortem) — escape-ledger regression-pin detection was
+// unreachable. The git adapter `_added_paths_for_range` shredded its own
+// 0x1e sha-marker on str.splitlines(), so CommitInfo.added_paths was ALWAYS
+// () in production and `_classify` could never reach the regression-pin
+// branch. Fixed by switching the marker to a non-line-boundary control
+// character (0x01) and parsing with an explicit split("\n").
 
 specification {
   element system
@@ -59,7 +61,7 @@ model {
       addedPaths = component '_added_paths_for_range' {
         #adapter
         #defect
-        description 'DEFECT (src/escape/detect.py:179-204): builds `\\x1eESCSHA\\x1e%H` marker lines, then parses git output with out.splitlines(). Python splits on 0x1e (RECORD SEPARATOR), so the marker line is shredded into ["", "ESCSHA", "<sha>"]; line.startswith(_SHA_MARKER) never matches, `current` stays None, and the function returns {} for EVERY range.'
+        description 'Builds `\\x01ESCSHA\\x01%H` marker lines, then parses git output with an explicit split("\\n"). FIXED (#10499): previously built the marker from `\\x1e` (RECORD SEPARATOR) and parsed with out.splitlines(), which treats 0x1e as its own line boundary and shredded the marker before `line.startswith(_SHA_MARKER)` ever saw it whole, so the function always returned {}.'
       }
       runGit = component '_run_git' {
         #adapter
@@ -73,7 +75,7 @@ model {
 
       addsPin = component 'adds_regression_pin' {
         #pure
-        description 'True when any added path starts with tests/regressions/. Correct, but starved: always receives ().'
+        description 'True when any added path starts with tests/regressions/. Was starved (always received ()) until #10499 fixed the upstream parse.'
       }
       fixesRefs = component 'extract_fixes_refs' {
         #pure
@@ -135,7 +137,7 @@ views {
   }
 
   view detectInternals of hydraflow.detect {
-    title 'escape.detect — pure core vs git adapters (defect in _added_paths_for_range)'
+    title 'escape.detect — pure core vs git adapters (_added_paths_for_range parse fix, #10499)'
     include *
     include hydraflow.attribution.*
     include hydraflow.models
