@@ -1261,7 +1261,7 @@ def build_services(
     )
     runs_gc_loop = RunsGCLoop(config=config, run_recorder=run_recorder, deps=loop_deps)
     adr_reviewer = ADRCouncilReviewer(
-        config, event_bus, prs, subprocess_runner, credentials=credentials
+        config, event_bus, subprocess_runner, credentials=credentials
     )
     adr_reviewer_loop = ADRReviewerLoop(
         config=config, adr_reviewer=adr_reviewer, deps=loop_deps

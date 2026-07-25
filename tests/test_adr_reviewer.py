@@ -31,9 +31,8 @@ def _make_reviewer(
     from events import EventBus
 
     bus = EventBus()
-    prs = MagicMock()
     runner = MagicMock()
-    return ADRCouncilReviewer(config, bus, prs, runner)
+    return ADRCouncilReviewer(config, bus, runner)
 
 
 def _read_adr_decisions(reviewer: ADRCouncilReviewer) -> list[dict]:
@@ -1523,7 +1522,7 @@ class TestExecuteOrchestrator:
         )
         from events import EventBus
 
-        reviewer = ADRCouncilReviewer(config, EventBus(), MagicMock(), MagicMock())
+        reviewer = ADRCouncilReviewer(config, EventBus(), MagicMock())
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "output"
@@ -1546,7 +1545,7 @@ class TestExecuteOrchestrator:
         )
         from events import EventBus
 
-        reviewer = ADRCouncilReviewer(config, EventBus(), MagicMock(), MagicMock())
+        reviewer = ADRCouncilReviewer(config, EventBus(), MagicMock())
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "output"
@@ -1686,7 +1685,7 @@ class TestCommitAcceptance:
         )
         from events import EventBus
 
-        reviewer = ADRCouncilReviewer(config, EventBus(), MagicMock(), MagicMock())
+        reviewer = ADRCouncilReviewer(config, EventBus(), MagicMock())
         result = ADRCouncilResult(
             adr_number=1, adr_title="Test", final_decision="ACCEPT", summary="OK"
         )
@@ -2510,9 +2509,7 @@ class TestADRCouncilReviewerCredentials:
         creds = Credentials(gh_token="test-token-xyz")
         config = ConfigFactory.create(repo_root=tmp_path / "repo")
         bus = EventBus()
-        reviewer = ADRCouncilReviewer(
-            config, bus, MagicMock(), MagicMock(), credentials=creds
-        )
+        reviewer = ADRCouncilReviewer(config, bus, MagicMock(), credentials=creds)
         assert reviewer._credentials is creds
         assert reviewer._credentials.gh_token == "test-token-xyz"
 
@@ -2595,7 +2592,7 @@ class TestGateBlockEscalation:
         bus.publish = AsyncMock()
         runner = MagicMock()
         runner.run_simple = AsyncMock()
-        reviewer = ADRCouncilReviewer(config, bus, MagicMock(), runner)
+        reviewer = ADRCouncilReviewer(config, bus, runner)
         return reviewer, bus, runner
 
     @pytest.mark.asyncio
