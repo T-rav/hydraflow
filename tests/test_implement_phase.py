@@ -3124,9 +3124,16 @@ class TestHandleNoPrFallback:
         assert returned is result
 
     @pytest.mark.asyncio
-    async def test_with_diff_marks_failed_for_retry(
+    async def test_with_diff_marks_failed_when_recovery_pr_open_fails(
         self, config: HydraFlowConfig
     ) -> None:
+        """A diff-bearing branch only stays failed when PR recovery genuinely fails.
+
+        Since #10493 the fallback first tries to recover the PR from the
+        already-pushed branch; it only marks the issue ``failed`` (for retry)
+        when that open genuinely fails — here ``create_pr`` returns the
+        ``number=0`` sentinel and no PR appeared in the meantime.
+        """
         issue = TaskFactory.create()
         result = WorkerResultFactory.create(
             issue_number=42,
@@ -3137,6 +3144,8 @@ class TestHandleNoPrFallback:
         phase, _, mock_prs = (
             ImplementPhaseMockBuilder(config)
             .with_issues([issue])
+            .with_create_pr_return(PRInfoFactory.create(number=0))
+            .with_prs_method("find_open_pr_for_branch", AsyncMock(return_value=None))
             .with_prs_method("branch_has_diff_from_main", AsyncMock(return_value=True))
             .build()
         )
