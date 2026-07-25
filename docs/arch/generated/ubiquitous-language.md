@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_71 terms across 3 bounded contexts._
+_72 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -610,6 +610,18 @@ Hexagonal port for persisting and querying recurring reviewer-feedback patterns.
 **Invariants:**
 - Pure Protocol — no implementation, no state.
 - Methods cover the full lifecycle: `append_review` writes a new record, `load_recent` reads recent history, `get_proposed_categories` and `mark_category_proposed` gate category escalation, and `record_proposal`, `load_proposal_metadata`, and `update_proposal_verified` track whether a proposed mandatory block reduced the pattern.
+
+## ReviewVerdict
+
+**Kind:** `value_object` · **Context:** `builder` · **Anchor:** `src/models.py:ReviewVerdict` · **Confidence:** `accepted`
+**Aliases:** `review verdict`, `review decision`, `review outcome`
+
+The closed-set outcome of a reviewer agent's evaluation of a pull request — APPROVE, REQUEST_CHANGES, or COMMENT. It is the terminal decision produced by the review phase (src/reviewer.py), submitted as a formal GitHub PR review via PRManager.submit_review, and consumed downstream to gate auto-merge eligibility (DependabotMergeLoop's human/bot shepherd path only merges on ReviewVerdict.APPROVE) and to drive review-insight analytics (review_insights.py filters records by verdict != APPROVE).
+
+**Invariants:**
+- Exactly one of APPROVE, REQUEST_CHANGES, or COMMENT — no other values are valid
+- PRManager.submit_review maps each verdict to its corresponding gh CLI review flag (--approve / --request-changes / --comment)
+- Only ReviewVerdict.APPROVE authorizes DependabotMergeLoop's shepherd path to proceed to merge
 
 ## RouteBackCounterPort
 
