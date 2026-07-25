@@ -1,0 +1,55 @@
+// Issue #10515 — Where the terminal-bucket status vocabulary is produced and
+// consumed. The bug: the Fake stamps `processing` on the two terminal buckets
+// while the real store stamps `hitl` / `merged`, so MockWorld scenarios assert
+// on a wire vocabulary production never emits.
+
+specification {
+  element module
+  element fake {
+    style { color amber }
+  }
+  element contract {
+    style { color green }
+  }
+  element surface
+}
+
+model {
+  vocab = contract 'models.PipelineIssueStatus' {
+    description 'Shared wire vocabulary: queued | active | processing | hitl | merged. Validated by models.PipelineIssue.status.'
+  }
+
+  real = module 'issue_store.IssueStore' {
+    description 'Production store. get_pipeline_snapshot() = _snapshot_queued + _snapshot_in_flight (processing) + _snapshot_active (active) + _snapshot_hitl (hitl) + _snapshot_merged (merged).'
+  }
+
+  fakestore = fake 'mockworld.fakes.fake_issue_store.FakeIssueStore' {
+    description 'MockWorld IssueStorePort double. BUG: STAGE_HITL and STAGE_MERGED buckets both stamped PipelineIssueStatus.PROCESSING (fake_issue_store.py:435-441).'
+  }
+
+  route = surface 'dashboard_routes._routes.get_pipeline' {
+    description 'GET /api/pipeline — maps backend stage keys via _STAGE_NAME_MAP and validates every entry through PipelineIssue.'
+  }
+
+  ui = surface 'ui/src/constants.js' {
+    description 'PIPELINE_STAGES / status→color mapping. hitl = red "Needs Human", merged = green "Merged".'
+  }
+
+  scenarios = module 'tests/scenarios/*' {
+    description 'MockWorld scenarios + tests/regressions/test_issue_10515.py — assert on snapshot status. Only as truthful as the Fake.'
+  }
+
+  real -> vocab 'stamps hitl / merged on terminal buckets'
+  fakestore -> vocab 'stamps processing on terminal buckets (divergence)'
+  real -> route 'get_pipeline_snapshot()'
+  route -> ui 'PipelineSnapshot JSON'
+  fakestore -> scenarios 'get_pipeline_snapshot() under MockWorld'
+  scenarios -> vocab 'assertions pinned to the Fake, not production'
+}
+
+views {
+  view parity {
+    title 'Pipeline snapshot status vocabulary — real vs fake'
+    include *
+  }
+}

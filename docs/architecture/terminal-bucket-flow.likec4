@@ -1,0 +1,35 @@
+// Issue #10515 — Dynamic view: how one issue reaches each terminal bucket in
+// the Fake, and which status the entry carries out. The two red steps are the
+// ones this issue corrects.
+
+specification {
+  element component
+}
+
+model {
+  gh = component 'FakeGitHub' {
+    description 'Seeded issues + labels; source of hydraflow-hitl membership.'
+  }
+  fakestore = component 'FakeIssueStore' {
+    description '_stage_for(labels) -> stage; get_hitl_issues(); mark_merged() -> _merged_numbers.'
+  }
+  snap = component 'FakeIssueStore.get_pipeline_snapshot' {
+    description 'Builds per-stage buckets via local _entry(num, status) helper.'
+  }
+  entry = component 'PipelineSnapshotEntry' {
+    description 'TypedDict: issue_number, title, url, status.'
+  }
+
+  gh -> fakestore 'labels: hydraflow-hitl -> STAGE_HITL'
+  fakestore -> snap 'get_hitl_issues() / _merged_numbers'
+  snap -> entry 'queued -> QUEUED; in-flight/active -> PROCESSING (correct)'
+  snap -> entry 'hitl bucket -> PROCESSING (WRONG; must be HITL)'
+  snap -> entry 'merged bucket -> PROCESSING (WRONG; must be MERGED)'
+}
+
+views {
+  view flow {
+    title 'FakeIssueStore snapshot construction — status per bucket'
+    include *
+  }
+}

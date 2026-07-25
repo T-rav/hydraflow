@@ -417,11 +417,10 @@ class FakeIssueStore:
                 snapshot[stage] = entries
 
         snapshot[STAGE_HITL] = [
-            _entry(num, PipelineIssueStatus.PROCESSING)
-            for num in self.get_hitl_issues()
+            _entry(num, PipelineIssueStatus.HITL) for num in self.get_hitl_issues()
         ]
         snapshot[STAGE_MERGED] = [
-            _entry(num, PipelineIssueStatus.PROCESSING) for num in self._merged_numbers
+            _entry(num, PipelineIssueStatus.MERGED) for num in self._merged_numbers
         ]
         return snapshot
 

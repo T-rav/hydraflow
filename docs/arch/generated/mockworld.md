@@ -19,7 +19,7 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeHTTP** | `HTTPPort` | `tests/scenarios/fakes/test_fake_http.py` |
 | **FakeHoneycomb** | `HoneycombPort` | — |
 | **FakeIssueFetcher** | `IssueFetcherPort` | — |
-| **FakeIssueStore** | `IssueStorePort` | — |
+| **FakeIssueStore** | `IssueStorePort` | `tests/scenarios/test_pipeline_snapshot_terminal_status_scenario.py` |
 | **FakeLLM** | `LLMPort` | `tests/scenarios/behaviors/test_quota.py`<br>`tests/scenarios/fakes/test_fake_llm.py`<br>`tests/scenarios/fakes/test_fake_llm_streaming.py`<br>`tests/scenarios/fakes/test_prior_failure_propagation.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakeReviewInsightStore** | `ReviewInsightStorePort` | — |
 | **FakeRouteBackCounter** | `RouteBackCounterPort` | — |
@@ -60,6 +60,7 @@ graph LR
     FakeHoneycomb -.-> HoneycombPort
     FakeIssueFetcher -.-> IssueFetcherPort
     FakeIssueStore -.-> IssueStorePort
+    tests_scenarios_test_pipeline_snapshot_terminal_status_scenario_py([tests/scenarios/test_pipeline_snapshot_terminal_status_scenario.py]) --> FakeIssueStore
     FakeLLM -.-> LLMPort
     tests_scenarios_behaviors_test_quota_py([tests/scenarios/behaviors/test_quota.py]) --> FakeLLM
     tests_scenarios_fakes_test_fake_llm_py([tests/scenarios/fakes/test_fake_llm.py]) --> FakeLLM
