@@ -48,16 +48,15 @@ function PendingIntentCard({ intent }) {
 }
 
 function PipelineFlow({ stageGroups, queueStrategy }) {
+  // Per-region and pipeline-wide issue/PR counts for the flow badges (#10488).
+  const counts = useMemo(() => countPipeline(stageGroups), [stageGroups])
+
   const { mergedCount, failedCount } = useMemo(() => {
-    const merged = stageGroups.find(g => g.stage.key === 'merged')?.issues.length || 0
     const failed = stageGroups.reduce(
       (sum, g) => sum + g.issues.filter(i => i.overallStatus === 'failed').length, 0
     )
-    return { mergedCount: merged, failedCount: failed }
-  }, [stageGroups])
-
-  // Per-region and pipeline-wide issue/PR counts for the flow badges (#10488).
-  const counts = useMemo(() => countPipeline(stageGroups), [stageGroups])
+    return { mergedCount: counts.perStage.merged?.issues || 0, failedCount: failed }
+  }, [stageGroups, counts])
 
   // #9863: a big backlog (67 queued in PLAN) rendered 67 dots in one
   // non-wrapping row and blew out the strip. Cap the dots and show the
