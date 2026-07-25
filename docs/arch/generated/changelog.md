@@ -6,7 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `15bae5e` — feat(signal-control): package scaffold + Ewma conditioner *(2026-07-24)*
+- `b9f7109` — chore: remove dead crate subsystem (#10520) (#10520) *(2026-07-25)*
+- `d6bad2e` — feat(signal-control): pure control-theory substrate (Stage 1) (#10502) (#10502) *(2026-07-24)*
 - `055267e` — fix(adr): single-colon ADR-0049 citations so drift coverage parses (#10481) (#10481) *(2026-07-24)*
 - `6c3cb69` — feat(adr): nudge bare shared-infra citations toward :Symbol granularity (#10479) (#10479) *(2026-07-24)*
 - `ee56677` — fix(gc): guard active auto-agent worktrees from stale-worktree GC (#10476) (#10476) *(2026-07-24)*
