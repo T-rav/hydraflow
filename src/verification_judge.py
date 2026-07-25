@@ -593,7 +593,10 @@ Diff excerpt:
             ),
             issue_number=issue_number,
             issue_labels=issue_labels,
-            provider=self._config.verification_judge_provider,
+            # The judge shares review's tool + model (verification_judge_tool is
+            # force-synced to review_tool; it runs review_model), so it must run
+            # on review's backend to stay coherent — it has no dial of its own.
+            provider=self._config.review_provider,
         )
 
     def terminate(self) -> None:

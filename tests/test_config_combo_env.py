@@ -13,15 +13,21 @@ import config as config_module
 from config import HydraFlowConfig, _parse_combo
 
 
-def test_agentic_roles_have_provider_dial_defaulting_claude() -> None:
-    """Every agentic role carries a harness-backend dial defaulting to claude."""
+def test_wired_agentic_roles_have_provider_dial_defaulting_claude() -> None:
+    """Every role with a provider-honoring spawn carries a dial defaulting claude.
+
+    Only roles with a dedicated spawn get a dial — sub-spawns inherit their
+    outer runner's provider, so a dial for them would validate yet never route.
+    """
     cfg = HydraFlowConfig()
+    for role in ("implementation", "review", "planner", "triage", "ac"):
+        assert getattr(cfg, f"{role}_provider") == "claude", role
+
+
+def test_sub_spawn_roles_have_no_dead_provider_dial() -> None:
+    """Sub-spawn roles must NOT expose a validated-but-unrouted provider dial."""
+    fields = HydraFlowConfig.model_fields
     for role in (
-        "implementation",
-        "review",
-        "planner",
-        "triage",
-        "ac",
         "subskill",
         "debug",
         "verification_judge",
@@ -29,7 +35,7 @@ def test_agentic_roles_have_provider_dial_defaulting_claude() -> None:
         "system",
         "background",
     ):
-        assert getattr(cfg, f"{role}_provider") == "claude", role
+        assert f"{role}_provider" not in fields, role
 
 
 def test_reject_glm_model_on_claude_provider() -> None:
@@ -64,6 +70,26 @@ def test_maintenance_knob_routes_only_maintenance_roles() -> None:
     assert cfg.implementation_provider == "claude"
     assert cfg.model != "glm-5.2"
     assert cfg.review_provider == "claude"
+
+
+def test_verifier_model_validated_against_implementation_provider() -> None:
+    """The test-adequacy verifier runs on the implementation harness, so its
+    model is validated against implementation_provider, not a dial of its own."""
+    # impl → GLM but an opus verifier model is incoherent (runs on the GLM
+    # harness) and must fail at load.
+    with pytest.raises((ValueError, ValidationError), match="glm|provider"):
+        HydraFlowConfig(
+            implementation_provider="zai",
+            model="glm-5.2",
+            test_adequacy_verifier_model="opus",
+        )
+    # A glm verifier model under impl=zai is coherent and accepted.
+    cfg = HydraFlowConfig(
+        implementation_provider="zai",
+        model="glm-5.2",
+        test_adequacy_verifier_model="glm-5.2",
+    )
+    assert cfg.test_adequacy_verifier_model == "glm-5.2"
 
 
 def test_valid_background_model_does_not_leak_into_work_roles() -> None:

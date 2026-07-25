@@ -2454,6 +2454,14 @@ class HydraFlowConfig(BaseModel):
     # /api/anthropic endpoint). This is what lets an operator route maintenance
     # loops to GLM while implement/review/plan/triage stay on Claude. Pair a
     # "zai" dial with a glm-* model (enforced by _harmonize_tool_model_defaults).
+    #
+    # ONLY roles with a dedicated, provider-honoring spawn get a dial. Sub-spawns
+    # inherit their outer runner's provider (they share its harness), so they get
+    # NO separate dial: the test-adequacy verifier and skill sub-spawns run on
+    # implementation_provider; the AC precheck's subskill/debug closures run on
+    # ac_provider; the verification judge shares review's tool+model so it runs
+    # on review_provider. Adding a dead dial here would validate at config-load
+    # yet never route at runtime — a footgun, so we don't.
     implementation_provider: Literal["claude", "zai"] = Field(
         default="claude", description="Harness backend for implementation agents."
     )
@@ -2468,27 +2476,6 @@ class HydraFlowConfig(BaseModel):
     )
     ac_provider: Literal["claude", "zai"] = Field(
         default="claude", description="Harness backend for acceptance-criteria agents."
-    )
-    subskill_provider: Literal["claude", "zai"] = Field(
-        default="claude", description="Harness backend for subskill agents."
-    )
-    debug_provider: Literal["claude", "zai"] = Field(
-        default="claude", description="Harness backend for debug agents."
-    )
-    verification_judge_provider: Literal["claude", "zai"] = Field(
-        default="claude", description="Harness backend for the verification judge."
-    )
-    test_adequacy_verifier_provider: Literal["claude", "zai"] = Field(
-        default="claude",
-        description="Harness backend for the independent test-adequacy verifier.",
-    )
-    system_provider: Literal["claude", "zai"] = Field(
-        default="claude",
-        description="Harness backend profile default for system-tier agents.",
-    )
-    background_provider: Literal["claude", "zai"] = Field(
-        default="claude",
-        description="Harness backend profile default for background-tier agents.",
     )
     # One knob to route ALL maintenance loops to a backend, coherently. Unlike
     # the old background_model (which back-filled *_model only and could strand a
@@ -5788,6 +5775,14 @@ _MODEL_PROVIDER_REQUIRED: list[tuple[str, str]] = [
     ("glm", "zai"),
 ]
 
+# Sub-spawn stages have no *_provider dial of their own — they run on the harness
+# of the outer runner that spawns them. Map each to the config field holding that
+# runner's provider so model validation is checked against the backend the spawn
+# actually uses (see _harmonize_tool_model_defaults).
+_SUBSPAWN_PROVIDER_SOURCE: dict[str, str] = {
+    "test_adequacy_verifier": "implementation_provider",
+}
+
 
 def _required_tool_for_model(model: str) -> str | None:
     m = model.lower()
@@ -5887,7 +5882,14 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
         # model needs provider "zai", and a "zai" provider needs a glm-* model.
         # This is what stops a background/maintenance model from silently
         # stranding a GLM model on a claude-provider (Anthropic) spawn.
-        provider = getattr(config, f"{stage}_provider", "claude")
+        #
+        # Sub-spawn stages have no dial of their own — they run on the harness of
+        # the outer runner that spawns them, so validate their model against that
+        # runner's provider (the test-adequacy verifier runs via the
+        # implementation spawn). This makes config-load reject e.g. an opus
+        # verifier model while implementation is routed to the GLM harness.
+        provider_field = _SUBSPAWN_PROVIDER_SOURCE.get(stage, f"{stage}_provider")
+        provider = getattr(config, provider_field, "claude")
         required_provider = _required_provider_for_model(model)
         if required_provider is not None and provider != required_provider:
             msg = (
