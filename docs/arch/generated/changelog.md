@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `bbd3332` — Merge remote-tracking branch 'origin/staging' into agent/issue-10515 *(2026-07-25)*
+- `204d2e1` — feat(ul): term-proposer batch — 1 drafts (#10514) (#10514) *(2026-07-25)*
+- `39bd616` — Fixes #10515: FakeIssueStore stamps HITL/merged snapshot entries with the real vocabulary *(2026-07-25)*
 - `92b2bc7` — Merge remote-tracking branch 'origin/staging' into agent/issue-10509 *(2026-07-25)*
 - `6c6ad21` — Fixes #10509: Work Stream stage timeline: merged issues show HITL filled and Merged hollow *(2026-07-25)*
 - `204d2e1` — feat(ul): term-proposer batch — 1 drafts (#10514) (#10514) *(2026-07-25)*
