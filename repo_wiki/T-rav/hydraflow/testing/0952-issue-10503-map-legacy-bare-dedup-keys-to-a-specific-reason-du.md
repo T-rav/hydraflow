@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10503
 source_phase: plan
 created_at: 2026-07-25T02:16:20.035331+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0953
 ---
 
 # Map legacy bare dedup keys to a specific reason during migration

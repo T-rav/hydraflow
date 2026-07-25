@@ -1,0 +1,18 @@
+---
+id: 0514
+topic: patterns
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-25T06:12:20.642463+00:00
+status: active
+corroborations: 1
+supersedes: 0481,0482,0483,0484,0485,0486,0487,0488,0489,0490,0491,0492,0493,0494,0495,0496,0497,0498
+---
+
+# Config field naming mirrors sibling fields for discoverability
+
+New `adr_drift_*` config fields in `src/config.py` should mirror the naming shape of existing sibling fields rather than inventing new conventions.
+
+Example: `adr_drift_shared_infra_fanout_threshold` was named to mirror `adr_drift_fleet_batch_threshold`, keeping the `adr_drift_<concern>_threshold` pattern and its matching `_ENV_INT_OVERRIDES` env var (`HYDRAFLOW_ADR_DRIFT_SHARED_INFRA_FANOUT_THRESHOLD`) consistent with existing overrides.
+
+**Why:** consistent naming lets future readers grep `adr_drift_` in `src/config.py` and immediately infer the env override name without checking `_ENV_INT_OVERRIDES`.

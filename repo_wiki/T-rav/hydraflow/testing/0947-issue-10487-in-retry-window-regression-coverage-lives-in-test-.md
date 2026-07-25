@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10487
 source_phase: plan
 created_at: 2026-07-24T22:26:43.556503+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0953
 ---
 
 # `_in_retry_window()` regression coverage lives in test_issue_10459.py
