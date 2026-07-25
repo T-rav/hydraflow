@@ -7,6 +7,7 @@ graph LR
   subgraph builder
     agentrunner["AgentRunner<br/><i>runner</i>"]
     reportissueloop["ReportIssueLoop<br/><i>loop</i>"]
+    reviewverdict["ReviewVerdict<br/><i>value_object</i>"]
     task["Task<br/><i>entity</i>"]
   end
   subgraph caretaker
@@ -316,6 +317,9 @@ graph LR
   reportissueloop -->|depends_on| dedupstore
   repowikistore -->|depends_on| dedupstore
   reviewinsightstoreport -->|depends_on| task
+  reviewverdict -->|depends_on| prport
+  reviewverdict -->|depends_on| prmanager
+  reviewverdict -->|depends_on| dependabotmergeloop
   routebackcounterport -->|depends_on| prport
   sentryloop -->|depends_on| basebackgroundloop
   sentryloop -->|depends_on| hydraflowconfig

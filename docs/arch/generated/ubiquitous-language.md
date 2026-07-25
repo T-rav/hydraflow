@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_71 terms across 3 bounded contexts._
+_72 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -610,6 +610,18 @@ Hexagonal port for persisting and querying recurring reviewer-feedback patterns.
 **Invariants:**
 - Pure Protocol — no implementation, no state.
 - Methods cover the full lifecycle: `append_review` writes a new record, `load_recent` reads recent history, `get_proposed_categories` and `mark_category_proposed` gate category escalation, and `record_proposal`, `load_proposal_metadata`, and `update_proposal_verified` track whether a proposed mandatory block reduced the pattern.
+
+## ReviewVerdict
+
+**Kind:** `value_object` · **Context:** `builder` · **Anchor:** `src/models.py:ReviewVerdict` · **Confidence:** `accepted`
+**Aliases:** `reviewer verdict`, `review outcome`, `pr review decision`
+
+The enumerated verdict a reviewer agent renders on a pull request — approve, request-changes, or comment. Submitted as a formal GitHub PR review via PRPort.submit_review / PRManager.submit_review, and read downstream by merge automation such as DependabotMergeLoop to decide whether a PR is eligible for auto-merge, gating the review→merge stage of the pipeline.
+
+**Invariants:**
+- Three-valued StrEnum: APPROVE, REQUEST_CHANGES, COMMENT
+- Submitted as a formal GitHub PR review via PRPort.submit_review / PRManager.submit_review
+- Only ReviewVerdict.APPROVE is treated as merge-eligible by downstream automation (e.g. DependabotMergeLoop's CI-green shepherd path)
 
 ## RouteBackCounterPort
 
