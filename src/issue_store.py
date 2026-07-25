@@ -136,6 +136,14 @@ class IssueStore:
         # HITL issues are tracked as a set (display only, not consumed)
         self._hitl_numbers: set[int] = set()
 
+        # Issues that have ever escalated to HITL, even after they've since
+        # left the HITL set (resolved, merged, etc). Unlike _hitl_numbers,
+        # entries here are never discarded — it's the durable "did this issue
+        # ever need a human" signal the dashboard timeline needs to
+        # distinguish a merged issue that skipped HITL from one that visited
+        # and recovered (#10509).
+        self._hitl_visited: set[int] = set()
+
         # Merged issues — populated by mark_merged(), used by pipeline snapshot
         self._merged_numbers: set[int] = set()
 
@@ -297,6 +305,7 @@ class IssueStore:
 
             if stage == STAGE_HITL:
                 self._hitl_numbers.add(issue_number)
+                self._hitl_visited.add(issue_number)
                 self._remove_from_all_queues(issue_number)
                 continue
             current_stage = self._find_queue_stage(issue_number)
@@ -399,6 +408,7 @@ class IssueStore:
 
         if stage == STAGE_HITL:
             self._hitl_numbers.add(task.id)
+            self._hitl_visited.add(task.id)
             self._eagerly_transitioned[task.id] = stage
             self._publish_queue_update_nowait()
             return
@@ -769,6 +779,7 @@ class IssueStore:
             title=cached.title if cached else f"Issue #{issue_number}",
             url=cached.source_url if cached else "",
             status=status,
+            hitl_visited=issue_number in self._hitl_visited,
         )
         if cached:
             epic_meta = self._epic_metadata(cached)
