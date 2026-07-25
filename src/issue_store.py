@@ -10,7 +10,6 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
@@ -19,9 +18,6 @@ from models import PipelineIssueStatus, PipelineSnapshotEntry, QueueStats, Task
 from queue_strategy import band_of, order_queue
 from subprocess_util import AuthenticationError
 from task_source import TaskFetcher
-
-if TYPE_CHECKING:
-    from crate_manager import CrateManager
 
 logger = logging.getLogger("hydraflow.issue_store")
 
@@ -178,20 +174,6 @@ class IssueStore:
 
         self._last_poll_ts: str | None = None
         self._lock = asyncio.Lock()
-        self._crate_manager: CrateManager | None = None
-
-    def set_crate_manager(self, cm: CrateManager) -> None:
-        """Inject the crate manager after construction (avoids circular init)."""
-        self._crate_manager = cm
-
-    def get_uncrated_issues(self) -> list[Task]:
-        """Return queued tasks that have no ``milestone_number`` in metadata."""
-        uncrated: list[Task] = []
-        for q in self._queues.values():
-            for task in q:
-                if task.metadata.get("milestone_number") is None:
-                    uncrated.append(task)
-        return uncrated
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -511,8 +493,8 @@ class IssueStore:
         """Return the set of HITL issue numbers."""
         return set(self._hitl_numbers)
 
-    def _is_eligible(self, task: Task, stage: IssueStoreStage) -> bool:
-        """Whether *task* may be dispatched from *stage* on this tick."""
+    def _is_eligible(self, task: Task) -> bool:
+        """Whether *task* may be dispatched on this tick."""
         if task.id in self._active:
             return False
         # ``human-required`` issues have been escalated out of the pipeline;
@@ -531,14 +513,7 @@ class IssueStore:
         # can't see the claim; the durable label can. Skip re-pick — belt-and-
         # suspenders with the in-process guard (ADR-0002).
         in_progress = {lbl.lower() for lbl in self._config.in_progress_label}
-        if in_progress & {t.lower() for t in task.tags}:
-            return False
-        return not (
-            stage != STAGE_FIND
-            and self._crate_manager is not None
-            and self._crate_manager.active_crate_number is not None
-            and not self._crate_manager.is_in_active_crate(task)
-        )
+        return not (in_progress & {t.lower() for t in task.tags})
 
     def _take_from_queue(self, stage: IssueStoreStage, max_count: int) -> list[Task]:
         """Take up to *max_count* eligible tasks from the *stage* queue.
@@ -574,7 +549,7 @@ class IssueStore:
         for task in ordered:
             if len(result) >= max_count:
                 break
-            if self._is_eligible(task, stage):
+            if self._is_eligible(task):
                 result.append(task)
 
         if not result:

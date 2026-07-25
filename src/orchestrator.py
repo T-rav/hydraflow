@@ -65,7 +65,6 @@ from subprocess_util import (
 
 if TYPE_CHECKING:
     from base_background_loop import BaseBackgroundLoop
-    from crate_manager import CrateManager
     from epic import EpicManager
     from github_cache_loop import GitHubDataCache
     from issue_store import IssueStore
@@ -288,11 +287,6 @@ class HydraFlowOrchestrator:
         svc.cost_budget_watcher_loop.set_bg_workers(self._bg_workers)
         self._hitl_ctrl = HITLController(svc.hitl_phase, svc.fetcher, config.hitl_label)
         self._state_restorer = StateRestorer(self._state, self._bus, self._bg_workers)
-
-    @property
-    def crate_manager(self) -> CrateManager:
-        """Expose the crate manager for dashboard integration."""
-        return self._svc.crate_manager
 
     @property
     def event_bus(self) -> EventBus:
@@ -1877,7 +1871,6 @@ class HydraFlowOrchestrator:
             if any(r.merged for r in review_results):
                 await asyncio.sleep(_POST_MERGE_DELAY)
                 await self._svc.prs.pull_main()
-                await self._svc.crate_manager.check_and_advance()
             return True
         finally:
             release_batch_in_flight(self._svc.store, {issue.id})

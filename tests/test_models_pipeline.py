@@ -171,22 +171,6 @@ class TestIssueOutcomeModels:
         entry = IssueHistoryEntry(issue_number=42)
         assert entry.linked_issues == []
 
-    def test_issue_history_entry_crate_fields_default(self) -> None:
-        from models import IssueHistoryEntry
-
-        entry = IssueHistoryEntry(issue_number=42)
-        assert entry.crate_number is None
-        assert entry.crate_title == ""
-
-    def test_issue_history_entry_crate_fields_can_be_set(self) -> None:
-        from models import IssueHistoryEntry
-
-        entry = IssueHistoryEntry(
-            issue_number=42, crate_number=3, crate_title="Sprint 1"
-        )
-        assert entry.crate_number == 3
-        assert entry.crate_title == "Sprint 1"
-
     def test_lifetime_stats_outcome_counters_default_zero(self) -> None:
         stats = LifetimeStats()
         assert stats.total_outcomes_merged == 0
