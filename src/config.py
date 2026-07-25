@@ -2490,6 +2490,27 @@ class HydraFlowConfig(BaseModel):
         default="claude",
         description="Harness backend profile default for background-tier agents.",
     )
+    # One knob to route ALL maintenance loops to a backend, coherently. Unlike
+    # the old background_model (which back-filled *_model only and could strand a
+    # glm model on a claude-provider role), this sets provider AND model together
+    # on the maintenance role-set (wiki, adr-review, transcript, drift-resolver,
+    # term-proposer, triage-honeypot, pr-unstick) and NEVER touches implement/
+    # review/plan/triage. Leave at claude/"" to configure roles individually.
+    maintenance_provider: Literal["claude", "zai"] = Field(
+        default="claude",
+        description=(
+            "Backend applied to every maintenance loop (not the work loops). "
+            "Set to 'zai' to run all maintenance on GLM; pair with maintenance_model."
+        ),
+    )
+    maintenance_model: str = Field(
+        default="",
+        description=(
+            "Model applied to every maintenance loop when set (e.g. 'glm-5.2'). "
+            "Empty keeps each maintenance role's own model. Only touches the "
+            "maintenance role-set, never the work loops."
+        ),
+    )
     triage_max_turns: int = Field(
         default=12,
         ge=1,
@@ -5717,9 +5738,36 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
         ):
             _apply_if_default(field, config.background_model)
 
+    # Maintenance knob: route the maintenance role-set to one backend coherently
+    # (provider AND model together), never the work loops. A model is only
+    # applied where the role actually has a *_model field (pr_unstick has none).
+    if config.maintenance_provider != "claude" or config.maintenance_model.strip():
+        for role in _MAINTENANCE_ROLES:
+            if config.maintenance_provider != "claude":
+                _apply_if_default(f"{role}_provider", config.maintenance_provider)
+            model_field = f"{role}_model"
+            if (
+                config.maintenance_model.strip()
+                and model_field in HydraFlowConfig.model_fields
+            ):
+                _apply_if_default(model_field, config.maintenance_model)
+
+
+# The maintenance role-set the maintenance_* knob routes (never the work loops).
+_MAINTENANCE_ROLES: tuple[str, ...] = (
+    "wiki_compilation",
+    "adr_review",
+    "transcript_summary",
+    "adr_drift_resolver",
+    "term_proposer",
+    "triage_honeypot",
+    "pr_unstick",
+)
 
 # Model prefix → required tool. Any model starting with a listed prefix
-# MUST pair with the given tool; any other pairing is rejected.
+# MUST pair with the given tool; any other pairing is rejected. glm-* rides the
+# Claude CLI (pointed at z.ai's Anthropic-compatible endpoint), so it requires
+# tool="claude".
 _MODEL_TOOL_REQUIRED: list[tuple[str, str]] = [
     ("gpt-", "codex"),
     ("o1", "codex"),
@@ -5729,6 +5777,15 @@ _MODEL_TOOL_REQUIRED: list[tuple[str, str]] = [
     ("sonnet", "claude"),
     ("haiku", "claude"),
     ("claude-", "claude"),
+    ("glm", "claude"),
+]
+
+# Model prefix → required provider (harness backend). A glm-* model only runs on
+# the z.ai harness backend, so its role's *_provider MUST be "zai". Anything not
+# listed is provider-agnostic on the tool axis but still subject to the inverse
+# check (a "zai" provider requires a glm-* model).
+_MODEL_PROVIDER_REQUIRED: list[tuple[str, str]] = [
+    ("glm", "zai"),
 ]
 
 
@@ -5737,6 +5794,14 @@ def _required_tool_for_model(model: str) -> str | None:
     for prefix, tool in _MODEL_TOOL_REQUIRED:
         if m.startswith(prefix):
             return tool
+    return None
+
+
+def _required_provider_for_model(model: str) -> str | None:
+    m = model.lower()
+    for prefix, provider in _MODEL_PROVIDER_REQUIRED:
+        if m.startswith(prefix):
+            return provider
     return None
 
 
@@ -5815,6 +5880,25 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
             msg = (
                 f"{stage}: mismatched pair {tool!r}+{model!r}; "
                 f"model {model!r} requires tool {required!r}"
+            )
+            raise ValueError(msg)
+        # Provider-scoped model validation. A role's *_provider (default
+        # "claude" for roles without a dial) must agree with its model: a glm-*
+        # model needs provider "zai", and a "zai" provider needs a glm-* model.
+        # This is what stops a background/maintenance model from silently
+        # stranding a GLM model on a claude-provider (Anthropic) spawn.
+        provider = getattr(config, f"{stage}_provider", "claude")
+        required_provider = _required_provider_for_model(model)
+        if required_provider is not None and provider != required_provider:
+            msg = (
+                f"{stage}: model {model!r} requires provider "
+                f"{required_provider!r} but the role is on provider {provider!r}"
+            )
+            raise ValueError(msg)
+        if provider == "zai" and required_provider != "zai":
+            msg = (
+                f"{stage}: provider 'zai' (the GLM harness) requires a glm-* "
+                f"model, got {model!r}"
             )
             raise ValueError(msg)
 

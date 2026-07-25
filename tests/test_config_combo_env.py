@@ -32,6 +32,47 @@ def test_agentic_roles_have_provider_dial_defaulting_claude() -> None:
         assert getattr(cfg, f"{role}_provider") == "claude", role
 
 
+def test_reject_glm_model_on_claude_provider() -> None:
+    """A glm-* model on a claude-provider role is incoherent and must fail loud."""
+    with pytest.raises((ValueError, ValidationError), match="provider"):
+        HydraFlowConfig(implementation_provider="claude", model="glm-5.2")
+
+
+def test_reject_opus_model_on_zai_provider() -> None:
+    """The zai (GLM) harness backend must pair with a glm-* model."""
+    with pytest.raises((ValueError, ValidationError), match="glm"):
+        HydraFlowConfig(wiki_compilation_provider="zai", wiki_compilation_model="opus")
+
+
+def test_allow_glm_on_zai_provider() -> None:
+    cfg = HydraFlowConfig(
+        wiki_compilation_provider="zai", wiki_compilation_model="glm-5.2"
+    )
+    assert cfg.wiki_compilation_provider == "zai"
+    assert cfg.wiki_compilation_model == "glm-5.2"
+
+
+def test_maintenance_knob_routes_only_maintenance_roles() -> None:
+    """maintenance_* sets provider+model on maintenance roles, never work loops."""
+    cfg = HydraFlowConfig(maintenance_provider="zai", maintenance_model="glm-5.2")
+    # maintenance roles routed to GLM…
+    assert cfg.wiki_compilation_provider == "zai"
+    assert cfg.wiki_compilation_model == "glm-5.2"
+    assert cfg.adr_review_provider == "zai"
+    assert cfg.pr_unstick_provider == "zai"  # provider even though it has no model
+    # …work loops untouched (still Claude).
+    assert cfg.implementation_provider == "claude"
+    assert cfg.model != "glm-5.2"
+    assert cfg.review_provider == "claude"
+
+
+def test_valid_background_model_does_not_leak_into_work_roles() -> None:
+    """A valid (same-provider) background_model never reaches implement/review."""
+    cfg = HydraFlowConfig(background_model="sonnet")
+    assert cfg.model != "sonnet"  # implementation keeps its own default
+    assert cfg.review_model == HydraFlowConfig.model_fields["review_model"].default
+
+
 def test_no_gemini_or_pi_tool_literal_in_config() -> None:
     """gemini/pi are gutted — no *_tool Literal nor the combo allowlist admits them."""
     for name, field in HydraFlowConfig.model_fields.items():
