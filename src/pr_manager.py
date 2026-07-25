@@ -3057,9 +3057,14 @@ class PRManager:
 
         #8786 Phase 13: routed through the contracts boundary helper in
         lenient mode against ``GhCheckRun``. The helper logs WARN on
-        shape drift (e.g. a new check state enum value, removed
-        detailsUrl) and falls back to the raw dict so the existing
-        downstream processing keeps working.
+        shape drift (e.g. a new check state enum value, a renamed URL
+        field) and falls back to the raw dict so the existing downstream
+        processing keeps working.
+
+        #10510: the ``gh pr checks --json`` URL field is ``link`` — the
+        older ``detailsUrl`` name was removed and requesting it makes the
+        whole call fail (``Unknown JSON field: "detailsUrl"``), so every
+        poll 3x-retried and returned no failed runs.
         """
         from contracts.boundary import field_or, parse_list_with_shape  # noqa: PLC0415
         from contracts.shapes import GhCheckRun  # noqa: PLC0415
@@ -3072,7 +3077,7 @@ class PRManager:
             "--repo",
             self._repo,
             "--json",
-            "name,state,detailsUrl",
+            "name,state,link",
         )
         results = parse_list_with_shape(raw, GhCheckRun)
 
@@ -3081,7 +3086,7 @@ class PRManager:
         for r in results:
             name = str(field_or(r, "name", "unknown"))
             state = str(field_or(r, "state", "")).upper()
-            details_url = str(field_or(r, "details_url", "", dict_key="detailsUrl"))
+            details_url = str(field_or(r, "details_url", "", dict_key="link"))
             if state in self._PASSING_STATES or state in self._PENDING_STATES:
                 continue
             if not details_url:

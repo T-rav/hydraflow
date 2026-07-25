@@ -28,6 +28,7 @@ graph LR
     src_review_phase["src.review_phase"]
     src_runners["src.runners"]
     src_sentry["src.sentry"]
+    src_signal_control["src.signal_control"]
     src_state["src.state"]
     src_telemetry["src.telemetry"]
     src_vitals["src.vitals"]

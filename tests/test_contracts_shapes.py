@@ -51,13 +51,14 @@ def test_label_rejects_missing_name() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_check_run_parses_alias_detailsUrl() -> None:
-    """gh emits camelCase; the model accepts camelCase via alias."""
+def test_check_run_parses_alias_link() -> None:
+    """gh pr checks --json emits the URL as ``link`` (#10510: the older
+    ``detailsUrl`` field was removed); the model accepts it via alias."""
     raw = {
         "name": "Lint & Format",
         "state": "COMPLETED",
         "conclusion": "SUCCESS",
-        "detailsUrl": "https://github.com/x/y/actions/runs/1",
+        "link": "https://github.com/x/y/actions/runs/1",
     }
     cr = GhCheckRun.model_validate(raw)
     assert cr.details_url == "https://github.com/x/y/actions/runs/1"

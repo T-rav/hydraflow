@@ -1,6 +1,13 @@
 """Regression: PRManager._get_failed_check_runs is routed through the
 contracts boundary helper (Phase 13 of #8786). GhCheckRun matches the
-``--json name,state,detailsUrl`` shape exactly."""
+``--json name,state,link`` shape exactly.
+
+#10510: gh renamed the URL field ``detailsUrl`` -> ``link``. Requesting
+the removed field made the whole ``gh pr checks`` call fail
+(``Unknown JSON field: "detailsUrl"``), 3x-retrying every poll and
+returning no failed runs. These fixtures use ``link`` (real gh output),
+and ``test_requests_link_not_removed_detailsurl_field`` pins the request
+field so a revert is caught."""
 
 from __future__ import annotations
 
@@ -39,13 +46,13 @@ async def test_well_shaped_response_extracts_failed_runs(
                 "name": "Lint",
                 "state": "COMPLETED",
                 "conclusion": "SUCCESS",
-                "detailsUrl": "https://github.com/x/y/actions/runs/1",
+                "link": "https://github.com/x/y/actions/runs/1",
             },
             {
                 "name": "Tests",
                 "state": "COMPLETED",
                 "conclusion": "FAILURE",
-                "detailsUrl": "https://github.com/x/y/actions/runs/2",
+                "link": "https://github.com/x/y/actions/runs/2",
             },
         ]
     )
@@ -81,7 +88,7 @@ async def test_drifted_state_enum_logs_warn_and_falls_back(
             {
                 "name": "FlakyCheck",
                 "state": "WARP_DRIVE",  # not in the Literal
-                "detailsUrl": "https://github.com/x/y/actions/runs/9",
+                "link": "https://github.com/x/y/actions/runs/9",
             }
         ]
     )
@@ -109,3 +116,30 @@ async def test_empty_checks_list_returns_empty(
     with patch("asyncio.create_subprocess_exec", mock_create):
         result = await mgr._get_failed_check_runs(pr_number=42)
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_requests_link_not_removed_detailsurl_field(
+    config,  # noqa: ANN001
+    event_bus,  # noqa: ANN001
+) -> None:
+    """#10510: pin the ``gh pr checks --json`` field to ``link``.
+
+    ``detailsUrl`` was removed from ``gh pr checks --json``; requesting it
+    fails the whole call. Guard the exact field list so a revert is caught
+    here instead of by a 3x-retry storm in production.
+    """
+    captured_args: list[str] = []
+
+    async def _record(*args: str, **_kwargs: object):  # noqa: ANN202
+        captured_args.extend(str(a) for a in args)
+        proc = SubprocessMockBuilder().with_stdout("[]").build()
+        return await proc(*args, **_kwargs)
+
+    mgr = make_pr_manager(config, event_bus)
+    with patch("asyncio.create_subprocess_exec", side_effect=_record):
+        await mgr._get_failed_check_runs(pr_number=42)
+
+    joined = " ".join(captured_args)
+    assert "name,state,link" in joined, joined
+    assert "detailsUrl" not in joined, joined
