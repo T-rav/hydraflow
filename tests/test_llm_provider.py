@@ -535,3 +535,20 @@ class TestRunLightweightAgentDispatch:
         assert result.stdout == "CLI"
         assert cli_called["n"] == 1
         assert http_called["n"] == 0
+
+
+class TestHarnessBackend:
+    """z.ai as a Claude-harness backend (the /api/anthropic face)."""
+
+    def test_zai_harness_base_url_default_and_lookup(self) -> None:
+        from config import HydraFlowConfig
+        from runner_utils import harness_base_url
+
+        cfg = HydraFlowConfig()
+        assert cfg.zai_harness_base_url == "https://api.z.ai/api/anthropic"
+        assert harness_base_url("zai", cfg) == cfg.zai_harness_base_url
+        # claude/anthropic are not harness *backends* — they use the native
+        # Anthropic endpoint, so there is no override URL.
+        assert harness_base_url("claude", cfg) == ""
+        assert harness_base_url("anthropic", cfg) == ""
+        assert harness_base_url("openrouter", cfg) == ""

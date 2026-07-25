@@ -2407,6 +2407,16 @@ class HydraFlowConfig(BaseModel):
             "(a secret — never stored on config or shown in the UI)."
         ),
     )
+    zai_harness_base_url: str = Field(
+        default="https://api.z.ai/api/anthropic",
+        description=(
+            "Anthropic-compatible base URL for the 'zai' *harness* backend — the "
+            "endpoint the Claude CLI is pointed at (via ANTHROPIC_BASE_URL) when "
+            "an agentic role sets provider='zai', so a tool-using maintenance loop "
+            "runs on GLM. Distinct from zai_base_url (the one-shot /paas/v4 face). "
+            "The API key is read from ZAI_API_KEY (a secret — env-only)."
+        ),
+    )
     kimi_base_url: str = Field(
         default="https://api.moonshot.ai/v1",
         description=(

@@ -719,6 +719,34 @@ def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str,
     return backend.base_url(config), backend.api_key()
 
 
+# Anthropic-compatible *harness* backends: providers the Claude CLI can be
+# pointed at via ANTHROPIC_BASE_URL so an agentic (tool-using) role runs on a
+# non-Anthropic model. Distinct from _OPENAI_COMPAT_BACKENDS (the one-shot HTTP
+# face) — z.ai appears in both, with a different URL for each. Only z.ai is
+# wired today; kimi stays one-shot-only.
+_HARNESS_BACKENDS: dict[str, _OpenAICompatBackend] = {
+    _ZAI: _OpenAICompatBackend(
+        base_url_field="zai_harness_base_url",
+        api_key_envs=("ZAI_API_KEY", "HYDRAFLOW_ZAI_API_KEY"),
+    ),
+}
+
+
+def harness_base_url(provider: str, config: HydraFlowConfig) -> str:
+    """Anthropic-compatible base URL for a *harness* backend, or "" if none.
+
+    Returns the endpoint the Claude CLI should be pointed at (via
+    ``ANTHROPIC_BASE_URL``) when an agentic role's provider dial names a harness
+    backend (today: ``"zai"`` → ``/api/anthropic``). Returns ``""`` for
+    ``"claude"``/``"anthropic"`` (the native endpoint — no override) and for
+    one-shot-only providers (``"openrouter"``/``"kimi"``), which never back an
+    agentic harness."""
+    backend = _HARNESS_BACKENDS.get(provider)
+    if backend is None:
+        return ""
+    return backend.base_url(config)
+
+
 def _telemetry_cmd(provider: str, tool: str, model: str) -> list[str]:
     """The ``cmd``-shaped descriptor ``_record_inference`` parses into
     ``(tool, model)``. For an OpenAI-compatible backend the 'tool' is the
