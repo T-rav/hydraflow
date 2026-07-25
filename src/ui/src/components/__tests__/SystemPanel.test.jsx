@@ -533,9 +533,15 @@ describe('SystemPanel', () => {
         render(<SystemPanel backgroundWorkers={[]} />)
         fireEvent.click(screen.getByText('Diagnostics'))
         // Lazy-loaded; wait for the dynamic import to resolve and tab to mount.
-        await waitFor(() => {
-          expect(screen.getByText('Factory Diagnostics')).toBeInTheDocument()
-        })
+        // `make quality` runs this suite alongside a full xdist pytest run,
+        // pyright, and bandit, so the transform for this chunk (charts +
+        // tables) can take longer than testing-library's 1000ms default.
+        await waitFor(
+          () => {
+            expect(screen.getByText('Factory Diagnostics')).toBeInTheDocument()
+          },
+          { timeout: 5000 },
+        )
         expect(screen.queryByText('Repo Health')).not.toBeInTheDocument()
       } finally {
         global.fetch = originalFetch
