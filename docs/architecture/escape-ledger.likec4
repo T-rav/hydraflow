@@ -1,0 +1,154 @@
+// Issue #10499 — escape-ledger regression-pin detection is unreachable.
+// The git adapter `_added_paths_for_range` shreds its own 0x1e sha-marker on
+// str.splitlines(), so CommitInfo.added_paths is ALWAYS () in production and
+// `_classify` can never reach the regression-pin branch.
+
+specification {
+  element system
+  element container
+  element component
+  element store
+  element external
+
+  tag pure
+  tag adapter
+  tag defect
+  tag hitl
+}
+
+model {
+  hydraflow = system 'HydraFlow' {
+
+    loop = container 'EscapeLedgerLoop' {
+      description 'src/escape_ledger_loop.py — caretaker loop (ADR-0029). Cursor-scans a base-branch commit range once (dedup by SHA), records rows, files bounded HITL issues.'
+
+      doWork = component '_do_work' {
+        description 'tick entry: resolve range -> detect -> record -> trends -> reports -> surface'
+      }
+      resolveRange = component '_resolve_range' {
+        description 'last_processed_sha..HEAD; primes cursor on first tick'
+      }
+      recordEscapes = component '_record_escapes' {
+        description 'append one deduped EscapeRecord per candidate; never blocks'
+      }
+      surface = component '_surface_findings' {
+        #hitl
+        description 'files hydraflow-find + escape-ledger issues for low-confidence and aging none-yet rows, capped per tick'
+      }
+      selectFindings = component 'select_findings_to_surface' {
+        #hitl
+        description 'low_confidence(records) + unencoded_aging(records); excludes already-surfaced fingerprints'
+      }
+    }
+
+    detect = container 'escape.detect' {
+      description 'src/escape/detect.py — pure detector + thin git adapters'
+
+      classify = component '_classify' {
+        #pure
+        description 'precedence: revert > regression-pin > hotfix > bug-issue. Emits exactly one EscapeCandidate per commit.'
+      }
+      detectEscapes = component 'detect_escapes' {
+        #pure
+        description 'pure core: list[CommitInfo] -> list[EscapeCandidate]. No git, no I/O.'
+      }
+      commitsForRange = component 'commits_for_range' {
+        #adapter
+        description 'git log -z --pretty=format:%H\\x1f%cI\\x1f%s\\x1f%b -> list[CommitInfo]. Splits on NUL/0x1f — correct.'
+      }
+      addedPaths = component '_added_paths_for_range' {
+        #adapter
+        #defect
+        description 'DEFECT (src/escape/detect.py:179-204): builds `\\x1eESCSHA\\x1e%H` marker lines, then parses git output with out.splitlines(). Python splits on 0x1e (RECORD SEPARATOR), so the marker line is shredded into ["", "ESCSHA", "<sha>"]; line.startswith(_SHA_MARKER) never matches, `current` stays None, and the function returns {} for EVERY range.'
+      }
+      runGit = component '_run_git' {
+        #adapter
+        description 'read-only subprocess git; None on any failure (missing git / non-zero / timeout)'
+      }
+    }
+
+    attribution = container 'escape.attribution' {
+      #pure
+      description 'src/escape/attribution.py — pure text parsers, no git'
+
+      addsPin = component 'adds_regression_pin' {
+        #pure
+        description 'True when any added path starts with tests/regressions/. Correct, but starved: always receives ().'
+      }
+      fixesRefs = component 'extract_fixes_refs' {
+        #pure
+        description 'GitHub closing keywords -> [#N]'
+      }
+    }
+
+    models = container 'escape.models' {
+      #pure
+      description 'src/escape/models.py — CommitInfo, EscapeCandidate, EscapeRecord, EncodedAs'
+    }
+
+    ledger = store 'EscapeLedger (JSONL)' {
+      description 'src/escape/ledger.py over IdentifiedJsonlLedger; <data_root>/diagnostics/escape_ledger.jsonl. APPEND-ONLY — rows are never mutated or rewritten.'
+    }
+
+    cursor = store 'escape_ledger_last_processed_sha' {
+      description 'src/state/_escape_ledger.py — analyze-once SHA cursor'
+    }
+
+    dedup = store 'DedupStore' {
+      description '.hydraflow/dedup/escape_ledger.json — surfacing fingerprints, one HITL issue per escape id forever'
+    }
+  }
+
+  git = external 'git (local repo)' {
+    description 'git log / rev-list, read-only'
+  }
+  github = external 'GitHub' {
+    description 'issues filed via PRPort.create_issue'
+  }
+
+  // --- wiring ---
+  hydraflow.loop.doWork -> hydraflow.loop.resolveRange 'resolve range'
+  hydraflow.loop.resolveRange -> hydraflow.cursor 'read/advance cursor'
+  hydraflow.loop.resolveRange -> hydraflow.detect.commitsForRange 'materialize CommitInfo'
+  hydraflow.detect.commitsForRange -> hydraflow.detect.runGit 'git log -z'
+  hydraflow.detect.commitsForRange -> hydraflow.detect.addedPaths 'added_map = paths added per sha'
+  hydraflow.detect.addedPaths -> hydraflow.detect.runGit 'git log --diff-filter=A --name-only'
+  hydraflow.detect.runGit -> git 'subprocess, read-only'
+  hydraflow.detect.commitsForRange -> hydraflow.models 'CommitInfo(added_paths=...)'
+  hydraflow.loop.doWork -> hydraflow.detect.detectEscapes 'pure detect'
+  hydraflow.detect.detectEscapes -> hydraflow.detect.classify 'per commit'
+  hydraflow.detect.classify -> hydraflow.attribution.addsPin 'regression-pin signal'
+  hydraflow.detect.classify -> hydraflow.attribution.fixesRefs 'origin pointer'
+  hydraflow.loop.doWork -> hydraflow.loop.recordEscapes 'record'
+  hydraflow.loop.recordEscapes -> hydraflow.ledger 'append EscapeRecord'
+  hydraflow.loop.doWork -> hydraflow.loop.surface 'surface findings'
+  hydraflow.loop.surface -> hydraflow.loop.selectFindings 'eligible rows'
+  hydraflow.loop.selectFindings -> hydraflow.ledger 'read_all'
+  hydraflow.loop.surface -> hydraflow.dedup 'fingerprint already-surfaced'
+  hydraflow.loop.surface -> github 'create_issue(hydraflow-find, escape-ledger)'
+}
+
+views {
+  view index {
+    title 'Escape ledger — container context'
+    include *
+  }
+
+  view detectInternals of hydraflow.detect {
+    title 'escape.detect — pure core vs git adapters (defect in _added_paths_for_range)'
+    include *
+    include hydraflow.attribution.*
+    include hydraflow.models
+    include git
+  }
+
+  view loopInternals of hydraflow.loop {
+    title 'EscapeLedgerLoop — tick pipeline and the HITL surface'
+    include *
+    include hydraflow.detect.*
+    include hydraflow.ledger
+    include hydraflow.cursor
+    include hydraflow.dedup
+    include github
+  }
+}
