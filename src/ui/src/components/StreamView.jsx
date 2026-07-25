@@ -5,8 +5,8 @@ import { StreamCard } from './StreamCard'
 import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
 import { splitPipelineTracks } from '../utils/pipelineTracks'
 import { countPipeline } from '../utils/pipelineCounts'
+import { buildSyntheticStages, overallStatus as deriveOverallStatus } from '../utils/stageStatus'
 import { TerminalFork } from './PipelineFork'
-import { STAGE_KEYS } from '../hooks/useTimeline'
 import {
   sectionHeaderStyles,
   sectionLabelStyles,
@@ -229,33 +229,12 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
   )
 }
 
-/** Map pipeline stage key to its index in STAGE_KEYS for building synthetic stages. */
-const STAGE_INDEX = Object.fromEntries(STAGE_KEYS.map((k, i) => [k, i]))
-
 /**
  * Convert a PipelineIssue from the server into a StreamCard-compatible shape.
  * Builds a synthetic `stages` object based on current pipeline position.
  */
 export function toStreamIssue(pipeIssue, stageKey, prs) {
-  const currentIdx = STAGE_INDEX[stageKey] ?? 0
-  const isActive = pipeIssue.status === 'active'
-  const isDone = pipeIssue.status === 'done'
-  const stages = {}
-  for (let i = 0; i < STAGE_KEYS.length; i++) {
-    const k = STAGE_KEYS[i]
-    if (i < currentIdx) {
-      stages[k] = { status: 'done', startTime: null, endTime: null, transcript: [] }
-    } else if (i === currentIdx) {
-      const currentStageStatus = isDone ? 'done'
-        : isActive ? 'active'
-        : pipeIssue.status === 'failed' ? 'failed'
-        : pipeIssue.status === 'hitl' ? 'hitl'
-        : 'queued'
-      stages[k] = { status: currentStageStatus, startTime: null, endTime: null, transcript: [] }
-    } else {
-      stages[k] = { status: 'pending', startTime: null, endTime: null, transcript: [] }
-    }
-  }
+  const stages = buildSyntheticStages(pipeIssue, stageKey)
 
   // Match PR from prs array — repo-qualified so two repos' same issue number
   // don't resolve to the wrong repo's PR under repo=__all__.
@@ -269,11 +248,7 @@ export function toStreamIssue(pipeIssue, stageKey, prs) {
     title: pipeIssue.title || `Issue #${pipeIssue.issue_number}`,
     issueUrl: pipeIssue.url || null,
     currentStage: stageKey,
-    overallStatus: pipeIssue.status === 'hitl' ? 'hitl'
-      : pipeIssue.status === 'failed' || pipeIssue.status === 'error' ? 'failed'
-      : isDone ? 'done'
-      : pipeIssue.status === 'active' ? 'active'
-      : 'queued',
+    overallStatus: deriveOverallStatus(pipeIssue),
     startTime: null,
     endTime: null,
     pr,

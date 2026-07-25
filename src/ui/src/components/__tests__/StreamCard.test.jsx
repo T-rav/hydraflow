@@ -173,6 +173,58 @@ describe('StageRow hitl presentation', () => {
   })
 })
 
+describe('StageRow merged-issue hitl/merged rendering (#10509)', () => {
+  // A merged issue that never escalated must render "Needs Human" hollow
+  // (pending), not filled — and Merged, the stage that actually completed,
+  // must render solid-filled, not hollow/subtle.
+  it('renders hitl hollow and merged filled for a merged issue that never visited hitl', () => {
+    const issue = makeIssue({ overallStatus: 'done', currentStage: 'merged' })
+    issue.stages.review = { ...issue.stages.review, status: 'done' }
+    issue.stages.hitl = { status: 'pending', startTime: null, endTime: null, transcript: [] }
+    issue.stages.merged = { status: 'done', startTime: null, endTime: null, transcript: [] }
+
+    const { getByTestId } = render(<StreamCard issue={issue} defaultExpanded />)
+    const hitlNode = getByTestId('stage-node-hitl')
+    const mergedNode = getByTestId('stage-node-merged')
+
+    expect(hitlNode.style.background).toBe('transparent')
+    expect(hitlNode.style.borderColor).toBe(theme.border)
+    expect(getByTestId('stage-badge-hitl').textContent).toBe('pending')
+
+    expect(mergedNode.style.background).toBe(STAGE_META.merged.color)
+    expect(mergedNode.style.borderColor).toBe(STAGE_META.merged.color)
+    expect(getByTestId('stage-badge-merged').textContent).toBe('done')
+  })
+
+  it('renders hitl filled for a merged issue that previously visited hitl', () => {
+    const issue = makeIssue({ overallStatus: 'done', currentStage: 'merged' })
+    issue.stages.review = { ...issue.stages.review, status: 'done' }
+    issue.stages.hitl = { status: 'done', startTime: null, endTime: null, transcript: [] }
+    issue.stages.merged = { status: 'done', startTime: null, endTime: null, transcript: [] }
+
+    const { getByTestId } = render(<StreamCard issue={issue} defaultExpanded />)
+    const hitlNode = getByTestId('stage-node-hitl')
+
+    expect(hitlNode.style.background).toBe(STAGE_META.hitl.color)
+    expect(hitlNode.style.borderColor).toBe(STAGE_META.hitl.color)
+    expect(getByTestId('stage-badge-hitl').textContent).toBe('done')
+  })
+
+  it('renders the connector below a skipped hitl node as dashed/not-traversed', () => {
+    const issue = makeIssue({ overallStatus: 'done', currentStage: 'merged' })
+    issue.stages.review = { ...issue.stages.review, status: 'done' }
+    issue.stages.hitl = { status: 'pending', startTime: null, endTime: null, transcript: [] }
+    issue.stages.merged = { status: 'done', startTime: null, endTime: null, transcript: [] }
+
+    const { getByTestId } = render(<StreamCard issue={issue} defaultExpanded />)
+    const hitlNode = getByTestId('stage-node-hitl')
+    const connector = hitlNode.nextSibling
+
+    expect(connector.style.borderLeft).toContain('dashed')
+    expect(connector.style.background).toBe('transparent')
+  })
+})
+
 describe('StreamCard phase-aware styling', () => {
   it('aligns border and accent to stage color when collapsed', () => {
     const issue = makeIssue({ overallStatus: 'active', currentStage: 'review' })

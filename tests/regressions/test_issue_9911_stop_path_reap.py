@@ -41,6 +41,15 @@ from orchestrator import HydraFlowOrchestrator
 from runner_utils import reap_all_tracked_processes
 
 
+# `make quality` runs this file's serial job alongside pyright, bandit, the
+# full -n auto suite, and (on the shared dark-factory box) other worktrees'
+# quality gates at once; a real spawn/reap can take far longer than the 5s
+# these polls used to allow, flaking the assertion rather than the process
+# itself (confirmed: this file's runtime went 7s standalone -> 300s+ under
+# realistic concurrent load).
+_POLL_DEADLINE_S = 30
+
+
 def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -74,7 +83,7 @@ class TestReapAllTrackedProcesses:
             start_new_session=True,
         )
         try:
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + _POLL_DEADLINE_S
             while not pidfile.exists() and time.monotonic() < deadline:
                 time.sleep(0.05)
             grandchild = int(pidfile.read_text().strip())
@@ -86,7 +95,7 @@ class TestReapAllTrackedProcesses:
             reaped = reap_all_tracked_processes()
 
             assert reaped == 1
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + _POLL_DEADLINE_S
             while _pid_alive(grandchild) and time.monotonic() < deadline:
                 time.sleep(0.05)
             assert not _pid_alive(grandchild), "grandchild survived the group kill"
@@ -221,7 +230,7 @@ class TestRunSimpleChildrenAreStopReapable:
             )
         )
         try:
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + _POLL_DEADLINE_S
             while not pidfile.exists() and time.monotonic() < deadline:
                 await asyncio.sleep(0.05)
             grandchild = int(pidfile.read_text().strip())
@@ -230,7 +239,7 @@ class TestRunSimpleChildrenAreStopReapable:
             reaped = reap_all_tracked_processes()
 
             assert reaped >= 1
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + _POLL_DEADLINE_S
             while _pid_alive(grandchild) and time.monotonic() < deadline:
                 await asyncio.sleep(0.05)
             assert not _pid_alive(grandchild), (

@@ -4,9 +4,9 @@ import { PIPELINE_STAGES } from '../constants'
 /** Canonical stage keys in lifecycle order. */
 export const STAGE_KEYS = PIPELINE_STAGES.map(s => s.key)
 
-/** Map stage key → { color, subtleColor, label, role }. */
+/** Map stage key → { color, subtleColor, label, role, conditional }. */
 export const STAGE_META = Object.fromEntries(
-  PIPELINE_STAGES.map(s => [s.key, { color: s.color, subtleColor: s.subtleColor, label: s.label, role: s.role }])
+  PIPELINE_STAGES.map(s => [s.key, { color: s.color, subtleColor: s.subtleColor, label: s.label, role: s.role, conditional: s.conditional }])
 )
 
 /**
