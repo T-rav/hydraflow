@@ -80,7 +80,7 @@ def gather_series_readings(
     # 1) Escapes — escapes detected within the trailing window (escape ledger).
     escape_path = diag / _ESCAPE_LEDGER
     if escape_path.exists():
-        records = EscapeLedger(escape_path).read_all()
+        records = EscapeLedger(escape_path).read_latest()
         readings[SERIES_ESCAPES] = float(
             rolling_escape_count(records, now, days=window_days)
         )
