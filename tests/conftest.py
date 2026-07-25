@@ -163,6 +163,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 sys.path.insert(0, str(_REPO_ROOT))
 
 import subprocess_util  # noqa: E402
+import trace_collector  # noqa: E402
 from tests.helpers import ConfigFactory  # noqa: E402
 
 if TYPE_CHECKING:
@@ -204,6 +205,17 @@ if TYPE_CHECKING:
 #   subprocess_util to prevent cross-test leakage of semaphore/rate-limit
 #   state.  This couples tests to internal implementation details; if those
 #   internals are renamed, this fixture must be updated accordingly.
+#
+# - ``_reset_active_config`` clears ``trace_collector``'s process-wide active
+#   config slot.  ``HydraFlowOrchestrator.__init__`` registers its config via
+#   ``set_active_config`` but nothing ever calls it with ``None`` again, so
+#   any test that builds an orchestrator (directly, or via MockWorld, which
+#   applies the sandbox overrides — including
+#   ``auto_pr_preflight_gate_enabled=False`` — before constructing it) leaves
+#   that config active for whichever test runs next on the same xdist
+#   worker. Free functions like ``auto_pr``'s pre-flight gate
+#   (``_preflight_settings``) read it as ground truth, so the leak silently
+#   changes their behavior in unrelated tests (#10487).
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -273,6 +285,21 @@ def _reset_gh_semaphore():
     yield
     subprocess_util._gh_semaphore = None
     subprocess_util._rate_limit_until = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_active_config():
+    """Reset ``trace_collector``'s process-wide active-config slot per test.
+
+    ``HydraFlowOrchestrator.__init__`` calls ``set_active_config`` on every
+    construction but nothing resets it on teardown, so a config built by one
+    test (e.g. MockWorld's sandbox-overridden orchestrator, which disables
+    ``auto_pr_preflight_gate_enabled``) otherwise stays active for whichever
+    test runs next on the same xdist worker (#10487).
+    """
+    trace_collector.set_active_config(None)
+    yield
+    trace_collector.set_active_config(None)
 
 
 @pytest.fixture(autouse=True)
