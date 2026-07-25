@@ -552,3 +552,27 @@ class TestHarnessBackend:
         assert harness_base_url("claude", cfg) == ""
         assert harness_base_url("anthropic", cfg) == ""
         assert harness_base_url("openrouter", cfg) == ""
+
+    def test_resolve_harness_env_isolation_and_zai(self, monkeypatch) -> None:
+        from config import HydraFlowConfig
+        from runner_utils import resolve_harness_env
+
+        cfg = HydraFlowConfig()
+        # Native Anthropic: pristine env — the main workers must stay untouched.
+        assert resolve_harness_env("claude", cfg) == {}
+        assert resolve_harness_env("anthropic", cfg) == {}
+        # zai: point the Claude CLI at GLM + clear the shadowing API key.
+        monkeypatch.setenv("ZAI_API_KEY", "sk-zai-test")
+        env = resolve_harness_env("zai", cfg)
+        assert env["ANTHROPIC_BASE_URL"] == cfg.zai_harness_base_url
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-zai-test"
+        assert env["ANTHROPIC_API_KEY"] == ""
+
+    def test_resolve_harness_env_missing_key_falls_open(self, monkeypatch) -> None:
+        from config import HydraFlowConfig
+        from runner_utils import resolve_harness_env
+
+        monkeypatch.delenv("ZAI_API_KEY", raising=False)
+        monkeypatch.delenv("HYDRAFLOW_ZAI_API_KEY", raising=False)
+        # No key → fall open to Anthropic rather than spawn a broken CLI.
+        assert resolve_harness_env("zai", HydraFlowConfig()) == {}

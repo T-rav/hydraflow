@@ -747,6 +747,38 @@ def harness_base_url(provider: str, config: HydraFlowConfig) -> str:
     return backend.base_url(config)
 
 
+def resolve_harness_env(provider: str, config: HydraFlowConfig) -> dict[str, str]:
+    """Per-spawn env overrides that point the Claude CLI at a harness backend.
+
+    Returns ``{}`` for ``"claude"``/``"anthropic"`` (the native endpoint — the
+    main coding workers must get a pristine env) and for any non-harness
+    provider. For a harness backend (today: ``"zai"``) with its key present,
+    returns ``ANTHROPIC_BASE_URL`` + ``ANTHROPIC_AUTH_TOKEN`` and clears
+    ``ANTHROPIC_API_KEY`` so a host Claude key can't shadow the backend token.
+
+    CRITICAL: this MUST be merged into a per-spawn env, never exported globally —
+    a global ``ANTHROPIC_BASE_URL`` would silently reroute every Claude worker to
+    the backend. When the backend is selected but its key is unset, we fall open
+    to Anthropic (empty dict) rather than spawn a CLI that cannot authenticate.
+    """
+    base_url = harness_base_url(provider, config)
+    if not base_url:
+        return {}
+    api_key = _HARNESS_BACKENDS[provider].api_key()
+    if not api_key:
+        logger.warning(
+            "harness backend %r selected but its API key is unset; falling back "
+            "to the native Anthropic endpoint",
+            provider,
+        )
+        return {}
+    return {
+        "ANTHROPIC_BASE_URL": base_url,
+        "ANTHROPIC_AUTH_TOKEN": api_key,
+        "ANTHROPIC_API_KEY": "",
+    }
+
+
 def _telemetry_cmd(provider: str, tool: str, model: str) -> list[str]:
     """The ``cmd``-shaped descriptor ``_record_inference`` parses into
     ``(tool, model)``. For an OpenAI-compatible backend the 'tool' is the
