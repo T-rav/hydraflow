@@ -543,9 +543,4 @@ def build_scripted_services(
         active_lint=MagicMock(),
         list_repos=MagicMock(return_value=[]),
     )
-    services.crate_manager = SimpleNamespace(
-        active_crate_number=None,
-        check_and_advance=AsyncMock(),
-        auto_package_if_needed=AsyncMock(),
-    )
     return services

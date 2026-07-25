@@ -1,32 +1,19 @@
 """Regression pins for issue #10037 — selectable work-queue discipline.
 
-Two invariants that a future change to ``IssueStore._take_from_queue`` could
+Invariant that a future change to ``IssueStore._take_from_queue`` could
 silently break:
 
-1. **``fifo`` is a behaviour pin.** ``fifo`` is the escape hatch back to the
-   pre-#10037 oldest-first ordering (the default is now ``weighted_mix``). Its
-   whole value is being a *faithful* arrival-order pass-through: an operator
-   setting ``fifo`` must get exactly the pre-#10037 behaviour with no
-   reordering. If that ever drifts, the escape hatch silently stops being one.
-
-2. **The crate (milestone) gate was absorbed, not retired, and unmilestoned
-   repos keep flowing.** #10037 folded the dormant crate scope-filter
-   (`issue_store.py`, ``CrateManager.is_in_active_crate``) into the strategy's
-   eligibility check rather than deleting it, because the dashboard crate UI and
-   the orchestrator lifecycle still consume ``CrateManager``. The load-bearing
-   property is that with **no active crate** — the real repo state, zero
-   milestones — every task flows regardless of strategy. The known hazard the
-   issue flagged (activating a crate wedges an unmilestoned backlog, because
-   ``is_in_active_crate`` returns ``False`` for unmilestoned tasks) is preserved
-   deliberately and pinned here so retirement is a conscious future decision,
-   not an accident.
+**``fifo`` is a behaviour pin.** ``fifo`` is the escape hatch back to the
+pre-#10037 oldest-first ordering (the default is now ``weighted_mix``). Its
+whole value is being a *faithful* arrival-order pass-through: an operator
+setting ``fifo`` must get exactly the pre-#10037 behaviour with no
+reordering. If that ever drifts, the escape hatch silently stops being one.
 """
 
 from __future__ import annotations
 
 import random
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -39,25 +26,6 @@ from issue_store import STAGE_READY, IssueStore
 from models import Task
 from queue_strategy import BandWeights, QueueStrategy, order_queue
 from tests.helpers import ConfigFactory
-
-
-class _FakeCrateManager:
-    """Minimal stand-in exposing the two members the take path consults."""
-
-    def __init__(
-        self,
-        active_crate_number: int | None,
-        is_in_active_crate: Callable[[Task], bool],
-    ) -> None:
-        self._active = active_crate_number
-        self._predicate = is_in_active_crate
-
-    @property
-    def active_crate_number(self) -> int | None:
-        return self._active
-
-    def is_in_active_crate(self, task: Task) -> bool:
-        return self._predicate(task)
 
 
 def _store(strategy: QueueStrategy) -> IssueStore:
@@ -90,33 +58,15 @@ def test_fifo_reproduces_pre_10037_oldest_first_order_exactly() -> None:
     assert [t.id for t in store.get_implementable(4)] == [1, 2, 3, 4]
 
 
-def test_unmilestoned_repo_keeps_flowing_when_no_crate_is_active() -> None:
-    # Zero milestones ⇒ active_crate_number is None ⇒ is_in_active_crate is
-    # never consulted, so an unmilestoned task dispatches under every strategy.
+def test_unmilestoned_work_flows_under_every_strategy() -> None:
+    # There is no milestone/scope gate: an unmilestoned task dispatches under
+    # every queue strategy.
     unmilestoned = Task(id=42, title="unmilestoned work", tags=["P1"])
     for strategy in QueueStrategy:
         store = _store(strategy)
-        store.set_crate_manager(
-            _FakeCrateManager(
-                active_crate_number=None, is_in_active_crate=lambda _t: False
-            )
-        )
         _enqueue(store, unmilestoned)
 
         assert [t.id for t in store.get_implementable(1)] == [42], strategy
-
-
-def test_activating_a_crate_still_gates_out_unmilestoned_work() -> None:
-    # The absorbed gate is preserved: with a crate active, a task the crate
-    # manager rejects is held back (the pre-existing wedge hazard the issue
-    # flagged). Pinned so retiring the gate is a deliberate future choice.
-    store = _store(QueueStrategy.WEIGHTED_MIX)
-    store.set_crate_manager(
-        _FakeCrateManager(active_crate_number=7, is_in_active_crate=lambda _t: False)
-    )
-    _enqueue(store, Task(id=1, title="unmilestoned P0", tags=["P0"]))
-
-    assert store.get_implementable(1) == []
 
 
 def test_an_unhandled_queue_strategy_raises_rather_than_silently_mixing() -> None:

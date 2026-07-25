@@ -950,7 +950,7 @@ class TestFillPendingSlots:
             return x
 
         pending: dict = {}
-        counter = _fill_pending_slots(lambda: [], noop, pending, 3, 5)
+        counter = await _fill_pending_slots(lambda: [], noop, pending, 3, 5)
         assert counter == 5
         assert not pending
 
@@ -969,7 +969,7 @@ class TestFillPendingSlots:
             return result
 
         pending: dict = {}
-        counter = _fill_pending_slots(supply_once, noop, pending, 5, 0)
+        counter = await _fill_pending_slots(supply_once, noop, pending, 5, 0)
         assert len(pending) == 2
         assert counter == 2
         for t in pending:
@@ -984,7 +984,9 @@ class TestFillPendingSlots:
             return x
 
         pending: dict = {}
-        counter = _fill_pending_slots(lambda: [1, 2, 3, 4, 5], noop, pending, 2, 0)
+        counter = await _fill_pending_slots(
+            lambda: [1, 2, 3, 4, 5], noop, pending, 2, 0
+        )
         assert len(pending) == 2
         assert counter == 2
         for t in pending:
@@ -1005,7 +1007,7 @@ class TestFillPendingSlots:
             return result
 
         pending: dict = {}
-        counter = _fill_pending_slots(supply_once, noop, pending, 5, 10)
+        counter = await _fill_pending_slots(supply_once, noop, pending, 5, 10)
         assert counter == 13  # started at 10, created 3 tasks
         for t in pending:
             t.cancel()
@@ -1020,7 +1022,7 @@ class TestFillPendingSlots:
 
         existing_task = asyncio.create_task(noop(0, 0))
         pending: dict = {existing_task: 0}
-        counter = _fill_pending_slots(lambda: [10, 20, 30], noop, pending, 2, 1)
+        counter = await _fill_pending_slots(lambda: [10, 20, 30], noop, pending, 2, 1)
         assert len(pending) == 2  # 1 existing + 1 new
         assert counter == 2
         for t in list(pending):

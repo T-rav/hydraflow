@@ -336,8 +336,6 @@ export function OutcomesPanel() {
       const issueText = `#${item.issue_number} ${(item.title || '').toLowerCase()}`
       if (issueText.includes(q)) return true
       if ((item.epic || '').toLowerCase().includes(q)) return true
-      if ((item.crate_title || '').toLowerCase().includes(q)) return true
-      if (item.crate_number != null && String(item.crate_number).includes(q)) return true
       const repoSlug = item.repo || extractRepoSlug(item.issue_url)
       if (repoSlug && repoSlug.toLowerCase().includes(q)) return true
       if ((item.outcome?.reason || '').toLowerCase().includes(q)) return true
@@ -362,28 +360,9 @@ export function OutcomesPanel() {
     if (groupBy === 'none') return null
     const groups = {}
     for (const item of sorted) {
-      let label
-      if (groupBy === 'crate') {
-        label = item.crate_number
-          ? (item.crate_title || `Crate #${item.crate_number}`)
-          : 'Uncrated'
-      } else {
-        label = item.epic || 'Ungrouped'
-      }
-      if (!groups[label]) groups[label] = { items: [], meta: {}, sortKey: null }
+      const label = item.epic || 'Ungrouped'
+      if (!groups[label]) groups[label] = { items: [] }
       groups[label].items.push(item)
-    }
-    if (groupBy === 'crate') {
-      for (const [label, group] of Object.entries(groups)) {
-        const items = group.items
-        group.sortKey = label === 'Uncrated' ? Infinity : (items[0]?.crate_number ?? Infinity)
-        group.meta = {
-          total: items.length,
-          merged: items.filter(i => i.outcome?.outcome === 'merged').length,
-          failed: items.filter(i => i.outcome?.outcome === 'failed').length,
-          tokens: items.reduce((s, i) => s + (i.inference?.total_tokens || 0), 0),
-        }
-      }
     }
     return groups
   }, [sorted, groupBy])
@@ -431,16 +410,10 @@ export function OutcomesPanel() {
     title: (item) => {
       const title = item.title || ''
       const outcomeReason = item.outcome?.reason || ''
-      const hasCrate = (item.crate_title != null && item.crate_title !== 'null') || (item.crate_number != null && String(item.crate_number) !== 'null')
       return (
         <div style={styles.titleCell} title={title || `Issue #${item.issue_number}`}>
           <div style={styles.titleMain}>
             <span style={styles.titleText}>{title || <span style={styles.dimText}>Untitled</span>}</span>
-            {hasCrate && (
-              <span style={styles.cratePill} title={item.crate_title || `Crate #${item.crate_number}`}>
-                {item.crate_title || `#${item.crate_number}`}
-              </span>
-            )}
             {item.epic && (
               <span style={styles.epicPill} title={item.epic}>
                 {item.epic}
@@ -604,41 +577,6 @@ export function OutcomesPanel() {
     )
   }
 
-  function renderCrateItems(items, crateLabel) {
-    const epics = {}
-    for (const item of items) {
-      const epicLabel = item.epic || 'No epic'
-      if (!epics[epicLabel]) epics[epicLabel] = []
-      epics[epicLabel].push(item)
-    }
-    const epicKeys = Object.keys(epics)
-    if (epicKeys.length === 1 && epicKeys[0] === 'No epic') {
-      return items.map(item => renderIssueRow(item))
-    }
-    return Object.entries(epics)
-      .sort(([a], [b]) => (a === 'No epic' ? 1 : b === 'No epic' ? -1 : a.localeCompare(b)))
-      .map(([epicLabel, epicItems]) => {
-        const subKey = `${crateLabel}::${epicLabel}`
-        const isSubCollapsed = collapsedGroups.has(subKey)
-        return (
-          <div key={subKey}>
-            <button
-              type="button"
-              onClick={() => toggleGroupCollapse(subKey)}
-              style={styles.subEpicHeader}
-              aria-expanded={!isSubCollapsed}
-              aria-label={`Toggle ${epicLabel} sub-group`}
-            >
-              <span>{isSubCollapsed ? '▸' : '▾'}</span>
-              <span style={styles.epicTitle}>{epicLabel}</span>
-              <span style={styles.epicCount}>{epicItems.length} issue{epicItems.length !== 1 ? 's' : ''}</span>
-            </button>
-            {!isSubCollapsed && epicItems.map(item => renderIssueRow(item))}
-          </div>
-        )
-      })
-  }
-
   return (
     <div style={styles.container}>
       <div style={styles.controls}>
@@ -677,7 +615,7 @@ export function OutcomesPanel() {
         <div style={styles.filterRow}>
           <input
             type="text"
-            placeholder="Search issue #, title, repo, epic, crate, reason"
+            placeholder="Search issue #, title, repo, epic, reason"
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={styles.searchInput}
@@ -695,7 +633,6 @@ export function OutcomesPanel() {
           <select value={groupBy} onChange={e => setGroupBy(e.target.value)} style={styles.select}>
             <option value="none">No grouping</option>
             <option value="epic">Group by epic</option>
-            <option value="crate">Group by crate</option>
           </select>
           <label style={styles.checkboxLabel}>
             <input type="checkbox" checked={epicOnly} onChange={e => setEpicOnly(e.target.checked)} />
@@ -761,47 +698,14 @@ export function OutcomesPanel() {
         <div style={styles.tableBody}>
           {grouped ? (
             Object.entries(grouped)
-              .sort(([a, ga], [b, gb]) => {
-                const bottomLabel = groupBy === 'crate' ? 'Uncrated' : 'Ungrouped'
-                if (a === bottomLabel) return 1
-                if (b === bottomLabel) return -1
-                if (groupBy === 'crate' && ga.sortKey != null && gb.sortKey != null) {
-                  return ga.sortKey - gb.sortKey
-                }
+              .sort(([a], [b]) => {
+                if (a === 'Ungrouped') return 1
+                if (b === 'Ungrouped') return -1
                 return a.localeCompare(b)
               })
               .map(([label, group]) => {
                 const isCollapsed = collapsedGroups.has(label)
                 const items = group.items
-                if (groupBy === 'crate') {
-                  const meta = group.meta || {}
-                  const progressPct = meta.total ? Math.min(100, Math.round((meta.merged / meta.total) * 100)) : 0
-                  return (
-                    <div key={label}>
-                      <button
-                        type="button"
-                        onClick={() => toggleGroupCollapse(label)}
-                        style={styles.crateHeader}
-                        aria-expanded={!isCollapsed}
-                        aria-label={`Toggle ${label} group`}
-                      >
-                        <span>{isCollapsed ? '▸' : '▾'}</span>
-                        <span style={styles.crateTitle}>{label}</span>
-                        <span style={styles.crateMeta}>
-                          {meta.merged}/{meta.total} merged
-                        </span>
-                        <span style={styles.crateBar}>
-                          <span style={{ ...styles.crateBarFill, width: `${progressPct}%` }} />
-                        </span>
-                        {meta.failed > 0 && (
-                          <span style={styles.crateFailCount}>{meta.failed} failed</span>
-                        )}
-                        <span style={styles.crateTokens}>{formatCompact(meta.tokens)} tok</span>
-                      </button>
-                      {!isCollapsed && renderCrateItems(items, label)}
-                    </div>
-                  )
-                }
                 return (
                   <div key={label}>
                     <button
@@ -1049,20 +953,6 @@ const styles = {
     whiteSpace: 'nowrap',
     lineHeight: 1.3,
   },
-  cratePill: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    borderRadius: 999,
-    fontSize: 9,
-    fontWeight: 600,
-    padding: '1px 6px',
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-    color: theme.purple,
-    background: theme.purpleSubtle,
-    border: `1px solid ${theme.purple}`,
-    opacity: 0.8,
-  },
   epicPill: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -1177,70 +1067,6 @@ const styles = {
     background: theme.surfaceInset,
     cursor: 'pointer',
     fontSize: 12,
-    color: theme.text,
-    textAlign: 'left',
-  },
-  crateHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-    padding: '8px 10px',
-    border: 'none',
-    borderBottom: `1px solid ${theme.border}`,
-    borderLeft: `3px solid ${theme.purple}`,
-    background: theme.surfaceInset,
-    cursor: 'pointer',
-    fontSize: 12,
-    color: theme.text,
-    textAlign: 'left',
-  },
-  crateTitle: {
-    fontWeight: 700,
-  },
-  crateMeta: {
-    color: theme.textMuted,
-    fontSize: 11,
-    whiteSpace: 'nowrap',
-  },
-  crateBar: {
-    width: 60,
-    height: 6,
-    borderRadius: 3,
-    background: theme.surfaceInset,
-    border: `1px solid ${theme.border}`,
-    overflow: 'hidden',
-    flexShrink: 0,
-  },
-  crateBarFill: {
-    height: '100%',
-    background: theme.green,
-    borderRadius: 3,
-    transition: 'width 0.2s ease',
-  },
-  crateFailCount: {
-    color: theme.red,
-    fontSize: 10,
-    fontWeight: 700,
-  },
-  crateTokens: {
-    color: theme.textMuted,
-    fontSize: 10,
-    marginLeft: 'auto',
-    whiteSpace: 'nowrap',
-  },
-  subEpicHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-    padding: '6px 10px 6px 24px',
-    border: 'none',
-    borderBottom: `1px solid ${theme.border}`,
-    borderLeft: `3px solid ${theme.accent}`,
-    background: theme.surface,
-    cursor: 'pointer',
-    fontSize: 11,
     color: theme.text,
     textAlign: 'left',
   },

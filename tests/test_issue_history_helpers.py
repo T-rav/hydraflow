@@ -1,7 +1,7 @@
 """Tests for extracted issue-history helpers in dashboard_routes.py.
 
 The helpers (_build_issue_history_entry, _aggregate_telemetry_record,
-_process_events_into_rows, _filter_rows_to_items, _apply_enrichment_and_crate_titles)
+_process_events_into_rows, _filter_rows_to_items, _apply_enrichment_and_sort)
 are inner functions inside ``create_router``.  We exercise them indirectly via
 the GET /api/issues/history endpoint and verify their isolated behaviours.
 """
@@ -506,69 +506,12 @@ class TestFilterRowsToItems:
 
 
 # ---------------------------------------------------------------------------
-# _apply_enrichment_and_crate_titles tests
+# _apply_enrichment_and_sort tests
 # ---------------------------------------------------------------------------
 
 
-class TestApplyEnrichmentAndCrateTitles:
-    """Verify enrichment and crate-title backfill logic."""
-
-    @pytest.mark.asyncio
-    async def test_crate_title_backfilled_from_milestones(
-        self, config, event_bus: EventBus, state, tmp_path: Path
-    ) -> None:
-        """Items with crate_number get title from milestones."""
-        from unittest.mock import MagicMock
-
-        await event_bus.publish(
-            HydraFlowEvent(
-                type=EventType.ISSUE_CREATED,
-                data={"issue": 140, "title": "Crate issue", "milestone_number": 5},
-            )
-        )
-
-        router = _make_router(config, event_bus, state, tmp_path)
-        endpoint = _get_endpoint(router)
-
-        mock_milestone = MagicMock()
-        mock_milestone.number = 5
-        mock_milestone.title = "Sprint Alpha"
-
-        with patch(
-            "pr_manager.PRManager.list_milestones",
-            new_callable=AsyncMock,
-            return_value=[mock_milestone],
-        ):
-            resp = await endpoint(limit=100)
-        payload = json.loads(resp.body)
-        item = next(x for x in payload["items"] if x["issue_number"] == 140)
-        assert item["crate_number"] == 5
-        assert item["crate_title"] == "Sprint Alpha"
-
-    @pytest.mark.asyncio
-    async def test_crate_title_empty_when_no_milestone_match(
-        self, config, event_bus: EventBus, state, tmp_path: Path
-    ) -> None:
-        """When milestone is not found, crate_title stays empty."""
-        await event_bus.publish(
-            HydraFlowEvent(
-                type=EventType.ISSUE_CREATED,
-                data={"issue": 141, "title": "No match", "milestone_number": 99},
-            )
-        )
-
-        router = _make_router(config, event_bus, state, tmp_path)
-        endpoint = _get_endpoint(router)
-
-        with patch(
-            "pr_manager.PRManager.list_milestones",
-            new_callable=AsyncMock,
-            return_value=[],
-        ):
-            resp = await endpoint(limit=100)
-        payload = json.loads(resp.body)
-        item = next(x for x in payload["items"] if x["issue_number"] == 141)
-        assert item["crate_title"] == ""
+class TestApplyEnrichmentAndSort:
+    """Verify enrichment and sort logic."""
 
     @pytest.mark.asyncio
     async def test_enrichment_rebuilds_items_after_github_fetch(

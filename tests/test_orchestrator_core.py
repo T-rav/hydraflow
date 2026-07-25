@@ -969,7 +969,6 @@ class TestServiceRegistry:
     def test_properties_delegate_to_svc(self, config: HydraFlowConfig) -> None:
         """Public properties should delegate to _svc."""
         orch = HydraFlowOrchestrator(config)
-        assert orch.crate_manager is orch._svc.crate_manager
         assert orch.issue_store is orch._svc.store
         assert orch.run_recorder is orch._svc.run_recorder
         assert orch.metrics_manager is orch._svc.metrics_manager

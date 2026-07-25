@@ -333,9 +333,6 @@ export const UNSTICK_BATCH_OPTIONS = [1, 2, 3, 5, 10, 15, 20, 30, 50]
  */
 export const SESSION_STATUSES = ['active', 'completed']
 
-/** Crate (milestone) states for the delivery queue panel. */
-export const CRATE_STATUSES = ['open', 'closed']
-
 /**
  * Background worker definitions — maintenance and system loops that can be toggled on/off.
  * Workers with `system: true` are internal services shown with a "system" badge.
