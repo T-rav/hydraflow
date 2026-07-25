@@ -69,6 +69,13 @@ def _changed_paths_for_range(
     out = _run_git(
         repo_root,
         [
+            # core.quotepath defaults to true, which wraps any path containing
+            # non-ASCII bytes in literal quotes and octal-escapes them (see
+            # escape.detect._added_paths_for_range, #10499 — same defect
+            # class); disable it so name-only output round-trips real UTF-8
+            # paths instead of quoted escape sequences.
+            "-c",
+            "core.quotepath=false",
             "log",
             commit_range,
             "--reverse",

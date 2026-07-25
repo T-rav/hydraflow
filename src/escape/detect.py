@@ -189,6 +189,12 @@ def _added_paths_for_range(repo_root: Path, commit_range: str) -> dict[str, list
     out = _run_git(
         repo_root,
         [
+            # core.quotepath defaults to true, which octal-escapes non-ASCII
+            # path bytes (e.g. `"tests/regressions/test_\303\251.py"`) and
+            # would defeat `adds_regression_pin`'s startswith() check below;
+            # disable it so name-only output round-trips real UTF-8 paths.
+            "-c",
+            "core.quotepath=false",
             "log",
             commit_range,
             "--reverse",

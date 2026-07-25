@@ -136,6 +136,25 @@ class TestAddedPathsForRange:
         assert added == {}
         assert modify_sha not in added
 
+    def test_maps_non_ascii_added_path_unescaped(self, tmp_path: Path) -> None:
+        # core.quotepath defaults to true, which octal-escapes non-ASCII path
+        # bytes and wraps the whole path in literal quotes (e.g.
+        # `"tests/regressions/test_\303\251.py"`), defeating a startswith()
+        # match against the raw path. `_added_paths_for_range` must disable
+        # it so this round-trips as real UTF-8, not a quoted escape (#10499).
+        repo = _init_repo(tmp_path)
+        base_sha = _head(repo)
+        sha = _add_file(
+            repo,
+            "tests/regressions/test_café.py",
+            "def test_cafe(): pass\n",
+            "fix: pin regression with non-ascii filename",
+        )
+
+        added = _added_paths_for_range(repo, f"{base_sha}..{sha}")
+
+        assert added == {sha: ["tests/regressions/test_café.py"]}
+
 
 class TestRegressionPinDetectionEndToEnd:
     def test_commits_for_range_detects_regression_pin(self, tmp_path: Path) -> None:
@@ -162,6 +181,26 @@ class TestRegressionPinDetectionEndToEnd:
         # point of restoring the regression-pin detection source (#10499).
         assert pin_candidates[0].attribution_confidence == "medium"
 
+    def test_detects_regression_pin_at_a_non_ascii_path(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        base_sha = _head(repo)
+        _add_file(repo, "src/mod.py", "def risky(): return 1\n", "feat: risky change")
+        bad_sha = _head(repo)
+        head_sha = _add_file(
+            repo,
+            "tests/regressions/test_café.py",
+            "def test_cafe(): pass\n",
+            f"fix: pin regression from {bad_sha}",
+        )
+
+        commits = commits_for_range(repo, f"{base_sha}..{head_sha}")
+        assert commits is not None
+        candidates = detect_escapes(commits)
+
+        pin_candidates = [c for c in candidates if c.detection_source == "regression-pin"]
+        assert len(pin_candidates) == 1
+        assert pin_candidates[0].detection_ref == head_sha
+
 
 class TestAuditDetectSameDefectClass:
     """``audit.detect`` shared the ``\\x1eMARKER\\x1e`` + ``splitlines()`` bug —
@@ -175,6 +214,19 @@ class TestAuditDetectSameDefectClass:
         changed = _changed_paths_for_range(repo, f"{base_sha}..{sha}")
 
         assert changed == {sha: ["src/mod.py"]}
+
+    def test_maps_non_ascii_changed_path_unescaped(self, tmp_path: Path) -> None:
+        # Same core.quotepath defect class as escape.detect (#10499): without
+        # disabling it, a non-ASCII path comes back quoted/octal-escaped.
+        repo = _init_repo(tmp_path)
+        base_sha = _head(repo)
+        sha = _add_file(
+            repo, "src/café.py", "def f(): return 1\n", "feat: add café (#7)"
+        )
+
+        changed = _changed_paths_for_range(repo, f"{base_sha}..{sha}")
+
+        assert changed == {sha: ["src/café.py"]}
 
     def test_merged_changes_for_range_populates_changed_paths(
         self, tmp_path: Path
