@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10499
 source_phase: review
 created_at: 2026-07-25T06:08:03.278827+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10499 closed
 ---
 
 # Regression tests for git-log parsers must drive real git, not mock _run_git
