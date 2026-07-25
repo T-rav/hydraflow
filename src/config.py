@@ -816,7 +816,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "adr_touchpoint_auditor_loop_enabled",
         "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_LOOP_ENABLED",
-        True,
+        False,  # #10540: activity-based ADR-drift retired; default OFF.
     ),
     (
         "adr_conformance_loop_enabled",
@@ -967,7 +967,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "adr_drift_resolver_loop_enabled",
         "HYDRAFLOW_ADR_DRIFT_RESOLVER_LOOP_ENABLED",
-        True,
+        False,  # #10540: activity-based ADR-drift retired; default OFF.
     ),
     (
         "human_branch_shepherd_enabled",
@@ -4909,8 +4909,16 @@ class HydraFlowConfig(BaseModel):
         description="Deploy-time kill-switch for ADRReviewerLoop.",
     )
     adr_touchpoint_auditor_loop_enabled: bool = Field(
-        default=True,
-        description="Deploy-time kill-switch for AdrTouchpointAuditorLoop.",
+        default=False,
+        description=(
+            "Deploy-time kill-switch for AdrTouchpointAuditorLoop. Defaults "
+            "OFF (#10540): activity-based ADR-drift ('a cited module changed "
+            "in a PR', ~70% false positives) is retired in favour of the "
+            "deterministic violation-based citation gate "
+            "(tests/test_adr_citation_conformance.py). The loop code is kept "
+            "for now; set HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_LOOP_ENABLED=true "
+            "to re-enable."
+        ),
     )
     adr_conformance_loop_enabled: bool = Field(
         default=True,
@@ -5185,12 +5193,16 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     adr_drift_resolver_loop_enabled: bool = Field(
-        default=True,
+        default=False,
         description=(
             "Deploy-time kill-switch for AdrDriftResolverLoop (#9976: "
             "triage-before-escalate so ADR-drift rollups self-resolve). "
-            "Defense-in-depth alongside the ADR-0049 UI kill-switch — the "
-            "in-body enabled_cb gate is checked first."
+            "Defaults OFF (#10540): it triaged the activity-based ADR-drift "
+            "rollups that are now retired in favour of the deterministic "
+            "violation-based citation gate "
+            "(tests/test_adr_citation_conformance.py), so there is nothing for "
+            "it to resolve. Loop code is kept; set "
+            "HYDRAFLOW_ADR_DRIFT_RESOLVER_LOOP_ENABLED=true to re-enable."
         ),
     )
     stale_issue_loop_enabled: bool = Field(
