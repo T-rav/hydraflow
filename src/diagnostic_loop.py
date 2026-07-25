@@ -268,12 +268,24 @@ class DiagnosticLoop(BaseBackgroundLoop):
             return "escalated"
 
         if len(attempts) >= self._config.max_diagnostic_attempts:
+            # Attempts-exhausted is an auto-resolvable "too-big / wrong-strategy"
+            # signal (the #10411/#10403 class), not a human-judgment need. Route
+            # it straight to the Auto-Agent's autofix stage rather than the
+            # human-visible HITL queue (flag-gated, default on); the Auto-Agent
+            # decomposes/retries and only pages a human (``human-required``) if
+            # it too exhausts.
+            human_visible = not self._config.diagnostic_exhausted_routes_autofix
             logger.info(
-                "Diagnostic: issue #%d exhausted %d attempt(s) — escalating to HITL",
+                "Diagnostic: issue #%d exhausted %d attempt(s) — routing to %s",
                 issue_number,
                 len(attempts),
+                "HITL (human-visible)" if human_visible else "Auto-Agent autofix",
             )
-            await self._escalate_to_hitl(issue_number, comment=diagnosis_comment)
+            await self._escalate_to_hitl(
+                issue_number,
+                comment=diagnosis_comment,
+                human_visible=human_visible,
+            )
             return "escalated"
 
         return None
@@ -457,15 +469,23 @@ class DiagnosticLoop(BaseBackgroundLoop):
             await self._publish_update(issue_number, "retry")
             return "retry"
 
-        # All attempts exhausted after this failure
+        # All attempts exhausted after this failure — same auto-resolvable
+        # "too-big / wrong-strategy" signal as the pre-fix gate (#10411/#10403):
+        # route to the Auto-Agent autofix stage, not the human-visible queue.
+        human_visible = not self._config.diagnostic_exhausted_routes_autofix
         logger.info(
-            "Diagnostic: fix failed and attempts exhausted for issue #%d — escalating to HITL",
+            "Diagnostic: fix failed and attempts exhausted for issue #%d — routing to %s",
             issue_number,
+            "HITL (human-visible)" if human_visible else "Auto-Agent autofix",
         )
-        await self._escalate_to_hitl(issue_number, comment=diagnosis_comment)
+        await self._escalate_to_hitl(
+            issue_number, comment=diagnosis_comment, human_visible=human_visible
+        )
         return "escalated"
 
-    async def _escalate_to_hitl(self, issue_number: int, *, comment: str) -> None:
+    async def _escalate_to_hitl(
+        self, issue_number: int, *, comment: str, human_visible: bool = True
+    ) -> None:
         """Post the diagnosis comment and route to HITL via the Auto-Agent.
 
         The diagnose phase couldn't resolve this, but rather than dead-end at a
@@ -476,6 +496,17 @@ class DiagnosticLoop(BaseBackgroundLoop):
         credit/session limit) or applying the diagnosis — before any human is
         involved. The Auto-Agent routes a *resolved* diagnose-failed issue back
         to review.
+
+        *human_visible* (#10411/#10403 HITL-transit fix): when ``False`` (the
+        attempts-exhausted gate — an auto-resolvable "too-big scope" signal, NOT
+        a human-judgment need), swap straight to the ``hydraflow-hitl-autofix``
+        claim stage instead of ``hydraflow-hitl``. The Auto-Agent poll covers
+        BOTH stages, so it still discovers + decomposes the issue, but it is
+        excluded from the human queue (built from ``hitl``/``hitl-active`` only)
+        from the start rather than transiting it for a poll cycle. If the
+        Auto-Agent ALSO exhausts, it applies ``human-required`` — so the human
+        fallback is preserved. ``True`` (not-fixable / missing-context — genuine
+        judgment) keeps the issue human-visible as before.
         """
         digest = hashlib.sha256(comment.encode("utf-8")).hexdigest()[:16]
         dedup_key = f"{issue_number}:{digest}"
@@ -502,14 +533,18 @@ class DiagnosticLoop(BaseBackgroundLoop):
                 self._hitl_comment_dedup.set_all(
                     {k for k in seen if not k.startswith(prefix)} | {dedup_key}
                 )
+        stage_label = (
+            self._config.hitl_label[0]
+            if human_visible
+            else self._config.hitl_autofix_label[0]
+        )
         try:
-            await self._prs.swap_pipeline_labels(
-                issue_number, self._config.hitl_label[0]
-            )
+            await self._prs.swap_pipeline_labels(issue_number, stage_label)
         except Exception:
             logger.warning(
-                "Diagnostic: label swap to HITL failed for issue #%d "
+                "Diagnostic: label swap to %s failed for issue #%d "
                 "— issue may need manual label update",
+                stage_label,
                 issue_number,
                 exc_info=True,
             )

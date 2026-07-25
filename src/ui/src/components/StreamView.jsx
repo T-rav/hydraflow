@@ -4,6 +4,7 @@ import { useHydraFlow, workerKey } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
 import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
 import { splitPipelineTracks } from '../utils/pipelineTracks'
+import { countPipeline } from '../utils/pipelineCounts'
 import { TerminalFork } from './PipelineFork'
 import { STAGE_KEYS } from '../hooks/useTimeline'
 import {
@@ -47,13 +48,15 @@ function PendingIntentCard({ intent }) {
 }
 
 function PipelineFlow({ stageGroups, queueStrategy }) {
+  // Per-region and pipeline-wide issue/PR counts for the flow badges (#10488).
+  const counts = useMemo(() => countPipeline(stageGroups), [stageGroups])
+
   const { mergedCount, failedCount } = useMemo(() => {
-    const merged = stageGroups.find(g => g.stage.key === 'merged')?.issues.length || 0
     const failed = stageGroups.reduce(
       (sum, g) => sum + g.issues.filter(i => i.overallStatus === 'failed').length, 0
     )
-    return { mergedCount: merged, failedCount: failed }
-  }, [stageGroups])
+    return { mergedCount: counts.perStage.merged?.issues || 0, failedCount: failed }
+  }, [stageGroups, counts])
 
   // #9863: a big backlog (67 queued in PLAN) rendered 67 dots in one
   // non-wrapping row and blew out the strip. Cap the dots and show the
@@ -63,6 +66,13 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
   const renderFlowStage = (group) => (
     <div style={styles.flowStage} key={group.stage.key}>
       <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
+      <span
+        style={styles.flowCount}
+        data-testid={`flow-count-${group.stage.key}`}
+        title={`${counts.perStage[group.stage.key].issues} issue(s), ${counts.perStage[group.stage.key].prs} PR(s) in ${group.stage.label}`}
+      >
+        {counts.perStage[group.stage.key].issues} · {counts.perStage[group.stage.key].prs} PR
+      </span>
       {group.issues.length > 0 && (
         <div style={styles.flowDots}>
           {group.issues.slice(0, FLOW_DOT_CAP).map(issue => {
@@ -106,6 +116,13 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
   return (
     <div style={styles.flowContainer} data-testid="pipeline-flow">
       <span style={styles.flowTitle}>Pipeline Flow</span>
+      <span
+        style={styles.flowTotal}
+        data-testid="flow-total"
+        title={`${counts.total.issues} issue(s) and ${counts.total.prs} PR(s) across the whole pipeline`}
+      >
+        {counts.total.issues} issues · {counts.total.prs} PRs
+      </span>
       {queueStrategy && (
         <span
           style={styles.queueStrategyBadge}
@@ -137,24 +154,6 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
           {failedCount > 0 && <span style={flowSummaryFailedStyle}>{failedCount} failed</span>}
         </span>
       )}
-    </div>
-  )
-}
-
-function EpicContainer({ epicNumber, issues, children }) {
-  const activeCount = issues.filter(i => i.overallStatus === 'active').length
-  return (
-    <div style={epicContainerStyles.wrapper}>
-      <div style={epicContainerStyles.header}>
-        <span style={epicContainerStyles.badge}>Epic #{epicNumber}</span>
-        <span style={epicContainerStyles.progress}>
-          {activeCount} / {issues.length} active
-        </span>
-        {activeCount > 0 && <span style={epicContainerStyles.pulse} />}
-      </div>
-      <div style={epicContainerStyles.children}>
-        {children}
-      </div>
     </div>
   )
 }
@@ -212,47 +211,20 @@ function StageSection({ stage, issues, workerCount, workerCap, queuedCount, inte
           data-testid={`stage-dot-${stage.key}`}
         />
       </div>
-      {open && (() => {
-        // Group epic children by epicNumber, keep standalone separate
-        const epicGroups = {}
-        const standalone = []
-        for (const issue of safeIssues) {
-          if (issue.isEpicChild && issue.epicNumber > 0) {
-            if (!epicGroups[issue.epicNumber]) epicGroups[issue.epicNumber] = []
-            epicGroups[issue.epicNumber].push(issue)
-          } else {
-            standalone.push(issue)
-          }
-        }
-        return (
-          <>
-            {standalone.map(issue => (
-              <StreamCard
-                key={`${issue.repo}#${issue.issueNumber}`}
-                issue={issue}
-                intent={intentMap.get(issue.issueNumber)}
-                defaultExpanded={issue.overallStatus === 'active'}
-                onRequestChanges={onRequestChanges}
-                transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber, issue.repo)}
-              />
-            ))}
-            {Object.entries(epicGroups).map(([epicNum, epicIssues]) => (
-              <EpicContainer key={`epic-${epicNum}`} epicNumber={Number(epicNum)} issues={epicIssues}>
-                {epicIssues.map(issue => (
-                  <StreamCard
-                    key={`${issue.repo}#${issue.issueNumber}`}
-                    issue={issue}
-                    intent={intentMap.get(issue.issueNumber)}
-                    defaultExpanded={issue.overallStatus === 'active'}
-                    onRequestChanges={onRequestChanges}
-                    transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber, issue.repo)}
-                  />
-                ))}
-              </EpicContainer>
-            ))}
-          </>
-        )
-      })()}
+      {open && safeIssues.map(issue => (
+        // Epic children render as flat cards (no EpicContainer grouping) —
+        // the epic is shown inline on the card (the "Epic #N" chip), so the
+        // pipeline flow stays a flat per-stage list. Epic roll-ups live on the
+        // Outcomes screen.
+        <StreamCard
+          key={`${issue.repo}#${issue.issueNumber}`}
+          issue={issue}
+          intent={intentMap.get(issue.issueNumber)}
+          defaultExpanded={issue.overallStatus === 'active'}
+          onRequestChanges={onRequestChanges}
+          transcript={findWorkerTranscript(workers, prs, stage.key, issue.issueNumber, issue.repo)}
+        />
+      ))}
     </div>
   )
 }
@@ -581,6 +553,12 @@ const styles = {
     marginLeft: 2,
     whiteSpace: 'nowrap',
   },
+  flowCount: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.textMuted,
+    whiteSpace: 'nowrap',
+  },
   flowConnector: {
     width: 16,
     height: 1,
@@ -610,6 +588,13 @@ const styles = {
     color: theme.textMuted,
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+  },
+  flowTotal: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.textMuted,
     flexShrink: 0,
     whiteSpace: 'nowrap',
   },
@@ -698,42 +683,6 @@ const forkStyles = {
   fork: styles.flowFork,
   forkTop: styles.flowForkTop,
   forkArrow: styles.flowForkArrow,
-}
-
-const epicContainerStyles = {
-  wrapper: {
-    borderLeft: `3px solid ${theme.purple}`,
-    background: theme.surfaceInset,
-    borderRadius: 8,
-    marginBottom: 4,
-    overflow: 'hidden',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '4px 12px',
-    background: theme.purpleSubtle,
-  },
-  badge: {
-    fontSize: 10,
-    fontWeight: 700,
-    color: theme.purple,
-  },
-  progress: {
-    fontSize: 10,
-    color: theme.textMuted,
-  },
-  pulse: {
-    ...dotBase,
-    width: 6,
-    height: 6,
-    background: theme.purple,
-    animation: PULSE_ANIMATION,
-  },
-  children: {
-    padding: 4,
-  },
 }
 
 // Pre-computed section opacity variants (avoids object spread in StageSection render)

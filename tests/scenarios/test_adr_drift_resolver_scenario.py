@@ -158,3 +158,67 @@ class TestAdrDriftResolver:
         assert "Decision" in issue.body
         assert "made them async" in issue.body
         assert any("real_drift" in c.body for c in issue.comments)
+
+    async def test_fleet_batch_all_consistent_auto_closes(self, tmp_path) -> None:
+        """#10457 — a batched fleet rollup (previously one-shot/human-closed
+        only) auto-closes when every member ADR triages CONSISTENT, exactly
+        like the auditor would have filed it (adr_numbers persisted)."""
+        from adr_drift_triage import DriftClassification, TriageVerdict  # noqa: PLC0415
+        from adr_index import ADRIndex  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+
+        repo = tmp_path / "repo"
+        adr_dir = repo / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        _write_adr(adr_dir, number=59, title="gamma", related=["src/review_advisor.py"])
+        _write_adr(
+            adr_dir, number=94, title="delta", related=["src/review_phase/_phase.py"]
+        )
+        adr_index = ADRIndex(adr_dir)
+
+        issue_number = await world.github.create_issue(
+            "ADR drift: fleet PR #9603 drifted 2 ADRs (batched)",
+            "## ADR drift rollup — cross-cutting fleet PR (batched)\n\n"
+            "PR #9603 changed `src/review_advisor.py`, `src/review_phase/_phase.py`.\n",
+            labels=["hydraflow-find", "hydraflow-adr-drift"],
+        )
+        world.github.seed_pr_diff(
+            9603,
+            "diff --git a/src/review_advisor.py b/src/review_advisor.py\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-# old\n"
+            "+# refactor only\n",
+        )
+
+        state = MagicMock()
+        state.all_adr_rollups.return_value = {
+            "FLEET-9603": {
+                "issue_number": issue_number,
+                "pr_numbers": [9603],
+                "adr_numbers": [59, 94],
+            },
+        }
+
+        triage = MagicMock()
+        triage.classify = AsyncMock(
+            return_value=TriageVerdict(
+                classification=DriftClassification.CONSISTENT,
+                rationale="Implementation-only refactor; the Decision is untouched.",
+            )
+        )
+
+        _seed_ports(
+            world,
+            adr_drift_resolver_state=state,
+            adr_drift_resolver_index=adr_index,
+            adr_drift_resolver_triage=triage,
+        )
+
+        results = await world.run_with_loops(["adr_drift_resolver"], cycles=1)
+        assert results["adr_drift_resolver"]["fleet_closed"] == 1
+
+        issue = world.github.issue(issue_number)
+        assert issue.state == "closed"
+        assert "hydraflow-hitl-escalation" not in issue.labels
+        assert any("CONSISTENT for all batched ADRs" in c.body for c in issue.comments)
