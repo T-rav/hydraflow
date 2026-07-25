@@ -347,7 +347,7 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
     def _render_reports(self, repo_root: Path) -> None:
         """Rewrite escape-ledger.md + erosion-trends.md from the current data."""
         now = datetime.now(UTC)
-        records = EscapeLedger(self._ledger_path).read_all()
+        records = EscapeLedger(self._ledger_path).read_latest()
         merge_count = count_commits_since(repo_root, 30) or 0
         _write(
             repo_root / _ESCAPE_REPORT_REL,
@@ -362,7 +362,7 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
 
     async def _surface_findings(self) -> tuple[int, bool]:
         """File bounded HITL/find issues for low-confidence + aging-unencoded rows."""
-        records = EscapeLedger(self._ledger_path).read_all()
+        records = EscapeLedger(self._ledger_path).read_latest()
         now = datetime.now(UTC)
         threshold_hours = float(self._config.escape_ledger_encoding_age_days) * 24.0
         max_issues = int(self._config.escape_ledger_max_issues_per_tick)
@@ -441,7 +441,8 @@ def _render_finding(record: EscapeRecord) -> tuple[str, str]:
         f"| time_to_detection_hours | {record.time_to_detection_hours if record.time_to_detection_hours is not None else '—'} |\n"
         f"| attribution_method | {record.attribution_method} |\n"
         f"| attribution_confidence | {record.attribution_confidence} |\n"
-        f"| encoded_as | {record.encoded_as} |\n\n"
+        f"| encoded_as | {record.encoded_as} |\n"
+        f"| notes | {record.notes or '—'} |\n\n"
         "This is a falsification-instrument finding (escape ledger, #10367). "
         "It is bookkeeping ABOUT the gauntlet, not a gate: the escape already "
         "became work through normal triage. Filed for a human to either "

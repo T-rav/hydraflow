@@ -2536,6 +2536,10 @@ class PipelineIssue(BaseModel):
     is_epic_child: bool = False
     track: str = ""
     repo: str = ""
+    # Whether this issue ever escalated to HITL, even if it has since been
+    # resolved and moved on (e.g. merged). Distinct from status == HITL,
+    # which only reflects the *current* stage. See ADR touchpoint #10509.
+    hitl_visited: bool = False
 
 
 class PipelineSnapshot(BaseModel):
@@ -3231,6 +3235,8 @@ class PipelineSnapshotEntry(TypedDict):
     # dispatch order by sorting on ``dispatch_rank``.
     priority: NotRequired[str]
     dispatch_rank: NotRequired[int]
+    # Whether this issue ever escalated to HITL — see PipelineIssue.hitl_visited.
+    hitl_visited: NotRequired[bool]
 
 
 class PipelineSnapshotPayload(TypedDict):

@@ -290,9 +290,14 @@ describe('toStreamIssue status mapping', () => {
     expect(result.overallStatus).toBe('failed')
   })
 
-  it('maps done status to overallStatus done', () => {
-    const result = toStreamIssue({ ...basePipeIssue, status: 'done' }, 'merged', [])
+  it('maps merged status to overallStatus done', () => {
+    const result = toStreamIssue({ ...basePipeIssue, status: 'merged' }, 'merged', [])
     expect(result.overallStatus).toBe('done')
+  })
+
+  it('maps processing status to overallStatus active', () => {
+    const result = toStreamIssue({ ...basePipeIssue, status: 'processing' }, 'plan', [])
+    expect(result.overallStatus).toBe('active')
   })
 
   it('maps unknown status to overallStatus queued', () => {
@@ -307,13 +312,14 @@ describe('toStreamIssue status mapping', () => {
 })
 
 describe('toStreamIssue stage building', () => {
-  it('sets all stages to done for merged/done items', () => {
+  it('sets every non-conditional stage to done for a merged item', () => {
     const result = toStreamIssue(
-      { issue_number: 10, title: 'Test', status: 'done' },
+      { issue_number: 10, title: 'Test', status: 'merged' },
       'merged',
       []
     )
     for (const key of STAGE_KEYS) {
+      if (key === 'hitl') continue
       expect(result.stages[key].status).toBe('done')
     }
     expect(result.overallStatus).toBe('done')
@@ -379,6 +385,58 @@ describe('toStreamIssue stage building', () => {
     expect(result.stages.implement.status).toBe('pending')
     expect(result.stages.review.status).toBe('pending')
     expect(result.stages.merged.status).toBe('pending')
+  })
+})
+
+describe('toStreamIssue hitl conditional stage (#10509)', () => {
+  // hitl is a conditional escalation branch, not a linear stage every issue
+  // passes through — a merged issue that never escalated must render hitl
+  // hollow (pending), not blanket-stamped done just because it's behind the
+  // current index. Positive evidence (hitl_visited) is required for done.
+  it('renders hitl as pending for a merged issue that never visited hitl', () => {
+    const result = toStreamIssue(
+      { issue_number: 10, title: 'Test', status: 'merged', hitl_visited: false },
+      'merged',
+      []
+    )
+    expect(result.stages.hitl.status).toBe('pending')
+  })
+
+  it('renders hitl as pending when hitl_visited is absent (old payloads)', () => {
+    const result = toStreamIssue(
+      { issue_number: 10, title: 'Test', status: 'merged' },
+      'merged',
+      []
+    )
+    expect(result.stages.hitl.status).toBe('pending')
+  })
+
+  it('renders hitl as done for a merged issue that previously visited hitl', () => {
+    const result = toStreamIssue(
+      { issue_number: 10, title: 'Test', status: 'merged', hitl_visited: true },
+      'merged',
+      []
+    )
+    expect(result.stages.hitl.status).toBe('done')
+  })
+
+  it('renders merged as done for a merged issue', () => {
+    const result = toStreamIssue(
+      { issue_number: 10, title: 'Test', status: 'merged' },
+      'merged',
+      []
+    )
+    expect(result.stages.merged.status).toBe('done')
+  })
+
+  it('still renders hitl as the current-stage red hitl status for an issue genuinely sitting in hitl', () => {
+    const result = toStreamIssue(
+      { issue_number: 10, title: 'Test', status: 'hitl' },
+      'hitl',
+      []
+    )
+    expect(result.stages.hitl.status).toBe('hitl')
+    expect(result.overallStatus).toBe('hitl')
   })
 })
 
