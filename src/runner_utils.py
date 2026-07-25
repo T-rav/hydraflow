@@ -96,6 +96,14 @@ class StreamConfig:
     # prose routinely; scanning it raised a false global CreditExhaustedError
     # on essentially every diagnostic run (mirrors the _is_auth_failure rule).
     credit_prose_scan: bool = True
+    # Per-spawn env overrides that point the Claude CLI at a harness backend
+    # (from resolve_harness_env). Empty for the native Anthropic endpoint — the
+    # main workers get a pristine env. Merged AFTER make_clean_env so the
+    # ANTHROPIC_* keys survive the strip.
+    harness_env: dict[str, str] = field(default_factory=dict)
+    # The resolved billing provider for this spawn ("anthropic"/"zai") so a
+    # credit-out is scoped to the right backend rather than a global kill switch.
+    provider: str = "claude"
 
 
 def _route_prompt_to_cmd(cmd: list[str], prompt: str) -> tuple[list[str], int]:
@@ -187,7 +195,13 @@ def _post_stream_result(
 
     if not early_killed and is_credit_exhaustion(combined):
         resume_at = parse_credit_resume_time(combined)
-        raise CreditExhaustedError("API credit limit reached", resume_at=resume_at)
+        # Tag the resolved backend so the pause is scoped to loops on it — a GLM
+        # cap on a zai-routed agentic spawn must not halt Claude work (#9807).
+        raise CreditExhaustedError(
+            "API credit limit reached",
+            resume_at=resume_at,
+            provider=normalize_provider(config.provider),
+        )
 
     if config.usage_stats is not None:
         config.usage_stats.update(parser.usage_snapshot)
@@ -326,6 +340,9 @@ async def stream_claude_process(
         result_text → accumulated_text → raw_lines.
     """
     env = make_clean_env(config.gh_token)
+    # Per-spawn harness override (e.g. z.ai's /api/anthropic endpoint). Merged
+    # after the clean-env strip; empty for native Anthropic (main workers).
+    env.update(config.harness_env)
     runner = config.runner or get_default_runner()
     cmd_to_run, stdin_mode = _route_prompt_to_cmd(cmd, prompt)
 
@@ -462,19 +479,28 @@ def _as_opt_int(value: object) -> int | None:
     return None
 
 
-def raise_if_credit_exhausted(stdout: str, stderr: str, tool: str) -> None:
+def raise_if_credit_exhausted(
+    stdout: str, stderr: str, tool: str, *, provider: str = "claude"
+) -> None:
     """Raise :class:`CreditExhaustedError` if lightweight CLI output signals credit-out.
 
     ``run_simple`` returns a ``SimpleResult`` and never raises on credit
     exhaustion (it surfaces as ``rc != 0`` text), so the lightweight path must
     inspect the output. Mirrors the streaming path's credit check in
     :func:`_post_stream_result`.
+
+    *provider* is the role's resolved backend dial. It is normalized to the
+    billing identity and tagged on the error so the orchestrator scopes the
+    pause to loops on that backend — a z.ai cap must not halt Claude work, and
+    vice-versa (#9807). Defaults to ``"claude"`` (→ ``"anthropic"``) so every
+    existing CLI call site stays Anthropic-scoped without change.
     """
     for blob in (stdout, stderr):
         if blob and is_credit_exhaustion(blob):
             raise CreditExhaustedError(
                 f"{tool} CLI signaled credit exhaustion",
                 resume_at=parse_credit_resume_time(blob),
+                provider=normalize_provider(provider),
             )
 
 
@@ -534,6 +560,7 @@ async def stream_claude_with_telemetry(
     issue_number: int | None = None,
     pr_number: int | None = None,
     issue_labels: Sequence[str] = (),
+    provider: str = "claude",
 ) -> str:
     """Stream an agent subprocess AND record prompt/inference telemetry.
 
@@ -577,6 +604,15 @@ async def stream_claude_with_telemetry(
     if stats is None:
         stats = {}
         stream_config = replace(stream_config, usage_stats=stats)
+
+    # Point the CLI at the role's harness backend for this spawn only (empty for
+    # native Anthropic — the main workers stay pristine), and carry the resolved
+    # provider so a credit-out is scoped to the right backend.
+    stream_config = replace(
+        stream_config,
+        harness_env=resolve_harness_env(provider, config),
+        provider=provider,
+    )
 
     start = time.monotonic()
     transcript = ""
@@ -797,9 +833,17 @@ async def _claude_cli_complete(
     timeout: float,
     gh_token: str,
     isolate_user_settings: bool,
+    provider: str = "claude",
+    config: HydraFlowConfig | None = None,
 ) -> SimpleResult:
     """The Claude CLI backend (today's behaviour). Credit-out surfaces as
-    ``rc != 0`` output text, so it is detected and raised here."""
+    ``rc != 0`` output text, so it is detected and raised here.
+
+    *provider* selects the harness backend: ``"claude"`` runs the native
+    Anthropic endpoint; ``"zai"`` points the CLI at GLM's Anthropic-compatible
+    endpoint via a per-spawn env override (needs *config* for the URL). The
+    credit-out is tagged with the resolved provider so a backend cap is scoped
+    to loops on that backend."""
 
     from agent_cli import AgentTool, build_lightweight_command  # noqa: PLC0415
 
@@ -810,8 +854,10 @@ async def _claude_cli_complete(
         isolate_user_settings=isolate_user_settings,
     )
     env = make_clean_env(gh_token)
+    if config is not None:
+        env.update(resolve_harness_env(provider, config))
     result = await runner.run_simple(cmd, env=env, input=cmd_input, timeout=timeout)
-    raise_if_credit_exhausted(result.stdout, result.stderr, tool)
+    raise_if_credit_exhausted(result.stdout, result.stderr, tool, provider=provider)
     return result
 
 
@@ -1024,6 +1070,8 @@ async def run_lightweight_agent(
                     timeout=timeout,
                     gh_token=gh_token,
                     isolate_user_settings=isolate_user_settings,
+                    provider=provider,
+                    config=config,
                 )
         except TimeoutError:
             # ``asyncio.wait_for`` raises a *bare* TimeoutError whose ``str()``
