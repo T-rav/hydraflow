@@ -533,9 +533,13 @@ describe('SystemPanel', () => {
         render(<SystemPanel backgroundWorkers={[]} />)
         fireEvent.click(screen.getByText('Diagnostics'))
         // Lazy-loaded; wait for the dynamic import to resolve and tab to mount.
+        // The default 1000ms waitFor budget is tight for a dynamic import plus
+        // a chained 7-endpoint fetch mock under `make quality`'s parallel CPU
+        // contention (pytest + vitest running concurrently) — widen it rather
+        // than let this flake under load.
         await waitFor(() => {
           expect(screen.getByText('Factory Diagnostics')).toBeInTheDocument()
-        })
+        }, { timeout: 5000 })
         expect(screen.queryByText('Repo Health')).not.toBeInTheDocument()
       } finally {
         global.fetch = originalFetch
