@@ -170,6 +170,43 @@ describe('deriveIssueTimelines', () => {
     expect(result[0].overallStatus).toBe('hitl')
   })
 
+  it('marks the hitl stage from a hitl_escalation event', () => {
+    const events = [
+      { type: 'hitl_escalation', timestamp: '2026-01-15T10:00:00Z', data: { issue: 99, pr: 80, status: 'escalated' } },
+    ]
+    const result = deriveIssueTimelines(events, {}, [])
+
+    expect(result).toHaveLength(1)
+    expect(result[0].issueNumber).toBe(99)
+    // The "Needs Human" (hitl) stage must transition out of its default state.
+    expect(result[0].stages.hitl.status).toBe('hitl')
+    expect(result[0].stages.hitl.startTime).toBe('2026-01-15T10:00:00Z')
+    expect(result[0].overallStatus).toBe('hitl')
+  })
+
+  it('marks the hitl stage active from a hitl_update running event', () => {
+    const events = [
+      { type: 'hitl_update', timestamp: '2026-01-15T10:00:00Z', data: { issue: 77, status: 'running', action: 'hitl_run' } },
+    ]
+    const result = deriveIssueTimelines(events, {}, [])
+
+    expect(result).toHaveLength(1)
+    expect(result[0].issueNumber).toBe(77)
+    expect(result[0].stages.hitl.status).toBe('active')
+    expect(result[0].stages.hitl.startTime).toBe('2026-01-15T10:00:00Z')
+  })
+
+  it('resolves the hitl stage from a hitl_update done event', () => {
+    const events = [
+      { type: 'hitl_update', timestamp: '2026-01-15T10:05:00Z', data: { issue: 77, status: 'done', action: 'hitl_run' } },
+      { type: 'hitl_update', timestamp: '2026-01-15T10:00:00Z', data: { issue: 77, status: 'running', action: 'hitl_run' } },
+    ]
+    const result = deriveIssueTimelines(events, {}, [])
+
+    expect(result[0].stages.hitl.status).toBe('done')
+    expect(result[0].stages.hitl.endTime).toBe('2026-01-15T10:05:00Z')
+  })
+
   it('attaches PR info from pr_created event', () => {
     const events = [
       { type: 'pr_created', timestamp: '2026-01-15T10:00:00Z', data: { issue: 5, pr: 25, url: 'https://github.com/pr/25' } },

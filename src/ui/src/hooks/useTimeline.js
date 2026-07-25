@@ -19,6 +19,11 @@ const EVENT_TO_STAGE = {
   worker_update: 'implement',
   review_update: 'review',
   merge_update: 'merged',
+  // HITL bus traffic drives the "Needs Human" stage. Stage status is derived
+  // from event.data.status by the shared logic below (escalated → 'hitl',
+  // running → 'active', done/failed → resolved), matching the other stages.
+  hitl_escalation: 'hitl',
+  hitl_update: 'hitl',
 }
 
 /** Map worker `source` field (from transcript_line) to stage key. */
