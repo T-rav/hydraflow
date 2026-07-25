@@ -5776,11 +5776,16 @@ _MODEL_PROVIDER_REQUIRED: list[tuple[str, str]] = [
 ]
 
 # Sub-spawn stages have no *_provider dial of their own — they run on the harness
-# of the outer runner that spawns them. Map each to the config field holding that
-# runner's provider so model validation is checked against the backend the spawn
-# actually uses (see _harmonize_tool_model_defaults).
-_SUBSPAWN_PROVIDER_SOURCE: dict[str, str] = {
-    "test_adequacy_verifier": "implementation_provider",
+# of the outer runner(s) that spawn them. Map each to the config field(s) holding
+# those runners' providers so its model is validated against EVERY backend it can
+# actually run on (see _harmonize_tool_model_defaults). subskill/debug are
+# multi-caller: the AC precheck closures run them on ac_provider, while the
+# reviewer + verification-judge prechecks run them on review_provider — so their
+# model must be coherent with BOTH.
+_SUBSPAWN_PROVIDER_SOURCE: dict[str, tuple[str, ...]] = {
+    "test_adequacy_verifier": ("implementation_provider",),
+    "subskill": ("ac_provider", "review_provider"),
+    "debug": ("ac_provider", "review_provider"),
 }
 
 
@@ -5884,25 +5889,28 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
         # stranding a GLM model on a claude-provider (Anthropic) spawn.
         #
         # Sub-spawn stages have no dial of their own — they run on the harness of
-        # the outer runner that spawns them, so validate their model against that
-        # runner's provider (the test-adequacy verifier runs via the
-        # implementation spawn). This makes config-load reject e.g. an opus
-        # verifier model while implementation is routed to the GLM harness.
-        provider_field = _SUBSPAWN_PROVIDER_SOURCE.get(stage, f"{stage}_provider")
-        provider = getattr(config, provider_field, "claude")
+        # the outer runner(s) that spawn them, so validate their model against
+        # EVERY provider it can run on (the verifier runs via the implementation
+        # spawn; subskill/debug run via ac_provider AND review_provider). This
+        # rejects e.g. an opus sub-spawn model while a routing runner is on GLM,
+        # and a glm sub-spawn model unless every routing runner is on GLM.
+        provider_fields = _SUBSPAWN_PROVIDER_SOURCE.get(stage, (f"{stage}_provider",))
+        providers = {getattr(config, f, "claude") for f in provider_fields}
         required_provider = _required_provider_for_model(model)
-        if required_provider is not None and provider != required_provider:
-            msg = (
-                f"{stage}: model {model!r} requires provider "
-                f"{required_provider!r} but the role is on provider {provider!r}"
-            )
-            raise ValueError(msg)
-        if provider == "zai" and required_provider != "zai":
-            msg = (
-                f"{stage}: provider 'zai' (the GLM harness) requires a glm-* "
-                f"model, got {model!r}"
-            )
-            raise ValueError(msg)
+        for provider in providers:
+            if required_provider is not None and provider != required_provider:
+                msg = (
+                    f"{stage}: model {model!r} requires provider "
+                    f"{required_provider!r} but a routing runner is on provider "
+                    f"{provider!r}"
+                )
+                raise ValueError(msg)
+            if provider == "zai" and required_provider != "zai":
+                msg = (
+                    f"{stage}: provider 'zai' (the GLM harness) requires a glm-* "
+                    f"model, got {model!r}"
+                )
+                raise ValueError(msg)
 
 
 def _resolve_base_paths(config: HydraFlowConfig) -> None:

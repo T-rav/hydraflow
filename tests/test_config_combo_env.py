@@ -92,6 +92,27 @@ def test_verifier_model_validated_against_implementation_provider() -> None:
     assert cfg.test_adequacy_verifier_model == "glm-5.2"
 
 
+def test_subskill_debug_models_validated_against_all_routing_providers() -> None:
+    """subskill/debug run on BOTH ac_provider and review_provider, so their
+    (default, claude) models must be rejected the moment either routes to GLM."""
+    # ac routed to GLM but subskill/debug keep their default claude models →
+    # incoherent (they'd run a claude model on the GLM harness) → rejected.
+    with pytest.raises((ValueError, ValidationError)):
+        HydraFlowConfig(ac_provider="zai", ac_model="glm-5.2")
+    # Coherent only when EVERY routing runner is on GLM and the sub-spawn models
+    # are glm too.
+    cfg = HydraFlowConfig(
+        ac_provider="zai",
+        ac_model="glm-5.2",
+        review_provider="zai",
+        review_model="glm-5.2",
+        subskill_model="glm-5.2",
+        debug_model="glm-5.2",
+    )
+    assert cfg.subskill_model == "glm-5.2"
+    assert cfg.debug_model == "glm-5.2"
+
+
 def test_valid_background_model_does_not_leak_into_work_roles() -> None:
     """A valid (same-provider) background_model never reaches implement/review."""
     cfg = HydraFlowConfig(background_model="sonnet")
