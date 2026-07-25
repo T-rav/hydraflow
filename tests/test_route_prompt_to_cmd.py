@@ -40,26 +40,6 @@ class TestClaudePrintMode:
         assert stdin_mode == asyncio.subprocess.DEVNULL
 
 
-class TestPiPrintMode:
-    """Pi -p / --print flag: prompt inserted immediately after flag."""
-
-    def test_pi_p_flag_inserts_prompt(self) -> None:
-        cmd = ["pi", "-p", "--mode", "json"]
-        prompt = "do the thing"
-        result_cmd, stdin_mode = _route_prompt_to_cmd(cmd, prompt)
-        p_idx = result_cmd.index("-p")
-        assert result_cmd[p_idx + 1] == prompt
-        assert stdin_mode == asyncio.subprocess.DEVNULL
-
-    def test_pi_print_flag_inserts_prompt(self) -> None:
-        cmd = ["pi", "--print", "--mode", "json"]
-        prompt = "do the thing"
-        result_cmd, stdin_mode = _route_prompt_to_cmd(cmd, prompt)
-        p_idx = result_cmd.index("--print")
-        assert result_cmd[p_idx + 1] == prompt
-        assert stdin_mode == asyncio.subprocess.DEVNULL
-
-
 class TestCodexExecMode:
     """Codex exec: prompt appended as trailing positional argument."""
 

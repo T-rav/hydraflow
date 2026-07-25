@@ -3,8 +3,8 @@
 **Status:** Accepted
 **Accepted on:** 2026-07-25 — operator-approved (route agentic maintenance loops to GLM while work stays on Claude).
 **Date:** 2026-07-25
-**Enforcement:** decision-of-record + config validation
-**Enforced by:** `src/config.py:_harmonize_tool_model_defaults` (provider-scoped model validation); `src/runner_utils.py:resolve_harness_env` (per-spawn isolation); `tests/test_config_combo_env.py:test_reject_glm_model_on_claude_provider`; `tests/test_llm_provider.py:TestHarnessBackend`
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider
 **Amends:** ADR-0001 (Five Concurrent Async Loops — background workers gain a per-role harness backend dial)
 
 ## Context

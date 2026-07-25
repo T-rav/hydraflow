@@ -316,11 +316,12 @@ async def test_build_prompt_truncates_long_body(config, event_bus):
 
     assert "…(truncated)" in prompt
     # Well under original 20k body. Upper bound accommodates the ADR titles
-    # index (now ~64 ADRs, up from ~50, since the adr_index parser fix makes
-    # every ADR title/status format visible instead of silently dropping
-    # em-dash-titled or H2-status ADRs) and the ADR-0044 principles checklist
-    # (~900 chars) that the plan prompt now injects.
-    assert len(prompt) < 20_000
+    # index (now ~65 ADRs and growing — ADR-0109 tipped it past the old 20_000
+    # ceiling, since the adr_index parser fix makes every ADR title/status
+    # format visible instead of silently dropping em-dash-titled or H2-status
+    # ADRs) and the ADR-0044 principles checklist (~900 chars) that the plan
+    # prompt now injects. Bump this ceiling as the ADR corpus grows.
+    assert len(prompt) < 21_000
 
 
 @pytest.mark.asyncio

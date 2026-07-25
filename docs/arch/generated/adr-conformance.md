@@ -79,13 +79,12 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0104 | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py` |
 | ADR-0107 | decision-of-record | — |
-| ADR-0109 | unknown | `'src/config.py:_harmonize_tool_model_defaults' (provider-scoped model validation); 'src/runner_utils.py:resolve_harness_env' (per-spawn isolation); 'tests/test_config_combo_env.py:test_reject_glm_model_on_claude_provider'; 'tests/test_llm_provider.py:TestHarnessBackend'` |
+| ADR-0109 | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 
 ## Check → ADRs it protects
 
 | Check | Protects |
 |---|---|
-| `'src/config.py:_harmonize_tool_model_defaults' (provider-scoped model validation); 'src/runner_utils.py:resolve_harness_env' (per-spawn isolation); 'tests/test_config_combo_env.py:test_reject_glm_model_on_claude_provider'; 'tests/test_llm_provider.py:TestHarnessBackend'` | ADR-0109 |
 | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` | ADR-0051 |
 | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` | ADR-0023 |
 | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` | ADR-0035 |
@@ -125,6 +124,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_auto_tighten_invariant.py` | ADR-0104 |
 | `pytest:tests/test_base_runner.py` | ADR-0004 |
 | `pytest:tests/test_caretaker_loop_wiring.py` | ADR-0029 |
+| `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` | ADR-0109 |
 | `pytest:tests/test_config_env.py` | ADR-0103 |
 | `pytest:tests/test_convergence_gate.py` | ADR-0094 |
 | `pytest:tests/test_convergence_ledger.py` | ADR-0094 |
