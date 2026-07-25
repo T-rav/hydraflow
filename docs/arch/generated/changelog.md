@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `731eda5` — chore(arch): regenerate artifacts after staging merge *(2026-07-25)*
 - `f50db86` — Merge remote-tracking branch 'origin/staging' into feat/provider-split-zai-harness *(2026-07-25)*
 - `92d4244` — fix(quality): resolve gemini/pi-gut fallout in the full suite *(2026-07-25)*
 - `ed09a33` — docs(adr): ADR-0109 provider/harness backend split (supersedes agentic=Claude-only) *(2026-07-25)*

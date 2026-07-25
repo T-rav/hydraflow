@@ -68,10 +68,11 @@ with the resolved provider, so a GLM cap pauses only z.ai-routed loops and an
 Anthropic cap only Anthropic-routed loops. The z.ai/GLM billing phrasings are
 added to `src/subprocess_util.py:_CREDIT_PATTERNS` for the harness (stderr) path.
 
-**6. Runner activation.** `src/base_runner.py:_resolve_provider` reads an
-overridable `PROVIDER_FIELD`; the four core streaming runners
-(implementation/planner/review/triage) set their dial. Default `claude` is a
-no-op, so behavior is unchanged until an operator flips a dial.
+**6. Runner activation.** `src/base_runner.py:BaseRunner` resolves each runner's
+provider via an overridable `_resolve_provider()` / `PROVIDER_FIELD` hook; the
+four core streaming runners (implementation/planner/review/triage) set their
+dial. Default `claude` is a no-op, so behavior is unchanged until an operator
+flips a dial.
 
 ## Consequences
 
