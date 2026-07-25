@@ -37,3 +37,21 @@ def all_registered() -> dict[str, CheckFn]:
 def _clear_for_tests() -> None:
     """Only for unit tests — never call in production code."""
     _REGISTRY.clear()
+
+
+def _snapshot_for_tests() -> dict[str, CheckFn]:
+    """Only for unit tests — capture the registry so it can be restored later.
+
+    `@register(...)` decorators only fire once, at first import of a check
+    module — the process-global ``_REGISTRY`` is never repopulated after
+    that. A test that clears the registry (e.g. to isolate itself) must
+    restore this snapshot in teardown, or every real check registered
+    before that test ran is gone for the rest of the process/worker.
+    """
+    return dict(_REGISTRY)
+
+
+def _restore_for_tests(snapshot: dict[str, CheckFn]) -> None:
+    """Only for unit tests — pair with `_snapshot_for_tests`."""
+    _REGISTRY.clear()
+    _REGISTRY.update(snapshot)

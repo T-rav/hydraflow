@@ -40,7 +40,15 @@ _FIELD_SEP = "\x1f"
 _LOG_FORMAT = f"%H{_FIELD_SEP}%cI{_FIELD_SEP}%s{_FIELD_SEP}%b"
 
 # Marker line prefix for the added-paths pass (distinct from any real path).
-_SHA_MARKER = "\x1eESCSHA\x1e"
+# Built from `\x01` (SOH), NOT a Unicode line-boundary character -- unlike
+# `\x1e` (Record Separator), which `str.splitlines()` treats as its own line
+# break and would shred the marker into pieces before any line could match
+# it whole (#10499). `_added_paths_for_range` below also avoids
+# `str.splitlines()` entirely for the same reason: `git log` output uses
+# bare `\n` line endings, so an explicit `str.split("\n")` is both correct
+# and immune to any future marker/path colliding with `splitlines()`'s wider
+# line-boundary set (\v, \f, \x1c, \x1d, \x1e, \x85, U+2028, U+2029).
+_SHA_MARKER = "\x01ESCSHA\x01"
 
 
 def _fix_subject(subject: str) -> bool:
@@ -191,6 +199,12 @@ def _added_paths_for_range(repo_root: Path, commit_range: str) -> dict[str, list
     out = _run_git(
         repo_root,
         [
+            # core.quotepath defaults to true, which octal-escapes non-ASCII
+            # path bytes (e.g. `"tests/regressions/test_\303\251.py"`) and
+            # would defeat `adds_regression_pin`'s startswith() check below;
+            # disable it so name-only output round-trips real UTF-8 paths.
+            "-c",
+            "core.quotepath=false",
             "log",
             commit_range,
             "--reverse",
@@ -203,7 +217,10 @@ def _added_paths_for_range(repo_root: Path, commit_range: str) -> dict[str, list
     if not out:
         return added
     current: str | None = None
-    for line in out.splitlines():
+    # `git log` output uses bare `\n` line endings; split explicitly rather
+    # than `str.splitlines()`, whose wider line-boundary set (see
+    # `_SHA_MARKER` above) can shred a marker or path apart mid-line (#10499).
+    for line in out.split("\n"):
         if line.startswith(_SHA_MARKER):
             current = line[len(_SHA_MARKER) :].strip()
             added.setdefault(current, [])
