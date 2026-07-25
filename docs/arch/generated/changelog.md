@@ -6,11 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `bbd3332` — Merge remote-tracking branch 'origin/staging' into agent/issue-10515 *(2026-07-25)*
-- `204d2e1` — feat(ul): term-proposer batch — 1 drafts (#10514) (#10514) *(2026-07-25)*
-- `39bd616` — Fixes #10515: FakeIssueStore stamps HITL/merged snapshot entries with the real vocabulary *(2026-07-25)*
-- `92b2bc7` — Merge remote-tracking branch 'origin/staging' into agent/issue-10509 *(2026-07-25)*
-- `6c6ad21` — Fixes #10509: Work Stream stage timeline: merged issues show HITL filled and Merged hollow *(2026-07-25)*
+- `306cc57` — Fixes #10515: FakeIssueStore stamps HITL and merged snapshot entrie... (#10528) (#10528) *(2026-07-25)*
+- `585f69e` — Fixes #10509: Work Stream stage timeline: merged issues show HITL f... (#10529) (#10529) *(2026-07-25)*
 - `204d2e1` — feat(ul): term-proposer batch — 1 drafts (#10514) (#10514) *(2026-07-25)*
 - `b9f7109` — chore: remove dead crate subsystem (#10520) (#10520) *(2026-07-25)*
 - `d6bad2e` — feat(signal-control): pure control-theory substrate (Stage 1) (#10502) (#10502) *(2026-07-24)*
@@ -590,10 +587,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `3f349d8` — feat(runners): BaseSubprocessRunner + AutoAgentRunner migration + Port↔Fake signature conformance (#8446) (#8446) *(2026-04-26)*
 - `3af8d25` — feat(infra): dark-factory infrastructure hardening — spec + plan + PR1 (ADR-0051 + pre-commit arch-check) (#8445) (#8445) *(2026-04-26)*
 - `6cd7920` — docs(wiki): dark-factory engineering — distill lessons from auto-agent journey (#8443) (#8443) *(2026-04-26)*
-- `717e68f` — feat(auto-agent): wire real Claude Code subprocess (closes ADR-0050 partial landing) (#8439) (#8439) *(2026-04-26)*
-- `204084a` — feat(loop): wire DiagramLoop (L24) into runtime — five-checkpoint pattern (#8440) (#8440) *(2026-04-26)*
-- `5837a29` — feat(arch): trust fleet topology page (curated) (#8438) (#8438) *(2026-04-26)*
-- `64e9f31` — fix(arch): lift modules.md drift exemption (root cause: stale baseline) (#8437) (#8437) *(2026-04-26)*
 
 
 <!-- arch:generated -->

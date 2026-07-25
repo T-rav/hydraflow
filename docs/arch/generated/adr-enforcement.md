@@ -6,11 +6,11 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 71
-- **REAL** (real asserting enforcement): 59 (83.1%)
-- **WEAK** (prose-only or tautological): 7
+- **Accepted ADRs:** 72
+- **REAL** (real asserting enforcement): 59 (81.9%)
+- **WEAK** (prose-only or tautological): 8
 - **MISSING** (no `**Enforced by:**`): 5
-- **Unenforced-decision debt** (WEAK + MISSING): **12 / 71 = 16.9%**
+- **Unenforced-decision debt** (WEAK + MISSING): **13 / 72 = 18.1%**
 
 By declared `**Enforcement:**` kind: `enforced` 59 · `manual` 7 · `decision-of-record` 5.
 
@@ -89,6 +89,7 @@ By declared `**Enforcement:**` kind: `enforced` 59 · `manual` 7 · `decision-of
 | ADR-0104 | REAL | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0106 | REAL | enforced | `pytest:tests/regressions/test_issue_9552.py` |
 | ADR-0107 | MISSING | decision-of-record | — |
+| ADR-0109 | WEAK | unknown | `'src/config.py:_harmonize_tool_model_defaults' (provider-scoped model validation); 'src/runner_utils.py:resolve_harness_env' (per-spawn isolation); 'tests/test_config_combo_env.py:test_reject_glm_model_on_claude_provider'; 'tests/test_llm_provider.py:TestHarnessBackend'` |
 
 ## Unenforced-decision debt
 
@@ -106,6 +107,7 @@ By declared `**Enforcement:**` kind: `enforced` 59 · `manual` 7 · `decision-of
 | ADR-0065 | WEAK | manual | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
 | ADR-0091 | MISSING | decision-of-record | — |
 | ADR-0107 | MISSING | decision-of-record | — |
+| ADR-0109 | WEAK | unknown | `'src/config.py:_harmonize_tool_model_defaults' (provider-scoped model validation); 'src/runner_utils.py:resolve_harness_env' (per-spawn isolation); 'tests/test_config_combo_env.py:test_reject_glm_model_on_claude_provider'; 'tests/test_llm_provider.py:TestHarnessBackend'` |
 
 ## Weak / tautological enforcements
 
