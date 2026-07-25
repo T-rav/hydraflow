@@ -107,9 +107,9 @@ Adopt **forward-progression-only** as the canonical semantics for all
 - Implementation: PR #1689, issue #1542
 - `src/models.py:SessionCounters` — counter model definition
 - `src/state/_session.py:SessionStateMixin.increment_session_counter` — increment logic
-- `src/triage_phase.py:_triage_single` — triaged counter (forward-progression)
-- `src/plan_phase.py:_handle_already_satisfied`, `src/plan_phase.py:_handle_plan_success` — planned counter (forward-progression)
-- `src/implement_phase.py:_handle_implementation_result` — implemented counter (forward-progression)
-- `src/review_phase/_phase.py:_record_review_outcome` — reviewed counter (guarded on APPROVE)
-- `src/post_merge_handler.py:handle_approved` — merged counter (forward-progression)
-- `src/orchestrator.py:build_pipeline_stats` — session_counter_map (stage-to-field mapping)
+- `src/triage_phase.py:TriagePhase._triage_single` — triaged counter (forward-progression)
+- `src/plan_phase.py:PlanPhase._handle_already_satisfied`, `src/plan_phase.py:PlanPhase._handle_plan_success` — planned counter (forward-progression)
+- `src/implement_phase.py:ImplementPhase._handle_implementation_result` — implemented counter (forward-progression)
+- `src/review_phase/_phase.py:ReviewPhase._record_review_outcome` — reviewed counter (guarded on APPROVE)
+- `src/post_merge_handler.py:PostMergeHandler.handle_approved` — merged counter (forward-progression)
+- `src/orchestrator.py:HydraFlowOrchestrator.build_pipeline_stats` — session_counter_map (stage-to-field mapping)

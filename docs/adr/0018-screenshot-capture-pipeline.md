@@ -145,4 +145,4 @@ inadvertently contains sensitive information.
 - `src/report_issue_loop.py:ReportIssueLoop._do_work` — report-issue intake/orchestration
 - `src/screenshot_scanner.py:scan_base64_for_secrets` — backend secret scan (defense layer 3)
 - `src/pr_manager.py:PRManager.upload_screenshot_gist` — gist visibility control (defense layer 4)
-- `src/config.py:screenshot_redaction_enabled`, `src/config.py:screenshot_gist_public` — redaction + gist-visibility flags
+- `src/config.py:HydraFlowConfig.screenshot_redaction_enabled`, `src/config.py:HydraFlowConfig.screenshot_gist_public` — redaction + gist-visibility flags

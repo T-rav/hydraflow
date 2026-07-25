@@ -48,14 +48,20 @@ def _write_adr(adr_dir: Path, *, number: int, title: str, related: str) -> None:
     (adr_dir / f"{number:04d}-{title}.md").write_text(body)
 
 
-def _make_loop(tmp_path: Path) -> tuple[AdrDriftResolverLoop, StateTracker, DedupStore, AsyncMock, AsyncMock]:
+def _make_loop(
+    tmp_path: Path,
+) -> tuple[AdrDriftResolverLoop, StateTracker, DedupStore, AsyncMock, AsyncMock]:
     adr_dir = tmp_path / "docs" / "adr"
     adr_dir.mkdir(parents=True, exist_ok=True)
     _write_adr(adr_dir, number=24, title="alpha", related="src/agent.py")
     _write_adr(adr_dir, number=27, title="beta", related="src/runner.py")
 
     cfg = HydraFlowConfig(
-        data_root=tmp_path, repo="hydra/hydraflow", repo_root=tmp_path
+        data_root=tmp_path,
+        repo="hydra/hydraflow",
+        repo_root=tmp_path,
+        # Loop now defaults OFF (#10540); force ON for this regression pin.
+        adr_drift_resolver_loop_enabled=True,
     )
     state = StateTracker(tmp_path / "state.json")
     dedup = DedupStore("adr_drift_resolver", tmp_path / "dedup.json")

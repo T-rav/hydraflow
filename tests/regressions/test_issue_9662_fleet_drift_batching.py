@@ -84,7 +84,11 @@ async def test_loop_files_one_batched_issue_for_fleet_pr(tmp_path: Path) -> None
     exactly ONE issue, tracked under the FLEET-<pr> namespace."""
     index, files = _fleet_fixture(tmp_path)
     cfg = HydraFlowConfig(
-        data_root=tmp_path, repo="hydra/hydraflow", repo_root=tmp_path
+        data_root=tmp_path,
+        repo="hydra/hydraflow",
+        repo_root=tmp_path,
+        # Loop now defaults OFF (#10540); force ON for this fleet-batch pin.
+        adr_touchpoint_auditor_loop_enabled=True,
     )
     state = MagicMock()
     state.get_adr_audit_cursor.return_value = "2026-07-01T00:00:00Z"
@@ -136,7 +140,11 @@ async def test_closing_batched_issue_clears_all_tracking(tmp_path: Path) -> None
     re-files)."""
     index, _files = _fleet_fixture(tmp_path)
     cfg = HydraFlowConfig(
-        data_root=tmp_path, repo="hydra/hydraflow", repo_root=tmp_path
+        data_root=tmp_path,
+        repo="hydra/hydraflow",
+        repo_root=tmp_path,
+        # Loop now defaults OFF (#10540); force ON for this fleet-batch pin.
+        adr_touchpoint_auditor_loop_enabled=True,
     )
     fleet_key = f"FLEET-{_FLEET_PR}"
     state = MagicMock()

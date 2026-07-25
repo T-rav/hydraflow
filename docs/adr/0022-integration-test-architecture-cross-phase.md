@@ -30,7 +30,7 @@ Several concrete requirements flow from the production code:
   logic in `IssueStore` will route nothing to downstream phases, so integration tests
   would give false confidence.
 - Queue updates are published via `_publish_queue_update_nowait()`, which calls
-  `loop.create_task()` on the running loop (`src/issue_store.py:_publish_queue_update_nowait`). Tests must run
+  `loop.create_task()` on the running loop (`src/issue_store.py:IssueStore._publish_queue_update_nowait`). Tests must run
   under `pytest-asyncio` (or an equivalent running event loop) and often need
   `await asyncio.sleep(0)` so those fire-and-forget `EventBus.publish()` tasks drain
   before making assertions.

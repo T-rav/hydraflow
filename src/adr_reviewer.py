@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from config import Credentials, HydraFlowConfig
     from events import EventBus
     from execution import SubprocessRunner
-    from pr_manager import PRManager
 
 logger = logging.getLogger("hydraflow.adr_reviewer")
 
@@ -119,7 +118,6 @@ class ADRCouncilReviewer:
         self,
         config: HydraFlowConfig,
         event_bus: EventBus,
-        pr_manager: PRManager,
         runner: SubprocessRunner,
         credentials: Credentials | None = None,
         gate_block_dedup: DedupStore | None = None,
