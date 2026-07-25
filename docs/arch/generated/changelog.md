@@ -6,10 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `bbd3332` — Merge remote-tracking branch 'origin/staging' into agent/issue-10515 *(2026-07-25)*
+- `204d2e1` — feat(ul): term-proposer batch — 1 drafts (#10514) (#10514) *(2026-07-25)*
+- `39bd616` — Fixes #10515: FakeIssueStore stamps HITL/merged snapshot entries with the real vocabulary *(2026-07-25)*
 - `b9f7109` — chore: remove dead crate subsystem (#10520) (#10520) *(2026-07-25)*
-- `7e4165f` — Merge remote-tracking branch 'origin/staging' into archheal-ul-proposer-9dad4ac2-20260725060352 *(2026-07-25)*
-- `b9f7109` — chore: remove dead crate subsystem (#10520) (#10520) *(2026-07-25)*
-- `1deb944` — feat(ul): term-proposer batch — 1 drafts *(2026-07-24)*
 - `d6bad2e` — feat(signal-control): pure control-theory substrate (Stage 1) (#10502) (#10502) *(2026-07-24)*
 - `055267e` — fix(adr): single-colon ADR-0049 citations so drift coverage parses (#10481) (#10481) *(2026-07-24)*
 - `6c3cb69` — feat(adr): nudge bare shared-infra citations toward :Symbol granularity (#10479) (#10479) *(2026-07-24)*
