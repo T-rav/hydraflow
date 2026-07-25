@@ -1,6 +1,9 @@
 // Issue #10515 — Dynamic view: how one issue reaches each terminal bucket in
-// the Fake, and which status the entry carries out. The two red steps are the
-// ones this issue corrects.
+// the Fake, and which status the entry carries out after the fix.
+// Note: the active bucket (snap -> entry, active path) still diverges from
+// the real IssueStore, which stamps "active" via _snapshot_active rather
+// than PROCESSING — that divergence is out of scope for #10515 and untouched
+// here.
 
 specification {
   element component
@@ -22,9 +25,10 @@ model {
 
   gh -> fakestore 'labels: hydraflow-hitl -> STAGE_HITL'
   fakestore -> snap 'get_hitl_issues() / _merged_numbers'
-  snap -> entry 'queued -> QUEUED; in-flight/active -> PROCESSING (correct)'
-  snap -> entry 'hitl bucket -> PROCESSING (WRONG; must be HITL)'
-  snap -> entry 'merged bucket -> PROCESSING (WRONG; must be MERGED)'
+  snap -> entry 'queued -> QUEUED; in-flight -> PROCESSING (correct)'
+  snap -> entry 'active -> PROCESSING (diverges from real "active"; out of scope)'
+  snap -> entry 'hitl bucket -> HITL (fixed by #10515)'
+  snap -> entry 'merged bucket -> MERGED (fixed by #10515)'
 }
 
 views {

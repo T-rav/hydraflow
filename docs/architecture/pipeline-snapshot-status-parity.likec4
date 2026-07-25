@@ -24,7 +24,7 @@ model {
   }
 
   fakestore = fake 'mockworld.fakes.fake_issue_store.FakeIssueStore' {
-    description 'MockWorld IssueStorePort double. BUG: STAGE_HITL and STAGE_MERGED buckets both stamped PipelineIssueStatus.PROCESSING (fake_issue_store.py:435-441).'
+    description 'MockWorld IssueStorePort double. get_pipeline_snapshot() STAGE_HITL/STAGE_MERGED bucket builders now stamp PipelineIssueStatus.HITL/.MERGED, matching the real store (previously both stamped PROCESSING — see #10515).'
   }
 
   route = surface 'dashboard_routes._routes.get_pipeline' {
@@ -40,11 +40,11 @@ model {
   }
 
   real -> vocab 'stamps hitl / merged on terminal buckets'
-  fakestore -> vocab 'stamps processing on terminal buckets (divergence)'
+  fakestore -> vocab 'stamps hitl / merged on terminal buckets (parity restored, #10515)'
   real -> route 'get_pipeline_snapshot()'
   route -> ui 'PipelineSnapshot JSON'
   fakestore -> scenarios 'get_pipeline_snapshot() under MockWorld'
-  scenarios -> vocab 'assertions pinned to the Fake, not production'
+  scenarios -> vocab 'assertions match production vocabulary'
 }
 
 views {
