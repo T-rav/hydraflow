@@ -543,7 +543,7 @@ class PRUnsticker:
         issue_number: int,
         issue: GitHubIssue,
         wt_path: Path,
-        branch: str,
+        _branch: str,
     ) -> bool:
         """Use HITLRunner for generic/unknown causes."""
         if self._hitl_runner is None:

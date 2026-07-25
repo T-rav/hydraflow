@@ -1050,7 +1050,7 @@ class ReviewPhase:
             return None
 
     async def _check_baseline_policy(
-        self, pr: PRInfo, task: Task
+        self, pr: PRInfo, _task: Task
     ) -> BaselineApprovalResult | None:
         """Run baseline policy check if a policy is configured.
 
@@ -2062,7 +2062,7 @@ class ReviewPhase:
         return None
 
     async def _run_visual_validation(
-        self, pr: PRInfo, wt_path: Path, worker_id: int
+        self, pr: PRInfo, _wt_path: Path, worker_id: int
     ) -> VisualValidationReport | None:
         """Run visual validation if enabled. Returns None when disabled or on error."""
         if self._visual_validator is None:
@@ -2551,7 +2551,7 @@ class ReviewPhase:
 
         return result, diff
 
-    async def _run_delta_verification(self, pr: PRInfo, diff: str) -> str:
+    async def _run_delta_verification(self, pr: PRInfo, _diff: str) -> str:
         """Run delta verification comparing plan's File Delta section to actual diff.
 
         Returns a summary string (empty if no plan or no delta section).
@@ -2946,7 +2946,7 @@ class ReviewPhase:
         return "fail", {}, reason
 
     async def _run_ci_wait_attempt(
-        self, pr: PRInfo, attempt: int, worker_id: int
+        self, pr: PRInfo, _attempt: int, worker_id: int
     ) -> tuple[bool, str]:
         """Poll CI once. Return (passed, message)."""
         await self._publish_review_status(pr, worker_id, "ci_wait")
@@ -3506,10 +3506,10 @@ class ReviewPhase:
         *,
         pr: Any,
         task: Any,
-        wt_path: Any,
+        wt_path: Any,  # noqa: ARG002  # keyword-only judge-factory contract
         result: Any,
         diff: str,
-        worker_id: int,
+        worker_id: int,  # noqa: ARG002  # keyword-only judge-factory contract
         surface: str,
     ) -> Callable[..., Any]:
         """Return an async ``judge(ctx, i) -> JudgeVerdict`` for the approve gate.

@@ -3195,7 +3195,7 @@ class PRManager:
     )
 
     def _evaluate_ci_checks(
-        self, checks: list[dict[str, Any]], pr_number: int
+        self, checks: list[dict[str, Any]], _pr_number: int
     ) -> tuple[bool, str] | None:
         """Evaluate completed CI checks.
 

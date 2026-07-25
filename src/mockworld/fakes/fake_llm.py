@@ -143,7 +143,7 @@ class _FakePlannerRunner(_ScriptedRunner):
         _child_plans: dict[Any, Any],
         _child_titles: dict[Any, Any],
         *,
-        issue_labels: Sequence[str] = (),
+        issue_labels: Sequence[str] = (),  # noqa: ARG002  # fake mirrors real run_gap_review signature
     ) -> str:
         return ""
 

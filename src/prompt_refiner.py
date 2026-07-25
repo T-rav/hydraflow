@@ -166,7 +166,7 @@ def _collect_patch_targets(patch_text: str) -> set[str]:
     return targets
 
 
-def check_tripwires(patch_text: str, skill_name: str, repo_root: Path) -> list[str]:
+def check_tripwires(patch_text: str, skill_name: str, _repo_root: Path) -> list[str]:
     """Pre-eval hard gates. Empty list means the candidate may proceed to eval."""
     reasons: list[str] = []
     allowed = SKILL_BUILDER_MODULES[skill_name]

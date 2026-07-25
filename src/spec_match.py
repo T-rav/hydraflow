@@ -105,7 +105,7 @@ Compare the implementation against the original specification. Evaluate:
 """
 
 
-def build_requirements_gap_prompt(issue: Task) -> str:
+def build_requirements_gap_prompt(_issue: Task) -> str:
     """Build a prompt section for detecting requirements gaps during implementation.
 
     Injected into the implementation agent prompt so it can flag missing

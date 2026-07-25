@@ -47,7 +47,7 @@ class FakeSentry:
     def set_measurement(self, name: str, value: float, unit: str = "") -> None:
         self.measurements.append({"name": name, "value": value, "unit": unit})
 
-    def flush(self, timeout_ms: int = 2000) -> bool:
+    def flush(self, timeout_ms: int = 2000) -> bool:  # noqa: ARG002  # fake mirrors SentryPort.flush
         return True
 
     # ------------------------------------------------------------------

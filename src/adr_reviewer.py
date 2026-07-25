@@ -119,7 +119,7 @@ class ADRCouncilReviewer:
         self,
         config: HydraFlowConfig,
         event_bus: EventBus,
-        pr_manager: PRManager,
+        _pr_manager: PRManager,
         runner: SubprocessRunner,
         credentials: Credentials | None = None,
         gate_block_dedup: DedupStore | None = None,

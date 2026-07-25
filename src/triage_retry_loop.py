@@ -218,7 +218,7 @@ class TriageRetryLoop(BaseBackgroundLoop):
         return {"status": "ok", **stats}
 
     async def _retry_triage(
-        self, issue_number: int, issue: GitHubIssueSummary, prior_attempts: int
+        self, issue_number: int, issue: GitHubIssueSummary, _prior_attempts: int
     ) -> None:
         """Bump the counter, comment with context, and route back to find."""
         attempts = self._state.inc_triage_retry_attempts(issue_number)

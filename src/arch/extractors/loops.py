@@ -152,7 +152,7 @@ def _tick_interval(
     return None
 
 
-def _kill_switch(cls: ast.ClassDef, module_src: str) -> str | None:
+def _kill_switch(_cls: ast.ClassDef, module_src: str) -> str | None:
     """Find the HYDRAFLOW_DISABLE_… env-var name for this loop.
 
     The env-var string can appear in two places:

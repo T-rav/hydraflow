@@ -251,7 +251,7 @@ AREA_STANDARD_COVERAGE: dict[str, str] = {
 def _standard_check_with_area(
     name: str,
     standards_dir: Path,
-    fa_path: Path,
+    _fa_path: Path,
     area_map: dict[str, str],
     aliases: list[str],
 ) -> str:
@@ -412,7 +412,7 @@ def _port_row(
     standards_dir: Path,
     fa_path: Path,
     area_map: dict[str, str],
-    tests_dir: Path,
+    tests_dir: Path,  # noqa: ARG001  # uniform row-builder signature (ports use fakes_dir, not tests_dir)
     fakes_dir: Path,
     ports_md: Path,
 ) -> str:

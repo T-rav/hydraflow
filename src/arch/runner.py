@@ -222,7 +222,7 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
     return artifacts
 
 
-def _stamp_footer(body: str, sha: str, source_sha: str) -> str:
+def _stamp_footer(body: str, sha: str, source_sha: str) -> str:  # noqa: ARG001  # sha/source_sha retained in signature by design (see docstring); callers pass by keyword
     """Replace {{ARCH_FOOTER}} with a stable placeholder.
 
     `sha`/`source_sha` are kept in the signature because they still drive the

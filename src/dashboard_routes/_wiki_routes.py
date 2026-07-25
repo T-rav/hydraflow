@@ -228,7 +228,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:
             )
 
     @router.get("/api/wiki/metrics")
-    async def get_wiki_metrics(repo: RepoSlugParam = None) -> dict:
+    async def get_wiki_metrics(repo: RepoSlugParam = None) -> dict:  # noqa: ARG001  # FastAPI query param, kept for API symmetry (see docstring)
         """Return current knowledge-system counters as a JSON snapshot.
 
         ``knowledge_metrics`` is a process-wide singleton — its snapshot already

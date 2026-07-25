@@ -97,7 +97,7 @@ async def run_precheck_context(
     diff: str,
     execute: ExecuteCallback,
     debug_message: str,
-    logger: logging.Logger,
+    logger: logging.Logger,  # noqa: ARG001  # keyword-only param retained for caller API symmetry
     execute_debug: ExecuteCallback | None = None,
 ) -> str:
     """Run the shared precheck orchestration loop.

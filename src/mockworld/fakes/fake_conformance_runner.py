@@ -39,7 +39,11 @@ class FakeConformanceRunner:
         return self._available
 
     def run(
-        self, check: Check, *, repo_root: Path, timeout_s: float = 300.0
+        self,
+        check: Check,
+        *,
+        repo_root: Path,  # noqa: ARG002  # fake mirrors ConformanceRunnerPort.run
+        timeout_s: float = 300.0,  # noqa: ARG002  # fake mirrors ConformanceRunnerPort.run
     ) -> CheckResult:
         self.calls.append(check.raw)
         return CheckResult(

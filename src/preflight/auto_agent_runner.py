@@ -53,7 +53,7 @@ class AutoAgentRunner(BaseSubprocessRunner[PreflightSpawn]):
     def _telemetry_source(self) -> str:
         return "auto_agent_preflight"
 
-    def _build_command(self, prompt: str, worktree: Path) -> list[str]:
+    def _build_command(self, prompt: str, worktree: Path) -> list[str]:  # noqa: ARG002  # BaseSubprocessRunner abstract-method override
         # The auto-agent operates on attacker-reachable input, so it MUST be
         # hardened by default (ADR-0092): restricted=True drops bypassPermissions
         # for acceptEdits + a tool allowlist (claude) / the network-blocked
@@ -71,7 +71,7 @@ class AutoAgentRunner(BaseSubprocessRunner[PreflightSpawn]):
             self._config.auto_agent_wall_clock_cap_s or self._config.agent_timeout
         )
 
-    def _pre_spawn_hook(self, prompt: str) -> None:
+    def _pre_spawn_hook(self, prompt: str) -> None:  # noqa: ARG002  # BaseSubprocessRunner abstract-method override
         # The claude backend gets the full restricted hardening (acceptEdits +
         # tool allowlist + WebFetch/WebSearch disallow). codex gets a real
         # network-egress block via its workspace-write sandbox. Other backends

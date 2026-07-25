@@ -117,7 +117,7 @@ def load_all_instincts() -> list[dict]:
 # ─────────────────────────────────────────────
 
 
-def cmd_status(args):
+def cmd_status(args):  # noqa: ARG001  # argparse subcommand handler — uniform (args) signature
     """Show status of all instincts."""
     instincts = load_all_instincts()
 

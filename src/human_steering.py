@@ -164,7 +164,7 @@ class SteeringDecision:
 
 def apply_steering(
     state: SteeringState,
-    issue: str,
+    _issue: str,
     known_phases: set[str],
     max_redos: int,
 ) -> SteeringDecision:

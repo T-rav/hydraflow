@@ -141,7 +141,7 @@ class HydraFlowEvent(BaseModel):
     session_id: str | None = None
     repo: str | None = None
 
-    def typed_data(self, cls: type[_T]) -> _T:
+    def typed_data(self, _cls: type[_T]) -> _T:
         """Cast ``self.data`` to a typed payload class for safe access.
 
         *cls* should be one of the ``TypedDict`` payload classes defined in

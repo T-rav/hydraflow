@@ -20,11 +20,12 @@ class _UsageExtractor:
     backend = "unknown"
 
     def extract(
-        self, event: dict[str, Any]
+        self,
+        event: dict[str, Any],  # noqa: ARG002  # base extractor contract, overridden by backend subclasses
     ) -> tuple[dict[str, int], list[dict[str, Any]]]:
         return {}, []
 
-    def is_final_event(self, event: dict[str, Any]) -> bool:
+    def is_final_event(self, event: dict[str, Any]) -> bool:  # noqa: ARG002  # base extractor contract, overridden by backend subclasses
         return False
 
 

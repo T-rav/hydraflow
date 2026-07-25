@@ -261,7 +261,7 @@ def should_dispatch_auto_agent(
     return is_bot_author or has_auto_fix_ok_label
 
 
-def _build_human_pr_comment(pr: Any, *, log_text: str) -> str:
+def _build_human_pr_comment(_pr: Any, *, log_text: str) -> str:
     """Render the one-time log-pointer comment for a human-authored PR."""
     if log_text and log_text.strip():
         tail = "\n".join(log_text.strip().splitlines()[-40:])

@@ -1152,7 +1152,7 @@ SUMMARY: <one-line summary>
         issue: Task,
         worktree_path: Path,
         branch: str,
-        worker_id: int,
+        worker_id: int,  # noqa: ARG002  # skill-runner signature; callers pass worker_id= by keyword
         plan_text: str = "",
     ) -> LoopResult:
         """Run a registered post-implementation skill via the skill registry.

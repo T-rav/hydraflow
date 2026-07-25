@@ -142,7 +142,7 @@ class DiscoverRunner(BaseRunner):
         self._dedup = dedup
 
     async def discover(
-        self, task: Task, worker_id: int = 0, *, guidance: str = ""
+        self, task: Task, _worker_id: int = 0, *, guidance: str = ""
     ) -> DiscoverResult:
         """Run product discovery with post-output evaluation (§4.10).
 

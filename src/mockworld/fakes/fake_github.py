@@ -560,7 +560,11 @@ class FakeGitHub:
         self._comments.append((pr_number, body))
 
     async def submit_review(
-        self, pr_number: int, verdict: Any, body: str, **_kw: Any
+        self,
+        pr_number: int,  # noqa: ARG002  # fake mirrors PRPort.submit_review
+        verdict: Any,  # noqa: ARG002  # fake mirrors PRPort.submit_review
+        body: str,  # noqa: ARG002  # fake mirrors PRPort.submit_review
+        **_kw: Any,
     ) -> bool:
         """Submit a formal PR review (no-op stub — always returns True)."""
         self._maybe_rate_limit()
@@ -684,7 +688,7 @@ class FakeGitHub:
             branch=branch,
         )
 
-    async def branch_has_diff_from_main(self, branch: str) -> bool:
+    async def branch_has_diff_from_main(self, branch: str) -> bool:  # noqa: ARG002  # fake mirrors PRPort.branch_has_diff_from_main
         self._maybe_rate_limit()
         return True
 
@@ -715,7 +719,7 @@ class FakeGitHub:
             return self._default_pr_diff
         return "diff --git a/x b/x"
 
-    async def get_pr_head_sha(self, pr_number: int) -> str:
+    async def get_pr_head_sha(self, pr_number: int) -> str:  # noqa: ARG002  # fake mirrors PRPort.get_pr_head_sha
         self._maybe_rate_limit()
         return "abc123"
 
@@ -753,7 +757,7 @@ class FakeGitHub:
             return "\n\n".join(commits[-n:])
         return f"## deadbeef stub-commit — {branch}\ndiff --git a/x b/x\n+fix"
 
-    async def get_pr_approvers(self, pr_number: int) -> list[str]:
+    async def get_pr_approvers(self, pr_number: int) -> list[str]:  # noqa: ARG002  # fake mirrors PRPort.get_pr_approvers
         self._maybe_rate_limit()
         return ["octocat"]
 
@@ -786,7 +790,7 @@ class FakeGitHub:
                 return pr.number
         return None
 
-    async def get_pr_reviews(self, pr_number: int) -> list[dict[str, str]]:
+    async def get_pr_reviews(self, pr_number: int) -> list[dict[str, str]]:  # noqa: ARG002  # fake mirrors PRPort.get_pr_reviews
         """No GitHub reviews in the air-gapped sandbox. Empty → epic detail
         rendering derives no review status rather than AttributeError-ing (same
         /api/epics rendering path as get_pr_checks)."""
@@ -821,7 +825,10 @@ class FakeGitHub:
         return True
 
     async def refresh_pr_branch_with_arch_regen(
-        self, pr_number: int, branch: str, **_kw: Any
+        self,
+        pr_number: int,
+        branch: str,  # noqa: ARG002  # fake mirrors PRPort.refresh_pr_branch_with_arch_regen
+        **_kw: Any,
     ) -> bool:
         """Fake of the arch-staleness self-heal.
 
@@ -1215,7 +1222,10 @@ class FakeGitHub:
         return []
 
     async def list_hitl_items(
-        self, hitl_labels: list[str], *, concurrency: int = 10
+        self,
+        hitl_labels: list[str],
+        *,
+        concurrency: int = 10,  # noqa: ARG002  # fake mirrors PRPort.list_hitl_items
     ) -> list[Any]:
         """Return HITLItem-compatible objects for issues with HITL labels."""
         self._maybe_rate_limit()
@@ -1275,7 +1285,7 @@ class FakeGitHub:
 
         return PRManager.expected_pr_title(issue_number, issue_title)
 
-    async def get_pr_mergeable(self, pr_number: int) -> bool | None:
+    async def get_pr_mergeable(self, pr_number: int) -> bool | None:  # noqa: ARG002  # fake mirrors PRPort.get_pr_mergeable
         self._maybe_rate_limit()
         return True
 
@@ -1305,7 +1315,7 @@ class FakeGitHub:
         if issue_number in self._issues:
             self._issues[issue_number].body = body
 
-    async def update_pr_title(self, pr_number: int, title: str) -> bool:
+    async def update_pr_title(self, pr_number: int, title: str) -> bool:  # noqa: ARG002  # fake mirrors PRPort.update_pr_title
         self._maybe_rate_limit()
         return True
 

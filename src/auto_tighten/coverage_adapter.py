@@ -18,7 +18,7 @@ class CoverageAdapter:
         self._cov = coverage_jsonl
         self._margin = margin
 
-    def current(self, repo_root: Path) -> float:
+    def current(self, repo_root: Path) -> float:  # noqa: ARG002  # ratchet adapter protocol signature (see baseline())
         lines = (
             [line for line in self._cov.read_text().splitlines() if line.strip()]
             if self._cov.exists()

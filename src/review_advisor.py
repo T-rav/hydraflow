@@ -283,7 +283,7 @@ class PreFlightTrigger:
 
 
 class AlwaysTrigger(PreFlightTrigger):
-    def should_run(self, diff_stats: object, pr: object) -> bool:
+    def should_run(self, diff_stats: object, pr: object) -> bool:  # noqa: ARG002  # PreFlightTrigger.should_run abstract signature
         return True
 
 

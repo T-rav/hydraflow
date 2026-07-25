@@ -624,7 +624,7 @@ async def run_clean(config: HydraFlowConfig) -> TaskResult:
     return TaskResult(success=True, log=log)
 
 
-async def run_compact(config: HydraFlowConfig) -> TaskResult:
+async def run_compact(_config: HydraFlowConfig) -> TaskResult:
     """Memory compaction removed in Phase 3 cutover.
 
     The wiki + tribal + ADR-draft pipeline handles durable knowledge now,

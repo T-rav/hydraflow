@@ -1011,7 +1011,7 @@ class EpicManager:
         self,
         child_info: EpicChildInfo,
         worker_held: dict[int, str],
-        queued: dict[int, str],
+        _queued: dict[int, str],
     ) -> None:
         """Set a non-terminal child's running/queued status + worker.
 

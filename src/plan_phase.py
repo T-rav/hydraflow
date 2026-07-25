@@ -588,7 +588,7 @@ class PlanPhase:
         return "\n".join(lines)
 
     def _should_shape_helper(
-        self, issue: Task, discover_result: DiscoverResult | None
+        self, _issue: Task, discover_result: DiscoverResult | None
     ) -> bool:
         """ADR-0107 planner decision gate: does discovery warrant a shaping turn?
 

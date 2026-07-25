@@ -51,11 +51,11 @@ class FakeWikiCompiler:
         )
         return self.compiled_entries_per_call
 
-    async def compile_topic(self, *args, **kwargs) -> int:
+    async def compile_topic(self, *args, **kwargs) -> int:  # noqa: ARG002  # fake mirrors WikiCompiler.compile_topic
         """Legacy topic-page compile — return 0 to indicate no change."""
         return 0
 
-    async def detect_contradictions(self, *args, **kwargs):
+    async def detect_contradictions(self, *args, **kwargs):  # noqa: ARG002  # fake mirrors WikiCompiler.detect_contradictions
         """Ingest-time contradiction detector — never flags anything in fakes."""
 
         class _Empty:
@@ -63,7 +63,7 @@ class FakeWikiCompiler:
 
         return _Empty()
 
-    async def dedup_or_corroborate(self, **kwargs):
+    async def dedup_or_corroborate(self, **kwargs):  # noqa: ARG002  # fake mirrors WikiCompiler.dedup_or_corroborate
         """Corroboration decision stub.
 
         Default is 'no match' so scenarios exercise the normal write

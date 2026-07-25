@@ -29,7 +29,7 @@ class ResearchRunner(BaseRunner):
 
     _log = logger
 
-    async def research(self, task: Task, worker_id: int = 0) -> ResearchResult:
+    async def research(self, task: Task, _worker_id: int = 0) -> ResearchResult:
         """Run the research agent for *task*.
 
         Returns a :class:`ResearchResult` with the research context.

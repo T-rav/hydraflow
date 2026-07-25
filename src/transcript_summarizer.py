@@ -232,7 +232,7 @@ class TranscriptSummarizer:
         phase: str,
         *,
         status: str,
-        issue_title: str,
+        issue_title: str,  # noqa: ARG002  # keyword-only param retained for caller call-site symmetry
         duration_seconds: float,
         log_file: str,
         issue_labels: Sequence[str] = (),
