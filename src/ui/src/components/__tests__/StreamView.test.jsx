@@ -1093,6 +1093,132 @@ describe('PipelineFlow dot cap (#9863)', () => {
   })
 })
 
+describe('PipelineFlow region + total count badges (#10488)', () => {
+  it('shows the per-region issue and PR count as "N · N PR" for regions with no PRs', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        plan: [
+          { issue_number: 1, title: 'P1', status: 'queued' },
+          { issue_number: 2, title: 'P2', status: 'queued' },
+        ],
+        implement: [
+          { issue_number: 3, title: 'I1', status: 'queued' },
+        ],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.getByTestId('flow-count-plan').textContent).toBe('2 · 0 PR')
+    expect(screen.getByTestId('flow-count-implement').textContent).toBe('1 · 0 PR')
+  })
+
+  it('counts matching PRs for a region where some issues carry a PR, and shows 0 explicitly for one that has none', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        triage: [
+          { issue_number: 4, title: 'T1', status: 'queued' },
+          { issue_number: 5, title: 'T2', status: 'queued' },
+        ],
+        review: [
+          { issue_number: 1, title: 'R1', status: 'active' },
+          { issue_number: 2, title: 'R2', status: 'active' },
+          { issue_number: 3, title: 'R3', status: 'queued' },
+        ],
+      },
+      prs: [
+        { issue: 1, pr: 101, url: 'https://github.com/pr/101' },
+        { issue: 2, pr: 102, url: 'https://github.com/pr/102' },
+      ],
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.getByTestId('flow-count-review').textContent).toBe('3 · 2 PR')
+    // A region with issues but none carrying a PR shows the zero explicitly,
+    // not hidden — assert the exact string, not just presence.
+    expect(screen.getByTestId('flow-count-triage').textContent).toBe('2 · 0 PR')
+  })
+
+  it('renders flow-count badges for the terminal-fork stages hitl and merged', () => {
+    // hitl/merged render via the shared TerminalFork -> renderFlowStage path,
+    // not the plain postTriageGroups.map path — assert both explicitly so a
+    // regression that special-cases the fork doesn't silently drop the badge.
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        hitl: [{ issue_number: 77, title: 'Escalated issue', status: 'hitl' }],
+        merged: [{ issue_number: 10, title: 'Fix bug', url: '', status: 'done' }],
+      },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.getByTestId('flow-count-hitl')).toBeTruthy()
+    expect(screen.getByTestId('flow-count-hitl').textContent).toBe('1 · 0 PR')
+    expect(screen.getByTestId('flow-count-merged')).toBeTruthy()
+    expect(screen.getByTestId('flow-count-merged').textContent).toBe('1 · 0 PR')
+  })
+
+  it('shows the full issue count in the region badge even when dots are capped at 10', () => {
+    // #9863 caps rendered dots at 10 with a +N overflow badge — the count
+    // badge must still report the FULL group.issues.length (via countRegion),
+    // not the capped dot count.
+    const many = Array.from({ length: 11 }, (_, i) => ({
+      issue_number: 3000 + i,
+      title: `Q${i}`,
+      status: 'queued',
+    }))
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: { plan: many },
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.getByTestId('flow-count-plan').textContent).toBe('11 · 0 PR')
+    expect(screen.getByTestId('flow-overflow-plan').textContent).toBe('+1')
+    expect(screen.getByTestId('flow-dot-3009')).toBeTruthy()
+    expect(screen.queryByTestId('flow-dot-3010')).toBeNull()
+  })
+
+  it('shows the pipeline-wide total as "N issues · N PRs" summed across all regions', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        triage: [
+          { issue_number: 1, title: 'T1', status: 'queued' },
+          { issue_number: 2, title: 'T2', status: 'queued' },
+        ],
+        review: [
+          { issue_number: 3, title: 'R1', status: 'active' },
+        ],
+      },
+      prs: [
+        { issue: 3, pr: 300, url: 'https://github.com/pr/300' },
+      ],
+    }))
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.getByTestId('flow-total').textContent).toBe('3 issues · 1 PRs')
+  })
+
+  it('updates flow-count-plan after the context snapshot changes and the component re-renders', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        plan: [{ issue_number: 1, title: 'P1', status: 'queued' }],
+      },
+    }))
+    const { rerender } = render(<StreamView {...defaultProps} />)
+    expect(screen.getByTestId('flow-count-plan').textContent).toBe('1 · 0 PR')
+
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineIssues: {
+        plan: [
+          { issue_number: 1, title: 'P1', status: 'queued' },
+          { issue_number: 2, title: 'P2', status: 'queued' },
+          { issue_number: 3, title: 'P3', status: 'queued' },
+        ],
+      },
+    }))
+    rerender(<StreamView {...defaultProps} />)
+    expect(screen.getByTestId('flow-count-plan').textContent).toBe('3 · 0 PR')
+  })
+})
+
 describe('work-queue strategy visualisation (#10067)', () => {
   it('shows the active strategy badge from config', () => {
     mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({

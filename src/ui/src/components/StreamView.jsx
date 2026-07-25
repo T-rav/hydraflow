@@ -4,6 +4,7 @@ import { useHydraFlow, workerKey } from '../context/HydraFlowContext'
 import { StreamCard } from './StreamCard'
 import { PIPELINE_STAGES, PULSE_ANIMATION } from '../constants'
 import { splitPipelineTracks } from '../utils/pipelineTracks'
+import { countPipeline } from '../utils/pipelineCounts'
 import { TerminalFork } from './PipelineFork'
 import { STAGE_KEYS } from '../hooks/useTimeline'
 import {
@@ -47,13 +48,15 @@ function PendingIntentCard({ intent }) {
 }
 
 function PipelineFlow({ stageGroups, queueStrategy }) {
+  // Per-region and pipeline-wide issue/PR counts for the flow badges (#10488).
+  const counts = useMemo(() => countPipeline(stageGroups), [stageGroups])
+
   const { mergedCount, failedCount } = useMemo(() => {
-    const merged = stageGroups.find(g => g.stage.key === 'merged')?.issues.length || 0
     const failed = stageGroups.reduce(
       (sum, g) => sum + g.issues.filter(i => i.overallStatus === 'failed').length, 0
     )
-    return { mergedCount: merged, failedCount: failed }
-  }, [stageGroups])
+    return { mergedCount: counts.perStage.merged?.issues || 0, failedCount: failed }
+  }, [stageGroups, counts])
 
   // #9863: a big backlog (67 queued in PLAN) rendered 67 dots in one
   // non-wrapping row and blew out the strip. Cap the dots and show the
@@ -63,6 +66,13 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
   const renderFlowStage = (group) => (
     <div style={styles.flowStage} key={group.stage.key}>
       <span style={flowLabelStyles[group.stage.key]}>{group.stage.label}</span>
+      <span
+        style={styles.flowCount}
+        data-testid={`flow-count-${group.stage.key}`}
+        title={`${counts.perStage[group.stage.key].issues} issue(s), ${counts.perStage[group.stage.key].prs} PR(s) in ${group.stage.label}`}
+      >
+        {counts.perStage[group.stage.key].issues} · {counts.perStage[group.stage.key].prs} PR
+      </span>
       {group.issues.length > 0 && (
         <div style={styles.flowDots}>
           {group.issues.slice(0, FLOW_DOT_CAP).map(issue => {
@@ -106,6 +116,13 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
   return (
     <div style={styles.flowContainer} data-testid="pipeline-flow">
       <span style={styles.flowTitle}>Pipeline Flow</span>
+      <span
+        style={styles.flowTotal}
+        data-testid="flow-total"
+        title={`${counts.total.issues} issue(s) and ${counts.total.prs} PR(s) across the whole pipeline`}
+      >
+        {counts.total.issues} issues · {counts.total.prs} PRs
+      </span>
       {queueStrategy && (
         <span
           style={styles.queueStrategyBadge}
@@ -536,6 +553,12 @@ const styles = {
     marginLeft: 2,
     whiteSpace: 'nowrap',
   },
+  flowCount: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.textMuted,
+    whiteSpace: 'nowrap',
+  },
   flowConnector: {
     width: 16,
     height: 1,
@@ -565,6 +588,13 @@ const styles = {
     color: theme.textMuted,
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+  },
+  flowTotal: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.textMuted,
     flexShrink: 0,
     whiteSpace: 'nowrap',
   },

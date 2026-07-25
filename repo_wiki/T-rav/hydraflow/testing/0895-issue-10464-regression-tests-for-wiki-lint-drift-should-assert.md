@@ -5,7 +5,7 @@ source_issue: 10464
 source_phase: plan
 created_at: 2026-07-24T15:39:21.687953+00:00
 status: active
-corroborations: 1
+corroborations: 2
 ---
 
 # Regression tests for wiki-lint drift should assert the full live-wiki lint, not one term
