@@ -22,7 +22,13 @@ export default defineConfig({
   plugins: [react()],
   base: '/',
   optimizeDeps: {
-    include: ['html2canvas']
+    // Pre-bundle the heavy charting stack at startup so vite doesn't discover
+    // and re-optimize it mid-session. echarts (+ its transitive zrender) is
+    // large; a lazy re-optimize pass restarts vite's module server and, on
+    // vite 8, briefly 404s `Sec-Fetch-Dest: script` requests — so a browser
+    // loading the dashboard during that window white-screens (never renders).
+    // Declaring them here makes the optimize happen once, up front. See #10494.
+    include: ['html2canvas', 'echarts', 'echarts-for-react']
   },
   build: {
     outDir: 'dist',
