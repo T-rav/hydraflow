@@ -1380,15 +1380,55 @@ class ImplementPhase:
     ) -> WorkerResult:
         """Handle the case where implementation succeeded but no PR exists.
 
-        If the branch has no diff from main, escalates to HITL.  Otherwise
-        marks as failed for retry.
+        If the branch has no diff from main, escalates to HITL.  Otherwise the
+        work was really committed and pushed — the PR-open step just never ran
+        (e.g. a long local verification step got reaped by a subprocess timeout
+        AFTER commit+push but BEFORE ``gh pr create``; issue #10493). Recover
+        idempotently instead of discarding the delivered work: re-check for an
+        open PR, then open one from the already-pushed branch, mirroring the
+        happy path. Only a genuine PR-open failure falls through to the "mark
+        failed / retry" path (which would rebuild the work from scratch).
         """
         has_diff = await self._prs.branch_has_diff_from_main(result.branch)
         if not has_diff:
             return await self._escalate_no_changes_to_hitl(issue, result)
 
+        # Idempotent recovery (#10493): the branch carries a real diff and is
+        # already pushed on origin, so deliver it rather than bouncing the
+        # issue back to hydraflow-ready for a full rebuild. A PR may have been
+        # created since the initial resolve; otherwise open one now from the
+        # pushed branch (the same call the happy path uses in _resolve_pr).
+        pr = await self._prs.find_open_pr_for_branch(
+            result.branch, issue_number=issue.id
+        )
+        if pr is None or pr.number <= 0:
+            gh_issue = GitHubIssue.from_task(issue)
+            pr = await self._prs.create_pr(gh_issue, result.branch)
+
+        if pr is not None and pr.number > 0:
+            logger.info(
+                "Recovered PR #%d for issue #%d from already-pushed branch %s "
+                "(no PR existed after successful implementation)",
+                pr.number,
+                issue.id,
+                result.branch,
+            )
+            # Mirror the happy-path post-create state marking so the delivered
+            # work advances to review instead of being rebuilt: enqueue +
+            # drive the review transition, bump the session counter, and mark
+            # the issue "success" (what _handle_successful_push's caller does).
+            self._store.enqueue_transition(issue, "review")
+            await self._transitioner.transition(issue.id, "review", pr_number=pr.number)
+            self._state.increment_session_counter("implemented")
+            self._state.mark_issue(issue.id, "success")
+            result.success = True
+            result.pr_info = pr
+            result.error = None
+            return result
+
         logger.warning(
-            "Implementation succeeded for issue #%d but no open PR exists for branch %s",
+            "Implementation succeeded for issue #%d but PR recovery failed for "
+            "branch %s — keeping in ready queue for retry",
             issue.id,
             result.branch,
         )
