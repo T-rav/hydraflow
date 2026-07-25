@@ -157,6 +157,10 @@ class TestRegressionPinDetectionEndToEnd:
         pin_candidates = [c for c in candidates if c.detection_source == "regression-pin"]
         assert len(pin_candidates) == 1
         assert pin_candidates[0].detection_ref == head_sha
+        # medium confidence, not low -- this must NOT reach the low-confidence
+        # HITL surface (escape.metrics.low_confidence), which is the whole
+        # point of restoring the regression-pin detection source (#10499).
+        assert pin_candidates[0].attribution_confidence == "medium"
 
 
 class TestAuditDetectSameDefectClass:

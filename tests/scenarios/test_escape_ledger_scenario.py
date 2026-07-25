@@ -164,7 +164,12 @@ class TestEscapeLedgerScenario:
         records = EscapeLedger(loop._ledger_path).read_all()
         assert len(records) == 1
         assert records[0].detection_source == "regression-pin"
+        assert records[0].attribution_confidence == "medium"
         assert state._cursor["sha"] == head_sha
+        # medium confidence must not trip the low-confidence HITL surface --
+        # confirms the fix suppresses the spurious bug-issue filing, not just
+        # that the ledger row's label changed.
+        assert result["filed"] == 0
 
     async def test_re_tick_does_not_rerecord(self, tmp_path: Path) -> None:
         world = MockWorld(tmp_path)
