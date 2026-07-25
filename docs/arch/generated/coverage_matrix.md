@@ -35,18 +35,18 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `EscapeLedgerLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_escape_ledger_loop.py` | ✅ in catalog | ✅ `s83_escape_ledger_idle_poll.py` |
 | `FailOpenMonitorLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_fail_open_monitor_loop.py` | ✅ in catalog | ✅ `s84_fail_open_monitor_idle_poll.py` |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0047, 0056, 0089] | ✅ [fake-coverage-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ✅ `s29_fake_coverage_auditor_clean.py` |
-| `FitnessScorecardLoop` | ✅ [0093, 0100, 0104] | ✅ [fitness-scorecard-loop.md, loop-fitness.md] | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_fitness_scorecard_loop.py` | ✅ in catalog | ❌ |
+| `FitnessScorecardLoop` | ✅ [0093, 0100, 0104] | ✅ [fitness-scorecard-loop.md, loop-fitness.md] | ✅ loops.md | ❌ | ✅ `test_fitness_scorecard_loop.py` | ✅ in catalog | ❌ |
 | `FlakeTrackerLoop` | ✅ [0045, 0056, 0065, 0089, 0099] | ✅ [flake-tracker-loop.md, git-hub-data-cache.md] | ✅ loops.md | ✅ README.md | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
 | `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
-| `GateHealthLoop` | ❌ | ✅ [dark-factory.md, feedback-workstream-fixes-over-loops.md] | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_gate_health_loop.py` | ✅ in catalog | ❌ |
+| `GateHealthLoop` | ❌ | ✅ [dark-factory.md, feedback-workstream-fixes-over-loops.md] | ✅ loops.md | ❌ | ✅ `test_gate_health_loop.py` | ✅ in catalog | ❌ |
 | `GitHubCacheLoop` | ✅ [0076] | ✅ [git-hub-cache-loop.md, git-hub-data-cache.md, hitl-item.md] | ✅ loops.md | ✅ README.md | ✅ `test_github_cache_loop.py` | ✅ in catalog | ✅ `s44_github_cache_idle_poll.py` |
 | `HealthMonitorLoop` | ✅ [0045, 0046, 0093, 0106] | ✅ [gotchas.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |
 | `HumanSteeringLoop` | ✅ [0103] | ✅ [human-steering-loop.md, steering-channel.md, steering-state.md] | ❌ | ❌ | ✅ `test_human_steering_loop.py` | ✅ in catalog | ✅ `s52_human_steering_directive.py` |
 | `InterventionTallyLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_intervention_tally_loop.py` | ✅ in catalog | ✅ `s85_intervention_tally_idle_poll.py` |
-| `IssueRefinementLoop` | ❌ | ❌ | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_issue_refinement_loop.py` | ✅ in catalog | ✅ `s57_issue_refinement_digest.py` |
+| `IssueRefinementLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_issue_refinement_loop.py` | ✅ in catalog | ✅ `s57_issue_refinement_digest.py` |
 | `LabelDriftWatcherLoop` | ✅ [0088] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_label_drift_watcher_loop.py` | ✅ in catalog | ✅ `s81_label_drift_watcher_reconciles_pr_ahead.py` |
 | `LiveCorpusReplayLoop` | ✅ [0086] | ✅ [live-corpus-replay-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_live_corpus_replay_loop.py` | ✅ in catalog | ✅ `s43_live_corpus_replay_idle.py` |
-| `LogIngestLoop` | ❌ | ❌ | ✅ loops.md | ✅ (caretaker loop) | ✅ `test_log_ingest_loop.py` | ✅ in catalog | ❌ |
+| `LogIngestLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_log_ingest_loop.py` | ✅ in catalog | ❌ |
 | `MemoryBacklogLoop` | ✅ [0089] | ✅ [README.md] | ✅ loops.md | ✅ README.md | ✅ `test_memory_backlog_loop.py` | ✅ in catalog | ❌ |
 | `MergeStateWatcherLoop` | ✅ [0075, 0077] | ✅ [merge-state-watcher-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_merge_state_watcher_loop.py` | ✅ in catalog | ✅ `s49_merge_state_watcher_idle_poll.py` |
 | `PRUnstickerLoop` | ✅ [0075, 0077] | ✅ [hitl-item.md, pr-unsticker-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_pr_unsticker_loop.py` | ✅ in catalog | ✅ `s08_pr_unsticker_revives_stuck_pr.py` |
