@@ -59,6 +59,21 @@ def _seed_revert(repo: Path) -> tuple[str, str]:
     return base_sha, _head(repo)
 
 
+def _seed_regression_pin(repo: Path) -> tuple[str, str]:
+    base_sha = _head(repo)
+    (repo / "src" / "mod2.py").write_text("def risky2():\n    return 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "feat: another risky change")
+    bad_sha = _head(repo)
+    (repo / "tests" / "regressions").mkdir(parents=True)
+    (repo / "tests" / "regressions" / "test_mod2.py").write_text(
+        "def test_mod2(): pass\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", f"fix: pin regression from {bad_sha}")
+    return base_sha, _head(repo)
+
+
 def _make_state(initial_sha: str) -> Any:
     from unittest.mock import MagicMock
 
@@ -127,6 +142,34 @@ class TestEscapeLedgerScenario:
         assert len(records) == 1
         assert records[0].detection_source == "revert"
         assert state._cursor["sha"] == head_sha
+
+    async def test_seeded_regression_pin_range_records_one_escape(
+        self, tmp_path: Path
+    ) -> None:
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base_sha, head_sha = _seed_regression_pin(repo)
+
+        state = _make_state(base_sha)
+        loop = _build_loop(tmp_path, repo, github, state)
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ok"
+        assert result["escapes_recorded"] == 1
+
+        from escape.ledger import EscapeLedger
+
+        records = EscapeLedger(loop._ledger_path).read_all()
+        assert len(records) == 1
+        assert records[0].detection_source == "regression-pin"
+        assert records[0].attribution_confidence == "medium"
+        assert state._cursor["sha"] == head_sha
+        # medium confidence must not trip the low-confidence HITL surface --
+        # confirms the fix suppresses the spurious bug-issue filing, not just
+        # that the ledger row's label changed.
+        assert result["filed"] == 0
 
     async def test_re_tick_does_not_rerecord(self, tmp_path: Path) -> None:
         world = MockWorld(tmp_path)
