@@ -2448,6 +2448,48 @@ class HydraFlowConfig(BaseModel):
         default="claude",
         description="Backend for the term-proposer / entry-evidence drafters.",
     )
+    # Per-role backend dials for the AGENTIC (tool-using) roles. Unlike the
+    # one-shot dials above, these only offer harness backends: "claude" (the
+    # native Anthropic endpoint) or "zai" (the Claude CLI pointed at GLM's
+    # /api/anthropic endpoint). This is what lets an operator route maintenance
+    # loops to GLM while implement/review/plan/triage stay on Claude. Pair a
+    # "zai" dial with a glm-* model (enforced by _harmonize_tool_model_defaults).
+    implementation_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for implementation agents."
+    )
+    review_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for review agents."
+    )
+    planner_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for planning agents."
+    )
+    triage_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for triage agents."
+    )
+    ac_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for acceptance-criteria agents."
+    )
+    subskill_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for subskill agents."
+    )
+    debug_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for debug agents."
+    )
+    verification_judge_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for the verification judge."
+    )
+    test_adequacy_verifier_provider: Literal["claude", "zai"] = Field(
+        default="claude",
+        description="Harness backend for the independent test-adequacy verifier.",
+    )
+    system_provider: Literal["claude", "zai"] = Field(
+        default="claude",
+        description="Harness backend profile default for system-tier agents.",
+    )
+    background_provider: Literal["claude", "zai"] = Field(
+        default="claude",
+        description="Harness backend profile default for background-tier agents.",
+    )
     triage_max_turns: int = Field(
         default=12,
         ge=1,

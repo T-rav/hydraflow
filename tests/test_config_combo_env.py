@@ -13,6 +13,25 @@ import config as config_module
 from config import HydraFlowConfig, _parse_combo
 
 
+def test_agentic_roles_have_provider_dial_defaulting_claude() -> None:
+    """Every agentic role carries a harness-backend dial defaulting to claude."""
+    cfg = HydraFlowConfig()
+    for role in (
+        "implementation",
+        "review",
+        "planner",
+        "triage",
+        "ac",
+        "subskill",
+        "debug",
+        "verification_judge",
+        "test_adequacy_verifier",
+        "system",
+        "background",
+    ):
+        assert getattr(cfg, f"{role}_provider") == "claude", role
+
+
 def test_no_gemini_or_pi_tool_literal_in_config() -> None:
     """gemini/pi are gutted — no *_tool Literal nor the combo allowlist admits them."""
     for name, field in HydraFlowConfig.model_fields.items():
