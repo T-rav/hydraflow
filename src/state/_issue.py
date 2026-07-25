@@ -1,4 +1,4 @@
-"""Issue, PR, outcome, hook-failure, verification, and crate state."""
+"""Issue, PR, outcome, hook-failure, and verification state."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 class IssueStateMixin:
-    """Methods for issue tracking, attempts, outcomes, PRs, verification, hooks, and crates."""
+    """Methods for issue tracking, attempts, outcomes, PRs, verification, and hooks."""
 
     _data: StateData
 
@@ -247,17 +247,6 @@ class IssueStateMixin:
             f.model_copy(deep=True)
             for f in self._data.hook_failures.get(self._key(issue_number), [])
         ]
-
-    # --- active crate ---
-
-    def get_active_crate_number(self) -> int | None:
-        """Return the persisted active crate (milestone) number, or None."""
-        return self._data.active_crate_number
-
-    def set_active_crate_number(self, number: int | None) -> None:
-        """Persist the active crate number (or clear it with None)."""
-        self._data.active_crate_number = number
-        self.save()
 
     # --- digest hash tracking ---
 

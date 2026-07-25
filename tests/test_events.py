@@ -101,8 +101,6 @@ class TestEventTypeEnum:
             "PIPELINE_STATS",
             "VISUAL_GATE",
             "BASELINE_UPDATE",
-            "CRATE_ACTIVATED",
-            "CRATE_COMPLETED",
             "AGENT_ACTIVITY",
             "SYSTEM_REROUTE",
             "DIAGNOSTIC_UPDATE",

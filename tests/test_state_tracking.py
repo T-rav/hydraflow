@@ -41,7 +41,6 @@ class TestInitialization:
         d = tracker.to_dict()
         expected_keys = {
             "active_branches",
-            "active_crate_number",
             "bead_mappings",
             "active_issue_numbers",
             "active_workspaces",

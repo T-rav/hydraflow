@@ -9,7 +9,7 @@ concrete-only methods the orchestrator dispatches via
 ``cast("IssueStore", self._svc.store)`` (``start``, ``clear_active``,
 ``get_active_issues``, ``get_queue_stats``, ``get_pipeline_snapshot``,
 ``is_in_pipeline``, ``get_merged_numbers``, ``get_cached``,
-``get_hitl_issues``, ``get_uncrated_issues``, ``set_crate_manager``).
+``get_hitl_issues``).
 
 Implementation strategy:
 
@@ -126,9 +126,6 @@ class FakeIssueStore:
             "snapshot_entries": 0,
         }
         self._last_poll_ts: str | None = None
-        # Crate manager — set later by service_registry; the Fake doesn't
-        # use it but exposes the setter so the wiring path doesn't fork.
-        self._crate_manager: Any = None
 
     @classmethod
     def from_seed(cls, seed: MockWorldSeed, event_bus: EventBus) -> FakeIssueStore:
@@ -224,19 +221,6 @@ class FakeIssueStore:
             )
         except Exception:  # noqa: BLE001
             logger.debug("FakeIssueStore.refresh publish failed", exc_info=True)
-
-    def set_crate_manager(self, cm: Any) -> None:
-        """Store the crate manager (Fake doesn't use it but signature must match)."""
-        self._crate_manager = cm
-
-    def get_uncrated_issues(self) -> list[Task]:
-        """Return queued tasks with no crate metadata. Fake has none, so [].
-
-        Production CrateManager assigns ``milestone_number`` in metadata; the
-        Fake doesn't simulate milestones. Returning an empty list keeps the
-        crate-management code path quiet.
-        """
-        return []
 
     # ------------------------------------------------------------------
     # Queue accessors

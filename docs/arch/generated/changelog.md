@@ -6,6 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `055267e` — fix(adr): single-colon ADR-0049 citations so drift coverage parses (#10481) (#10481) *(2026-07-24)*
+- `6c3cb69` — feat(adr): nudge bare shared-infra citations toward :Symbol granularity (#10479) (#10479) *(2026-07-24)*
+- `ee56677` — fix(gc): guard active auto-agent worktrees from stale-worktree GC (#10476) (#10476) *(2026-07-24)*
+- `7150d37` — Fixes #10457: Fleet-batch ADR-drift triage auto-close (#10474) (#10474) *(2026-07-24)*
 - `23a02b7` — feat(ul): term-proposer batch — 2 drafts (#10465) (#10465) *(2026-07-24)*
 - `25b0df2` — fix(ul): drop over-broad prose aliases from CreditExhaustedError term (#10466) (#10466) *(2026-07-24)*
 - `c0821c9` — Fixes #10403: Erosion: symbol `append` scattered across 4 modules (#10446) (#10446) *(2026-07-24)*
@@ -582,11 +586,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `204084a` — feat(loop): wire DiagramLoop (L24) into runtime — five-checkpoint pattern (#8440) (#8440) *(2026-04-26)*
 - `5837a29` — feat(arch): trust fleet topology page (curated) (#8438) (#8438) *(2026-04-26)*
 - `64e9f31` — fix(arch): lift modules.md drift exemption (root cause: stale baseline) (#8437) (#8437) *(2026-04-26)*
-- `67079aa` — docs(spec): Auto-Agent HITL pre-flight loop design (#8431) (#8431) *(2026-04-25)*
-- `70392a6` — fix(arch): correct GitHub org in all site URLs (#8435) (#8435) *(2026-04-25)*
-- `f893069` — feat(arch): Plan C — DiagramLoop (L24) + CI guard + Pages site (#8434) (#8434) *(2026-04-25)*
-- `300c3c7` — feat(arch): Plan B — Functional Areas + ADR-0001 amendment + migration (#8433) (#8433) *(2026-04-25)*
-- `bee256f` — feat(arch): Architecture Knowledge System v1 — spec + 3 plans + Plan A runner (#8432) (#8432) *(2026-04-25)*
 
 
 <!-- arch:generated -->

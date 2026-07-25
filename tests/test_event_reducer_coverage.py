@@ -38,9 +38,6 @@ SKIP_LIST: set[str] = {
     "visual_gate",
     # Baseline update events are consumed server-side for policy decisions
     "baseline_update",
-    # Crate lifecycle events are consumed by the crate manager, not the dashboard
-    "crate_activated",
-    "crate_completed",
     # Issue-created events are handled by pipeline snapshot refresh
     "issue_created",
     # Refinement tick summaries surface via the rolling digest issue and the

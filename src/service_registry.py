@@ -48,7 +48,6 @@ from contract_refresh_loop import ContractRefreshLoop
 from convergence_oscillation_loop import ConvergenceOscillationLoop
 from corpus_learning_loop import CorpusLearningLoop
 from cost_budget_watcher_loop import CostBudgetWatcherLoop  # noqa: TCH001
-from crate_manager import CrateManager
 from dependabot_merge_loop import DependabotMergeLoop
 from detector_calibration_loop import DetectorCalibrationLoop
 from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
@@ -284,7 +283,6 @@ class ServiceRegistry:
     # object as `store` when caching_issue_store_enabled is False so
     # consumers can opt in without conditional wiring.
     phase_store: IssueStorePort
-    crate_manager: CrateManager
     issue_cache: IssueCache
 
     # Phase coordinators
@@ -856,27 +854,18 @@ def build_services(
     # full widening of downstream method signatures to take
     # ``IssueStorePort`` directly, after which this cast can be removed.
     #
-    # Note: ``set_crate_manager`` and ``is_in_pipeline`` are
-    # IssueStore-only plumbing not on the Port; both call sites below
-    # are gated on attribute presence so override stores remain functional.
+    # Note: ``is_in_pipeline`` is IssueStore-only plumbing not on the Port;
+    # the call sites below are gated on attribute presence so override stores
+    # remain functional.
     store = cast(IssueStore, store)
-
-    # Crate management
-    crate_manager = CrateManager(config, state, prs, event_bus)
-    # ``set_crate_manager`` is internal IssueStore plumbing not part of
-    # IssueStorePort. Sandbox stores (FakeIssueStore) don't implement it
-    # and don't need it — gate the call on attribute presence so override
-    # stores remain functional.
-    if hasattr(store, "set_crate_manager"):
-        store.set_crate_manager(crate_manager)
 
     # #9842: event-driven workstream cards. Every successful
     # ``swap_pipeline_labels`` is applied to the in-memory pipeline
     # immediately, so the existing coalesced PIPELINE_SNAPSHOT push moves the
     # board within ~1s instead of at the 300s ``data_poll_interval`` label
-    # re-read (which stays as the reconciling backstop). hasattr-gated like
-    # ``set_crate_manager``: sandbox fakes (FakeGitHub / FakeIssueStore) read
-    # labels live and need no bridge.
+    # re-read (which stays as the reconciling backstop). hasattr-gated:
+    # sandbox fakes (FakeGitHub / FakeIssueStore) read labels live and need
+    # no bridge.
     if hasattr(prs, "set_pipeline_label_listener") and hasattr(
         store, "apply_label_transition"
     ):
@@ -1993,7 +1982,6 @@ def build_services(
         fetcher=fetcher,
         store=store,
         phase_store=phase_store,
-        crate_manager=crate_manager,
         issue_cache=issue_cache,
         triager=triager,
         discover_runner=discover_runner,

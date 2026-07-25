@@ -16,8 +16,6 @@ Every `EventType` published or subscribed in `src/`. Events with no subscribers 
 | **BASELINE_UPDATE** ⚠️ | `src.baseline_policy:BaselinePolicy.check_approval`<br>`src.baseline_policy:BaselinePolicy.rollback` | — |
 | **CI_CHECK** ⚠️ | `src.pr_manager:PRManager.wait_for_ci`<br>`src.reviewer:ReviewRunner.fix_ci` | — |
 | **CONCERN_FORWARDED** ⚠️ | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_concerns_forwarded` | — |
-| **CRATE_ACTIVATED** ⚠️ | `src.crate_manager:CrateManager.activate_crate` | — |
-| **CRATE_COMPLETED** ⚠️ | `src.crate_manager:CrateManager.check_and_advance` | — |
 | **DIAGNOSTIC_UPDATE** ⚠️ | `src.diagnostic_loop:DiagnosticLoop._publish_update` | — |
 | **EPIC_PROGRESS** ⚠️ | `src.epic:EpicManager.refresh_cache` | — |
 | **EPIC_READY** ⚠️ | `src.epic:EpicManager._publish_ready_event`<br>`src.epic:EpicManager.refresh_cache` | — |
