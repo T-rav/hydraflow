@@ -135,6 +135,28 @@ describe('Header component', () => {
     expect(screen.getByText('Stopping\u2026')).toBeInTheDocument()
   })
 
+  it('does not log a border shorthand/longhand collision warning when the start/stop button toggles connected state (#10564)', () => {
+    // The Start/Stop <button> keeps the same DOM position across the `connected`
+    // toggle, so React diffs its inline style. If the disabled variant mixes the
+    // `border` shorthand (inherited from controlStartBtn) with a `border*`
+    // longhand (borderColor), React logs a shorthand/longhand collision warning
+    // on rerender. Toggle connected in both idle (Start) and running (Stop) modes.
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const { rerender } = render(<Header {...defaultProps} connected={false} orchestratorStatus="idle" />)
+    rerender(<Header {...defaultProps} connected={true} orchestratorStatus="idle" />)
+    rerender(<Header {...defaultProps} connected={false} orchestratorStatus="idle" />)
+    rerender(<Header {...defaultProps} connected={false} orchestratorStatus="running" />)
+    rerender(<Header {...defaultProps} connected={true} orchestratorStatus="running" />)
+    rerender(<Header {...defaultProps} connected={false} orchestratorStatus="running" />)
+
+    const collisionWarnings = consoleSpy.mock.calls.filter(call =>
+      String(call[0]).includes('conflicting property')
+    )
+    consoleSpy.mockRestore()
+    expect(collisionWarnings).toEqual([])
+  })
+
   it('does not render workload counters', () => {
     mockUseHydraFlow.mockReturnValue({
       stageStatus: { ...mockStageStatus(), workload: { active: 3, done: 2, failed: 1, total: 6 } },

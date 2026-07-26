@@ -527,6 +527,9 @@ const controlBtnDisabled = {
   ...styles.controlStartBtn,
   opacity: 0.4,
   cursor: 'not-allowed',
-  borderColor: theme.border,
+  // Override the full `border` shorthand (not just borderColor) so this variant
+  // never mixes shorthand + longhand for the same element across the `connected`
+  // toggle vs controlStartBtn/controlStopBtn — React warns on that mix (#10564).
+  border: `1px solid ${theme.border}`,
   color: theme.textInactive,
 }
