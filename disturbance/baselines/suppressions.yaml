@@ -154,7 +154,7 @@ entries:
   src/hitl_phase.py::noqa:PLC0415: 3
   src/human_steering_loop.py::noqa:BLE001: 1
   src/implement_phase.py::noqa:BLE001: 1
-  src/implement_phase.py::noqa:PLC0415: 14
+  src/implement_phase.py::noqa:PLC0415: 13
   src/implement_phase.py::type-ignore[arg-type]: 2
   "src/implement_spec_reviewer.py::noqa:ANN001\u2014duck-typed": 1
   "src/implement_spec_reviewer.py::noqa:ANN001\u2014duck-typedrun_simplecallable": 2
