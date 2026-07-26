@@ -772,6 +772,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
+        "auto_pr_auto_merge_enabled",
+        "HYDRAFLOW_AUTO_PR_AUTO_MERGE_ENABLED",
+        True,
+    ),
+    (
         "pr_base_freshness_guard_enabled",
         "HYDRAFLOW_PR_BASE_FRESHNESS_GUARD_ENABLED",
         True,
@@ -4735,6 +4740,18 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Per-stage timeout in seconds for the auto-PR pre-flight gate "
             "(#10013). A stage that exceeds it counts as red."
+        ),
+    )
+    auto_pr_auto_merge_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for arming auto-merge on bot PRs (#10672, Fix 2). "
+            "When True (default, preserving behavior), the auto-PR merge path "
+            "may run ``gh pr merge --auto --squash`` — but only after a "
+            "fail-closed green-gate confirms the PR's statusCheckRollup is "
+            "fully green (no failing or still-pending check). When False, "
+            "auto-merge is never armed and PRs wait for a human/shepherd merge, "
+            "without a code change."
         ),
     )
     pr_base_freshness_guard_enabled: bool = Field(
