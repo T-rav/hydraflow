@@ -110,6 +110,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 60),
     ("max_plan_chars", "HYDRAFLOW_MAX_PLAN_CHARS", 5000),
     (
+        "plan_design_decision_hitl_threshold",
+        "HYDRAFLOW_PLAN_DESIGN_DECISION_HITL_THRESHOLD",
+        2,
+    ),
+    (
         "max_pre_quality_review_attempts",
         "HYDRAFLOW_MAX_PRE_QUALITY_REVIEW_ATTEMPTS",
         3,
@@ -2612,6 +2617,21 @@ class HydraFlowConfig(BaseModel):
             "Hard character budget for a plan (#9955). Kept BELOW "
             "max_impl_plan_chars so the implement boundary never truncates — "
             "truncation is information loss the plan phase paid latency for."
+        ),
+    )
+    plan_design_decision_hitl_threshold: int = Field(
+        default=2,
+        ge=1,
+        le=50,
+        description=(
+            "Number of design-decision-class CRITICAL plan-review concerns "
+            "(unresolved design decision / unvalidated core mechanism, e.g. from "
+            "the Risk-Skeptic voter or AssumptionSurfacer) that routes an issue "
+            "to `human-required` instead of swapping to `hydraflow-ready` at the "
+            "plan->ready gate. Prevents the factory force-implementing "
+            "design/research issues where the agent hangs to the timeout and "
+            "retry-thrashes (issue #10659). Implementer-addressable concerns "
+            "(buildability/coverage/AC) never count toward this threshold."
         ),
     )
     max_new_files_warning: int = Field(
