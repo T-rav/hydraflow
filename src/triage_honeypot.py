@@ -57,6 +57,61 @@ _TOOL_CALL_RE = re.compile(r"TOOL_CALL:\s*([A-Za-z_][A-Za-z0-9_]*)")
 # Keep the honeypot cheap and bounded — it screens every issue.
 _MAX_BODY_CHARS = 4000
 
+# Precision gate (issue #10675) --------------------------------------------
+#
+# A subset of the belt tool NAMES collide with everyday engineering
+# vocabulary — a bug report, a transcript, or a mock-world fixture legitimately
+# quotes ``read_file`` / ``run_shell`` / ``execute_command`` as *data*. A weak
+# honeypot model would echo ``TOOL_CALL:`` for such a name on sight, tripping on
+# benign content (this happened on issue #10670 in shadow mode). These names are
+# only treated as an injection when the untrusted content ALSO carries an actual
+# injection DIRECTIVE (see :func:`content_has_injection_directive`). The
+# remaining belt tools (``exfiltrate_data``, ``read_secret``, ``list_credentials``,
+# …) have no benign reason to be "called", so a trip on one is genuine on its
+# own — detection of real payloads is NOT weakened.
+AMBIGUOUS_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "run_shell",
+        "execute_command",
+        "delete_file",
+        "fetch_url",
+    }
+)
+
+# Imperative verbs that, aimed at a tool NAME, read as "make the agent act".
+_IMPERATIVE_VERBS = (
+    "call|invoke|execute|run|use|read|fetch|send|delete|list|dump|print|"
+    "reveal|leak|exfiltrate"
+)
+_TOOL_ALTERNATION = "|".join(re.escape(t) for t in HONEYPOT_TOOLS)
+
+# An imperative verb sitting next to a belt tool ("call execute_command",
+# "run `run_shell`", "you must use read_file") — a tool-invocation directive.
+_IMPERATIVE_TOOL_RE = re.compile(
+    r"(?i)(?:please\s+|now\s+|then\s+|you\s+(?:must|should|need\s+to|have\s+to)\s+)?"
+    rf"\b(?:{_IMPERATIVE_VERBS})\b\s+(?:the\s+)?[`'\"]?(?:{_TOOL_ALTERNATION})\b"
+)
+
+# Instruction-override / role-hijack: "ignore previous instructions", etc.
+_OVERRIDE_RE = re.compile(
+    r"(?is)\b(?:ignore|disregard|forget|override|bypass)\b[^.\n]{0,40}\b"
+    r"(?:instruction|instructions|prompt|prompts|rule|rules|direction|"
+    r"directions|guardrail|guardrails)\b"
+)
+_ROLE_HIJACK_RE = re.compile(
+    r"(?i)(?:you\s+are\s+now|you\s+must\s+now|new\s+instructions|system\s+prompt|"
+    r"ignore\s+the\s+above|act\s+as\s+an?\b|pretend\s+(?:to\s+be|you\s+are)|"
+    r"reveal\s+your\s+(?:system\s+)?(?:prompt|instructions))"
+)
+
+# Exfiltration intent: "exfiltrate …", "leak the …", "send … to https://…".
+_EXFIL_RE = re.compile(
+    r"(?i)(?:exfiltrat\w*|\bleak\s+(?:the|your|all|any|it|them|contents|data)\b|"
+    r"\b(?:send|post|upload|transmit|forward)\b[^.\n]{0,40}?\bto\b[^.\n]{0,40}?"
+    r"(?:https?://|attacker|webhook|external|exfil))"
+)
+
 
 @dataclass
 class HoneypotVerdict:
@@ -85,6 +140,43 @@ def detect_tool_calls(raw: str) -> list[str]:
         if name in HONEYPOT_TOOLS and name not in found:
             found.append(name)
     return found
+
+
+def content_has_injection_directive(text: str) -> bool:
+    """True when *text* carries an actual prompt-injection DIRECTIVE.
+
+    A directive is an instruction/attack pattern aimed at the agent — an
+    instruction override ("ignore previous instructions"), a role-hijack, an
+    imperative tool-invocation ("call ``execute_command``"), or an exfiltration
+    attempt — as opposed to a bare *mention* of a tool/command/file that a
+    legitimate issue quotes as data (issue #10675). Deliberately conservative:
+    it gates only the everyday-vocabulary belt tools, so a false negative here
+    still leaves the unambiguous tools tripping on their own.
+    """
+    if not text:
+        return False
+    return bool(
+        _OVERRIDE_RE.search(text)
+        or _ROLE_HIJACK_RE.search(text)
+        or _EXFIL_RE.search(text)
+        or _IMPERATIVE_TOOL_RE.search(text)
+    )
+
+
+def _trip_is_genuine(tripped: list[str], *, title: str, body: str) -> bool:
+    """Decide whether parsed tool-calls represent a real injection.
+
+    An unambiguous belt tool (``exfiltrate_data``, ``read_secret``, …) has no
+    benign reason to be "called", so any such trip is genuine on its own. When
+    *only* everyday-vocabulary names tripped (``read_file``/``run_shell``/…),
+    require an injection directive in the untrusted content — bare tool-name
+    echoes on benign prose/fixtures no longer trip (issue #10675 / #10670).
+    """
+    if not tripped:
+        return False
+    if any(tool not in AMBIGUOUS_TOOL_NAMES for tool in tripped):
+        return True
+    return content_has_injection_directive(f"{title}\n{body}")
 
 
 def build_honeypot_prompt(
@@ -192,8 +284,9 @@ async def screen_issue(
         )
 
     tripped = detect_tool_calls(raw)
+    injection = _trip_is_genuine(tripped, title=title, body=body)
     return HoneypotVerdict(
-        injection_detected=bool(tripped),
+        injection_detected=injection,
         tripped_tools=tripped,
         raw=raw,
     )
