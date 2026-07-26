@@ -1,12 +1,13 @@
 """Regression test for issue #10571.
 
-Bug: the ``{ ...baseStyleWithBorderShorthand, borderColor: X }`` pattern fixed
-in ``Header.jsx`` for issue #10564 recurs in several other dashboard
-components — a base style object sets the ``border`` CSS shorthand and a
-variant/inline override then sets only the ``borderColor`` longhand. React
-warns when a style update removes a longhand sub-property while the
-shorthand remains set on the same DOM node across a rerender ("mixing
-shorthand and non-shorthand properties for the same value").
+Bug: the ``{ ...baseStyleWithBorderShorthand, borderColor: X }`` pattern
+reported for ``Header.jsx`` in issue #10564 (open, out of scope here) recurs
+in several other dashboard components — a base style object sets the
+``border`` CSS shorthand and a variant/inline override then sets only the
+``borderColor`` longhand. React warns when a style update removes a longhand
+sub-property while the shorthand remains set on the same DOM node across a
+rerender ("mixing shorthand and non-shorthand properties for the same
+value").
 
 Expected behaviour: any style object whose variants override a border
 sub-property must define the base in longhand form (``borderWidth`` /
@@ -32,8 +33,12 @@ from tests.ui_style_reader import (
 )
 
 _STREAM_CARD = REPO_ROOT / "src" / "ui" / "src" / "components" / "StreamCard.jsx"
-_PIPELINE_STATUS = REPO_ROOT / "src" / "ui" / "src" / "components" / "PipelineStatus.jsx"
-_BUG_REPORT_PANEL = REPO_ROOT / "src" / "ui" / "src" / "components" / "BugReportPanel.jsx"
+_PIPELINE_STATUS = (
+    REPO_ROOT / "src" / "ui" / "src" / "components" / "PipelineStatus.jsx"
+)
+_BUG_REPORT_PANEL = (
+    REPO_ROOT / "src" / "ui" / "src" / "components" / "BugReportPanel.jsx"
+)
 _ISSUE_HISTORY_PANEL = (
     REPO_ROOT / "src" / "ui" / "src" / "components" / "IssueHistoryPanel.jsx"
 )
@@ -44,7 +49,9 @@ def test_stream_card_stage_node_base_has_no_border_shorthand_conflict() -> None:
     src = read_source(_STREAM_CARD)
     base = extract_object_literal(src, "stageNodeBase")
     variants = extract_spread_variants(src, "stageNodeBase")
-    assert variants, "expected stageNodeBase to be spread by status variants in StageRow"
+    assert variants, (
+        "expected stageNodeBase to be spread by status variants in StageRow"
+    )
 
     conflicts = find_border_shorthand_conflicts(
         "StreamCard.stageNodeBase",
@@ -78,7 +85,9 @@ def test_pipeline_status_stage_has_no_border_shorthand_conflict() -> None:
     styles_block = extract_object_literal(src, "styles")
     base = extract_nested_object(styles_block, "stage")
     variants = extract_spread_variants(src, "styles.stage")
-    assert variants, "expected styles.stage to be spread by active/inactive stageStyles variants"
+    assert variants, (
+        "expected styles.stage to be spread by active/inactive stageStyles variants"
+    )
 
     conflicts = find_border_shorthand_conflicts(
         "PipelineStatus.styles.stage",
@@ -95,7 +104,9 @@ def test_bug_report_panel_status_badge_has_no_border_shorthand_conflict() -> Non
     styles_block = extract_object_literal(src, "styles")
     base = extract_nested_object(styles_block, "statusBadge")
     variants = extract_spread_variants(src, "styles.statusBadge")
-    assert variants, "expected styles.statusBadge to be spread by the inline status badge"
+    assert variants, (
+        "expected styles.statusBadge to be spread by the inline status badge"
+    )
 
     conflicts = find_border_shorthand_conflicts(
         "BugReportPanel.styles.statusBadge",
@@ -128,7 +139,9 @@ def test_issue_history_panel_linked_pill_has_no_border_shorthand_conflict() -> N
     styles_block = extract_object_literal(src, "styles")
     base = extract_nested_object(styles_block, "linkedPill")
     variants = extract_spread_variants(src, "styles.linkedPill")
-    assert variants, "expected styles.linkedPill to be spread by renderLinkedIssue's pillStyle"
+    assert variants, (
+        "expected styles.linkedPill to be spread by renderLinkedIssue's pillStyle"
+    )
 
     conflicts = find_border_shorthand_conflicts(
         "IssueHistoryPanel.styles.linkedPill",
