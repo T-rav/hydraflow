@@ -22,13 +22,21 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field
 
 from dedup_store import DedupStore
+from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from knowledge_metrics import metrics as _metrics
 from prompt_gate_alerts import (
     alert_prompt_gate_block,
     clear_prompt_gate_block,
     is_prompt_gate_blocked,
 )
-from repo_wiki import WikiEntry
+from repo_wiki import (
+    DEFAULT_TOPICS,
+    WikiEntry,
+    _load_tracked_active_entries,
+    _mark_tracked_entry_superseded,
+    _write_tracked_synthesis_entry,
+    synthesis_matches_active_bodies,
+)
 from wiki_anchor_gate import config_field_vocabulary, has_repo_anchor
 
 _SYNTHESIS_ID_RE = re.compile(r"^(\d+)-")
@@ -465,6 +473,22 @@ def parse_adr_draft_suggestion(transcript: str) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# Compile flow (P1 of #10682, ADR-0111)
+# ---------------------------------------------------------------------------
+
+
+def _flow_aborted(state: FlowState) -> bool:
+    """Edge guard: route to the terminal when a node has signalled abort.
+
+    Nodes set ``state['_stop']`` on any fail-closed early-exit (too few
+    inputs, model failure, empty / anchor-less / byte-identical output) so
+    the graph routes straight to ``done`` without running ``validate`` — the
+    only node that writes.
+    """
+    return bool(state.get("_stop"))
+
+
+# ---------------------------------------------------------------------------
 # Compiler
 # ---------------------------------------------------------------------------
 
@@ -557,7 +581,6 @@ class WikiCompiler:
         then writes the compiled entries back.  Returns the number of
         entries after compilation (0 on failure).
         """
-        from repo_wiki import DEFAULT_TOPICS  # noqa: PLC0415
 
         repo_dir = store._repo_dir(repo)
         topic_path = repo_dir / f"{topic}.md"
@@ -663,19 +686,113 @@ class WikiCompiler:
         7), so combining this method with ``_maybe_open_maintenance_pr``
         lets ``RepoWikiLoop`` emit complete maintenance PRs without
         needing a separate synthesis sub-loop.
+
+        Since P1 of #10682 (ADR-0111) the multi-step compile runs as an
+        explicit ``src.flows.Flow`` — ``extract -> verify -> synthesize ->
+        validate`` — built by :meth:`_build_compile_flow`. Behavior and the
+        return contract are unchanged; the steps are just no longer inlined.
         """
-        from repo_wiki import (  # noqa: PLC0415
-            DEFAULT_TOPICS,
-            _load_tracked_active_entries,
-            _mark_tracked_entry_superseded,
-            _write_tracked_synthesis_entry,
-            synthesis_matches_active_bodies,
+        flow = self._build_compile_flow()
+        state: FlowState = {
+            "tracked_root": tracked_root,
+            "repo": repo,
+            "topic": topic,
+            "other_topics": other_topics,
+            "result": 0,
+        }
+        result = await flow.run(state)
+        return int(result.state["result"])
+
+    def _build_compile_flow(
+        self,
+        *,
+        checkpoint: NodeHook | None = None,
+        kill_switch: KillSwitch | None = None,
+    ) -> Flow:
+        """Build the tracked-compile DAG (P1 of #10682, ADR-0111).
+
+        The straight-line compile is re-expressed as an explicit flow:
+        ``extract -> verify -> synthesize -> validate`` with a terminal
+        ``done`` sink. Every fail-closed abort (too few inputs, model
+        failure, empty / anchor-less / byte-identical output) routes straight
+        to ``done``, so ``validate`` — the only node that writes — runs
+        exclusively on a genuine, anchored, non-no-op synthesis. The LLM call
+        lives inside ``synthesize`` alone (the actuator boundary); routing
+        between nodes is deterministic.
+
+        ``checkpoint`` / ``kill_switch`` stay injected per ADR-0111 so the
+        primitive's persistence + halt seams are wired-through and testable.
+        The production entry runs without a checkpoint: a single-shot compile
+        needs no resume, and writing one would be a new on-disk side effect
+        this parity-gated, no-flag refactor must not introduce. Per-node
+        ``on_node`` event wiring is deferred to a later phase per ADR-0111.
+        """
+        return Flow(
+            nodes=[
+                Node("extract", self._flow_extract, kind="gate"),
+                Node("verify", self._flow_verify),
+                Node("synthesize", self._flow_synthesize, kind="gate"),
+                Node("validate", self._flow_validate),
+                Node("done", self._flow_done),
+            ],
+            edges=[
+                # First-match-wins: an aborted node skips straight to the sink.
+                Edge("extract", "done", when=_flow_aborted),
+                Edge("extract", "verify"),
+                Edge("verify", "synthesize"),
+                Edge("synthesize", "done", when=_flow_aborted),
+                Edge("synthesize", "validate"),
+                Edge("validate", "done"),
+            ],
+            entry="extract",
+            checkpoint=checkpoint,
+            kill_switch=kill_switch,
         )
 
-        topic_dir = tracked_root / repo / topic
+    async def _flow_extract(self, state: FlowState) -> FlowState:
+        """Load the topic's active tracked entries (#10682 extract node).
+
+        Fewer than two active entries means there is nothing to compile:
+        abort to the terminal so no model call is ever spent.
+        """
+
+        topic_dir = state["tracked_root"] / state["repo"] / state["topic"]
         active_entries = _load_tracked_active_entries(topic_dir)
+        state["topic_dir"] = topic_dir
+        state["active_entries"] = active_entries
         if len(active_entries) < 2:
-            return 0
+            state["_stop"] = True
+        return state
+
+    async def _flow_verify(self, state: FlowState) -> FlowState:
+        """Pin shipped-claim provenance from the inputs (#10682 verify node).
+
+        Unions ``fixed_in_pr`` / ``code_refs`` across the active sources up
+        front (#10590) so the value is captured from the inputs before the
+        LLM can drop it; ``validate`` applies it to the synthesized entries.
+        Pure over ``active_entries`` — no side effects, no I/O — so computing
+        it here rather than on the write path is behavior-preserving.
+        """
+        union_pr, union_refs = self._union_shipped_claim_provenance(
+            state["active_entries"]
+        )
+        state["union_pr"] = union_pr
+        state["union_refs"] = union_refs
+        return state
+
+    async def _flow_synthesize(self, state: FlowState) -> FlowState:
+        """Run the LLM compile and gate its output (#10682 synthesize node).
+
+        The single actuator: build the prompt, call the model, parse, then
+        apply the repo-anchor gate (#9954) and the byte-identity no-op guard
+        (#10573). Any failure or empty / anchor-less / no-op result aborts to
+        the terminal, keeping the originals untouched.
+        """
+
+        active_entries = state["active_entries"]
+        repo = state["repo"]
+        topic = state["topic"]
+        other_topics = state["other_topics"]
 
         entries_text = "\n\n".join(
             f"### {e['title']} (id: {e['id']})\n{e['body']}\n"
@@ -696,7 +813,8 @@ class WikiCompiler:
 
         raw = await self._call_model(prompt)
         if raw is None:
-            return 0
+            state["_stop"] = True
+            return state
 
         compiled = self._parse_entries(raw)
         if not compiled:
@@ -706,7 +824,8 @@ class WikiCompiler:
                 repo,
                 topic,
             )
-            return 0
+            state["_stop"] = True
+            return state
 
         # Repo-specificity gate (#9954): drop anchor-less platitudes before
         # they are written as synthesis entries. Keeping originals when the
@@ -722,7 +841,8 @@ class WikiCompiler:
                 repo,
                 topic,
             )
-            return 0
+            state["_stop"] = True
+            return state
 
         # Byte-identity no-op guard (#10573): if the synthesized bodies are
         # byte-identical to the current active set, writing them would only
@@ -737,16 +857,38 @@ class WikiCompiler:
                 repo,
                 topic,
             )
-            return 0
+            state["_stop"] = True
+            return state
+
+        state["compiled"] = compiled
+        return state
+
+    async def _flow_validate(self, state: FlowState) -> FlowState:
+        """Apply provenance, then persist the synthesis (#10682 validate node).
+
+        Carries the pinned shipped-claim provenance onto every output
+        (#10590), resolves per-entry supersession (#10566), writes each
+        synthesis entry, and flips every input to ``superseded``. The only
+        node that mutates the tracked layout, and it runs only after
+        ``synthesize`` produced a genuine, anchored, non-no-op result.
+        """
+
+        active_entries = state["active_entries"]
+        compiled = state["compiled"]
+        repo = state["repo"]
+        topic = state["topic"]
+        topic_dir = state["topic_dir"]
+        union_pr = state["union_pr"]
+        union_refs = state["union_refs"]
 
         # Shipped-claim provenance union (#10590): the LLM is not guaranteed
-        # to echo the source entries' fixed_in_pr / code_refs, so carry them
-        # deterministically onto every synthesized entry. Promotion merges /
-        # splits entries, so the source→synthesis mapping is not 1:1; unioning
-        # the whole superseded set onto each output over-approximates but never
-        # DROPS a shipped claim — under-reporting is the bug, and extra valid
-        # code_refs only make the downstream verifier corroborate more readily.
-        union_pr, union_refs = self._union_shipped_claim_provenance(active_entries)
+        # to echo the source entries' fixed_in_pr / code_refs, so carry the
+        # pinned union (captured in ``verify``) deterministically onto every
+        # synthesized entry. Promotion merges / splits entries, so the
+        # source→synthesis mapping is not 1:1; unioning the whole superseded
+        # set onto each output over-approximates but never DROPS a shipped
+        # claim — under-reporting is the bug, and extra valid code_refs only
+        # make the downstream verifier corroborate more readily.
         if union_pr is not None or union_refs:
             for entry in compiled:
                 entry.fixed_in_pr = union_pr
@@ -791,7 +933,18 @@ class WikiCompiler:
             len(active_entries),
             len(compiled),
         )
-        return len(compiled)
+        state["result"] = len(compiled)
+        return state
+
+    @staticmethod
+    async def _flow_done(state: FlowState) -> FlowState:
+        """Terminal sink for the compile flow (#10682).
+
+        A no-op join point so every path — the four-node happy walk and each
+        fail-closed abort — ends at one observable terminal carrying the
+        final ``result`` count.
+        """
+        return state
 
     async def detect_contradictions(
         self,
@@ -913,7 +1066,6 @@ class WikiCompiler:
         if not wiki_ids:
             decision.reason = "no tribal wiki entry cited"
             return decision
-        from repo_wiki import DEFAULT_TOPICS  # noqa: PLC0415
 
         tribal_ids: set[str] = set()
         tribal_repo_dir = tribal.repo_dir()
@@ -1218,7 +1370,7 @@ class WikiCompiler:
             try:
                 raw_supersedes_ids = item.get("supersedes_ids")
                 supersedes_ids = (
-                    [str(x) for x in raw_supersedes_ids if isinstance(x, (str, int))]
+                    [str(x) for x in raw_supersedes_ids if isinstance(x, str | int)]
                     if isinstance(raw_supersedes_ids, list)
                     else []
                 )

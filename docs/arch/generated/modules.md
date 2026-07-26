@@ -41,6 +41,7 @@ graph LR
     src -- "5" --> src_disturbance
     src -- "16" --> src_erosion
     src -- "11" --> src_escape
+    src -- "1" --> src_flows
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
     src -- "16" --> src_preflight

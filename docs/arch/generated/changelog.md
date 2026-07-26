@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `c74283c` — feat(flows): in-framework flow (DAG) primitive + ADR (P0 of #10682) (#10684) (#10684) *(2026-07-26)*
 - `108a348` — feat: provider/harness backend split — z.ai as a Claude-harness backend (#10550) (#10550) *(2026-07-26)*
 - `81a7a66` — feat(ul): edge-proposer — 42 new edges across 23 terms (#10650) (#10650) *(2026-07-26)*
 - `958d9a5` — fix(arch): canonical label transition table + real ADR-0002 drift gate (#10642) (#10642) *(2026-07-26)*
