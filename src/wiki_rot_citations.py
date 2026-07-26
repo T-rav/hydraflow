@@ -79,12 +79,21 @@ def extract_cites(text: str) -> list[Cite]:
     out: list[Cite] = []
 
     for m in _STYLE_A_RE.finditer(text):
-        key = (m.group(1), m.group(2), "colon")
+        symbol = m.group(2)
+        # A purely-numeric tail (``path.py:141``) is a *line reference*, not
+        # a symbol cite. ``\w+`` in ``_STYLE_A_RE`` matches digits, so these
+        # slipped through as bogus symbol cites that can never resolve via
+        # ``verify_cite_ast`` — a permanent wiki-rot false-positive class
+        # (#10591). Python identifiers never start with a digit, so skip
+        # them here; genuine ``path.py:Symbol`` tails are unaffected.
+        if symbol.isdigit():
+            continue
+        key = (m.group(1), symbol, "colon")
         if key in seen:
             continue
         seen.add(key)
         out.append(
-            Cite(module=m.group(1), symbol=m.group(2), style="colon", raw=m.group(0))
+            Cite(module=m.group(1), symbol=symbol, style="colon", raw=m.group(0))
         )
 
     for m in _STYLE_B_RE.finditer(text):
