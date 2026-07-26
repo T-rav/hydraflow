@@ -1530,6 +1530,20 @@ class TestGetPrLabels:
         assert ".labels[].name" in call_args
 
     @pytest.mark.asyncio
+    async def test_blank_lines_are_filtered(self, config, event_bus):
+        mgr = make_pr_manager(config, event_bus)
+        mock_create = (
+            SubprocessMockBuilder()
+            .with_stdout("needs-review\n\n  \npriority-high\n")
+            .build()
+        )
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_pr_labels(521)
+
+        assert result == ["needs-review", "priority-high"]
+
+    @pytest.mark.asyncio
     async def test_read_failure_propagates(self, config, event_bus):
         """Errors are NOT swallowed so callers can fail-closed (mirrors #9575)."""
         mgr = make_pr_manager(config, event_bus)
