@@ -94,9 +94,10 @@ model {
       vitestPin = testPin 'src/ui/src/components/__tests__/*.test.jsx' {
         description 'Render probe: toggling filter pill / preset button logs no console.error collision'
       }
-      pin10564 = testPin 'tests/regressions/test_issue_10564.py' {
-        description 'Header.jsx pin (sibling issue) — should share the reader, not duplicate it'
-      }
+      // NOTE: issue #10564 (Header.jsx, same defect class) is still open and has
+      // no regression pin yet. When it lands, it should import this reader
+      // rather than duplicating the extraction logic — do not add a testPin
+      // element for it here until that file actually exists.
     }
   }
 
@@ -120,7 +121,6 @@ model {
 
   // pins
   pyPin -> reader 'imports public helpers'
-  pin10564 -> reader 'imports public helpers'
   pyPin -> streamCard 'pins'
   pyPin -> pipelineStatus 'pins'
   pyPin -> bugReport 'pins'
