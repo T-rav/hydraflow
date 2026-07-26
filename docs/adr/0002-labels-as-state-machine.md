@@ -42,6 +42,33 @@ a crash between remove and add leaves conflicting labels).
 
 State is polled, not pushed: each loop queries GitHub for issues with its label.
 
+### State transition diagram (machine-checked)
+
+The legal pipeline-stage transitions are the *canonical edge set* of this state
+machine. They are declared once, in code, as
+`src/label_transitions.py:LABEL_TRANSITIONS` — the single source of truth the
+runtime consults and the architecture extractor reads to render
+`docs/arch/generated/labels.md`. The diagram below is the human-readable form of
+that same edge set; `tests/architecture/test_label_state_matches_adr0002.py`
+diffs the two on every PR and fails on any drift (issue #10621).
+
+```mermaid
+stateDiagram-v2
+    hydraflow_find --> hydraflow_plan: triage
+    hydraflow_plan --> hydraflow_ready: plan accepted
+    hydraflow_plan --> hydraflow_hitl: plan escalation
+    hydraflow_ready --> hydraflow_review: PR opened
+    hydraflow_ready --> hydraflow_hitl: implement escalation
+    hydraflow_review --> hydraflow_fixed: merged
+    hydraflow_review --> hydraflow_hitl: review escalation
+    hydraflow_hitl --> hydraflow_ready: human correction
+    hydraflow_hitl --> hydraflow_review: human re-review
+```
+
+Orthogonal markers (`human-required`, `hydraflow-in-progress`) coexist with a
+stage label rather than being one; they are not edges in this diagram (see the
+build-claim marker section below).
+
 ### Build-claim marker: `ready → in-progress → review` (#10168)
 
 The single-stage-label invariant covers *pipeline stages*. Alongside the stage

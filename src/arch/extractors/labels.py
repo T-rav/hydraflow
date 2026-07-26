@@ -4,11 +4,13 @@ Looks for a top-level constant of the form
     TRANSITIONS = [(from_state, to_state, trigger?), ...]
 (or `_TRANSITIONS` / `LABEL_TRANSITIONS`). Walks src/*.py until one is found.
 
-For codebases where transitions are scattered across imperative
-`swap_pipeline_labels(...)` call-sites (HydraFlow as of v1) this returns an
-empty state machine. That's intentional: the ADR-0002 drift guard asserts
-that generated labels documentation explicitly reports the empty extraction
-until a later cleanup introduces a declarative transition table.
+HydraFlow's canonical source is `label_transitions.LABEL_TRANSITIONS` (the
+single source of truth the runtime consults, ADR-0002 / issue #10621). This
+extractor reads that literal verbatim so `docs/arch/generated/labels.md`
+renders the real edge set, which the drift guard
+`tests/architecture/test_label_state_matches_adr0002.py` diffs against the
+Mermaid diagram in ADR-0002. If no declarative table is found the state
+machine is empty (the pre-#10621 behavior).
 """
 
 from __future__ import annotations
@@ -21,6 +23,27 @@ from arch._models import LabelStateMachine, LabelTransition
 _RECOGNIZED_NAMES = {"TRANSITIONS", "_TRANSITIONS", "LABEL_TRANSITIONS"}
 
 
+def _target_name_and_value(
+    node: ast.stmt,
+) -> tuple[str, ast.expr] | None:
+    """Return ``(name, value)`` for a top-level ``NAME = ...`` assignment.
+
+    Handles both plain ``NAME = [...]`` (``ast.Assign``) and annotated
+    ``NAME: T = [...]`` (``ast.AnnAssign``) so the canonical table can carry a
+    type annotation. Returns ``None`` for anything else (bare annotations,
+    tuple targets, augmented assignments, ...).
+    """
+    if isinstance(node, ast.Assign):
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            return node.targets[0].id, node.value
+        return None
+    if isinstance(node, ast.AnnAssign):
+        if isinstance(node.target, ast.Name) and node.value is not None:
+            return node.target.id, node.value
+        return None
+    return None
+
+
 def _literal_transitions(src_text: str) -> list[LabelTransition]:
     """Find a top-level TRANSITIONS = [...] of tuples and parse them."""
     try:
@@ -29,15 +52,15 @@ def _literal_transitions(src_text: str) -> list[LabelTransition]:
         return []
     out: list[LabelTransition] = []
     for node in tree.body:
-        if not isinstance(node, ast.Assign):
+        target = _target_name_and_value(node)
+        if target is None:
             continue
-        if not (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+        name, value = target
+        if name not in _RECOGNIZED_NAMES:
             continue
-        if node.targets[0].id not in _RECOGNIZED_NAMES:
+        if not isinstance(value, ast.List | ast.Tuple):
             continue
-        if not isinstance(node.value, (ast.List, ast.Tuple)):
-            continue
-        for elt in node.value.elts:
+        for elt in value.elts:
             if not isinstance(elt, ast.Tuple):
                 continue
             parts: list[str] = []
