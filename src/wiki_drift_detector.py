@@ -17,6 +17,7 @@ returns its own finding type so operators can review before acting.
 
 from __future__ import annotations
 
+import builtins
 import logging
 import re
 from dataclasses import dataclass, field
@@ -255,6 +256,240 @@ def apply_drift_markers(findings: list[DriftFinding]) -> int:
             continue
         updated += 1
     return updated
+
+
+# ---------------------------------------------------------------------------
+# Prose-form citation drift (report-only) — issue #10581
+# ---------------------------------------------------------------------------
+#
+# ``detect_drift`` above recognizes only the strict single-backtick-span form
+# ``src/path.py:Symbol``. Plan-phase ingested entries routinely cite code in
+# *prose* instead:
+#
+#   * two backtick spans — "``DETECTOR_GENERATION`` constant in
+#     ``escape/detect.py``" (a bare identifier span near a module-path span,
+#     no ``src/`` prefix, no colon);
+#   * a dotted attribute/call — "``metrics.dedupe_by_detection_ref()``";
+#   * a bare module cite — "``src/models.py``" with no symbol.
+#
+# ``_SOURCE_PAIR_CITATION_RE`` matches none of these, so ``detect_drift``
+# returns early and an entry proposing never-implemented code sits at
+# ``status: active`` forever (issue #10581: architecture/0204, gotchas/0842).
+#
+# This channel recognizes those forms, but it is deliberately REPORT-ONLY:
+# ``detect_prose_drift`` returns a distinct ``ProseDriftFinding`` type that is
+# never passed to ``apply_drift_markers``. Auto-flipping ~395 active entries to
+# ``status: stale`` on a *heuristic* pairing would be far higher blast radius
+# than the strict path warrants — a wrong verdict must cost a log line, not a
+# mass stale-flip. This mirrors how ``SemanticDriftFinding`` is kept distinct
+# from ``DriftFinding`` for the same review-before-acting reason.
+
+# A backtick span whose whole content is a slashed/dotted path ending in
+# ``.py`` — ``escape/detect.py``, ``src/models.py``, ``foo.py``. The strict
+# ``src/x.py:Symbol`` form is NOT matched here (the trailing ``:Symbol`` means
+# ``.py`` is not immediately followed by a backtick), so this channel never
+# double-reports what ``detect_drift`` already owns.
+_PROSE_MODULE_SPAN_RE = re.compile(r"`([\w./-]+\.py)`")
+
+# A backtick span whose whole content is a bare identifier —
+# ``DETECTOR_GENERATION``, ``handle_start``.
+_PROSE_IDENT_SPAN_RE = re.compile(r"`([A-Za-z_]\w*)`")
+
+# A backtick span holding a dotted attribute/call —
+# ``metrics.dedupe_by_detection_ref()``, ``escape.metrics.gauge_calibration``.
+# The last dotted segment is the symbol; everything before it is the module.
+_PROSE_DOTTED_SPAN_RE = re.compile(r"`([A-Za-z_][\w.]*?)\.([A-Za-z_]\w*)(?:\(\s*\))?`")
+
+# Max character distance between a module span and an identifier span for the
+# two-span pairing to fire — keeps pairings inside a clause, not across
+# paragraphs.
+_PROSE_PAIR_WINDOW = 80
+
+# Identifier spans that are never a real code symbol: Python builtins /
+# exceptions (``KeyError``, ``True`` …) plus a few prose words that showed up
+# as junk pairings in prototype scans.
+_PROSE_SYMBOL_DENY: frozenset[str] = frozenset(dir(builtins)) | frozenset(
+    {"self", "cls", "py", "cannot", "execution", "true", "false", "none"}
+)
+
+
+@dataclass(frozen=True)
+class ProseDriftFinding:
+    """One active entry citing prose-form code that does not resolve.
+
+    ``suspect_symbols`` holds ``module_ref:symbol`` strings (or
+    ``src/path.py (missing file)`` for a bare unresolved file cite) for the
+    prose-form citations whose module names a real source file but whose symbol
+    is undefined anywhere under ``src/``.
+
+    Distinct from :class:`DriftFinding` so the heuristic prose channel is never
+    fed to :func:`apply_drift_markers` — a false positive here costs a log line,
+    not a ``status: stale`` flip.
+    """
+
+    entry_path: Path
+    entry_id: str
+    topic: str
+    suspect_symbols: frozenset[str]
+
+
+def _index_src(repo_root: Path) -> tuple[frozenset[str], frozenset[str]]:
+    """Return ``(defined_symbols, basenames)`` for ``repo_root/src``.
+
+    ``defined_symbols`` is every ``class`` / ``def`` / ``async def`` name plus
+    every module-level assignment target defined *anywhere* under ``src/`` —
+    the same grammar :func:`_file_defines_symbol` uses, walked over the whole
+    tree. A symbol counts as implemented if it exists anywhere, so a merely
+    *relocated* symbol stays silent; the target is *unimplemented* code.
+
+    ``basenames`` is the set of ``.py`` file basenames under ``src/`` — used to
+    judge whether a cited module names a real source file.
+    """
+    src_dir = repo_root / "src"
+    if not src_dir.is_dir():
+        return frozenset(), frozenset()
+    def_re = re.compile(r"^\s*(?:class|def|async\s+def)\s+([A-Za-z_]\w*)", re.MULTILINE)
+    assign_re = re.compile(r"^([A-Za-z_]\w*)\s*(?::\s*[^=\n]+)?\s*=", re.MULTILINE)
+    symbols: set[str] = set()
+    basenames: set[str] = set()
+    for py in src_dir.rglob("*.py"):
+        basenames.add(py.name)
+        try:
+            text = py.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        symbols.update(m.group(1) for m in def_re.finditer(text))
+        symbols.update(m.group(1) for m in assign_re.finditer(text))
+    return frozenset(symbols), frozenset(basenames)
+
+
+def _module_ref_is_credible(
+    repo_root: Path, ref: str, basenames: frozenset[str]
+) -> bool:
+    """Return ``True`` iff *ref* names a real source module under ``src/``.
+
+    Resolution order (mirrors the issue's plan): ``repo_root/<ref>`` →
+    ``repo_root/src/<ref>`` → any basename match under ``src/``. A dotted ref
+    (``escape.metrics``) is first mapped to a slashed ``.py`` path. Credibility
+    is the false-positive gate — random prose in backticks near an unknown
+    module is dropped rather than reported.
+    """
+    if ref.endswith(".py"):
+        if (repo_root / ref).is_file() or (repo_root / "src" / ref).is_file():
+            return True
+        return Path(ref).name in basenames
+    as_path = ref.replace(".", "/") + ".py"
+    if (repo_root / "src" / as_path).is_file() or (repo_root / as_path).is_file():
+        return True
+    return f"{ref.rsplit('.', maxsplit=1)[-1]}.py" in basenames
+
+
+def _extract_prose_cites(body: str) -> set[tuple[str, str]]:
+    """Extract ``(module_ref, symbol)`` prose citations from an entry body.
+
+    Two shapes are recognized:
+
+    * **dotted** — ``mod.symbol`` / ``mod.symbol()`` in one backtick span;
+    * **two-span** — a bare identifier span paired with its nearest module-path
+      span within :data:`_PROSE_PAIR_WINDOW` characters.
+    """
+    cites: set[tuple[str, str]] = set()
+
+    for match in _PROSE_DOTTED_SPAN_RE.finditer(body):
+        module, symbol = match.group(1), match.group(2)
+        if symbol == "py":  # a bare ``foo.py`` file span, not ``mod.symbol``
+            continue
+        cites.add((module, symbol))
+
+    modules = [(m.start(1), m.group(1)) for m in _PROSE_MODULE_SPAN_RE.finditer(body)]
+    idents = [(m.start(1), m.group(1)) for m in _PROSE_IDENT_SPAN_RE.finditer(body)]
+    for mpos, mref in modules:
+        nearest: str | None = None
+        nearest_dist: int | None = None
+        for ipos, ident in idents:
+            dist = abs(ipos - mpos)
+            if dist <= _PROSE_PAIR_WINDOW and (
+                nearest_dist is None or dist < nearest_dist
+            ):
+                nearest, nearest_dist = ident, dist
+        if nearest is not None:
+            cites.add((mref, nearest))
+    return cites
+
+
+def _prose_suspects(
+    body: str,
+    repo_root: Path,
+    defined_symbols: frozenset[str],
+    basenames: frozenset[str],
+) -> set[str]:
+    """Return the ``module_ref:symbol`` suspects for one entry body.
+
+    A prose cite is a suspect when its module names a real source file
+    (credibility gate) but the symbol is not defined anywhere under ``src/``
+    and is not a builtin / deny-listed word. Bare ``src/...py`` cites whose
+    file does not exist are reported as ``<path> (missing file)``.
+    """
+    suspects: set[str] = set()
+    for module_ref, symbol in _extract_prose_cites(body):
+        if symbol in _PROSE_SYMBOL_DENY or symbol in defined_symbols:
+            continue
+        if not _module_ref_is_credible(repo_root, module_ref, basenames):
+            continue
+        suspects.add(f"{module_ref}:{symbol}")
+
+    for match in _PROSE_MODULE_SPAN_RE.finditer(body):
+        ref = match.group(1)
+        if ref.startswith("src/") and not (repo_root / ref).is_file():
+            suspects.add(f"{ref} (missing file)")
+    return suspects
+
+
+def detect_prose_drift(
+    *,
+    tracked_root: Path,
+    repo_root: Path,
+    repo_slug: str,
+) -> list[ProseDriftFinding]:
+    """Scan active entries for prose-form cites to unimplemented code.
+
+    Report-only companion to :func:`detect_drift`: it recognizes the prose
+    citation forms the strict detector cannot (two-span, dotted, bare file) and
+    returns :class:`ProseDriftFinding`\\ s for entries whose prose cites name a
+    real source module but an undefined symbol. Callers **log and count** these
+    — they must never be passed to :func:`apply_drift_markers`.
+
+    Parameters mirror :func:`detect_drift`.
+    """
+    findings: list[ProseDriftFinding] = []
+    repo_dir = tracked_root / repo_slug
+    if not repo_dir.is_dir():
+        return findings
+
+    defined_symbols, basenames = _index_src(repo_root)
+
+    for topic_dir in sorted(p for p in repo_dir.iterdir() if p.is_dir()):
+        for entry_path in sorted(topic_dir.glob("*.md")):
+            try:
+                text = entry_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            fields = _parse_frontmatter(text)
+            if fields.get("status", "active") != "active":
+                continue
+            suspects = _prose_suspects(
+                _entry_body(text), repo_root, defined_symbols, basenames
+            )
+            if suspects:
+                findings.append(
+                    ProseDriftFinding(
+                        entry_path=entry_path,
+                        entry_id=fields.get("id", ""),
+                        topic=topic_dir.name,
+                        suspect_symbols=frozenset(suspects),
+                    )
+                )
+    return findings
 
 
 # ---------------------------------------------------------------------------
