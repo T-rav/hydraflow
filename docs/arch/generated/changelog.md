@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `e2625f4` — Fixes #10567: PRPort has no get_pr_labels — PR-level label routing ... (#10584) (#10584) *(2026-07-25)*
+- `7d284d6` — Fixes #10565: Sampled re-audit disagreement: PR #10479 (structural)... (#10576) (#10576) *(2026-07-25)*
 - `1ac9d57` — docs(arch): align functional_areas.yml loop grouping with the UI (#10554) (#10554) *(2026-07-25)*
 - `58b5cdc` — Fixes #10540, #10533: violation-based ADR citation conformance gate; retire activity-drift (#10547) (#10547) *(2026-07-25)*
 - `306cc57` — Fixes #10515: FakeIssueStore stamps HITL and merged snapshot entrie... (#10528) (#10528) *(2026-07-25)*
@@ -580,11 +582,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `54f940e` — feat(sandbox): catalog s02-s12 + SandboxFailureFixerLoop + 3-trigger CI (PR C of 3) (#8453) (#8453) *(2026-04-28)*
 - `e1e9c91` — feat(sandbox): docker-compose stack + harness + s01 + ADR-0052 (PR B of 3) (#8452) (#8452) *(2026-04-28)*
 - `32ef615` — feat(mockworld): foundation — Fake relocation + DI plumbing + sandbox entrypoint (PR A of 3) (#8451) (#8451) *(2026-04-28)*
-
-## 2026-W17
-
-- `7a0e225` — feat: CostBudgetWatcherLoop + PSH onboarding (multi-repo prereq) (#8450) (#8450) *(2026-04-26)*
-- `3738e3d` — feat(loop): PricingRefreshLoop — daily LiteLLM upstream-pricing refresh (#8449) (#8449) *(2026-04-26)*
 
 
 <!-- arch:generated -->
