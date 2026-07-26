@@ -339,6 +339,7 @@ entries:
   src/wiki_drift_detector.py::noqa:PLR0911: 1
   src/wiki_rot_detector_loop.py::noqa:BLE001: 4
   src/wiki_rot_detector_loop.py::noqa:PLC0415: 3
+  src/wiki_supersession_repair.py::noqa:PLC0415: 1
   src/workspace.py::noqa:E402: 1
   src/workspace.py::noqa:S311: 1
   src/workspace_gc_loop.py::noqa:BLE001: 8

@@ -259,6 +259,16 @@ def _split_tracked_entry(text: str) -> tuple[dict[str, str], str, str]:
     return fields, block, body
 
 
+def split_tracked_entry(text: str) -> tuple[dict[str, str], str, str]:
+    """Public wrapper for :func:`_split_tracked_entry`.
+
+    Lets other modules (e.g. ``wiki_supersession_repair``) parse tracked
+    per-entry frontmatter without importing a private, underscore-prefixed
+    symbol across a module boundary.
+    """
+    return _split_tracked_entry(text)
+
+
 def _update_tracked_entry_status(
     text: str, *, status: str, stale_reason: str | None = None
 ) -> str | None:
