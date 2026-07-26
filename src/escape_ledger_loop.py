@@ -70,7 +70,7 @@ from escape.detect import (
     count_commits_since,
     detect_escapes,
 )
-from escape.ledger import EscapeLedger
+from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from escape.metrics import low_confidence, unencoded_aging
 from escape.models import EscapeCandidate, EscapeRecord
 from escape.report import render_escape_ledger_markdown
@@ -91,7 +91,6 @@ _ISSUE_LABELS = ["hydraflow-find", "escape-ledger"]
 _ESCAPE_REPORT_REL = Path("docs/arch/generated/escape-ledger.md")
 _TRENDS_REPORT_REL = Path("docs/arch/generated/erosion-trends.md")
 
-_LEDGER_FILENAME = "escape_ledger.jsonl"
 _TRENDS_FILENAME = "erosion_trends.jsonl"
 
 _HEX_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
@@ -223,7 +222,7 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
 
     @property
     def _ledger_path(self) -> Path:
-        return self._config.diagnostics_dir / _LEDGER_FILENAME
+        return self._config.diagnostics_dir / ESCAPE_LEDGER_FILENAME
 
     @property
     def _trends_path(self) -> Path:
