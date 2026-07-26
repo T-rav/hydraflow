@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { theme } from '../theme'
+import { borderSides } from '../styles/borders'
 
 const _repoRowBase = {
   display: 'flex',
@@ -7,8 +8,7 @@ const _repoRowBase = {
   justifyContent: 'space-between',
   width: '100%',
   padding: '8px 10px',
-  border: 'none',
-  borderBottom: `1px solid ${theme.border}`,
+  ...borderSides({ bottom: `1px solid ${theme.border}` }),
   color: theme.text,
   textAlign: 'left',
   gap: 8,

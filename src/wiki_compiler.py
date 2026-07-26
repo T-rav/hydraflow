@@ -725,6 +725,19 @@ class WikiCompiler:
             )
             return 0
 
+        # Shipped-claim provenance union (#10590): the LLM is not guaranteed
+        # to echo the source entries' fixed_in_pr / code_refs, so carry them
+        # deterministically onto every synthesized entry. Promotion merges /
+        # splits entries, so the source→synthesis mapping is not 1:1; unioning
+        # the whole superseded set onto each output over-approximates but never
+        # DROPS a shipped claim — under-reporting is the bug, and extra valid
+        # code_refs only make the downstream verifier corroborate more readily.
+        union_pr, union_refs = self._union_shipped_claim_provenance(active_entries)
+        if union_pr is not None or union_refs:
+            for entry in compiled:
+                entry.fixed_in_pr = union_pr
+                entry.code_refs = union_refs
+
         superseded_ids = [e["id"] for e in active_entries]
         synthesis_paths: list[Path] = []
         for entry in compiled:
@@ -1017,6 +1030,39 @@ class WikiCompiler:
         except (OSError, FileNotFoundError, NotImplementedError) as exc:
             logger.warning("Wiki compilation model unavailable: %s", exc)
             return None
+
+    @staticmethod
+    def _union_shipped_claim_provenance(
+        active_entries: list[dict[str, Any]],
+    ) -> tuple[str | None, tuple[str, ...]]:
+        """Union the shipped-claim provenance across the superseded sources
+        (issue #10590).
+
+        Returns ``(fixed_in_pr, code_refs)`` where ``fixed_in_pr`` is an
+        order-preserving, de-duplicated, comma-joined string of every
+        distinct non-empty source ``fixed_in_pr`` (or ``None`` when none
+        carry one), and ``code_refs`` is the order-preserving, de-duplicated
+        tuple of every source ``code_ref``. Deterministic — no LLM involved —
+        so a synthesized entry can never silently drop a source's shipped
+        claim during promotion.
+        """
+        prs: list[str] = []
+        seen_pr: set[str] = set()
+        refs: list[str] = []
+        seen_ref: set[str] = set()
+        for entry in active_entries:
+            raw_pr = entry.get("fixed_in_pr")
+            pr = raw_pr.strip() if isinstance(raw_pr, str) else ""
+            if pr and pr not in seen_pr:
+                seen_pr.add(pr)
+                prs.append(pr)
+            for ref in entry.get("code_refs") or ():
+                cleaned = ref.strip() if isinstance(ref, str) else ""
+                if cleaned and cleaned not in seen_ref:
+                    seen_ref.add(cleaned)
+                    refs.append(cleaned)
+        fixed_in_pr = ",".join(prs) if prs else None
+        return fixed_in_pr, tuple(refs)
 
     @staticmethod
     def _filter_anchored_entries(

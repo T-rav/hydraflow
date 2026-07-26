@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useHydraFlow } from '../context/HydraFlowContext'
 import { canonicalRepoSlug, REPO_ALL } from '../constants'
 import { theme } from '../theme'
+import { borderSides } from '../styles/borders'
 
 function buildDisplayName(repo) {
   if (repo.full_name) return repo.full_name
@@ -252,8 +253,7 @@ const styles = {
     color: theme.textMuted,
   },
   registerBtn: {
-    border: 'none',
-    borderTop: `1px solid ${theme.border}`,
+    ...borderSides({ top: `1px solid ${theme.border}` }),
     background: theme.surfaceInset,
     padding: '8px 10px',
     fontSize: 12,
@@ -262,8 +262,7 @@ const styles = {
     cursor: 'pointer',
   },
   registerBtnDisabled: {
-    border: 'none',
-    borderTop: `1px solid ${theme.border}`,
+    ...borderSides({ top: `1px solid ${theme.border}` }),
     background: theme.surfaceInset,
     padding: '8px 10px',
     fontSize: 12,

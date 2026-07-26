@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -287,13 +288,29 @@ def _tracked_entry_age_days(fields: dict[str, str], now: datetime) -> int:
     return max(0, (now - ts).days)
 
 
+def _parse_code_refs_field(raw: str | None) -> tuple[str, ...]:
+    """Parse a frontmatter ``code_refs`` value into an order-preserving tuple.
+
+    Serialized as a comma-joined string (``src/a.py:Foo,src/b.py:Bar``);
+    ``path.py:symbol`` refs embed colons, so callers must split the
+    frontmatter line on the FIRST ``:`` only (``_split_tracked_entry``
+    does). Blank / missing values yield an empty tuple.
+    """
+    if not raw:
+        return ()
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
 def _load_tracked_active_entries(topic_dir: Path) -> list[dict[str, Any]]:
     """Return ``[{id, title, body, source_issue, source_phase, created_at,
-    path}]`` for every ``status: active`` entry in ``topic_dir``.
+    corroborations, fixed_in_pr, code_refs, path}]`` for every
+    ``status: active`` entry in ``topic_dir``.
 
     Used by ``WikiCompiler.compile_topic_tracked`` to build the LLM
     prompt and to remember which files to mark superseded after the
-    synthesis output lands.
+    synthesis output lands. ``fixed_in_pr`` / ``code_refs`` carry the
+    entry's shipped-claim provenance (issue #10590) so the compiler can
+    union it onto synthesized entries rather than losing it on promotion.
     """
     if not topic_dir.is_dir():
         return []
@@ -307,6 +324,7 @@ def _load_tracked_active_entries(topic_dir: Path) -> list[dict[str, Any]]:
         if not fields or fields.get("status", "active") != "active":
             continue
         title = body.lstrip().split("\n", 1)[0].lstrip("# ").strip() or path.stem
+        fixed_in_pr = fields.get("fixed_in_pr") or None
         out.append(
             {
                 "id": fields.get("id", ""),
@@ -316,6 +334,8 @@ def _load_tracked_active_entries(topic_dir: Path) -> list[dict[str, Any]]:
                 "source_phase": fields.get("source_phase", ""),
                 "created_at": fields.get("created_at", ""),
                 "corroborations": fields.get("corroborations", "1"),
+                "fixed_in_pr": fixed_in_pr,
+                "code_refs": _parse_code_refs_field(fields.get("code_refs")),
                 "path": str(path),
             }
         )
@@ -356,6 +376,13 @@ def _write_tracked_synthesis_entry(
         "status: active",
         f"corroborations: {entry.corroborations}",
     ]
+    # Shipped-claim provenance (issue #10590): carry the fields through so
+    # downstream verification can still tie the synthesized entry to its
+    # PR/code. Emitted only when present to keep frontmatter minimal.
+    if entry.fixed_in_pr:
+        lines.append(f"fixed_in_pr: {entry.fixed_in_pr}")
+    if entry.code_refs:
+        lines.append("code_refs: " + ",".join(entry.code_refs))
     if supersedes:
         lines.append("supersedes: " + ",".join(supersedes))
     lines.append("---")
@@ -395,7 +422,6 @@ def synthesis_matches_active_bodies(
     empty active set never matches a non-empty synthesis (and vice-versa),
     so the first real synthesis of a topic is never suppressed.
     """
-    from collections import Counter  # noqa: PLC0415
 
     active = Counter(str(e["body"]).strip() for e in active_entries)
     proposed = Counter(
@@ -1476,17 +1502,29 @@ class RepoWikiStore:
         status = "stale" if entry.stale else "active"
         safe_content = _sanitize_body_for_frontmatter(entry.content)
 
+        frontmatter = [
+            "---",
+            f"id: {next_id:04d}",
+            f"topic: {topic}",
+            f"source_issue: {issue_tag}",
+            f"source_phase: {source_phase}",
+            f"created_at: {entry.created_at}",
+            f"status: {status}",
+            f"corroborations: {entry.corroborations}",
+        ]
+        # Shipped-claim provenance (issue #10590): persist so the compiler's
+        # synthesis pass can union it onto merged entries and downstream
+        # shipped-claim verification can still resolve it. Emitted only when
+        # present to keep frontmatter minimal for the common case.
+        if entry.fixed_in_pr:
+            frontmatter.append(f"fixed_in_pr: {entry.fixed_in_pr}")
+        if entry.code_refs:
+            frontmatter.append("code_refs: " + ",".join(entry.code_refs))
+        frontmatter.append("---")
+
         body = "\n".join(
             [
-                "---",
-                f"id: {next_id:04d}",
-                f"topic: {topic}",
-                f"source_issue: {issue_tag}",
-                f"source_phase: {source_phase}",
-                f"created_at: {entry.created_at}",
-                f"status: {status}",
-                f"corroborations: {entry.corroborations}",
-                "---",
+                *frontmatter,
                 "",
                 f"# {entry.title}",
                 "",
