@@ -26,6 +26,14 @@ from jsonl_ledger import IdentifiedJsonlLedger
 
 logger = logging.getLogger("hydraflow.escape_ledger")
 
+#: Canonical basename for the append-only escape ledger under
+#: ``<data_root>/diagnostics/``. The SINGLE source of truth (#10578) — every
+#: caller (``service_registry``, ``EscapeLedgerLoop``, ``SampledAuditLoop``,
+#: ``vitals.observe``) resolves the location through this rather than re-hardcoding
+#: the literal, the cross-module JSONL-store duplication the concept-scatter
+#: sensor (#10104) flags.
+ESCAPE_LEDGER_FILENAME = "escape_ledger.jsonl"
+
 
 class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
     """Append-only reader/writer over one escape-ledger JSONL file."""

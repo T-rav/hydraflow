@@ -3,7 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { deriveStageStatus } from '../../hooks/useStageStatus'
 import { PIPELINE_STAGES } from '../../constants'
 import {
-  dotConnected, dotDisconnected,
+  dotDisconnected,
+  statusDotStyles, statusDotLabels,
   stageAbbreviations,
   pipelineStageStylesMap,
   pipelineLabelStylesMap,
@@ -48,11 +49,32 @@ beforeEach(() => {
 })
 
 describe('Header pre-computed styles', () => {
-  describe('dot variants', () => {
-    it('dotConnected has green background', () => {
-      expect(dotConnected).toMatchObject({
+  describe('factory-state dot variants', () => {
+    it('running dot has green background', () => {
+      expect(statusDotStyles.running).toMatchObject({
         width: 8, height: 8, borderRadius: '50%',
         background: 'var(--green)',
+      })
+    })
+
+    it('stopping dot has yellow background', () => {
+      expect(statusDotStyles.stopping).toMatchObject({
+        width: 8, height: 8, borderRadius: '50%',
+        background: 'var(--yellow)',
+      })
+    })
+
+    it('idle dot has red background', () => {
+      expect(statusDotStyles.idle).toMatchObject({
+        width: 8, height: 8, borderRadius: '50%',
+        background: 'var(--red)',
+      })
+    })
+
+    it('done dot has red background', () => {
+      expect(statusDotStyles.done).toMatchObject({
+        width: 8, height: 8, borderRadius: '50%',
+        background: 'var(--red)',
       })
     })
 
@@ -62,10 +84,17 @@ describe('Header pre-computed styles', () => {
         background: 'var(--red)',
       })
     })
+
+    it('exposes a human-readable label for every state', () => {
+      expect(statusDotLabels.running).toBe('Factory: running')
+      expect(statusDotLabels.stopping).toBe('Factory: stopping')
+      expect(statusDotLabels.idle).toBe('Factory: idle')
+      expect(statusDotLabels.done).toBe('Factory: done')
+    })
   })
 
   it('style objects are referentially stable', () => {
-    expect(dotConnected).toBe(dotConnected)
+    expect(statusDotStyles.running).toBe(statusDotStyles.running)
   })
 
   describe('pipelineStageStylesMap', () => {
@@ -133,6 +162,61 @@ describe('Header component', () => {
   it('renders Stopping badge when orchestrator is stopping', () => {
     render(<Header {...defaultProps} orchestratorStatus="stopping" />)
     expect(screen.getByText('Stopping\u2026')).toBeInTheDocument()
+  })
+
+  describe('factory-state indicator dot', () => {
+    it('is green with a running label when orchestrator is running', () => {
+      render(<Header {...defaultProps} orchestratorStatus="running" />)
+      const dot = screen.getByTestId('orchestrator-status')
+      expect(dot.style.background).toBe('var(--green)')
+      expect(dot.getAttribute('aria-label')).toBe('Factory: running')
+      expect(dot.getAttribute('title')).toBe('Factory: running')
+    })
+
+    it('is yellow with a stopping label when orchestrator is stopping', () => {
+      render(<Header {...defaultProps} orchestratorStatus="stopping" />)
+      const dot = screen.getByTestId('orchestrator-status')
+      expect(dot.style.background).toBe('var(--yellow)')
+      expect(dot.getAttribute('aria-label')).toBe('Factory: stopping')
+      expect(dot.getAttribute('title')).toBe('Factory: stopping')
+    })
+
+    it('is red with an idle label when orchestrator is idle', () => {
+      render(<Header {...defaultProps} orchestratorStatus="idle" />)
+      const dot = screen.getByTestId('orchestrator-status')
+      expect(dot.style.background).toBe('var(--red)')
+      expect(dot.getAttribute('aria-label')).toBe('Factory: idle')
+      expect(dot.getAttribute('title')).toBe('Factory: idle')
+    })
+
+    it('is red with a done label when orchestrator is done', () => {
+      render(<Header {...defaultProps} orchestratorStatus="done" />)
+      const dot = screen.getByTestId('orchestrator-status')
+      expect(dot.style.background).toBe('var(--red)')
+      expect(dot.getAttribute('aria-label')).toBe('Factory: done')
+      expect(dot.getAttribute('title')).toBe('Factory: done')
+    })
+
+    it('reads as disconnected (red) when the socket is down, regardless of status', () => {
+      render(<Header {...defaultProps} connected={false} orchestratorStatus="running" />)
+      const dot = screen.getByTestId('orchestrator-status')
+      expect(dot.style.background).toBe('var(--red)')
+      expect(dot.getAttribute('aria-label')).toBe('Disconnected from server')
+      expect(dot.getAttribute('title')).toBe('Disconnected from server')
+    })
+
+    it('exposes state to assistive tech as a named graphic (not color alone)', () => {
+      render(<Header {...defaultProps} orchestratorStatus="running" />)
+      expect(screen.getByRole('img', { name: 'Factory: running' })).toBeInTheDocument()
+    })
+
+    it('does not render the orchestrator status as visible text (regression: sr-only span removed)', () => {
+      render(<Header {...defaultProps} orchestratorStatus="running" />)
+      // The dot conveys state via color + aria-label/title, never a bare status word.
+      expect(screen.queryByText('running')).toBeNull()
+      const dot = screen.getByTestId('orchestrator-status')
+      expect(dot.textContent).toBe('')
+    })
   })
 
   it('does not log a border shorthand/longhand collision warning when the start/stop button toggles connected state (#10564)', () => {

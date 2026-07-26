@@ -62,7 +62,7 @@ from epic import EpicCompletionChecker, EpicManager
 from epic_monitor_loop import EpicMonitorLoop
 from epic_sweeper_loop import EpicSweeperLoop
 from erosion_metrics_loop import ErosionMetricsLoop
-from escape.ledger import EscapeLedger
+from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from escape_ledger_loop import EscapeLedgerLoop
 from events import EventBus
 from execution import SubprocessRunner
@@ -1334,7 +1334,7 @@ def build_services(
         state=state,
         # Sentry-attributed escapes append a row to the same escape ledger
         # EscapeLedgerLoop writes (#10367); agent-research / low confidence.
-        escape_ledger=EscapeLedger(config.diagnostics_dir / "escape_ledger.jsonl"),
+        escape_ledger=EscapeLedger(config.diagnostics_dir / ESCAPE_LEDGER_FILENAME),
     )
     log_ingest_dedup = DedupStore(
         "log_ingest_filed_sighashes",

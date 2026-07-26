@@ -1543,14 +1543,27 @@ SUMMARY: <one-line summary>
         from execution import get_default_runner
 
         host = get_default_runner()
-        timeout = self._config.git_command_timeout
+        # ``git status`` / ``git add`` are cheap plumbing — they stay on the
+        # short git tier. The salvage ``git commit`` runs the repo's pre-commit
+        # hook (quality-lite / security / arch-check; we must NOT --no-verify),
+        # which routinely exceeds the 30s git tier, so it gets a make-tier budget
+        # of its own (#10598). Without this the hook timed out, TimeoutError was
+        # raised, and the agent's real changes were discarded → zero commits.
+        git_timeout = self._config.git_command_timeout
+        commit_timeout = self._config.salvage_commit_timeout
         cwd = str(worktree_path)
+
+        # Track the in-flight op + its budget so a TimeoutError can name a
+        # concrete duration — ``str(TimeoutError())`` is empty, which is what
+        # produced the blank "force-commit failed:" log the bug report cites.
+        active_op = "git status"
+        active_timeout: int = git_timeout
 
         try:
             status = await host.run_simple(
                 ["git", "status", "--porcelain"],
                 cwd=cwd,
-                timeout=timeout,
+                timeout=git_timeout,
             )
             if not status.stdout.strip():
                 return False
@@ -1559,10 +1572,11 @@ SUMMARY: <one-line summary>
                 "Issue #%d: agent left uncommitted changes — force-committing",
                 task.id,
             )
+            active_op, active_timeout = "git add", git_timeout
             add_result = await host.run_simple(
                 ["git", "add", "-A"],
                 cwd=cwd,
-                timeout=timeout,
+                timeout=git_timeout,
             )
             if add_result.returncode != 0:
                 logger.warning(
@@ -1572,6 +1586,7 @@ SUMMARY: <one-line summary>
                     add_result.stderr,
                 )
                 return False
+            active_op, active_timeout = "git commit", commit_timeout
             commit_result = await host.run_simple(
                 [
                     "git",
@@ -1581,7 +1596,7 @@ SUMMARY: <one-line summary>
                     "Auto-committed by HydraFlow (agent did not commit)",
                 ],
                 cwd=cwd,
-                timeout=timeout,
+                timeout=commit_timeout,
             )
             if commit_result.returncode != 0:
                 logger.warning(
@@ -1596,7 +1611,15 @@ SUMMARY: <one-line summary>
                 task.id,
             )
             return True
-        except (TimeoutError, FileNotFoundError, OSError) as exc:
+        except TimeoutError:
+            logger.warning(
+                "Issue #%d: force-commit failed: %s timed out after %ds",
+                task.id,
+                active_op,
+                active_timeout,
+            )
+            return False
+        except (FileNotFoundError, OSError) as exc:
             logger.warning(
                 "Issue #%d: force-commit failed: %s",
                 task.id,

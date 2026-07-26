@@ -331,6 +331,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("transcript_summary_timeout", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TIMEOUT", 120),
     ("quality_timeout", "HYDRAFLOW_QUALITY_TIMEOUT", 3600),
     ("git_command_timeout", "HYDRAFLOW_GIT_COMMAND_TIMEOUT", 30),
+    ("salvage_commit_timeout", "HYDRAFLOW_SALVAGE_COMMIT_TIMEOUT", 1800),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
     ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 300),
     ("error_output_max_chars", "HYDRAFLOW_ERROR_OUTPUT_MAX_CHARS", 3000),
@@ -2689,6 +2690,17 @@ class HydraFlowConfig(BaseModel):
         ge=5,
         le=120,
         description="Timeout in seconds for simple git commands (rev-list, rev-parse, status)",
+    )
+    salvage_commit_timeout: int = Field(
+        default=1800,
+        ge=60,
+        le=3600,
+        description=(
+            "Timeout in seconds for the salvage 'git commit' in "
+            "AgentRunner._force_commit_uncommitted. This commit runs the repo's "
+            "pre-commit hook (quality-lite / security / arch-check), so it needs a "
+            "make-tier budget rather than the short git_command_timeout tier (#10598)."
+        ),
     )
     summarizer_timeout: int = Field(
         default=120,

@@ -70,7 +70,7 @@ from escape.detect import (
     count_commits_since,
     detect_escapes,
 )
-from escape.ledger import EscapeLedger
+from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from escape.metrics import low_confidence, unencoded_aging
 from escape.models import EscapeCandidate, EscapeRecord
 from escape.report import render_escape_ledger_markdown
@@ -91,7 +91,6 @@ _ISSUE_LABELS = ["hydraflow-find", "escape-ledger"]
 _ESCAPE_REPORT_REL = Path("docs/arch/generated/escape-ledger.md")
 _TRENDS_REPORT_REL = Path("docs/arch/generated/erosion-trends.md")
 
-_LEDGER_FILENAME = "escape_ledger.jsonl"
 _TRENDS_FILENAME = "erosion_trends.jsonl"
 
 _HEX_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
@@ -223,7 +222,7 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
 
     @property
     def _ledger_path(self) -> Path:
-        return self._config.diagnostics_dir / _LEDGER_FILENAME
+        return self._config.diagnostics_dir / ESCAPE_LEDGER_FILENAME
 
     @property
     def _trends_path(self) -> Path:
@@ -406,7 +405,9 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         for record, reason in to_file:
             title, body = _render_finding(record, reason)
             try:
-                await self._prs.create_issue(title, body, labels=_ISSUE_LABELS)
+                issue_number = await self._prs.create_issue(
+                    title, body, labels=_ISSUE_LABELS
+                )
             except Exception as exc:
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
@@ -414,6 +415,20 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
                     record.id,
                     reason,
                     exc_info=True,
+                )
+                continue
+            if not issue_number:
+                # create_issue's documented 0-sentinel: the gh call failed
+                # WITHOUT raising (ports.py). Leave the reason-scoped surfacing
+                # fingerprint UNSPENT so the next tick retries — mirrors
+                # adr_touchpoint_auditor_loop's "returned 0 → don't record"
+                # guard (#10585).
+                logger.warning(
+                    "EscapeLedger: create_issue returned 0 (sentinel) for "
+                    "finding %s (%s); leaving surfacing fingerprint unspent, "
+                    "will retry next tick",
+                    record.id,
+                    reason,
                 )
                 continue
             seen = seen | {surfacing_fingerprint(record.id, reason)}

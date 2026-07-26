@@ -239,7 +239,13 @@ export function Header({ connected, orchestratorStatus }) {
             </span>
           )}
         </div>
-        <span style={connected ? dotConnected : dotDisconnected} />
+        <span
+          data-testid="orchestrator-status"
+          role="img"
+          style={connected ? (statusDotStyles[orchestratorStatus] || statusDotStyles.idle) : dotDisconnected}
+          aria-label={connected ? (statusDotLabels[orchestratorStatus] || statusDotLabels.idle) : 'Disconnected from server'}
+          title={connected ? (statusDotLabels[orchestratorStatus] || statusDotLabels.idle) : 'Disconnected from server'}
+        />
       </div>
       <div style={styles.center}>
         <div style={styles.sessionBox} data-testid="session-box" aria-label="Session pipeline statistics">
@@ -281,7 +287,6 @@ export function Header({ connected, orchestratorStatus }) {
         </div>
       </div>
       <div style={styles.controls}>
-        <span data-testid="orchestrator-status" className="sr-only">{orchestratorStatus}</span>
         {orchestratorStatus === 'running' ? (
           <button
             style={connected ? styles.controlStopBtn : controlBtnDisabled}
@@ -493,9 +498,27 @@ export const stageAbbreviations = Object.fromEntries(PIPELINE_STAGES.map(s => [s
 export const pipelineStageStylesMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, { ...styles.pipelineStage, borderColor: s.color }]))
 export const pipelineLabelStylesMap = Object.fromEntries(PIPELINE_STAGES.map(s => [s.key, { ...styles.pipelineLabel, color: s.color }]))
 
-// Pre-computed connection dot variants
-export const dotConnected = { ...styles.dot, background: theme.green }
+// Pre-computed factory-state indicator dot variants (avoids object spread in
+// render, consistent with pipelineStageStylesMap). The left-hand header dot
+// encodes orchestrator state via color:
+//   running → green · stopping → yellow · idle/done → red
+export const statusDotStyles = {
+  running: { ...styles.dot, background: theme.green },
+  stopping: { ...styles.dot, background: theme.yellow },
+  idle: { ...styles.dot, background: theme.red },
+  done: { ...styles.dot, background: theme.red },
+}
+// A disconnected socket makes the factory state unknowable → fall back to red.
 export const dotDisconnected = { ...styles.dot, background: theme.red }
+
+// Human-readable state exposed to assistive tech via aria-label/title so the
+// indicator is never conveyed by color alone.
+export const statusDotLabels = {
+  running: 'Factory: running',
+  stopping: 'Factory: stopping',
+  idle: 'Factory: idle',
+  done: 'Factory: done',
+}
 
 // Tracker button + modal styles
 styles.trackerBtn = {

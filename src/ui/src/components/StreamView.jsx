@@ -48,7 +48,8 @@ function PendingIntentCard({ intent }) {
 }
 
 function PipelineFlow({ stageGroups, queueStrategy }) {
-  // Per-region and pipeline-wide issue/PR counts for the flow badges (#10488).
+  // Per-region and pipeline-wide issue counts for the flow badges (#10488;
+  // PR count dropped in #10593).
   const counts = useMemo(() => countPipeline(stageGroups), [stageGroups])
 
   const { mergedCount, failedCount } = useMemo(() => {
@@ -69,9 +70,9 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
       <span
         style={styles.flowCount}
         data-testid={`flow-count-${group.stage.key}`}
-        title={`${counts.perStage[group.stage.key].issues} issue(s), ${counts.perStage[group.stage.key].prs} PR(s) in ${group.stage.label}`}
+        title={`${counts.perStage[group.stage.key].issues} issue(s) in ${group.stage.label}`}
       >
-        {counts.perStage[group.stage.key].issues} · {counts.perStage[group.stage.key].prs} PR
+        {counts.perStage[group.stage.key].issues}
       </span>
       {group.issues.length > 0 && (
         <div style={styles.flowDots}>
@@ -119,9 +120,9 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
       <span
         style={styles.flowTotal}
         data-testid="flow-total"
-        title={`${counts.total.issues} issue(s) and ${counts.total.prs} PR(s) across the whole pipeline`}
+        title={`${counts.total.issues} issue(s) across the whole pipeline`}
       >
-        {counts.total.issues} issues · {counts.total.prs} PRs
+        {counts.total.issues} issues
       </span>
       {queueStrategy && (
         <span
