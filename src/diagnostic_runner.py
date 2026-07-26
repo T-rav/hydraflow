@@ -196,9 +196,16 @@ class DiagnosticRunner(BaseRunner):
             # raises the error on some paths; the no-JSON-with-credit-text path
             # is the one that leaked (weekly limit → soft failure).
             if transcript and is_credit_exhaustion(transcript):
+                # ``parsed is None`` means the diagnose agent produced NO valid
+                # JSON — the signature of the agent's own run being cut off by the
+                # cap, not a completed analysis that merely quotes a prior cap. So
+                # this is authoritative: the orchestrator must pause directly and
+                # not route it through the weekly-blind probe that would discard it
+                # (completes #10537's intent; see #10558).
                 raise CreditExhaustedError(
                     "Diagnostic agent hit a usage/credit limit — no structured output",
                     resume_at=parse_credit_resume_time(transcript),
+                    authoritative=True,
                 )
             return DiagnosisResult(
                 root_cause=transcript[:500] if transcript else "No output",

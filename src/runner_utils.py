@@ -193,7 +193,20 @@ def _post_stream_result(
 
     if not early_killed and is_credit_exhaustion(combined):
         resume_at = parse_credit_resume_time(combined)
-        raise CreditExhaustedError("API credit limit reached", resume_at=resume_at)
+        # Authoritative when the CLI's OWN stderr carries the signal — that is the
+        # process's direct termination, ground truth for a real cap (session /
+        # weekly / balance). A match found ONLY in stdout prose (credit_prose_scan)
+        # is a diagnostic/reviewer run quoting a prior cap in its analysis, so it
+        # is NOT authoritative and must be corroborated by the orchestrator's live
+        # probe before a global pause. Crucially, the auth probe cannot detect a
+        # *weekly* limit (the key stays valid), so a genuine weekly signal on
+        # stderr must skip the probe or it is wrongly discarded (#10558/#9895).
+        authoritative = is_credit_exhaustion(stderr_text)
+        raise CreditExhaustedError(
+            "API credit limit reached",
+            resume_at=resume_at,
+            authoritative=authoritative,
+        )
 
     if config.usage_stats is not None:
         config.usage_stats.update(parser.usage_snapshot)
@@ -484,9 +497,14 @@ def raise_if_credit_exhausted(stdout: str, stderr: str, tool: str) -> None:
     """
     for blob in (stdout, stderr):
         if blob and is_credit_exhaustion(blob):
+            # The lightweight CLI's own output IS the process's termination
+            # signal (no agent-analysis loop that could merely quote a prior
+            # cap), so this is authoritative — the orchestrator pauses without
+            # a probe that cannot see a weekly-limit exhaustion (#10558).
             raise CreditExhaustedError(
                 f"{tool} CLI signaled credit exhaustion",
                 resume_at=parse_credit_resume_time(blob),
+                authoritative=True,
             )
 
 
@@ -826,13 +844,19 @@ async def _openai_compatible_complete(
         # Tag the signal with THIS backend so the orchestrator scopes the pause
         # to loops routed here — a z.ai/kimi cap must not halt Claude work, and
         # vice-versa (#9807).
+        # A structured HTTP 402/429 from the backend is ground truth, not quoted
+        # prose — authoritative so the orchestrator pauses without a probe (#10558).
         raise CreditExhaustedError(
-            f"{provider} {resp.status_code}: {resp.text[:200]}", provider=provider
+            f"{provider} {resp.status_code}: {resp.text[:200]}",
+            provider=provider,
+            authoritative=True,
         )
     if resp.status_code >= 400:
         body = resp.text or ""
         if is_credit_exhaustion(body):
-            raise CreditExhaustedError(f"{provider}: {body[:200]}", provider=provider)
+            raise CreditExhaustedError(
+                f"{provider}: {body[:200]}", provider=provider, authoritative=True
+            )
         return SimpleResult(
             stderr=f"{provider} http {resp.status_code}: {body[:300]}",
             returncode=resp.status_code,
