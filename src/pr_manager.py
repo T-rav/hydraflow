@@ -1955,6 +1955,30 @@ class PRManager:
         )
         return [line.strip() for line in output.splitlines() if line.strip()]
 
+    async def get_pr_labels(self, pr_number: int) -> list[str]:
+        """Return the label names carried by a GitHub pull request.
+
+        Delegates to ``gh pr view <n> --json labels --jq '.labels[].name'``
+        (newline-separated names), mirroring :meth:`get_issue_labels`. Read
+        failures propagate rather than being swallowed so PR-scoped label
+        routing can fail-closed on error instead of silently treating an
+        unreadable PR as unlabelled (#10567).
+        """
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "pr",
+            "view",
+            str(pr_number),
+            "--repo",
+            self._repo,
+            "--json",
+            "labels",
+            "--jq",
+            ".labels[].name",
+        )
+        return [line.strip() for line in output.splitlines() if line.strip()]
+
     async def get_latest_ci_status(self) -> tuple[str, str]:
         """Return (conclusion, url) for the latest CI run on the main branch."""
         self._assert_repo()

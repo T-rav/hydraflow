@@ -455,6 +455,18 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         )
         return FakeOutput(exit_code=0, stdout="", stderr="")
 
+    if method == "get_pr_labels":
+        pr_number = int(args[0])
+        # Seed the PR with a deterministic label set so the contract covers
+        # the non-empty path, mirroring the newline-separated output of
+        # `gh pr view --json labels --jq '.labels[].name'` (#10567).
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        fake.add_pr_label(pr_number, "needs-review")
+        fake.add_pr_label(pr_number, "priority-high")
+        names = await fake.get_pr_labels(pr_number)
+        stdout = "".join(f"{name}\n" for name in names)
+        return FakeOutput(exit_code=0, stdout=stdout, stderr="")
+
     if method == "close_pr":
         pr_number = int(args[0])
         fake.add_pr(number=pr_number, issue_number=1, branch="b")
