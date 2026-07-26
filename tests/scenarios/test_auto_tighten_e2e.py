@@ -136,6 +136,14 @@ def _build_stub_run_subprocess(gh_calls: list[tuple[str, ...]]):
             gh_calls.append(cmd)
             if cmd[1:3] == ("pr", "create"):
                 return "https://github.com/hydra/hydraflow/pull/999\n"
+            if cmd[1:3] == ("pr", "view") and "statusCheckRollup" in cmd:
+                # Green rollup so the auto-merge green-gate (#10672) arms --auto
+                # (the gate now queries CI status before arming; a fully-green PR
+                # arms exactly as before).
+                return (
+                    '{"statusCheckRollup": '
+                    '[{"status": "COMPLETED", "conclusion": "SUCCESS"}]}'
+                )
             return ""
         raise AssertionError(f"unexpected non-git/gh command in stub: {cmd!r}")
 
