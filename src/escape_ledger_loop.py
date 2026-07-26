@@ -405,7 +405,9 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         for record, reason in to_file:
             title, body = _render_finding(record, reason)
             try:
-                await self._prs.create_issue(title, body, labels=_ISSUE_LABELS)
+                issue_number = await self._prs.create_issue(
+                    title, body, labels=_ISSUE_LABELS
+                )
             except Exception as exc:
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
@@ -413,6 +415,20 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
                     record.id,
                     reason,
                     exc_info=True,
+                )
+                continue
+            if not issue_number:
+                # create_issue's documented 0-sentinel: the gh call failed
+                # WITHOUT raising (ports.py). Leave the reason-scoped surfacing
+                # fingerprint UNSPENT so the next tick retries — mirrors
+                # adr_touchpoint_auditor_loop's "returned 0 → don't record"
+                # guard (#10585).
+                logger.warning(
+                    "EscapeLedger: create_issue returned 0 (sentinel) for "
+                    "finding %s (%s); leaving surfacing fingerprint unspent, "
+                    "will retry next tick",
+                    record.id,
+                    reason,
                 )
                 continue
             seen = seen | {surfacing_fingerprint(record.id, reason)}
