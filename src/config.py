@@ -143,6 +143,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         10,
     ),
     ("max_issue_attempts", "HYDRAFLOW_MAX_ISSUE_ATTEMPTS", 3),
+    (
+        "implement_no_progress_abort_attempts",
+        "HYDRAFLOW_IMPLEMENT_NO_PROGRESS_ABORT_ATTEMPTS",
+        3,
+    ),
     ("max_decomposition_depth", "HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", 2),
     (
         "max_total_decomposition_children",
@@ -1512,6 +1517,23 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=10,
         description="Max total implementation attempts per issue before HITL escalation",
+    )
+    implement_no_progress_abort_attempts: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description=(
+            "No-progress early-abort threshold for ImplementPhase's flow "
+            "(#10659/#10616, P2 of #10682). When an issue reaches this attempt "
+            "number AND its immediately prior attempt produced no output (zero "
+            "commits with an error), the ``no-progress-abort`` flow node "
+            "escalates it to HITL BEFORE spending another full (up to "
+            "``agent_timeout``) build, instead of retry-thrashing to the "
+            "``max_issue_attempts`` cap. Default 3 == the default "
+            "``max_issue_attempts``, so the final futile build is skipped while "
+            "the ADR-0063 W5 corrective retry still runs; lower it to abort "
+            "sooner (fewer corrective retries) or set 0 to disable the abort."
+        ),
     )
     max_decomposition_depth: int = Field(
         default=2,

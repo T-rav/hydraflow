@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `58476f5` — Fixes #10652: staging_bisect stall remediation no longer lags the sanity alert (#10686) (#10686) *(2026-07-26)*
+- `56795f5` — refactor(wiki-compiler): run compile as a flow (DAG) on the P0 primitive (P1 of #10682) (#10687) (#10687) *(2026-07-26)*
+- `ca6fd9a` — feat(arch): integrity gate — fail on degenerate generated artifacts (#10685) (#10685) *(2026-07-26)*
 - `c74283c` — feat(flows): in-framework flow (DAG) primitive + ADR (P0 of #10682) (#10684) (#10684) *(2026-07-26)*
 - `108a348` — feat: provider/harness backend split — z.ai as a Claude-harness backend (#10550) (#10550) *(2026-07-26)*
 - `81a7a66` — feat(ul): edge-proposer — 42 new edges across 23 terms (#10650) (#10650) *(2026-07-26)*
