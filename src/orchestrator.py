@@ -2073,6 +2073,20 @@ class HydraFlowOrchestrator:
                 getattr(exc, "provider", PROVIDER_ANTHROPIC) or PROVIDER_ANTHROPIC
             )
 
+            # Origin gate (#10558): an AUTHORITATIVE signal came from the
+            # subprocess's own termination — the CLI's stderr / a structured HTTP
+            # 402/429/quota body — and is ground truth. Only a signal scanned from
+            # agent stdout PROSE (a diagnostic/reviewer run quoting a prior cap —
+            # the #9895 CREDIT_PROSE_SCAN class) needs the probe. The auth/
+            # availability probe structurally CANNOT detect a *weekly*-limit
+            # exhaustion (the key stays valid, so the probe passes), so routing a
+            # genuine weekly signal through it discarded it as a false positive and
+            # the factory never paused — loops then crash-thrashed against the
+            # exhausted budget. Corroborate prose-only signals; pause directly on
+            # authoritative ones. Defaults to the conservative "corroborate"
+            # stance so an untagged/unknown signal keeps the legacy probe gate.
+            authoritative = getattr(exc, "authoritative", False)
+
             # Corroborate the text-detected signal with a live API probe before
             # committing a GLOBAL pause. ``is_credit_exhaustion`` matches
             # credit-error PROSE, so a diagnostic/reviewer run that merely quotes
@@ -2090,7 +2104,8 @@ class HydraFlowOrchestrator:
             fp_last = self._credit_fp_last.get(source)
             cooldown = float(self._config.credit_fp_suppress_cooldown_seconds)
             if (
-                self._config.credit_pause_require_probe
+                not authoritative
+                and self._config.credit_pause_require_probe
                 and fp_last is not None
                 and (datetime.now(UTC) - fp_last).total_seconds() < cooldown
             ):
@@ -2109,7 +2124,8 @@ class HydraFlowOrchestrator:
                 provider, self._config
             )
             if (
-                self._config.credit_pause_require_probe
+                not authoritative
+                and self._config.credit_pause_require_probe
                 and await probe_credit_availability(
                     provider, base_url=probe_base_url, api_key=probe_api_key
                 )
