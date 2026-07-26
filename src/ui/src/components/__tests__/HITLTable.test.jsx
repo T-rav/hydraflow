@@ -495,6 +495,72 @@ describe('HITLTable component', () => {
     expect(runLink).toBeInTheDocument()
     expect(runLink.getAttribute('href')).toBe('https://ci.example.com/run/123')
   })
+
+  const evidenceWithShots = (overrides = {}) => [
+    {
+      ...mockItems[0],
+      visualEvidence: {
+        items: [
+          {
+            screen_name: 'login',
+            diff_percent: 8.5,
+            status: 'fail',
+            baseline_url: 'https://ci.example.com/login-baseline.png',
+            actual_url: 'https://ci.example.com/login-actual.png',
+            diff_url: 'https://ci.example.com/login-diff.png',
+            ...overrides,
+          },
+        ],
+        summary: '',
+        run_url: '',
+        attempt: 1,
+      },
+    },
+  ]
+
+  it('renders inline screenshot thumbnails for baseline/actual/diff URLs', () => {
+    render(<HITLTable items={evidenceWithShots()} onRefresh={() => {}} />)
+    fireEvent.click(screen.getByTestId('hitl-row-42'))
+    const baseline = screen.getByTestId('hitl-visual-thumb-42-0-baseline')
+    const actual = screen.getByTestId('hitl-visual-thumb-42-0-actual')
+    const diff = screen.getByTestId('hitl-visual-thumb-42-0-diff')
+    expect(baseline.querySelector('img').getAttribute('src')).toBe('https://ci.example.com/login-baseline.png')
+    expect(actual.querySelector('img').getAttribute('src')).toBe('https://ci.example.com/login-actual.png')
+    expect(diff.querySelector('img').getAttribute('src')).toBe('https://ci.example.com/login-diff.png')
+  })
+
+  it('omits a thumbnail for a screenshot slot without a URL', () => {
+    render(<HITLTable items={evidenceWithShots({ baseline_url: '' })} onRefresh={() => {}} />)
+    fireEvent.click(screen.getByTestId('hitl-row-42'))
+    expect(screen.queryByTestId('hitl-visual-thumb-42-0-baseline')).toBeNull()
+    expect(screen.getByTestId('hitl-visual-thumb-42-0-actual')).toBeInTheDocument()
+  })
+
+  it('renders no shots container when the item carries no screenshot URLs', () => {
+    render(<HITLTable items={evidenceWithShots({ baseline_url: '', actual_url: '', diff_url: '' })} onRefresh={() => {}} />)
+    fireEvent.click(screen.getByTestId('hitl-row-42'))
+    expect(screen.queryByTestId('hitl-visual-shots-42-0')).toBeNull()
+  })
+
+  it('clicking a thumbnail opens the full-resolution lightbox', () => {
+    render(<HITLTable items={evidenceWithShots()} onRefresh={() => {}} />)
+    fireEvent.click(screen.getByTestId('hitl-row-42'))
+    expect(screen.queryByTestId('image-lightbox-overlay')).toBeNull()
+    fireEvent.click(screen.getByTestId('hitl-visual-thumb-42-0-actual'))
+    expect(screen.getByTestId('image-lightbox-overlay')).toBeInTheDocument()
+    const img = screen.getByTestId('image-lightbox-img')
+    expect(img.getAttribute('src')).toBe('https://ci.example.com/login-actual.png')
+    expect(screen.getByTestId('image-lightbox-caption')).toHaveTextContent('login — Actual')
+  })
+
+  it('closing the lightbox returns to the detail pane', () => {
+    render(<HITLTable items={evidenceWithShots()} onRefresh={() => {}} />)
+    fireEvent.click(screen.getByTestId('hitl-row-42'))
+    fireEvent.click(screen.getByTestId('hitl-visual-thumb-42-0-diff'))
+    expect(screen.getByTestId('image-lightbox-overlay')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('image-lightbox-close'))
+    expect(screen.queryByTestId('image-lightbox-overlay')).toBeNull()
+  })
 })
 
 describe('HITLTable multi-repo (aggregate mode)', () => {

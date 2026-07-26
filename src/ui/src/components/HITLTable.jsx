@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { theme } from '../theme'
 import { PIPELINE_STAGES } from '../constants'
 import { useHITLCorrection } from '../hooks/useHITLCorrection'
+import { ImageLightbox } from './ImageLightbox'
 
 // Composite row identity — colliding issue numbers across repos must not share
 // per-row state (corrections/summaries/expand) in aggregate mode. Falls back to
@@ -36,6 +37,9 @@ export function HITLTable({ items, onRefresh }) {
   const [closedIssues, setClosedIssues] = useState(() => new Set())
   const [refreshing, setRefreshing] = useState(false)
   const [countdown, setCountdown] = useState(30)
+  // Click-to-zoom target for visual-evidence screenshots (#10626). `null` when
+  // the lightbox is closed; otherwise { src, alt, caption }.
+  const [lightbox, setLightbox] = useState(null)
   const onRefreshRef = useRef(onRefresh)
   const { submitCorrection, skipIssue, closeIssue, approveProcess } = useHITLCorrection()
 
@@ -347,11 +351,7 @@ export function HITLTable({ items, onRefresh }) {
                                     <div style={diffFillStyle(ev.status, ev.diff_percent)} />
                                   </div>
                                   <span style={styles.visualDiffLabel}>{ev.diff_percent.toFixed(1)}% diff</span>
-                                  <div style={styles.visualLinks}>
-                                    {ev.baseline_url && <a href={ev.baseline_url} target="_blank" rel="noreferrer" style={styles.link} onClick={e => e.stopPropagation()}>Baseline</a>}
-                                    {ev.actual_url && <a href={ev.actual_url} target="_blank" rel="noreferrer" style={styles.link} onClick={e => e.stopPropagation()}>Actual</a>}
-                                    {ev.diff_url && <a href={ev.diff_url} target="_blank" rel="noreferrer" style={styles.link} onClick={e => e.stopPropagation()}>Diff</a>}
-                                  </div>
+                                  <VisualShots ev={ev} issue={item.issue} idx={idx} onZoom={setLightbox} />
                                 </div>
                               ))}
                             </div>
@@ -419,6 +419,54 @@ export function HITLTable({ items, onRefresh }) {
         </tbody>
       </table>
       )}
+      {lightbox && (
+        <ImageLightbox
+          src={lightbox.src}
+          alt={lightbox.alt}
+          caption={lightbox.caption}
+          onClose={() => setLightbox(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Inline, click-to-zoom screenshot thumbnails for a single visual-evidence
+ * item (#10626). Renders whichever of the baseline / actual / diff screenshots
+ * have a URL; clicking a thumbnail opens it full-resolution in the lightbox.
+ * Renders nothing when no screenshot URLs are present (e.g. legacy evidence
+ * that only carried diff percentages).
+ */
+function VisualShots({ ev, issue, idx, onZoom }) {
+  const shots = [
+    ['Baseline', ev.baseline_url],
+    ['Actual', ev.actual_url],
+    ['Diff', ev.diff_url],
+  ].filter(([, url]) => url)
+  if (shots.length === 0) return null
+  return (
+    <div style={styles.visualShots} data-testid={`hitl-visual-shots-${issue}-${idx}`}>
+      {shots.map(([label, url]) => (
+        <button
+          key={label}
+          type="button"
+          style={styles.visualThumbBtn}
+          title={`${ev.screen_name} — ${label}: click to zoom`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onZoom({
+              src: url,
+              alt: `${ev.screen_name} — ${label} screenshot`,
+              caption: `${ev.screen_name} — ${label}`,
+            })
+          }}
+          data-testid={`hitl-visual-thumb-${issue}-${idx}-${label.toLowerCase()}`}
+        >
+          <img src={url} alt={`${ev.screen_name} ${label} screenshot`} style={styles.visualThumbImg} />
+          <span style={styles.visualThumbLabel}>{label}</span>
+        </button>
+      ))}
     </div>
   )
 }
@@ -647,5 +695,38 @@ const styles = {
     marginBottom: 4, overflow: 'hidden',
   },
   visualDiffLabel: { fontSize: 10, color: theme.textMuted },
-  visualLinks: { display: 'flex', gap: 8, marginTop: 4, fontSize: 11 },
+  visualShots: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))',
+    gap: 6,
+    marginTop: 8,
+  },
+  visualThumbBtn: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    padding: 0,
+    border: `1px solid ${theme.border}`,
+    borderRadius: 4,
+    overflow: 'hidden',
+    background: theme.bg,
+    cursor: 'zoom-in',
+  },
+  visualThumbImg: {
+    width: '100%',
+    height: 'auto',
+    maxHeight: 120,
+    objectFit: 'contain',
+    display: 'block',
+    background: theme.surfaceInset,
+  },
+  visualThumbLabel: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+    padding: '2px 4px',
+    textAlign: 'center',
+  },
 }
