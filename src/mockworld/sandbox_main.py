@@ -91,6 +91,13 @@ SEAM_KINDS: frozenset[str] = frozenset(
     }
 )
 
+# Default credit-exhaustion text carried on the scripted signal (#10570) when a
+# scenario's ``credit_exhaustion`` seed omits ``message``. Mirrors the Claude
+# Code weekly-cap wording ``subprocess_util._CREDIT_PATTERNS`` /
+# ``_LIMIT_HIT_RE`` recognize; cosmetic here (the pause's ``resume_at`` is
+# carried explicitly on the seed, not parsed from this string).
+_DEFAULT_CREDIT_MESSAGE = "You've hit your weekly limit · resets Jun 18 at 5pm"
+
 SANDBOX_SEAMS: dict[str, str] = {
     # The four phase runners (triage/plan/implement/review) are replaced by
     # ``runners=fake_llm``; every other build_services BaseRunner gets the
@@ -962,6 +969,24 @@ async def main() -> None:
     for phase_name, by_issue in seed.phase_scripts.items():
         for issue_number, payload in by_issue.items():
             _load_phase_script(fake_llm, phase_name, int(issue_number), payload)
+
+    # Credit-exhaustion signal for the credit-pause path (#10570). Arms the
+    # FakeLLM plan runner so the seeded plan-queue issue's FIRST plan() raises an
+    # authoritative CreditExhaustedError — the air-gapped stand-in for the Claude
+    # CLI terminating on a weekly-limit cap, which drives the orchestrator's
+    # global pause (credits_paused_until + SYSTEM_ALERT). Subsequent plan calls
+    # succeed so the resumed loop plans the issue normally. Empty (every other
+    # scenario) leaves the FakeLLM untouched. See MockWorldSeed.credit_exhaustion.
+    if seed.credit_exhaustion:
+        ce = seed.credit_exhaustion
+        resume_raw = ce.get("resume_at")
+        resume_at = datetime.fromisoformat(str(resume_raw)) if resume_raw else None
+        fake_llm.script_plan_credit_exhaustion(
+            int(ce["issue"]),
+            message=str(ce.get("message", _DEFAULT_CREDIT_MESSAGE)),
+            resume_at=resume_at,
+            authoritative=bool(ce.get("authoritative", True)),
+        )
 
     # Pre-seed the auto-agent attempt counter (decompose-to-converge, ADR-0105).
     # Lets s54 start an issue already at `auto_agent_max_attempts` so the

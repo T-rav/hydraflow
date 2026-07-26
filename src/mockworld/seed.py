@@ -365,6 +365,39 @@ class MockWorldSeed:
     # unchanged.
     repo_wiki_fixtures: list[dict[str, Any]] = field(default_factory=list)
 
+    # Scripted credit-exhaustion signal for the credit-pause path (#10570).
+    # There is no FakeLLM path that emits a credit-exhaustion signal, so the
+    # orchestrator's global credit pause (``credits_paused_until`` + the
+    # ``SYSTEM_ALERT`` banner) and its clear-via-control-endpoint resume have no
+    # docker-tier coverage. When set, ``sandbox_main`` arms the FakeLLM plan
+    # runner so the FIRST ``planners.plan`` call for the given issue raises a
+    # ``CreditExhaustedError`` — the air-gapped stand-in for the Claude CLI
+    # terminating on a weekly-limit cap. The plan phase propagates it to
+    # ``_supervise_loops`` (``phase_utils.run_refilling_pool`` treats it as
+    # fatal), which pauses every loop. Keys:
+    #   - ``issue`` (int, required): the plan-queue issue whose ``plan`` raises.
+    #     Seed a matching ``hydraflow-plan``-labelled issue so the plan loop
+    #     actually reaches it.
+    #   - ``message`` (str, optional): the raw credit text carried on the error;
+    #     defaults to the weekly-limit wording. Cosmetic — the SYSTEM_ALERT's
+    #     ``resume_at`` comes from ``resume_at`` below, not from parsing this.
+    #   - ``resume_at`` (str, optional): ISO-8601 timestamp the pause runs until;
+    #     omit to let the orchestrator apply its default (~5h) fallback. A
+    #     scenario passes an explicit FUTURE value so ``credits_paused_until`` is
+    #     deterministically non-null within the scenario's polling window.
+    #   - ``authoritative`` (bool, optional, default True): tags the signal as
+    #     originating from the subprocess's own termination (#10558) so the
+    #     orchestrator pauses directly, bypassing the live availability probe
+    #     (which cannot see a weekly-quota exhaustion and would otherwise refute
+    #     the signal as a false positive on the air-gapped network).
+    # Only consumed by ``sandbox_main`` (Tier-2). The credit pause is an
+    # orchestrator-supervision behavior the flat in-process parity harness
+    # (``MockWorld.run_pipeline``) cannot model, so the scenario opts out of
+    # Tier-1 (``IN_PROCESS = False``) and the orchestrator supervision is covered
+    # in-process by ``tests/test_credit_pause.py``. Default None: no signal,
+    # every existing seed payload unchanged.
+    credit_exhaustion: dict[str, Any] | None = None
+
     def to_json(self) -> str:
         """Serialize to JSON for cross-process transfer."""
         return json.dumps(asdict(self), indent=2)

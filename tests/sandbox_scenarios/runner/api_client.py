@@ -29,6 +29,21 @@ class SandboxAPIClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def post(self, path: str, json: dict | None = None) -> dict:
+        """POST to a dashboard control endpoint (e.g. clear-credit-pause).
+
+        Used by scenarios that drive an operator-triggered control action —
+        the REST twin of clicking a System-tab button — then re-read state via
+        :meth:`get` / :meth:`wait_until` to assert the observable effect.
+        """
+        url = urljoin(self.base_url + "/", path.lstrip("/"))
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                url, json=json, headers={"Accept": "application/json"}
+            )
+            resp.raise_for_status()
+            return resp.json()
+
     async def wait_until(
         self,
         path: str,
