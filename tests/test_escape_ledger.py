@@ -573,6 +573,106 @@ class TestMetrics:
         recs = [_record("a:1"), _record("b:2"), _record("c:3")]
         assert metrics.latest_by_id(recs) == recs
 
+    def test_latest_by_escape_empty_list(self) -> None:
+        assert metrics.latest_by_escape([]) == []
+
+    def test_latest_by_escape_collapses_two_sources_for_one_commit(self) -> None:
+        # The #10654 double-count: one commit sha detected under two sources
+        # (bug-issue/low then regression-pin/medium) has two distinct ids that
+        # latest_by_id can never merge — latest_by_escape groups by detection_ref
+        # and keeps the stronger (medium) row, so the commit counts once.
+        sha = "ee56677201303fa4de5b1dec341447d4a12076d4"
+        rows = [
+            _record(f"bug-issue:{sha}", source="bug-issue", confidence="low"),
+            _record(
+                f"regression-pin:{sha}", source="regression-pin", confidence="medium"
+            ),
+        ]
+
+        collapsed = metrics.latest_by_escape(rows)
+
+        assert len(collapsed) == 1
+        assert collapsed[0].detection_source == "regression-pin"
+        assert collapsed[0].attribution_confidence == "medium"
+
+    def test_latest_by_escape_counts_the_collapsed_commit_once(self) -> None:
+        # encoded_summary().total and rolling_escape_count must see one commit,
+        # not two, once the two-source rows are collapsed.
+        now = datetime(2026, 2, 1, tzinfo=UTC)
+        sha = "055267e7b2b7900d615b0ff8553ef511dc3e8652"
+        rows = [
+            _record(
+                f"bug-issue:{sha}",
+                source="bug-issue",
+                confidence="low",
+                detected_at="2026-01-20T00:00:00+00:00",
+            ),
+            _record(
+                f"regression-pin:{sha}",
+                source="regression-pin",
+                confidence="medium",
+                detected_at="2026-01-20T00:00:00+00:00",
+            ),
+        ]
+
+        collapsed = metrics.latest_by_escape(rows)
+
+        assert metrics.encoded_summary(collapsed).total == 1
+        assert metrics.rolling_escape_count(collapsed, now, days=30) == 1
+
+    def test_latest_by_escape_never_discards_a_human_resolution(self) -> None:
+        # A resolved row (encoded_as != "none-yet") must survive collapse
+        # against a LATER unencoded row sharing its detection_ref — an appended
+        # human resolution is never dropped for a mechanical sibling.
+        sha = "9196f74abcd"
+        resolved = _record(
+            f"regression-pin:{sha}",
+            source="regression-pin",
+            confidence="medium",
+            encoded_as="detector",
+        )
+        later_unencoded = _record(
+            f"bug-issue:{sha}",
+            source="bug-issue",
+            confidence="low",
+            encoded_as="none-yet",
+        )
+
+        collapsed = metrics.latest_by_escape([resolved, later_unencoded])
+
+        assert len(collapsed) == 1
+        assert collapsed[0].encoded_as == "detector"
+        assert collapsed[0].detection_source == "regression-pin"
+
+    def test_latest_by_escape_keeps_distinct_commits_separate(self) -> None:
+        # Counter-pin: two genuinely different escaping commits (distinct
+        # detection_refs) keep two separate rows — the collapse folds only
+        # re-detections of the SAME commit, never merges unrelated escapes.
+        rows = [
+            _record("bug-issue:aaaa111", source="bug-issue", confidence="low"),
+            _record("bug-issue:bbbb222", source="bug-issue", confidence="low"),
+        ]
+
+        collapsed = metrics.latest_by_escape(rows)
+
+        assert {r.detection_ref for r in collapsed} == {"aaaa111", "bbbb222"}
+        assert len(collapsed) == 2
+
+    def test_latest_by_escape_preserves_first_appearance_order(self) -> None:
+        rows = [
+            _record("bug-issue:ref-c", source="bug-issue", confidence="low"),
+            _record("bug-issue:ref-a", source="bug-issue", confidence="low"),
+            _record(
+                "regression-pin:ref-c", source="regression-pin", confidence="medium"
+            ),
+        ]
+
+        collapsed = metrics.latest_by_escape(rows)
+
+        # ref-c appeared first (row 0), ref-a second — order preserved despite
+        # ref-c's surviving row being the later-appended regression-pin one.
+        assert [r.detection_ref for r in collapsed] == ["ref-c", "ref-a"]
+
 
 # ---------------------------------------------------------------------------
 # report

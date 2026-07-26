@@ -10,8 +10,10 @@ rewrites existing lines — the ledger is an audit trail, not a mutable table.
 A human resolution (confirmed attribution / an encoding) is recorded the same
 way: ``append_resolution`` appends a NEW row sharing the original's id rather
 than rewriting it. ``read_latest`` gives derived reads (metrics, report, HITL
-surfacing) a single current view per id by collapsing to the latest-appended
-row (#10498).
+surfacing) a single current view per underlying escaping commit by delegating to
+the two-stage ``latest_by_escape`` collapse — first by id (a resolution
+supersedes its original, #10498), then by ``detection_ref`` so one commit
+re-detected under a second source is not double-counted (#10654).
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
-from escape.metrics import latest_by_id
+from escape.metrics import latest_by_escape, latest_by_id
 from escape.models import EncodedAs, EscapeRecord
 from jsonl_ledger import IdentifiedJsonlLedger
 
@@ -42,8 +44,14 @@ class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
         super().__init__(path, EscapeRecord, logger=logger)
 
     def read_latest(self) -> list[EscapeRecord]:
-        """One row per id — the latest-appended row wins (supersession read)."""
-        return latest_by_id(self.read_all())
+        """One row per underlying escaping commit — the supersession read.
+
+        Delegates to the two-stage ``latest_by_escape`` collapse: first by id
+        (a resolution supersedes its original, #10498), then by ``detection_ref``
+        so one commit re-detected under a second source is not double-counted
+        (#10654). This is the single point every consumer reads through.
+        """
+        return latest_by_escape(self.read_all())
 
     def append_resolution(
         self,
@@ -59,8 +67,16 @@ class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
         carrying forward every detection/attribution field and overriding
         only the human-decided terminal fields — the original line on disk
         is never touched, only a new one is appended.
+
+        The lookup runs against the id-collapsed view (``latest_by_id``), not
+        the escape-collapsed ``read_latest``: resolution is keyed by the exact
+        id, which the ``detection_ref`` collapse (#10654) may fold away in favour
+        of a stronger-source sibling — resolving that folded id must still find
+        its own latest row rather than silently returning ``None``.
         """
-        original = next((r for r in self.read_latest() if r.id == escape_id), None)
+        original = next(
+            (r for r in latest_by_id(self.read_all()) if r.id == escape_id), None
+        )
         if original is None:
             return None
         overrides: dict[str, object] = {"encoded_as": encoded_as}
