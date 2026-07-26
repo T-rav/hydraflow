@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `7dcc422` — Fixes #10555: opt-in /code-review ultra review-phase option (#10620) (#10620) *(2026-07-26)*
+- `1c76ec6` — fix(arch): event-bus extractor recognizes fan-out subscribe(); stop false 'dead' flags (#10629) (#10629) *(2026-07-26)*
 - `e2625f4` — Fixes #10567: PRPort has no get_pr_labels — PR-level label routing ... (#10584) (#10584) *(2026-07-25)*
 - `7d284d6` — Fixes #10565: Sampled re-audit disagreement: PR #10479 (structural)... (#10576) (#10576) *(2026-07-25)*
 - `1ac9d57` — docs(arch): align functional_areas.yml loop grouping with the UI (#10554) (#10554) *(2026-07-25)*

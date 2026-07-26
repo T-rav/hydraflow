@@ -74,6 +74,7 @@ from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from escape.metrics import low_confidence, unencoded_aging
 from escape.models import EscapeCandidate, EscapeRecord
 from escape.report import render_escape_ledger_markdown
+from escape.surfaces import SurfacedIssue, SurfacedIssueLedger
 from exception_classify import reraise_on_credit_or_bug
 from git_timeouts import GIT_READONLY_TIMEOUT_S
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
@@ -92,6 +93,7 @@ _ESCAPE_REPORT_REL = Path("docs/arch/generated/escape-ledger.md")
 _TRENDS_REPORT_REL = Path("docs/arch/generated/erosion-trends.md")
 
 _TRENDS_FILENAME = "erosion_trends.jsonl"
+_SURFACES_FILENAME = "escape_surfaces.jsonl"
 
 _HEX_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
@@ -184,6 +186,42 @@ def select_findings_to_surface(
     return eligible[:max_per_tick], capped
 
 
+def _surfacing_answered(link: SurfacedIssue, record: EscapeRecord) -> bool:
+    """Is the reason *link* was surfaced for now answered by *record*?
+
+    Each surfacing reason has an independent "answered" predicate read against
+    the current (collapsed) ledger row: a ``low-confidence`` surface is answered
+    once a human bumps the mechanical confidence off ``low``; an ``aging``
+    surface is answered once the escape terminates in an encoding
+    (``encoded_as`` is no longer ``none-yet``). Any other reason string is
+    treated as unanswered — the link stays open rather than closing on a guess.
+    """
+    if link.reason == SURFACE_REASON_LOW_CONFIDENCE:
+        return record.attribution_confidence != "low"
+    if link.reason == SURFACE_REASON_AGING:
+        return record.encoded_as != "none-yet"
+    return False
+
+
+def answered_surfacings(
+    open_links: list[SurfacedIssue],
+    latest_records: dict[str, EscapeRecord],
+) -> list[SurfacedIssue]:
+    """Pure policy: which OPEN surfacing links now have an answered ledger row.
+
+    *latest_records* is the current one-row-per-id view (``read_latest``). A
+    link whose escape id is absent from it (or whose reason is not yet answered)
+    is left open — the reconcile pass only closes an issue once the human
+    resolution that answers its surfacing reason has actually landed.
+    """
+    answered: list[SurfacedIssue] = []
+    for link in open_links:
+        record = latest_records.get(link.escape_id)
+        if record is not None and _surfacing_answered(link, record):
+            answered.append(link)
+    return answered
+
+
 class EscapeLedgerLoop(BaseBackgroundLoop):
     """Records post-merge escapes + erosion trends. Read-only (Pattern B).
 
@@ -228,6 +266,10 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
     def _trends_path(self) -> Path:
         return self._config.diagnostics_dir / _TRENDS_FILENAME
 
+    @property
+    def _surfaces_path(self) -> Path:
+        return self._config.diagnostics_dir / _SURFACES_FILENAME
+
     # --- main tick -------------------------------------------------------
 
     async def _do_work(self) -> dict[str, Any] | None:
@@ -238,8 +280,17 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         if self._config.dry_run:
             return None
 
+        # Reconcile BEFORE _resolve_range's early exits: a human resolution
+        # almost always lands on a QUIET tick (no new commits merged), which
+        # _resolve_range would short-circuit at ``no_new_commits`` before any
+        # GitHub work — so a close step folded into the per-commit path would
+        # never run on exactly the ticks that matter (#10577). Every status
+        # dict below therefore carries the ``closed`` count.
+        closed = await self._reconcile_surfaced_issues()
+
         resolved = self._resolve_range()
         if isinstance(resolved, dict):
+            resolved["closed"] = closed
             return resolved
         repo_root, commit_range, commits, current_sha = resolved
 
@@ -262,6 +313,7 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
             "trend_datapoint": datapoint is not None,
             "filed": filed,
             "capped": capped,
+            "closed": closed,
         }
 
     def _resolve_range(
@@ -401,6 +453,7 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
             already_surfaced=seen,
             max_per_tick=max_issues,
         )
+        surfaces = SurfacedIssueLedger(self._surfaces_path)
         filed = 0
         for record, reason in to_file:
             title, body = _render_finding(record, reason)
@@ -431,8 +484,19 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
                     reason,
                 )
                 continue
-            seen = seen | {surfacing_fingerprint(record.id, reason)}
+            fingerprint = surfacing_fingerprint(record.id, reason)
+            seen = seen | {fingerprint}
             self._dedup.set_all(seen)
+            # Persist the number create_issue just returned so a later
+            # resolution can close THIS issue (#10577). The dedup fingerprint
+            # is a bare string and cannot hold it; the sidecar link can.
+            surfaces.append_surfaced(
+                fingerprint=fingerprint,
+                escape_id=record.id,
+                reason=reason,
+                issue_number=int(issue_number),
+                filed_at=now.isoformat(),
+            )
             filed += 1
             logger.info("EscapeLedger: surfaced finding %s (%s)", record.id, reason)
         if capped:
@@ -442,6 +506,84 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
                 max_issues,
             )
         return filed, capped
+
+    # --- reconcile answered surfaces (close stranded HITL issues) --------
+
+    async def _reconcile_surfaced_issues(self) -> int:
+        """Comment on + close each surfaced HITL issue whose row is now answered.
+
+        Ties an answered ledger row back to the issue ``_surface_findings``
+        filed for it (#10577): for every OPEN link whose surfacing reason is now
+        satisfied — ``low-confidence`` bumped off ``low``, or ``aging`` given an
+        encoding — post one comment naming the resolution, close the issue, and
+        append a terminal ``closed`` row so the link never re-fires. Returns the
+        number of issues closed this tick.
+
+        A failed ``close_issue`` (returns ``False`` or raises a non-credit
+        error) leaves the link OPEN for a later retry rather than marking it
+        closed; ``CreditExhaustedError`` propagates via ``reraise_on_credit_or_bug``.
+        """
+        surfaces = SurfacedIssueLedger(self._surfaces_path)
+        open_links = surfaces.open_links()
+        if not open_links:
+            return 0
+        latest = {r.id: r for r in EscapeLedger(self._ledger_path).read_latest()}
+        answered = answered_surfacings(open_links, latest)
+        closed = 0
+        for link in answered:
+            record = latest[link.escape_id]
+            try:
+                await self._prs.post_comment(
+                    link.issue_number, _resolution_comment(record, link.reason)
+                )
+                ok = await self._prs.close_issue(link.issue_number, reason="completed")
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "EscapeLedger: failed to close surfaced issue #%d for "
+                    "resolved escape %s (%s); leaving link open for retry",
+                    link.issue_number,
+                    link.escape_id,
+                    link.reason,
+                    exc_info=True,
+                )
+                continue
+            if not ok:
+                logger.warning(
+                    "EscapeLedger: close_issue returned False for #%d (%s); "
+                    "leaving link open for retry",
+                    link.issue_number,
+                    link.escape_id,
+                )
+                continue
+            surfaces.append_closed(link, closed_at=datetime.now(UTC).isoformat())
+            closed += 1
+            logger.info(
+                "EscapeLedger: closed surfaced issue #%d for resolved escape %s (%s)",
+                link.issue_number,
+                link.escape_id,
+                link.reason,
+            )
+        return closed
+
+
+def _resolution_comment(record: EscapeRecord, reason: str) -> str:
+    """Render the close comment for a resolved escape's HITL issue (#10577).
+
+    Names the resolution that answered the surfacing so the closed issue leaves
+    an audit trail: an ``aging`` surface reports the encoding it terminated in,
+    a ``low-confidence`` surface reports the confidence a human confirmed it at.
+    """
+    if reason == SURFACE_REASON_AGING:
+        detail = f"encoded as `{record.encoded_as}`"
+    else:
+        detail = f"attribution confidence is now `{record.attribution_confidence}`"
+    return (
+        "## Resolved (EscapeLedgerLoop, automated)\n\n"
+        f"Escape `{record.id}` has been answered — {detail}. Closing this "
+        "escape-ledger finding so no stale HITL surface is left behind after "
+        "the human resolution (#10577).\n"
+    )
 
 
 def _month_of(iso: str) -> str:
