@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10602
 source_phase: plan
 created_at: 2026-07-26T10:26:40.201309+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1154
 ---
 
 # Skip Tier-1 MockWorld for credit pause tests

@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10569
 source_phase: plan
 created_at: 2026-07-26T03:51:14.084292+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0584
 ---
 
 # Guard create_task() restart paths with _stop_event to avoid post-stop leaks

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10587
 source_phase: plan
 created_at: 2026-07-26T02:52:52.792532+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1154
 ---
 
 # Thread repo_root as required keyword-only to force worktree wiring

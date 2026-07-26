@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10591
 source_phase: plan
 created_at: 2026-07-26T03:23:10.272131+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1144
 ---
 
 # GitHub-issue audit scripts route through PRPort, never raw gh/git/subprocess

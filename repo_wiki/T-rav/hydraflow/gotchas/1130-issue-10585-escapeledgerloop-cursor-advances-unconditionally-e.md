@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10585
 source_phase: plan
 created_at: 2026-07-26T02:30:26.057561+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1144
 ---
 
 # EscapeLedgerLoop cursor advances unconditionally even on filing failure

@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10591
 source_phase: plan
 created_at: 2026-07-26T03:23:10.272087+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1144
 ---
 
 # Fix wiki-rot cite regex in the extractor, never as a downstream .isdigit() filter
