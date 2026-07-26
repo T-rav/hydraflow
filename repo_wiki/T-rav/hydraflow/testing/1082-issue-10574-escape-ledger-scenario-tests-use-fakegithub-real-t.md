@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10574
 source_phase: plan
 created_at: 2026-07-26T00:21:42.291392+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1085
 ---
 
 # Escape-ledger scenario tests use FakeGitHub + real tiny git repo, tagged scenario_loops

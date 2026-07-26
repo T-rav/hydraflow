@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10565
 source_phase: plan
 created_at: 2026-07-25T23:03:04.264311+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10565 closed
 ---
 
 # Editing src/adr_index.py triggers an AdrTouchpointAuditorLoop rollup (ADR-0100 bare-cites it)

@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10561
 source_phase: plan
 created_at: 2026-07-25T23:57:26.301223+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1039
 ---
 
 # Bound self-heal reclassification passes with a DedupStore one-shot fingerprint
