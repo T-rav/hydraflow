@@ -28,8 +28,8 @@ model {
       adrsTouching = func 'ADRIndex.adrs_touching(paths)' {
         description 'LIVE GATE: filters to status in (Accepted, Proposed) before path matching. The only status filter in the suppression path.'
       }
-      isLive = func 'ADR.is_live / LIVE_ADR_STATUSES  [NEW]' {
-        description 'Planned single source of truth for "live ADR". Backs adrs_touching, adr_citation_resolve, and the nudge filter.'
+      isLive = func 'ADR.is_live / LIVE_ADR_STATUSES' {
+        description 'Single source of truth for "live ADR" (#10565). Backs adrs_touching, adr_citation_resolve, and the nudge filter.'
       }
     }
 
@@ -40,7 +40,7 @@ model {
         description 'Reaches ADRs ONLY via adrs_touching -> live-only by construction.'
       }
       fanout = func '_bare_citation_fanout(path, adrs)' {
-        description 'Counts bare citers of a path. Denominator is live-only on the drift path; corpus-wide on the nudge path -> the #10565 fan-out inflation bug.'
+        description 'Counts bare citers of a path. Live-only on both the drift path and the nudge path (#10565 fixed the nudge path denominator to match).'
       }
       isSharedInfra = func '_is_shared_infra(path, fanout, threshold)' {
         description 'Shared predicate: manual _SHARED_INFRA_MODULES allowlist OR fan-out >= threshold.'
@@ -48,8 +48,8 @@ model {
       citationDrifts = func '_citation_drifts(adr, path, ...)' {
         description 'Bare citation drifts unless _is_shared_infra; symbol-qualified drifts only on symbol evidence.'
       }
-      nudges = func 'bare_infra_citation_nudges(adrs)  [BUG SITE]' {
-        description 'Iterates EVERY ADR handed to it - no status filter. Claims to fire on exactly the bare citations suppression covers.'
+      nudges = func 'bare_infra_citation_nudges(adrs)' {
+        description 'Filters to live ADRs before iterating (#10565 fix), matching adrs_touching -> fires on exactly the bare citations suppression covers.'
       }
     }
 
@@ -73,7 +73,7 @@ model {
   }
 
   xref = artifact 'docs/arch/generated/adr_xref.md' {
-    description 'Shipped artifact. Symbol-Granularity Nudges table currently carries 5 rows for Superseded ADRs (0006, 0013 x2, 0033, 0036).'
+    description 'Shipped artifact. Symbol-Granularity Nudges table previously carried 5 rows for Superseded ADRs (0006, 0013 x2, 0033, 0036) before #10565 filtered them out.'
   }
 
   index -> adrCorpus 'reads'
@@ -82,10 +82,10 @@ model {
   computeDrift -> citationDrifts 'calls'
   citationDrifts -> isSharedInfra 'calls'
   nudges -> isSharedInfra 'calls'
-  nudges -> fanout 'calls (WHOLE corpus - inflated)'
-  adrsTouching -> isLive 'calls [planned]'
-  resolve -> isLive 'calls [planned]'
-  nudges -> isLive 'calls [planned fix]'
+  nudges -> fanout 'calls (live-only)'
+  adrsTouching -> isLive 'calls'
+  resolve -> isLive 'calls'
+  nudges -> isLive 'calls'
   renderNudges -> nudges 'calls'
   renderNudges -> adrs 'receives full corpus'
   runner -> renderNudges 'calls'
@@ -100,24 +100,37 @@ views {
   }
 
   view driftInternals of driftSystem {
-    title 'Where the status filter exists (and where it does not)'
+    title 'Where the live-status filter is enforced (post-#10565)'
     include *
     style nudges {
-      color red
+      color green
     }
     style adrsTouching {
       color green
     }
   }
 
-  dynamic view nudgeFlow {
-    title 'Nudge generation flow — the escape'
+  dynamic view nudgeFlowPreFix {
+    title 'Nudge generation flow — the escape (historical, pre-#10565; fixed below)'
     runner -> renderNudges 'arch-regen'
     renderNudges -> adrs 'full corpus (all statuses)'
     renderNudges -> nudges 'bare_infra_citation_nudges(adrs)'
-    nudges -> fanout 'counts non-live citers too'
+    nudges -> fanout 'counted non-live citers too'
     nudges -> isSharedInfra 'allowlist OR inflated fan-out'
     nudges -> renderNudges 'CitationNudge rows incl. Superseded ADRs'
+    renderNudges -> runner 'markdown table'
+    runner -> xref 'writes adr_xref.md'
+  }
+
+  dynamic view nudgeFlowFixed {
+    title 'Nudge generation flow — current (post-#10565)'
+    runner -> renderNudges 'arch-regen'
+    renderNudges -> adrs 'full corpus (all statuses)'
+    renderNudges -> nudges 'bare_infra_citation_nudges(adrs)'
+    nudges -> isLive 'filters adr_list to live ADRs first'
+    nudges -> fanout 'live-only fan-out count'
+    nudges -> isSharedInfra 'allowlist OR live fan-out'
+    nudges -> renderNudges 'CitationNudge rows, live ADRs only'
     renderNudges -> runner 'markdown table'
     runner -> xref 'writes adr_xref.md'
   }
