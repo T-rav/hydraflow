@@ -303,3 +303,55 @@ class TestEscapeLedgerScenario:
 
         assert filed == 0
         assert capped is False
+
+    async def test_resolved_escape_closes_its_surfaced_issue_on_next_tick(
+        self, tmp_path: Path
+    ) -> None:
+        # End-to-end over FakeGitHub: a surfaced HITL issue is closed once the
+        # operator records an encoding, on a QUIET (no_new_commits) tick — the
+        # reconcile pass runs before the early exit (#10577).
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        state = _make_state(_head(repo))
+        loop = _build_loop(tmp_path, repo, github, state)
+
+        from escape.ledger import EscapeLedger
+        from escape.models import EscapeRecord
+        from escape.surfaces import SurfacedIssueLedger
+
+        ledger = EscapeLedger(loop._ledger_path)
+        ledger.append(
+            EscapeRecord(
+                id="bug-issue:esc9",
+                detected_at="2026-01-01T00:00:00+00:00",  # aged past threshold
+                detection_source="bug-issue",
+                detection_ref="esc9",
+                originating_pr=None,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="fixes-chain",
+                attribution_confidence="medium",  # not low => only the AGING surface
+                encoded_as="none-yet",
+                notes="",
+            )
+        )
+
+        # A busy tick would file the aging HITL issue; drive that surface here.
+        filed, _capped = await loop._surface_findings()
+        assert filed == 1
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert await github.get_issue_state(link.issue_number) == "OPEN"
+
+        # Operator records the encoding via EscapeLedger.append_resolution.
+        ledger.append_resolution("bug-issue:esc9", encoded_as="detector", notes="done")
+
+        # The next tick is quiet — reconcile must STILL close the stranded issue.
+        result = await loop._do_work()
+        assert result["status"] == "no_new_commits"
+        assert result["closed"] == 1
+
+        issue = github._issues[link.issue_number]
+        assert issue.state == "closed"
+        assert any("detector" in str(c) for c in issue.comments)
