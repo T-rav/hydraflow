@@ -21,6 +21,7 @@ import ci_sentinels
 from comment_formatter import CommentFormatter, SelfReviewError
 from config import Credentials, HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
+from label_transitions import pipeline_stage_labels
 from merge_state_watcher import ConflictingPR
 from models import (
     CICheckPayload,
@@ -4173,6 +4174,18 @@ class PRManager:
             "diagnose": (self._config.diagnose_label or ["hydraflow-diagnose"])[0],
         }
         label = _STAGE_LABEL.get(new_stage, new_stage)
+        # Consult the canonical ADR-0002 state machine (single source of truth:
+        # label_transitions.LABEL_TRANSITIONS). Advisory and fail-open per the
+        # dark-factory contract — a label move is never blocked — but a target
+        # that is neither a canonical pipeline stage nor a known non-stage
+        # target (e.g. diagnose) is surfaced for observability (#10621).
+        if label not in pipeline_stage_labels() and new_stage not in _STAGE_LABEL:
+            logger.debug(
+                "transition: target %r (%s) is not a canonical ADR-0002 "
+                "pipeline stage; proceeding fail-open",
+                new_stage,
+                label,
+            )
         await self.swap_pipeline_labels(issue_number, label, pr_number=pr_number)
 
     async def close_task(self, issue_number: int) -> None:

@@ -9,7 +9,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR | Modules cited | Enforced by |
 |---|---|---|
 | ADR-0001 | — | `pytest:tests/test_orchestrator_loops.py`, `pytest:tests/architecture/test_loop_count_matches_adr0001.py` |
-| ADR-0002 | `src.config`, `src.implement_phase`, `src.issue_store`, `src.pr_manager` | `pytest:tests/test_state_machine.py` |
+| ADR-0002 | `src.config`, `src.implement_phase`, `src.issue_store`, `src.label_transitions`, `src.pr_manager` | `pytest:tests/test_state_machine.py` |
 | ADR-0003 | `src.ports`, `src.workspace` | — |
 | ADR-0004 | `src.agent_cli`, `src.base_runner` | `pytest:tests/test_agent_cli.py`, `pytest:tests/test_base_runner.py` |
 | ADR-0005 | `src.implement_phase`, `src.pr_manager` | `pytest:tests/test_implement_phase.py` |
@@ -200,6 +200,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_fetcher` | ADR-0019, ADR-0067, ADR-0108 |
 | `src.issue_store` | ADR-0002, ADR-0006, ADR-0022, ADR-0041, ADR-0084, ADR-0099, ADR-0108 |
 | `src.label_drift_watcher_loop` | ADR-0088 |
+| `src.label_transitions` | ADR-0002 |
 | `src.live_corpus_replay_loop` | ADR-0086 |
 | `src.loop_fitness` | ADR-0093 |
 | `src.memory_backlog_loop` | ADR-0089 |

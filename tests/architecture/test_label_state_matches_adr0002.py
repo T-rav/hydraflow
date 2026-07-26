@@ -1,8 +1,14 @@
 """Drift guard: ADR-0002's Mermaid state diagram vs the generated labels.md.
 
-HydraFlow does not yet expose a canonical transition table. Until that source
-exists, this test asserts that the generated labels page is present and
-explicitly documents the empty transition extraction instead of being skipped.
+The canonical transition table (`label_transitions.LABEL_TRANSITIONS`) is the
+single source of truth the runtime consults; the architecture extractor reads
+it to render `docs/arch/generated/labels.md`. This test diffs that generated
+Mermaid edge set against the Mermaid `stateDiagram-v2` block in ADR-0002 and
+fails on any drift, so the two representations of the label state machine can
+never silently diverge (issue #10621).
+
+Both blocks must exist: an empty extraction (the pre-#10621 state, when no
+declarative table existed) is now a failure, not a pass.
 """
 
 import re
@@ -33,15 +39,24 @@ def test_label_state_matches_adr0002(real_repo_root: Path):
 
     adr_block = _first_mermaid_block(adr_path.read_text())
     gen_block = _first_mermaid_block(gen_path.read_text())
-    if not gen_block:
-        gen_text = gen_path.read_text()
-        assert "_(no transitions discovered)_" in gen_text
-        return
-    if not adr_block:
-        raise AssertionError("ADR-0002 has no Mermaid block — add one.")
+
+    assert adr_block, (
+        "ADR-0002 has no Mermaid stateDiagram block — it is the source of truth "
+        "for the label state machine. Add one (see issue #10621)."
+    )
+    assert gen_block, (
+        "docs/arch/generated/labels.md has no Mermaid block — the canonical "
+        "transition table (label_transitions.LABEL_TRANSITIONS) is missing or "
+        "empty. Run `make arch-regen`."
+    )
 
     adr_edges = _edges(adr_block)
     gen_edges = _edges(gen_block)
+    assert gen_edges, (
+        "generated labels.md Mermaid has no parseable edges — the canonical "
+        "transition table is empty."
+    )
+
     missing = adr_edges - gen_edges
     extra = gen_edges - adr_edges
     if missing or extra:
@@ -53,5 +68,6 @@ def test_label_state_matches_adr0002(real_repo_root: Path):
         raise AssertionError(
             "Label state machine drift between code and ADR-0002:\n  "
             + "\n  ".join(msg)
-            + "\n\nFix: update either the source transition table or ADR-0002."
+            + "\n\nFix: update either src/label_transitions.py:LABEL_TRANSITIONS "
+            "or the Mermaid block in ADR-0002 so the edge sets match."
         )
