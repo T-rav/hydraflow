@@ -1274,11 +1274,21 @@ class WikiCompiler:
 
         Returns ``(fixed_in_pr, code_refs)`` where ``fixed_in_pr`` is an
         order-preserving, de-duplicated, comma-joined string of every
-        distinct non-empty source ``fixed_in_pr`` (or ``None`` when none
-        carry one), and ``code_refs`` is the order-preserving, de-duplicated
-        tuple of every source ``code_ref``. Deterministic — no LLM involved —
-        so a synthesized entry can never silently drop a source's shipped
-        claim during promotion.
+        distinct non-empty source PR (or ``None`` when none carry one), and
+        ``code_refs`` is the order-preserving, de-duplicated tuple of every
+        source ``code_ref``. Deterministic — no LLM involved — so a
+        synthesized entry can never silently drop a source's shipped claim
+        during promotion.
+
+        A source ``fixed_in_pr`` may itself be a comma-joined *compound* of
+        several PRs — any prior synthesis round emits one, since this method
+        joins the union with commas. An N-to-1 merge that folds such a
+        compound source in alongside a sibling sharing one of its PRs must
+        still land each distinct PR exactly once. So the union splits on
+        commas and de-dups at individual-PR granularity, symmetric with
+        ``code_refs`` below; whole-string dedup instead re-emitted a shared
+        PR twice and never treated the compound's embedded PRs as
+        first-class, distinct references (#10655).
         """
         prs: list[str] = []
         seen_pr: set[str] = set()
@@ -1286,10 +1296,11 @@ class WikiCompiler:
         seen_ref: set[str] = set()
         for entry in active_entries:
             raw_pr = entry.get("fixed_in_pr")
-            pr = raw_pr.strip() if isinstance(raw_pr, str) else ""
-            if pr and pr not in seen_pr:
-                seen_pr.add(pr)
-                prs.append(pr)
+            for token in raw_pr.split(",") if isinstance(raw_pr, str) else ():
+                pr = token.strip()
+                if pr and pr not in seen_pr:
+                    seen_pr.add(pr)
+                    prs.append(pr)
             for ref in entry.get("code_refs") or ():
                 cleaned = ref.strip() if isinstance(ref, str) else ""
                 if cleaned and cleaned not in seen_ref:
