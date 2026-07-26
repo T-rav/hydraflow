@@ -39,6 +39,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.runner_utils")
 
+# Size of the accumulated-display tail scanned per line for a mid-run credit
+# signal (#10597). Comfortably larger than the longest credit phrase plus its
+# resume clause (~65 chars), so a cap message split across a few consecutive
+# same-message stream deltas is still caught, while keeping the per-line scan
+# O(1) instead of re-scanning the whole (growing) transcript.
+_CREDIT_SCAN_TAIL_CHARS = 512
+
 
 class AuthenticationRetryError(RuntimeError):
     """Raised when the agent CLI reports authentication_failed.
@@ -267,6 +274,33 @@ async def _stream_and_collect(
             # reaped only the direct child, leaking its group (#9911).
             _kill_proc_group(proc)
             break
+
+        # Fail-fast on a MID-RUN credit-exhaustion signal (#10597). When the
+        # weekly/session cap is hit partway through a run the CLI does not exit:
+        # it sits in api-retry/backoff, emits the limit line into stdout, but
+        # never closes the stream — so this read loop would block until the
+        # 3600s hard cap fires (~1h burned per attempt). Worse, that generic
+        # hard-timeout surfaces as a plain RuntimeError the orchestrator counts
+        # as a failed attempt, consuming the retry budget; raising here routes
+        # the signal through reraise_on_credit_or_bug to the global pause/park
+        # (with an attempt refund) instead. Placed AFTER the on_output early-kill
+        # so an early-kill's legitimate credit-phrase content stays exempt
+        # (mirrors _post_stream_result's early_killed skip). Gated on
+        # credit_prose_scan for the SAME reason as the post-stream check
+        # (#9895): runners that quote credit-error prose (DiagnosticRunner) must
+        # not self-trip. Scans a bounded tail of the accumulated display text —
+        # the exact surface the post-stream check inspects — so the cap phrase
+        # is caught even when it streams in split across same-message deltas,
+        # while adding no new false-positive exposure beyond earlier detection.
+        credit_tail = accumulated_text[-_CREDIT_SCAN_TAIL_CHARS:]
+        if config.credit_prose_scan and is_credit_exhaustion(credit_tail):
+            _kill_proc_group(proc)
+            with contextlib.suppress(ProcessLookupError, OSError):
+                await proc.wait()
+            raise CreditExhaustedError(
+                "API credit limit reached (detected mid-run)",
+                resume_at=parse_credit_resume_time(credit_tail),
+            )
 
         # Emit structured activity event (additive — does not replace TRANSCRIPT_LINE)
         try:
