@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `c5fecf3` — refactor(implement): run implement as a flow (DAG) + no-progress abort (P2 of #10682) (#10694) (#10694) *(2026-07-26)*
 - `58476f5` — Fixes #10652: staging_bisect stall remediation no longer lags the sanity alert (#10686) (#10686) *(2026-07-26)*
 - `56795f5` — refactor(wiki-compiler): run compile as a flow (DAG) on the P0 primitive (P1 of #10682) (#10687) (#10687) *(2026-07-26)*
 - `ca6fd9a` — feat(arch): integrity gate — fail on degenerate generated artifacts (#10685) (#10685) *(2026-07-26)*
