@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10499
 source_phase: plan
 created_at: 2026-07-25T01:53:00.854342+00:00
-status: active
+status: stale
 corroborations: 2
+stale_reason: source issue #10499 closed
 ---
 
 # Regression tests for escape/detect.py need a real temp git repo, not synthetic added_paths

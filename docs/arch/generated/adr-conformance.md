@@ -79,7 +79,8 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0104 | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py` |
 | ADR-0107 | decision-of-record | — |
-| ADR-0109 | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
+| ADR-0109 | enforced | `pytest:tests/test_ultra_review.py` |
+| ADR-0110 | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 
 ## Check → ADRs it protects
 
@@ -124,7 +125,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_auto_tighten_invariant.py` | ADR-0104 |
 | `pytest:tests/test_base_runner.py` | ADR-0004 |
 | `pytest:tests/test_caretaker_loop_wiring.py` | ADR-0029 |
-| `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` | ADR-0109 |
+| `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` | ADR-0110 |
 | `pytest:tests/test_config_env.py` | ADR-0103 |
 | `pytest:tests/test_convergence_gate.py` | ADR-0094 |
 | `pytest:tests/test_convergence_ledger.py` | ADR-0094 |
@@ -183,6 +184,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_trust_fleet_anomaly_detectors.py` | ADR-0045 |
 | `pytest:tests/test_trust_fleet_sanity_loop.py` | ADR-0045 |
 | `pytest:tests/test_ubiquitous_language_drift.py` | ADR-0053 |
+| `pytest:tests/test_ultra_review.py` | ADR-0109 |
 | `pytest:tests/test_untrusted_text.py` | ADR-0092 |
 | `pytest:tests/test_visual_validation.py` | ADR-0016 |
 | `pytest:tests/test_wiki_corroboration.py` | ADR-0032 |

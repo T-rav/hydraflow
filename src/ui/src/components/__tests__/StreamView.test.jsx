@@ -1152,7 +1152,7 @@ describe('PipelineFlow dot cap (#9863)', () => {
 })
 
 describe('PipelineFlow region + total count badges (#10488)', () => {
-  it('shows the per-region issue and PR count as "N · N PR" for regions with no PRs', () => {
+  it('shows the per-region issue count as a bare "N" with no "· N PR" suffix', () => {
     mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
       pipelineIssues: {
         plan: [
@@ -1166,11 +1166,14 @@ describe('PipelineFlow region + total count badges (#10488)', () => {
     }))
     render(<StreamView {...defaultProps} />)
 
-    expect(screen.getByTestId('flow-count-plan').textContent).toBe('2 · 0 PR')
-    expect(screen.getByTestId('flow-count-implement').textContent).toBe('1 · 0 PR')
+    expect(screen.getByTestId('flow-count-plan').textContent).toBe('2')
+    expect(screen.getByTestId('flow-count-implement').textContent).toBe('1')
+    // #10593: the PR count suffix is gone entirely — no badge mentions PR.
+    expect(screen.getByTestId('flow-count-plan').textContent).not.toContain('PR')
+    expect(screen.getByTestId('flow-count-implement').textContent).not.toContain('PR')
   })
 
-  it('counts matching PRs for a region where some issues carry a PR, and shows 0 explicitly for one that has none', () => {
+  it('drops the PR count for REVIEW even when issues carry a PR, keeping only the issue count', () => {
     mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
       pipelineIssues: {
         triage: [
@@ -1190,10 +1193,12 @@ describe('PipelineFlow region + total count badges (#10488)', () => {
     }))
     render(<StreamView {...defaultProps} />)
 
-    expect(screen.getByTestId('flow-count-review').textContent).toBe('3 · 2 PR')
-    // A region with issues but none carrying a PR shows the zero explicitly,
-    // not hidden — assert the exact string, not just presence.
-    expect(screen.getByTestId('flow-count-triage').textContent).toBe('2 · 0 PR')
+    // REVIEW has 2 PRs, but the badge no longer surfaces that — issue count only.
+    expect(screen.getByTestId('flow-count-review').textContent).toBe('3')
+    expect(screen.getByTestId('flow-count-review').textContent).not.toContain('PR')
+    expect(screen.getByTestId('flow-count-triage').textContent).toBe('2')
+    // The hover tooltip must not mention PRs either (acceptance criterion).
+    expect(screen.getByTestId('flow-count-review').getAttribute('title')).not.toContain('PR')
   })
 
   it('renders flow-count badges for the terminal-fork stages hitl and merged', () => {
@@ -1209,9 +1214,9 @@ describe('PipelineFlow region + total count badges (#10488)', () => {
     render(<StreamView {...defaultProps} />)
 
     expect(screen.getByTestId('flow-count-hitl')).toBeTruthy()
-    expect(screen.getByTestId('flow-count-hitl').textContent).toBe('1 · 0 PR')
+    expect(screen.getByTestId('flow-count-hitl').textContent).toBe('1')
     expect(screen.getByTestId('flow-count-merged')).toBeTruthy()
-    expect(screen.getByTestId('flow-count-merged').textContent).toBe('1 · 0 PR')
+    expect(screen.getByTestId('flow-count-merged').textContent).toBe('1')
   })
 
   it('shows the full issue count in the region badge even when dots are capped at 10', () => {
@@ -1228,13 +1233,13 @@ describe('PipelineFlow region + total count badges (#10488)', () => {
     }))
     render(<StreamView {...defaultProps} />)
 
-    expect(screen.getByTestId('flow-count-plan').textContent).toBe('11 · 0 PR')
+    expect(screen.getByTestId('flow-count-plan').textContent).toBe('11')
     expect(screen.getByTestId('flow-overflow-plan').textContent).toBe('+1')
     expect(screen.getByTestId('flow-dot-3009')).toBeTruthy()
     expect(screen.queryByTestId('flow-dot-3010')).toBeNull()
   })
 
-  it('shows the pipeline-wide total as "N issues · N PRs" summed across all regions', () => {
+  it('shows the pipeline-wide total as "N issues" with no "· N PRs" suffix', () => {
     mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
       pipelineIssues: {
         triage: [
@@ -1251,7 +1256,9 @@ describe('PipelineFlow region + total count badges (#10488)', () => {
     }))
     render(<StreamView {...defaultProps} />)
 
-    expect(screen.getByTestId('flow-total').textContent).toBe('3 issues · 1 PRs')
+    expect(screen.getByTestId('flow-total').textContent).toBe('3 issues')
+    expect(screen.getByTestId('flow-total').textContent).not.toContain('PR')
+    expect(screen.getByTestId('flow-total').getAttribute('title')).not.toContain('PR')
   })
 
   it('updates flow-count-plan after the context snapshot changes and the component re-renders', () => {
@@ -1261,7 +1268,7 @@ describe('PipelineFlow region + total count badges (#10488)', () => {
       },
     }))
     const { rerender } = render(<StreamView {...defaultProps} />)
-    expect(screen.getByTestId('flow-count-plan').textContent).toBe('1 · 0 PR')
+    expect(screen.getByTestId('flow-count-plan').textContent).toBe('1')
 
     mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
       pipelineIssues: {
@@ -1273,7 +1280,7 @@ describe('PipelineFlow region + total count badges (#10488)', () => {
       },
     }))
     rerender(<StreamView {...defaultProps} />)
-    expect(screen.getByTestId('flow-count-plan').textContent).toBe('3 · 0 PR')
+    expect(screen.getByTestId('flow-count-plan').textContent).toBe('3')
   })
 })
 

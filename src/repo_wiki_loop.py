@@ -33,6 +33,7 @@ from wiki_anchor_gate import config_field_vocabulary
 from wiki_drift_detector import (
     apply_drift_markers,
     detect_drift,
+    detect_prose_drift,
     scan_semantic_drift,
 )
 from wiki_maint_queue import MaintenanceQueue, MaintenanceTask
@@ -492,6 +493,55 @@ class RepoWikiLoop(BaseBackgroundLoop):
                 )
         return drift_findings, drift_marked
 
+    async def _detect_prose_drift(
+        self, repos: list[str], tracked_root: Path | None, *, repo_root: Path
+    ) -> int:
+        """Phase 9c: REPORT-ONLY prose-form citation drift (issue #10581).
+
+        Companion to :meth:`_detect_structural_drift`. The strict deterministic
+        detector recognizes only ``src/path.py:Symbol`` citations, so plan-phase
+        entries that cite code in *prose* — a bare identifier span near a module
+        span, a dotted call, a bare ``src/...py`` — never drift and sit at
+        ``status: active`` forever. :func:`detect_prose_drift` recognizes those
+        forms.
+
+        It is deliberately REPORT-ONLY: findings are logged and counted but
+        NEVER passed to :func:`apply_drift_markers`. A heuristic prose verdict
+        must cost a log line, not a ``status: stale`` flip across ~395 active
+        entries (the #10638 safety boundary, mirroring how ``SemanticDriftFinding``
+        is kept distinct from ``DriftFinding``).
+
+        Returns the total suspect-citation count across all flagged entries —
+        surfaced by the heal as ``stats["prose_drift_suspects"]``.
+        """
+        if tracked_root is None:
+            return 0
+
+        prose_suspects = 0
+        for slug in repos:
+            try:
+                findings = await asyncio.to_thread(
+                    detect_prose_drift,
+                    tracked_root=tracked_root,
+                    repo_root=repo_root,
+                    repo_slug=slug,
+                )
+            except Exception as exc:  # noqa: BLE001
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "prose drift detection failed for %s", slug, exc_info=True
+                )
+                continue
+            for f in findings:
+                prose_suspects += len(f.suspect_symbols)
+                logger.info(
+                    "prose drift (report-only): %s entry %s suspects %s",
+                    f.entry_path,
+                    f.entry_id,
+                    sorted(f.suspect_symbols),
+                )
+        return prose_suspects
+
     async def _run_semantic_drift_scan(
         self, repos: list[str], tracked_root: Path | None, *, repo_root: Path
     ) -> int:
@@ -632,6 +682,11 @@ class RepoWikiLoop(BaseBackgroundLoop):
             s["drift_findings"] = drift_findings
             s["drift_marked_stale"] = drift_marked
             s["semantic_drift_findings"] = await self._run_semantic_drift_scan(
+                repos, wt_tracked_root, repo_root=worktree
+            )
+            # Phase 9c: report-only prose-form citation drift (#10581). Surfaced
+            # as a count/log only — never auto-staled (the #10638 boundary).
+            s["prose_drift_suspects"] = await self._detect_prose_drift(
                 repos, wt_tracked_root, repo_root=worktree
             )
             await self._run_generalization_pass(per_repo=store)

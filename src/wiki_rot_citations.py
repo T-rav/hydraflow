@@ -69,23 +69,70 @@ class Cite:
         return ""
 
 
+# Documentation metavariables — placeholder symbol names that only ever
+# appear in *format-example* cites used to explain the cite grammar in prose
+# (``path.py:symbol``, ``src.module.Class``). They never name a real code
+# symbol. See :func:`_is_placeholder_cite` (#10595).
+_METAVAR_SYMBOLS: frozenset[str] = frozenset(
+    {"symbol", "some_symbol", "Class", "module"}
+)
+
+# Placeholder module tokens — illustrative paths that never name a real
+# source file. Paired with a metavariable symbol they form a self-referential
+# documentation example, not a broken cite (#10595).
+_PLACEHOLDER_MODULES: frozenset[str] = frozenset(
+    {"path.py", "path/to/file.py", "path/to/module.py", "src.module"}
+)
+
+
+def _is_placeholder_cite(module: str, symbol: str) -> bool:
+    """Return ``True`` iff ``module``/``symbol`` is a documentation placeholder.
+
+    The wiki entry that documents the rot detector itself explains the cite
+    grammar with the literal examples ``path.py:symbol`` (Style-A) and
+    ``src.module.Class`` (Style-B). ``extract_cites`` used to emit both as
+    real cites; neither can ever resolve, so ``WikiRotDetectorLoop`` reported
+    its own docs as rotten forever and escalated them — a permanent
+    self-referential false-positive class (#10595).
+
+    A cite is a placeholder only when it pairs a placeholder module token with
+    a metavariable symbol — the ``AND`` keeps genuine broken cites reported: a
+    real-looking module with a metavariable-shaped symbol (``real.py:Class``),
+    or a placeholder module with a real symbol (``path.py:handle``), still
+    surfaces.
+    """
+    return module in _PLACEHOLDER_MODULES and symbol in _METAVAR_SYMBOLS
+
+
 def extract_cites(text: str) -> list[Cite]:
     """Extract Style-A + Style-B hard cites from arbitrary markdown/prose.
 
     Deduplicated by ``(module, symbol, style)``.  Fenced-code hints
     (Style-C) are **excluded** — see :func:`extract_fenced_hints`.
+    Documentation placeholder cites (:func:`_is_placeholder_cite`) are
+    likewise excluded so the detector never flags its own format examples.
     """
     seen: set[tuple[str, str, str]] = set()
     out: list[Cite] = []
 
     for m in _STYLE_A_RE.finditer(text):
-        key = (m.group(1), m.group(2), "colon")
+        module = m.group(1)
+        symbol = m.group(2)
+        # A purely-numeric tail (``path.py:141``) is a *line reference*, not
+        # a symbol cite. ``\w+`` in ``_STYLE_A_RE`` matches digits, so these
+        # slipped through as bogus symbol cites that can never resolve via
+        # ``verify_cite_ast`` — a permanent wiki-rot false-positive class
+        # (#10591). Python identifiers never start with a digit, so skip
+        # them here; genuine ``path.py:Symbol`` tails are unaffected.
+        if symbol.isdigit():
+            continue
+        if _is_placeholder_cite(module, symbol):
+            continue
+        key = (module, symbol, "colon")
         if key in seen:
             continue
         seen.add(key)
-        out.append(
-            Cite(module=m.group(1), symbol=m.group(2), style="colon", raw=m.group(0))
-        )
+        out.append(Cite(module=module, symbol=symbol, style="colon", raw=m.group(0)))
 
     for m in _STYLE_B_RE.finditer(text):
         path = m.group(1)
@@ -98,6 +145,8 @@ def extract_cites(text: str) -> list[Cite]:
         # identifier char — some prose ends in ``src.foo.`` (trailing dot)
         # which the `\b` anchor does not catch.
         if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", symbol):
+            continue
+        if _is_placeholder_cite(module, symbol):
             continue
         key = (module, symbol, "dotted")
         if key in seen:
@@ -293,12 +342,51 @@ def verify_cite_ast(
     return False, sorted(symbols)
 
 
+def _assign_target_names(target: ast.expr) -> set[str]:
+    """Names bound by one assignment target, unpacking tuple/list targets.
+
+    Mirrors ``adr_citation_resolve._assign_target_names`` so the two
+    resolvers agree on which module-level names a bare cite may resolve to.
+    """
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Starred):
+        return _assign_target_names(target.value)
+    if isinstance(target, ast.Tuple | ast.List):
+        names: set[str] = set()
+        for elt in target.elts:
+            names |= _assign_target_names(elt)
+        return names
+    return set()
+
+
 def _collect_defined_symbols(tree: ast.AST) -> set[str]:
-    """Walk *tree* for top-level + nested defs and return symbol names."""
+    """Return the resolvable symbol names defined by *tree*.
+
+    Two symbol classes are collected:
+
+    * **Defs/classes** — every ``FunctionDef`` / ``AsyncFunctionDef`` /
+      ``ClassDef`` at *any* depth (walked recursively), so nested helpers
+      and methods stay citeable.
+    * **Module-level constants** — names bound by *top-level*
+      ``ast.Assign`` / ``ast.AnnAssign`` targets (``NAME = ...`` /
+      ``NAME: T = ...``, including tuple/list unpacking). Module-level only,
+      so a cite to a live constant such as ``src/foo.py:_SURFACE_DEFAULTS``
+      resolves (issue #10594) while function-local variables never do.
+
+    Mirrors the bare-name grammar in ``adr_citation_resolve`` so the ADR
+    and wiki-rot citation resolvers agree on what a module-level name is.
+    """
     out: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             out.add(node.name)
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                out |= _assign_target_names(tgt)
+        elif isinstance(node, ast.AnnAssign):
+            out |= _assign_target_names(node.target)
     return out
 
 

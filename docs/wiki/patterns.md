@@ -478,3 +478,15 @@ Every `BaseBackgroundLoop` subclass must implement `loop_fitness(self, ctx: Fitn
 ```json:entry
 {"id":"01JZ9FK3C0M04HYR42BF44W0D4","title":"`LoopFitness` contract and AST ratchet (ADR-0093)","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-06-30T00:00:00.000000+00:00","updated_at":"2026-06-30T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+
+## Opt-in ultra deep-review tier (ADR-0109)
+
+Expose a deep multi-reviewer "ultra" pass as an opt-in review-phase option (#10555). The **cloud** `/code-review ultra` tier has no programmatic entry point — it is client-side, user-triggered, and separately billed — so the tier instead wraps the locally-installed `code-review` plugin dispatched headlessly through the same seam as the post-verify advisor. Load-bearing: build the command with `build_agent_command(..., isolate_user_settings=False)`; `True` strips the `--plugin-dir` flags so the plugin slash-command would not resolve. Cost gate is three AND-ed conditions: `config.review_ultra_enabled` (default OFF) AND (`review:ultra` issue label OR high-blast-radius diff when `review_ultra_auto_high_blast`). Findings scored ≥80 flip the verdict to `REQUEST_CHANGES` (reusing the existing fix hand-back); sub-threshold findings post as a PR comment. Credit-exhaustion propagates via `reraise_on_credit_or_bug`; any other spawn failure fails soft to a degraded result that leaves the verdict intact. Logic lives in `src/ultra_review.py`; the phase adds only a thin runner adapter + fold helpers.
+
+**Why:** A deep adversarial pass whose high-confidence findings actually change merge outcomes, without cost blow-up — the default-off dial plus three AND-ed triggers keep the expensive fan-out off every PR, and a test asserts zero dispatch at defaults.
+
+
+```json:entry
+{"id":"01KYEF98BHWVZEC1S5YEBDJPK3","title":"Opt-in ultra deep-review tier (ADR-0109)","topic":null,"source_type":"compiled","source_issue":10555,"source_repo":null,"created_at":"2026-07-25T00:00:00.000000+00:00","updated_at":"2026-07-25T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

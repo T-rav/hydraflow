@@ -151,9 +151,13 @@ class SubprocessAgentRunner:
         for blob in (stdout, stderr):
             if blob and is_credit_exhaustion(blob):
                 resume_at = parse_credit_resume_time(blob)
+                # The voter CLI's own output is the process termination signal
+                # (no analysis loop quoting a prior cap) — authoritative so the
+                # orchestrator pauses without the weekly-blind probe (#10558).
                 raise CreditExhaustedError(
                     f"{self.tool} CLI signaled credit exhaustion",
                     resume_at=resume_at,
+                    authoritative=True,
                 )
 
         if result.returncode != 0:

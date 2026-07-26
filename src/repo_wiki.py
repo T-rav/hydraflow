@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -28,6 +29,11 @@ from ulid import ULID
 
 from staleness import evaluate as evaluate_staleness
 from wiki_anchor_gate import has_repo_anchor
+from wiki_rot_citations import (
+    extract_shipped_claims,
+    verify_cite_ast,
+    verify_cite_grep,
+)
 
 if TYPE_CHECKING:
     from dedup_store import DedupStore
@@ -282,13 +288,29 @@ def _tracked_entry_age_days(fields: dict[str, str], now: datetime) -> int:
     return max(0, (now - ts).days)
 
 
+def _parse_code_refs_field(raw: str | None) -> tuple[str, ...]:
+    """Parse a frontmatter ``code_refs`` value into an order-preserving tuple.
+
+    Serialized as a comma-joined string (``src/a.py:Foo,src/b.py:Bar``);
+    ``path.py:symbol`` refs embed colons, so callers must split the
+    frontmatter line on the FIRST ``:`` only (``_split_tracked_entry``
+    does). Blank / missing values yield an empty tuple.
+    """
+    if not raw:
+        return ()
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
 def _load_tracked_active_entries(topic_dir: Path) -> list[dict[str, Any]]:
     """Return ``[{id, title, body, source_issue, source_phase, created_at,
-    path}]`` for every ``status: active`` entry in ``topic_dir``.
+    corroborations, fixed_in_pr, code_refs, path}]`` for every
+    ``status: active`` entry in ``topic_dir``.
 
     Used by ``WikiCompiler.compile_topic_tracked`` to build the LLM
     prompt and to remember which files to mark superseded after the
-    synthesis output lands.
+    synthesis output lands. ``fixed_in_pr`` / ``code_refs`` carry the
+    entry's shipped-claim provenance (issue #10590) so the compiler can
+    union it onto synthesized entries rather than losing it on promotion.
     """
     if not topic_dir.is_dir():
         return []
@@ -302,6 +324,7 @@ def _load_tracked_active_entries(topic_dir: Path) -> list[dict[str, Any]]:
         if not fields or fields.get("status", "active") != "active":
             continue
         title = body.lstrip().split("\n", 1)[0].lstrip("# ").strip() or path.stem
+        fixed_in_pr = fields.get("fixed_in_pr") or None
         out.append(
             {
                 "id": fields.get("id", ""),
@@ -311,6 +334,8 @@ def _load_tracked_active_entries(topic_dir: Path) -> list[dict[str, Any]]:
                 "source_phase": fields.get("source_phase", ""),
                 "created_at": fields.get("created_at", ""),
                 "corroborations": fields.get("corroborations", "1"),
+                "fixed_in_pr": fixed_in_pr,
+                "code_refs": _parse_code_refs_field(fields.get("code_refs")),
                 "path": str(path),
             }
         )
@@ -351,6 +376,13 @@ def _write_tracked_synthesis_entry(
         "status: active",
         f"corroborations: {entry.corroborations}",
     ]
+    # Shipped-claim provenance (issue #10590): carry the fields through so
+    # downstream verification can still tie the synthesized entry to its
+    # PR/code. Emitted only when present to keep frontmatter minimal.
+    if entry.fixed_in_pr:
+        lines.append(f"fixed_in_pr: {entry.fixed_in_pr}")
+    if entry.code_refs:
+        lines.append("code_refs: " + ",".join(entry.code_refs))
     if supersedes:
         lines.append("supersedes: " + ",".join(supersedes))
     lines.append("---")
@@ -361,6 +393,41 @@ def _write_tracked_synthesis_entry(
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
+
+
+def _tracked_entry_body_for_compare(title: str, content: str) -> str:
+    """Reconstruct the on-disk body that ``_write_tracked_synthesis_entry``
+    produces for ``(title, content)`` and ``_load_tracked_active_entries``
+    reads back, normalized for byte-identity comparison (#10573).
+
+    Kept next to ``_write_tracked_synthesis_entry`` so the two stay in
+    sync: the write format (``# {title}`` heading + sanitized content) is
+    the contract this must mirror. If the write layout changes, this must
+    change with it.
+    """
+    return f"# {title}\n\n{_sanitize_body_for_frontmatter(content)}".strip()
+
+
+def synthesis_matches_active_bodies(
+    active_entries: list[dict[str, Any]],
+    compiled: list[WikiEntry],
+) -> bool:
+    """True when the synthesized entries are byte-identical (by body) to the
+    current active set — so re-emitting them would only mint new ids and
+    supersede the originals with exact copies (#10573).
+
+    The comparison is a multiset over entry bodies: id-, timestamp- and
+    order-agnostic, multiplicity-preserving. An added, removed, or edited
+    entry makes the multisets differ and synthesis proceeds as before. An
+    empty active set never matches a non-empty synthesis (and vice-versa),
+    so the first real synthesis of a topic is never suppressed.
+    """
+
+    active = Counter(str(e["body"]).strip() for e in active_entries)
+    proposed = Counter(
+        _tracked_entry_body_for_compare(e.title, e.content) for e in compiled
+    )
+    return active == proposed
 
 
 def _mark_tracked_entry_superseded(entry_path: Path, *, superseded_by: str) -> None:
@@ -426,10 +493,41 @@ def increment_corroboration(entry_path: Path, *, by: int = 1) -> None:
         logger.warning("increment_corroboration: failed to rewrite %s", entry_path)
 
 
+def _entry_body_has_corroborated_shipped_claim(body: str, repo_root: Path) -> bool:
+    """Return ``True`` iff *body* carries a ``fixed_in_pr`` shipped claim that
+    is still backed by live code under *repo_root*.
+
+    A ``json:entry`` block's ``fixed_in_pr`` claim is corroborated when at
+    least one of its ``code_refs`` resolves against the checked-out source —
+    a ``path.py:symbol`` ref via AST (with a grep fallback for re-exports /
+    non-Python targets), or a bare file ref by existence.  A claim with **no**
+    ``code_refs`` is unverifiable offline and therefore not corroborated.
+
+    This is the read-only durability signal used by
+    :func:`active_lint_tracked` to exempt durable lessons from the
+    closed-source-issue sweep; it mirrors
+    ``WikiRotDetectorLoop._shipped_claim_corroborated`` (the two consumers of
+    the same rule) by composing the shared, side-effect-free verifiers in
+    :mod:`wiki_rot_citations`.
+    """
+    for claim in extract_shipped_claims(body):
+        for ref in claim.code_refs:
+            module_path, sep, symbol = ref.partition(":")
+            if sep and symbol:
+                ok, _ = verify_cite_ast(repo_root, module_path, symbol)
+                if ok or verify_cite_grep(repo_root, module_path, symbol):
+                    return True
+            elif module_path and (repo_root / module_path).is_file():
+                return True
+    return False
+
+
 def active_lint_tracked(
     tracked_root: Path,
     repo_slug: str,
     closed_issues: set[int] | None = None,
+    *,
+    repo_root: Path | None = None,
 ) -> LintResult:
     """Tracked-layout counterpart of ``RepoWikiStore.active_lint``.
 
@@ -447,9 +545,33 @@ def active_lint_tracked(
     - Entries whose frontmatter ``source_issue`` is an int in
       *closed_issues* and current ``status == "active"`` are rewritten
       with ``status: stale`` and a ``stale_reason`` pointing at the
-      closed issue.
+      closed issue — **unless** the entry carries a corroborated
+      ``fixed_in_pr`` shipped claim (see below), in which case it is left
+      untouched (no write) and counted in
+      ``LintResult.entries_exempt_shipped_claim``.
     - Stale entries older than 90 days are deleted outright — their
       source information is recoverable from git history.
+
+    **Durable-lesson exemption (#10587).** A closed *source issue* is the
+    normal terminal state of a fixed bug and is **not** evidence the lesson it
+    produced is stale.  Staleness is instead driven by the lesson's own
+    freshness signal: an entry whose ``json:entry`` ``fixed_in_pr`` claim is
+    still corroborated by live source (at least one ``code_ref`` resolves
+    against *repo_root*) is exempt from the closed-source-issue flip.  The
+    exemption is narrow — it gates only the active→stale flip, never the
+    90-day prune of an already-``stale`` entry — and it is *not* a permanent
+    reprieve: ``wiki_drift_detector`` retires the entry on a later tick once
+    its ``code_refs`` stop resolving.  Do not "simplify" this exemption away:
+    without it, durable gotchas are swept on a timer purely because their
+    ticket closed.
+
+    *repo_root* is the checked-out source tree the shipped claims are verified
+    against; it defaults to ``tracked_root.parent`` (the live
+    ``<repo>/repo_wiki`` layout, where ``repo_wiki_path`` is a single
+    segment), so the maintenance loop's worktree-scoped ``tracked_root``
+    resolves claims against that same worktree with no extra wiring.  When the
+    default cannot resolve refs the exemption simply never fires and behavior
+    is identical to the pre-#10587 sweep — the fix never widens staleness.
 
     Writes happen in the tracked dir so the subsequent
     ``RepoWikiLoop._maybe_open_maintenance_pr`` tick will pick them up as
@@ -462,6 +584,7 @@ def active_lint_tracked(
     if not repo_dir.is_dir():
         return result
 
+    resolved_repo_root = repo_root if repo_root is not None else tracked_root.parent
     closed = closed_issues or set()
     now = datetime.now(UTC)
 
@@ -482,7 +605,7 @@ def active_lint_tracked(
             except OSError:
                 continue
 
-            fields, _block, _body = _split_tracked_entry(text)
+            fields, _block, body = _split_tracked_entry(text)
             if not fields:
                 continue
 
@@ -498,20 +621,28 @@ def active_lint_tracked(
                 and source_issue is not None
                 and source_issue in closed
             ):
-                updated = _update_tracked_entry_status(
-                    text,
-                    status="stale",
-                    stale_reason=f"source issue #{source_issue} closed",
-                )
-                if updated is not None:
-                    # Atomic rewrite: an interrupted write would leave a
-                    # half-frontmatter block that _split_tracked_entry
-                    # silently drops, losing the entry entirely.
-                    from file_util import atomic_write  # noqa: PLC0415
+                if _entry_body_has_corroborated_shipped_claim(body, resolved_repo_root):
+                    # Durable-lesson exemption (#10587): the source issue
+                    # closing is not evidence the lesson is stale, and its
+                    # shipped claim still resolves against live code. Leave the
+                    # entry active with no write at all — wiki_drift_detector
+                    # retires it later once its code_refs die.
+                    result.entries_exempt_shipped_claim += 1
+                else:
+                    updated = _update_tracked_entry_status(
+                        text,
+                        status="stale",
+                        stale_reason=f"source issue #{source_issue} closed",
+                    )
+                    if updated is not None:
+                        # Atomic rewrite: an interrupted write would leave a
+                        # half-frontmatter block that _split_tracked_entry
+                        # silently drops, losing the entry entirely.
+                        from file_util import atomic_write  # noqa: PLC0415
 
-                    atomic_write(entry_path, updated)
-                    result.entries_marked_stale += 1
-                    status = "stale"
+                        atomic_write(entry_path, updated)
+                        result.entries_marked_stale += 1
+                        status = "stale"
 
             if status == "stale":
                 result.stale_entries += 1
@@ -671,6 +802,17 @@ class WikiEntry(BaseModel):
             "extra field on parse (issue #9936)."
         ),
     )
+    supersedes_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Ids of input entries this synthesized entry directly replaces, "
+            "as declared by the compiler LLM. Used by "
+            "WikiCompiler.compile_topic_tracked to build a topical "
+            "supersedes/superseded_by mapping instead of blanket-linking "
+            "every synthesized entry to every input entry (issue #10566). "
+            "Transient — not meaningful outside a single compile call."
+        ),
+    )
 
     @model_validator(mode="after")
     def _default_valid_from(self) -> WikiEntry:
@@ -821,6 +963,9 @@ class LintResult(BaseModel):
     entries_marked_stale: int = 0
     orphans_pruned: int = 0
     review_candidates_flagged: int = 0  # stale + age > 90d (no longer pruned)
+    # Durable lessons left active despite a closed source issue because their
+    # ``fixed_in_pr`` shipped claim still resolves against live code (#10587).
+    entries_exempt_shipped_claim: int = 0
     index_rebuilt: bool = False
 
 
@@ -1368,17 +1513,29 @@ class RepoWikiStore:
         status = "stale" if entry.stale else "active"
         safe_content = _sanitize_body_for_frontmatter(entry.content)
 
+        frontmatter = [
+            "---",
+            f"id: {next_id:04d}",
+            f"topic: {topic}",
+            f"source_issue: {issue_tag}",
+            f"source_phase: {source_phase}",
+            f"created_at: {entry.created_at}",
+            f"status: {status}",
+            f"corroborations: {entry.corroborations}",
+        ]
+        # Shipped-claim provenance (issue #10590): persist so the compiler's
+        # synthesis pass can union it onto merged entries and downstream
+        # shipped-claim verification can still resolve it. Emitted only when
+        # present to keep frontmatter minimal for the common case.
+        if entry.fixed_in_pr:
+            frontmatter.append(f"fixed_in_pr: {entry.fixed_in_pr}")
+        if entry.code_refs:
+            frontmatter.append("code_refs: " + ",".join(entry.code_refs))
+        frontmatter.append("---")
+
         body = "\n".join(
             [
-                "---",
-                f"id: {next_id:04d}",
-                f"topic: {topic}",
-                f"source_issue: {issue_tag}",
-                f"source_phase: {source_phase}",
-                f"created_at: {entry.created_at}",
-                f"status: {status}",
-                f"corroborations: {entry.corroborations}",
-                "---",
+                *frontmatter,
                 "",
                 f"# {entry.title}",
                 "",
@@ -1670,7 +1827,9 @@ class RepoWikiStore:
                     lines.append(
                         f"_Source: #{entry.source_issue} ({entry.source_type})_\n"
                     )
-                slim = entry.model_dump_json(exclude={"content", "valid_from"})
+                slim = entry.model_dump_json(
+                    exclude={"content", "valid_from", "supersedes_ids"}
+                )
                 lines.append(f"\n```json:entry\n{slim}\n```\n")
 
         topic_path.write_text("\n".join(lines))

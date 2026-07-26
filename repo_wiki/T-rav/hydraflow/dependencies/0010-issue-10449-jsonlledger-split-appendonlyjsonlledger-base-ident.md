@@ -6,7 +6,7 @@ source_phase: plan
 created_at: 2026-07-24T12:33:05.988808+00:00
 status: superseded
 corroborations: 1
-superseded_by: 0011
+superseded_by: 0015
 ---
 
 # JsonlLedger split: AppendOnlyJsonlLedger base + IdentifiedJsonlLedger for dedup

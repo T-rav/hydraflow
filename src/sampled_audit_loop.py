@@ -78,7 +78,7 @@ from audit.stratify import classify_blast_radius
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
-from escape.ledger import EscapeLedger
+from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
@@ -97,7 +97,6 @@ _AUDIT_LLM_TIMEOUT_S = 300
 _ISSUE_LABELS = ["hydraflow-find", "sampled-audit"]
 
 _SAMPLES_FILENAME = "audit_samples.jsonl"
-_ESCAPE_LEDGER_FILENAME = "escape_ledger.jsonl"
 
 # How much of the merged diff the auditor is shown (chars) — bounded so a huge
 # merge cannot blow the prompt / token budget. Canonical in ``audit.budget`` so
@@ -246,7 +245,7 @@ class SampledAuditLoop(BaseBackgroundLoop):
 
     @property
     def _escape_ledger_path(self) -> Path:
-        return self._config.diagnostics_dir / _ESCAPE_LEDGER_FILENAME
+        return self._config.diagnostics_dir / ESCAPE_LEDGER_FILENAME
 
     # --- main tick -------------------------------------------------------
 

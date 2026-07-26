@@ -12,7 +12,7 @@ from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from mockworld.fakes._factories import (
     PlanResultFactory,
@@ -21,6 +21,10 @@ from mockworld.fakes._factories import (
     WorkerResultFactory,
 )
 from models import EpicDecompResult, ReviewVerdict
+from subprocess_util import CreditExhaustedError
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 
 @dataclass(slots=True)
@@ -113,6 +117,20 @@ class _FakePlannerRunner(_ScriptedRunner):
     def __init__(self, parent: FakeLLM) -> None:
         super().__init__()
         self._parent = parent
+        # Per-issue one-shot credit-exhaustion signal (#10570). When an issue is
+        # registered here, the FIRST ``plan`` call for it raises the scripted
+        # ``CreditExhaustedError`` (the air-gapped stand-in for the Claude CLI
+        # terminating on a weekly-limit cap) and the issue number is recorded in
+        # ``_credit_fired``; every later call falls through to normal scripted
+        # behavior so the loop resumes cleanly once the pause is cleared.
+        self._credit_exc: dict[int, CreditExhaustedError] = {}
+        self._credit_fired: set[int] = set()
+
+    def script_credit_exhaustion(
+        self, issue_number: int, exc: CreditExhaustedError
+    ) -> None:
+        """Arm a one-shot credit-exhaustion raise for *issue_number*'s next plan."""
+        self._credit_exc[issue_number] = exc
 
     async def plan(
         self,
@@ -126,6 +144,12 @@ class _FakePlannerRunner(_ScriptedRunner):
         if self._parent.plan_hold_seconds:
             await asyncio.sleep(self._parent.plan_hold_seconds)
         issue_number = getattr(task, "id", getattr(task, "number", 0))
+        pending_credit_exc = self._credit_exc.get(issue_number)
+        if pending_credit_exc is not None and issue_number not in self._credit_fired:
+            # One-shot: fire the credit signal exactly once so the orchestrator
+            # pauses, then let the resumed loop plan the issue normally (#10570).
+            self._credit_fired.add(issue_number)
+            raise pending_credit_exc
         if not self._parent._consume_budget(issue_number):
             return PlanResultFactory.create(
                 issue_number=issue_number,
@@ -430,6 +454,34 @@ class FakeLLM:
     def script_plan(self, issue_number: int, results: list[Any]) -> None:
         self.planners.add_script(
             issue_number, [self._coerce_plan(issue_number, r) for r in results]
+        )
+
+    def script_plan_credit_exhaustion(
+        self,
+        issue_number: int,
+        *,
+        message: str,
+        resume_at: datetime | None = None,
+        authoritative: bool = True,
+    ) -> None:
+        """Arm the plan runner to raise a one-shot ``CreditExhaustedError`` (#10570).
+
+        The FIRST ``planners.plan`` call for *issue_number* raises the signal —
+        the air-gapped stand-in for the Claude CLI terminating with a
+        weekly-limit cap ("You've hit your weekly limit · resets ..."). The
+        signal is AUTHORITATIVE by default (#10558): it stands in for the
+        subprocess's own termination, so the orchestrator pauses on it directly
+        rather than routing it through the live availability probe (which cannot
+        detect a weekly-quota exhaustion). The plan phase propagates the error to
+        ``_supervise_loops`` (``phase_utils.run_refilling_pool`` treats it as
+        fatal), which pauses every loop until ``resume_at``; subsequent plan
+        calls succeed, so the resumed loop plans the issue normally.
+        """
+        self.planners.script_credit_exhaustion(
+            issue_number,
+            CreditExhaustedError(
+                message, resume_at=resume_at, authoritative=authoritative
+            ),
         )
 
     def script_implement(self, issue_number: int, results: list[Any]) -> None:

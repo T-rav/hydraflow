@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10493
 source_phase: plan
 created_at: 2026-07-24T23:45:36.554303+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0851
 ---
 
 # Verification subprocess timeout should scale to the make-tier, not a fixed 120s

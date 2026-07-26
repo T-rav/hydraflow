@@ -289,7 +289,9 @@ const styles = {
   pill: {
     padding: '4px 10px',
     borderRadius: 12,
-    border: `1px solid ${theme.border}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: theme.border,
     background: 'transparent',
     color: theme.textMuted,
     fontSize: 11,
@@ -392,7 +394,8 @@ const styles = {
     fontWeight: 600,
     padding: '2px 8px',
     borderRadius: 999,
-    border: '1px solid',
+    borderWidth: 1,
+    borderStyle: 'solid',
     whiteSpace: 'nowrap',
   },
   dateText: {

@@ -1,4 +1,4 @@
-# ADR-0109: Provider/Harness Backend Split — z.ai as a Claude-harness backend
+# ADR-0110: Provider/Harness Backend Split — z.ai as a Claude-harness backend
 
 **Status:** Accepted
 **Accepted on:** 2026-07-25 — operator-approved (route agentic maintenance loops to GLM while work stays on Claude).

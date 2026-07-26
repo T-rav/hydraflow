@@ -336,6 +336,19 @@ class CreditExhaustedError(RuntimeError):
         never halts z.ai/kimi background workers, and vice-versa (#9807). Kept
         defaulting to ``"anthropic"`` so every existing raise site — all of
         which are harness paths — stays Anthropic-scoped without change.
+    authoritative:
+        ``True`` when the signal came from the subprocess's OWN termination — the
+        CLI's stderr, its lightweight-path stdout/stderr, or a structured HTTP
+        402/429/quota error body. Such a signal is ground truth: the orchestrator
+        pauses on it directly, skipping the live probe. Every genuine-origin raise
+        site sets this explicitly. It defaults to ``False`` — "only *scanned from
+        agent stdout prose*, so corroborate before pausing" — the conservative
+        stance for the #9895 ``CREDIT_PROSE_SCAN`` class (a diagnostic/reviewer run
+        quoting a prior cap in its analysis). The distinction matters because the
+        auth/availability probe cannot detect *weekly*-limit exhaustion (the key
+        stays valid, so the probe passes); routing a genuine weekly signal through
+        it wrongly discards it as a false positive and the factory never pauses
+        (#10558). Authoritative signals must therefore bypass the probe.
     """
 
     def __init__(
@@ -344,10 +357,12 @@ class CreditExhaustedError(RuntimeError):
         *,
         resume_at: datetime | None = None,
         provider: str = PROVIDER_ANTHROPIC,
+        authoritative: bool = False,
     ) -> None:
         super().__init__(message)
         self.resume_at = resume_at
         self.provider = provider
+        self.authoritative = authoritative
 
 
 _AUTH_PATTERNS = ("401", "not logged in", "authentication required", "auth token")

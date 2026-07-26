@@ -146,7 +146,8 @@ cadence and files remediation issues on drift.
 | [0106](0106-thread-level-event-loop-freeze-detector.md) | Thread-level event-loop freeze detector | Accepted |
 | [0107](0107-collapse-discover-shape-into-plan.md) | Collapse Discover + Shape into Plan — Triage → Plan Directly | Accepted |
 | [0108](0108-deterministic-simulation-fault-injection-evaluation.md) | Deterministic-Simulation Fault Injection on the Sandbox Compose — Evaluation | Proposed |
-| [0109](0109-provider-harness-backend-split.md) | Provider/Harness Backend Split — z.ai as a Claude-harness backend | Accepted |
+| [0109](0109-ultra-review-opt-in-deep-review-tier.md) | Opt-in "ultra" deep-review tier for the review phase | Accepted |
+| [0110](0110-provider-harness-backend-split.md) | Provider/Harness Backend Split — z.ai as a Claude-harness backend | Accepted |
 
 ## Adding a new ADR
 

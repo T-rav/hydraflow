@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10498
 source_phase: review
 created_at: 2026-07-25T09:07:23.395854+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0954
 ---
 
 # test_latest_by_id_collapses_to_last_appended_row doesn't isolate collapse basis

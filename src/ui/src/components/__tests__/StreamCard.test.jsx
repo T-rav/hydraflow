@@ -231,7 +231,8 @@ describe('StreamCard phase-aware styling', () => {
     const { container } = render(<StreamCard issue={issue} />)
     const card = container.firstChild
     expect(card.style.margin).toBe('0px 8px 8px')
-    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.review.color}`)
+    expect(card.style.borderLeftWidth).toBe('3px')
+    expect(card.style.borderLeftColor).toBe(STAGE_META.review.color)
   })
 
   it('falls back to subtle border for inactive cards', () => {
@@ -239,36 +240,95 @@ describe('StreamCard phase-aware styling', () => {
     issue.stages.plan = { ...issue.stages.plan, status: 'queued' }
     const { container } = render(<StreamCard issue={issue} />)
     const card = container.firstChild
-    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.plan.color}`)
+    expect(card.style.borderLeftWidth).toBe('3px')
+    expect(card.style.borderLeftColor).toBe(STAGE_META.plan.color)
   })
 
   it('uses cardInactiveStyleMap for done status', () => {
     const issue = makeIssue({ overallStatus: 'done', currentStage: 'implement' })
     const { container } = render(<StreamCard issue={issue} />)
     const card = container.firstChild
-    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.implement.color}`)
+    expect(card.style.borderLeftWidth).toBe('3px')
+    expect(card.style.borderLeftColor).toBe(STAGE_META.implement.color)
   })
 
   it('uses cardInactiveStyleMap for failed status', () => {
     const issue = makeIssue({ overallStatus: 'failed', currentStage: 'review' })
     const { container } = render(<StreamCard issue={issue} />)
     const card = container.firstChild
-    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.review.color}`)
+    expect(card.style.borderLeftWidth).toBe('3px')
+    expect(card.style.borderLeftColor).toBe(STAGE_META.review.color)
   })
 
   it('uses cardInactiveStyleMap for hitl status', () => {
     const issue = makeIssue({ overallStatus: 'hitl', currentStage: 'review' })
     const { container } = render(<StreamCard issue={issue} />)
     const card = container.firstChild
-    expect(card.getAttribute('style') || '').toContain(`border-left: 3px solid ${STAGE_META.review.color}`)
+    expect(card.style.borderLeftWidth).toBe('3px')
+    expect(card.style.borderLeftColor).toBe(STAGE_META.review.color)
   })
 
   it('falls back to neutral border when currentStage is null', () => {
     const issue = makeIssue({ overallStatus: 'queued', currentStage: null })
     const { container } = render(<StreamCard issue={issue} />)
     const card = container.firstChild
-    // No phase-specific left border — base styles.card border only
-    expect(card.getAttribute('style') || '').not.toContain('border-left')
+    // No phase-specific left accent — neutral 1px left border matching the base
+    expect(card.style.borderLeftWidth).toBe('1px')
+    expect(card.style.borderLeftColor).toBe(theme.border)
+  })
+})
+
+// #10579: the card element must express its border family entirely in longhand
+// so the `border`/`borderLeft` shorthand-vs-longhand collision (the class fixed
+// for Header.jsx in #10564 and the dashboard style objects in #10571) can never
+// arise — regardless of whether issue.currentStage is truthy or falsy.
+describe('StreamCard border shorthand/longhand collision — regression #10579', () => {
+  const hasBareBorderShorthand = (styleAttr) => /(^|;)\s*border\s*:/.test(styleAttr)
+  const hasBorderLeftShorthand = (styleAttr) => /(^|;)\s*border-left\s*:/.test(styleAttr)
+
+  it('never mixes the border shorthand with a border longhand when a stage is active', () => {
+    const issue = makeIssue({ overallStatus: 'active', currentStage: 'review' })
+    const { container } = render(<StreamCard issue={issue} />)
+    const styleAttr = container.firstChild.getAttribute('style') || ''
+    expect(hasBareBorderShorthand(styleAttr)).toBe(false)
+    expect(hasBorderLeftShorthand(styleAttr)).toBe(false)
+  })
+
+  it('never mixes the border shorthand with a border longhand when currentStage is falsy', () => {
+    const issue = makeIssue({ overallStatus: 'queued', currentStage: null })
+    const { container } = render(<StreamCard issue={issue} />)
+    const styleAttr = container.firstChild.getAttribute('style') || ''
+    expect(hasBareBorderShorthand(styleAttr)).toBe(false)
+    expect(hasBorderLeftShorthand(styleAttr)).toBe(false)
+  })
+
+  it('does not emit a React shorthand/longhand collision warning when currentStage toggles', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { rerender } = render(<StreamCard issue={makeIssue({ currentStage: 'review' })} />)
+    // Toggle to a falsy stage (drops the phase accent) and back — the exact
+    // rerender shape React's validateShorthandPropertyCollisionInDev warns about
+    // when `border` shorthand and `borderLeft` longhand are mixed.
+    rerender(<StreamCard issue={makeIssue({ currentStage: null })} />)
+    rerender(<StreamCard issue={makeIssue({ currentStage: 'review' })} />)
+
+    const collisionWarnings = consoleSpy.mock.calls.filter(call =>
+      String(call[0]).includes('conflicting property')
+    )
+    consoleSpy.mockRestore()
+    expect(collisionWarnings).toEqual([])
+  })
+
+  it('carries an identical border key set across active and inactive stage maps', () => {
+    for (const key of STAGE_KEYS) {
+      const activeKeys = Object.keys(cardActiveStyleMap[key]).sort()
+      const inactiveKeys = Object.keys(cardInactiveStyleMap[key]).sort()
+      expect(activeKeys).toEqual(inactiveKeys)
+      // No shorthand keys survive — longhand only.
+      expect(cardActiveStyleMap[key].border).toBeUndefined()
+      expect(cardActiveStyleMap[key].borderLeft).toBeUndefined()
+      expect(cardInactiveStyleMap[key].border).toBeUndefined()
+      expect(cardInactiveStyleMap[key].borderLeft).toBeUndefined()
+    }
   })
 })
 
@@ -276,10 +336,18 @@ describe('phase-specific style maps', () => {
   it('exports per-stage card and dot styles', () => {
     for (const key of STAGE_KEYS) {
       const meta = STAGE_META[key]
-      expect(cardActiveStyleMap[key].border).toBe(`1px solid ${meta.color}`)
-      expect(cardActiveStyleMap[key].borderLeft).toBe(`3px solid ${meta.color}`)
-      expect(cardInactiveStyleMap[key].border).toBe(`1px solid color-mix(in srgb, ${meta.color} 20%, transparent)`)
-      expect(cardInactiveStyleMap[key].borderLeft).toBe(`3px solid ${meta.color}`)
+      expect(cardActiveStyleMap[key].borderWidth).toBe(1)
+      expect(cardActiveStyleMap[key].borderStyle).toBe('solid')
+      expect(cardActiveStyleMap[key].borderColor).toBe(meta.color)
+      expect(cardActiveStyleMap[key].borderLeftWidth).toBe(3)
+      expect(cardActiveStyleMap[key].borderLeftStyle).toBe('solid')
+      expect(cardActiveStyleMap[key].borderLeftColor).toBe(meta.color)
+      expect(cardInactiveStyleMap[key].borderWidth).toBe(1)
+      expect(cardInactiveStyleMap[key].borderStyle).toBe('solid')
+      expect(cardInactiveStyleMap[key].borderColor).toBe(`color-mix(in srgb, ${meta.color} 20%, transparent)`)
+      expect(cardInactiveStyleMap[key].borderLeftWidth).toBe(3)
+      expect(cardInactiveStyleMap[key].borderLeftStyle).toBe('solid')
+      expect(cardInactiveStyleMap[key].borderLeftColor).toBe(meta.color)
       expect(activeDotStyleMap[key].background).toBe(meta.color)
       expect(activeDotStyleMap[key].animation).toContain('stream-pulse')
     }

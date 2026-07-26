@@ -133,6 +133,7 @@ class TestPRPortMethods:
         # PR label methods
         "add_pr_labels",
         "remove_pr_label",
+        "get_pr_labels",
         "swap_pipeline_labels",
         "post_comment",
         # Comment / listing methods
@@ -275,6 +276,7 @@ class TestPRPortSignatures:
         # PR label methods
         "add_pr_labels",
         "remove_pr_label",
+        "get_pr_labels",
         "swap_pipeline_labels",
         "post_comment",
         # Comment / listing methods

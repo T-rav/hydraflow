@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10487
 source_phase: plan
 created_at: 2026-07-24T22:26:43.556491+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0851
 ---
 
 # HitlPage navigates via Outcomes surface, not a standalone HITL tab

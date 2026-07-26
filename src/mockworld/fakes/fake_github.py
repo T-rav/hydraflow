@@ -707,6 +707,14 @@ class FakeGitHub:
         if label in pr.labels:
             pr.labels.remove(label)
 
+    async def get_pr_labels(self, pr_number: int) -> list[str]:
+        """Return the label names on a PR (empty list when unknown)."""
+        self._maybe_rate_limit()
+        pr = self._prs.get(pr_number)
+        if pr is None:
+            return []
+        return list(pr.labels)
+
     async def get_pr_diff(self, pr_number: int) -> str:
         self._maybe_rate_limit()
         if pr_number in self._pr_diffs:

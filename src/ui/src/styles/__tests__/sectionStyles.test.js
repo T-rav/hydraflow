@@ -31,11 +31,17 @@ describe('sectionStyles shared module', () => {
       }
     })
 
-    it('applies correct stage-specific background, border, and borderLeft', () => {
+    it('applies correct stage-specific background and per-side borders (box + left accent)', () => {
       for (const stage of PIPELINE_STAGES) {
         const style = sectionHeaderStyles[stage.key]
+        const box = `1px solid color-mix(in srgb, ${stage.color} 20%, transparent)`
         expect(style.background).toBe(stage.subtleColor)
-        expect(style.border).toBe(`1px solid color-mix(in srgb, ${stage.color} 20%, transparent)`)
+        // Border expressed entirely per-side (never the `border` shorthand) so
+        // the object can be spread without a shorthand/longhand collision (#10583).
+        expect(style).not.toHaveProperty('border')
+        expect(style.borderTop).toBe(box)
+        expect(style.borderRight).toBe(box)
+        expect(style.borderBottom).toBe(box)
         expect(style.borderLeft).toBe(`3px solid ${stage.color}`)
       }
     })
