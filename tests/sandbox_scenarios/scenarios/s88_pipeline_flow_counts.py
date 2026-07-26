@@ -1,4 +1,7 @@
-"""s88 — Pipeline Flow region shows per-stage and total issue/PR counts (#10488).
+"""s88 — Pipeline Flow region shows per-stage and total issue counts (#10488).
+
+Badge text is issue-count-only since #10609 dropped the PR count from the strip
+(per-stage ``N``, pipeline total ``N issues``); see #10664.
 
 The sandbox e2e layer for the Pipeline Flow count badges. It proves the real
 end-to-end wiring path only a live browser against the real Docker stack can
@@ -70,8 +73,13 @@ def _canonical_stage_keys() -> list[str]:
 
 STAGE_KEYS = _canonical_stage_keys()
 
-_STAGE_COUNT_PATTERN = re.compile(r"^\d+ · \d+ PR$")
-_TOTAL_COUNT_PATTERN = re.compile(r"^\d+ issues · \d+ PRs$")
+# #10609 dropped the PR count from the Pipeline Flow strip: the per-stage badge
+# now renders a bare issue count (``N``) and the pipeline total renders
+# ``N issues`` — no more ``· N PR`` / ``· N PRs`` suffix. These patterns track
+# that current render (pinned by the frontend's own StreamView.test.jsx: a
+# flow-count badge is ``'2'``, flow-total is ``'3 issues'``). See #10664.
+_STAGE_COUNT_PATTERN = re.compile(r"^\d+$")
+_TOTAL_COUNT_PATTERN = re.compile(r"^\d+ issues$")
 
 
 def seed() -> MockWorldSeed:
@@ -117,12 +125,12 @@ async def assert_outcome(api, page) -> None:
         await badge.wait_for(timeout=15_000)
         text = await badge.inner_text()
         assert _STAGE_COUNT_PATTERN.match(text), (
-            f"stage '{stage_key}' count badge should match '<n> · <n> PR', got {text!r}"
+            f"stage '{stage_key}' count badge should match '<n>', got {text!r}"
         )
 
     total = page.locator("[data-testid='flow-total']")
     await total.wait_for(timeout=15_000)
     total_text = await total.inner_text()
     assert _TOTAL_COUNT_PATTERN.match(total_text), (
-        f"pipeline total badge should match '<n> issues · <n> PRs', got {total_text!r}"
+        f"pipeline total badge should match '<n> issues', got {total_text!r}"
     )
