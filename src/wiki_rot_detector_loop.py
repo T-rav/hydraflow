@@ -544,6 +544,16 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         for ref in claim.code_refs:
             module_path, sep, symbol = ref.partition(":")
             if sep and symbol:
+                # A purely-numeric symbol half (``path.py:412``) is a *line
+                # reference*, not a symbol. ``verify_cite_ast`` never resolves
+                # it, but ``verify_cite_grep`` would match the digit string as
+                # incidental substring text and spuriously corroborate a
+                # ``fixed_in_pr`` claim with no live code behind it — a wiki-rot
+                # false negative (#10596). Python identifiers never start with a
+                # digit, so a pure-numeric tail is unambiguously a line ref;
+                # skip it, mirroring the Style-A guard in ``extract_cites``.
+                if symbol.isdigit():
+                    continue
                 ok, _ = verify_cite_ast(repo_root, module_path, symbol)
                 if ok or verify_cite_grep(repo_root, module_path, symbol):
                     return True
