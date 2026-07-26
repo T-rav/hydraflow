@@ -302,12 +302,51 @@ def verify_cite_ast(
     return False, sorted(symbols)
 
 
+def _assign_target_names(target: ast.expr) -> set[str]:
+    """Names bound by one assignment target, unpacking tuple/list targets.
+
+    Mirrors ``adr_citation_resolve._assign_target_names`` so the two
+    resolvers agree on which module-level names a bare cite may resolve to.
+    """
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Starred):
+        return _assign_target_names(target.value)
+    if isinstance(target, ast.Tuple | ast.List):
+        names: set[str] = set()
+        for elt in target.elts:
+            names |= _assign_target_names(elt)
+        return names
+    return set()
+
+
 def _collect_defined_symbols(tree: ast.AST) -> set[str]:
-    """Walk *tree* for top-level + nested defs and return symbol names."""
+    """Return the resolvable symbol names defined by *tree*.
+
+    Two symbol classes are collected:
+
+    * **Defs/classes** — every ``FunctionDef`` / ``AsyncFunctionDef`` /
+      ``ClassDef`` at *any* depth (walked recursively), so nested helpers
+      and methods stay citeable.
+    * **Module-level constants** — names bound by *top-level*
+      ``ast.Assign`` / ``ast.AnnAssign`` targets (``NAME = ...`` /
+      ``NAME: T = ...``, including tuple/list unpacking). Module-level only,
+      so a cite to a live constant such as ``src/foo.py:_SURFACE_DEFAULTS``
+      resolves (issue #10594) while function-local variables never do.
+
+    Mirrors the bare-name grammar in ``adr_citation_resolve`` so the ADR
+    and wiki-rot citation resolvers agree on what a module-level name is.
+    """
     out: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             out.add(node.name)
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                out |= _assign_target_names(tgt)
+        elif isinstance(node, ast.AnnAssign):
+            out |= _assign_target_names(node.target)
     return out
 
 
