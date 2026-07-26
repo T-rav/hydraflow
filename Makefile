@@ -738,6 +738,18 @@ docker-test: docker-build
 audit-prompts: ## Render all prompt fixtures, score against the rubric, regenerate the prompt-audit report.
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/audit_prompts.py
 
+# --------------------------------------------------------------------------
+# Escape ledger — operator resolution (#10574)
+#   make escape-list                                                   # unresolved escapes
+#   make escape-resolve ARGS="bug-issue:9196f74 --encoded-as regression-test --notes '...'"
+# --------------------------------------------------------------------------
+.PHONY: escape-list escape-resolve
+escape-list: ## List escape-ledger findings still awaiting a human resolution.
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/resolve_escape.py list $(ARGS)
+
+escape-resolve: ## Record a human resolution for an escape (ARGS="<id> --encoded-as <encoding>").
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/resolve_escape.py resolve $(ARGS)
+
 .PHONY: arch-regen arch-check arch-serve arch-validate arch-regen-stage rebase-onto
 
 ## arch-regen — regenerate docs/arch/generated/ from source
