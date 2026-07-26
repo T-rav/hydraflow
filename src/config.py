@@ -6392,6 +6392,18 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                 )
 
     # Combo env vars: HYDRAFLOW_<STAGE>=tool:model
+    #
+    # Precedence (#10657): an explicitly supplied value — a constructor kwarg,
+    # a config-file value, or a PATCH edit re-validated through
+    # ``model_validate`` — beats the matching ``HYDRAFLOW_*`` env var, exactly
+    # like every other ``_ENV_*_OVERRIDES`` table above. The combo loop was the
+    # sole table that applied the env value unconditionally, so a PATCH edit to
+    # a combo-covered model/tool field (``patch_config`` re-runs this loop) was
+    # silently reverted to the env value. ``__pydantic_fields_set__`` is the
+    # "was this explicitly supplied?" signal; it is snapshotted *before* the
+    # loop so combo entries can't mask each other, and it stays authoritative
+    # even though the loop adds to it as it applies env-only fields (#9717).
+    explicit_before_combo = set(config.__pydantic_fields_set__)
     for env_key, tool_field, model_field in _ENV_COMBO_OVERRIDES:
         env_val = _get_env(env_key)
         if env_val is None:
@@ -6404,14 +6416,17 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                 f"{env_key}=inherit not allowed; {tool_field} requires an explicit tool"
             )
             raise ValueError(msg)
-        object.__setattr__(config, tool_field, tool)
-        # Register as explicitly-set: object.__setattr__ bypasses Pydantic's
-        # fields-set tracking, so without this the group cascade in
-        # _apply_profile_overrides treats the field as untouched and — when
-        # the env value equals the field default — silently overwrites the
-        # operator's per-role choice (#9717).
-        config.__pydantic_fields_set__.add(tool_field)
-        if model:  # empty model only for "inherit"
+        if tool_field not in explicit_before_combo:
+            object.__setattr__(config, tool_field, tool)
+            # Register as explicitly-set: object.__setattr__ bypasses Pydantic's
+            # fields-set tracking, so without this the group cascade in
+            # _apply_profile_overrides treats the field as untouched and — when
+            # the env value equals the field default — silently overwrites the
+            # operator's per-role choice (#9717).
+            config.__pydantic_fields_set__.add(tool_field)
+        if (
+            model and model_field not in explicit_before_combo
+        ):  # empty only for "inherit"
             object.__setattr__(config, model_field, model)
             config.__pydantic_fields_set__.add(model_field)
 
