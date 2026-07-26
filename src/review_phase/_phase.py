@@ -74,6 +74,7 @@ from comment_formatter import SelfReviewError
 from config import HydraFlowConfig
 from convergence_recording import _normalize_text
 from events import EventBus, EventType, HydraFlowEvent
+from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from harness_insights import FailureCategory, HarnessInsightStore
 from merge_conflict_resolver import MergeConflictResolver
 from models import (
@@ -167,6 +168,82 @@ _INSIGHT_DEDUP_WINDOW = timedelta(hours=1)
 # ``docs/adr/`` substring is what ``judge_independence`` matches for the
 # STRUCTURAL class (see ``_STRUCTURAL_SUBSTRINGS``).
 _ADR_REVIEW_CLASSIFICATION_PATHS: tuple[str, ...] = ("docs/adr/",)
+
+
+# ---------------------------------------------------------------------------
+# Review flow (P3b of #10682, ADR-0111) — edge guards
+# ---------------------------------------------------------------------------
+#
+# The per-PR review pipeline runs as an explicit ``src.flows.Flow``:
+#
+#     guards -> pre-review -> pre-flight -> review -> post-review -> gate
+#         guards       --(issue-missing / merge-conflict)--> done
+#         pre-review   --(baseline-block / early ReviewResult)--> done
+#         gate         --(APPROVE handled by the convergence gate)--> cleanup
+#         gate         --> route -> cleanup -> done
+#
+# Node roles map 1:1 to the pre-refactor straight-line ``_review_one_inner``
+# body plus the ``_run_post_review_actions`` tail:
+#
+# * ``guards``       — publish "start", reset the per-cycle pre-flight plan, run
+#   ``_run_initial_guards`` (issue lookup + worktree/merge-with-main). A returned
+#   ``ReviewResult`` (issue-not-found, merge-conflict) sets ``result`` + ``_stop``
+#   and routes straight to ``done`` (mirrors the old early ``return``s).
+# * ``pre-review``   — ``_run_pre_review_checks`` (baseline policy, visual
+#   decision, code-scanning fetch, delta verify). A baseline block returns a
+#   ``ReviewResult`` → ``_stop`` → ``done``.
+# * ``pre-flight``   — ``_run_pre_flight_advisor`` (the PreFlightAdvisor plan).
+# * ``review``       — the adversarial-review node: the sole primary reviewer
+#   actuator (``_run_and_post_review`` → ``ReviewRunner.review`` + the
+#   ``_check_adversarial_threshold`` council). Records ``result``.
+# * ``post-review``  — ultra-tier fold + the REQUEST_CHANGES/COMMENT re-review
+#   fix loop + visual validation + outcome recording + the product-track
+#   pre-merge spec check. The head of the former ``_run_post_review_actions``.
+# * ``gate``         — the convergence gate on the APPROVE path
+#   (``_handle_approved_review_gated`` → ``_convergence_decision``,
+#   ADR-0094–0098). ADVANCE → merge; LOOP_BACK → re-queue to ``ready``;
+#   ESCALATE → HITL. Sets ``skip_worktree_cleanup`` and marks the approve path
+#   handled so ``route`` is skipped — exactly as the old ``return`` after the
+#   approve branch did.
+# * ``route``        — the REQUEST_CHANGES/COMMENT reject route
+#   (``_handle_rejected_review`` → the same convergence gate at the reject
+#   boundary). Only reached when the approve path did NOT fire.
+# * ``cleanup``      — ``_cleanup_worktree`` (destroy vs preserve per the gate/
+#   route ``skip_worktree_cleanup`` flag).
+# * ``done``         — terminal sink carrying the final ``result``.
+#
+# Every fail-closed early exit sets ``state['_stop']`` (routed to ``done`` by the
+# ``_flow_stopped`` guard). The primary reviewer call lives inside ``review``;
+# the convergence gate (which itself invokes the post-verify lens judge) lives
+# in ``gate`` / ``route``. Routing between nodes is deterministic. ``_review_one``
+# keeps its scaffolding (semaphore, span, stop-event, ``run_with_fatal_guard``,
+# active-issue bookkeeping); ``_review_one_inner`` keeps the reviewer tracing
+# lifecycle and now builds + runs the flow. ``_run_post_review_actions`` re-enters
+# the same flow at ``post-review`` via ``Flow.resume`` (mirroring P2's
+# ``_handle_implementation_result``) so the post-review tail has a single source
+# of truth and cannot drift between the two entry points.
+#
+# PARITY NOTE (per #10682 requirement 4): ``_run_post_review_actions`` remains a
+# public seam with an unchanged signature + return contract because five unit
+# tests drive it directly and pin the full fix-loop → gate → cleanup behaviour.
+# The convergence gate is therefore reached AS its own ``gate`` node in the live
+# ``_review_one_inner`` walk, but the direct-call contract is preserved by having
+# the method resume the flow rather than duplicating the sequence.
+
+
+def _flow_stopped(state: FlowState) -> bool:
+    """Edge guard: a node signalled a fail-closed early exit → route to ``done``."""
+    return bool(state.get("_stop"))
+
+
+def _approve_path_handled(state: FlowState) -> bool:
+    """Edge guard: the ``gate`` node handled the APPROVE path → skip ``route``.
+
+    Mirrors the pre-refactor ``return result`` immediately after the APPROVE
+    branch of ``_run_post_review_actions``: once the convergence gate ran on an
+    approved review the reject route must NOT also run.
+    """
+    return bool(state.get("_approve_handled"))
 
 
 class ReviewPhase:
@@ -1248,6 +1325,14 @@ class ReviewPhase:
         for Phase 4). Phase 4 outer helpers may invoke this with other
         surface names; the surface is threaded through the advisor and
         executor prompt-building call sites.
+
+        Runs the per-PR review pipeline as an explicit ``src.flows.Flow`` (P3b
+        of #10682, ADR-0111): ``guards -> pre-review -> pre-flight -> review ->
+        post-review -> gate -> (route ->) cleanup -> done`` (see the
+        module-level diagram). The reviewer tracing lifecycle stays here in the
+        outer scaffolding; the pipeline body is the flow. Signature and
+        ``ReviewResult`` return contract are unchanged — the final ``result``
+        is read off the terminal state.
         """
         from trace_rollup import write_phase_rollup  # noqa: PLC0415
         from tracing_context import (  # noqa: PLC0415
@@ -1267,47 +1352,11 @@ class ReviewPhase:
         )
 
         try:
-            await self._publish_review_status(pr, idx, "start")
-
-            # Reset per-PR pre-flight plan on every review entry. The plan is
-            # scoped to a single review cycle and must not leak across reviews
-            # of the same PR — reusing a stale plan from the prior cycle would
-            # feed an out-of-date rubric to both the executor's prompt and the
-            # post-verify advisor.
-            self._advisor_pre_flight_plan.pop((surface, pr.number), None)
-
-            guards = await self._run_initial_guards(idx, pr, issue_map)
-            if isinstance(guards, ReviewResult):
-                return guards
-
-            pre_review = await self._run_pre_review_checks(pr, guards.task)
-            if isinstance(pre_review, ReviewResult):
-                return pre_review
-
-            await self._run_pre_flight_advisor(
-                pr, guards.task, pre_review.diff, surface=surface
+            flow = self._build_review_flow()
+            outcome = await flow.run(
+                self._initial_review_state(idx, pr, issue_map, surface)
             )
-
-            result = await self._run_and_post_review(
-                pr,
-                guards.task,
-                guards.workspace_path,
-                pre_review.diff,
-                idx,
-                code_scanning_alerts=pre_review.code_scanning_alerts,
-                pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
-                surface=surface,
-            )
-
-            return await self._run_post_review_actions(
-                pr,
-                guards.task,
-                guards.workspace_path,
-                result,
-                pre_review,
-                idx,
-                surface=surface,
-            )
+            return outcome.state["result"]
         finally:
             self._reviewers.clear_tracing_context()
             try:
@@ -1324,6 +1373,322 @@ class ReviewPhase:
                     exc_info=True,
                 )
             self._state.end_trace_run(pr.issue_number, trace_phase)
+
+    @staticmethod
+    def _initial_review_state(
+        idx: int,
+        pr: PRInfo,
+        issue_map: dict[int, Task],
+        surface: str,
+    ) -> FlowState:
+        """Seed the review flow's shared working state for one PR."""
+        return {
+            "idx": idx,
+            "pr": pr,
+            "issue_map": issue_map,
+            "surface": surface,
+        }
+
+    def _build_review_flow(
+        self,
+        *,
+        checkpoint: NodeHook | None = None,
+        kill_switch: KillSwitch | None = None,
+    ) -> Flow:
+        """Build the per-PR review DAG (P3b of #10682, ADR-0111).
+
+        See the module-level diagram for node roles. ``checkpoint`` /
+        ``kill_switch`` stay injected per ADR-0111 so the primitive's
+        persistence + halt seams are wired-through and testable. The production
+        entry runs without a checkpoint: a single review tick needs no resume,
+        and writing one would be a new on-disk side effect this parity-gated,
+        no-flag refactor must not introduce. Per-node ``on_node`` event wiring
+        is deferred to a later phase per ADR-0111.
+        """
+        return Flow(
+            nodes=[
+                Node("guards", self._flow_guards, kind="gate"),
+                Node("pre-review", self._flow_pre_review, kind="gate"),
+                Node("pre-flight", self._flow_pre_flight),
+                Node("review", self._flow_review),
+                Node("post-review", self._flow_post_review),
+                Node("gate", self._flow_gate, kind="gate"),
+                Node("route", self._flow_route, kind="gate"),
+                Node("cleanup", self._flow_cleanup),
+                Node("done", self._flow_done),
+            ],
+            edges=[
+                # First-match-wins: a stopped node skips straight to the sink.
+                Edge("guards", "done", when=_flow_stopped),
+                Edge("guards", "pre-review"),
+                Edge("pre-review", "done", when=_flow_stopped),
+                Edge("pre-review", "pre-flight"),
+                Edge("pre-flight", "review"),
+                Edge("review", "post-review"),
+                Edge("post-review", "gate"),
+                # The convergence gate handled the APPROVE path → skip the
+                # reject route (mirrors the pre-refactor ``return`` after the
+                # approve branch).
+                Edge("gate", "cleanup", when=_approve_path_handled),
+                Edge("gate", "route"),
+                Edge("route", "cleanup"),
+                Edge("cleanup", "done"),
+            ],
+            entry="guards",
+            checkpoint=checkpoint,
+            kill_switch=kill_switch,
+        )
+
+    # -- flow nodes ---------------------------------------------------------
+
+    async def _flow_guards(self, state: FlowState) -> FlowState:
+        """Publish "start", reset the pre-flight plan, run the initial guards.
+
+        Reproduces the head of the pre-refactor ``_review_one_inner`` body: a
+        returned ``ReviewResult`` (issue-not-found, merge-conflict) is a
+        fail-closed early exit — it sets ``result`` + ``_stop`` and routes
+        straight to ``done`` (the old early ``return``, which ran no
+        post-review handling and no worktree cleanup).
+        """
+        pr = state["pr"]
+        idx = state["idx"]
+        issue_map = state["issue_map"]
+        surface = state["surface"]
+
+        await self._publish_review_status(pr, idx, "start")
+
+        # Reset per-PR pre-flight plan on every review entry. The plan is
+        # scoped to a single review cycle and must not leak across reviews
+        # of the same PR — reusing a stale plan from the prior cycle would
+        # feed an out-of-date rubric to both the executor's prompt and the
+        # post-verify advisor.
+        self._advisor_pre_flight_plan.pop((surface, pr.number), None)
+
+        guards = await self._run_initial_guards(idx, pr, issue_map)
+        if isinstance(guards, ReviewResult):
+            state["result"] = guards
+            state["_stop"] = True
+            return state
+        state["task"] = guards.task
+        state["workspace_path"] = guards.workspace_path
+        return state
+
+    async def _flow_pre_review(self, state: FlowState) -> FlowState:
+        """Baseline / visual / delta pre-review checks.
+
+        A baseline block returns a ``ReviewResult`` — a fail-closed early exit
+        (``_stop`` → ``done``) exactly as the pre-refactor early ``return`` did.
+        """
+        pr = state["pr"]
+        task = state["task"]
+        pre_review = await self._run_pre_review_checks(pr, task)
+        if isinstance(pre_review, ReviewResult):
+            state["result"] = pre_review
+            state["_stop"] = True
+            return state
+        state["pre_review"] = pre_review
+        return state
+
+    async def _flow_pre_flight(self, state: FlowState) -> FlowState:
+        """PreFlightAdvisor plan node (no verdict — populates the pre-flight plan)."""
+        pr = state["pr"]
+        task = state["task"]
+        pre_review = state["pre_review"]
+        surface = state["surface"]
+        await self._run_pre_flight_advisor(pr, task, pre_review.diff, surface=surface)
+        return state
+
+    async def _flow_review(self, state: FlowState) -> FlowState:
+        """The adversarial-review node: the sole primary reviewer actuator.
+
+        Delegates to ``_run_and_post_review`` (``ReviewRunner.review`` + the
+        ``_check_adversarial_threshold`` council). Records ``result``.
+        """
+        pr = state["pr"]
+        task = state["task"]
+        wt_path = state["workspace_path"]
+        pre_review = state["pre_review"]
+        idx = state["idx"]
+        surface = state["surface"]
+        result = await self._run_and_post_review(
+            pr,
+            task,
+            wt_path,
+            pre_review.diff,
+            idx,
+            code_scanning_alerts=pre_review.code_scanning_alerts,
+            pre_flight_plan=self._advisor_pre_flight_plan.get((surface, pr.number)),
+            surface=surface,
+        )
+        state["result"] = result
+        return state
+
+    async def _flow_post_review(self, state: FlowState) -> FlowState:
+        """Ultra fold + fix loop + visual + record + product-track spec check.
+
+        The head of the former ``_run_post_review_actions`` (steps up to — but
+        not including — the APPROVE/reject routing, which are the ``gate`` /
+        ``route`` nodes). Copied verbatim from the pre-refactor body to preserve
+        the exact call order; the (possibly upgraded) ``result`` and (possibly
+        refreshed) ``diff`` are threaded forward in ``state``.
+        """
+        pr = state["pr"]
+        task = state["task"]
+        wt_path = state["workspace_path"]
+        result = state["result"]
+        pre_review = state["pre_review"]
+        worker_id = state["idx"]
+
+        diff = pre_review.diff
+        code_scanning_alerts = pre_review.code_scanning_alerts
+
+        # Opt-in ultra deep-review tier (#10555). No-op when the dial is off;
+        # when it fires, material findings flip an APPROVE verdict here so the
+        # existing REQUEST_CHANGES fix hand-back below runs.
+        result = await self._maybe_fold_ultra_review(pr, result, diff)
+
+        if result.verdict in (
+            ReviewVerdict.REQUEST_CHANGES,
+            ReviewVerdict.COMMENT,
+        ):
+            if result.fixes_made:
+                result, diff = await self._handle_self_fix_re_review(
+                    pr,
+                    task,
+                    wt_path,
+                    result,
+                    diff,
+                    worker_id,
+                    code_scanning_alerts=code_scanning_alerts,
+                )
+            else:
+                result, diff = await self._attempt_review_fix(
+                    pr,
+                    task,
+                    wt_path,
+                    result,
+                    diff,
+                    worker_id,
+                    code_scanning_alerts=code_scanning_alerts,
+                )
+
+        visual_report = await self._run_visual_validation(pr, wt_path, worker_id)
+        if visual_report and visual_report.has_failures:
+            result = await self._handle_visual_failure(
+                pr,
+                task,
+                result,
+                visual_report,
+                worker_id,
+            )
+
+        await self._record_review_outcome(pr, result)
+
+        # Pre-merge spec check for product-track issues
+        if (
+            result.verdict == ReviewVerdict.APPROVE
+            and pr.number > 0
+            and self._is_product_track_pr(task)
+        ):
+            spec_ok = await self._run_pre_merge_spec_check(
+                task, diff, pr_number=pr.number
+            )
+            if not spec_ok:
+                result = result.model_copy(
+                    update={
+                        "verdict": ReviewVerdict.REQUEST_CHANGES,
+                        "summary": (result.summary or "")
+                        + "\n\nSpec-match check failed: implementation does not fully "
+                        "match the product direction from Shape. See spec-match "
+                        "comment on the issue.",
+                    }
+                )
+
+        state["result"] = result
+        state["diff"] = diff
+        return state
+
+    async def _flow_gate(self, state: FlowState) -> FlowState:
+        """Convergence gate on the APPROVE path (ADR-0094–0098).
+
+        Reproduces the APPROVE branch of ``_run_post_review_actions``: when the
+        verdict is APPROVE and the PR is real, ``_handle_approved_review_gated``
+        routes through ``_convergence_decision`` (ADVANCE → merge / LOOP_BACK →
+        re-queue to ``ready`` / ESCALATE → HITL) and returns the
+        ``skip_worktree_cleanup`` flag. Marking the approve path handled makes
+        the outgoing edge skip ``route`` — the flow analogue of the pre-refactor
+        ``return result`` that fired immediately after this branch.
+        """
+        pr = state["pr"]
+        task = state["task"]
+        wt_path = state["workspace_path"]
+        result = state["result"]
+        diff = state["diff"]
+        worker_id = state["idx"]
+        surface = state["surface"]
+        pre_review = state["pre_review"]
+
+        if result.verdict == ReviewVerdict.APPROVE and pr.number > 0:
+            state["skip_worktree_cleanup"] = await self._handle_approved_review_gated(
+                pr,
+                task,
+                wt_path,
+                result,
+                diff,
+                worker_id,
+                surface=surface,
+                code_scanning_alerts=pre_review.code_scanning_alerts,
+                visual_decision=pre_review.visual_decision,
+            )
+            state["_approve_handled"] = True
+        return state
+
+    async def _flow_route(self, state: FlowState) -> FlowState:
+        """Reject route for REQUEST_CHANGES / COMMENT verdicts.
+
+        Reproduces the reject branch of ``_run_post_review_actions``: only
+        reached when the ``gate`` node did NOT handle the APPROVE path.
+        ``skip_worktree_cleanup`` starts False (matching the pre-refactor
+        initializer) and becomes the ``_handle_rejected_review`` result only on
+        a REQUEST_CHANGES / COMMENT verdict.
+        """
+        pr = state["pr"]
+        task = state["task"]
+        result = state["result"]
+        worker_id = state["idx"]
+
+        skip = False
+        if result.verdict in (
+            ReviewVerdict.REQUEST_CHANGES,
+            ReviewVerdict.COMMENT,
+        ):
+            skip = await self._handle_rejected_review(
+                pr,
+                task,
+                result,
+                worker_id,
+            )
+        state["skip_worktree_cleanup"] = skip
+        return state
+
+    async def _flow_cleanup(self, state: FlowState) -> FlowState:
+        """Destroy or preserve the worktree per the gate/route skip flag."""
+        pr = state["pr"]
+        result = state["result"]
+        await self._cleanup_worktree(
+            pr, result, bool(state.get("skip_worktree_cleanup"))
+        )
+        return state
+
+    @staticmethod
+    async def _flow_done(state: FlowState) -> FlowState:
+        """Terminal sink for the review flow (#10682).
+
+        A no-op join point so every path — the full walk and each fail-closed
+        early exit — ends at one observable terminal carrying the final
+        ``result``.
+        """
+        return state
 
     async def _run_initial_guards(
         self,
@@ -1423,108 +1788,26 @@ class ReviewPhase:
         ``surface`` is forwarded to the convergence gate's lens judge so the
         post-verify advisor uses the correct surface config (T24.7).
         Defaults to ``"pr_review"`` for back-compat.
+
+        The post-review tail of the review flow (P3b of #10682): the same
+        ``post-review -> gate -> (route ->) cleanup`` graph ``_review_one_inner``
+        runs, re-entered at the ``post-review`` node with the built ``result``
+        pre-seeded (``Flow.resume``, mirroring P2's
+        ``_handle_implementation_result``). Keeping this as the single source of
+        truth — rather than a second inline copy — means the fix-loop / gate /
+        route / cleanup branches can never drift between the two entry points.
+        Signature and ``ReviewResult`` return contract are unchanged.
         """
-        diff = pre_review.diff
-        code_scanning_alerts = pre_review.code_scanning_alerts
-
-        # Opt-in ultra deep-review tier (#10555). No-op when the dial is off;
-        # when it fires, material findings flip an APPROVE verdict here so the
-        # existing REQUEST_CHANGES fix hand-back below runs.
-        result = await self._maybe_fold_ultra_review(pr, result, diff)
-
-        if result.verdict in (
-            ReviewVerdict.REQUEST_CHANGES,
-            ReviewVerdict.COMMENT,
-        ):
-            if result.fixes_made:
-                result, diff = await self._handle_self_fix_re_review(
-                    pr,
-                    task,
-                    wt_path,
-                    result,
-                    diff,
-                    worker_id,
-                    code_scanning_alerts=code_scanning_alerts,
-                )
-            else:
-                result, diff = await self._attempt_review_fix(
-                    pr,
-                    task,
-                    wt_path,
-                    result,
-                    diff,
-                    worker_id,
-                    code_scanning_alerts=code_scanning_alerts,
-                )
-
-        visual_report = await self._run_visual_validation(pr, wt_path, worker_id)
-        if visual_report and visual_report.has_failures:
-            result = await self._handle_visual_failure(
-                pr,
-                task,
-                result,
-                visual_report,
-                worker_id,
-            )
-
-        await self._record_review_outcome(pr, result)
-
-        # Pre-merge spec check for product-track issues
-        if (
-            result.verdict == ReviewVerdict.APPROVE
-            and pr.number > 0
-            and self._is_product_track_pr(task)
-        ):
-            spec_ok = await self._run_pre_merge_spec_check(
-                task, diff, pr_number=pr.number
-            )
-            if not spec_ok:
-                result = result.model_copy(
-                    update={
-                        "verdict": ReviewVerdict.REQUEST_CHANGES,
-                        "summary": (result.summary or "")
-                        + "\n\nSpec-match check failed: implementation does not fully "
-                        "match the product direction from Shape. See spec-match "
-                        "comment on the issue.",
-                    }
-                )
-
-        # APPROVE-path second opinion.
-        #
-        # The approve decision routes unconditionally through the convergence
-        # HybridGate. The lens judge + outer lap budget own the retry loop.
-        # ADVANCE → merge (recording last_verdict=="ADVANCE", which flips
-        # ledger.converged to True). LOOP_BACK → re-queue to ``ready``
-        # (worktree preserved). ESCALATE → HITL (worktree destroyed).
-        skip_worktree_cleanup = False
-        if result.verdict == ReviewVerdict.APPROVE and pr.number > 0:
-            skip_worktree_cleanup = await self._handle_approved_review_gated(
-                pr,
-                task,
-                wt_path,
-                result,
-                diff,
-                worker_id,
-                surface=surface,
-                code_scanning_alerts=code_scanning_alerts,
-                visual_decision=pre_review.visual_decision,
-            )
-            await self._cleanup_worktree(pr, result, skip_worktree_cleanup)
-            return result
-
-        if result.verdict in (
-            ReviewVerdict.REQUEST_CHANGES,
-            ReviewVerdict.COMMENT,
-        ):
-            skip_worktree_cleanup = await self._handle_rejected_review(
-                pr,
-                task,
-                result,
-                worker_id,
-            )
-
-        await self._cleanup_worktree(pr, result, skip_worktree_cleanup)
-        return result
+        flow = self._build_review_flow()
+        state = self._initial_review_state(
+            worker_id, pr, {pr.issue_number: task}, surface
+        )
+        state["task"] = task
+        state["workspace_path"] = wt_path
+        state["result"] = result
+        state["pre_review"] = pre_review
+        outcome = await flow.resume(state, "post-review")
+        return outcome.state["result"]
 
     async def _run_pre_flight_advisor(
         self,

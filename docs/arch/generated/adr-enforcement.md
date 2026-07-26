@@ -112,11 +112,6 @@ By declared `**Enforcement:**` kind: `enforced` 62 · `manual` 7 · `decision-of
 
 ## Weak / tautological enforcements
 
-Checks that resolve (the node exists) but assert nothing — hollow guards that stay green while the decision may drift. Strengthen the cited test or repoint the ADR at one that asserts the invariant.
-
-| ADR | Hollow check |
-|---|---|
-| ADR-0094 | `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
-| ADR-0095 | `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
+_(none)_
 
 <!-- arch:generated -->

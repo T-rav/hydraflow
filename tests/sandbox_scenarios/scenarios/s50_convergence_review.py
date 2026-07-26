@@ -131,10 +131,30 @@ async def assert_outcome(api, page) -> None:
                 return True
         return False
 
-    await api.wait_until(
+    history = await api.wait_until(
         "/api/issues/history?limit=500",
         _merged,
         timeout=240.0,
+    )
+    # Explicit end-state assertion. Reaching outcome "merged" is the e2e proof
+    # that the WHOLE gated convergence path ran in the real orchestrator:
+    # REQUEST_CHANGES → gate deterministic RED → LOOP_BACK (ADR-0094 reject
+    # boundary, ledger lap 1) → re-implement → APPROVE → gate ADVANCE +
+    # recompute_converged (ADR-0095 approve-path gating, converged live) →
+    # _handle_approved_merge. If any link in that chain regressed, issue #1
+    # would never reach "merged" and this assertion fails.
+    hist_items = history.get("items") if isinstance(history, dict) else None
+    assert isinstance(hist_items, list), f"history payload missing items: {history!r}"
+    merged_issue_1 = [
+        item
+        for item in hist_items
+        if isinstance(item, dict)
+        and item.get("issue_number") == 1
+        and isinstance(item.get("outcome"), dict)
+        and item["outcome"].get("outcome") == "merged"
+    ]
+    assert merged_issue_1, (
+        f"issue #1 did not reach merged via the gated convergence path: {history!r}"
     )
 
     # --- 2. /api/state shows convergence_ledgers ABSENT for issue #1 ---
@@ -159,8 +179,21 @@ async def assert_outcome(api, page) -> None:
                 return False  # Still present — clear hasn't propagated yet.
         return True
 
-    await api.wait_until(
+    state = await api.wait_until(
         "/api/state",
         _ledger_absent,
         timeout=30.0,
+    )
+    # ADR-0094 clear-on-merge contract: PostMergeHandler.handle_approved calls
+    # clear_convergence_ledger after the merge, so once the merge has completed
+    # (asserted above) no convergence_ledgers entry for issue #1 must remain in
+    # the real orchestrator's persisted state.
+    ledgers = state.get("convergence_ledgers") if isinstance(state, dict) else None
+    remaining_issue_1 = [
+        entry
+        for entry in (ledgers.values() if isinstance(ledgers, dict) else [])
+        if isinstance(entry, dict) and entry.get("issue_number") == 1
+    ]
+    assert not remaining_issue_1, (
+        f"convergence ledger for issue #1 not cleared after merge: {state!r}"
     )
