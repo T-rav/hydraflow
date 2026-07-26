@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10515
 source_phase: review
 created_at: 2026-07-25T09:50:02.028825+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0851
 ---
 
 # Known gap: active-bucket stamps PROCESSING but real store uses "active"

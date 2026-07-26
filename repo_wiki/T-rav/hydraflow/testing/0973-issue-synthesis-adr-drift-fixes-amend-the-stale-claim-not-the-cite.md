@@ -1,0 +1,18 @@
+---
+id: 0973
+topic: testing
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-25T23:19:07.562976+00:00
+status: active
+corroborations: 1
+supersedes: 0898,0899,0900,0901,0902,0903,0904,0905,0906,0907,0908,0909,0910,0911,0912,0913,0914,0915,0916,0917,0918,0919,0920,0921,0922,0923,0924,0925,0926,0927,0928,0929,0930,0931,0932,0933,0934,0935,0936,0937,0938,0939,0940,0941,0942,0943,0944,0945,0946,0947,0948,0949,0950,0952,0953,0953,0953
+---
+
+# ADR drift fixes: amend the stale claim, not the cited PR's whole decision
+
+Repairing ADR drift (e.g. ADR-0107's Routing section vs. #10290's triage-park split) means correcting the specific stale sentence plus a one-line cross-reference to the source PR/issue, not re-describing or absorbing the other PR's whole decision into this ADR.
+
+Example: #10290's park-behavior decision has its own ADR/regression coverage; ADR-0107 is about collapsing Discover/Shape and should stay scoped to that.
+
+**Why:** scope creep during drift repair turns a docs-reconciliation PR into an undocumented re-litigation of a decision owned elsewhere, and duplicates coverage instead of cross-referencing it.

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10498
 source_phase: plan
 created_at: 2026-07-25T01:51:29.166489+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0954
 ---
 
 # escape/detect.py's pure core must stay git-free — no subprocess/gh/git calls
