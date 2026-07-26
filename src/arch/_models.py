@@ -68,11 +68,19 @@ class ModuleGraph(BaseModel):
 class EventEdge(BaseModel):
     event: str  # EventType member name, e.g. "PR_OPENED"
     publishers: list[str] = Field(default_factory=list)  # qualified module:func
-    subscribers: list[str] = Field(default_factory=list)
+    # Live-only allowlist member (``EPHEMERAL_EVENT_TYPES`` in src/events.py):
+    # fanned out to subscribers but never persisted. Never flagged "dead", even
+    # without a discoverable publisher.
+    ephemeral: bool = False
 
 
 class EventBusTopology(BaseModel):
     events: list[EventEdge] = Field(default_factory=list)
+    # Fan-out consumers: qualified call sites that take an argless
+    # ``subscribe()`` / ``subscription()`` queue. HydraFlow's ``EventBus``
+    # delivers every published event to every subscriber, so subscribers are
+    # global (one queue drains the whole bus), not per-``EventType``.
+    global_subscribers: list[str] = Field(default_factory=list)
 
 
 class ADRRef(BaseModel):
