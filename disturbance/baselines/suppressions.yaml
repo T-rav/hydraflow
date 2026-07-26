@@ -257,7 +257,7 @@ entries:
   src/review_phase/_phase.py::noqa:ARG002: 2
   src/review_phase/_phase.py::noqa:BLE001: 4
   "src/review_phase/_phase.py::noqa:E402,F401\u2014usedbycallsitesbelow": 1
-  src/review_phase/_phase.py::noqa:PLC0415: 43
+  src/review_phase/_phase.py::noqa:PLC0415: 44
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__+sig": 1
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__signature": 1
   src/review_phase/_phase.py::type-ignore[arg-type]: 2
@@ -329,6 +329,7 @@ entries:
   src/trust_fleet_sanity_loop.py::noqa:BLE001: 3
   src/trust_fleet_sanity_loop.py::noqa:PLC0415: 3
   "src/ubiquitous_language.py::noqa:PLR0911\u2014linearF1guards,eachwithitsownfailpath": 1
+  src/ultra_review.py::noqa:PLC0415: 2
   src/verification_judge.py::noqa:PLC0415: 1
   src/whatsapp_bridge.py::noqa:PLC0415: 1
   src/wiki_anchor_gate.py::noqa:PLC0415: 1
