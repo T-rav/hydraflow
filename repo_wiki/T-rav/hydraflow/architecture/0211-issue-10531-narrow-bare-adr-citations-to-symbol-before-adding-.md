@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10531
 source_phase: plan
 created_at: 2026-07-25T09:52:15.450977+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: drift_detected: src/foo.py
 ---
 
 # Narrow bare ADR citations to :Symbol before adding a shared-infra exemption
