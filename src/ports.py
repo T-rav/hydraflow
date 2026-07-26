@@ -254,6 +254,16 @@ class PRPort(Protocol):
         """Remove *label* from a GitHub pull request (no-op if absent)."""
         ...
 
+    async def get_pr_labels(self, pr_number: int) -> list[str]:
+        """Return the label names carried by *pr_number*.
+
+        Propagates read failures (does not swallow) so PR-scoped label
+        routing can fail-closed on error rather than mistaking an
+        unreadable PR for an unlabelled one (#10567), mirroring
+        ``get_issue_labels`` (#9575).
+        """
+        ...
+
     async def swap_pipeline_labels(
         self,
         issue_number: int,

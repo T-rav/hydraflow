@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10565
 source_phase: plan
 created_at: 2026-07-25T23:03:04.264264+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0940
 ---
 
 # Live-ADR-status literal must have one home: src/adr_index.py
