@@ -159,6 +159,17 @@ def test_cache_handles_directory_creation_after_instantiation(tmp_path):
     assert len(refreshed) == 1
 
 
+def test_adr_is_live_true_for_accepted_and_proposed():
+    assert ADR(number=1, title="x", status="Accepted", summary="").is_live
+    assert ADR(number=2, title="x", status="Proposed", summary="").is_live
+
+
+def test_adr_is_live_false_for_superseded_deprecated_unknown():
+    assert not ADR(number=3, title="x", status="Superseded", summary="").is_live
+    assert not ADR(number=4, title="x", status="Deprecated", summary="").is_live
+    assert not ADR(number=5, title="x", status="Unknown", summary="").is_live
+
+
 def test_scan_real_adr_directory_produces_valid_output():
     """Smoke test against the real docs/adr/ — guards against regression
     if an ADR file's format drifts from the expected template."""

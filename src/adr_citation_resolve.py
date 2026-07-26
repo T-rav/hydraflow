@@ -185,5 +185,5 @@ def unresolved_citations(
     """
     if repo_root is None:
         repo_root = Path(adr_index.adr_dir).parent.parent
-    live = [a for a in adr_index.adrs() if a.status in ("Accepted", "Proposed")]
+    live = [a for a in adr_index.adrs() if a.is_live]
     return _unresolved(live, repo_root)
