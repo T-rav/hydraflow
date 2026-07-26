@@ -100,8 +100,9 @@ def valid_stored_overrides(overrides: Mapping[str, Any], slug: str) -> dict[str,
             logger.warning("Ignoring unknown stored override %r for repo %s", key, slug)
             continue
         annotation = field_info.annotation
-        if field_info.metadata:
-            annotation = Annotated[(annotation, *field_info.metadata)]
+        metadata = field_info.metadata
+        if metadata:
+            annotation = Annotated[(annotation, *metadata)]
         try:
             TypeAdapter(annotation).validate_python(value)
         except ValidationError:
