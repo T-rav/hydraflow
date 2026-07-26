@@ -638,6 +638,14 @@ def _render_finding(record: EscapeRecord, reason: str) -> tuple[str, str]:
         "became work through normal triage. Filed for a human to either "
         "confirm/complete the attribution (low confidence) or point at the "
         "encoding — regression test / stored lesson / detector / ADR — that "
-        "should close it out.\n"
+        "should close it out.\n\n"
+        "### Record the resolution\n\n"
+        "Point at the encoding with the operator CLI (#10574) — this appends a "
+        "resolution row so the aging surface stops re-firing and this issue is "
+        "auto-closed on the next tick (#10577):\n\n"
+        "```\n"
+        f'make escape-resolve ARGS="{record.id} --encoded-as '
+        "<regression-test|stored-lesson|detector|adr> --notes '<why>'\"\n"
+        "```\n"
     )
     return title, body
