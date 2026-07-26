@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10564
 source_phase: plan
 created_at: 2026-07-25T23:31:13.809595+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1039
 ---
 
 # Header.jsx border-conflict test must use rerender(), not a second render()

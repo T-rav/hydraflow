@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10566
 source_phase: plan
 created_at: 2026-07-25T23:57:01.883157+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1039
 ---
 
 # Fail-safe abort beats silent wrong-edges when supersession is ambiguous

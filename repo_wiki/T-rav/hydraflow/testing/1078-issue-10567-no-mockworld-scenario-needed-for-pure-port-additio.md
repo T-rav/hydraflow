@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10567
 source_phase: plan
 created_at: 2026-07-25T23:37:32.613892+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10567 closed
 ---
 
 # No MockWorld scenario needed for pure Port additions with no consumer

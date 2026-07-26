@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10575
 source_phase: plan
 created_at: 2026-07-26T00:41:55.611443+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1039
 ---
 
 # repo_wiki frontmatter is naive f'{k}: {v}' — avoid colons/multiline values

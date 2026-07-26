@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10567
 source_phase: plan
 created_at: 2026-07-25T23:37:32.613851+00:00
-status: active
+status: stale
 corroborations: 2
+stale_reason: source issue #10567 closed
 ---
 
 # New PRPort/IssuePort methods need 5 surfaces or CI fails

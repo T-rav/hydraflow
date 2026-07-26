@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10564
 source_phase: plan
 created_at: 2026-07-25T23:31:13.809570+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0550
 ---
 
 # React border shorthand+longhand mix triggers dev console errors on rerender
