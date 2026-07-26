@@ -546,6 +546,14 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         # instead of a debug line — the tick retries.
         await self._check_worker_staleness()
 
+        # Persistent-error actuator (#10140): a loop that keeps TICKING but keeps
+        # FAILING — complements the silent-heartbeat staleness sweep, so it runs on
+        # the SAME fast tick (not behind the 2h heavy-pass gate) or persistent
+        # worker errors would take up to health_monitor_interval to be filed
+        # (#10652). Deliberately unwrapped — a genuine bug here surfaces as a
+        # visible cycle error and retries, not a debug line.
+        await self._check_persistent_worker_errors()
+
         if not self._should_run_heavy_pass():
             # Sweep-only cycle: a compact, distinct status (NOT zeroed trend
             # metrics, which would read as a real 0% first-pass rate on the
@@ -605,12 +613,6 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             await self._check_event_loop_stall()
         except Exception:
             logger.debug("event-loop stall check failed", exc_info=True)
-
-        # Persistent-error actuator (#10140): a loop that keeps TICKING but
-        # keeps FAILING (complements the silent-heartbeat sweep on the fast
-        # path). Deliberately unwrapped — a genuine bug here should surface as
-        # a visible cycle error and retry, not vanish into a debug line.
-        await self._check_persistent_worker_errors()
 
         metrics = compute_trend_metrics(
             self._outcomes_path, self._scores_path, self._failures_path
