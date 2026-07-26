@@ -233,7 +233,7 @@ entries:
   src/rc_budget_loop.py::noqa:PLC0415: 1
   src/rc_budget_loop.py::noqa:TCH001: 2
   src/repo_wiki.py::noqa:BLE001: 3
-  src/repo_wiki.py::noqa:PLC0415: 7
+  src/repo_wiki.py::noqa:PLC0415: 6
   "src/repo_wiki.py::noqa:PLC0415\u2014isolatedhere,notamodule-leveldep": 1
   src/repo_wiki.py::type-ignore[return-value]: 1
   src/repo_wiki_ingest.py::noqa:BLE001: 1
