@@ -16,13 +16,80 @@ from config import HydraFlowConfig, build_credentials
 from events import EventType, HydraFlowEvent
 from log import setup_logging
 from prompt_gate import most_restrictive_data_class
-from runtime_config import DEFAULT_LOG_FILE, load_runtime_config
+from runtime_config import (
+    DEFAULT_LOG_FILE,
+    load_runtime_config,
+    valid_stored_overrides,
+)
 from unpushed_branch_alert import check_and_alert_unpushed_branches
 
 if TYPE_CHECKING:
     from events import EventBus
+    from repo_runtime import RepoRuntimeRegistry
+    from repo_store import RepoRegistryStore
 
 logger = logging.getLogger("hydraflow.server")
+
+
+async def _restore_registered_repos(
+    repo_store: RepoRegistryStore, registry: RepoRuntimeRegistry
+) -> None:
+    """Restore persisted repos from the store into the in-memory registry.
+
+    The repo store persists to disk, but the registry is in-memory — without
+    this, added repos are lost on restart and their play buttons return 404.
+
+    Each repo's persisted operator edits (``RepoRecord.overrides``, #10658) are
+    read back through :func:`valid_stored_overrides` and merged **under** the
+    structural keys (``repo_root`` / ``repo`` / ``repo_data_class``) so an edit
+    survives the restart while a stale stored value can never hijack repo
+    identity or the CH-6 data-class governance merge. Both ``load_runtime_config``
+    calls carry the stored edits — the data-class reload must too, or an
+    upgrade path would silently drop the edit.
+    """
+    for record in repo_store.list():
+        if not record.path:
+            continue
+        if record.slug in registry:
+            # Already registered (e.g. the host repo added above) — skip.
+            continue
+        repo_path = Path(record.path)
+        if not repo_path.is_dir():
+            logger.warning(
+                "Skipping stored repo %s — path %s not found",
+                record.slug,
+                record.path,
+            )
+            continue
+        try:
+            stored = valid_stored_overrides(record.overrides, record.slug)
+            repo_cfg = load_runtime_config(
+                overrides={
+                    **stored,
+                    "repo_root": str(repo_path),
+                    **({"repo": record.repo} if record.repo else {}),
+                }
+            )
+            # CH-6 (#9734): the registry's data-class declaration rides the
+            # per-repo config so prompt_gate enforces it. Merge upward-only —
+            # a defaulted record must never downgrade a class the repo's own
+            # config file declares (that would be fail-open).
+            effective_class = most_restrictive_data_class(
+                repo_cfg.repo_data_class, record.data_class
+            )
+            if repo_cfg.repo_data_class != effective_class:
+                repo_cfg = load_runtime_config(
+                    overrides={
+                        **stored,
+                        "repo_root": str(repo_path),
+                        **({"repo": record.repo} if record.repo else {}),
+                        "repo_data_class": effective_class,
+                    }
+                )
+            await registry.register(repo_cfg)
+            logger.info("Restored registered repo %r from store", record.slug)
+        except Exception:
+            logger.warning("Failed to restore repo %s", record.slug, exc_info=True)
 
 
 def _init_sentry(*, force: bool = False) -> None:
@@ -221,48 +288,9 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     except Exception:
         logger.warning("Unpushed-branch boot check failed for host repo", exc_info=True)
 
-    # Restore previously registered repos into the runtime registry.
-    # The repo store persists to disk, but the registry is in-memory —
-    # without this, added repos are lost on restart and their play
-    # buttons return 404.
-    for record in repo_store.list():
-        if not record.path:
-            continue
-        if record.slug in registry:
-            # Already registered (e.g. the host repo added above) — skip.
-            continue
-        repo_path = Path(record.path)
-        if not repo_path.is_dir():
-            logger.warning(
-                "Skipping stored repo %s — path %s not found", record.slug, record.path
-            )
-            continue
-        try:
-            repo_cfg = load_runtime_config(
-                overrides={
-                    "repo_root": str(repo_path),
-                    **({"repo": record.repo} if record.repo else {}),
-                }
-            )
-            # CH-6 (#9734): the registry's data-class declaration rides the
-            # per-repo config so prompt_gate enforces it. Merge upward-only —
-            # a defaulted record must never downgrade a class the repo's own
-            # config file declares (that would be fail-open).
-            effective_class = most_restrictive_data_class(
-                repo_cfg.repo_data_class, record.data_class
-            )
-            if repo_cfg.repo_data_class != effective_class:
-                repo_cfg = load_runtime_config(
-                    overrides={
-                        "repo_root": str(repo_path),
-                        **({"repo": record.repo} if record.repo else {}),
-                        "repo_data_class": effective_class,
-                    }
-                )
-            await registry.register(repo_cfg)
-            logger.info("Restored registered repo %r from store", record.slug)
-        except Exception:
-            logger.warning("Failed to restore repo %s", record.slug, exc_info=True)
+    # Restore previously registered repos (and their persisted per-repo config
+    # overrides, #10658) into the runtime registry.
+    await _restore_registered_repos(repo_store, registry)
 
     # Auto-register parent repo when running as a git submodule
     hydraflow_root = Path(__file__).resolve().parent.parent
@@ -292,7 +320,10 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     async def _register_repo(
         repo_path: Path, slug: str | None, data_class: str | None = None
     ) -> tuple[RepoRecord, HydraFlowConfig]:
-        from runtime_config import load_runtime_config  # noqa: PLC0415
+        from runtime_config import (  # noqa: PLC0415
+            load_runtime_config,
+            valid_stored_overrides,
+        )
 
         repo_cfg = load_runtime_config(
             overrides={
@@ -314,9 +345,16 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
             existing.data_class if existing else None,
             data_class,
         )
-        if repo_cfg.repo_data_class != effective_class:
+        # Re-apply the repo's persisted operator edits (#10658) so re-adding a
+        # known repo reproduces its stored config, layered under the structural
+        # keys. Reload whenever there are stored overrides or a data-class change.
+        stored = (
+            valid_stored_overrides(existing.overrides, github_slug) if existing else {}
+        )
+        if stored or repo_cfg.repo_data_class != effective_class:
             repo_cfg = load_runtime_config(
                 overrides={
+                    **stored,
                     "repo_root": str(repo_path),
                     **({"repo": slug} if slug else {}),
                     "repo_data_class": effective_class,
