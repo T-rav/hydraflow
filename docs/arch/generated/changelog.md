@@ -6,7 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `48e918a` — refactor(review): run review as a flow (DAG) on the primitive (P3b of #10682) (#10700) (#10700) *(2026-07-26)*
+- `17249a8` — refactor(triage): run triage as a flow (DAG) on the primitive (P3c of #10682) *(2026-07-26)*
 - `5ff5005` — refactor(plan): run plan as a flow (DAG) on the primitive (P3a of #10682) (#10696) (#10696) *(2026-07-26)*
 - `c5fecf3` — refactor(implement): run implement as a flow (DAG) + no-progress abort (P2 of #10682) (#10694) (#10694) *(2026-07-26)*
 - `58476f5` — Fixes #10652: staging_bisect stall remediation no longer lags the sanity alert (#10686) (#10686) *(2026-07-26)*
