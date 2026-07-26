@@ -655,6 +655,7 @@ class WikiCompiler:
             _load_tracked_active_entries,
             _mark_tracked_entry_superseded,
             _write_tracked_synthesis_entry,
+            synthesis_matches_active_bodies,
         )
 
         topic_dir = tracked_root / repo / topic
@@ -704,6 +705,21 @@ class WikiCompiler:
             logger.info(
                 "Wiki compile_tracked for %s/%s: all synthesized entries "
                 "lacked a repo anchor — keeping originals",
+                repo,
+                topic,
+            )
+            return 0
+
+        # Byte-identity no-op guard (#10573): if the synthesized bodies are
+        # byte-identical to the current active set, writing them would only
+        # mint new ids and supersede the originals with exact copies —
+        # unbounded id growth and a permanently churning maintenance PR.
+        # Skip re-emission when nothing actually changed; a genuine edit
+        # (added / removed / edited entry) still flows through below.
+        if synthesis_matches_active_bodies(active_entries, compiled):
+            logger.info(
+                "Wiki compile_tracked %s/%s: synthesized output byte-identical "
+                "to active set — skipping re-emission (no new ids)",
                 repo,
                 topic,
             )

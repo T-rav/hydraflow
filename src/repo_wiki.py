@@ -363,6 +363,42 @@ def _write_tracked_synthesis_entry(
     return path
 
 
+def _tracked_entry_body_for_compare(title: str, content: str) -> str:
+    """Reconstruct the on-disk body that ``_write_tracked_synthesis_entry``
+    produces for ``(title, content)`` and ``_load_tracked_active_entries``
+    reads back, normalized for byte-identity comparison (#10573).
+
+    Kept next to ``_write_tracked_synthesis_entry`` so the two stay in
+    sync: the write format (``# {title}`` heading + sanitized content) is
+    the contract this must mirror. If the write layout changes, this must
+    change with it.
+    """
+    return f"# {title}\n\n{_sanitize_body_for_frontmatter(content)}".strip()
+
+
+def synthesis_matches_active_bodies(
+    active_entries: list[dict[str, Any]],
+    compiled: list[WikiEntry],
+) -> bool:
+    """True when the synthesized entries are byte-identical (by body) to the
+    current active set — so re-emitting them would only mint new ids and
+    supersede the originals with exact copies (#10573).
+
+    The comparison is a multiset over entry bodies: id-, timestamp- and
+    order-agnostic, multiplicity-preserving. An added, removed, or edited
+    entry makes the multisets differ and synthesis proceeds as before. An
+    empty active set never matches a non-empty synthesis (and vice-versa),
+    so the first real synthesis of a topic is never suppressed.
+    """
+    from collections import Counter  # noqa: PLC0415
+
+    active = Counter(str(e["body"]).strip() for e in active_entries)
+    proposed = Counter(
+        _tracked_entry_body_for_compare(e.title, e.content) for e in compiled
+    )
+    return active == proposed
+
+
 def _mark_tracked_entry_superseded(entry_path: Path, *, superseded_by: str) -> None:
     """Flip ``status`` → ``superseded`` and add ``superseded_by`` in the
     frontmatter.  No-op when the file has no frontmatter block.
