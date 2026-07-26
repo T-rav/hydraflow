@@ -1289,6 +1289,16 @@ class HydraFlowOrchestrator:
         loop body starts (#9888 suppressed-credit backoff) — the supervisor
         is never blocked and the task stays tracked in the map.
         """
+        if self._stop_event.is_set():
+            # Shutdown has begun: recreating a loop task now would leak a live
+            # task past ``_supervise_loops``'s cancel/gather drain, pinning
+            # ``run_status`` at "stopping" forever (#10569). A restart exists
+            # only to keep supervision alive, and supervision ends at stop.
+            # The supervisor's finally sweeps the crashed task; no hot-loop.
+            logger.debug(
+                "Skipping restart of loop %r — stop already requested", loop_name
+            )
+            return
         logger.error("Loop %r crashed — restarting: %s", loop_name, exc)
         data: ErrorPayload = {
             "message": f"Loop {loop_name} crashed and was restarted",
@@ -1335,6 +1345,12 @@ class HydraFlowOrchestrator:
 
         Returns ``False`` for unknown names or before supervision started.
         """
+        if self._stop_event.is_set():
+            # A restart requested after stop (e.g. HealthMonitorLoop's
+            # restart-first stall policy racing a shutdown) would spawn a rogue
+            # loop task that outlives ``_supervise_loops``'s drain and wedges
+            # ``run_status`` at "stopping" (#10569). Refuse once stop is set.
+            return False
         old = self._loop_tasks.get(name)
         factory = self._loop_factories.get(name)
         if old is None or factory is None:
@@ -2222,6 +2238,16 @@ class HydraFlowOrchestrator:
         *affected* ``None`` restarts every loop (global/legacy). A scoped pause
         passes the same set it cancelled so only those loops are recreated —
         the surviving backend/harness loops were never touched (#9807)."""
+        if self._stop_event.is_set():
+            # Stop landed during the pause: clear the pause state but do NOT
+            # recreate any loop. ``_pause_for_credits`` already short-circuits
+            # to this outcome before calling us; this guard also fail-safes any
+            # future caller so a credit pause that ends after stop never leaks a
+            # live loop past the shutdown drain and wedges "stopping" (#10569).
+            self._credits_paused_until = None
+            self._credit_paused_provider = None
+            self._credit_resume_event.clear()
+            return
         provider = self._credit_paused_provider
         self._credits_paused_until = None
         self._credit_paused_provider = None
