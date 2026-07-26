@@ -237,7 +237,7 @@ entries:
   "src/repo_wiki.py::noqa:PLC0415\u2014isolatedhere,notamodule-leveldep": 1
   src/repo_wiki.py::type-ignore[return-value]: 1
   src/repo_wiki_ingest.py::noqa:BLE001: 1
-  src/repo_wiki_loop.py::noqa:BLE001: 6
+  src/repo_wiki_loop.py::noqa:BLE001: 7
   "src/repo_wiki_loop.py::noqa:PLR0911\u2014linearstate-machineguards": 1
   src/repo_wiki_loop.py::type-ignore[arg-type]: 1
   src/report_issue_loop.py::noqa:PLC0415: 3
