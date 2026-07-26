@@ -394,6 +394,14 @@ _CREDIT_PATTERNS = (
     # non-retryable halt on every run.
     "reached your specified api usage limits",
     "reached your specified usage limits",
+    # z.ai / GLM harness backend (provider="zai"): a GLM cap surfaces through
+    # the Claude CLI's stderr, NOT as a raw 402/429 (that path is handled at the
+    # transport in _openai_compatible_complete). These are the z.ai / OpenAI-
+    # compatible billing phrasings; specific enough not to match normal prose.
+    # Pin the exact GLM stderr with a cassette once observed in the wild.
+    "insufficient balance",
+    "insufficient_quota",
+    "insufficient quota",
 )
 
 # Catches the whole "You've hit your <usage|session|weekly|daily|…> limit"

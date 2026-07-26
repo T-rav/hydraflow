@@ -82,6 +82,7 @@ class TriageRunner(BaseRunner):
     """
 
     _log = logger
+    PROVIDER_FIELD = "triage_provider"
 
     def set_observability(self, obs: ObservabilityPort) -> None:
         """Inject the observability port after construction."""

@@ -535,3 +535,105 @@ class TestRunLightweightAgentDispatch:
         assert result.stdout == "CLI"
         assert cli_called["n"] == 1
         assert http_called["n"] == 0
+
+
+class TestHarnessBackend:
+    """z.ai as a Claude-harness backend (the /api/anthropic face)."""
+
+    def test_zai_harness_base_url_default_and_lookup(self) -> None:
+        from config import HydraFlowConfig
+        from runner_utils import harness_base_url
+
+        cfg = HydraFlowConfig()
+        assert cfg.zai_harness_base_url == "https://api.z.ai/api/anthropic"
+        assert harness_base_url("zai", cfg) == cfg.zai_harness_base_url
+        # claude/anthropic are not harness *backends* — they use the native
+        # Anthropic endpoint, so there is no override URL.
+        assert harness_base_url("claude", cfg) == ""
+        assert harness_base_url("anthropic", cfg) == ""
+        assert harness_base_url("openrouter", cfg) == ""
+
+    def test_resolve_harness_env_isolation_and_zai(self, monkeypatch) -> None:
+        from config import HydraFlowConfig
+        from runner_utils import resolve_harness_env
+
+        cfg = HydraFlowConfig()
+        # Native Anthropic: pristine env — the main workers must stay untouched.
+        assert resolve_harness_env("claude", cfg) == {}
+        assert resolve_harness_env("anthropic", cfg) == {}
+        # zai: point the Claude CLI at GLM + clear the shadowing API key.
+        monkeypatch.setenv("ZAI_API_KEY", "sk-zai-test")
+        env = resolve_harness_env("zai", cfg)
+        assert env["ANTHROPIC_BASE_URL"] == cfg.zai_harness_base_url
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-zai-test"
+        assert env["ANTHROPIC_API_KEY"] == ""
+
+    def test_resolve_harness_env_missing_key_falls_open(self, monkeypatch) -> None:
+        from config import HydraFlowConfig
+        from runner_utils import resolve_harness_env
+
+        monkeypatch.delenv("ZAI_API_KEY", raising=False)
+        monkeypatch.delenv("HYDRAFLOW_ZAI_API_KEY", raising=False)
+        # No key → fall open to Anthropic rather than spawn a broken CLI.
+        assert resolve_harness_env("zai", HydraFlowConfig()) == {}
+
+    @pytest.mark.asyncio
+    async def test_cli_spawn_env_carries_zai_override(self, monkeypatch) -> None:
+        from config import HydraFlowConfig
+        from runner_utils import _claude_cli_complete
+
+        monkeypatch.setenv("ZAI_API_KEY", "sk-zai-test")
+        captured: dict[str, str] = {}
+
+        class FakeRunner:
+            async def run_simple(self, cmd, *, env, input, timeout):
+                captured.update(env)
+                from execution import SimpleResult
+
+                return SimpleResult(stdout="ok", returncode=0)
+
+        result = await _claude_cli_complete(
+            runner=FakeRunner(),
+            tool="claude",
+            model="glm-5.2",
+            prompt="p",
+            timeout=1.0,
+            gh_token="",
+            isolate_user_settings=True,
+            provider="zai",
+            config=HydraFlowConfig(),
+        )
+        assert result.stdout == "ok"
+        assert captured["ANTHROPIC_BASE_URL"].endswith("/api/anthropic")
+        assert captured["ANTHROPIC_AUTH_TOKEN"] == "sk-zai-test"
+        assert captured["ANTHROPIC_API_KEY"] == ""
+
+    @pytest.mark.asyncio
+    async def test_cli_spawn_env_pristine_for_claude(self, monkeypatch) -> None:
+        from config import HydraFlowConfig
+        from runner_utils import _claude_cli_complete
+
+        monkeypatch.setenv("ZAI_API_KEY", "sk-zai-test")
+        captured: dict[str, str] = {}
+
+        class FakeRunner:
+            async def run_simple(self, cmd, *, env, input, timeout):
+                captured.update(env)
+                from execution import SimpleResult
+
+                return SimpleResult(stdout="ok", returncode=0)
+
+        await _claude_cli_complete(
+            runner=FakeRunner(),
+            tool="claude",
+            model="sonnet",
+            prompt="p",
+            timeout=1.0,
+            gh_token="",
+            isolate_user_settings=True,
+            provider="claude",
+            config=HydraFlowConfig(),
+        )
+        # The native provider gets no harness override — the isolation invariant
+        # that keeps the main workers on Anthropic regardless of z.ai config.
+        assert "ANTHROPIC_AUTH_TOKEN" not in captured

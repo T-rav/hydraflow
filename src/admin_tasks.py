@@ -371,8 +371,6 @@ def _detect_available_prep_tools() -> list[str]:
 def _best_model_for_tool(tool: str) -> str:
     if tool == "claude":
         return "opus"
-    if tool == "pi":
-        return "gpt-5.3-codex"
     return "gpt-5-codex"
 
 

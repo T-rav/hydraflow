@@ -30,7 +30,7 @@ SRC = Path(__file__).resolve().parent.parent / "src"
 
 # CLI tool names that, as the first element of a list literal, mark a
 # hand-built agent command line (the shape build_lightweight_command produces).
-_AGENT_TOOLS: frozenset[str] = frozenset({"claude", "codex", "gemini", "pi"})
+_AGENT_TOOLS: frozenset[str] = frozenset({"claude", "codex"})
 
 
 @dataclass(frozen=True)

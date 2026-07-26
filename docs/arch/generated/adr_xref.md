@@ -116,6 +116,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0107 | `src.discover_runner`, `src.models`, `src.plan_phase`, `src.shape_runner`, `src.triage_phase` | — |
 | ADR-0108 | `src.event_loop_watchdog`, `src.health_monitor_loop`, `src.issue_fetcher`, `src.issue_store`, `src.mockworld.fakes.fake_clock`, `src.mockworld.sandbox_main`, `src.models`, `src.phase_utils`, `src.retrospective_queue`, `src.subprocess_util` | — |
 | ADR-0109 | `src.agent_cli`, `src.exception_classify`, `src.ports`, `src.review_advisor`, `src.review_phase._phase`, `src.reviewer`, `src.ultra_review` | `pytest:tests/test_ultra_review.py` |
+| ADR-0110 | `src.base_runner`, `src.runner_utils`, `src.subprocess_util` | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 
 ## Module → ADRs
 
@@ -138,7 +139,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
 | `src.auto_pr` | ADR-0101 |
 | `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084, ADR-0093, ADR-0099, ADR-0106 |
-| `src.base_runner` | ADR-0004, ADR-0032, ADR-0055, ADR-0066, ADR-0099 |
+| `src.base_runner` | ADR-0004, ADR-0032, ADR-0055, ADR-0066, ADR-0099, ADR-0110 |
 | `src.bg_worker_manager` | ADR-0049 |
 | `src.branch_protection_audit` | ADR-0082 |
 | `src.branch_protection_auditor_loop` | ADR-0082 |
@@ -252,6 +253,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.reviewer` | ADR-0025, ADR-0027, ADR-0059, ADR-0103, ADR-0109 |
 | `src.route_back` | ADR-0041, ADR-0071 |
 | `src.run_recorder` | ADR-0073 |
+| `src.runner_utils` | ADR-0110 |
 | `src.runs_gc_loop` | ADR-0073 |
 | `src.screenshot_scanner` | ADR-0018 |
 | `src.secret_scrub` | ADR-0085 |
@@ -277,7 +279,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.state._report` | ADR-0013 |
 | `src.state._sandbox_failure_fixer` | ADR-0097 |
 | `src.state._session` | ADR-0014, ADR-0021 |
-| `src.subprocess_util` | ADR-0108 |
+| `src.subprocess_util` | ADR-0108, ADR-0110 |
 | `src.telemetry.__init__` | ADR-0055 |
 | `src.telemetry.otel` | ADR-0055 |
 | `src.telemetry.slugs` | ADR-0055 |

@@ -103,6 +103,14 @@ class StreamConfig:
     # prose routinely; scanning it raised a false global CreditExhaustedError
     # on essentially every diagnostic run (mirrors the _is_auth_failure rule).
     credit_prose_scan: bool = True
+    # Per-spawn env overrides that point the Claude CLI at a harness backend
+    # (from resolve_harness_env). Empty for the native Anthropic endpoint — the
+    # main workers get a pristine env. Merged AFTER make_clean_env so the
+    # ANTHROPIC_* keys survive the strip.
+    harness_env: dict[str, str] = field(default_factory=dict)
+    # The resolved billing provider for this spawn ("anthropic"/"zai") so a
+    # credit-out is scoped to the right backend rather than a global kill switch.
+    provider: str = "claude"
 
 
 def _route_prompt_to_cmd(cmd: list[str], prompt: str) -> tuple[list[str], int]:
@@ -113,19 +121,13 @@ def _route_prompt_to_cmd(cmd: list[str], prompt: str) -> tuple[list[str], int]:
     ``asyncio.subprocess.PIPE`` (caller must write *prompt* to stdin).
     """
     use_codex_exec = len(cmd) >= 2 and cmd[0] == "codex" and cmd[1] == "exec"
-    use_pi_print = cmd and cmd[0] == "pi" and ("-p" in cmd or "--print" in cmd)
-    use_claude_print = cmd and cmd[0] == "claude" and "-p" in cmd
-    # Gemini CLI only supports -p (no --print alias).
-    use_gemini_print = cmd and cmd[0] == "gemini" and "-p" in cmd
-    use_prompt_arg = (
-        use_codex_exec or use_pi_print or use_claude_print or use_gemini_print
-    )
+    use_claude_print = bool(cmd) and cmd[0] == "claude" and "-p" in cmd
+    use_prompt_arg = use_codex_exec or use_claude_print
     if use_prompt_arg:
-        if use_claude_print or use_pi_print or use_gemini_print:
-            # Claude / Pi / Gemini all require the prompt immediately after
-            # -p/--print; placing it at the end causes CLI errors.
-            flag = "-p" if "-p" in cmd else "--print"
-            idx = cmd.index(flag)
+        if use_claude_print:
+            # Claude requires the prompt immediately after -p; placing it at
+            # the end causes CLI errors.
+            idx = cmd.index("-p")
             cmd_to_run = [*cmd[: idx + 1], prompt, *cmd[idx + 1 :]]
         else:
             # Codex exec: prompt is a trailing positional argument.
@@ -200,18 +202,21 @@ def _post_stream_result(
 
     if not early_killed and is_credit_exhaustion(combined):
         resume_at = parse_credit_resume_time(combined)
-        # Authoritative when the CLI's OWN stderr carries the signal — that is the
-        # process's direct termination, ground truth for a real cap (session /
-        # weekly / balance). A match found ONLY in stdout prose (credit_prose_scan)
-        # is a diagnostic/reviewer run quoting a prior cap in its analysis, so it
-        # is NOT authoritative and must be corroborated by the orchestrator's live
-        # probe before a global pause. Crucially, the auth probe cannot detect a
-        # *weekly* limit (the key stays valid), so a genuine weekly signal on
-        # stderr must skip the probe or it is wrongly discarded (#10558/#9895).
+        # Tag the resolved backend so the pause is scoped to loops on it — a GLM
+        # cap on a zai-routed agentic spawn must not halt Claude work (#9807).
+        # Authoritative when the CLI's OWN stderr carries the signal — the process's
+        # direct termination, ground truth for a real cap (session / weekly /
+        # balance). A match found ONLY in stdout prose (credit_prose_scan) is a
+        # diagnostic/reviewer run quoting a prior cap in its analysis, so it is NOT
+        # authoritative and must be corroborated by the orchestrator's live probe
+        # before a global pause. Crucially, the auth probe cannot detect a *weekly*
+        # limit (the key stays valid), so a genuine weekly signal on stderr must
+        # skip the probe or it is wrongly discarded (#10558/#9895).
         authoritative = is_credit_exhaustion(stderr_text)
         raise CreditExhaustedError(
             "API credit limit reached",
             resume_at=resume_at,
+            provider=normalize_provider(config.provider),
             authoritative=authoritative,
         )
 
@@ -379,6 +384,9 @@ async def stream_claude_process(
         result_text → accumulated_text → raw_lines.
     """
     env = make_clean_env(config.gh_token)
+    # Per-spawn harness override (e.g. z.ai's /api/anthropic endpoint). Merged
+    # after the clean-env strip; empty for native Anthropic (main workers).
+    env.update(config.harness_env)
     runner = config.runner or get_default_runner()
     cmd_to_run, stdin_mode = _route_prompt_to_cmd(cmd, prompt)
 
@@ -414,13 +422,7 @@ async def stream_claude_process(
         stderr_task = asyncio.create_task(proc.stderr.read())
 
         parser = StreamParser()
-        _backend = "claude"
-        if cmd and cmd[0] == "codex":
-            _backend = "codex"
-        elif cmd and cmd[0] == "gemini":
-            _backend = "gemini"
-        elif cmd and cmd[0] == "pi":
-            _backend = "pi"
+        _backend = "codex" if cmd and cmd[0] == "codex" else "claude"
         activity_parser = get_activity_parser(_backend)
 
         return await asyncio.wait_for(
@@ -521,13 +523,21 @@ def _as_opt_int(value: object) -> int | None:
     return None
 
 
-def raise_if_credit_exhausted(stdout: str, stderr: str, tool: str) -> None:
+def raise_if_credit_exhausted(
+    stdout: str, stderr: str, tool: str, *, provider: str = "claude"
+) -> None:
     """Raise :class:`CreditExhaustedError` if lightweight CLI output signals credit-out.
 
     ``run_simple`` returns a ``SimpleResult`` and never raises on credit
     exhaustion (it surfaces as ``rc != 0`` text), so the lightweight path must
     inspect the output. Mirrors the streaming path's credit check in
     :func:`_post_stream_result`.
+
+    *provider* is the role's resolved backend dial. It is normalized to the
+    billing identity and tagged on the error so the orchestrator scopes the
+    pause to loops on that backend — a z.ai cap must not halt Claude work, and
+    vice-versa (#9807). Defaults to ``"claude"`` (→ ``"anthropic"``) so every
+    existing CLI call site stays Anthropic-scoped without change.
     """
     for blob in (stdout, stderr):
         if blob and is_credit_exhaustion(blob):
@@ -538,6 +548,7 @@ def raise_if_credit_exhausted(stdout: str, stderr: str, tool: str) -> None:
             raise CreditExhaustedError(
                 f"{tool} CLI signaled credit exhaustion",
                 resume_at=parse_credit_resume_time(blob),
+                provider=normalize_provider(provider),
                 authoritative=True,
             )
 
@@ -598,6 +609,7 @@ async def stream_claude_with_telemetry(
     issue_number: int | None = None,
     pr_number: int | None = None,
     issue_labels: Sequence[str] = (),
+    provider: str = "claude",
 ) -> str:
     """Stream an agent subprocess AND record prompt/inference telemetry.
 
@@ -641,6 +653,15 @@ async def stream_claude_with_telemetry(
     if stats is None:
         stats = {}
         stream_config = replace(stream_config, usage_stats=stats)
+
+    # Point the CLI at the role's harness backend for this spawn only (empty for
+    # native Anthropic — the main workers stay pristine), and carry the resolved
+    # provider so a credit-out is scoped to the right backend.
+    stream_config = replace(
+        stream_config,
+        harness_env=resolve_harness_env(provider, config),
+        provider=provider,
+    )
 
     start = time.monotonic()
     transcript = ""
@@ -783,6 +804,66 @@ def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str,
     return backend.base_url(config), backend.api_key()
 
 
+# Anthropic-compatible *harness* backends: providers the Claude CLI can be
+# pointed at via ANTHROPIC_BASE_URL so an agentic (tool-using) role runs on a
+# non-Anthropic model. Distinct from _OPENAI_COMPAT_BACKENDS (the one-shot HTTP
+# face) — z.ai appears in both, with a different URL for each. Only z.ai is
+# wired today; kimi stays one-shot-only.
+_HARNESS_BACKENDS: dict[str, _OpenAICompatBackend] = {
+    _ZAI: _OpenAICompatBackend(
+        base_url_field="zai_harness_base_url",
+        api_key_envs=("ZAI_API_KEY", "HYDRAFLOW_ZAI_API_KEY"),
+    ),
+}
+
+
+def harness_base_url(provider: str, config: HydraFlowConfig) -> str:
+    """Anthropic-compatible base URL for a *harness* backend, or "" if none.
+
+    Returns the endpoint the Claude CLI should be pointed at (via
+    ``ANTHROPIC_BASE_URL``) when an agentic role's provider dial names a harness
+    backend (today: ``"zai"`` → ``/api/anthropic``). Returns ``""`` for
+    ``"claude"``/``"anthropic"`` (the native endpoint — no override) and for
+    one-shot-only providers (``"openrouter"``/``"kimi"``), which never back an
+    agentic harness."""
+    backend = _HARNESS_BACKENDS.get(provider)
+    if backend is None:
+        return ""
+    return backend.base_url(config)
+
+
+def resolve_harness_env(provider: str, config: HydraFlowConfig) -> dict[str, str]:
+    """Per-spawn env overrides that point the Claude CLI at a harness backend.
+
+    Returns ``{}`` for ``"claude"``/``"anthropic"`` (the native endpoint — the
+    main coding workers must get a pristine env) and for any non-harness
+    provider. For a harness backend (today: ``"zai"``) with its key present,
+    returns ``ANTHROPIC_BASE_URL`` + ``ANTHROPIC_AUTH_TOKEN`` and clears
+    ``ANTHROPIC_API_KEY`` so a host Claude key can't shadow the backend token.
+
+    CRITICAL: this MUST be merged into a per-spawn env, never exported globally —
+    a global ``ANTHROPIC_BASE_URL`` would silently reroute every Claude worker to
+    the backend. When the backend is selected but its key is unset, we fall open
+    to Anthropic (empty dict) rather than spawn a CLI that cannot authenticate.
+    """
+    base_url = harness_base_url(provider, config)
+    if not base_url:
+        return {}
+    api_key = _HARNESS_BACKENDS[provider].api_key()
+    if not api_key:
+        logger.warning(
+            "harness backend %r selected but its API key is unset; falling back "
+            "to the native Anthropic endpoint",
+            provider,
+        )
+        return {}
+    return {
+        "ANTHROPIC_BASE_URL": base_url,
+        "ANTHROPIC_AUTH_TOKEN": api_key,
+        "ANTHROPIC_API_KEY": "",
+    }
+
+
 def _telemetry_cmd(provider: str, tool: str, model: str) -> list[str]:
     """The ``cmd``-shaped descriptor ``_record_inference`` parses into
     ``(tool, model)``. For an OpenAI-compatible backend the 'tool' is the
@@ -801,9 +882,17 @@ async def _claude_cli_complete(
     timeout: float,
     gh_token: str,
     isolate_user_settings: bool,
+    provider: str = "claude",
+    config: HydraFlowConfig | None = None,
 ) -> SimpleResult:
     """The Claude CLI backend (today's behaviour). Credit-out surfaces as
-    ``rc != 0`` output text, so it is detected and raised here."""
+    ``rc != 0`` output text, so it is detected and raised here.
+
+    *provider* selects the harness backend: ``"claude"`` runs the native
+    Anthropic endpoint; ``"zai"`` points the CLI at GLM's Anthropic-compatible
+    endpoint via a per-spawn env override (needs *config* for the URL). The
+    credit-out is tagged with the resolved provider so a backend cap is scoped
+    to loops on that backend."""
 
     from agent_cli import AgentTool, build_lightweight_command  # noqa: PLC0415
 
@@ -814,8 +903,10 @@ async def _claude_cli_complete(
         isolate_user_settings=isolate_user_settings,
     )
     env = make_clean_env(gh_token)
+    if config is not None:
+        env.update(resolve_harness_env(provider, config))
     result = await runner.run_simple(cmd, env=env, input=cmd_input, timeout=timeout)
-    raise_if_credit_exhausted(result.stdout, result.stderr, tool)
+    raise_if_credit_exhausted(result.stdout, result.stderr, tool, provider=provider)
     return result
 
 
@@ -1034,6 +1125,8 @@ async def run_lightweight_agent(
                     timeout=timeout,
                     gh_token=gh_token,
                     isolate_user_settings=isolate_user_settings,
+                    provider=provider,
+                    config=config,
                 )
         except TimeoutError:
             # ``asyncio.wait_for`` raises a *bare* TimeoutError whose ``str()``

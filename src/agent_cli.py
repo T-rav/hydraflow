@@ -1,11 +1,26 @@
-"""Agent CLI command builders for Claude, Codex, Gemini, and Pi backends."""
+"""Agent CLI command builders for the Claude and Codex backends."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
-AgentTool = Literal["claude", "codex", "gemini", "pi"]
+AgentTool = Literal["claude", "codex"]
+
+_SUPPORTED_TOOLS = frozenset(get_args(AgentTool))
+
+
+def _require_supported_tool(tool: str) -> None:
+    """Reject any harness other than the two supported CLIs.
+
+    gemini/pi were removed (only claude + codex are supported), so a stale
+    caller passing a dropped tool must fail loudly rather than silently
+    spawn a ``[tool, ...]`` command for a binary we no longer wire.
+    """
+    if tool not in _SUPPORTED_TOOLS:
+        msg = f"unsupported tool {tool!r}; supported: claude, codex"
+        raise ValueError(msg)
+
 
 # Base directory for plugins pre-cloned into the Docker image at build time
 # (see Dockerfile.agent-base). Each subdirectory is passed as ``--plugin-dir``
@@ -106,16 +121,9 @@ def build_agent_command(
     plugin's ``SessionStart`` hook can't inject skill-invocation guidance that
     breaks the JSON contract — see :data:`_CONTRACT_SETTING_SOURCES`.
     """
+    _require_supported_tool(tool)
     if tool == "codex":
         return _build_codex_command(model=model, restricted=restricted)
-    if tool == "gemini":
-        return _build_gemini_command(model=model)
-    if tool == "pi":
-        return _build_pi_command(
-            model=model,
-            max_turns=max_turns,
-            disallowed_tools=disallowed_tools,
-        )
 
     cmd = [
         "claude",
@@ -168,25 +176,6 @@ def _build_codex_command(*, model: str, restricted: bool = False) -> list[str]:
     return cmd
 
 
-def _build_gemini_command(*, model: str) -> list[str]:
-    """Build a Gemini headless command with streaming JSONL output.
-
-    The prompt is spliced in by ``_route_prompt_to_cmd`` (runner_utils) —
-    leaving ``-p`` dangling here lets the splicer insert the prompt at the
-    exact position gemini requires (immediately after ``-p``).
-    """
-    return [
-        "gemini",
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--model",
-        model,
-        "--approval-mode",
-        "yolo",
-    ]
-
-
 def build_lightweight_command(
     *,
     tool: AgentTool,
@@ -213,30 +202,11 @@ def build_lightweight_command(
     contract worker from a host/user ``SessionStart`` hook — see
     :data:`_CONTRACT_SETTING_SOURCES`.
     """
+    _require_supported_tool(tool)
     if tool == "codex":
         cmd = _build_codex_command(model=model)
         cmd.append(prompt)
         return cmd, None
-
-    # Gemini: `-p <prompt>` for small prompts; for large ones, pass an
-    # empty -p flag and let the prompt flow in via stdin (gemini's docs:
-    # "Appended to input on stdin (if any)"). `-p -` would pass the
-    # literal string "-" as a prompt prefix, not "read from stdin" —
-    # that's a claude convention, not gemini's.
-    #
-    # Mirrors claude/pi inline pattern (not the codex delegation pattern)
-    # — lightweight callers deliberately omit --output-format stream-json.
-    if tool == "gemini":
-        prompt_bytes = prompt.encode()
-        if len(prompt_bytes) > 100_000:
-            return (
-                ["gemini", "-p", "", "--model", model, "--approval-mode", "yolo"],
-                prompt_bytes,
-            )
-        return (
-            ["gemini", "-p", prompt, "--model", model, "--approval-mode", "yolo"],
-            None,
-        )
 
     # For large prompts, pass via stdin to avoid OS ARG_MAX limit.
     prompt_bytes = prompt.encode()
@@ -255,37 +225,3 @@ def build_lightweight_command(
         else:
             cmd.extend(_plugin_dir_flags())
     return cmd, input_bytes
-
-
-def _build_pi_command(
-    *,
-    model: str,
-    max_turns: int | None = None,
-    disallowed_tools: str | None = None,
-) -> list[str]:
-    """Build a Pi headless command that emits machine-readable output."""
-    cmd = [
-        "pi",
-        "-p",
-        "--mode",
-        "json",
-        "--model",
-        model,
-    ]
-
-    guidance: list[str] = []
-    # Pi has no native max-turns flag; add explicit stop guidance instead.
-    if max_turns is not None:
-        guidance.append(
-            f"Limit yourself to at most {max_turns} assistant turn(s) and then stop."
-        )
-    if disallowed_tools:
-        blocked = ",".join(t.strip() for t in disallowed_tools.split(",") if t.strip())
-        if blocked:
-            guidance.append(
-                "Do not invoke these tools under any circumstances: "
-                f"{blocked}. If needed, explain the limitation and continue."
-            )
-    for line in guidance:
-        cmd.extend(["--append-system-prompt", line])
-    return cmd

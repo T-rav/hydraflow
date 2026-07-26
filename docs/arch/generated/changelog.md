@@ -6,11 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
-- `7dcc422` — Fixes #10555: opt-in /code-review ultra review-phase option (#10620) (#10620) *(2026-07-26)*
-- `1c76ec6` — fix(arch): event-bus extractor recognizes fan-out subscribe(); stop false 'dead' flags (#10629) (#10629) *(2026-07-26)*
-- `e2625f4` — Fixes #10567: PRPort has no get_pr_labels — PR-level label routing ... (#10584) (#10584) *(2026-07-25)*
-- `7d284d6` — Fixes #10565: Sampled re-audit disagreement: PR #10479 (structural)... (#10576) (#10576) *(2026-07-25)*
-- `1ac9d57` — docs(arch): align functional_areas.yml loop grouping with the UI (#10554) (#10554) *(2026-07-25)*
+- `3f73f31` — fix(adr): cite BaseRunner class, not the _resolve_provider method *(2026-07-25)*
+- `731eda5` — chore(arch): regenerate artifacts after staging merge *(2026-07-25)*
+- `f50db86` — Merge remote-tracking branch 'origin/staging' into feat/provider-split-zai-harness *(2026-07-25)*
+- `92d4244` — fix(quality): resolve gemini/pi-gut fallout in the full suite *(2026-07-25)*
+- `ed09a33` — docs(adr): ADR-0109 provider/harness backend split (supersedes agentic=Claude-only) *(2026-07-25)*
 - `58b5cdc` — Fixes #10540, #10533: violation-based ADR citation conformance gate; retire activity-drift (#10547) (#10547) *(2026-07-25)*
 - `306cc57` — Fixes #10515: FakeIssueStore stamps HITL and merged snapshot entrie... (#10528) (#10528) *(2026-07-25)*
 - `585f69e` — Fixes #10509: Work Stream stage timeline: merged issues show HITL f... (#10529) (#10529) *(2026-07-25)*

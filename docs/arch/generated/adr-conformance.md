@@ -80,6 +80,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py` |
 | ADR-0107 | decision-of-record | — |
 | ADR-0109 | enforced | `pytest:tests/test_ultra_review.py` |
+| ADR-0110 | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 
 ## Check → ADRs it protects
 
@@ -124,6 +125,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_auto_tighten_invariant.py` | ADR-0104 |
 | `pytest:tests/test_base_runner.py` | ADR-0004 |
 | `pytest:tests/test_caretaker_loop_wiring.py` | ADR-0029 |
+| `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` | ADR-0110 |
 | `pytest:tests/test_config_env.py` | ADR-0103 |
 | `pytest:tests/test_convergence_gate.py` | ADR-0094 |
 | `pytest:tests/test_convergence_ledger.py` | ADR-0094 |

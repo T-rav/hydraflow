@@ -1,16 +1,36 @@
-"""Tests for agent_cli.py — CLI command builders for Claude, Codex, Gemini, and Pi."""
+"""Tests for agent_cli.py — CLI command builders for Claude and Codex."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import agent_cli
 from agent_cli import (
     build_agent_command,
     build_lightweight_command,
 )
+
+
+class TestSupportedTools:
+    def test_agent_tool_is_claude_and_codex_only(self) -> None:
+        """The harness supports exactly claude and codex — gemini/pi removed."""
+        assert set(agent_cli.AgentTool.__args__) == {"claude", "codex"}
+
+    def test_build_lightweight_command_rejects_removed_tools(self) -> None:
+        """Removed harnesses must be rejected, not silently spawned."""
+        for dead in ("gemini", "pi"):
+            with pytest.raises((ValueError, KeyError)):
+                build_lightweight_command(tool=dead, model="x", prompt="p")  # type: ignore[arg-type]
+
+    def test_build_agent_command_rejects_removed_tools(self) -> None:
+        for dead in ("gemini", "pi"):
+            with pytest.raises((ValueError, KeyError)):
+                build_agent_command(tool=dead, model="x")  # type: ignore[arg-type]
 
 
 class TestBuildAgentCommand:
@@ -125,62 +145,6 @@ class TestBuildAgentCommand:
         assert "--disallowedTools" not in cmd_with_opts
         assert "--max-turns" not in cmd_with_opts
 
-    def test_pi_command_structure(self) -> None:
-        """Pi command should run headless with JSON output and model selection."""
-        cmd = build_agent_command(tool="pi", model="pi-max")
-
-        assert cmd[0] == "pi"
-        assert "-p" in cmd
-        assert "--mode" in cmd
-        assert cmd[cmd.index("--mode") + 1] == "json"
-        assert "--model" in cmd
-        assert cmd[cmd.index("--model") + 1] == "pi-max"
-
-    def test_pi_disallowed_tools_adds_system_guidance(self) -> None:
-        """Pi receives disallowed-tools policy via appended system guidance."""
-        cmd = build_agent_command(
-            tool="pi",
-            model="pi-max",
-            disallowed_tools="Edit, Write",
-        )
-
-        assert "--append-system-prompt" in cmd
-        prompts = [
-            cmd[i + 1]
-            for i, val in enumerate(cmd[:-1])
-            if val == "--append-system-prompt"
-        ]
-        assert any(
-            "Do not invoke these tools under any circumstances: Edit,Write" in p
-            for p in prompts
-        )
-        assert "--disallowedTools" not in cmd
-
-    def test_pi_max_turns_adds_stop_guidance(self) -> None:
-        """Pi has no native --max-turns flag; we pass stop guidance via system prompt."""
-        cmd = build_agent_command(tool="pi", model="pi-max", max_turns=3)
-
-        assert "--append-system-prompt" in cmd
-        guidance = cmd[cmd.index("--append-system-prompt") + 1]
-        assert "at most 3 assistant turn(s)" in guidance
-        assert "--max-turns" not in cmd
-
-    def test_pi_combines_max_turns_and_disallowed_guidance(self) -> None:
-        """Pi should include both max-turns and disallowed-tools guidance when set."""
-        cmd = build_agent_command(
-            tool="pi",
-            model="pi-max",
-            max_turns=3,
-            disallowed_tools="Edit",
-        )
-        prompts = [
-            cmd[i + 1]
-            for i, val in enumerate(cmd[:-1])
-            if val == "--append-system-prompt"
-        ]
-        assert any("at most 3 assistant turn(s)" in p for p in prompts)
-        assert any("Do not invoke these tools" in p for p in prompts)
-
     def test_claude_max_turns_converted_to_string(self) -> None:
         """max_turns integer should be converted to a string in the command."""
         cmd = build_agent_command(tool="claude", model="sonnet", max_turns=42)
@@ -224,18 +188,6 @@ class TestBuildLightweightCommand:
         assert cmd[cmd.index("--model") + 1] == "sonnet"
         assert cmd_input is None
 
-    def test_other_tool_uses_pipe_flag(self) -> None:
-        """Non-codex tools should use -p flag with the tool name as executable."""
-        cmd, cmd_input = build_lightweight_command(
-            tool="pi", model="pi-max", prompt="hello"
-        )
-
-        assert cmd[0] == "pi"
-        assert "-p" in cmd
-        assert "hello" in cmd
-        assert cmd[cmd.index("--model") + 1] == "pi-max"
-        assert cmd_input is None
-
     def test_input_none_for_short_prompts(self) -> None:
         """cmd_input should be None for short prompts (passed as CLI arg)."""
         _, codex_input = build_lightweight_command(
@@ -270,19 +222,6 @@ class TestBuildLightweightCommand:
 
         assert cmd[-1] == large_prompt
         assert cmd_input is None
-
-    def test_large_prompt_pi_uses_stdin(self) -> None:
-        """Pi tool should also use stdin for large prompts."""
-        large_prompt = "x" * 150_000
-        cmd, cmd_input = build_lightweight_command(
-            tool="pi", model="pi-max", prompt=large_prompt
-        )
-
-        assert cmd[0] == "pi"
-        assert "-" in cmd
-        assert large_prompt not in cmd
-        assert cmd_input == large_prompt.encode()
-        assert cmd[cmd.index("--model") + 1] == "pi-max"
 
     def test_boundary_prompt_stays_inline(self) -> None:
         """Prompt of exactly 100KB should remain as CLI arg (not stdin)."""
@@ -411,21 +350,6 @@ class TestPluginDirFlags:
 
         assert "--plugin-dir" in cmd
         assert cmd[cmd.index("--plugin-dir") + 1] == str(root / "lightfactory")
-
-    def test_lightweight_pi_excludes_plugin_dirs(self, tmp_path: Path) -> None:
-        """build_lightweight_command for pi should not include --plugin-dir flags."""
-        from unittest.mock import patch
-
-        import agent_cli
-
-        root = tmp_path / "plugins"
-        root.mkdir()
-        (root / "lightfactory").mkdir()
-
-        with patch.object(agent_cli, "_PRE_CLONED_PLUGIN_ROOT", root):
-            cmd, _ = build_lightweight_command(tool="pi", model="pi-max", prompt="test")
-
-        assert "--plugin-dir" not in cmd
 
     def test_pre_cloned_plugin_root_points_at_opt_plugins(self) -> None:
         """The constant should point at /opt/plugins (where Dockerfile bakes plugins)."""

@@ -1037,7 +1037,7 @@ _DEPRECATED_ENV_REVERSE: dict[str, str] = {
     v: k for k, v in _DEPRECATED_ENV_ALIASES.items()
 }
 
-_ALLOWED_TOOLS_COMBO: set[str] = {"claude", "codex", "gemini", "pi"}
+_ALLOWED_TOOLS_COMBO: set[str] = {"claude", "codex"}
 
 
 def _parse_combo(env_key: str, value: str) -> tuple[str, str]:
@@ -1259,7 +1259,7 @@ class HydraFlowConfig(BaseModel):
             )
         return v
 
-    system_tool: Literal["inherit", "claude", "codex", "gemini", "pi"] = Field(
+    system_tool: Literal["inherit", "claude", "codex"] = Field(
         default="inherit",
         description="Optional global default tool for system agents; 'inherit' keeps per-agent defaults",
     )
@@ -1267,7 +1267,7 @@ class HydraFlowConfig(BaseModel):
         default="",
         description="Optional global default model for system agents; empty keeps per-agent defaults",
     )
-    background_tool: Literal["inherit", "claude", "codex", "gemini", "pi"] = Field(
+    background_tool: Literal["inherit", "claude", "codex"] = Field(
         default="inherit",
         description="Optional global default tool for background workers; 'inherit' keeps per-worker defaults",
     )
@@ -1275,7 +1275,7 @@ class HydraFlowConfig(BaseModel):
         default="",
         description="Optional global default model for background workers; empty keeps per-worker defaults",
     )
-    implementation_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    implementation_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for implementation agents",
     )
@@ -1291,7 +1291,7 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Review configuration
-    review_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    review_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for review agents",
     )
@@ -1300,7 +1300,7 @@ class HydraFlowConfig(BaseModel):
     # Independent test-adequacy verifier (#9546): a second-opinion pass with a
     # model that MUST stay independent of review_model — a shared model would
     # defeat the second opinion (the finder grading its own homework).
-    test_adequacy_verifier_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    test_adequacy_verifier_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for the independent test-adequacy verifier pass",
     )
@@ -2409,7 +2409,7 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-plan"],
         description="Labels for issues needing plans (OR logic)",
     )
-    planner_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    planner_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for planning agents",
     )
@@ -2419,7 +2419,7 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         description="Max fix attempts per TDD REFACTOR sub-agent before reporting failure",
     )
-    triage_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    triage_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for triage agents",
     )
@@ -2441,6 +2441,16 @@ class HydraFlowConfig(BaseModel):
             "OpenAI-compatible base URL for the 'zai' one-shot LLM provider "
             "(z.ai / GLM). The API key is read from the ZAI_API_KEY env var "
             "(a secret — never stored on config or shown in the UI)."
+        ),
+    )
+    zai_harness_base_url: str = Field(
+        default="https://api.z.ai/api/anthropic",
+        description=(
+            "Anthropic-compatible base URL for the 'zai' *harness* backend — the "
+            "endpoint the Claude CLI is pointed at (via ANTHROPIC_BASE_URL) when "
+            "an agentic role sets provider='zai', so a tool-using maintenance loop "
+            "runs on GLM. Distinct from zai_base_url (the one-shot /paas/v4 face). "
+            "The API key is read from ZAI_API_KEY (a secret — env-only)."
         ),
     )
     kimi_base_url: str = Field(
@@ -2473,6 +2483,56 @@ class HydraFlowConfig(BaseModel):
     term_proposer_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
         default="claude",
         description="Backend for the term-proposer / entry-evidence drafters.",
+    )
+    # Per-role backend dials for the AGENTIC (tool-using) roles. Unlike the
+    # one-shot dials above, these only offer harness backends: "claude" (the
+    # native Anthropic endpoint) or "zai" (the Claude CLI pointed at GLM's
+    # /api/anthropic endpoint). This is what lets an operator route maintenance
+    # loops to GLM while implement/review/plan/triage stay on Claude. Pair a
+    # "zai" dial with a glm-* model (enforced by _harmonize_tool_model_defaults).
+    #
+    # ONLY roles with a dedicated, provider-honoring spawn get a dial. Sub-spawns
+    # inherit their outer runner's provider (they share its harness), so they get
+    # NO separate dial: the test-adequacy verifier and skill sub-spawns run on
+    # implementation_provider; the AC precheck's subskill/debug closures run on
+    # ac_provider; the verification judge shares review's tool+model so it runs
+    # on review_provider. Adding a dead dial here would validate at config-load
+    # yet never route at runtime — a footgun, so we don't.
+    implementation_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for implementation agents."
+    )
+    review_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for review agents."
+    )
+    planner_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for planning agents."
+    )
+    triage_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for triage agents."
+    )
+    ac_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for acceptance-criteria agents."
+    )
+    # One knob to route ALL maintenance loops to a backend, coherently. Unlike
+    # the old background_model (which back-filled *_model only and could strand a
+    # glm model on a claude-provider role), this sets provider AND model together
+    # on the maintenance role-set (wiki, adr-review, transcript, drift-resolver,
+    # term-proposer, triage-honeypot, pr-unstick) and NEVER touches implement/
+    # review/plan/triage. Leave at claude/"" to configure roles individually.
+    maintenance_provider: Literal["claude", "zai"] = Field(
+        default="claude",
+        description=(
+            "Backend applied to every maintenance loop (not the work loops). "
+            "Set to 'zai' to run all maintenance on GLM; pair with maintenance_model."
+        ),
+    )
+    maintenance_model: str = Field(
+        default="",
+        description=(
+            "Model applied to every maintenance loop when set (e.g. 'glm-5.2'). "
+            "Empty keeps each maintenance role's own model. Only touches the "
+            "maintenance role-set, never the work loops."
+        ),
     )
     triage_max_turns: int = Field(
         default=12,
@@ -2640,7 +2700,7 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Agent prompt configuration
-    subskill_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    subskill_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for low-tier subskill/tool-chain passes",
     )
@@ -2658,7 +2718,7 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Enable automatic escalation to debug model when low-tier prechecks signal risk/ambiguity",
     )
-    debug_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    debug_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for debug escalation passes",
     )
@@ -3076,7 +3136,7 @@ class HydraFlowConfig(BaseModel):
         default="haiku",
         description="Model for wiki compilation and synthesis",
     )
-    wiki_compilation_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    wiki_compilation_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for wiki compilation",
     )
@@ -3302,7 +3362,7 @@ class HydraFlowConfig(BaseModel):
         default="haiku",
         description="Cheap model for summarising agent transcripts into structured learnings",
     )
-    transcript_summary_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    transcript_summary_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for transcript summarization",
     )
@@ -3313,7 +3373,7 @@ class HydraFlowConfig(BaseModel):
         description="Max transcript characters to send for summarization (truncated from end)",
     )
     # Report issue worker
-    report_issue_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    report_issue_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for report-issue worker",
     )
@@ -3321,7 +3381,7 @@ class HydraFlowConfig(BaseModel):
         default="opus",
         description="Model for report-issue worker (codebase research + structured issue creation)",
     )
-    sentry_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    sentry_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for sentry_loop ingestion worker",
     )
@@ -3329,7 +3389,7 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for sentry_loop ingestion worker (issue triage + filing from Sentry events) — sonnet is sufficient; the task is stack-trace parsing + issue filing, not deep reasoning. Opus was 4-5× the cost for no measurable quality win.",
     )
-    adr_drift_resolver_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    adr_drift_resolver_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
     )
@@ -3914,7 +3974,7 @@ class HydraFlowConfig(BaseModel):
         le=5,
         description="Maximum deliberation rounds before forcing a decision",
     )
-    adr_review_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    adr_review_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for the ADR council review orchestrator",
     )
@@ -3936,11 +3996,11 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for acceptance criteria generation (post-merge)",
     )
-    ac_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    ac_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for acceptance criteria generation",
     )
-    verification_judge_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    verification_judge_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for verification judge agents",
     )
@@ -4259,7 +4319,7 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for the term-proposer / entry-evidence drafters.",
     )
-    term_proposer_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    term_proposer_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for the term-proposer drafters (claude path only).",
     )
@@ -5724,11 +5784,37 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
         ):
             _apply_if_default(field, config.background_model)
 
+    # Maintenance knob: route the maintenance role-set to one backend coherently
+    # (provider AND model together), never the work loops. A model is only
+    # applied where the role actually has a *_model field (pr_unstick has none).
+    if config.maintenance_provider != "claude" or config.maintenance_model.strip():
+        for role in _MAINTENANCE_ROLES:
+            if config.maintenance_provider != "claude":
+                _apply_if_default(f"{role}_provider", config.maintenance_provider)
+            model_field = f"{role}_model"
+            if (
+                config.maintenance_model.strip()
+                and model_field in HydraFlowConfig.model_fields
+            ):
+                _apply_if_default(model_field, config.maintenance_model)
+
+
+# The maintenance role-set the maintenance_* knob routes (never the work loops).
+_MAINTENANCE_ROLES: tuple[str, ...] = (
+    "wiki_compilation",
+    "adr_review",
+    "transcript_summary",
+    "adr_drift_resolver",
+    "term_proposer",
+    "triage_honeypot",
+    "pr_unstick",
+)
 
 # Model prefix → required tool. Any model starting with a listed prefix
-# MUST pair with the given tool; any other pairing is rejected.
+# MUST pair with the given tool; any other pairing is rejected. glm-* rides the
+# Claude CLI (pointed at z.ai's Anthropic-compatible endpoint), so it requires
+# tool="claude".
 _MODEL_TOOL_REQUIRED: list[tuple[str, str]] = [
-    ("gemini", "gemini"),
     ("gpt-", "codex"),
     ("o1", "codex"),
     ("o3", "codex"),
@@ -5737,7 +5823,29 @@ _MODEL_TOOL_REQUIRED: list[tuple[str, str]] = [
     ("sonnet", "claude"),
     ("haiku", "claude"),
     ("claude-", "claude"),
+    ("glm", "claude"),
 ]
+
+# Model prefix → required provider (harness backend). A glm-* model only runs on
+# the z.ai harness backend, so its role's *_provider MUST be "zai". Anything not
+# listed is provider-agnostic on the tool axis but still subject to the inverse
+# check (a "zai" provider requires a glm-* model).
+_MODEL_PROVIDER_REQUIRED: list[tuple[str, str]] = [
+    ("glm", "zai"),
+]
+
+# Sub-spawn stages have no *_provider dial of their own — they run on the harness
+# of the outer runner(s) that spawn them. Map each to the config field(s) holding
+# those runners' providers so its model is validated against EVERY backend it can
+# actually run on (see _harmonize_tool_model_defaults). subskill/debug are
+# multi-caller: the AC precheck closures run them on ac_provider, while the
+# reviewer + verification-judge prechecks run them on review_provider — so their
+# model must be coherent with BOTH.
+_SUBSPAWN_PROVIDER_SOURCE: dict[str, tuple[str, ...]] = {
+    "test_adequacy_verifier": ("implementation_provider",),
+    "subskill": ("ac_provider", "review_provider"),
+    "debug": ("ac_provider", "review_provider"),
+}
 
 
 def _required_tool_for_model(model: str) -> str | None:
@@ -5745,6 +5853,14 @@ def _required_tool_for_model(model: str) -> str | None:
     for prefix, tool in _MODEL_TOOL_REQUIRED:
         if m.startswith(prefix):
             return tool
+    return None
+
+
+def _required_provider_for_model(model: str) -> str | None:
+    m = model.lower()
+    for prefix, provider in _MODEL_PROVIDER_REQUIRED:
+        if m.startswith(prefix):
+            return provider
     return None
 
 
@@ -5825,6 +5941,35 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
                 f"model {model!r} requires tool {required!r}"
             )
             raise ValueError(msg)
+        # Provider-scoped model validation. A role's *_provider (default
+        # "claude" for roles without a dial) must agree with its model: a glm-*
+        # model needs provider "zai", and a "zai" provider needs a glm-* model.
+        # This is what stops a background/maintenance model from silently
+        # stranding a GLM model on a claude-provider (Anthropic) spawn.
+        #
+        # Sub-spawn stages have no dial of their own — they run on the harness of
+        # the outer runner(s) that spawn them, so validate their model against
+        # EVERY provider it can run on (the verifier runs via the implementation
+        # spawn; subskill/debug run via ac_provider AND review_provider). This
+        # rejects e.g. an opus sub-spawn model while a routing runner is on GLM,
+        # and a glm sub-spawn model unless every routing runner is on GLM.
+        provider_fields = _SUBSPAWN_PROVIDER_SOURCE.get(stage, (f"{stage}_provider",))
+        providers = {getattr(config, f, "claude") for f in provider_fields}
+        required_provider = _required_provider_for_model(model)
+        for provider in providers:
+            if required_provider is not None and provider != required_provider:
+                msg = (
+                    f"{stage}: model {model!r} requires provider "
+                    f"{required_provider!r} but a routing runner is on provider "
+                    f"{provider!r}"
+                )
+                raise ValueError(msg)
+            if provider == "zai" and required_provider != "zai":
+                msg = (
+                    f"{stage}: provider 'zai' (the GLM harness) requires a glm-* "
+                    f"model, got {model!r}"
+                )
+                raise ValueError(msg)
 
 
 def _resolve_base_paths(config: HydraFlowConfig) -> None:

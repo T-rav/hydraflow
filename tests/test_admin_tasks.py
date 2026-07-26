@@ -39,9 +39,6 @@ class TestPrepModelSelection:
     def test_codex_default_model(self) -> None:
         assert _best_model_for_tool("codex") == "gpt-5-codex"
 
-    def test_pi_default_model(self) -> None:
-        assert _best_model_for_tool("pi") == "gpt-5.3-codex"
-
 
 class TestPrepToolSelection:
     def test_detect_available_tools(self, monkeypatch: pytest.MonkeyPatch) -> None:
