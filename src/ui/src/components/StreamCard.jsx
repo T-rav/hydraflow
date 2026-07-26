@@ -315,7 +315,8 @@ const stageNodeBase = {
   width: 10,
   height: 10,
   borderRadius: '50%',
-  border: '2px solid',
+  borderWidth: 2,
+  borderStyle: 'solid',
   flexShrink: 0,
 }
 
@@ -446,7 +447,8 @@ const styles = {
     fontSize: 10,
     fontWeight: 600,
     textTransform: 'uppercase',
-    border: '1px solid',
+    borderWidth: 1,
+    borderStyle: 'solid',
     whiteSpace: 'nowrap',
   },
   duration: {

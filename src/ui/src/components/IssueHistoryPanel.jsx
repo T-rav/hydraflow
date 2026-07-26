@@ -816,7 +816,9 @@ const styles = {
     color: theme.text,
   },
   button: {
-    border: `1px solid ${theme.border}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: theme.border,
     background: theme.surfaceInset,
     color: theme.textMuted,
     borderRadius: 6,
@@ -1048,7 +1050,9 @@ const styles = {
   linkedPill: {
     display: 'inline-flex',
     alignItems: 'center',
-    border: `1px solid ${theme.border}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: theme.border,
     borderRadius: 999,
     padding: '1px 6px',
     marginRight: 6,

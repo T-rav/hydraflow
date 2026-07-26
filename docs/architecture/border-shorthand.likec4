@@ -1,0 +1,154 @@
+// Issue #10571 — border shorthand/longhand mixing across dashboard components.
+// Topology of the style objects React diffs, and the test pins that guard them.
+
+specification {
+  element system
+  element container
+  element component
+  element styleObject {
+    style { shape rectangle }
+  }
+  element testPin {
+    style { shape queue; color green }
+  }
+  relationship spreads
+  relationship toggles
+  relationship pins
+}
+
+model {
+  dashboard = system 'HydraFlow Dashboard UI' {
+    ui = container 'src/ui/src' {
+      technology 'React 18 + inline style objects'
+
+      theme = component 'theme.js' {
+        description 'Colour tokens (theme.border, theme.accent, ...)'
+      }
+
+      // ---- StreamCard ----
+      streamCard = component 'components/StreamCard.jsx' {
+        stageNodeBase = styleObject 'stageNodeBase' {
+          description 'border: "2px solid" (shorthand, no colour)'
+        }
+        stageNodeVariants = styleObject 'nodeStyle x6 (pending/active/failed/hitl/queued/done)' {
+          description 'spread stageNodeBase + borderColor longhand — SYMMETRIC'
+        }
+        stageBadge = styleObject 'styles.stageBadge' {
+          description 'border: "1px solid"'
+        }
+        stageBadgeInline = styleObject 'inline header badge' {
+          description 'spread stageBadge + borderColor: meta.color'
+        }
+      }
+
+      // ---- PipelineStatus ----
+      pipelineStatus = component 'components/PipelineStatus.jsx' {
+        stageBase = styleObject 'styles.stage' {
+          description 'border: "1px solid"'
+        }
+        stageVariants = styleObject 'stageStyles[key].active | .inactive' {
+          description 'spread styles.stage + borderColor — SYMMETRIC'
+        }
+      }
+
+      // ---- BugReportPanel ----
+      bugReport = component 'components/BugReportPanel.jsx' {
+        statusBadge = styleObject 'styles.statusBadge' {
+          description 'border: "1px solid"'
+        }
+        statusBadgeInline = styleObject 'inline status badge' {
+          description 'spread statusBadge + borderColor: statusColor — SYMMETRIC'
+        }
+        pill = styleObject 'styles.pill' {
+          description 'border: `1px solid ${theme.border}`'
+        }
+        pillActive = styleObject 'styles.pillActive' {
+          description 'borderColor: theme.accent — ASYMMETRIC (inactive branch has no borderColor)'
+        }
+      }
+
+      // ---- IssueHistoryPanel ----
+      issueHistory = component 'components/IssueHistoryPanel.jsx' {
+        linkedPill = styleObject 'styles.linkedPill' {
+          description 'border: `1px solid ${theme.border}`'
+        }
+        linkedPillVariant = styleObject 'pillStyle (renderLinkedIssue)' {
+          description 'spread linkedPill + borderColor: meta.color'
+        }
+        buttonBase = styleObject 'styles.button' {
+          description 'border: `1px solid ${theme.border}`'
+        }
+        buttonActive = styleObject 'buttonActiveStyle' {
+          description 'spread styles.button + borderColor: theme.accent — ASYMMETRIC'
+        }
+      }
+    }
+
+    tests = container 'Test pins' {
+      reader = component 'tests/ui_style_reader.py' {
+        description 'Shared JSX style-object reader + React shorthand->longhand table'
+      }
+      pyPin = testPin 'tests/regressions/test_issue_10571.py' {
+        description 'Source-level: no base+variant pair may mix border shorthand with border longhands'
+      }
+      vitestPin = testPin 'src/ui/src/components/__tests__/*.test.jsx' {
+        description 'Render probe: toggling filter pill / preset button logs no console.error collision'
+      }
+      pin10564 = testPin 'tests/regressions/test_issue_10564.py' {
+        description 'Header.jsx pin (sibling issue) — should share the reader, not duplicate it'
+      }
+    }
+  }
+
+  // structural spreads
+  stageNodeVariants -> stageNodeBase 'spreads'
+  stageBadgeInline -> stageBadge 'spreads'
+  stageVariants -> stageBase 'spreads'
+  statusBadgeInline -> statusBadge 'spreads'
+  pillActive -> pill 'merged onto'
+  linkedPillVariant -> linkedPill 'spreads'
+  buttonActive -> buttonBase 'spreads'
+
+  stageNodeBase -> theme 'reads tokens'
+  pill -> theme 'reads tokens'
+  linkedPill -> theme 'reads tokens'
+  buttonBase -> theme 'reads tokens'
+
+  // the two sites React actually warns about (a branch DROPS the longhand)
+  pill -> pillActive 'toggles at BugReportPanel.jsx:86 — React warns'
+  buttonBase -> buttonActive 'toggles at IssueHistoryPanel.jsx:591 — React warns'
+
+  // pins
+  pyPin -> reader 'imports public helpers'
+  pin10564 -> reader 'imports public helpers'
+  pyPin -> streamCard 'pins'
+  pyPin -> pipelineStatus 'pins'
+  pyPin -> bugReport 'pins'
+  pyPin -> issueHistory 'pins'
+  vitestPin -> bugReport 'renders + clicks'
+  vitestPin -> issueHistory 'renders + clicks'
+}
+
+views {
+  view index {
+    title 'Issue #10571 — context'
+    include dashboard, dashboard.*
+  }
+
+  view componentsView of ui {
+    title 'Style objects that mix border shorthand and longhand'
+    include ui.*, tests.*
+    style ui.bugReport.pill, ui.bugReport.pillActive,
+          ui.issueHistory.buttonBase, ui.issueHistory.buttonActive {
+      color red
+    }
+  }
+
+  dynamic view reactDiffFlow {
+    title 'Why only asymmetric variants warn (React validateShorthandPropertyCollisionInDev)'
+    pill -> pillActive 'user clicks filter -> isActive true'
+    pillActive -> pill 'user clicks another filter -> borderColor REMOVED from diff'
+    pill -> pillActive 'React resolves borderLeftColor owner: `border` (next) vs `borderColor` (diff) -> mismatch -> console.error'
+    stageNodeVariants -> stageNodeBase 'contrast: every stageNode variant carries borderColor -> owner unchanged -> silent, but still the same latent defect'
+  }
+}

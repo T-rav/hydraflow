@@ -573,4 +573,18 @@ describe('OutcomesPanel (merged History+Outcomes)', () => {
       expect(screen.queryByTestId('epic-outcome-cards')).not.toBeInTheDocument()
     })
   })
+
+  it('does not log a border shorthand/longhand collision warning when switching range presets (#10571)', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(<OutcomesPanel />)
+
+    fireEvent.click(screen.getByText('7d'))
+    fireEvent.click(screen.getByText('30d'))
+
+    const collisionWarnings = consoleSpy.mock.calls.filter(call =>
+      String(call[0]).includes('conflicting property')
+    )
+    consoleSpy.mockRestore()
+    expect(collisionWarnings).toEqual([])
+  })
 })
