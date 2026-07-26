@@ -380,17 +380,30 @@ const queuedBadgeStyleMap = Object.fromEntries(
 // Phase-aware card and dot styling — exported for test assertions.
 const subtleBorder = (color) => `color-mix(in srgb, ${color} 20%, transparent)`
 
+// Border expressed entirely in longhand (never the `border`/`borderLeft`
+// shorthand) so these maps and styles.card share one key set — merging them, or
+// dropping the map when currentStage is falsy, only ever changes values. This
+// avoids the shorthand-vs-longhand collision React warns about (#10579; same
+// class as #10564/#10571).
 export const cardActiveStyleMap = Object.fromEntries(
   PIPELINE_STAGES.map(s => [s.key, {
-    border: `1px solid ${s.color}`,
-    borderLeft: `3px solid ${s.color}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: s.color,
+    borderLeftWidth: 3,
+    borderLeftStyle: 'solid',
+    borderLeftColor: s.color,
   }])
 )
 
 export const cardInactiveStyleMap = Object.fromEntries(
   PIPELINE_STAGES.map(s => [s.key, {
-    border: `1px solid ${subtleBorder(s.color)}`,
-    borderLeft: `3px solid ${s.color}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: subtleBorder(s.color),
+    borderLeftWidth: 3,
+    borderLeftStyle: 'solid',
+    borderLeftColor: s.color,
   }])
 )
 
@@ -404,7 +417,15 @@ const styles = {
     borderRadius: 8,
     margin: `0 ${WORKSTREAM_SIDE_INSET_PX}px 8px`,
     overflow: 'hidden',
-    border: `1px solid ${theme.border}`,
+    // Longhand border matching cardActiveStyleMap/cardInactiveStyleMap's key set
+    // so the phase accent can be layered on (or absent) without ever mixing the
+    // `border` shorthand with the `borderLeft` longhand across renders (#10579).
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: theme.border,
+    borderLeftWidth: 1,
+    borderLeftStyle: 'solid',
+    borderLeftColor: theme.border,
   },
   header: {
     display: 'flex',
