@@ -26,3 +26,16 @@ async def test_get_pr_labels_empty_for_unknown_pr() -> None:
     labels = await gh.get_pr_labels(999)
 
     assert labels == []
+
+
+@pytest.mark.asyncio
+async def test_get_pr_labels_reflects_removal() -> None:
+    gh = FakeGitHub()
+    gh.add_pr(number=100, issue_number=1, branch="hf/issue-1")
+    gh.add_pr_label(100, "needs-review")
+    gh.add_pr_label(100, "priority-high")
+
+    await gh.remove_pr_label(100, "needs-review")
+    labels = await gh.get_pr_labels(100)
+
+    assert labels == ["priority-high"]
