@@ -1,0 +1,16 @@
+---
+id: 0567
+topic: patterns
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-26T02:20:36.862629+00:00
+status: active
+corroborations: 1
+supersedes: 0523,0524,0525,0526,0527,0528,0529,0530,0531,0532,0533,0534,0535,0536,0537,0538,0539,0540,0542,0543,0544,0545,0546,0547,0548,0549
+---
+
+# Factor one shared word-boundary matcher for lint_paraphrases and validate_draft
+
+Both `lint_paraphrases` and the new strip-guard in `validate_draft` (`src/ubiquitous_language.py`) need the same word-boundary alias-matching logic against wiki prose. Factor it into a single shared helper instead of duplicating the regex in two places.
+
+**Why:** two independent regex implementations of "does this alias collide with prose" will drift apart over time, letting the proposer strip aliases the lint would still flag (or vice versa).

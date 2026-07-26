@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10567
 source_phase: plan
 created_at: 2026-07-25T23:37:32.613879+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1085
 ---
 
 # tests/test_ports.py has two parity lists that both need every method
