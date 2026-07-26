@@ -300,7 +300,11 @@ def latest_by_escape(records: list[EscapeRecord]) -> list[EscapeRecord]:
     best: dict[str, EscapeRecord] = {}
     order: list[str] = []
     for record in latest_by_id(records):
-        ref = record.detection_ref
+        # A row with no detection_ref (a minimal/synthetic escape row, or one whose
+        # detecting commit is unrecorded) is its OWN escape — fall back to its id so
+        # absent refs don't all collapse under a single empty key (double-count fix
+        # was collapsing N distinct no-ref rows to 1).
+        ref = record.detection_ref or f"__noref__:{record.id}"
         incumbent = best.get(ref)
         if incumbent is None:
             order.append(ref)
