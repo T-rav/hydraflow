@@ -334,7 +334,7 @@ entries:
   src/whatsapp_bridge.py::noqa:PLC0415: 1
   src/wiki_anchor_gate.py::noqa:PLC0415: 1
   src/wiki_compiler.py::noqa:BLE001: 3
-  src/wiki_compiler.py::noqa:PLC0415: 5
+  src/wiki_compiler.py::noqa:PLC0415: 2
   src/wiki_drift_detector.py::noqa:BLE001: 1
   src/wiki_drift_detector.py::noqa:PLR0911: 1
   src/wiki_rot_detector_loop.py::noqa:BLE001: 4
