@@ -6,8 +6,8 @@ source_phase: synthesis
 created_at: 2026-07-25T02:47:14.124038+00:00
 status: superseded
 corroborations: 1
-supersedes: 0011,0012,0013,0014,0015
-superseded_by: 0022
+supersedes: 0014
+superseded_by: 0025
 ---
 
 # ADR drift: fix bare source-file citations by dropping `src/`, not adding `:Symbol`

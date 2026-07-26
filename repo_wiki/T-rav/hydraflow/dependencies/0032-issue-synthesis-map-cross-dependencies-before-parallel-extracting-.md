@@ -6,7 +6,7 @@ source_phase: synthesis
 created_at: 2026-07-26T10:47:46.851820+00:00
 status: active
 corroborations: 1
-supersedes: 0027,0028,0029,0030,0031
+supersedes: 0027
 ---
 
 # Map cross-dependencies before parallel-extracting a god class

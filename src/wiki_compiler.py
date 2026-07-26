@@ -194,6 +194,16 @@ emitting them wastes the slot — fold their durable, repo-specific corollary
    from the original entries when an output entry maps 1:1 to a single
    input. For split or genuinely-merged entries, use source_type
    "compiled" and source_issue null.
+7. **Declare correspondence**: Every output entry MUST set
+   "supersedes_ids" to the input entry id(s) — see the `(id: ...)`
+   annotation next to each entry's title above — that it directly
+   replaces. A 1:1 rewrite lists that one id. A merge lists every id
+   it merges. A split of one umbrella input into several outputs
+   lists that same input id on each split output. Do NOT list an id
+   from an input this output doesn't actually draw from, and do NOT
+   invent ids not shown above — readers follow this pointer from the
+   old entry to its replacement, so a wrong id misdirects them to an
+   unrelated topic.
 
 ## Expected entry-count behavior
 
@@ -211,6 +221,8 @@ Return a JSON array of compiled entries. Each entry must be a JSON object with t
 - "source_type": string (plan, implement, review, hitl, or "compiled")
 - "source_issue": number or null
 - "stale": false
+- "supersedes_ids": array of strings — the input entry ids (from the
+  "(id: ...)" annotations above) this output entry replaces. See rule 7.
 
 Return ONLY the JSON array, no other text.
 """
@@ -555,7 +567,7 @@ class WikiCompiler:
             return len(entries)  # nothing to compile
 
         entries_text = "\n\n".join(
-            f"### {e.title}\n{e.content}\n"
+            f"### {e.title} (id: {e.id})\n{e.content}\n"
             f"Source: #{e.source_issue or 'N/A'} ({e.source_type})\n"
             f"Created: {e.created_at}"
             for e in entries
@@ -639,8 +651,10 @@ class WikiCompiler:
           suffix so the filename doesn't collide with issue-tagged
           entries.
         - Flips every input entry's ``status`` to ``superseded`` with a
-          ``superseded_by`` pointer to the first synthesis id (operators
-          looking at a superseded entry can find the replacement).
+          ``superseded_by`` pointer to the synthesis entry that actually
+          replaces it, per the LLM's own ``supersedes_ids`` declaration
+          (see ``_resolve_supersession_ids``) — not a blanket pointer to
+          every synthesis entry regardless of topical match (#10566).
 
         Returns the number of compiled entries written (0 if the LLM
         call failed or the topic had fewer than 2 active entries).
@@ -664,7 +678,7 @@ class WikiCompiler:
             return 0
 
         entries_text = "\n\n".join(
-            f"### {e['title']}\n{e['body']}\n"
+            f"### {e['title']} (id: {e['id']})\n{e['body']}\n"
             f"Source: #{e['source_issue'] or 'N/A'} ({e['source_phase']})\n"
             f"Created: {e['created_at']}"
             for e in active_entries
@@ -738,23 +752,36 @@ class WikiCompiler:
                 entry.fixed_in_pr = union_pr
                 entry.code_refs = union_refs
 
-        superseded_ids = [e["id"] for e in active_entries]
+        per_entry_supersedes = self._resolve_supersession_ids(active_entries, compiled)
         synthesis_paths: list[Path] = []
-        for entry in compiled:
+        for entry, supersedes in zip(compiled, per_entry_supersedes, strict=True):
             path = _write_tracked_synthesis_entry(
                 topic_dir,
                 entry=entry,
                 topic=topic,
-                supersedes=superseded_ids,
+                supersedes=supersedes,
             )
             synthesis_paths.append(path)
 
         if synthesis_paths:
             m = _SYNTHESIS_ID_RE.match(synthesis_paths[0].name)
             primary_id = m.group(1) if m else "unknown"
+
+            superseded_by: dict[str, str] = {}
+            for path, supersedes in zip(
+                synthesis_paths, per_entry_supersedes, strict=True
+            ):
+                sm = _SYNTHESIS_ID_RE.match(path.name)
+                new_id = sm.group(1) if sm else "unknown"
+                for old_id in supersedes:
+                    superseded_by.setdefault(old_id, new_id)
+
             for entry in active_entries:
+                new_id = (
+                    superseded_by.get(entry["id"]) if entry["id"] else None
+                ) or primary_id
                 _mark_tracked_entry_superseded(
-                    Path(entry["path"]), superseded_by=primary_id
+                    Path(entry["path"]), superseded_by=new_id
                 )
 
         logger.info(
@@ -1032,6 +1059,61 @@ class WikiCompiler:
             return None
 
     @staticmethod
+    def _dedup_known_ids(ids: list[str], known_ids: set[str]) -> list[str]:
+        """De-dup ``ids`` (order preserved) and drop any not in ``known_ids``.
+
+        Guards ``_resolve_supersession_ids`` against two LLM failure
+        modes: a hallucinated id not present in the input list, and a
+        repeated id within a single entry's own ``supersedes_ids``.
+        """
+        seen: set[str] = set()
+        out: list[str] = []
+        for old_id in ids:
+            if old_id in known_ids and old_id not in seen:
+                seen.add(old_id)
+                out.append(old_id)
+        return out
+
+    @staticmethod
+    def _resolve_supersession_ids(
+        active_entries: list[dict[str, Any]],
+        compiled: list[WikiEntry],
+    ) -> list[list[str]]:
+        """Map each ``compiled`` entry to the old entry ids it supersedes.
+
+        Returns a list aligned index-for-index with ``compiled``. Honors
+        the LLM's own ``supersedes_ids`` declaration per entry (deduped,
+        filtered to ids that actually exist in ``active_entries``)
+        instead of blanket-linking every synthesis entry to every input
+        entry — that cartesian mapping broke topical continuity in the
+        wiki's supersedes/superseded_by graph (#10566): five unrelated
+        old entries all pointed at one new entry, and every new entry
+        claimed to supersede all five.
+
+        An old id nobody explicitly claims (the LLM omitted the tag for
+        it, or a compilation rule dropped it as stale with no direct
+        successor) is folded onto the first compiled entry, so every
+        input still ends up superseded by *something* rather than left
+        dangling. Multiple entries legitimately claiming the same old id
+        (an umbrella entry split across several outputs) is not an
+        error — each keeps that id in its own ``supersedes`` list; only
+        the ``superseded_by`` pointer on the old entry itself picks one
+        canonical winner (first-claim, by output order).
+        """
+        known_ids = {e["id"] for e in active_entries if e["id"]}
+        per_entry = [
+            WikiCompiler._dedup_known_ids(entry.supersedes_ids, known_ids)
+            for entry in compiled
+        ]
+        claimed = {old_id for ids in per_entry for old_id in ids}
+        orphans = [
+            e["id"] for e in active_entries if e["id"] and e["id"] not in claimed
+        ]
+        if orphans and per_entry:
+            per_entry[0] = per_entry[0] + [o for o in orphans if o not in per_entry[0]]
+        return per_entry
+
+    @staticmethod
     def _union_shipped_claim_provenance(
         active_entries: list[dict[str, Any]],
     ) -> tuple[str | None, tuple[str, ...]]:
@@ -1134,6 +1216,12 @@ class WikiCompiler:
             if not isinstance(item, dict):
                 continue
             try:
+                raw_supersedes_ids = item.get("supersedes_ids")
+                supersedes_ids = (
+                    [str(x) for x in raw_supersedes_ids if isinstance(x, (str, int))]
+                    if isinstance(raw_supersedes_ids, list)
+                    else []
+                )
                 entries.append(
                     WikiEntry(
                         title=item.get("title", "Untitled"),
@@ -1141,6 +1229,7 @@ class WikiCompiler:
                         source_type=item.get("source_type", "compiled"),
                         source_issue=item.get("source_issue"),
                         stale=item.get("stale", False),
+                        supersedes_ids=supersedes_ids,
                     )
                 )
             except Exception:  # noqa: BLE001

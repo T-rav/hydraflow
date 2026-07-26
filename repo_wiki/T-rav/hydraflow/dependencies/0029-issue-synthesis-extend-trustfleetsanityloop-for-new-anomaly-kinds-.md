@@ -6,8 +6,8 @@ source_phase: synthesis
 created_at: 2026-07-26T00:53:24.581803+00:00
 status: superseded
 corroborations: 1
-supersedes: 0022,0023,0024,0025,0026
-superseded_by: 0032
+supersedes: 0024
+superseded_by: 0034
 ---
 
 # Extend TrustFleetSanityLoop for new anomaly kinds instead of a new loop

@@ -6,7 +6,7 @@ source_phase: plan
 created_at: 2026-07-24T10:43:53.901975+00:00
 status: superseded
 corroborations: 1
-superseded_by: 0011
+superseded_by: 0014
 ---
 
 # ADR drift: fix bare source-file citations by dropping `src/`, never adding `:Symbol`
