@@ -331,6 +331,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("transcript_summary_timeout", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TIMEOUT", 120),
     ("quality_timeout", "HYDRAFLOW_QUALITY_TIMEOUT", 3600),
     ("git_command_timeout", "HYDRAFLOW_GIT_COMMAND_TIMEOUT", 30),
+    ("salvage_commit_timeout", "HYDRAFLOW_SALVAGE_COMMIT_TIMEOUT", 1800),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
     ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 300),
     ("error_output_max_chars", "HYDRAFLOW_ERROR_OUTPUT_MAX_CHARS", 3000),
@@ -929,6 +930,12 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_JUDGE_SELF_MOD_FAIL_CLOSED",
         False,
     ),
+    ("review_ultra_enabled", "HYDRAFLOW_REVIEW_ULTRA_ENABLED", False),
+    (
+        "review_ultra_auto_high_blast",
+        "HYDRAFLOW_REVIEW_ULTRA_AUTO_HIGH_BLAST",
+        False,
+    ),
     (
         "erosion_metrics_loop_enabled",
         "HYDRAFLOW_EROSION_METRICS_LOOP_ENABLED",
@@ -1351,6 +1358,35 @@ class HydraFlowConfig(BaseModel):
             "configured → degraded mode (same-family verdict, ledgered). A model "
             "whose family is inside the roster does not count as independent."
         ),
+    )
+
+    # Opt-in "ultra" deep-review tier (#10555). Runs the locally-installed
+    # ``code-review`` plugin command headlessly as an extra adversarial pass;
+    # high-confidence findings fold into the verdict. Default OFF: the fan-out
+    # is expensive, so the tier only fires when this dial is on AND the issue
+    # carries the ``review:ultra`` label OR (with the auto-high-blast dial on)
+    # the diff's blast radius is "high". See ADR-0109.
+    review_ultra_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the opt-in ultra deep-review tier (#10555). Default OFF — "
+            "with defaults a review pass issues zero ultra spawns. Even when "
+            "on, the tier only fires for a ``review:ultra``-labelled issue or a "
+            "high-blast-radius diff (auto-high-blast dial), never on every PR."
+        ),
+    )
+    review_ultra_auto_high_blast: bool = Field(
+        default=False,
+        description=(
+            "When the ultra tier is enabled, also fire it automatically on any "
+            "high-blast-radius diff (critical paths / large src change) even "
+            "without the ``review:ultra`` label. Default OFF — label-only "
+            "triggering until validated (#10555)."
+        ),
+    )
+    review_ultra_model: str = Field(
+        default="sonnet",
+        description="Model for the ultra deep-review tier spawn (#10555).",
     )
 
     # CI check configuration
@@ -2654,6 +2690,17 @@ class HydraFlowConfig(BaseModel):
         ge=5,
         le=120,
         description="Timeout in seconds for simple git commands (rev-list, rev-parse, status)",
+    )
+    salvage_commit_timeout: int = Field(
+        default=1800,
+        ge=60,
+        le=3600,
+        description=(
+            "Timeout in seconds for the salvage 'git commit' in "
+            "AgentRunner._force_commit_uncommitted. This commit runs the repo's "
+            "pre-commit hook (quality-lite / security / arch-check), so it needs a "
+            "make-tier budget rather than the short git_command_timeout tier (#10598)."
+        ),
     )
     summarizer_timeout: int = Field(
         default=120,

@@ -139,11 +139,16 @@ class TestEventBusTopology:
                 EventEdge(
                     event="PR_OPENED",
                     publishers=["src.orchestrator:open_pr"],
-                    subscribers=["src.review_loop:on_pr_opened"],
                 ),
+                EventEdge(event="PIPELINE_SNAPSHOT", ephemeral=True),
             ],
+            global_subscribers=["src.dashboard_routes._routes:websocket_endpoint"],
         )
         assert topo.events[0].event == "PR_OPENED"
+        assert topo.events[1].ephemeral is True
+        assert topo.global_subscribers == [
+            "src.dashboard_routes._routes:websocket_endpoint"
+        ]
 
 
 class TestADRRefIndex:

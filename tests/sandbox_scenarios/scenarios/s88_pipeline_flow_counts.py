@@ -29,6 +29,7 @@ job is only to prove the wiring is live end-to-end in the real stack.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from mockworld.seed import MockWorldSeed
 
@@ -39,7 +40,35 @@ DESCRIPTION = (
     "reaches the browser via /api/pipeline and renders through countPipeline."
 )
 
-STAGE_KEYS = ["triage", "plan", "implement", "review", "hitl", "merged"]
+# The whole repo is mounted read-only at the container root, so constants.js is
+# reachable from the scenario (Dockerfile.playwright / docker-compose.sandbox).
+_CONSTANTS_JS = (
+    Path(__file__).resolve().parents[3] / "src" / "ui" / "src" / "constants.js"
+)
+
+
+def _canonical_stage_keys() -> list[str]:
+    """Derive the pipeline stage keys from the canonical PIPELINE_STAGES source.
+
+    The frontend defines ``PIPELINE_STAGES`` once (``src/ui/src/constants.js``)
+    and derives ``STAGE_KEYS = PIPELINE_STAGES.map(s => s.key)`` plus every
+    per-stage view from it. Parsing the same array here — instead of duplicating
+    the list — keeps this scenario in lockstep: a stage added, removed, or
+    renamed there flows through automatically, so the scenario can never go
+    stale and silently stop covering a stage (the #10601 false-green). Fails
+    loud if the array can't be located rather than falling back to a guessed set.
+    """
+    src = _CONSTANTS_JS.read_text(encoding="utf-8")
+    block = re.search(r"PIPELINE_STAGES\s*=\s*\[(.*?)\]", src, re.S)
+    if not block:
+        raise RuntimeError(f"could not locate PIPELINE_STAGES array in {_CONSTANTS_JS}")
+    keys = re.findall(r"key:\s*'([^']+)'", block.group(1))
+    if not keys:
+        raise RuntimeError(f"PIPELINE_STAGES in {_CONSTANTS_JS} yielded no keys")
+    return keys
+
+
+STAGE_KEYS = _canonical_stage_keys()
 
 _STAGE_COUNT_PATTERN = re.compile(r"^\d+ · \d+ PR$")
 _TOTAL_COUNT_PATTERN = re.compile(r"^\d+ issues · \d+ PRs$")
@@ -59,7 +88,31 @@ async def assert_outcome(api, page) -> None:
     flow = page.locator("[data-testid='pipeline-flow']")
     await flow.wait_for(timeout=15_000)
 
-    for stage_key in STAGE_KEYS:
+    # Derive the stage set from what the board actually rendered rather than a
+    # hardcoded list: StreamView emits one flow-count-<key> badge per
+    # PIPELINE_STAGES entry (its stageGroups map), so enumerating the badges
+    # keeps this scenario automatically in sync when a stage is added, removed,
+    # or renamed — no stale copy silently dropping coverage (#10601).
+    count_badges = page.locator("[data-testid^='flow-count-']")
+    await count_badges.first.wait_for(timeout=15_000)
+    rendered_keys: list[str] = await count_badges.evaluate_all(
+        "els => els.map(e => "
+        "e.getAttribute('data-testid').substring('flow-count-'.length))"
+    )
+    assert rendered_keys, "Pipeline Flow rendered no per-stage flow-count badges"
+
+    # Cross-check the rendered stage set against the canonical PIPELINE_STAGES
+    # keys. A mismatch means /api/pipeline stage membership and PIPELINE_STAGES
+    # have drifted apart (a dropped or renamed stage) — the exact stage-key
+    # mismatch this scenario exists to catch, now surfaced as a failure instead
+    # of a false-green.
+    assert set(rendered_keys) == set(STAGE_KEYS), (
+        f"rendered Pipeline Flow stages {sorted(rendered_keys)} drifted from the "
+        f"canonical PIPELINE_STAGES keys {sorted(STAGE_KEYS)} "
+        "(src/ui/src/constants.js)"
+    )
+
+    for stage_key in rendered_keys:
         badge = page.locator(f"[data-testid='flow-count-{stage_key}']")
         await badge.wait_for(timeout=15_000)
         text = await badge.inner_text()

@@ -4,7 +4,17 @@
 
 Live transitions extracted from source. Compared against the Mermaid block in ADR-0002 by `tests/architecture/test_label_state_matches_adr0002.py`.
 
-_(no transitions discovered)_
-
+```mermaid
+stateDiagram-v2
+    hydraflow_find --> hydraflow_plan: triage
+    hydraflow_hitl --> hydraflow_ready: human correction
+    hydraflow_hitl --> hydraflow_review: human re-review
+    hydraflow_plan --> hydraflow_hitl: plan escalation
+    hydraflow_plan --> hydraflow_ready: plan accepted
+    hydraflow_ready --> hydraflow_hitl: implement escalation
+    hydraflow_ready --> hydraflow_review: PR opened
+    hydraflow_review --> hydraflow_fixed: merged
+    hydraflow_review --> hydraflow_hitl: review escalation
+```
 
 <!-- arch:generated -->

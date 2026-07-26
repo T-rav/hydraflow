@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-26T00:53:24.581638+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0023
+superseded_by: 0033
 ---
 
 # DependabotMergeLoop merges any green PR, not just Dependabot's

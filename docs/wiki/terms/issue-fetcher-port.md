@@ -5,15 +5,13 @@ kind: "port"
 bounded_context: "shared-kernel"
 code_anchor: "src/ports.py:IssueFetcherPort"
 aliases: ["issue fetcher port", "github issue fetching port"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K9"}, {"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}]
-evidence: ["01KQP0AJ4Z2MY1EXMWW9BTXN9F", "01KRBX2N4QP7VW8FGH3J5YD0M6"]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K9"}, {"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}, {"kind": "depends_on", "target": "01KYABD5XVX4ZXFXT3Z76KMQZ0"}, {"kind": "depends_on", "target": "01KYBV9N8VSTKDRVDFC0FE40ZM"}]
 evidence: ["01KRBX2N4QP7VW8FGH3J5YD0M6"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T00:00:00.000000+00:00"
-updated_at: "2026-06-13T05:06:24.709864+00:00"
-updated_at: "2026-06-13T05:04:53.216762+00:00"
+updated_at: "2026-07-26T10:16:32.370693+00:00"
 ---
 
 ## Definition

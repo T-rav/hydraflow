@@ -59,7 +59,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
-from repo_wiki import parse_topic_page
+from repo_wiki import _split_tracked_entry, parse_topic_page
 from wiki_rot_citations import (
     Cite,
     ShippedClaim,
@@ -275,11 +275,19 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         broken_subjects: set[str] = set()
 
         entries = self._load_wiki_entries(slug)
-        if not entries:
-            return {"filed": 0, "escalated": 0, "broken_subjects": set()}
-
         is_self = slug == self_slug and bool(self_slug)
         repo_root = Path(self._config.repo_root)
+
+        # Tracked per-entry layout (issue #10586): the flat/compiled scan above
+        # never walks the tracked ``repo_wiki/`` root, so shipped claims written
+        # into tracked entries went unverified until the compiler promoted (and
+        # possibly dropped) them. Self-repo only — corroboration needs AST over
+        # checked-out source, mirroring the per-cite ``is_self`` gate.
+        tracked_entries = self._load_tracked_shipped_entries(slug) if is_self else []
+
+        if not entries and not tracked_entries:
+            return {"filed": 0, "escalated": 0, "broken_subjects": set()}
+
         dedup_seen = self._dedup.get()
 
         for scan_entry in entries:
@@ -341,35 +349,35 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                     )
                     escalated += 1
 
-            for claim in uncorroborated:
-                subject = f"{slug}:shipped {claim.pr_ref}"
-                # Counted before the dedup guard so a live-but-filed claim
-                # keeps its escalation alive (mirrors the per-cite path).
-                broken_subjects.add(subject)
-                dedup_key = f"wiki_rot_detector:{subject}"
-                if dedup_key in dedup_seen:
-                    continue
+            shipped_filed, shipped_escalated = await self._file_uncorroborated_claims(
+                slug=slug,
+                scan_entry=scan_entry,
+                claims=uncorroborated,
+                dedup_seen=dedup_seen,
+                broken_subjects=broken_subjects,
+            )
+            filed += shipped_filed
+            escalated += shipped_escalated
 
-                filed += 1
-                await self._file_shipped_find(
-                    slug=slug,
-                    entry_title=title,
-                    entry_path=str(entry_path),
-                    body=body,
-                    claim=claim,
-                    source_type=scan_entry.source_type,
-                    source_issue=scan_entry.source_issue,
-                )
-                dedup_seen.add(dedup_key)
-
-                attempts = self._state.inc_wiki_rot_attempts(subject)
-                if attempts >= _MAX_ATTEMPTS:
-                    await self._file_shipped_escalation(
-                        slug=slug,
-                        claim=claim,
-                        attempts=attempts,
-                    )
-                    escalated += 1
+        # Tracked per-entry layout shipped-claim pass (issue #10586). Runs the
+        # SHIPPED-CLAIM pass only — not the per-cite pass — so verifying the
+        # small set of tracked entries that assert a fix cannot flood findings
+        # for pre-existing broken cites across the ~400 active tracked entries.
+        for tracked_entry in tracked_entries:
+            uncorroborated = [
+                claim
+                for claim in self._shipped_claims_for(tracked_entry, tracked_entry.body)
+                if not self._shipped_claim_corroborated(claim, repo_root)
+            ]
+            shipped_filed, shipped_escalated = await self._file_uncorroborated_claims(
+                slug=slug,
+                scan_entry=tracked_entry,
+                claims=uncorroborated,
+                dedup_seen=dedup_seen,
+                broken_subjects=broken_subjects,
+            )
+            filed += shipped_filed
+            escalated += shipped_escalated
 
         self._dedup.set_all(dedup_seen)
         return {
@@ -462,6 +470,112 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             for entry in entries
         ]
 
+    def _load_tracked_shipped_entries(self, slug: str) -> list[_WikiScanEntry]:
+        """Return tracked per-entry rows that assert a shipped claim (#10586).
+
+        :meth:`_load_wiki_entries` walks only the flat/compiled ``wiki_root``
+        layout. The tracked per-entry layout under
+        ``{repo_root}/{repo_wiki_path}/{slug}/{topic}/*.md`` is a separate
+        root that was never scanned, so a ``fixed_in_pr`` / ``code_refs``
+        marker written into a tracked entry went unverified until the
+        compiler promoted it into a topic page (dropping the marker on LLM
+        synthesis). This surfaces **only** ``status: active`` entries that
+        actually carry a ``fixed_in_pr`` marker, so the shipped-claim pass can
+        verify them without a full per-cite scan over the ~400 active tracked
+        entries — the issue's flagged issue-filing-storm risk.
+
+        Tracked entries use YAML frontmatter (``_split_tracked_entry``), not
+        the ``json:entry`` block ``parse_topic_page`` reads; ``code_refs`` is
+        the comma-separated frontmatter convention (mirrors ``supersedes``).
+        A non-``None`` ``source_type`` marks each row as *structured* so
+        :meth:`_shipped_claims_for` reads the modeled fields directly.
+        """
+        tracked_root = Path(self._config.repo_root) / self._config.repo_wiki_path
+        repo_dir = tracked_root / slug
+        if not repo_dir.is_dir():
+            return []
+
+        out: list[_WikiScanEntry] = []
+        for md_path in sorted(repo_dir.rglob("*.md")):
+            if md_path.name in {"index.md", "log.md"}:
+                continue
+            try:
+                text = md_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            fields, _block, body = _split_tracked_entry(text)
+            if not fields or fields.get("status", "active") != "active":
+                continue
+            fixed_in_pr = fields.get("fixed_in_pr") or ""
+            if not fixed_in_pr:
+                continue  # scoped to shipped-claim verification (#10586)
+            code_refs = tuple(
+                ref.strip()
+                for ref in fields.get("code_refs", "").split(",")
+                if ref.strip()
+            )
+            out.append(
+                _WikiScanEntry(
+                    title=_first_heading(body) or md_path.stem,
+                    body=body,
+                    path=md_path,
+                    source_type=fields.get("source_phase") or "tracked",
+                    source_issue=_int_or_none(fields.get("source_issue")),
+                    fixed_in_pr=fixed_in_pr,
+                    code_refs=code_refs,
+                )
+            )
+        return out
+
+    async def _file_uncorroborated_claims(
+        self,
+        *,
+        slug: str,
+        scan_entry: _WikiScanEntry,
+        claims: list[ShippedClaim],
+        dedup_seen: set[str],
+        broken_subjects: set[str],
+    ) -> tuple[int, int]:
+        """File findings + escalations for uncorroborated shipped claims.
+
+        Shared by the flat topic-page loop and the tracked per-entry scan
+        (issue #10586) so both verify shipped claims through the identical
+        dedup / attempt / escalation path. Returns ``(filed, escalated)`` and
+        mutates *dedup_seen* / *broken_subjects* in place.
+        """
+        filed = 0
+        escalated = 0
+        for claim in claims:
+            subject = f"{slug}:shipped {claim.pr_ref}"
+            # Counted before the dedup guard so a live-but-filed claim keeps
+            # its escalation alive (mirrors the per-cite path).
+            broken_subjects.add(subject)
+            dedup_key = f"wiki_rot_detector:{subject}"
+            if dedup_key in dedup_seen:
+                continue
+
+            filed += 1
+            await self._file_shipped_find(
+                slug=slug,
+                entry_title=scan_entry.title,
+                entry_path=str(scan_entry.path),
+                body=scan_entry.body,
+                claim=claim,
+                source_type=scan_entry.source_type,
+                source_issue=scan_entry.source_issue,
+            )
+            dedup_seen.add(dedup_key)
+
+            attempts = self._state.inc_wiki_rot_attempts(subject)
+            if attempts >= _MAX_ATTEMPTS:
+                await self._file_shipped_escalation(
+                    slug=slug,
+                    claim=claim,
+                    attempts=attempts,
+                )
+                escalated += 1
+        return filed, escalated
+
     def _shipped_claims_for(
         self,
         scan_entry: _WikiScanEntry,
@@ -544,6 +658,16 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         for ref in claim.code_refs:
             module_path, sep, symbol = ref.partition(":")
             if sep and symbol:
+                # A purely-numeric symbol half (``path.py:412``) is a *line
+                # reference*, not a symbol. ``verify_cite_ast`` never resolves
+                # it, but ``verify_cite_grep`` would match the digit string as
+                # incidental substring text and spuriously corroborate a
+                # ``fixed_in_pr`` claim with no live code behind it — a wiki-rot
+                # false negative (#10596). Python identifiers never start with a
+                # digit, so a pure-numeric tail is unambiguously a line ref;
+                # skip it, mirroring the Style-A guard in ``extract_cites``.
+                if symbol.isdigit():
+                    continue
                 ok, _ = verify_cite_ast(repo_root, module_path, symbol)
                 if ok or verify_cite_grep(repo_root, module_path, symbol):
                     return True
@@ -790,6 +914,19 @@ def _entry_provenance(source_type: str | None, source_issue: int | None) -> str 
         return None
     issue_tag = f"#{source_issue}" if source_issue is not None else "no issue"
     return f"{issue_tag} ({source_type})"
+
+
+def _int_or_none(value: str | None) -> int | None:
+    """Parse a frontmatter ``source_issue`` into an int, or ``None``.
+
+    Tracked frontmatter ``source_issue`` is a free-form string — a real issue
+    number, or a sentinel like ``synthesis`` / ``unknown`` — so anything
+    non-numeric maps to ``None`` (no provenance line rendered).
+    """
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _first_heading(text: str) -> str | None:
