@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef, useCallback } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
+import { borderSides } from '../styles/borders'
 
 const RANGE_PRESETS = [
   { key: '24h', label: '24h', hours: 24 },
@@ -1065,9 +1066,7 @@ const styles = {
     gap: 8,
     width: '100%',
     padding: '8px 10px',
-    border: 'none',
-    borderBottom: `1px solid ${theme.border}`,
-    borderLeft: `3px solid ${theme.accent}`,
+    ...borderSides({ bottom: `1px solid ${theme.border}`, left: `3px solid ${theme.accent}` }),
     background: theme.surfaceInset,
     cursor: 'pointer',
     fontSize: 12,

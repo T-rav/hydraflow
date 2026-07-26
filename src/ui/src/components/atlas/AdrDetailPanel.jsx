@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { theme } from '../../theme'
 import { useHydraFlow } from '../../context/HydraFlowContext'
 import { splitNodeId } from './atlasNodeId'
+import { borderSides } from '../../styles/borders'
 
 export function AdrDetailPanel({ selectedNodeId }) {
   const { fetchWithRepo } = useHydraFlow()
@@ -66,8 +67,7 @@ export function AdrDetailPanel({ selectedNodeId }) {
     },
     name: { color: theme.textBright, fontSize: 15, marginTop: 4 },
     rule: {
-      border: 'none',
-      borderTop: `1px solid ${theme.border}`,
+      ...borderSides({ top: `1px solid ${theme.border}` }),
       margin: '12px 0',
     },
     body: {

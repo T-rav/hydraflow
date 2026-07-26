@@ -1,4 +1,5 @@
 import { PIPELINE_STAGES } from '../constants'
+import { borderSides } from './borders'
 
 export const WORKSTREAM_SIDE_INSET_PX = 8
 
@@ -33,8 +34,9 @@ export const sectionHeaderStyles = Object.fromEntries(
   PIPELINE_STAGES.map(s => [s.key, {
     ...sectionHeaderBase,
     background: s.subtleColor,
-    border: `1px solid ${subtleBorder(s.color)}`,
-    borderLeft: `3px solid ${s.color}`,
+    // Box border with a thicker left accent, expressed per-side so the object
+    // never mixes the `border` shorthand with a longhand (#10583).
+    ...borderSides({ fallback: `1px solid ${subtleBorder(s.color)}`, left: `3px solid ${s.color}` }),
   }])
 )
 
