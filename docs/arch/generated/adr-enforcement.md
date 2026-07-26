@@ -6,13 +6,13 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 73
-- **REAL** (real asserting enforcement): 61 (83.6%)
+- **Accepted ADRs:** 74
+- **REAL** (real asserting enforcement): 62 (83.8%)
 - **WEAK** (prose-only or tautological): 7
 - **MISSING** (no `**Enforced by:**`): 5
-- **Unenforced-decision debt** (WEAK + MISSING): **12 / 73 = 16.4%**
+- **Unenforced-decision debt** (WEAK + MISSING): **12 / 74 = 16.2%**
 
-By declared `**Enforcement:**` kind: `enforced` 61 · `manual` 7 · `decision-of-record` 5.
+By declared `**Enforcement:**` kind: `enforced` 62 · `manual` 7 · `decision-of-record` 5.
 
 ## Classification
 
@@ -91,6 +91,7 @@ By declared `**Enforcement:**` kind: `enforced` 61 · `manual` 7 · `decision-of
 | ADR-0107 | MISSING | decision-of-record | — |
 | ADR-0109 | REAL | enforced | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | REAL | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
+| ADR-0111 | REAL | enforced | `pytest:tests/test_flows.py` |
 
 ## Unenforced-decision debt
 

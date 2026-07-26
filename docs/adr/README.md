@@ -148,6 +148,7 @@ cadence and files remediation issues on drift.
 | [0108](0108-deterministic-simulation-fault-injection-evaluation.md) | Deterministic-Simulation Fault Injection on the Sandbox Compose — Evaluation | Proposed |
 | [0109](0109-ultra-review-opt-in-deep-review-tier.md) | Opt-in "ultra" deep-review tier for the review phase | Accepted |
 | [0110](0110-provider-harness-backend-split.md) | Provider/Harness Backend Split — z.ai as a Claude-harness backend | Accepted |
+| [0111](0111-in-framework-flow-dag-runtime.md) | In-framework flow (DAG) runtime for workers and phases | Accepted |
 
 ## Adding a new ADR
 

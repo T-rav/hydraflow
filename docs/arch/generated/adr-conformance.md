@@ -81,6 +81,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0107 | decision-of-record | — |
 | ADR-0109 | enforced | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
+| ADR-0111 | enforced | `pytest:tests/test_flows.py` |
 
 ## Check → ADRs it protects
 
@@ -137,6 +138,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_epic_manager.py` | ADR-0019 |
 | `pytest:tests/test_epic_merge_coordination.py` | ADR-0012 |
 | `pytest:tests/test_event_persistence.py` | ADR-0021 |
+| `pytest:tests/test_flows.py` | ADR-0111 |
 | `pytest:tests/test_human_steering.py` | ADR-0103 |
 | `pytest:tests/test_human_steering_actuator.py` | ADR-0103 |
 | `pytest:tests/test_human_steering_loop.py` | ADR-0103 |
