@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from config import HydraFlowConfig, load_config_file
 
 logger = logging.getLogger("hydraflow.runtime_config")
+
+# Repo-identity and data-governance keys the boot/register callers always own.
+# They are layered on top of stored per-repo overrides, so a stale or
+# hand-edited stored value can never hijack repo identity or the CH-6 data-class
+# merge (#10658). Never replayed from ``RepoRecord.overrides``.
+_STRUCTURAL_OVERRIDE_KEYS = frozenset({"repo_root", "repo", "repo_data_class"})
 
 
 def _default_data_root_path() -> Path:
@@ -61,6 +68,55 @@ def apply_repo_config_overlay(
             object.__setattr__(config, key, _coerce_overlay_value(key, val))
 
 
+def valid_stored_overrides(overrides: Mapping[str, Any], slug: str) -> dict[str, Any]:
+    """Return the replayable subset of a repo's persisted ``overrides``.
+
+    Operator edits from ``PATCH /api/control/config?repo=X`` are persisted into
+    ``RepoRecord.overrides`` in ``repos.json`` (``repo_store.update_overrides``).
+    The boot restore / repo-register seams read them back through this filter so
+    an edit survives a restart (#10658). Each stored value is validated against
+    its ``HydraFlowConfig`` field's declared type **and** range constraints:
+
+    * Unknown keys and out-of-range / wrong-typed values are dropped with a
+      warning naming ``slug`` — ``repos.json`` is hand-editable and the schema
+      may narrow over time, so a single bad value degrades to that field's
+      default instead of raising and dropping the whole repo.
+    * Structural keys (``repo_root`` / ``repo`` / ``repo_data_class``) are never
+      replayed; the caller layers those on top so a stored value can never
+      hijack repo identity or the CH-6 data-class governance merge.
+
+    The returned keys are handed to ``load_runtime_config(overrides=...)``, so
+    they become *explicit* fields — matching #10657's precedence, they beat a
+    conflicting ``HYDRAFLOW_*`` env var, while a field with no stored edit still
+    lets the env var win.
+    """
+    model_fields = HydraFlowConfig.model_fields
+    valid: dict[str, Any] = {}
+    for key, value in overrides.items():
+        if key in _STRUCTURAL_OVERRIDE_KEYS:
+            continue
+        field_info = model_fields.get(key)
+        if field_info is None:
+            logger.warning("Ignoring unknown stored override %r for repo %s", key, slug)
+            continue
+        annotation = field_info.annotation
+        if field_info.metadata:
+            annotation = Annotated[(annotation, *field_info.metadata)]
+        try:
+            TypeAdapter(annotation).validate_python(value)
+        except ValidationError:
+            logger.warning(
+                "Ignoring invalid stored override %s=%r for repo %s; "
+                "falling back to the default",
+                key,
+                value,
+                slug,
+            )
+            continue
+        valid[key] = value
+    return valid
+
+
 def load_runtime_config(
     config_file: str | os.PathLike[str] | None = None,
     overrides: dict[str, Any] | None = None,
@@ -99,4 +155,5 @@ __all__ = [
     "DEFAULT_LOG_FILE",
     "apply_repo_config_overlay",
     "load_runtime_config",
+    "valid_stored_overrides",
 ]
