@@ -1,4 +1,4 @@
-"""s88 — credit exhaustion pauses the factory; clearing it resumes (#10570).
+"""s89 — credit exhaustion pauses the factory; clearing it resumes (#10570).
 
 Tier-2 sandbox scenario for the global credit-pause path. Before this scenario
 there was NO FakeLLM path in ``tests/sandbox_scenarios`` that could emit a
@@ -55,7 +55,7 @@ from datetime import UTC, datetime, timedelta
 
 from mockworld.seed import MockWorldSeed
 
-NAME = "s88_credit_pause_auto_resume"
+NAME = "s89_credit_pause_auto_resume"
 DESCRIPTION = (
     "FakeLLM weekly-limit signal → orchestrator pauses (credits_paused + "
     "SYSTEM_ALERT); clear-credit-pause control endpoint resumes the loops."
