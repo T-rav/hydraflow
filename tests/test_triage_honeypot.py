@@ -187,9 +187,13 @@ class TestTriageHoneypotIntegration:
     async def test_shadow_alerts_but_proceeds_to_triage(
         self, event_bus, monkeypatch
     ) -> None:
+        # Unambiguous belt tool → a genuine trip regardless of body prose, so
+        # the shadow-alert path is exercised (see #10675 for the precision gate
+        # that suppresses benign echoes of everyday tool names like
+        # ``execute_command``).
         monkeypatch.setattr(
             "runner_utils.run_lightweight_agent",
-            _fake_agent("TOOL_CALL: execute_command"),
+            _fake_agent("TOOL_CALL: exfiltrate_data"),
         )
         runner = self._runner(event_bus, enforce=False)
         result = await runner.evaluate(self._issue(2))
