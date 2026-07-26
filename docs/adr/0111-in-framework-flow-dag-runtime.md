@@ -110,6 +110,25 @@ every completed node. `tests/test_flows.py` and
 (checkpoint-per-node in order; fail-closed on node failure and unroutable gate;
 kill-switch halt; construction-time graph validation).
 
+**Adoption — flows are the default for new multi-step workers (P4, #10682).**
+With P1–P3 landed, five workers run on the primitive and are the reference
+implementations: the wiki-compilation worker (P1) and the implement, plan,
+review, and triage phases (P2 / P3a / P3b / P3c). A **new
+multi-step-with-verification worker starts as a `Flow`** rather than as a single
+agentic prompt or a hand-rolled retry/route loop — express the steps as typed
+nodes, the stop/route decisions as gated edges, and confine the LLM to actuator
+nodes. One-shot transforms that reason once and emit (transcript-summary,
+term-proposer, adr-review, triage-honeypot) stay prompts; a flow buys them
+nothing. The conversions succeeded without behaviour change because they
+**delegated**: each node body calls the existing step-method (it does not rewrite
+it), and every fail-closed early exit sets `state['_stop']` so one shared
+`_flow_stopped` edge skips to the terminal sink. `_build_implement_flow` is the
+canonical worked example; the copy-this playbook is
+`docs/methodology/flows-for-multi-step-workers.md`. Because each top-level
+orchestrator was re-expressed *in place* as a thin flow-builder+runner, the P4
+cleanup found no bespoke per-phase control code left to retire — the delegation
+design left nothing dead behind.
+
 ## Related
 
 - Epic #10682 — in-framework flows (decompose workers + phases).
