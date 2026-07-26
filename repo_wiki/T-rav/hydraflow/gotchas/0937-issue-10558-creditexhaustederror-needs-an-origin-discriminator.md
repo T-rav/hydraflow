@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10558
 source_phase: plan
 created_at: 2026-07-25T23:16:50.588337+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0940
 ---
 
 # CreditExhaustedError needs an origin discriminator (cli vs prose)

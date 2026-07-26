@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10558
 source_phase: plan
 created_at: 2026-07-25T23:16:50.588372+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0523
 ---
 
 # CREDIT_PROSE_SCAN=False marks runners that don't scan transcripts

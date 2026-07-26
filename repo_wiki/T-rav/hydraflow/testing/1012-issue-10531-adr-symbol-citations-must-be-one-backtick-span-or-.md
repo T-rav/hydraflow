@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10531
 source_phase: plan
 created_at: 2026-07-25T09:52:15.451007+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1015
 ---
 
 # ADR :Symbol citations must be one backtick span or the symbol set parses empty

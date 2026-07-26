@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10558
 source_phase: plan
 created_at: 2026-07-25T23:16:50.588377+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0940
 ---
 
 # Credit-pause regression suite to keep green when touching pause logic
