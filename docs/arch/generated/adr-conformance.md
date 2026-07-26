@@ -79,6 +79,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0104 | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py` |
 | ADR-0107 | decision-of-record | — |
+| ADR-0109 | enforced | `pytest:tests/test_ultra_review.py` |
 
 ## Check → ADRs it protects
 
@@ -181,6 +182,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_trust_fleet_anomaly_detectors.py` | ADR-0045 |
 | `pytest:tests/test_trust_fleet_sanity_loop.py` | ADR-0045 |
 | `pytest:tests/test_ubiquitous_language_drift.py` | ADR-0053 |
+| `pytest:tests/test_ultra_review.py` | ADR-0109 |
 | `pytest:tests/test_untrusted_text.py` | ADR-0092 |
 | `pytest:tests/test_visual_validation.py` | ADR-0016 |
 | `pytest:tests/test_wiki_corroboration.py` | ADR-0032 |
