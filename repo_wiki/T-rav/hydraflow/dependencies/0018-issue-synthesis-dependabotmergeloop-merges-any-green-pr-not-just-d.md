@@ -6,8 +6,8 @@ source_phase: synthesis
 created_at: 2026-07-25T02:47:14.123494+00:00
 status: superseded
 corroborations: 1
-supersedes: 0011,0012,0013,0014,0015
-superseded_by: 0022
+supersedes: 0012
+superseded_by: 0023
 ---
 
 # DependabotMergeLoop merges any green PR, not just Dependabot's

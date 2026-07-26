@@ -6,7 +6,7 @@ source_phase: synthesis
 created_at: 2026-07-26T00:53:24.582100+00:00
 status: active
 corroborations: 1
-supersedes: 0022,0023,0024,0025,0026
+supersedes: 0026
 ---
 
 # JsonlLedger split: AppendOnlyJsonlLedger base vs IdentifiedJsonlLedger dedup

@@ -671,6 +671,17 @@ class WikiEntry(BaseModel):
             "extra field on parse (issue #9936)."
         ),
     )
+    supersedes_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Ids of input entries this synthesized entry directly replaces, "
+            "as declared by the compiler LLM. Used by "
+            "WikiCompiler.compile_topic_tracked to build a topical "
+            "supersedes/superseded_by mapping instead of blanket-linking "
+            "every synthesized entry to every input entry (issue #10566). "
+            "Transient — not meaningful outside a single compile call."
+        ),
+    )
 
     @model_validator(mode="after")
     def _default_valid_from(self) -> WikiEntry:
@@ -1670,7 +1681,9 @@ class RepoWikiStore:
                     lines.append(
                         f"_Source: #{entry.source_issue} ({entry.source_type})_\n"
                     )
-                slim = entry.model_dump_json(exclude={"content", "valid_from"})
+                slim = entry.model_dump_json(
+                    exclude={"content", "valid_from", "supersedes_ids"}
+                )
                 lines.append(f"\n```json:entry\n{slim}\n```\n")
 
         topic_path.write_text("\n".join(lines))

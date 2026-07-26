@@ -6,7 +6,7 @@ source_phase: plan
 created_at: 2026-07-24T04:15:36.841870+00:00
 status: superseded
 corroborations: 1
-superseded_by: 0006
+superseded_by: 0008
 ---
 
 # Extend TrustFleetSanityLoop for new anomaly kinds instead of adding a loop
