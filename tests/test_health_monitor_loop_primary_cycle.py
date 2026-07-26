@@ -522,6 +522,8 @@ class TestDoWorkIntegration:
             "stale_item_count",
             "adjustments_made",
             "total_outcomes",
+            # Marks a full heavy-pass cycle vs a fast sweep-only cycle (#10652).
+            "heavy_pass",
         }
         assert expected_keys == set(result.keys())
 
@@ -593,6 +595,11 @@ class TestDoWorkIntegration:
         _write_outcomes(loop._outcomes_path, ["success"] + ["failure"] * 9)
 
         result1 = await loop._do_work()
+        # Force a second *heavy* pass: the first cycle stamped
+        # `_last_heavy_pass_ts`, so without this the next tick would be a fast
+        # sweep-only cycle (#10652) that never re-runs the adjustment logic
+        # this test exercises for idempotency.
+        loop._last_heavy_pass_ts = None
         result2 = await loop._do_work()
         assert result1["adjustments_made"] == 0
         assert result2["adjustments_made"] == 0
