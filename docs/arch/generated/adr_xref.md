@@ -117,6 +117,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0108 | `src.event_loop_watchdog`, `src.health_monitor_loop`, `src.issue_fetcher`, `src.issue_store`, `src.mockworld.fakes.fake_clock`, `src.mockworld.sandbox_main`, `src.models`, `src.phase_utils`, `src.retrospective_queue`, `src.subprocess_util` | — |
 | ADR-0109 | `src.agent_cli`, `src.exception_classify`, `src.ports`, `src.review_advisor`, `src.review_phase._phase`, `src.reviewer`, `src.ultra_review` | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | `src.base_runner`, `src.runner_utils`, `src.subprocess_util` | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
+| ADR-0111 | `src.flows.adapters`, `src.flows.flow` | `pytest:tests/test_flows.py` |
 
 ## Module → ADRs
 
@@ -188,6 +189,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.file_util` | ADR-0021 |
 | `src.fitness_scorecard_loop` | ADR-0093 |
 | `src.flake_tracker_loop` | ADR-0045 |
+| `src.flows.adapters` | ADR-0111 |
+| `src.flows.flow` | ADR-0111 |
 | `src.gate_activation_check` | ADR-0082 |
 | `src.gate_activator_loop` | ADR-0082 |
 | `src.github_cache_loop` | ADR-0076 |

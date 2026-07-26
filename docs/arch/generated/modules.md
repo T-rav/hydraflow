@@ -18,6 +18,7 @@ graph LR
     src_disturbance_detectors["src.disturbance.detectors"]
     src_erosion["src.erosion"]
     src_escape["src.escape"]
+    src_flows["src.flows"]
     src_intervention["src.intervention"]
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
