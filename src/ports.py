@@ -254,6 +254,10 @@ class PRPort(Protocol):
         """Remove *label* from a GitHub pull request (no-op if absent)."""
         ...
 
+    async def get_pr_labels(self, pr_number: int) -> list[str]:
+        """Return the label names carried by *pr_number*."""
+        ...
+
     async def swap_pipeline_labels(
         self,
         issue_number: int,

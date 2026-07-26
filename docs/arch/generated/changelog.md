@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `1ac9d57` — docs(arch): align functional_areas.yml loop grouping with the UI (#10554) (#10554) *(2026-07-25)*
 - `58b5cdc` — Fixes #10540, #10533: violation-based ADR citation conformance gate; retire activity-drift (#10547) (#10547) *(2026-07-25)*
 - `306cc57` — Fixes #10515: FakeIssueStore stamps HITL and merged snapshot entrie... (#10528) (#10528) *(2026-07-25)*
 - `585f69e` — Fixes #10509: Work Stream stage timeline: merged issues show HITL f... (#10529) (#10529) *(2026-07-25)*
@@ -583,10 +584,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W17
 
 - `7a0e225` — feat: CostBudgetWatcherLoop + PSH onboarding (multi-repo prereq) (#8450) (#8450) *(2026-04-26)*
-- `3738e3d` — feat(loop): PricingRefreshLoop — daily LiteLLM upstream-pricing refresh (#8449) (#8449) *(2026-04-26)*
-- `f07ec68` — feat(scaffold): scripts/scaffold_loop.py upgrade — atomic apply + 5-checkpoint patcher (#8448) (#8448) *(2026-04-26)*
-- `3f349d8` — feat(runners): BaseSubprocessRunner + AutoAgentRunner migration + Port↔Fake signature conformance (#8446) (#8446) *(2026-04-26)*
-- `3af8d25` — feat(infra): dark-factory infrastructure hardening — spec + plan + PR1 (ADR-0051 + pre-commit arch-check) (#8445) (#8445) *(2026-04-26)*
 
 
 <!-- arch:generated -->

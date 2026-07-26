@@ -1490,6 +1490,60 @@ class TestGetIssueLabels:
             await mgr.get_issue_labels(42)
 
 
+class TestGetPrLabels:
+    """#10567: PRManager.get_pr_labels returns PR-scoped label names."""
+
+    @pytest.mark.asyncio
+    async def test_parses_newline_separated_names(self, config, event_bus):
+        mgr = make_pr_manager(config, event_bus)
+        mock_create = (
+            SubprocessMockBuilder().with_stdout("needs-review\npriority-high\n").build()
+        )
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_pr_labels(521)
+
+        assert result == ["needs-review", "priority-high"]
+
+    @pytest.mark.asyncio
+    async def test_empty_output_returns_empty_list(self, config, event_bus):
+        mgr = make_pr_manager(config, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create):
+            result = await mgr.get_pr_labels(521)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_queries_labels_via_pr_view(self, config, event_bus):
+        mgr = make_pr_manager(config, event_bus)
+        mock_create = SubprocessMockBuilder().with_stdout("").build()
+
+        with patch("asyncio.create_subprocess_exec", mock_create) as m:
+            await mgr.get_pr_labels(99)
+
+        call_args = m.call_args[0]
+        assert "99" in call_args
+        assert "pr" in call_args
+        assert "view" in call_args
+        assert ".labels[].name" in call_args
+
+    @pytest.mark.asyncio
+    async def test_read_failure_propagates(self, config, event_bus):
+        """Errors are NOT swallowed so callers can fail-closed (mirrors #9575)."""
+        mgr = make_pr_manager(config, event_bus)
+        mock_create = (
+            SubprocessMockBuilder().with_returncode(1).with_stderr("gh boom").build()
+        )
+
+        with (
+            patch("asyncio.create_subprocess_exec", mock_create),
+            pytest.raises(RuntimeError),
+        ):
+            await mgr.get_pr_labels(521)
+
+
 # ---------------------------------------------------------------------------
 # try/except/raise wrapper removal (issue #6306)
 # ---------------------------------------------------------------------------
