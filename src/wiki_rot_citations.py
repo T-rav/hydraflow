@@ -69,16 +69,54 @@ class Cite:
         return ""
 
 
+# Documentation metavariables — placeholder symbol names that only ever
+# appear in *format-example* cites used to explain the cite grammar in prose
+# (``path.py:symbol``, ``src.module.Class``). They never name a real code
+# symbol. See :func:`_is_placeholder_cite` (#10595).
+_METAVAR_SYMBOLS: frozenset[str] = frozenset(
+    {"symbol", "some_symbol", "Class", "module"}
+)
+
+# Placeholder module tokens — illustrative paths that never name a real
+# source file. Paired with a metavariable symbol they form a self-referential
+# documentation example, not a broken cite (#10595).
+_PLACEHOLDER_MODULES: frozenset[str] = frozenset(
+    {"path.py", "path/to/file.py", "path/to/module.py", "src.module"}
+)
+
+
+def _is_placeholder_cite(module: str, symbol: str) -> bool:
+    """Return ``True`` iff ``module``/``symbol`` is a documentation placeholder.
+
+    The wiki entry that documents the rot detector itself explains the cite
+    grammar with the literal examples ``path.py:symbol`` (Style-A) and
+    ``src.module.Class`` (Style-B). ``extract_cites`` used to emit both as
+    real cites; neither can ever resolve, so ``WikiRotDetectorLoop`` reported
+    its own docs as rotten forever and escalated them — a permanent
+    self-referential false-positive class (#10595).
+
+    A cite is a placeholder only when it pairs a placeholder module token with
+    a metavariable symbol — the ``AND`` keeps genuine broken cites reported: a
+    real-looking module with a metavariable-shaped symbol (``real.py:Class``),
+    or a placeholder module with a real symbol (``path.py:handle``), still
+    surfaces.
+    """
+    return module in _PLACEHOLDER_MODULES and symbol in _METAVAR_SYMBOLS
+
+
 def extract_cites(text: str) -> list[Cite]:
     """Extract Style-A + Style-B hard cites from arbitrary markdown/prose.
 
     Deduplicated by ``(module, symbol, style)``.  Fenced-code hints
     (Style-C) are **excluded** — see :func:`extract_fenced_hints`.
+    Documentation placeholder cites (:func:`_is_placeholder_cite`) are
+    likewise excluded so the detector never flags its own format examples.
     """
     seen: set[tuple[str, str, str]] = set()
     out: list[Cite] = []
 
     for m in _STYLE_A_RE.finditer(text):
+        module = m.group(1)
         symbol = m.group(2)
         # A purely-numeric tail (``path.py:141``) is a *line reference*, not
         # a symbol cite. ``\w+`` in ``_STYLE_A_RE`` matches digits, so these
@@ -88,13 +126,13 @@ def extract_cites(text: str) -> list[Cite]:
         # them here; genuine ``path.py:Symbol`` tails are unaffected.
         if symbol.isdigit():
             continue
-        key = (m.group(1), symbol, "colon")
+        if _is_placeholder_cite(module, symbol):
+            continue
+        key = (module, symbol, "colon")
         if key in seen:
             continue
         seen.add(key)
-        out.append(
-            Cite(module=m.group(1), symbol=symbol, style="colon", raw=m.group(0))
-        )
+        out.append(Cite(module=module, symbol=symbol, style="colon", raw=m.group(0)))
 
     for m in _STYLE_B_RE.finditer(text):
         path = m.group(1)
@@ -107,6 +145,8 @@ def extract_cites(text: str) -> list[Cite]:
         # identifier char — some prose ends in ``src.foo.`` (trailing dot)
         # which the `\b` anchor does not catch.
         if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", symbol):
+            continue
+        if _is_placeholder_cite(module, symbol):
             continue
         key = (module, symbol, "dotted")
         if key in seen:
