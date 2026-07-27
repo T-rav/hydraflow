@@ -70,7 +70,7 @@ class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
         self,
         escape_id: str,
         *,
-        encoded_as: EncodedAs,
+        encoded_as: EncodedAs | None = None,
         attribution_confidence: str | None = None,
         notes: str | None = None,
     ) -> EscapeRecord | None:
@@ -78,8 +78,11 @@ class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
 
         Builds the new row from the latest existing row for *escape_id*,
         carrying forward every detection/attribution field and overriding
-        only the human-decided terminal fields — the original line on disk
-        is never touched, only a new one is appended.
+        only the human-decided terminal fields that are actually supplied —
+        the original line on disk is never touched, only a new one is
+        appended. ``encoded_as`` is optional (#10747): a human may confirm
+        ``attribution_confidence`` alone without yet naming an encoding, in
+        which case the prior row's ``encoded_as`` carries forward untouched.
 
         The lookup runs against the id-collapsed view (``latest_by_id``), not
         the escape-collapsed ``read_latest``: resolution is keyed by the exact
@@ -92,7 +95,9 @@ class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
         )
         if original is None:
             return None
-        overrides: dict[str, object] = {"encoded_as": encoded_as}
+        overrides: dict[str, object] = {}
+        if encoded_as is not None:
+            overrides["encoded_as"] = encoded_as
         if attribution_confidence is not None:
             overrides["attribution_confidence"] = attribution_confidence
         if notes is not None:

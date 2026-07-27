@@ -134,6 +134,35 @@ _SURFACE_REASON_TEXT = {
     SURFACE_REASON_AGING: "unencoded escape has aged past the encoding threshold",
 }
 
+# Reason-scoped "Record the resolution" remediation blocks (#10747). Each is
+# the answer to its OWN _surfacing_answered predicate: a low-confidence surface
+# is answered by bumping attribution_confidence off "low" (--confidence),
+# never by --encoded-as alone, so the two reasons must not share one body.
+# Key-parity with _SURFACE_REASON_TEXT is enforced by
+# TestRenderFinding.test_remediation_map_has_same_keys_as_reason_text_map — a
+# new SURFACE_REASON_* needs an entry here too, or it silently falls back to
+# the aging instructions below.
+_SURFACE_REASON_REMEDIATION = {
+    SURFACE_REASON_LOW_CONFIDENCE: (
+        "Confirm the attribution with the operator CLI (#10574) — this "
+        "appends a resolution row so the low-confidence surface stops "
+        "re-firing and this issue is auto-closed on the next tick (#10577):\n\n"
+        "```\n"
+        'make escape-resolve ARGS="{id} --confidence '
+        "<high|medium> --notes '<why>'\"\n"
+        "```\n"
+    ),
+    SURFACE_REASON_AGING: (
+        "Point at the encoding with the operator CLI (#10574) — this appends "
+        "a resolution row so the aging surface stops re-firing and this "
+        "issue is auto-closed on the next tick (#10577):\n\n"
+        "```\n"
+        'make escape-resolve ARGS="{id} --encoded-as '
+        "<regression-test|stored-lesson|detector|adr> --notes '<why>'\"\n"
+        "```\n"
+    ),
+}
+
 
 def surfacing_fingerprint(escape_id: str, reason: str) -> str:
     """Stable dedup key for a filed HITL/find issue about one escape.
@@ -619,11 +648,17 @@ def _render_finding(record: EscapeRecord, reason: str) -> tuple[str, str]:
     *reason* is the surfacing criterion (``SURFACE_REASON_*``) that made the row
     eligible this tick; the title reflects it so an aging finding reads as aging
     even for a low-confidence row (issue #10503), rather than inferring the text
-    from ``attribution_confidence``.
+    from ``attribution_confidence``. The "Record the resolution" block is
+    likewise reason-selected (#10747): a low-confidence surface is answered by
+    ``--confidence``, an aging surface by ``--encoded-as`` — prescribing the
+    wrong one would leave the surface's own answered-predicate unsatisfied.
     """
     reason_text = _SURFACE_REASON_TEXT.get(
         reason, "unencoded escape has aged past the encoding threshold"
     )
+    remediation = _SURFACE_REASON_REMEDIATION.get(
+        reason, _SURFACE_REASON_REMEDIATION[SURFACE_REASON_AGING]
+    ).format(id=record.id)
     title = (
         f"Escape ledger: {record.detection_source} escape "
         f"`{record.detection_ref[:12]}` — {reason_text}"
@@ -648,13 +683,6 @@ def _render_finding(record: EscapeRecord, reason: str) -> tuple[str, str]:
         "confirm/complete the attribution (low confidence) or point at the "
         "encoding — regression test / stored lesson / detector / ADR — that "
         "should close it out.\n\n"
-        "### Record the resolution\n\n"
-        "Point at the encoding with the operator CLI (#10574) — this appends a "
-        "resolution row so the aging surface stops re-firing and this issue is "
-        "auto-closed on the next tick (#10577):\n\n"
-        "```\n"
-        f'make escape-resolve ARGS="{record.id} --encoded-as '
-        "<regression-test|stored-lesson|detector|adr> --notes '<why>'\"\n"
-        "```\n"
+        "### Record the resolution\n\n" + remediation
     )
     return title, body

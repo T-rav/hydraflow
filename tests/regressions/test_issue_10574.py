@@ -29,7 +29,9 @@ import pytest
 from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from escape.models import EscapeRecord
 from escape.resolve import (
+    InvalidConfidenceError,
     InvalidEncodingError,
+    NoResolutionFieldsError,
     UnknownEscapeIdError,
     default_ledger_path,
     list_unresolved,
@@ -166,6 +168,39 @@ class TestResolveEscapeService:
         with pytest.raises(UnknownEscapeIdError):
             resolve_escape("bug-issue:missing", "detector", ledger_path=ledger_path)
 
+    def test_resolve_escape_confidence_only_omits_encoded_as(
+        self, tmp_path: Path
+    ) -> None:
+        # A human may confirm attribution confidence alone, without yet
+        # pointing at an encoding — encoded_as carries forward (#10747).
+        ledger_path = tmp_path / ESCAPE_LEDGER_FILENAME
+        EscapeLedger(ledger_path).append(
+            _record("bug-issue:a", confidence="low", encoded_as="none-yet")
+        )
+
+        record = resolve_escape(
+            "bug-issue:a", ledger_path=ledger_path, attribution_confidence="medium"
+        )
+
+        assert record.attribution_confidence == "medium"
+        assert record.encoded_as == "none-yet"
+
+    def test_resolve_escape_raises_when_neither_field_given(
+        self, tmp_path: Path
+    ) -> None:
+        ledger_path = tmp_path / ESCAPE_LEDGER_FILENAME
+        EscapeLedger(ledger_path).append(_record("bug-issue:a"))
+        with pytest.raises(NoResolutionFieldsError):
+            resolve_escape("bug-issue:a", ledger_path=ledger_path)
+
+    def test_resolve_escape_rejects_invalid_confidence(self, tmp_path: Path) -> None:
+        ledger_path = tmp_path / ESCAPE_LEDGER_FILENAME
+        EscapeLedger(ledger_path).append(_record("bug-issue:a"))
+        with pytest.raises(InvalidConfidenceError):
+            resolve_escape(
+                "bug-issue:a", ledger_path=ledger_path, attribution_confidence="bogus"
+            )
+
     def test_list_unresolved_returns_only_none_yet_rows(self, tmp_path: Path) -> None:
         ledger_path = tmp_path / ESCAPE_LEDGER_FILENAME
         ledger = EscapeLedger(ledger_path)
@@ -201,6 +236,45 @@ class TestResolveEscapeCli:
         assert latest.encoded_as == "adr"
         assert latest.attribution_confidence == "high"
         assert latest.notes == "ADR-0060 covers this"
+
+    def test_cli_resolve_confidence_only_succeeds_without_encoded_as(
+        self, tmp_path: Path
+    ) -> None:
+        # #10747: a human confirming attribution confidence alone (no
+        # encoding yet) must be a valid CLI invocation.
+        cli = _load_cli()
+        ledger_path = tmp_path / ESCAPE_LEDGER_FILENAME
+        EscapeLedger(ledger_path).append(
+            _record("bug-issue:a", confidence="low", encoded_as="none-yet")
+        )
+
+        rc = cli.main(
+            [
+                "resolve",
+                "bug-issue:a",
+                "--confidence",
+                "medium",
+                "--ledger-path",
+                str(ledger_path),
+            ]
+        )
+
+        assert rc == 0
+        latest = EscapeLedger(ledger_path).read_latest()[0]
+        assert latest.attribution_confidence == "medium"
+        assert latest.encoded_as == "none-yet"
+
+    def test_cli_resolve_requires_encoded_as_or_confidence(
+        self, tmp_path: Path
+    ) -> None:
+        cli = _load_cli()
+        ledger_path = tmp_path / ESCAPE_LEDGER_FILENAME
+        EscapeLedger(ledger_path).append(_record("bug-issue:a"))
+
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main(["resolve", "bug-issue:a", "--ledger-path", str(ledger_path)])
+
+        assert exc_info.value.code == 2
 
     def test_cli_unknown_id_returns_nonzero(self, tmp_path: Path) -> None:
         cli = _load_cli()

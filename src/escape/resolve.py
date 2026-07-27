@@ -61,6 +61,15 @@ class UnknownEscapeIdError(EscapeResolveError):
     """No ledger row exists for the given *escape_id* — nothing to resolve."""
 
 
+class NoResolutionFieldsError(EscapeResolveError):
+    """Neither *encoded_as* nor *attribution_confidence* was supplied.
+
+    Both are optional individually (#10747 — a human may confirm confidence
+    alone, or point at an encoding alone), but a resolution naming NEITHER
+    would append a no-op row and silently leave the finding open.
+    """
+
+
 def default_ledger_path(config: HydraFlowConfig) -> Path:
     """The repo-scoped escape ledger path — the single source of truth (#10578).
 
@@ -74,7 +83,7 @@ def default_ledger_path(config: HydraFlowConfig) -> Path:
 
 def resolve_escape(
     escape_id: str,
-    encoded_as: str,
+    encoded_as: str | None = None,
     *,
     ledger_path: Path,
     attribution_confidence: str | None = None,
@@ -82,17 +91,29 @@ def resolve_escape(
 ) -> EscapeRecord:
     """Record a human resolution for *escape_id*, returning the new row.
 
-    Validates *encoded_as* against ``VALID_ENCODINGS`` (``none-yet`` is rejected
-    — it is the unresolved sentinel, not a selectable encoding) and the optional
-    *attribution_confidence* against ``VALID_CONFIDENCES`` BEFORE touching the
-    ledger, so a bad value never appends a garbage row. Then delegates to the
-    append-only ``EscapeLedger.append_resolution``: a NEW superseding row is
-    appended sharing the original id, never a rewrite.
+    *encoded_as* and *attribution_confidence* are each independently optional
+    (#10747) — a human may confirm attribution confidence alone (answering a
+    low-confidence surfacing without yet knowing the encoding), or point at an
+    encoding alone, but naming NEITHER would append a no-op row and silently
+    leave the finding open, so that combination is rejected up front.
 
-    Raises ``InvalidEncodingError`` / ``InvalidConfidenceError`` on bad input and
+    Validates *encoded_as* (when given) against ``VALID_ENCODINGS`` (``none-yet``
+    is rejected — it is the unresolved sentinel, not a selectable encoding) and
+    *attribution_confidence* (when given) against ``VALID_CONFIDENCES`` BEFORE
+    touching the ledger, so a bad value never appends a garbage row. Then
+    delegates to the append-only ``EscapeLedger.append_resolution``: a NEW
+    superseding row is appended sharing the original id, never a rewrite.
+
+    Raises ``NoResolutionFieldsError`` when neither field is given,
+    ``InvalidEncodingError`` / ``InvalidConfidenceError`` on bad input, and
     ``UnknownEscapeIdError`` when no row exists for *escape_id*.
     """
-    if encoded_as not in VALID_ENCODINGS:
+    if encoded_as is None and attribution_confidence is None:
+        raise NoResolutionFieldsError(
+            "at least one of encoded_as or attribution_confidence must be "
+            "given — naming neither would record nothing"
+        )
+    if encoded_as is not None and encoded_as not in VALID_ENCODINGS:
         raise InvalidEncodingError(
             f"encoded_as must be one of {', '.join(VALID_ENCODINGS)} "
             f"(got {encoded_as!r}); 'none-yet' is the unresolved sentinel, "

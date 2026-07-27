@@ -413,3 +413,63 @@ class TestEscapeLedgerScenario:
 
         issue = github._issues[link.issue_number]
         assert issue.state == "closed"
+
+    async def test_confidence_only_resolution_closes_low_confidence_surfaced_issue(
+        self, tmp_path: Path
+    ) -> None:
+        # #10747: an operator confirming attribution confidence ALONE (via the
+        # operator service, no --encoded-as) must answer the low-confidence
+        # surface end-to-end — the exact HITL path this issue's finding named.
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        state = _make_state(_head(repo))
+        loop = _build_loop(tmp_path, repo, github, state)
+
+        from datetime import UTC, datetime
+
+        from escape.ledger import EscapeLedger
+        from escape.models import EscapeRecord
+        from escape.resolve import resolve_escape
+        from escape.surfaces import SurfacedIssueLedger
+
+        fresh = datetime.now(UTC).isoformat()  # not aged => only the LOW surface
+        ledger = EscapeLedger(loop._ledger_path)
+        ledger.append(
+            EscapeRecord(
+                id="hotfix:4702cf9",
+                detected_at=fresh,
+                detection_source="hotfix",
+                detection_ref="4702cf9",
+                originating_pr=None,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="blame-intersect",
+                attribution_confidence="low",
+                encoded_as="none-yet",
+                notes="",
+            )
+        )
+
+        filed, _capped = await loop._surface_findings()
+        assert filed == 1
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert link.reason == "low-confidence"
+
+        # Operator confirms confidence via the service, WITHOUT naming an
+        # encoding — the encoding is still unknown.
+        resolved = resolve_escape(
+            "hotfix:4702cf9",
+            ledger_path=loop._ledger_path,
+            attribution_confidence="medium",
+            notes="attribution confirmed via blame",
+        )
+        assert resolved.encoded_as == "none-yet"
+
+        result = await loop._do_work()
+        assert result["status"] == "no_new_commits"
+        assert result["closed"] == 1
+
+        issue = github._issues[link.issue_number]
+        assert issue.state == "closed"

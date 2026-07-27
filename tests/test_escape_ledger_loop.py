@@ -20,6 +20,8 @@ from escape.ledger import EscapeLedger
 from escape.models import EscapeRecord
 from escape.surfaces import SurfacedIssue, SurfacedIssueLedger
 from escape_ledger_loop import (
+    _SURFACE_REASON_REMEDIATION,
+    _SURFACE_REASON_TEXT,
     SURFACE_REASON_AGING,
     SURFACE_REASON_LOW_CONFIDENCE,
     EscapeLedgerLoop,
@@ -330,6 +332,31 @@ class TestRenderFinding:
         record = _record("bug-issue:y", confidence="low", encoded_as="none-yet")
         title, _body = _render_finding(record, SURFACE_REASON_AGING)
         assert "aged past the encoding threshold" in title
+
+    def test_low_confidence_body_prescribes_confidence_not_encoding(self) -> None:
+        # #10747: the low-confidence remediation must name --confidence — the
+        # field that actually answers _surfacing_answered's low-confidence
+        # predicate — not just the --encoded-as form the aging surface uses.
+        record = _record("bug-issue:z", confidence="low", encoded_as="none-yet")
+        _title, body = _render_finding(record, SURFACE_REASON_LOW_CONFIDENCE)
+        assert "make escape-resolve" in body
+        assert "--confidence" in body
+        assert "bug-issue:z" in body
+        assert "<regression-test|stored-lesson|detector|adr>" not in body
+
+    def test_aging_body_still_prescribes_encoded_as(self) -> None:
+        # The aging surface's remediation is unchanged by the low-confidence
+        # addition — it still needs an encoding to stop re-firing.
+        record = _record("bug-issue:z", confidence="high", encoded_as="none-yet")
+        _title, body = _render_finding(record, SURFACE_REASON_AGING)
+        assert "--encoded-as" in body
+        assert "<regression-test|stored-lesson|detector|adr>" in body
+
+    def test_remediation_map_has_same_keys_as_reason_text_map(self) -> None:
+        # Key-parity: every SURFACE_REASON_* covered by the title map must
+        # also have a remediation block, or a new reason silently falls back
+        # to the wrong (aging) instructions.
+        assert set(_SURFACE_REASON_REMEDIATION) == set(_SURFACE_REASON_TEXT)
 
 
 class TestFindingRateBudget:

@@ -739,9 +739,10 @@ audit-prompts: ## Render all prompt fixtures, score against the rubric, regenera
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/audit_prompts.py
 
 # --------------------------------------------------------------------------
-# Escape ledger — operator resolution (#10574)
+# Escape ledger — operator resolution (#10574, #10747)
 #   make escape-list                                                   # unresolved escapes
 #   make escape-resolve ARGS="bug-issue:9196f74 --encoded-as regression-test --notes '...'"
+#   make escape-resolve ARGS="bug-issue:9196f74 --confidence medium --notes '...'"  # confidence-only
 # --------------------------------------------------------------------------
 .PHONY: escape-list escape-resolve
 escape-list: ## List escape-ledger findings still awaiting a human resolution.
