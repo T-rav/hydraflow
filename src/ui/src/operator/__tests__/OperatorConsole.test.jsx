@@ -73,7 +73,11 @@ describe('OperatorConsoleView — shell', () => {
   it('renders placeholder children for the not-yet-built components', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     expect(screen.getByTestId('item-workspace-placeholder')).toBeInTheDocument()
-    expect(screen.getByTestId('activity-drawer-placeholder')).toBeInTheDocument()
+  })
+
+  it('mounts the real ActivityDrawer in the drawer slot (Task 7)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    expect(screen.getByTestId('activity-drawer')).toBeInTheDocument()
   })
 
   it('wires the real VitalsCard into the vitals slot (Task 6)', () => {
