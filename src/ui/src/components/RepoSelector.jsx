@@ -4,7 +4,7 @@ import { canonicalRepoSlug, REPO_ALL } from '../constants'
 import { theme } from '../theme'
 import { borderSides } from '../styles/borders'
 
-function buildDisplayName(repo) {
+export function buildDisplayName(repo) {
   if (repo.full_name) return repo.full_name
   if (repo.slug) return repo.slug
   if (repo.repo) return repo.repo

@@ -109,4 +109,53 @@ describe('OperatorConsoleView — shell', () => {
     // The rail always renders the six canonical stages, even with no data.
     expect(container.querySelectorAll('[data-testid^="stage-tile-"]')).toHaveLength(6)
   })
+
+  // --- Task 9: multi-repo overview + switcher drill ---------------------------
+
+  // A multi-repo aggregate fixture: two supervised repos + a repo-tagged pipeline
+  // snapshot, shaped like the repo=__all__ context value.
+  function makeMultiRepoSocket(overrides = {}) {
+    return makeSocket({
+      supervisedRepos: [
+        { slug: 'acme/app', running: true },
+        { slug: 'acme/lib', running: false },
+      ],
+      runtimes: [{ slug: 'acme/app', running: true }],
+      pipelineIssues: {
+        triage: [{ issue_number: 1, title: 'T', status: 'queued', repo: 'acme-app' }],
+        plan: [], implement: [], review: [],
+        hitl: [{ issue_number: 9, title: 'Stuck', status: 'hitl', repo: 'acme-lib' }],
+        merged: [],
+      },
+      ...overrides,
+    })
+  }
+
+  it('shows the RepoOverview portfolio and the RepoSwitcher for a multi-repo install with no repo selected', () => {
+    render(<OperatorConsoleView socket={makeMultiRepoSocket()} />)
+    expect(screen.getByTestId('repo-overview')).toBeInTheDocument()
+    expect(screen.getByTestId('repo-row-acme/app')).toBeInTheDocument()
+    expect(screen.getByTestId('repo-row-acme/lib')).toBeInTheDocument()
+    expect(screen.getByTestId('repo-switcher-trigger')).toBeInTheDocument()
+    // The overview replaces the pipeline hero until a repo is drilled into.
+    expect(screen.queryByTestId('pipeline-rail')).toBeNull()
+  })
+
+  it('drills to the pipeline (and hides the overview) once a repo is selected', () => {
+    window.history.replaceState({}, '', '/?repo=acme%2Fapp')
+    render(<OperatorConsoleView socket={makeMultiRepoSocket()} />)
+    expect(screen.queryByTestId('repo-overview')).toBeNull()
+    expect(screen.getByTestId('pipeline-rail')).toBeInTheDocument()
+    // The switcher stays available for a sideways jump.
+    expect(screen.getByTestId('repo-switcher-trigger')).toBeInTheDocument()
+  })
+
+  it('shows the pipeline directly (no overview / switcher) for a single-repo install', () => {
+    render(<OperatorConsoleView socket={makeMultiRepoSocket({
+      supervisedRepos: [{ slug: 'acme/app', running: true }],
+    })} />)
+    expect(screen.queryByTestId('repo-overview')).toBeNull()
+    expect(screen.queryByTestId('repo-switcher-trigger')).toBeNull()
+    expect(screen.getByTestId('pipeline-rail')).toBeInTheDocument()
+  })
 })
