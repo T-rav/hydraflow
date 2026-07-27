@@ -93,7 +93,9 @@ describe('OperatorConsoleView — shell', () => {
     })} />)
     const vitalsSlot = screen.getByTestId('operator-vitals-slot')
     expect(vitalsSlot).toContainElement(screen.getByTestId('loops-panel'))
-    expect(screen.getByTestId('loop-row-ci_monitor')).toBeInTheDocument()
+    // Categories start collapsed; the ci_monitor loop flowing through groups it
+    // under its Repo Health category header (rows appear once expanded).
+    expect(screen.getByTestId('loops-category-toggle-repo_health')).toBeInTheDocument()
   })
 
   it('mounts the real PipelineRail in the pipeline slot (Task 3)', () => {

@@ -24,7 +24,7 @@
  * `useTokens()` — no inline literals, no hardcoded hex.
  */
 
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useHydraFlowSocket } from '../hooks/useHydraFlowSocket'
 import { ThemeProvider, useTokens } from '../styles/primitives'
 import { useThemeMode } from './useThemeMode'
@@ -36,8 +36,13 @@ import { toTranscript } from './model/transcript'
 import { toVitals } from './model/vitals'
 import { toActivityFeed } from './model/activity'
 import { toLoops } from './model/loops'
+import { toReleasePromotion } from './model/release'
+import { toSettingsSummary } from './model/settingsSummary'
 import { VitalsCard } from './VitalsCard'
 import { LoopsPanel } from './LoopsPanel'
+import { ReleasePromotionStrip } from './ReleasePromotionStrip'
+import { SettingsSummary } from './SettingsSummary'
+import { SettingsDrawer } from './SettingsDrawer'
 import { ActivityDrawer } from './ActivityDrawer'
 import { RepoOverview, buildRepoSummaries } from './RepoOverview'
 import { RepoSwitcher } from './RepoSwitcher'
@@ -161,6 +166,16 @@ export function OperatorConsoleView({ socket = {} }) {
     () => toLoops(socket.backgroundWorkers, { events }),
     [socket.backgroundWorkers, events],
   )
+  // Release Promotion (staging<->main, ADR-0042) — a distinct concern from the
+  // workflow pipeline and the background loops; its own strip near the pipeline.
+  const release = useMemo(
+    () => toReleasePromotion(socket.stagingPromotion, { backgroundWorkers: socket.backgroundWorkers }),
+    [socket.stagingPromotion, socket.backgroundWorkers],
+  )
+  // Settings at-a-glance (key runtime config) + a drawer that reuses the classic
+  // System tab for the full configuration surface.
+  const settings = useMemo(() => toSettingsSummary(socket.config), [socket.config])
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // --- State-screen signals (Task 10) --------------------------------------
   // `disconnected` is surfaced additively by useHydraFlowSocket (connected===false).
@@ -214,6 +229,7 @@ export function OperatorConsoleView({ socket = {} }) {
               ) : (
                 <PipelineRail pipeline={pipeline} select={select} stage={stage} />
               )}
+              {!showOverview && <ReleasePromotionStrip release={release} />}
             </div>
             <div data-testid="operator-detail-slot" style={styles.slot('detail')}>
               <ModeToggle mode={mode} select={select} styles={styles} />
@@ -228,12 +244,14 @@ export function OperatorConsoleView({ socket = {} }) {
             <div data-testid="operator-vitals-slot" style={styles.vitalsSlot}>
               <VitalsCard vitals={vitals} />
               <LoopsPanel loops={loops} />
+              <SettingsSummary summary={settings} onOpenSettings={() => setSettingsOpen(true)} />
             </div>
             <div data-testid="operator-drawer-slot" style={styles.slot('drawer')}>
               <ActivityDrawer activity={activity} select={select} />
             </div>
           </div>
         )}
+        <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
     </ThemeProvider>
   )
