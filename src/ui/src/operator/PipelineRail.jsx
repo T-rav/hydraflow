@@ -15,181 +15,140 @@
  * The chip buttons are siblings of the tile-header button (not nested), so a
  * chip click never also triggers the stage selection.
  *
- * Presentation only — no socket, no side effects. Styling uses the shared
- * `theme` CSS-variable references so the dark/light paths and the Phase-2 token
- * migration keep working.
+ * Presentation only — no socket, no side effects. Phase-2 (Task 12) styles the
+ * tile surface with the `Card` primitive, the attention markers with `Badge`,
+ * and every colour / space value from `useTokens()` — light + dark resolve from
+ * the console's ThemeProvider mode, no hardcoded literals.
  */
 
 import React from 'react'
-import { theme } from '../theme'
+import { useTokens, Card, Badge, Text } from '../styles/primitives'
 
-const styles = {
-  rail: {
-    display: 'flex',
-    alignItems: 'stretch',
-    gap: 8,
-    overflowX: 'auto',
-    padding: '4px 2px',
-    minWidth: 0,
-  },
-  tile: {
-    flex: '1 1 0',
-    minWidth: 120,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
-    border: `1px solid ${theme.border}`,
-    borderRadius: 8,
-    background: theme.surface,
-    padding: 8,
-    boxSizing: 'border-box',
-  },
-  header: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-    alignItems: 'flex-start',
-    width: '100%',
-    textAlign: 'left',
-    border: 'none',
-    background: 'transparent',
-    color: theme.text,
-    cursor: 'pointer',
-    padding: 0,
-    font: 'inherit',
-  },
-  labelRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    width: '100%',
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    color: theme.textMuted,
-  },
-  count: {
-    fontSize: 22,
-    fontWeight: 700,
-    lineHeight: 1,
-    color: theme.textBright,
-  },
-  slots: {
-    fontSize: 10,
-    color: theme.textMuted,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  badge: {
-    marginLeft: 'auto',
-    borderRadius: 10,
-    padding: '1px 7px',
-    fontSize: 10,
-    fontWeight: 700,
-    lineHeight: 1.6,
-    whiteSpace: 'nowrap',
-  },
-  hitlBadge: {
-    background: theme.orange,
-    color: theme.bg,
-  },
-  failedBadge: {
-    background: theme.red,
-    color: theme.white,
-  },
-  chips: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 4,
-  },
-  chip: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    maxWidth: '100%',
-    border: `1px solid ${theme.border}`,
-    borderRadius: 6,
-    background: theme.surfaceInset,
-    color: theme.text,
-    cursor: 'pointer',
-    padding: '2px 6px',
-    fontSize: 10,
-    font: 'inherit',
-    fontWeight: 500,
-    lineHeight: 1.4,
-  },
-  chipId: {
-    color: theme.textMuted,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  chipTitle: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: 90,
-  },
-  itemFailedDot: {
-    display: 'inline-block',
-    width: 6,
-    height: 6,
-    borderRadius: '50%',
-    background: theme.red,
-    flexShrink: 0,
-  },
+function makeStyles(t) {
+  return {
+    rail: {
+      display: 'flex',
+      alignItems: 'stretch',
+      gap: t.space.sm,
+      overflowX: 'auto',
+      padding: `${t.space.xs}px ${t.space.xxs}px`,
+      minWidth: 0,
+    },
+    tile: {
+      flex: '1 1 0',
+      minWidth: 120,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: t.space.xs,
+      padding: t.space.sm,
+      boxSizing: 'border-box',
+    },
+    header: (active) => ({
+      display: 'flex',
+      flexDirection: 'column',
+      gap: t.space.xs,
+      alignItems: 'flex-start',
+      width: '100%',
+      textAlign: 'left',
+      border: 'none',
+      background: 'transparent',
+      color: active ? t.color.accent : t.color.text,
+      cursor: 'pointer',
+      padding: 0,
+      font: 'inherit',
+    }),
+    labelRow: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.xs,
+      width: '100%',
+    },
+    badgeShift: (shift) => ({ marginLeft: shift }),
+    chips: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: t.space.xs,
+    },
+    chip: (failed) => ({
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: t.space.xs,
+      maxWidth: '100%',
+      border: `1px solid ${failed ? t.color.red : t.color.border}`,
+      borderRadius: t.radius.md,
+      background: t.color.surfaceInset,
+      color: t.color.text,
+      cursor: 'pointer',
+      padding: `${t.space.xxs}px ${t.space.xs}px`,
+      fontSize: t.type.size.xs,
+      font: 'inherit',
+      fontWeight: t.type.weight.medium,
+      lineHeight: 1.4,
+    }),
+    chipTitle: {
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      maxWidth: 90,
+    },
+    itemFailedDot: {
+      display: 'inline-block',
+      width: 6,
+      height: 6,
+      borderRadius: t.radius.pill,
+      background: t.color.red,
+      flexShrink: 0,
+    },
+    labelText: { letterSpacing: t.type.tracking.wide },
+    count: { fontSize: t.type.size.xl, lineHeight: 1 },
+  }
 }
 
-function StageTile({ stage, select, active }) {
+function StageTile({ styles, stage, select, active }) {
   const { key, label, count, slots, items, attention } = stage
   const showHitl = attention?.hitl > 0
   const showFailed = attention?.failed > 0
 
   return (
-    <div style={styles.tile} data-testid={`stage-card-${key}`}>
+    <Card as="div" style={styles.tile} data-testid={`stage-card-${key}`}>
       <button
         type="button"
         data-testid={`stage-tile-${key}`}
         aria-pressed={active}
-        style={{
-          ...styles.header,
-          ...(active ? { color: theme.accent } : null),
-        }}
+        style={styles.header(active)}
         onClick={() => select('stage', key)}
       >
         <span style={styles.labelRow}>
-          <span style={styles.label}>{label}</span>
+          <Text size="xs" weight="bold" tone="muted" uppercase style={styles.labelText}>{label}</Text>
           {showHitl && (
-            <span
+            <Badge
+              tone="warning"
               data-testid={`stage-hitl-badge-${key}`}
               data-tone="attention"
-              style={{ ...styles.badge, ...styles.hitlBadge }}
+              style={styles.badgeShift('auto')}
             >
               {attention.hitl}
-            </span>
+            </Badge>
           )}
           {showFailed && (
-            <span
+            <Badge
+              tone="danger"
               data-testid={`stage-failed-badge-${key}`}
               data-tone="danger"
-              style={{
-                ...styles.badge,
-                ...styles.failedBadge,
-                marginLeft: showHitl ? 4 : 'auto',
-              }}
+              style={styles.badgeShift(showHitl ? 4 : 'auto')}
             >
               {attention.failed}
-            </span>
+            </Badge>
           )}
         </span>
         <span style={styles.labelRow}>
-          <span data-testid={`stage-count-${key}`} style={styles.count}>
+          <Text as="span" size="xxl" weight="bold" tone="bright" data-testid={`stage-count-${key}`} style={styles.count}>
             {count}
-          </span>
+          </Text>
           {slots && (
-            <span data-testid={`stage-slots-${key}`} style={styles.slots}>
+            <Text as="span" size="xs" tone="muted" data-testid={`stage-slots-${key}`}>
               {slots.used}/{slots.cap ?? '∞'}
-            </span>
+            </Text>
           )}
         </span>
       </button>
@@ -204,10 +163,7 @@ function StageTile({ stage, select, active }) {
                 type="button"
                 data-testid={`item-chip-${item.id}`}
                 data-status={item.status}
-                style={{
-                  ...styles.chip,
-                  ...(failed ? { borderColor: theme.red } : null),
-                }}
+                style={styles.chip(failed)}
                 title={item.title}
                 onClick={() => select('item', item.id)}
               >
@@ -219,14 +175,14 @@ function StageTile({ stage, select, active }) {
                     style={styles.itemFailedDot}
                   />
                 )}
-                <span style={styles.chipId}>#{item.id}</span>
-                <span style={styles.chipTitle}>{item.title}</span>
+                <Text as="span" size="xs" tone="muted">#{item.id}</Text>
+                <Text as="span" size="xs" style={styles.chipTitle}>{item.title}</Text>
               </button>
             )
           })}
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -238,11 +194,13 @@ function StageTile({ stage, select, active }) {
  * }} props
  */
 export function PipelineRail({ pipeline = { stages: [] }, select = () => {}, stage = null }) {
+  const t = useTokens()
+  const styles = makeStyles(t)
   const stages = pipeline?.stages ?? []
   return (
     <div data-testid="pipeline-rail" style={styles.rail}>
       {stages.map(s => (
-        <StageTile key={s.key} stage={s} select={select} active={s.key === stage} />
+        <StageTile key={s.key} styles={styles} stage={s} select={select} active={s.key === stage} />
       ))}
     </div>
   )

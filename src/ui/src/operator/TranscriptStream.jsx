@@ -15,95 +15,89 @@
  *     something the operator needs to see.
  *
  * The stream auto-scrolls to the newest row as rows arrive. Presentation only —
- * no socket, no side effects; styling uses the shared `theme` CSS-variable
- * references so the dark/light paths keep working.
+ * no socket, no side effects. Phase-2 (Task 12): the container uses the `Card`
+ * primitive and every colour / space value resolves from `useTokens()`, so
+ * light + dark fall out of the console's ThemeProvider mode.
  */
 
 import React, { useEffect, useRef, useState } from 'react'
-import { theme } from '../theme'
+import { useTokens, Card } from '../styles/primitives'
 import { PULSE_ANIMATION } from '../constants'
 import { TranscriptRow } from '../components/StreamView'
 
-const styles = {
-  stream: {
-    display: 'flex',
-    flexDirection: 'column',
-    minWidth: 0,
-    border: `1px solid ${theme.border}`,
-    borderRadius: 8,
-    background: theme.surface,
-    overflow: 'hidden',
-  },
-  bar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '4px 8px',
-    borderBottom: `1px solid ${theme.border}`,
-  },
-  live: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    flexShrink: 0,
-    fontSize: 9,
-    fontWeight: 700,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    color: theme.green,
-  },
-  liveDot: {
-    display: 'inline-block',
-    width: 6,
-    height: 6,
-    borderRadius: '50%',
-    background: theme.green,
-    animation: PULSE_ANIMATION,
-  },
-  spacer: {
-    flex: '1 1 auto',
-  },
-  rawToggle: {
-    flexShrink: 0,
-    border: `1px solid ${theme.border}`,
-    borderRadius: 10,
-    background: theme.surfaceInset,
-    color: theme.textMuted,
-    cursor: 'pointer',
-    padding: '1px 8px',
-    font: 'inherit',
-    fontSize: 10,
-    fontWeight: 600,
-    lineHeight: 1.6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  rawToggleOn: {
-    background: theme.accent,
-    color: theme.bg,
-    borderColor: theme.accent,
-  },
-  body: {
-    overflowY: 'auto',
-    overflowX: 'hidden',
-    padding: '6px 8px',
-    maxHeight: 360,
-    minHeight: 0,
-  },
-  rawLine: {
-    fontFamily: 'monospace',
-    fontSize: 10,
-    color: theme.textMuted,
-    lineHeight: 1.5,
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-all',
-    padding: '1px 0',
-  },
-  empty: {
-    padding: '10px 2px',
-    fontSize: 12,
-    color: theme.textMuted,
-  },
+function makeStyles(t) {
+  return {
+    stream: {
+      display: 'flex',
+      flexDirection: 'column',
+      minWidth: 0,
+      padding: 0,
+      overflow: 'hidden',
+    },
+    bar: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.sm,
+      padding: `${t.space.xs}px ${t.space.sm}px`,
+      borderBottom: `1px solid ${t.color.border}`,
+    },
+    live: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: t.space.xs,
+      flexShrink: 0,
+      fontSize: t.type.size.xs,
+      fontWeight: t.type.weight.bold,
+      letterSpacing: t.type.tracking.wide,
+      textTransform: 'uppercase',
+      color: t.color.green,
+    },
+    liveDot: {
+      display: 'inline-block',
+      width: 6,
+      height: 6,
+      borderRadius: t.radius.pill,
+      background: t.color.green,
+      animation: PULSE_ANIMATION,
+    },
+    spacer: { flex: '1 1 auto' },
+    rawToggle: (on) => ({
+      flexShrink: 0,
+      border: `1px solid ${on ? t.color.accent : t.color.border}`,
+      borderRadius: t.radius.lg,
+      background: on ? t.color.accent : t.color.surfaceInset,
+      color: on ? t.color.bg : t.color.textMuted,
+      cursor: 'pointer',
+      padding: `1px ${t.space.sm}px`,
+      font: 'inherit',
+      fontSize: t.type.size.xs,
+      fontWeight: t.type.weight.semibold,
+      lineHeight: 1.6,
+      textTransform: 'uppercase',
+      letterSpacing: t.type.tracking.wide,
+    }),
+    body: {
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      padding: `${t.space.xs}px ${t.space.sm}px`,
+      maxHeight: 360,
+      minHeight: 0,
+    },
+    rawLine: {
+      fontFamily: t.type.family.mono,
+      fontSize: t.type.size.xs,
+      color: t.color.textMuted,
+      lineHeight: 1.5,
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-all',
+      padding: '1px 0',
+    },
+    empty: {
+      padding: `${t.space.md}px ${t.space.xxs}px`,
+      fontSize: t.type.size.sm,
+      color: t.color.textMuted,
+    },
+  }
 }
 
 /**
@@ -113,6 +107,8 @@ const styles = {
  * }} props
  */
 export function TranscriptStream({ rows = [], active = false }) {
+  const t = useTokens()
+  const styles = makeStyles(t)
   const [raw, setRaw] = useState(false)
   const scrollRef = useRef(null)
 
@@ -126,7 +122,7 @@ export function TranscriptStream({ rows = [], active = false }) {
   const hasRows = rows.length > 0
 
   return (
-    <div data-testid="transcript-stream" style={styles.stream}>
+    <Card as="div" data-testid="transcript-stream" style={styles.stream}>
       <div style={styles.bar}>
         {active && (
           <span data-testid="transcript-live" style={styles.live}>
@@ -140,7 +136,7 @@ export function TranscriptStream({ rows = [], active = false }) {
           data-testid="transcript-raw-toggle"
           aria-pressed={raw}
           onClick={() => setRaw(v => !v)}
-          style={{ ...styles.rawToggle, ...(raw ? styles.rawToggleOn : null) }}
+          style={styles.rawToggle(raw)}
           title="Show the unparsed transcript lines"
         >
           raw
@@ -162,7 +158,7 @@ export function TranscriptStream({ rows = [], active = false }) {
           rows.map((r, i) => <TranscriptRow key={i} row={r} />)
         )}
       </div>
-    </div>
+    </Card>
   )
 }
 

@@ -35,12 +35,14 @@ const styles = {
   detail: { gridArea: 'detail', minHeight: 220, ...shimmer },
   vitals: { gridArea: 'vitals', minHeight: 340, ...shimmer },
   drawer: { gridArea: 'drawer', height: 56, ...shimmer },
+  // Visually-hidden live-region label (screen readers only).
+  srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' },
 }
 
 export function LoadingState() {
   return (
     <div data-testid="operator-loading-state" role="status" aria-busy="true" aria-live="polite" style={styles.grid}>
-      <span className="sr-only" style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
+      <span className="sr-only" style={styles.srOnly}>
         Loading operator console…
       </span>
       <div data-testid="operator-skeleton" style={styles.header} />

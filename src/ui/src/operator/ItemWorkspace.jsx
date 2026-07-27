@@ -19,12 +19,13 @@
  * Regression contract (#10556): a missing item id must NEVER render as a
  * `#undefined` header — the header is only drawn when `item` is truthy.
  *
- * Presentation only — no socket, no side effects; styling uses the shared
- * `theme` CSS-variable references so the dark/light paths keep working.
+ * Presentation only — no socket, no side effects. Phase-2 (Task 12): the tab
+ * panels use the `Card` primitive and every colour / space value resolves from
+ * `useTokens()`, so light + dark fall out of the console's ThemeProvider mode.
  */
 
 import React, { useMemo, useState } from 'react'
-import { theme } from '../theme'
+import { useTokens, Card, Text } from '../styles/primitives'
 import { TranscriptStream } from './TranscriptStream'
 import { toTimelineRows } from '../hooks/useTimeline'
 import { formatTranscriptTs } from '../components/StreamView'
@@ -36,143 +37,112 @@ const TABS = [
   { key: 'timeline', label: 'Timeline' },
 ]
 
-const styles = {
-  workspace: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8,
-    minWidth: 0,
-  },
-  head: {
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: 8,
-    minWidth: 0,
-  },
-  title: {
-    fontSize: 14,
-    fontWeight: 700,
-    color: theme.textBright,
-    fontVariantNumeric: 'tabular-nums',
-    flexShrink: 0,
-  },
-  titleMuted: {
-    fontSize: 12,
-    color: theme.textMuted,
-    flexShrink: 0,
-  },
-  mode: {
-    fontSize: 9,
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    color: theme.textMuted,
-    marginLeft: 'auto',
-    flexShrink: 0,
-  },
-  tabs: {
-    display: 'flex',
-    gap: 4,
-    minWidth: 0,
-    overflowX: 'auto',
-  },
-  tab: {
-    flexShrink: 0,
-    border: `1px solid ${theme.border}`,
-    borderRadius: 6,
-    background: theme.surfaceInset,
-    color: theme.textMuted,
-    cursor: 'pointer',
-    padding: '3px 10px',
-    font: 'inherit',
-    fontSize: 11,
-    fontWeight: 600,
-  },
-  tabActive: {
-    background: theme.accent,
-    color: theme.bg,
-    borderColor: theme.accent,
-  },
-  panel: {
-    minWidth: 0,
-  },
-  tabPanel: {
-    border: `1px solid ${theme.border}`,
-    borderRadius: 8,
-    background: theme.surface,
-    padding: '8px 10px',
-    fontSize: 12,
-    color: theme.text,
-    minWidth: 0,
-    maxHeight: 360,
-    overflowY: 'auto',
-  },
-  empty: {
-    fontSize: 12,
-    color: theme.textMuted,
-  },
-  diffRow: {
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: 8,
-    padding: '1px 0',
-    minWidth: 0,
-  },
-  diffTs: {
-    flexShrink: 0,
-    fontFamily: 'monospace',
-    fontSize: 10,
-    color: theme.textMuted,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  diffText: {
-    flex: '1 1 auto',
-    minWidth: 0,
-    color: theme.cyan,
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-  },
-  timelineRow: {
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: 8,
-    padding: '2px 0',
-    minWidth: 0,
-  },
-  timelineTs: {
-    flexShrink: 0,
-    fontFamily: 'monospace',
-    fontSize: 10,
-    color: theme.textMuted,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  timelineKind: {
-    flexShrink: 0,
-    width: 40,
-    fontSize: 9,
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    color: theme.text,
-  },
-  timelineCount: {
-    flexShrink: 0,
-    borderRadius: 8,
-    background: theme.surfaceInset,
-    color: theme.textMuted,
-    padding: '0 6px',
-    fontSize: 10,
-    fontWeight: 700,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  timelineText: {
-    flex: '1 1 auto',
-    minWidth: 0,
-    color: theme.textMuted,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
+function makeStyles(t) {
+  return {
+    workspace: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: t.space.sm,
+      minWidth: 0,
+    },
+    head: {
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: t.space.sm,
+      minWidth: 0,
+    },
+    title: { flexShrink: 0 },
+    mode: { marginLeft: 'auto', flexShrink: 0, letterSpacing: t.type.tracking.wide },
+    tabs: {
+      display: 'flex',
+      gap: t.space.xs,
+      minWidth: 0,
+      overflowX: 'auto',
+    },
+    tab: (active) => ({
+      flexShrink: 0,
+      border: `1px solid ${active ? t.color.accent : t.color.border}`,
+      borderRadius: t.radius.md,
+      background: active ? t.color.accent : t.color.surfaceInset,
+      color: active ? t.color.bg : t.color.textMuted,
+      cursor: 'pointer',
+      padding: `${t.space.xxs}px ${t.space.md}px`,
+      font: 'inherit',
+      fontSize: t.type.size.xs,
+      fontWeight: t.type.weight.semibold,
+    }),
+    panel: { minWidth: 0 },
+    tabPanel: {
+      padding: `${t.space.sm}px ${t.space.md}px`,
+      fontSize: t.type.size.sm,
+      color: t.color.text,
+      minWidth: 0,
+      maxHeight: 360,
+      overflowY: 'auto',
+    },
+    diffRow: {
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: t.space.sm,
+      padding: '1px 0',
+      minWidth: 0,
+    },
+    diffTs: {
+      flexShrink: 0,
+      fontFamily: t.type.family.mono,
+      fontSize: t.type.size.xs,
+      color: t.color.textMuted,
+      fontVariantNumeric: 'tabular-nums',
+    },
+    diffText: {
+      flex: '1 1 auto',
+      minWidth: 0,
+      color: t.color.cyan,
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+    },
+    timelineRow: {
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: t.space.sm,
+      padding: '2px 0',
+      minWidth: 0,
+    },
+    timelineTs: {
+      flexShrink: 0,
+      fontFamily: t.type.family.mono,
+      fontSize: t.type.size.xs,
+      color: t.color.textMuted,
+      fontVariantNumeric: 'tabular-nums',
+    },
+    timelineKind: {
+      flexShrink: 0,
+      width: 40,
+      fontSize: t.type.size.xs,
+      fontWeight: t.type.weight.bold,
+      textTransform: 'uppercase',
+      letterSpacing: t.type.tracking.wide,
+      color: t.color.text,
+    },
+    timelineCount: {
+      flexShrink: 0,
+      borderRadius: t.radius.lg,
+      background: t.color.surfaceInset,
+      color: t.color.textMuted,
+      padding: `0 ${t.space.xs}px`,
+      fontSize: t.type.size.xs,
+      fontWeight: t.type.weight.bold,
+      fontVariantNumeric: 'tabular-nums',
+    },
+    timelineText: {
+      flex: '1 1 auto',
+      minWidth: 0,
+      color: t.color.textMuted,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+  }
 }
 
 /**
@@ -184,6 +154,8 @@ const styles = {
  * }} props
  */
 export function ItemWorkspace({ item = null, transcript = [], mode = 'focus', active }) {
+  const t = useTokens()
+  const styles = makeStyles(t)
   const [tab, setTab] = useState('transcript')
 
   // The transcript is live when a specific item is focused; an explicit prop
@@ -209,27 +181,27 @@ export function ItemWorkspace({ item = null, transcript = [], mode = 'focus', ac
         {/* Guard the #undefined regression: only render the id header when an
             item is actually selected (#10556). */}
         {item != null && item !== '' ? (
-          <span data-testid="item-workspace-header" style={styles.title}>
+          <Text as="span" size="lg" weight="bold" tone="bright" data-testid="item-workspace-header" style={styles.title}>
             #{item}
-          </span>
+          </Text>
         ) : (
-          <span style={styles.titleMuted}>No item selected</span>
+          <Text as="span" size="sm" tone="muted" style={styles.title}>No item selected</Text>
         )}
-        <span style={styles.mode}>{mode}</span>
+        <Text as="span" size="xs" weight="semibold" tone="muted" uppercase style={styles.mode}>{mode}</Text>
       </div>
 
       <div role="tablist" aria-label="Item workspace" style={styles.tabs}>
-        {TABS.map(t => (
+        {TABS.map(tabDef => (
           <button
-            key={t.key}
+            key={tabDef.key}
             type="button"
             role="tab"
-            data-testid={`workspace-tab-${t.key}`}
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-            style={{ ...styles.tab, ...(tab === t.key ? styles.tabActive : null) }}
+            data-testid={`workspace-tab-${tabDef.key}`}
+            aria-selected={tab === tabDef.key}
+            onClick={() => setTab(tabDef.key)}
+            style={styles.tab(tab === tabDef.key)}
           >
-            {t.label}
+            {tabDef.label}
           </button>
         ))}
       </div>
@@ -240,9 +212,9 @@ export function ItemWorkspace({ item = null, transcript = [], mode = 'focus', ac
         )}
 
         {tab === 'diff' && (
-          <div data-testid="workspace-diff" style={styles.tabPanel}>
+          <Card as="div" data-testid="workspace-diff" style={styles.tabPanel}>
             {editRows.length === 0 ? (
-              <div style={styles.empty}>No file edits yet.</div>
+              <Text as="div" size="sm" tone="muted">No file edits yet.</Text>
             ) : (
               editRows.map((r, i) => (
                 <div key={i} data-testid="diff-row" style={styles.diffRow}>
@@ -251,19 +223,19 @@ export function ItemWorkspace({ item = null, transcript = [], mode = 'focus', ac
                 </div>
               ))
             )}
-          </div>
+          </Card>
         )}
 
         {tab === 'pr' && (
-          <div data-testid="workspace-pr" style={styles.tabPanel}>
+          <Card as="div" data-testid="workspace-pr" style={styles.tabPanel}>
             {prNumber != null ? `PR #${prNumber}` : 'No PR yet.'}
-          </div>
+          </Card>
         )}
 
         {tab === 'timeline' && (
-          <div data-testid="workspace-timeline" style={styles.tabPanel}>
+          <Card as="div" data-testid="workspace-timeline" style={styles.tabPanel}>
             {timeline.length === 0 ? (
-              <div style={styles.empty}>No activity yet.</div>
+              <Text as="div" size="sm" tone="muted">No activity yet.</Text>
             ) : (
               timeline.map((p, i) => (
                 <div key={i} data-testid="timeline-row" data-kind={p.kind} style={styles.timelineRow}>
@@ -274,7 +246,7 @@ export function ItemWorkspace({ item = null, transcript = [], mode = 'focus', ac
                 </div>
               ))
             )}
-          </div>
+          </Card>
         )}
       </div>
     </div>

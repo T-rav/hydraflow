@@ -16,10 +16,18 @@
  * `OperatorConsole` (default) binds the real socket hook. `OperatorConsoleView`
  * (named) is the presentational shell that takes an injected `socket` — the
  * seam that keeps the shell testable without a live provider/WebSocket.
+ *
+ * Phase-2 (Task 12): the shell wraps its subtree in a `ThemeProvider` whose
+ * mode follows the document's `data-theme` (`useThemeMode`), so every token/
+ * primitive descendant flips light ↔ dark off the same signal as the app's
+ * CSS-variable theme; and every colour / space value here resolves from
+ * `useTokens()` — no inline literals, no hardcoded hex.
  */
 
 import React, { useMemo } from 'react'
 import { useHydraFlowSocket } from '../hooks/useHydraFlowSocket'
+import { ThemeProvider, useTokens } from '../styles/primitives'
+import { useThemeMode } from './useThemeMode'
 import { useOperatorSelection } from './useOperatorSelection'
 import { ConsoleHeader } from './ConsoleHeader'
 import { PipelineRail } from './PipelineRail'
@@ -38,8 +46,6 @@ import { PausedState } from './states/PausedState'
 import { DisconnectedBanner } from './states/DisconnectedBanner'
 import { LoadingState } from './states/LoadingState'
 
-const slotStyle = { minWidth: 0 }
-
 // Active work sits in every stage except 'merged' (which is historical). An
 // idle repo has none of it — the calm IdleState replaces the detail workspace.
 function pipelineActiveCount(pipeline) {
@@ -53,39 +59,51 @@ const MODES = [
   { key: 'all-active', label: 'All active' },
 ]
 
-const modeToggleStyles = {
-  bar: {
-    display: 'flex',
-    gap: 4,
-    marginBottom: 8,
-  },
-  btn: {
-    border: '1px solid var(--border)',
-    borderRadius: 6,
-    background: 'var(--surface-inset)',
-    color: 'var(--text-muted)',
-    cursor: 'pointer',
-    padding: '3px 10px',
-    font: 'inherit',
-    fontSize: 11,
-    fontWeight: 600,
-  },
-  btnActive: {
-    background: 'var(--accent)',
-    color: 'var(--bg)',
-    borderColor: 'var(--accent)',
-  },
+function makeStyles(t) {
+  return {
+    root: {
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: '100%',
+      boxSizing: 'border-box',
+    },
+    pausedWrap: { padding: `${t.space.md}px ${t.space.md}px 0` },
+    grid: {
+      display: 'grid',
+      gridTemplateColumns: 'minmax(0, 1fr) 280px',
+      gridTemplateAreas: '"header header" "pipeline vitals" "detail vitals" "drawer drawer"',
+      gap: t.space.md,
+      padding: t.space.md,
+      boxSizing: 'border-box',
+      flex: 1,
+      minHeight: 0,
+    },
+    slot: (area) => ({ minWidth: 0, gridArea: area }),
+    switcherWrap: { marginBottom: t.space.sm },
+    toggleBar: { display: 'flex', gap: t.space.xs, marginBottom: t.space.sm },
+    toggleBtn: (active) => ({
+      border: `1px solid ${active ? t.color.accent : t.color.border}`,
+      borderRadius: t.radius.md,
+      background: active ? t.color.accent : t.color.surfaceInset,
+      color: active ? t.color.bg : t.color.textMuted,
+      cursor: 'pointer',
+      padding: `3px ${t.space.sm}px`,
+      font: 'inherit',
+      fontSize: t.type.size.xs,
+      fontWeight: t.type.weight.semibold,
+    }),
+  }
 }
 
 /**
  * Focus <-> All-active mode toggle (Task 5). A two-button segmented control;
  * each button calls `select('mode', key)`, which the selection hook mirrors
  * into the URL query (`?mode=all-active`; focus is the clean default).
- * @param {{ mode: string, select: Function }} props
+ * @param {{ mode: string, select: Function, styles: object }} props
  */
-function ModeToggle({ mode, select }) {
+function ModeToggle({ mode, select, styles }) {
   return (
-    <div data-testid="mode-toggle" role="group" aria-label="Detail mode" style={modeToggleStyles.bar}>
+    <div data-testid="mode-toggle" role="group" aria-label="Detail mode" style={styles.toggleBar}>
       {MODES.map(m => (
         <button
           key={m.key}
@@ -93,7 +111,7 @@ function ModeToggle({ mode, select }) {
           data-testid={`mode-toggle-${m.key}`}
           aria-pressed={mode === m.key}
           onClick={() => select('mode', m.key)}
-          style={{ ...modeToggleStyles.btn, ...(mode === m.key ? modeToggleStyles.btnActive : null) }}
+          style={styles.toggleBtn(mode === m.key)}
         >
           {m.label}
         </button>
@@ -108,6 +126,9 @@ function ModeToggle({ mode, select }) {
  * @param {{ socket: object }} props
  */
 export function OperatorConsoleView({ socket = {} }) {
+  const themeMode = useThemeMode()
+  const t = useTokens(themeMode)
+  const styles = makeStyles(t)
   const { repo, stage, item, mode, select, breadcrumb } = useOperatorSelection()
   const events = socket.events ?? []
 
@@ -145,78 +166,61 @@ export function OperatorConsoleView({ socket = {} }) {
   const onResume = socket.clearCreditPause || socket.startOrchestrator
 
   return (
-    <div
-      data-testid="operator-console"
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: '100%',
-        boxSizing: 'border-box',
-      }}
-    >
-      {disconnected && hasData && <DisconnectedBanner onRetry={socket.reconnect} />}
-      {paused && (
-        <div style={{ padding: '12px 12px 0' }}>
-          <PausedState reason={vitals?.factory?.reason} provider={vitals?.credits?.provider} onResume={onResume} />
-        </div>
-      )}
-      {loading ? (
-        <LoadingState />
-      ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) 280px',
-            gridTemplateAreas: '"header header" "pipeline vitals" "detail vitals" "drawer drawer"',
-            gap: 12,
-            padding: 12,
-            boxSizing: 'border-box',
-            flex: 1,
-            minHeight: 0,
-          }}
-        >
-      <div data-testid="operator-header-slot" style={{ ...slotStyle, gridArea: 'header' }}>
-        <ConsoleHeader
-          breadcrumb={breadcrumb}
-          select={select}
-          vitals={vitals}
-          connected={socket.connected}
-          onStart={socket.startOrchestrator}
-          onStop={socket.stopOrchestrator}
-          onClear={socket.clearCreditPause}
-        />
-      </div>
-      <div data-testid="operator-pipeline-slot" style={{ ...slotStyle, gridArea: 'pipeline' }}>
-        {multiRepo && (
-          <div style={{ marginBottom: 8 }}>
-            <RepoSwitcher repos={repos} current={repo} stage={stage} item={item} select={select} />
+    <ThemeProvider mode={themeMode}>
+      <div data-testid="operator-console" style={styles.root}>
+        {disconnected && hasData && <DisconnectedBanner onRetry={socket.reconnect} />}
+        {paused && (
+          <div style={styles.pausedWrap}>
+            <PausedState reason={vitals?.factory?.reason} provider={vitals?.credits?.provider} onResume={onResume} />
           </div>
         )}
-        {showOverview ? (
-          <RepoOverview repos={repos} select={select} />
+        {loading ? (
+          <LoadingState />
         ) : (
-          <PipelineRail pipeline={pipeline} select={select} stage={stage} />
+          <div style={styles.grid}>
+            <div data-testid="operator-header-slot" style={styles.slot('header')}>
+              <ConsoleHeader
+                breadcrumb={breadcrumb}
+                select={select}
+                vitals={vitals}
+                connected={socket.connected}
+                onStart={socket.startOrchestrator}
+                onStop={socket.stopOrchestrator}
+                onClear={socket.clearCreditPause}
+              />
+            </div>
+            <div data-testid="operator-pipeline-slot" style={styles.slot('pipeline')}>
+              {multiRepo && (
+                <div style={styles.switcherWrap}>
+                  <RepoSwitcher repos={repos} current={repo} stage={stage} item={item} select={select} />
+                </div>
+              )}
+              {showOverview ? (
+                <RepoOverview repos={repos} select={select} />
+              ) : (
+                <PipelineRail pipeline={pipeline} select={select} stage={stage} />
+              )}
+            </div>
+            <div data-testid="operator-detail-slot" style={styles.slot('detail')}>
+              <ModeToggle mode={mode} select={select} styles={styles} />
+              {idle ? (
+                <IdleState />
+              ) : mode === 'all-active' ? (
+                <ActiveGrid pipeline={pipeline} events={events} select={select} />
+              ) : (
+                <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
+              )}
+            </div>
+            <div data-testid="operator-vitals-slot" style={styles.slot('vitals')}>
+              <VitalsCard vitals={vitals} />
+            </div>
+            <div data-testid="operator-drawer-slot" style={styles.slot('drawer')}>
+              <ActivityDrawer activity={activity} select={select} />
+            </div>
+          </div>
         )}
       </div>
-      <div data-testid="operator-detail-slot" style={{ ...slotStyle, gridArea: 'detail' }}>
-        <ModeToggle mode={mode} select={select} />
-        {idle ? (
-          <IdleState />
-        ) : mode === 'all-active' ? (
-          <ActiveGrid pipeline={pipeline} events={events} select={select} />
-        ) : (
-          <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
-        )}
-      </div>
-      <div data-testid="operator-vitals-slot" style={{ ...slotStyle, gridArea: 'vitals' }}>
-        <VitalsCard vitals={vitals} />
-      </div>
-      <div data-testid="operator-drawer-slot" style={{ ...slotStyle, gridArea: 'drawer' }}>
-        <ActivityDrawer activity={activity} select={select} />
-      </div>
-        </div>
-      )}
-    </div>
+    </ThemeProvider>
   )
 }
 
