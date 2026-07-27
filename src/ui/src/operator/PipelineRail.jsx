@@ -24,8 +24,37 @@
 import React from 'react'
 import { useTokens, Card, Badge, Text } from '../styles/primitives'
 
+/**
+ * Derive a stage's health severity from its view model, precedence
+ * failed > hitl > flowing > idle:
+ *   - `attention.failed > 0` → 'bad'   (something in this stage errored)
+ *   - `attention.hitl > 0`   → 'warn'  (work is parked awaiting a human)
+ *   - `count > 0`            → 'ok'    (work is flowing through the stage)
+ *   - otherwise              → 'muted' (idle / empty)
+ */
+function stageSeverity(stage) {
+  const failed = stage?.attention?.failed ?? 0
+  const hitl = stage?.attention?.hitl ?? 0
+  const count = stage?.count ?? 0
+  if (failed > 0) return 'bad'
+  if (hitl > 0) return 'warn'
+  if (count > 0) return 'ok'
+  return 'muted'
+}
+
 function makeStyles(t) {
+  // Severity → token colour. Every value routes through the resolved token
+  // bundle (no hardcoded literal), so the bar flips with the theme mode:
+  // ok=green, warn=yellow (the same tone the HITL badge uses), bad=red,
+  // muted=border (a neutral idle line).
+  const severityColor = {
+    ok: t.color.green,
+    warn: t.color.yellow,
+    bad: t.color.red,
+    muted: t.color.border,
+  }
   return {
+    severityColor,
     rail: {
       display: 'flex',
       alignItems: 'stretch',
@@ -43,6 +72,19 @@ function makeStyles(t) {
       padding: t.space.sm,
       boxSizing: 'border-box',
     },
+    // A thin health bar full-bleed across the top of the tile. Negative margins
+    // (token-backed) pull it out to the card's padded edge; the top radius
+    // matches the Card so it hugs the rounded corners.
+    colorBar: (severity) => ({
+      height: 3,
+      marginTop: -t.space.sm,
+      marginLeft: -t.space.sm,
+      marginRight: -t.space.sm,
+      borderTopLeftRadius: t.radius.lg,
+      borderTopRightRadius: t.radius.lg,
+      background: severityColor[severity] ?? severityColor.muted,
+      flexShrink: 0,
+    }),
     header: (active) => ({
       display: 'flex',
       flexDirection: 'column',
@@ -108,9 +150,16 @@ function StageTile({ styles, stage, select, active }) {
   const { key, label, count, slots, items, attention } = stage
   const showHitl = attention?.hitl > 0
   const showFailed = attention?.failed > 0
+  const severity = stageSeverity(stage)
 
   return (
     <Card as="div" style={styles.tile} data-testid={`stage-card-${key}`}>
+      <div
+        data-testid={`stage-colorbar-${key}`}
+        data-severity={severity}
+        aria-hidden="true"
+        style={styles.colorBar(severity)}
+      />
       <button
         type="button"
         data-testid={`stage-tile-${key}`}
