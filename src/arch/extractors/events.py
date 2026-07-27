@@ -1,10 +1,12 @@
 """Extract EventBus publish/subscribe topology from src/.
 
-HydraFlow's ``EventBus`` is a **fan-out** bus: ``subscribe()`` / ``subscription()``
-take *no* event type and return a queue that receives *every* published event
-(``src/events.py``). Subscribers are therefore global — one queue drains the whole
-bus — not per-``EventType``. The lone real consumer is the dashboard WebSocket
-endpoint, which streams all events to the UI.
+HydraFlow's ``EventBus`` is a **fan-out** bus by default: an argless
+``subscribe()`` / ``subscription()`` returns a queue that receives *every*
+published event (``src/events.py``). Since ADR-0114 (#10660) the bus also
+supports an *optional* publish-time per-type filter — ``subscribe(types=...)``
+/ ``subscription(types=...)`` — so a consumer's queue only receives the
+``EventType`` s it asked for. Both shapes coexist: an untyped call is a global
+(fan-out) subscriber; a ``types=``-carrying call is a typed subscriber.
 
 This walker collects, from ``src/*.py``:
 
@@ -13,10 +15,13 @@ This walker collects, from ``src/*.py``:
   The enclosing ``module:Class.func`` becomes the qualified publisher id.
 - **Global subscribers** — any *argless* ``<expr>.subscribe(...)`` /
   ``<expr>.subscription(...)`` call site (a fan-out consumer of every event).
-  Calls carrying an ``EventType.X`` argument are ignored: that per-type
-  ``subscribe(EventType.X, ...)`` API never existed on the bus. ``self.subscribe``
-  / ``self.subscription`` calls are ignored too — that is the bus's own internal
-  plumbing, not a consumer.
+  ``self.subscribe`` / ``self.subscription`` calls are ignored — that is the
+  bus's own internal plumbing, not a consumer.
+- **Typed subscribers** — any ``<expr>.subscribe(types=...)`` /
+  ``<expr>.subscription(types=...)`` call site (ADR-0114). Any ``EventType.X``
+  members named inside the ``types=`` value are recorded as the filter. A call
+  that carries an ``EventType.X`` by some *other* route (the phantom positional
+  ``subscribe(EventType.X, ...)`` API the bus never exposed) is still ignored.
 - **Declared events** — every member of the ``EventType`` enum, so events with
   a publisher but no live consumer, and events with neither, both surface.
 - **Ephemeral allowlist** — the ``EPHEMERAL_EVENT_TYPES`` frozenset (live-only
@@ -32,7 +37,7 @@ import ast
 from collections import defaultdict
 from pathlib import Path
 
-from arch._models import EventBusTopology, EventEdge
+from arch._models import EventBusTopology, EventEdge, TypedSubscriber
 
 _SUBSCRIBE_ATTRS = frozenset({"subscribe", "subscription"})
 _EPHEMERAL_ASSIGN_NAME = "EPHEMERAL_EVENT_TYPES"
@@ -68,11 +73,33 @@ def _call_carries_event_type(node: ast.Call) -> bool:
     return bool(_event_names_in(subtrees))
 
 
+def _is_none_literal(value: ast.expr) -> bool:
+    """True iff *value* is the literal ``None`` (an explicit fan-out request)."""
+    return isinstance(value, ast.Constant) and value.value is None
+
+
+def _types_keyword(node: ast.Call) -> ast.keyword | None:
+    """Return the ``types=`` keyword of a subscribe call, if present (ADR-0114).
+
+    ``subscribe(types=frozenset({EventType.X}))`` / ``subscription(types=...)``
+    is the optional per-type filter. ``types=None`` is treated as absent (an
+    explicit fan-out request), so it is not reported as a typed subscriber.
+    """
+    for kw in node.keywords:
+        if kw.arg == "types" and not _is_none_literal(kw.value):
+            return kw
+    return None
+
+
 class _Visitor(ast.NodeVisitor):
     def __init__(self, module: str) -> None:
         self.module = module
         self.publishers: dict[str, list[str]] = defaultdict(list)
         self.global_subscribers: set[str] = set()
+        # qualified call site -> the EventType member names it filters on
+        # (ADR-0114). A site may appear with an empty set when the filter is a
+        # named constant we cannot resolve statically.
+        self.typed_subscribers: dict[str, set[str]] = defaultdict(set)
         self.declared_events: set[str] = set()
         self.ephemeral_events: set[str] = set()
         self._fn_stack: list[str] = []
@@ -143,8 +170,18 @@ class _Visitor(ast.NodeVisitor):
         # never an external consumer.
         if isinstance(func.value, ast.Name) and func.value.id == "self":
             return
-        # A ``subscribe(EventType.X, ...)`` call is the phantom per-type API that
-        # the fan-out bus never exposed — not a global subscriber.
+        # ``subscribe(types=frozenset({EventType.X, ...}))`` is the ADR-0114
+        # per-type filter: a *typed* subscriber, not a fan-out one. Record it
+        # with the EventType members named inside the ``types=`` value.
+        types_kw = _types_keyword(node)
+        if types_kw is not None:
+            self.typed_subscribers[self._qualified()].update(
+                _event_names_in([types_kw.value])
+            )
+            return
+        # A ``subscribe(EventType.X, ...)`` call with the EventType by some other
+        # route is the phantom positional per-type API the bus never exposed —
+        # neither a fan-out nor a typed subscriber.
         if _call_carries_event_type(node):
             return
         self.global_subscribers.add(self._qualified())
@@ -154,6 +191,7 @@ def extract_event_topology(src_dir: Path) -> EventBusTopology:
     src_dir = Path(src_dir).resolve()
     pubs: dict[str, set[str]] = defaultdict(set)
     global_subs: set[str] = set()
+    typed_subs: dict[str, set[str]] = defaultdict(set)
     declared: set[str] = set()
     ephemeral: set[str] = set()
     for py in sorted(src_dir.rglob("*.py")):
@@ -166,6 +204,8 @@ def extract_event_topology(src_dir: Path) -> EventBusTopology:
         for ev, lst in v.publishers.items():
             pubs[ev].update(lst)
         global_subs.update(v.global_subscribers)
+        for sub, kinds in v.typed_subscribers.items():
+            typed_subs[sub].update(kinds)
         declared.update(v.declared_events)
         ephemeral.update(v.ephemeral_events)
 
@@ -180,4 +220,8 @@ def extract_event_topology(src_dir: Path) -> EventBusTopology:
             for e in events
         ],
         global_subscribers=sorted(global_subs),
+        typed_subscribers=[
+            TypedSubscriber(subscriber=sub, types=sorted(typed_subs[sub]))
+            for sub in sorted(typed_subs)
+        ],
     )

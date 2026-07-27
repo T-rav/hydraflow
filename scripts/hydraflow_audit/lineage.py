@@ -34,9 +34,10 @@ from pathlib import Path
 # standalone ADR file in the corpus yet, so they are not enumerated here; add
 # them when they get standalone ADRs. Every ADR in this set has been seeded with
 # a verified Precedent:/Divergence: line by the seed pass (#10674 child 3), so
-# the now-STRUCTURAL P1.17 check is green on the corpus (#10674 child 5).
+# the now-STRUCTURAL P1.17 check is green on the corpus (#10674 child 5). ADR-0114
+# (per-type EventBus subscription, #10660) joins the set with its own lines.
 CONTROL_PLANE_ADRS: frozenset[int] = frozenset(
-    {2, 29, 44, 49, 51, 94, 95, 96, 97, 98, 99, 100, 101, 103, 104}
+    {2, 29, 44, 49, 51, 94, 95, 96, 97, 98, 99, 100, 101, 103, 104, 114}
 )
 
 # A lineage field line. ``**`` bold markers are stripped before matching, so

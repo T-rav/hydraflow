@@ -4,6 +4,10 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W31
+
+- `0a7a5e6` — feat(events): optional per-type EventBus subscription (ADR-0114, #10660) *(2026-07-27)*
+
 ## 2026-W30
 
 - `c32990f` — feat(adr): lineage pass — Precedent/Divergence fields + audit CULTURAL check (ADR-0113, #10674) (#10720) (#10720) *(2026-07-26)*

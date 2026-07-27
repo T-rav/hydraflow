@@ -375,6 +375,109 @@ class TestEventBusPublishSubscribe:
 
 
 # ---------------------------------------------------------------------------
+# Typed (per-EventType) subscription — ADR-0114 / #10660
+#
+# The bus gained an OPTIONAL publish-time per-type filter. ``subscribe()`` /
+# ``subscription()`` with ``types=None`` (the default) keep the fan-out
+# contract; a frozenset restricts delivery so an ignored high-volume type never
+# consumes a subscriber's bounded slots.
+# ---------------------------------------------------------------------------
+
+
+class TestEventBusTypedSubscription:
+    @pytest.mark.asyncio
+    async def test_typed_subscriber_receives_only_subscribed_types(self) -> None:
+        """The decision: a typed subscriber's queue receives ONLY the
+        ``EventType`` s it asked for; other types are dropped at publish time."""
+        bus = EventBus()
+        wanted = frozenset({EventType.PR_CREATED, EventType.MERGE_UPDATE})
+        queue = bus.subscribe(types=wanted)
+
+        pr = EventFactory.create(type=EventType.PR_CREATED, data={"pr": 1})
+        noise = EventFactory.create(type=EventType.TRANSCRIPT_LINE, data={"line": "x"})
+        merge = EventFactory.create(type=EventType.MERGE_UPDATE, data={"pr": 1})
+        for event in (pr, noise, merge):
+            await bus.publish(event)
+
+        received = [queue.get_nowait() for _ in range(queue.qsize())]
+        assert received == [pr, merge]  # TRANSCRIPT_LINE never reached the queue
+
+    @pytest.mark.asyncio
+    async def test_untyped_subscriber_still_receives_all_events(self) -> None:
+        """Backward compatibility: an untyped subscriber keeps receiving every
+        event, coexisting alongside a typed subscriber on the same bus."""
+        bus = EventBus()
+        typed = bus.subscribe(types=frozenset({EventType.PR_CREATED}))
+        untyped = bus.subscribe()  # types=None → fan-out, unchanged contract
+
+        events = [
+            EventFactory.create(type=EventType.PR_CREATED, data={"n": 0}),
+            EventFactory.create(type=EventType.TRANSCRIPT_LINE, data={"n": 1}),
+            EventFactory.create(type=EventType.WORKER_UPDATE, data={"n": 2}),
+        ]
+        for event in events:
+            await bus.publish(event)
+
+        untyped_received = [untyped.get_nowait() for _ in range(untyped.qsize())]
+        assert untyped_received == events  # every event, exactly as before
+
+        assert typed.qsize() == 1  # only the PR_CREATED it filtered for
+        assert typed.get_nowait() is events[0]
+
+    @pytest.mark.asyncio
+    async def test_filtered_high_volume_type_does_not_consume_queue_slots(self) -> None:
+        """Overflow prevention (the core of #10660): a flood of a filtered-out
+        high-volume type must not consume any of the typed subscriber's bounded
+        slots, so subscribed-type events published afterwards are never evicted."""
+        bus = EventBus()
+        queue = bus.subscribe(max_queue=2, types=frozenset({EventType.WORKER_UPDATE}))
+
+        # Flood with a high-volume type the subscriber filtered out.
+        for i in range(100):
+            await bus.publish(
+                EventFactory.create(type=EventType.TRANSCRIPT_LINE, data={"i": i})
+            )
+        assert queue.qsize() == 0  # not one slot consumed by the ignored flood
+
+        # Both subscribed-type events fit — the flood did not evict them.
+        w1 = EventFactory.create(type=EventType.WORKER_UPDATE, data={"n": 1})
+        w2 = EventFactory.create(type=EventType.WORKER_UPDATE, data={"n": 2})
+        await bus.publish(w1)
+        await bus.publish(w2)
+
+        assert queue.qsize() == 2
+        assert queue.get_nowait() is w1
+        assert queue.get_nowait() is w2
+
+    @pytest.mark.asyncio
+    async def test_type_filter_does_not_affect_history(self) -> None:
+        """History records every non-ephemeral event regardless of the
+        per-subscriber filter — the filter is delivery-only."""
+        bus = EventBus()
+        bus.subscribe(types=frozenset({EventType.PR_CREATED}))
+
+        filtered = EventFactory.create(type=EventType.TRANSCRIPT_LINE, data={"n": 1})
+        kept = EventFactory.create(type=EventType.PR_CREATED, data={"n": 2})
+        await bus.publish(filtered)
+        await bus.publish(kept)
+
+        assert bus.get_history() == [filtered, kept]
+
+    @pytest.mark.asyncio
+    async def test_subscription_context_manager_applies_type_filter(self) -> None:
+        """The ``subscription(types=...)`` context-manager path filters too."""
+        bus = EventBus()
+        async with bus.subscription(types=frozenset({EventType.CI_CHECK})) as queue:
+            ci = EventFactory.create(type=EventType.CI_CHECK, data={"ok": True})
+            other = EventFactory.create(type=EventType.WORKER_UPDATE, data={"n": 1})
+            await bus.publish(ci)
+            await bus.publish(other)
+
+            assert queue.qsize() == 1
+            assert queue.get_nowait() is ci
+
+
+# ---------------------------------------------------------------------------
 # Unsubscribe
 # ---------------------------------------------------------------------------
 
@@ -678,7 +781,7 @@ class TestEventBusClear:
     def test_clear_on_empty_bus_does_not_raise(self) -> None:
         bus = EventBus()
         bus.clear()  # should not raise
-        assert bus._subscribers == []
+        assert bus._subscribers == {}
 
     @pytest.mark.asyncio
     async def test_bus_usable_after_clear(self) -> None:

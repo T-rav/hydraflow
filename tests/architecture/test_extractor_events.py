@@ -134,8 +134,67 @@ def test_phantom_per_type_subscribe_is_not_a_global_subscriber(fixture_src_tree)
     assert not any("Legacy.wire" in s for s in topo.global_subscribers)
 
 
+def test_typed_subscribe_is_a_typed_subscriber_not_fanout(fixture_src_tree):
+    # A ``subscribe(types={EventType.X, ...})`` call (ADR-0114) registers as a
+    # typed subscriber carrying its filter, NOT as a fan-out consumer.
+    root = _tree(
+        fixture_src_tree,
+        {
+            "src/waker.py": """
+            class WakeRouter:
+                def wire(self, bus):
+                    return bus.subscribe(types={EventType.ALPHA, EventType.BETA})
+            """,
+        },
+    )
+    topo = extract_event_topology(root / "src")
+    typed = {t.subscriber: t.types for t in topo.typed_subscribers}
+    match = next((v for k, v in typed.items() if "WakeRouter.wire" in k), None)
+    assert match == ["ALPHA", "BETA"]  # sorted EventType members it filters on
+    # A typed subscriber must not double as a fan-out consumer.
+    assert not any("WakeRouter.wire" in s for s in topo.global_subscribers)
+
+
+def test_typed_subscription_context_manager_is_recognized(fixture_src_tree):
+    root = _tree(
+        fixture_src_tree,
+        {
+            "src/consumer.py": """
+            class Consumer:
+                async def run(self, bus):
+                    async with bus.subscription(types=frozenset({EventType.ALPHA})) as q:
+                        async for event in q:
+                            yield event
+            """,
+        },
+    )
+    topo = extract_event_topology(root / "src")
+    typed = {t.subscriber: t.types for t in topo.typed_subscribers}
+    match = next((v for k, v in typed.items() if "Consumer.run" in k), None)
+    assert match == ["ALPHA"]
+    assert not any("Consumer.run" in s for s in topo.global_subscribers)
+
+
+def test_explicit_types_none_is_still_a_fanout_subscriber(fixture_src_tree):
+    # ``subscribe(types=None)`` is an explicit fan-out request, not a typed one.
+    root = _tree(
+        fixture_src_tree,
+        {
+            "src/plain.py": """
+            class Plain:
+                def go(self, bus):
+                    return bus.subscribe(types=None)
+            """,
+        },
+    )
+    topo = extract_event_topology(root / "src")
+    assert any("Plain.go" in s for s in topo.global_subscribers)
+    assert not any("Plain.go" in t.subscriber for t in topo.typed_subscribers)
+
+
 def test_returns_empty_when_no_events(fixture_src_tree):
     root = fixture_src_tree({"src/foo.py": "x = 1"})
     topo = extract_event_topology(root / "src")
     assert topo.events == []
     assert topo.global_subscribers == []
+    assert topo.typed_subscribers == []

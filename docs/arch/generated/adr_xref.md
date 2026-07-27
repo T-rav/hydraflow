@@ -120,6 +120,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0111 | `src.flows.adapters`, `src.flows.flow` | `pytest:tests/test_flows.py` |
 | ADR-0112 | `src.config`, `src.ports`, `src.workspace` | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 | ADR-0113 | — | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
+| ADR-0114 | `src.arch._models`, `src.arch.extractors.events`, `src.arch.generators.event_bus`, `src.events` | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
 
 ## Module → ADRs
 
@@ -138,6 +139,9 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.adversarial_retry_loop` | ADR-0064 |
 | `src.agent` | ADR-0024, ADR-0027, ADR-0066, ADR-0092, ADR-0103 |
 | `src.agent_cli` | ADR-0004, ADR-0109 |
+| `src.arch._models` | ADR-0114 |
+| `src.arch.extractors.events` | ADR-0114 |
+| `src.arch.generators.event_bus` | ADR-0114 |
 | `src.assumption_surfacer` | ADR-0064 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
 | `src.auto_pr` | ADR-0101 |
@@ -185,7 +189,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.epic_sweeper_loop` | ADR-0081 |
 | `src.escalation_gate` | ADR-0015 |
 | `src.event_loop_watchdog` | ADR-0106, ADR-0108 |
-| `src.events` | ADR-0006, ADR-0055, ADR-0064 |
+| `src.events` | ADR-0006, ADR-0055, ADR-0064, ADR-0114 |
 | `src.exception_classify` | ADR-0055, ADR-0109 |
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |

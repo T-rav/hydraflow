@@ -82,6 +82,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0111 | enforced | `pytest:tests/test_flows.py` |
 | ADR-0112 | enforced | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 | ADR-0113 | enforced | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
+| ADR-0114 | enforced | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
 
 ## Check → ADRs it protects
 
@@ -142,6 +143,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_epic_manager.py` | ADR-0019 |
 | `pytest:tests/test_epic_merge_coordination.py` | ADR-0012 |
 | `pytest:tests/test_event_persistence.py` | ADR-0021 |
+| `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` | ADR-0114 |
 | `pytest:tests/test_flows.py` | ADR-0111 |
 | `pytest:tests/test_human_steering.py` | ADR-0103 |
 | `pytest:tests/test_human_steering_actuator.py` | ADR-0103 |
