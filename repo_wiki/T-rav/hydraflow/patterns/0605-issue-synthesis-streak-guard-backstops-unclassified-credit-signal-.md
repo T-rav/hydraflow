@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T18:31:18.168332+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0571
+superseded_by: 0647
 ---
 
 # Streak guard backstops unclassified credit-signal raise sites

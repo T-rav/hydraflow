@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10731
 source_phase: plan
 created_at: 2026-07-27T18:39:53.932366+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0667
 ---
 
 # Rows without detection_ref use __noref__:<id> keys, not a shared singleton

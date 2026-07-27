@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10651
 source_phase: plan
 created_at: 2026-07-26T15:47:34.663659+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0663
 ---
 
 # escape_surfaces.jsonl sidecar uses append-only, last-row-wins per fingerprint

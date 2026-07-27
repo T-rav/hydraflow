@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10658
 source_phase: plan
 created_at: 2026-07-26T15:42:45.056049+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1296
 ---
 
 # Pass overrides to both load_runtime_config calls on restore

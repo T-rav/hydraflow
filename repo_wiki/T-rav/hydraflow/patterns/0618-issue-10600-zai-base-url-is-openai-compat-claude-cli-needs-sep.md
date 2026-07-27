@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10600
 source_phase: plan
 created_at: 2026-07-26T12:25:53.446771+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0660
 ---
 
 # zai_base_url is OpenAI-compat; claude CLI needs separate /api/anthropic

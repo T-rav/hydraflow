@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T18:41:12.884109+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1120
+superseded_by: 1263
 ---
 
 # Fabricated stderr in PRManager tests masked cannot/can-not bug
