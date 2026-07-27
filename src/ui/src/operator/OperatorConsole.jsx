@@ -35,7 +35,9 @@ import { toPipeline } from './model/pipeline'
 import { toTranscript } from './model/transcript'
 import { toVitals } from './model/vitals'
 import { toActivityFeed } from './model/activity'
+import { toLoops } from './model/loops'
 import { VitalsCard } from './VitalsCard'
+import { LoopsPanel } from './LoopsPanel'
 import { ActivityDrawer } from './ActivityDrawer'
 import { RepoOverview, buildRepoSummaries } from './RepoOverview'
 import { RepoSwitcher } from './RepoSwitcher'
@@ -79,6 +81,7 @@ function makeStyles(t) {
       minHeight: 0,
     },
     slot: (area) => ({ minWidth: 0, gridArea: area }),
+    vitalsSlot: { minWidth: 0, gridArea: 'vitals', display: 'flex', flexDirection: 'column', gap: t.space.md },
     switcherWrap: { marginBottom: t.space.sm },
     toggleBar: { display: 'flex', gap: t.space.xs, marginBottom: t.space.sm },
     toggleBtn: (active) => ({
@@ -147,6 +150,12 @@ export function OperatorConsoleView({ socket = {} }) {
     [events, socket.stagingPromotion],
   )
   const activity = useMemo(() => toActivityFeed(events), [events])
+  // All-loops quick view: the reducer's deduped backgroundWorkers slice for the
+  // per-loop snapshot, plus the raw events for restart/error correlation.
+  const loops = useMemo(
+    () => toLoops(socket.backgroundWorkers, { events }),
+    [socket.backgroundWorkers, events],
+  )
 
   // --- State-screen signals (Task 10) --------------------------------------
   // `disconnected` is surfaced additively by useHydraFlowSocket (connected===false).
@@ -211,8 +220,9 @@ export function OperatorConsoleView({ socket = {} }) {
                 <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
               )}
             </div>
-            <div data-testid="operator-vitals-slot" style={styles.slot('vitals')}>
+            <div data-testid="operator-vitals-slot" style={styles.vitalsSlot}>
               <VitalsCard vitals={vitals} />
+              <LoopsPanel loops={loops} />
             </div>
             <div data-testid="operator-drawer-slot" style={styles.slot('drawer')}>
               <ActivityDrawer activity={activity} select={select} />
