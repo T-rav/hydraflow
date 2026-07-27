@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `c32990f` — feat(adr): lineage pass — Precedent/Divergence fields + audit CULTURAL check (ADR-0113, #10674) (#10720) (#10720) *(2026-07-26)*
 - `880c542` — feat(adr): supersede ADR-0003 (clone-local isolation, ADR-0112) + mark ADR-0091 superseded by ADR-0105; enforcement debt 2→0 (#10623 Task 3) (#10719) (#10719) *(2026-07-26)*
 - `7720a90` — feat(adr): resolve remaining debt ADRs via enforcement+exemptions (#10623 Task 3 batch 2) (#10718) (#10718) *(2026-07-26)*
 - `0fdaf04` — feat(adr): REAL enforcement for 3 debt ADRs, ratchet 12→9 (#10623 Task 3 batch 1) (#10717) (#10717) *(2026-07-26)*

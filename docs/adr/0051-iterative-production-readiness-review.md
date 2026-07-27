@@ -8,6 +8,9 @@
 - **Enforcement:** manual
 - **Enforced by:** `superpowers:subagent-driven-development` workflow (per-task reviews), this ADR (process documentation), `superpowers:requesting-code-review` (which dispatches the `code-reviewer` agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.
 
+**Precedent:** Fagan software inspections (M. E. Fagan, "Design and Code Inspections to Reduce Errors in Program Development", IBM Systems Journal, 1976) and iterate-to-fixpoint refinement
+**Divergence:** a Fagan inspection is a single structured pass with the authors present to explain intent, but here each pass is deliberately context-free (fresh eyes, no design rationale) and repeated until a pass finds nothing material, because the author is often an agent blind to its own assumptions and one pass empirically missed load-bearing conventions (receipt: #8390, #8431)
+
 ## Context
 
 Across the trust-fleet (#8390) and auto-agent (#8431, #8439) feature builds, every Critical finding caught in fresh-eyes review was a missed load-bearing convention. Each feature took 3–5 review iterations before converging to "no Critical findings on the next pass." Without an explicit policy, convergence is a heroic ad-hoc effort that depends on the engineer remembering to dispatch reviewers; with one, it's the standard workflow.

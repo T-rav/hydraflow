@@ -91,7 +91,7 @@ By declared `**Enforcement:**` kind: `enforced` 70 · `manual` 3 · `decision-of
 | ADR-0110 | REAL | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 | ADR-0111 | REAL | enforced | `pytest:tests/test_flows.py` |
 | ADR-0112 | REAL | enforced | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
-| ADR-0113 | REAL | enforced | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_warns` |
+| ADR-0113 | REAL | enforced | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
 
 ## Unenforced-decision debt
 

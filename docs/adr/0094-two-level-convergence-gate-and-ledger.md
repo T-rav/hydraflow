@@ -11,6 +11,9 @@ pytest:tests/test_convergence_gate.py
 pytest:tests/scenarios/test_convergence_review_mockworld.py
 pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py
 
+**Precedent:** Fixpoint iteration to convergence (Kleene's fixed-point theorem; Kildall's dataflow-analysis fixpoint, 1973) driven by an independent referee (separation of duties)
+**Divergence:** classical fixpoint iteration converges a deterministic monotone function, but here each step is a stochastic generative-model stage judged by an independent gate that never grades its own output, so termination is not guaranteed by monotonicity — it is bounded by an explicit lap budget (`max_convergence_laps`) plus finding-signature oscillation detection escalating to HITL (receipt: ADR-0099, ADR-0051)
+
 > **Superseded in part by [ADR-0102](0102-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
 
 ## Context

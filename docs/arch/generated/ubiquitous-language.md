@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_72 terms across 3 bounded contexts._
+_73 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -455,6 +455,17 @@ Hexagonal port for the in-memory issue work-queue — exposes only the queue acc
 **Invariants:**
 - Pure Protocol — no implementation, no state.
 - Only domain-consumed methods are declared; orchestrator and dashboard methods deliberately stay off the port.
+
+## Lineage
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/adr_index.py:ADR` · **Confidence:** `accepted`
+
+The named engineering tradition a control-plane ADR inherits (its **Precedent**) together with the forced break it takes from that tradition (its **Divergence**, which must cite a receipt). Lineage makes the ADR corpus separate inherited engineering from genuine novelty: unforced invention is a defect, forced invention has a named forcing condition and a receipt. The two optional single-line fields are defined by ADR-0113, parsed by the pure functions in scripts/hydraflow_audit/lineage.py, and enforced on the control-plane ADR set by the P1.17 audit check. Anchored on the parsed ADR record the fields annotate.
+
+**Invariants:**
+- A control-plane ADR carries at least one lineage line — a Precedent or a Divergence (P1.17, ADR-0113).
+- Every Divergence cites a receipt (an ADR, incident, #issue, or docs path); a receipt-less Divergence is a defect — unforced invention.
+- A Precedent names a real, citable tradition; retrofitted branding fails review.
 
 ## LiveCorpusReplayLoop
 

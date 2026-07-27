@@ -1,10 +1,11 @@
-"""Tests for the ADR lineage fields + the P1.17 CULTURAL audit check (ADR-0113).
+"""Tests for the ADR lineage fields + the P1.17 STRUCTURAL audit check (ADR-0113).
 
 Covers the pure parser (`scripts/hydraflow_audit/lineage.py`) and the registered
 `P1.17` check (`scripts/hydraflow_audit/checks/p1_docs.py`): a control-plane ADR
-missing both lines WARNs, one with a valid `Precedent:` and/or a receipt-bearing
+missing both lines FAILs, one with a valid `Precedent:` and/or a receipt-bearing
 `Divergence:` is clean, and a `Divergence:` without a receipt is flagged. Also
-pins that the check is ADVISORY — its WARN never flips the audit exit code.
+pins that the check is STRUCTURAL (no longer advisory) — its FAIL flips the audit
+exit code, since the seed pass (#10674) backfilled the control-plane corpus.
 """
 
 from __future__ import annotations
@@ -129,13 +130,13 @@ def test_gaps_flag_receiptless_divergence_even_off_control_plane(
 # ---------------------------------------------------------------------------
 
 
-def test_control_plane_adr_missing_both_lines_warns(tmp_path: Path) -> None:
+def test_control_plane_adr_missing_both_lines_fails(tmp_path: Path) -> None:
     """The check cited by ADR-0113's Enforced-by: a control-plane ADR carrying
-    neither a Precedent: nor a Divergence: line produces a WARN."""
+    neither a Precedent: nor a Divergence: line FAILs (STRUCTURAL, #10674)."""
     adr_dir = tmp_path / "docs" / "adr"
     _adr(adr_dir, _CP)  # control-plane, no lineage
     result = _run_p117(tmp_path)
-    assert result.status is Status.WARN
+    assert result.status is Status.FAIL
     assert f"ADR-{_CP:04d}" in result.message
 
 
@@ -161,7 +162,7 @@ def test_divergence_without_a_receipt_is_flagged_by_the_check(tmp_path: Path) ->
     adr_dir = tmp_path / "docs" / "adr"
     _adr(adr_dir, _CP, "**Divergence:** an assumption breaks, so a new rule")
     result = _run_p117(tmp_path)
-    assert result.status is Status.WARN
+    assert result.status is Status.FAIL
     assert "receipt" in result.message
 
 
@@ -170,22 +171,25 @@ def test_check_is_na_without_an_adr_directory(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Advisory: a P1.17 WARN never fails the audit gate
+# STRUCTURAL: a P1.17 FAIL now flips the audit gate (escalated, #10674 child 5)
 # ---------------------------------------------------------------------------
 
 
-def test_p117_warn_does_not_flip_the_exit_code() -> None:
-    assert "P1.17" in ADVISORY_CHECKS
-    warn = Finding(
+def test_p117_is_no_longer_advisory() -> None:
+    assert "P1.17" not in ADVISORY_CHECKS
+
+
+def test_p117_fail_flips_the_exit_code() -> None:
+    fail = Finding(
         check_id="P1.17",
-        status=Status.WARN,
-        severity=Severity.CULTURAL,
+        status=Status.FAIL,
+        severity=Severity.STRUCTURAL,
         principle="P1",
         source="ADR-0113",
         what="lineage",
         remediation="add a line",
     )
-    assert overall_exit_code([warn]) == 0
+    assert overall_exit_code([fail]) == 1
 
 
 def test_the_real_control_plane_set_covers_the_proposal_seed_list() -> None:
