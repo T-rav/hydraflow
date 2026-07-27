@@ -138,6 +138,43 @@ describe('PipelineRail', () => {
     expect(screen.getByTestId('stage-tile-triage')).toHaveAttribute('aria-pressed', 'false')
   })
 
+  // ── Stage health color bar (#10556 follow-up) ─────────────────────────────
+  // A thin bar across the top of each tile encodes stage health, precedence
+  // failed > hitl > flowing > idle, exposed via data-severity for testability.
+
+  it('renders a health color bar for every stage tile', () => {
+    const { container } = render(<PipelineRail pipeline={makePipeline()} select={() => {}} />)
+    const bars = container.querySelectorAll('[data-testid^="stage-colorbar-"]')
+    expect(bars).toHaveLength(6)
+    for (const key of ['triage', 'plan', 'implement', 'review', 'hitl', 'merged']) {
+      expect(screen.getByTestId(`stage-colorbar-${key}`)).toBeInTheDocument()
+    }
+  })
+
+  it('marks a failed stage bar as bad (failed outranks everything)', () => {
+    // The Build stage has attention.failed === 1.
+    render(<PipelineRail pipeline={makePipeline()} select={() => {}} />)
+    expect(screen.getByTestId('stage-colorbar-implement')).toHaveAttribute('data-severity', 'bad')
+  })
+
+  it('marks an HITL stage bar as warn when it has HITL depth but no failures', () => {
+    // The HITL stage has attention.hitl === 4, attention.failed === 0.
+    render(<PipelineRail pipeline={makePipeline()} select={() => {}} />)
+    expect(screen.getByTestId('stage-colorbar-hitl')).toHaveAttribute('data-severity', 'warn')
+  })
+
+  it('marks an active (flowing) stage bar as ok when it has count but no attention', () => {
+    // The Review stage has count === 1, hitl === 0, failed === 0.
+    render(<PipelineRail pipeline={makePipeline()} select={() => {}} />)
+    expect(screen.getByTestId('stage-colorbar-review')).toHaveAttribute('data-severity', 'ok')
+  })
+
+  it('marks an empty/idle stage bar as muted when count is zero and no attention', () => {
+    // The Plan stage has count === 0 and no attention.
+    render(<PipelineRail pipeline={makePipeline()} select={() => {}} />)
+    expect(screen.getByTestId('stage-colorbar-plan')).toHaveAttribute('data-severity', 'muted')
+  })
+
   it('does not crash on an empty pipeline VM', () => {
     const { container } = render(<PipelineRail pipeline={{ stages: [] }} select={() => {}} />)
     expect(container.querySelector('[data-testid="pipeline-rail"]')).toBeInTheDocument()
