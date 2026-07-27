@@ -70,7 +70,8 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('console-header-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('item-workspace-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('vitals-card-placeholder')).toBeInTheDocument()
-    expect(screen.getByTestId('activity-drawer-placeholder')).toBeInTheDocument()
+    // Task 7: the drawer slot now mounts the real ActivityDrawer (no longer a placeholder).
+    expect(screen.getByTestId('activity-drawer')).toBeInTheDocument()
   })
 
   it('mounts the real PipelineRail in the pipeline slot (Task 3)', () => {

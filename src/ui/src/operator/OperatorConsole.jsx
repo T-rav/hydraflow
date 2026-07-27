@@ -22,6 +22,7 @@ import React, { useMemo } from 'react'
 import { useHydraFlowSocket } from '../hooks/useHydraFlowSocket'
 import { useOperatorSelection } from './useOperatorSelection'
 import { PipelineRail } from './PipelineRail'
+import { ActivityDrawer } from './ActivityDrawer'
 import { toPipeline } from './model/pipeline'
 import { toTranscript } from './model/transcript'
 import { toVitals } from './model/vitals'
@@ -63,14 +64,6 @@ function VitalsCardPlaceholder({ vitals }) {
   return (
     <div data-testid="vitals-card-placeholder" style={placeholderStyle}>
       VitalsCard — factory: {vitals.factory.state} · loops {vitals.loopsHealthy.ok}/{vitals.loopsHealthy.total}
-    </div>
-  )
-}
-
-function ActivityDrawerPlaceholder({ activity }) {
-  return (
-    <div data-testid="activity-drawer-placeholder" style={placeholderStyle}>
-      ActivityDrawer — {activity.length} rows
     </div>
   )
 }
@@ -121,7 +114,7 @@ export function OperatorConsoleView({ socket = {} }) {
         <VitalsCardPlaceholder vitals={vitals} />
       </div>
       <div data-testid="operator-drawer-slot" style={{ ...slotStyle, gridArea: 'drawer' }}>
-        <ActivityDrawerPlaceholder activity={activity} select={select} />
+        <ActivityDrawer activity={activity} select={select} />
       </div>
     </div>
   )
