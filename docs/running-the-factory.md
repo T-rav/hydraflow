@@ -17,8 +17,9 @@ This runs `scripts/run-factory-isolated.sh`, which:
 
 1. Clones the repo (once) into a dedicated workspace —
    `~/.hydraflow/factory-workspace/hydraflow` by default.
-2. Hard-syncs that workspace to the latest base branch (`main` by default) on
-   every launch — the workspace is the factory's scratch space, so its churn is
+2. Hard-syncs that workspace to the latest base branch (`staging` by default —
+   ADR-0042 two-tier model; `main` advances only via RC promotion) on every
+   launch — the workspace is the factory's scratch space, so its churn is
    discarded here.
 3. Copies your dev checkout's `.env` into the workspace so credentials/config
    carry over.
@@ -32,7 +33,24 @@ usual; pull them into your clean checkout with `git pull`.
 | Env var | Default | Purpose |
 |---|---|---|
 | `HYDRAFLOW_FACTORY_WORKSPACE` | `~/.hydraflow/factory-workspace/hydraflow` | Where the dedicated clone lives |
-| `HYDRAFLOW_FACTORY_BRANCH` | `main` | Branch the factory runs |
+| `HYDRAFLOW_FACTORY_BRANCH` | `staging` | Branch the factory runs (ADR-0042; `main` only via RC promotion) |
+
+## Boot-correctness: the liveness kernel never starts a stale factory
+
+The launchd liveness kernel (`scripts/factory_liveness_watchdog.py`, agent
+`com.hydraflow.liveness`, installed by `scripts/install_liveness_watchdog.py`) is
+the Tier-1 error kernel that keeps the factory running (#10734). Beyond the
+`/healthz` + `events.jsonl` down-detection, when installed with `--workspace` it
+**refuses to `POST /api/control/start` onto a stale boot**: unless the factory's
+reported `boot_sha` equals `origin/<factory_branch>` HEAD **and** `commits_behind`
+is `0` **and** the workspace is on the factory branch, it force-resyncs the
+isolated workspace (`run-factory-isolated.sh`'s `fetch → checkout -f → reset
+--hard → clean -fd`) and relaunches — pinned to `staging` via the plist's
+`EnvironmentVariables` — instead of booting stale. This prevents the 2026-07-27
+incident where a restart booted the factory 90 commits behind on `main`, idle.
+It also reaps orphaned `pytest -n auto` workers from a dead/OOM'd build and
+probes a wedged `credits_paused_until`. It is deterministic, LLM-free, and
+stdlib-only.
 
 ## Why not just `git restore` after each run?
 

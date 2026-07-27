@@ -489,3 +489,303 @@ class TestMainEndToEnd:
         )
         assert rc == 0
         assert not marker_path.exists()
+
+
+# --------------------------------------------------------------------------
+# Tier-1 boot-correctness kernel (#10734).
+# --------------------------------------------------------------------------
+
+_BootAction = watchdog.boot_guard.BootAction
+
+
+def _reboot_decision(reason: str = "stale boot") -> object:
+    return watchdog.boot_guard.BootDecision(
+        _BootAction.RESYNC_REBOOT, reason, notify=True
+    )
+
+
+def _start_decision() -> object:
+    return watchdog.boot_guard.BootDecision(_BootAction.START, "clean boot")
+
+
+class TestBranchPinDefault:
+    """Deliverable 2: relaunch always pinned to staging, never the shell 'main'."""
+
+    def test_factory_branch_defaults_to_staging_with_env_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("HYDRAFLOW_FACTORY_BRANCH", raising=False)
+        args = watchdog.build_arg_parser().parse_args([])
+        assert args.factory_branch == "staging"
+
+
+class TestRebootFactory:
+    """The reboot actuator: kill the port group, then detached-relaunch."""
+
+    def _fake_launcher(self, tmp_path: Path) -> Path:
+        launcher = tmp_path / "run-factory-isolated.sh"
+        launcher.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        return launcher
+
+    def test_kills_port_group_then_spawns_detached_pinned_to_staging(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        terminated: list[int] = []
+        monkeypatch.setattr(
+            watchdog, "find_port_listener_pids", lambda port, **k: [4242]
+        )
+        monkeypatch.setattr(watchdog, "_terminate_pid_group", terminated.append)
+        popen_calls: list[tuple[object, dict[str, object]]] = []
+
+        class _FakePopen:
+            def __init__(self, argv: object, **kwargs: object) -> None:
+                popen_calls.append((argv, kwargs))
+
+        monkeypatch.setattr(watchdog.subprocess, "Popen", _FakePopen)
+
+        ok = watchdog.reboot_factory(
+            workspace=tmp_path / "ws",
+            factory_branch="staging",
+            dashboard_port=5555,
+            launcher=self._fake_launcher(tmp_path),
+            dry_run=False,
+        )
+        assert ok is True
+        # Port group killed BEFORE the relaunch spawn.
+        assert terminated == [4242]
+        assert len(popen_calls) == 1
+        argv, kwargs = popen_calls[0]
+        assert argv[0] == "bash"
+        # Detached so the kernel's own exit can't kill the launcher.
+        assert kwargs["start_new_session"] is True
+        # Branch pin — never the shell default 'main'.
+        assert kwargs["env"]["HYDRAFLOW_FACTORY_BRANCH"] == "staging"
+
+    def test_missing_launcher_returns_false_without_spawn(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(watchdog, "find_port_listener_pids", lambda port, **k: [])
+        called = False
+
+        def _popen(*a: object, **k: object) -> None:
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(watchdog.subprocess, "Popen", _popen)
+        ok = watchdog.reboot_factory(
+            workspace=tmp_path / "ws",
+            factory_branch="staging",
+            dashboard_port=5555,
+            launcher=tmp_path / "does-not-exist.sh",
+            dry_run=False,
+        )
+        assert ok is False
+        assert called is False
+
+    def test_dry_run_performs_no_kill_and_no_spawn(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        killed = False
+        spawned = False
+
+        def _term(pid: int) -> None:
+            nonlocal killed
+            killed = True
+
+        def _popen(*a: object, **k: object) -> None:
+            nonlocal spawned
+            spawned = True
+
+        monkeypatch.setattr(watchdog, "_terminate_pid_group", _term)
+        monkeypatch.setattr(watchdog.subprocess, "Popen", _popen)
+        ok = watchdog.reboot_factory(
+            workspace=tmp_path / "ws",
+            factory_branch="staging",
+            dashboard_port=5555,
+            launcher=self._fake_launcher(tmp_path),
+            dry_run=True,
+        )
+        assert ok is True
+        assert killed is False
+        assert spawned is False
+
+
+def _wire_kernel(
+    monkeypatch: pytest.MonkeyPatch, *, decision: object, status: str = "idle"
+) -> None:
+    """Stub every live probe so main() with --workspace makes no real I/O."""
+    monkeypatch.setattr(watchdog, "check_healthz", lambda *a, **k: True)
+    monkeypatch.setattr(
+        watchdog.boot_guard, "probe_boot_correctness", lambda **k: decision
+    )
+    monkeypatch.setattr(
+        watchdog.boot_guard,
+        "fetch_control_status",
+        lambda *a, **k: {"status": status, "config": {}},
+    )
+    # Orphan reaper: header-only ps snapshot -> selects nothing -> never kills.
+    monkeypatch.setattr(
+        watchdog.orphan_reaper,
+        "enumerate_processes",
+        lambda **k: "  PID  PPID     ELAPSED COMMAND\n",
+    )
+
+
+class TestBootGuardMainWiring:
+    """Deliverable 1: a stale boot is prevented at launch, not detected after."""
+
+    def _args(self, tmp_path: Path, *, dry_run: bool = False) -> list[str]:
+        argv = [
+            "--workspace",
+            str(tmp_path / "ws"),
+            "--factory-branch",
+            "staging",
+            "--events-path",
+            str(tmp_path / "events.jsonl"),
+            "--marker-path",
+            str(tmp_path / "state.json"),
+            "--knob-path",
+            str(tmp_path / "restart.knob"),
+        ]
+        if dry_run:
+            argv.insert(0, "--dry-run")
+        return argv
+
+    def test_stale_boot_reboots_and_records_incident(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _wire_kernel(monkeypatch, decision=_reboot_decision())
+        calls: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            watchdog, "reboot_factory", lambda **k: calls.append(k) or True
+        )
+        monkeypatch.setattr(watchdog, "send_notification", lambda *a, **k: None)
+
+        rc = watchdog.main(self._args(tmp_path))
+        assert rc == 0
+        # Rebooted once, pinned to staging.
+        assert len(calls) == 1
+        assert calls[0]["factory_branch"] == "staging"
+        # Incident recorded so the next tick does not re-spawn.
+        marker = json.loads((tmp_path / "state.json").read_text())
+        assert "stale_reboot_at" in marker
+
+    def test_stale_boot_reboots_at_most_once_per_incident(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _wire_kernel(monkeypatch, decision=_reboot_decision())
+        calls: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            watchdog, "reboot_factory", lambda **k: calls.append(k) or True
+        )
+        monkeypatch.setattr(watchdog, "send_notification", lambda *a, **k: None)
+
+        watchdog.main(self._args(tmp_path))  # tick 1 -> reboot
+        watchdog.main(self._args(tmp_path))  # tick 2 -> still stale, no re-spawn
+        assert len(calls) == 1
+
+    def test_stale_boot_never_calls_control_start(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _wire_kernel(monkeypatch, decision=_reboot_decision())
+        monkeypatch.setattr(watchdog, "reboot_factory", lambda **k: True)
+        posts: list[str] = []
+        monkeypatch.setattr(
+            watchdog, "http_post_status", lambda url, **k: posts.append(url)
+        )
+        monkeypatch.setattr(watchdog, "send_notification", lambda *a, **k: None)
+        watchdog.main(self._args(tmp_path))
+        assert not any("/api/control/start" in u for u in posts)
+
+    def test_clean_boot_issues_control_start(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _wire_kernel(monkeypatch, decision=_start_decision())
+        posts: list[str] = []
+        monkeypatch.setattr(
+            watchdog,
+            "http_post_status",
+            lambda url, **k: posts.append(url) or "started",
+        )
+        monkeypatch.setattr(watchdog, "send_notification", lambda *a, **k: None)
+        watchdog.main(self._args(tmp_path))
+        assert any("/api/control/start" in u for u in posts)
+
+    def test_dry_run_stale_boot_writes_no_marker(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _wire_kernel(monkeypatch, decision=_reboot_decision())
+        monkeypatch.setattr(watchdog, "reboot_factory", lambda **k: True)
+        monkeypatch.setattr(watchdog, "send_notification", lambda *a, **k: None)
+        rc = watchdog.main(self._args(tmp_path, dry_run=True))
+        assert rc == 0
+        assert not (tmp_path / "state.json").exists()
+
+    def test_no_workspace_skips_boot_guard_entirely(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Legacy notify-only mode: without --workspace the guard never runs.
+        called = False
+
+        def _probe(**k: object) -> object:
+            nonlocal called
+            called = True
+            return _reboot_decision()
+
+        monkeypatch.setattr(watchdog, "check_healthz", lambda *a, **k: True)
+        monkeypatch.setattr(watchdog.boot_guard, "probe_boot_correctness", _probe)
+        rc = watchdog.main(
+            [
+                "--dry-run",
+                "--events-path",
+                str(tmp_path / "events.jsonl"),
+                "--marker-path",
+                str(tmp_path / "state.json"),
+                "--knob-path",
+                str(tmp_path / "restart.knob"),
+            ]
+        )
+        assert rc == 0
+        assert called is False
+
+
+class TestOrphanReaperMainWiring:
+    def test_reaper_kills_selected_orphans_non_dry_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _wire_kernel(
+            monkeypatch,
+            decision=watchdog.boot_guard.BootDecision(
+                _BootAction.NO_ACTION, "already running"
+            ),
+        )
+        # A ps snapshot with one genuine orphan; reap is monkeypatched (no kills).
+        monkeypatch.setattr(
+            watchdog.orphan_reaper,
+            "enumerate_processes",
+            lambda **k: (
+                "  PID  PPID     ELAPSED COMMAND\n"
+                "9999     1    50:00 python -m pytest -n auto tests/\n"
+            ),
+        )
+        reaped: list[int] = []
+        monkeypatch.setattr(
+            watchdog.orphan_reaper,
+            "reap_orphans",
+            lambda pids: reaped.extend(pids) or pids,
+        )
+        monkeypatch.setattr(watchdog, "reboot_factory", lambda **k: True)
+        monkeypatch.setattr(watchdog, "send_notification", lambda *a, **k: None)
+        watchdog.main(
+            [
+                "--workspace",
+                str(tmp_path / "ws"),
+                "--events-path",
+                str(tmp_path / "events.jsonl"),
+                "--marker-path",
+                str(tmp_path / "state.json"),
+                "--knob-path",
+                str(tmp_path / "restart.knob"),
+            ]
+        )
+        assert reaped == [9999]
