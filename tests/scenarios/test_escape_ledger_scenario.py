@@ -355,3 +355,61 @@ class TestEscapeLedgerScenario:
         issue = github._issues[link.issue_number]
         assert issue.state == "closed"
         assert any("detector" in str(c) for c in issue.comments)
+
+    async def test_folded_away_low_confidence_issue_closes_on_stronger_sibling(
+        self, tmp_path: Path
+    ) -> None:
+        # End-to-end over FakeGitHub (#10731): a low-confidence bug-issue is
+        # surfaced, then a stronger regression-pin sibling for the SAME commit
+        # lands and folds the surfaced id out of read_latest. On the next quiet
+        # tick the reconcile must STILL close the stranded HITL issue — it reads
+        # through read_latest_index, not the id-projected read_latest view.
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        state = _make_state(_head(repo))
+        loop = _build_loop(tmp_path, repo, github, state)
+
+        from datetime import UTC, datetime
+
+        from escape.ledger import EscapeLedger
+        from escape.models import EscapeRecord
+        from escape.surfaces import SurfacedIssueLedger
+
+        sha = "d15c0acef00dd15c0acef00dd15c0acef00dd15c"
+        fresh = datetime.now(UTC).isoformat()  # not aged => only the LOW surface
+
+        def _row(source: str, confidence: str, method: str) -> EscapeRecord:
+            return EscapeRecord(
+                id=f"{source}:{sha}",
+                detected_at=fresh,
+                detection_source=source,
+                detection_ref=sha,
+                originating_pr=None,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method=method,
+                attribution_confidence=confidence,
+                encoded_as="none-yet",
+                notes="",
+            )
+
+        ledger = EscapeLedger(loop._ledger_path)
+        ledger.append(_row("bug-issue", "low", "fixes-chain"))
+
+        filed, _capped = await loop._surface_findings()
+        assert filed == 1
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert link.escape_id == f"bug-issue:{sha}"
+        assert await github.get_issue_state(link.issue_number) == "OPEN"
+
+        # A stronger sibling for the same commit lands (folds bug-issue away).
+        ledger.append(_row("regression-pin", "medium", "regression-pin"))
+
+        result = await loop._do_work()
+        assert result["status"] == "no_new_commits"
+        assert result["closed"] == 1
+
+        issue = github._issues[link.issue_number]
+        assert issue.state == "closed"

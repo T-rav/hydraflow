@@ -209,10 +209,14 @@ def answered_surfacings(
 ) -> list[SurfacedIssue]:
     """Pure policy: which OPEN surfacing links now have an answered ledger row.
 
-    *latest_records* is the current one-row-per-id view (``read_latest``). A
-    link whose escape id is absent from it (or whose reason is not yet answered)
-    is left open — the reconcile pass only closes an issue once the human
-    resolution that answers its surfacing reason has actually landed.
+    *latest_records* maps every escape id to the row that currently represents
+    its commit (``read_latest_index`` — ``escape_by_id``), NOT the id-projected
+    ``read_latest`` view: ``read_latest`` collapses by ``detection_ref`` and so
+    drops the ids of siblings it folds away, which would strand a link filed
+    under a folded-away id (#10731). A link whose escape id is absent from the
+    map (or whose reason is not yet answered) is left open — the reconcile pass
+    only closes an issue once the resolution that answers its surfacing reason
+    (a human bump, or a stronger sibling for the same commit) has landed.
     """
     answered: list[SurfacedIssue] = []
     for link in open_links:
@@ -527,7 +531,12 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         open_links = surfaces.open_links()
         if not open_links:
             return 0
-        latest = {r.id: r for r in EscapeLedger(self._ledger_path).read_latest()}
+        # read_latest_index (NOT `{r.id: r for r in read_latest()}`): read_latest
+        # collapses by detection_ref and drops the ids of folded-away siblings, so
+        # a link filed under a low-confidence id later superseded by a stronger
+        # sibling for the same commit would never reconcile (#10731). The index
+        # maps every id to its detection_ref winner.
+        latest = EscapeLedger(self._ledger_path).read_latest_index()
         answered = answered_surfacings(open_links, latest)
         closed = 0
         for link in answered:
