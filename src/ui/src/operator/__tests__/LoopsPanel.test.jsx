@@ -141,6 +141,33 @@ describe('LoopsPanel', () => {
     expect(screen.getByTestId('loops-empty')).toBeInTheDocument()
   })
 
+  it('renders the canonical term as sub-text when the loop has one', () => {
+    render(<LoopsPanel loops={vm({
+      categories: [{
+        key: 'repo_health', name: 'Repo Health', count: 1, ok: 1,
+        loops: [loop({ name: 'Thrash Detector', term: 'Convergence Oscillation' })],
+      }],
+      totals: { ok: 1, total: 1, restarted: 0, disabled: 0 },
+    })} />)
+    expand()
+    const term = screen.getByTestId('loop-term-ci_monitor')
+    expect(term).toBeInTheDocument()
+    expect(term).toHaveTextContent('Convergence Oscillation')
+  })
+
+  it('omits the term sub-text when the loop has no term', () => {
+    render(<LoopsPanel loops={vm({
+      categories: [{
+        key: 'repo_health', name: 'Repo Health', count: 1, ok: 1,
+        loops: [loop({ term: null })],
+      }],
+      totals: { ok: 1, total: 1, restarted: 0, disabled: 0 },
+    })} />)
+    expand()
+    expect(screen.getByTestId('loop-row-ci_monitor')).toBeInTheDocument()
+    expect(screen.queryByTestId('loop-term-ci_monitor')).toBeNull()
+  })
+
   it('marks a disabled loop muted with an off badge', () => {
     render(<LoopsPanel loops={vm({
       categories: [{

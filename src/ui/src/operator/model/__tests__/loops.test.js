@@ -69,6 +69,21 @@ describe('toLoops', () => {
     expect(vm.categories[0].key).toBe('release')
   })
 
+  it('threads the canonical control-theory term as sub-text for a loop that has one', () => {
+    // convergence_oscillation carries a descriptive label + the canonical UL term
+    // (ADR-0053/0099): the descriptive name is primary, the term secondary.
+    const vm = toLoops([worker('convergence_oscillation')])
+    const loop = vm.categories.flatMap(c => c.loops).find(l => l.key === 'convergence_oscillation')
+    expect(loop.name).toBe('Thrash Detector')
+    expect(loop.term).toBe('Convergence Oscillation')
+  })
+
+  it('leaves term null for a loop whose label is already descriptive (no term field)', () => {
+    const vm = toLoops([worker('ci_monitor')])
+    const loop = vm.categories.flatMap(c => c.loops).find(l => l.key === 'ci_monitor')
+    expect(loop.term).toBeNull()
+  })
+
   it('derives severity: ok when running, bad when errored', () => {
     const vm = toLoops([
       worker('ci_monitor', { status: 'ok' }),

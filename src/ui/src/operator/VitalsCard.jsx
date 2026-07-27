@@ -2,7 +2,8 @@
  * VitalsCard — color-coded factory health readout (epic #10556, Task 6).
  *
  * Pure presentational component. Consumes the Task-1 `toVitals(...)` view model
- * and renders one color-coded row per vital: factory run-state, loop health
+ * and renders one color-coded row per vital: the factory run-state (labelled
+ * "Workflow" — it monitors the workflow / assembly line, #15), loop health
  * (ok/total), recently-restarted loops, credit state, and main↔staging sync.
  * Each row carries an `ok` | `warn` | `bad` severity class (and a matching
  * accent color) so an operator can read factory health at a glance — the class
@@ -114,7 +115,7 @@ export function VitalsCard({ vitals }) {
       <VitalRow
         styles={styles}
         vitalKey="factory"
-        label="Factory"
+        label="Workflow"
         value={factory.state}
         severity={severityForFactory(factory.state)}
         detail={factory.reason}

@@ -15,6 +15,8 @@
  * the same output.
  */
 
+import { PIPELINE_STAGES } from '../../constants'
+
 /**
  * The six canonical operator-console stages, in lifecycle order.
  * Keys align with the backend pipeline-snapshot / pipeline-stats stage keys so
@@ -132,4 +134,126 @@ export function toPipeline(input) {
   })
 
   return { stages }
+}
+
+/**
+ * The workflow stages the factory is actively working — triage → plan → build
+ * → review, in lifecycle order. These are the role-bearing stages
+ * (`OPERATOR_STAGES` with a non-null `role`); the terminal stages `hitl`
+ * (waiting on a human) and `merged` (historical) are deliberately excluded
+ * because nothing is "running" there.
+ */
+export const WORKFLOW_STAGE_KEYS = ['triage', 'plan', 'implement', 'review']
+
+/**
+ * Flatten the active-work items across every workflow stage of a pipeline view
+ * model, in lifecycle order, tagging each with the stage it sits in. This is
+ * what the all-active grid renders: a running triage/plan/build/review item all
+ * surface, not just Build-stage items. Tolerant of a missing / empty pipeline.
+ *
+ * @param {{ stages?: Array }} [pipeline]
+ * @returns {Array<{id, title, status, stage, stageLabel}>}
+ */
+export function activeWorkflowItems(pipeline) {
+  const stages = pipeline?.stages ?? []
+  const items = []
+  for (const key of WORKFLOW_STAGE_KEYS) {
+    const stage = stages.find(s => s.key === key)
+    if (!stage) continue
+    for (const item of stage.items ?? []) {
+      items.push({ ...item, stage: stage.key, stageLabel: stage.label })
+    }
+  }
+  return items
+}
+
+/**
+ * Format how long an item has been running as a compact, human relative
+ * duration: `45s`, `12m`, `1h04m` (hours pad minutes to two digits).
+ *
+ * Pure and deterministic — `now` is passed in explicitly (never read from
+ * `Date.now()` here) so callers/tests control the clock. `startTs` may be an ISO
+ * string (an event timestamp) or epoch-ms; `now` is epoch-ms (or ISO). Returns
+ * '' for a missing / unparseable / future start so the caller can omit the chip.
+ *
+ * @param {string|number|null|undefined} startTs
+ * @param {number|string} now
+ * @returns {string}
+ */
+export function stageDurationLabel(startTs, now) {
+  if (startTs == null) return ''
+  const startMs = typeof startTs === 'number' ? startTs : Date.parse(startTs)
+  if (Number.isNaN(startMs)) return ''
+  const nowMs = typeof now === 'number' ? now : Date.parse(now)
+  if (Number.isNaN(nowMs)) return ''
+
+  const diffSec = Math.floor((nowMs - startMs) / 1000)
+  if (diffSec < 0) return ''
+  if (diffSec < 60) return `${diffSec}s`
+  const totalMin = Math.floor(diffSec / 60)
+  if (totalMin < 60) return `${totalMin}m`
+  const hours = Math.floor(totalMin / 60)
+  const mins = totalMin % 60
+  return `${hours}h${String(mins).padStart(2, '0')}m`
+}
+
+/**
+ * Each operator stage's identity colour, as a TOKEN colour key, derived from the
+ * classic dashboard's `PIPELINE_STAGES` (constants.js) so the operator rail and
+ * the legacy board can never drift: triage=yellow, plan=purple,
+ * build/implement=accent, review=orange, hitl=red, merged=green. `PIPELINE_STAGES`
+ * stores `var(--x)` references; the token colour key is that `x` (camel-cased),
+ * so consumers resolve the value through `useTokens()` — theme-mode aware, no
+ * hardcoded literal.
+ */
+const STAGE_COLOR_KEY = Object.freeze(
+  Object.fromEntries(
+    PIPELINE_STAGES.map(s => {
+      const match = /var\(--([a-z0-9-]+)\)/.exec(s.color || '')
+      const key = match
+        ? match[1].replace(/-([a-z])/g, (_, c) => c.toUpperCase())
+        : null
+      return [s.key, key]
+    }),
+  ),
+)
+
+/**
+ * Token colour key for a stage's classic-palette identity colour, or `null` for
+ * an unknown stage key. Callers resolve it via `useTokens()` (`t.color[key]`).
+ * @param {string} stageKey
+ * @returns {string|null}
+ */
+export function stageColorKey(stageKey) {
+  return STAGE_COLOR_KEY[stageKey] ?? null
+}
+
+/**
+ * The timestamp at which an item ENTERED its current stage, inferred from its
+ * transcript rows' `meta.source` (triage/planner/reviewer, or null for the
+ * implement stage). Rows are oldest-first, as `toTranscript(...)` returns them;
+ * the current stage began at the first row of the trailing run that shares the
+ * latest row's source. Returns `null` when the source never changes (a single
+ * observed stage — the caller falls back to the total running duration) or there
+ * are no rows. Pure — never reads the wall clock.
+ *
+ * @param {Array<{ts, meta?}>} rows - oldest-first transcript rows
+ * @returns {string|number|null}
+ */
+export function stageTransitionTs(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return null
+  const sourceOf = (r) => r?.meta?.source ?? null
+  const current = sourceOf(rows[rows.length - 1])
+  let transitionTs = null
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (sourceOf(rows[i]) === current) {
+      transitionTs = rows[i].ts
+    } else {
+      // rows[i] is the last row of the PREVIOUS stage; the current stage began
+      // at the row after it, whose ts we already captured.
+      return transitionTs
+    }
+  }
+  // Every row shares one source: no transition observed within the window.
+  return null
 }

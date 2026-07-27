@@ -27,6 +27,8 @@
  * than a moving window (see the loop-health block below and #10556).
  */
 
+import { stageDurationLabel } from './pipeline'
+
 /**
  * Build the vitals view model.
  * @param {Array} events - WS events, newest-first
@@ -129,4 +131,62 @@ export function toVitals(events, extras = {}) {
     credits,
     mainStagingSync,
   }
+}
+
+/**
+ * Best-effort factory-start timestamp (epoch-ms) from the socket state, or
+ * `null` when no start signal is available. Prefers the current run session's
+ * `started_at`; falls back to the newest still-active session; last resort is a
+ * session id that encodes its start as a trailing `<YYYYMMDDTHHMMSS>` stamp
+ * (e.g. `acme-web-20260727T221406`). Pure — never reads the wall clock.
+ *
+ * @param {{ sessions?: Array, currentSessionId?: string|null }} [socket]
+ * @returns {number|null}
+ */
+export function factoryStartMs({ sessions, currentSessionId } = {}) {
+  const list = Array.isArray(sessions) ? sessions : []
+
+  // Prefer the current session, then any still-active session.
+  let session = null
+  if (currentSessionId != null) {
+    session = list.find(s => s?.id === currentSessionId) ?? null
+  }
+  if (!session) {
+    session = list.find(s => s?.status === 'active') ?? null
+  }
+
+  const startedAt = session?.started_at ?? null
+  if (startedAt != null) {
+    const ms = Date.parse(startedAt)
+    if (!Number.isNaN(ms)) return ms
+  }
+
+  // Last resort: a session id that encodes its start (<repo>-YYYYMMDDTHHMMSS).
+  return parseSessionIdStamp(currentSessionId ?? session?.id ?? null)
+}
+
+/** Parse a trailing `YYYYMMDDTHHMMSS` stamp out of a session id (UTC). */
+function parseSessionIdStamp(id) {
+  if (typeof id !== 'string') return null
+  const m = /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/.exec(id)
+  if (!m) return null
+  const [, y, mo, d, h, mi, s] = m
+  const ms = Date.parse(`${y}-${mo}-${d}T${h}:${mi}:${s}Z`)
+  return Number.isNaN(ms) ? null : ms
+}
+
+/**
+ * Compact factory runtime/uptime label ("2h14m", "12m", "45s") from the socket's
+ * best start signal, measured against an injected `now`. Returns '' when no
+ * start signal exists so the caller can render nothing. Pure — `now` is passed
+ * in, never read from `Date.now()` here (mirrors `stageDurationLabel`).
+ *
+ * @param {{ sessions?: Array, currentSessionId?: string|null }} socket
+ * @param {number|string} now - epoch-ms (or ISO)
+ * @returns {string}
+ */
+export function factoryUptimeLabel(socket, now) {
+  const startMs = factoryStartMs(socket)
+  if (startMs == null) return ''
+  return stageDurationLabel(startMs, now)
 }

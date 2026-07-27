@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toVitals } from '../vitals'
+import { toVitals, factoryStartMs, factoryUptimeLabel } from '../vitals'
 
 // Event shapes match the HydraFlowContext reducer:
 //   orchestrator_status → data { status, credits_paused_until, credits_paused_provider }
@@ -91,5 +91,59 @@ describe('toVitals', () => {
   it('is pure — identical input yields deeply-equal output', () => {
     const events = [bg('loop_a', 'ok', 1), orch({ status: 'running' }, 2)]
     expect(toVitals(events)).toEqual(toVitals(events))
+  })
+})
+
+// Factory runtime / uptime (#12) — derived from the socket's best start signal,
+// measured against an injected `now` (never the wall clock).
+describe('factoryStartMs', () => {
+  it('prefers the current session\'s started_at', () => {
+    const socket = {
+      currentSessionId: 'acme-20260727T100000',
+      sessions: [
+        { id: 'old', status: 'completed', started_at: '2026-07-26T00:00:00Z' },
+        { id: 'acme-20260727T100000', status: 'active', started_at: '2026-07-27T10:00:00Z' },
+      ],
+    }
+    expect(factoryStartMs(socket)).toBe(Date.parse('2026-07-27T10:00:00Z'))
+  })
+
+  it('falls back to the newest active session when no current id is set', () => {
+    const socket = {
+      sessions: [{ id: 's1', status: 'active', started_at: '2026-07-27T09:30:00Z' }],
+    }
+    expect(factoryStartMs(socket)).toBe(Date.parse('2026-07-27T09:30:00Z'))
+  })
+
+  it('parses a session id that encodes its start when no started_at exists', () => {
+    const socket = { currentSessionId: 'acme-web-20260727T221406', sessions: [] }
+    expect(factoryStartMs(socket)).toBe(Date.parse('2026-07-27T22:14:06Z'))
+  })
+
+  it('returns null when no start signal is available', () => {
+    expect(factoryStartMs({})).toBeNull()
+    expect(factoryStartMs()).toBeNull()
+    expect(factoryStartMs({ sessions: [], currentSessionId: null })).toBeNull()
+  })
+})
+
+describe('factoryUptimeLabel', () => {
+  it('formats the elapsed runtime compactly against an injected now', () => {
+    const socket = {
+      currentSessionId: 'a-20260727T100000',
+      sessions: [{ id: 'a-20260727T100000', status: 'active', started_at: '2026-07-27T10:00:00Z' }],
+    }
+    expect(factoryUptimeLabel(socket, Date.parse('2026-07-27T12:14:00Z'))).toBe('2h14m')
+  })
+
+  it('returns "" when no start signal exists (so the header renders nothing)', () => {
+    expect(factoryUptimeLabel({}, Date.now())).toBe('')
+  })
+
+  it('is deterministic — never reads the wall clock', () => {
+    const socket = { currentSessionId: 'a-20260727T100000', sessions: [] }
+    const now = Date.parse('2026-07-27T10:45:00Z')
+    expect(factoryUptimeLabel(socket, now)).toBe('45m')
+    expect(factoryUptimeLabel(socket, now)).toBe('45m')
   })
 })

@@ -7,7 +7,11 @@
  * count, its worker slots (used/cap, role-bearing stages only), and attention
  * badges: the HITL tile carries a badge equal to the HITL depth, and any stage
  * with failed work carries a red danger badge. Below the tile header the stage's
- * in-flight items render as chips, with a red marker on failed items.
+ * in-flight items render as chips, with a red marker on failed items; the
+ * terminal stages (hitl, merged) list their items as compact issue-id chips
+ * (#14). Each tile's top bar is painted in the stage's IDENTITY colour from the
+ * classic dashboard palette (constants.PIPELINE_STAGES, #10) — severity/attention
+ * still signal through `data-severity` and the badges.
  *
  * Interaction is delegated to the `select(kind, value)` callback threaded down
  * from `useOperatorSelection` (Task 2): clicking a tile emits
@@ -23,6 +27,7 @@
 
 import React from 'react'
 import { useTokens, Card, Badge, Text } from '../styles/primitives'
+import { stageColorKey } from './model/pipeline'
 
 /**
  * Derive a stage's health severity from its view model, precedence
@@ -53,8 +58,14 @@ function makeStyles(t) {
     bad: t.color.red,
     muted: t.color.border,
   }
+  // A stage's IDENTITY colour, from the classic dashboard palette
+  // (constants.PIPELINE_STAGES → token colour key): triage=yellow, plan=purple,
+  // build=accent, review=orange, hitl=red, merged=green. Falls back to the
+  // neutral muted line for an unknown stage key.
+  const stageColor = (key) => t.color[stageColorKey(key)] ?? severityColor.muted
   return {
     severityColor,
+    stageColor,
     rail: {
       display: 'flex',
       alignItems: 'stretch',
@@ -75,14 +86,14 @@ function makeStyles(t) {
     // A thin health bar full-bleed across the top of the tile. Negative margins
     // (token-backed) pull it out to the card's padded edge; the top radius
     // matches the Card so it hugs the rounded corners.
-    colorBar: (severity) => ({
+    colorBar: (color) => ({
       height: 3,
       marginTop: -t.space.sm,
       marginLeft: -t.space.sm,
       marginRight: -t.space.sm,
       borderTopLeftRadius: t.radius.lg,
       borderTopRightRadius: t.radius.lg,
-      background: severityColor[severity] ?? severityColor.muted,
+      background: color,
       flexShrink: 0,
     }),
     header: (active) => ({
@@ -133,6 +144,28 @@ function makeStyles(t) {
       whiteSpace: 'nowrap',
       maxWidth: 90,
     },
+    // Terminal stages (hitl, merged) list their items as compact issue-id
+    // chips — the classic dashboard's dot/id treatment (#14) — rather than only
+    // a count, so an operator sees WHICH issues are parked / just merged.
+    itemIds: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: t.space.xxs,
+    },
+    idChip: (failed) => ({
+      display: 'inline-flex',
+      alignItems: 'center',
+      border: `1px solid ${failed ? t.color.red : t.color.border}`,
+      borderRadius: t.radius.md,
+      background: t.color.surfaceInset,
+      color: t.color.text,
+      cursor: 'pointer',
+      padding: `${t.space.xxs}px ${t.space.xs}px`,
+      font: 'inherit',
+      fontSize: t.type.size.xs,
+      fontWeight: t.type.weight.medium,
+      lineHeight: 1.4,
+    }),
     itemFailedDot: {
       display: 'inline-block',
       width: 6,
@@ -151,14 +184,21 @@ function StageTile({ styles, stage, select, active }) {
   const showHitl = attention?.hitl > 0
   const showFailed = attention?.failed > 0
   const severity = stageSeverity(stage)
+  // The bar is painted in the stage's IDENTITY colour (classic palette, #10);
+  // severity/attention still signal through `data-severity` + the badges below.
+  const colorKey = stageColorKey(key)
+  // Terminal stages surface their items as compact issue-id chips (#14); the
+  // workflow stages keep the richer id-plus-title chips.
+  const isTerminal = key === 'hitl' || key === 'merged'
 
   return (
     <Card as="div" style={styles.tile} data-testid={`stage-card-${key}`}>
       <div
         data-testid={`stage-colorbar-${key}`}
         data-severity={severity}
+        data-stage-color={colorKey ?? ''}
         aria-hidden="true"
-        style={styles.colorBar(severity)}
+        style={styles.colorBar(styles.stageColor(key))}
       />
       <button
         type="button"
@@ -202,7 +242,7 @@ function StageTile({ styles, stage, select, active }) {
         </span>
       </button>
 
-      {items?.length > 0 && (
+      {items?.length > 0 && !isTerminal && (
         <div style={styles.chips}>
           {items.map(item => {
             const failed = item.status === 'failed'
@@ -229,6 +269,24 @@ function StageTile({ styles, stage, select, active }) {
               </button>
             )
           })}
+        </div>
+      )}
+
+      {items?.length > 0 && isTerminal && (
+        <div style={styles.itemIds} data-testid={`stage-items-${key}`}>
+          {items.map(item => (
+            <button
+              key={item.id}
+              type="button"
+              data-testid={`stage-item-${key}-${item.id}`}
+              data-status={item.status}
+              style={styles.idChip(item.status === 'failed')}
+              title={item.title}
+              onClick={() => select('item', item.id)}
+            >
+              <Text as="span" size="xs" tone="muted">#{item.id}</Text>
+            </button>
+          ))}
         </div>
       )}
     </Card>

@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { toPipeline, OPERATOR_STAGES } from '../pipeline'
+import {
+  toPipeline,
+  OPERATOR_STAGES,
+  WORKFLOW_STAGE_KEYS,
+  activeWorkflowItems,
+  stageDurationLabel,
+  stageColorKey,
+  stageTransitionTs,
+} from '../pipeline'
+import { PIPELINE_STAGES } from '../../../constants'
 
 // Raw event shapes are taken verbatim from the live WebSocket stream as parsed
 // by the HydraFlowContext reducer:
@@ -138,5 +147,128 @@ describe('toPipeline', () => {
       expect(stage.count).toBe(0)
       expect(stage.attention).toEqual({ hitl: 0, failed: 0 })
     }
+  })
+})
+
+describe('activeWorkflowItems', () => {
+  it('spans triage → plan → build → review, not just Build (#13)', () => {
+    expect(WORKFLOW_STAGE_KEYS).toEqual(['triage', 'plan', 'implement', 'review'])
+
+    const vm = toPipeline([snapshotEvent(fullSnapshot), statsEvent(fullStats)])
+    const items = activeWorkflowItems(vm)
+
+    // Every workflow-stage item surfaces, in lifecycle order, tagged by stage.
+    expect(items.map(i => i.id)).toEqual([101, 201, 202, 301])
+    expect(items.map(i => i.stage)).toEqual(['triage', 'implement', 'implement', 'review'])
+    expect(items.map(i => i.stageLabel)).toEqual(['Triage', 'Build', 'Build', 'Review'])
+  })
+
+  it('excludes the terminal hitl and merged stages', () => {
+    const vm = toPipeline([snapshotEvent(fullSnapshot), statsEvent(fullStats)])
+    const ids = activeWorkflowItems(vm).map(i => i.id)
+    // 401-404 are hitl, 501 is merged — none appear.
+    expect(ids).not.toContain(401)
+    expect(ids).not.toContain(501)
+  })
+
+  it('is tolerant of a missing / empty pipeline', () => {
+    expect(activeWorkflowItems(null)).toEqual([])
+    expect(activeWorkflowItems({})).toEqual([])
+    expect(activeWorkflowItems({ stages: [] })).toEqual([])
+  })
+})
+
+describe('stageDurationLabel', () => {
+  const start = Date.parse('2026-07-27T10:00:00Z')
+
+  it('formats sub-minute elapsed as seconds', () => {
+    expect(stageDurationLabel('2026-07-27T10:00:00Z', start + 45_000)).toBe('45s')
+  })
+
+  it('formats sub-hour elapsed as whole minutes', () => {
+    expect(stageDurationLabel('2026-07-27T10:00:00Z', start + 12 * 60_000)).toBe('12m')
+  })
+
+  it('formats multi-hour elapsed as `h`+zero-padded minutes', () => {
+    expect(stageDurationLabel('2026-07-27T10:00:00Z', start + 64 * 60_000)).toBe('1h04m')
+    expect(stageDurationLabel('2026-07-27T10:00:00Z', start + 60 * 60_000)).toBe('1h00m')
+  })
+
+  it('accepts epoch-ms as well as ISO for the start', () => {
+    expect(stageDurationLabel(start, start + 90_000)).toBe('1m')
+  })
+
+  it('is deterministic — never reads the wall clock (now is injected)', () => {
+    const now = start + 5 * 60_000
+    expect(stageDurationLabel('2026-07-27T10:00:00Z', now)).toBe('5m')
+    expect(stageDurationLabel('2026-07-27T10:00:00Z', now)).toBe('5m')
+  })
+
+  it('returns "" for a missing, unparseable, or future start', () => {
+    expect(stageDurationLabel(null, start)).toBe('')
+    expect(stageDurationLabel(undefined, start)).toBe('')
+    expect(stageDurationLabel('not-a-date', start)).toBe('')
+    expect(stageDurationLabel('2026-07-27T10:05:00Z', start)).toBe('') // start after now
+  })
+})
+
+describe('stageColorKey', () => {
+  it('maps each operator stage to its classic-palette token colour key (#10)', () => {
+    expect(stageColorKey('triage')).toBe('yellow')
+    expect(stageColorKey('plan')).toBe('purple')
+    expect(stageColorKey('implement')).toBe('accent')
+    expect(stageColorKey('review')).toBe('orange')
+    expect(stageColorKey('hitl')).toBe('red')
+    expect(stageColorKey('merged')).toBe('green')
+  })
+
+  it('never drifts from constants.PIPELINE_STAGES', () => {
+    // The colour key is the `x` in each classic stage's `var(--x)` reference.
+    for (const s of PIPELINE_STAGES) {
+      const raw = /var\(--([a-z0-9-]+)\)/.exec(s.color)[1]
+      const expected = raw.replace(/-([a-z])/g, (_, c) => c.toUpperCase())
+      expect(stageColorKey(s.key)).toBe(expected)
+    }
+  })
+
+  it('returns null for an unknown stage key', () => {
+    expect(stageColorKey('nope')).toBeNull()
+    expect(stageColorKey(undefined)).toBeNull()
+  })
+})
+
+describe('stageTransitionTs', () => {
+  const rowAt = (ts, source) => ({ ts, meta: { source } })
+
+  it('returns the ts at which the current stage began (last source change)', () => {
+    const rows = [
+      rowAt('2026-07-27T10:00:00Z', 'triage'),
+      rowAt('2026-07-27T10:02:00Z', 'triage'),
+      rowAt('2026-07-27T10:10:00Z', 'reviewer'),
+      rowAt('2026-07-27T10:11:00Z', 'reviewer'),
+    ]
+    expect(stageTransitionTs(rows)).toBe('2026-07-27T10:10:00Z')
+  })
+
+  it('returns null when every row shares one source (no observed transition)', () => {
+    const rows = [
+      rowAt('2026-07-27T10:00:00Z', 'implementer'),
+      rowAt('2026-07-27T10:05:00Z', 'implementer'),
+    ]
+    expect(stageTransitionTs(rows)).toBeNull()
+  })
+
+  it('treats a missing source as its own stage value', () => {
+    const rows = [
+      rowAt('2026-07-27T10:00:00Z', 'triage'),
+      rowAt('2026-07-27T10:05:00Z', undefined),
+    ]
+    expect(stageTransitionTs(rows)).toBe('2026-07-27T10:05:00Z')
+  })
+
+  it('is tolerant of empty / non-array input', () => {
+    expect(stageTransitionTs([])).toBeNull()
+    expect(stageTransitionTs(null)).toBeNull()
+    expect(stageTransitionTs(undefined)).toBeNull()
   })
 })
