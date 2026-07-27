@@ -162,7 +162,14 @@ function summarizeDetails(details) {
  * @param {{ events?: Array }} [extras] - raw events for restart/error correlation
  */
 export function toLoops(input, extras = {}) {
-  const workers = resolveWorkers(input)
+  // Loops == registered BACKGROUND workers only. The pipeline WORKFLOW stages
+  // (triage / plan / build / review — driven by the max_triagers/max_planners/…
+  // worker pools) and the staging<->main RELEASE PROMOTION flow are NOT
+  // background loops; they belong to the PipelineRail / release views. Keep only
+  // workers present in the canonical BACKGROUND_WORKERS registry (ratchet-
+  // enforced to match src/*_loop.py), so any workflow/promotion status that
+  // leaks onto the bus never shows up here as a "loop".
+  const workers = resolveWorkers(input).filter(w => w?.name != null && WORKER_META.has(w.name))
   const events = Array.isArray(extras.events)
     ? extras.events
     : (Array.isArray(input) && looksLikeEvents(input) ? input : [])

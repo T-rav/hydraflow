@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T20:11:03.090169+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1178
+superseded_by: 1326
 ---
 
 # In-process MockWorld can't run pipeline + loops together

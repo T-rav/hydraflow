@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T20:11:03.053740+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1167
+superseded_by: 1315
 ---
 
 # Loop default interval must be min() of class-specific floors

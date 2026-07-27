@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { LoopsPanel } from '../LoopsPanel'
 
@@ -45,9 +45,22 @@ function vm(over = {}) {
 }
 
 describe('LoopsPanel', () => {
+  // Collapse state is persisted to localStorage; isolate each test.
+  beforeEach(() => window.localStorage.clear())
+
+  // Categories start COLLAPSED — expand one to reveal its loop rows.
+  const expand = (key = 'repo_health') =>
+    fireEvent.click(screen.getByTestId(`loops-category-toggle-${key}`))
+
   it('renders the panel container', () => {
     render(<LoopsPanel loops={vm()} />)
     expect(screen.getByTestId('loops-panel')).toBeInTheDocument()
+  })
+
+  it('starts with every category collapsed (loop rows hidden)', () => {
+    render(<LoopsPanel loops={vm()} />)
+    expect(screen.getByTestId('loops-category-toggle-repo_health')).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByTestId('loop-row-ci_monitor')).toBeNull()
   })
 
   it('renders a category header with its count and ok/total badge', () => {
@@ -59,12 +72,14 @@ describe('LoopsPanel', () => {
 
   it('renders a status dot per loop carrying its severity class', () => {
     render(<LoopsPanel loops={vm()} />)
+    expand()
     expect(screen.getByTestId('loop-status-ci_monitor')).toHaveClass('ok')
     expect(screen.getByTestId('loop-status-flake_tracker')).toHaveClass('bad')
   })
 
   it('shows the live error on a bad loop and the stats line on an ok loop', () => {
     render(<LoopsPanel loops={vm()} />)
+    expand()
     expect(screen.getByTestId('loop-message-flake_tracker')).toHaveTextContent('Flake tracker loop error')
     expect(screen.getByTestId('loop-message-ci_monitor')).toHaveTextContent('filed=0')
   })
@@ -77,22 +92,37 @@ describe('LoopsPanel', () => {
       }],
       totals: { ok: 0, total: 1, restarted: 1, disabled: 0 },
     })} />)
+    expand()
     expect(screen.getByTestId('loop-restarts-ci_monitor')).toHaveTextContent('3')
   })
 
   it('expands a truncated message on click', () => {
     render(<LoopsPanel loops={vm()} />)
+    expand()
     const msg = screen.getByTestId('loop-message-ci_monitor')
     expect(msg).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(msg)
     expect(msg).toHaveAttribute('aria-expanded', 'true')
   })
 
-  it('collapses a category, hiding its loop rows', () => {
+  it('toggles a category open then closed, showing/hiding its loop rows', () => {
     render(<LoopsPanel loops={vm()} />)
-    expect(screen.getByTestId('loop-row-ci_monitor')).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId('loops-category-toggle-repo_health'))
     expect(screen.queryByTestId('loop-row-ci_monitor')).toBeNull()
+    expand()
+    expect(screen.getByTestId('loop-row-ci_monitor')).toBeInTheDocument()
+    expand()
+    expect(screen.queryByTestId('loop-row-ci_monitor')).toBeNull()
+  })
+
+  it('remembers a category open state across remount (persisted)', () => {
+    const { unmount } = render(<LoopsPanel loops={vm()} />)
+    expand() // operator opens Repo Health
+    expect(screen.getByTestId('loop-row-ci_monitor')).toBeInTheDocument()
+    unmount()
+    // Fresh mount (e.g. page reload): the remembered open state is restored.
+    render(<LoopsPanel loops={vm()} />)
+    expect(screen.getByTestId('loops-category-toggle-repo_health')).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByTestId('loop-row-ci_monitor')).toBeInTheDocument()
   })
 
   it('renders the panel health badge from totals', () => {
@@ -119,6 +149,7 @@ describe('LoopsPanel', () => {
       }],
       totals: { ok: 1, total: 1, restarted: 0, disabled: 1 },
     })} />)
+    expand()
     expect(screen.getByTestId('loop-status-ci_monitor')).toHaveClass('muted')
     expect(within(screen.getByTestId('loop-row-ci_monitor')).getByText('off')).toBeInTheDocument()
   })
