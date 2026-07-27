@@ -105,6 +105,11 @@ class PreconditionGate:
         for issue in issues:
             result = check_preconditions(self._cache, issue.id, stage)
             if result.ok:
+                # The issue converged this cycle (its stage preconditions pass)
+                # — reset its give-up window so accumulated restart-intensity
+                # from earlier blocking cycles never trips a spurious self-solve
+                # (#10735). No-op when the give-up window is not wired.
+                self._coordinator.reset_window(issue.id)
                 passed.append(issue)
                 continue
 
@@ -121,6 +126,7 @@ class PreconditionGate:
                     to_stage=target_stage,
                     reason=result.reason,
                     feedback_context=result.reason,
+                    issue_body=issue.body,
                 )
             except Exception:  # noqa: BLE001
                 # Route-back coordinator already logs at warning. The

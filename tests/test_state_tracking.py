@@ -107,6 +107,7 @@ class TestInitialization:
             "review_orphan_requeues",
             "review_orphan_strikes",
             "route_back_counts",
+            "give_up_events",
             # Trust-arch-hardening mixins (spec §4.1–§4.9 + §12.1)
             "auto_reverts_in_cycle",
             "auto_reverts_successful",

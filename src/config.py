@@ -701,6 +701,18 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
     ("cost_throttle_ratio", "HYDRAFLOW_COST_THROTTLE_RATIO", 0.8),
 ]
 
+# Formal give-up window thresholds (#10735) — one N-in-T pair per child-class.
+_ENV_INT_OVERRIDES += [
+    ("giveup_build_max_restarts", "HYDRAFLOW_GIVEUP_BUILD_MAX_RESTARTS", 3),
+    ("giveup_build_window_secs", "HYDRAFLOW_GIVEUP_BUILD_WINDOW_SECS", 3600),
+    ("giveup_review_max_restarts", "HYDRAFLOW_GIVEUP_REVIEW_MAX_RESTARTS", 3),
+    ("giveup_review_window_secs", "HYDRAFLOW_GIVEUP_REVIEW_WINDOW_SECS", 3600),
+    ("giveup_loop_max_restarts", "HYDRAFLOW_GIVEUP_LOOP_MAX_RESTARTS", 5),
+    ("giveup_loop_window_secs", "HYDRAFLOW_GIVEUP_LOOP_WINDOW_SECS", 3600),
+    ("giveup_plan_retry_max_restarts", "HYDRAFLOW_GIVEUP_PLAN_RETRY_MAX_RESTARTS", 2),
+    ("giveup_plan_retry_window_secs", "HYDRAFLOW_GIVEUP_PLAN_RETRY_WINDOW_SECS", 3600),
+]
+
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
     (
@@ -734,6 +746,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "precondition_gate_enabled",
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
+        False,
+    ),
+    (
+        "giveup_window_enabled",
+        "HYDRAFLOW_GIVEUP_WINDOW_ENABLED",
         False,
     ),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
@@ -3074,6 +3091,72 @@ class HydraFlowConfig(BaseModel):
             "phases. Requires issue_cache_enabled to be True. Defaults "
             "to False to give operators a separate opt-in switch."
         ),
+    )
+    # Formal give-up window (#10735, epic #10733 child 2) — OTP restart-
+    # intensity per child-class. N abnormal exits/retries within T seconds
+    # means the child is not converging under retry; the plan-retry route-back
+    # then self-solves (ADR-0105 decompose / auto-agent diagnose) instead of
+    # thrashing or dumping the issue on a human. resolve_window(config, cls) in
+    # giveup_window.py is the single threshold source for all four classes.
+    giveup_window_enabled: bool = Field(
+        default=False,
+        description=(
+            "Wire the plan-retry route-back terminal to the formal give-up "
+            "window: after giveup_plan_retry_max_restarts route-backs within "
+            "giveup_plan_retry_window_secs, self-solve (decompose/diagnose) "
+            "instead of routing back again. Off by default (feature opt-in, "
+            "and inert unless precondition_gate_enabled routes the plan-retry "
+            "loop at all)."
+        ),
+    )
+    giveup_build_max_restarts: int = Field(
+        default=3,
+        ge=1,
+        le=100,
+        description="Give-up window N for the build child-class (abnormal exits in T).",
+    )
+    giveup_build_window_secs: int = Field(
+        default=3600,
+        ge=1,
+        description="Give-up window T (seconds) for the build child-class.",
+    )
+    giveup_review_max_restarts: int = Field(
+        default=3,
+        ge=1,
+        le=100,
+        description="Give-up window N for the review child-class (abnormal exits in T).",
+    )
+    giveup_review_window_secs: int = Field(
+        default=3600,
+        ge=1,
+        description="Give-up window T (seconds) for the review child-class.",
+    )
+    giveup_loop_max_restarts: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description="Give-up window N for the background-loop child-class.",
+    )
+    giveup_loop_window_secs: int = Field(
+        default=3600,
+        ge=1,
+        description="Give-up window T (seconds) for the background-loop child-class.",
+    )
+    giveup_plan_retry_max_restarts: int = Field(
+        default=2,
+        ge=1,
+        le=100,
+        description=(
+            "Give-up window N for the plan-retry child-class: plan->ready "
+            "route-backs within giveup_plan_retry_window_secs before the "
+            "issue self-solves. Defaults to 2 (the legacy hardcoded "
+            "max_route_backs) so behaviour is unchanged when the window is on."
+        ),
+    )
+    giveup_plan_retry_window_secs: int = Field(
+        default=3600,
+        ge=1,
+        description="Give-up window T (seconds) for the plan-retry child-class.",
     )
     # Shadow corpus (#8786) — opt-in live sampling of production
     # subprocess calls. When enabled, every gh/git/docker/claude call

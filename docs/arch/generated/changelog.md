@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `308a6df` — fix(operator): registry-seeded stable loop-health count, not a window/tick artifact (#10556) (#10739) (#10739) *(2026-07-27)*
 - `98c8462` — feat(ul): entry-evidence — 5 new entry links across 5 terms (#10729) (#10729) *(2026-07-27)*
 - `30e34cb` — feat(events): optional per-type EventBus subscription (ADR-0114, #10660) (#10723) (#10723) *(2026-07-27)*
 - `b244257` — feat(adr): lineage seed pass + escalate audit to STRUCTURAL + wiki term (#10674) (#10722) (#10722) *(2026-07-27)*
