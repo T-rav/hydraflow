@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10594
 source_phase: plan
 created_at: 2026-07-26T04:15:06.679684+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0612
 ---
 
 # verify_cite_ast changes ripple into _shipped_claim_corroborated

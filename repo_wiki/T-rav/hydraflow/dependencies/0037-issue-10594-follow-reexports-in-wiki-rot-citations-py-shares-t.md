@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 10594
 source_phase: plan
 created_at: 2026-07-26T04:15:06.679663+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0043
 ---
 
 # _follow_reexports in wiki_rot_citations.py shares the symbol collector
