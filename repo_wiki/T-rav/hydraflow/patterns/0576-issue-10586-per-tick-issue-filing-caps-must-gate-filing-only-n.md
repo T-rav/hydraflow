@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10586
 source_phase: plan
 created_at: 2026-07-26T02:51:38.701769+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0610
 ---
 
 # Per-tick issue-filing caps must gate filing only, not subject accumulation

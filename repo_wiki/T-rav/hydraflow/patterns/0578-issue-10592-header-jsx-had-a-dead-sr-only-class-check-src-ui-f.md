@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10592
 source_phase: plan
 created_at: 2026-07-26T03:33:58.716456+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0584
 ---
 
 # Header.jsx had a dead sr-only class — check src/ui for defined CSS before using it

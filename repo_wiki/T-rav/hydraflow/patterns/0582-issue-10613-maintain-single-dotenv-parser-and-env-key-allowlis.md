@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10613
 source_phase: plan
 created_at: 2026-07-26T10:32:19.699657+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0613
 ---
 
 # Maintain single dotenv parser and env key allowlist

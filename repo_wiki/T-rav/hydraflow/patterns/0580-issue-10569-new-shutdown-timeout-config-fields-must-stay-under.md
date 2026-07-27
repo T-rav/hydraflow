@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10569
 source_phase: plan
 created_at: 2026-07-26T03:51:14.084312+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0611
 ---
 
 # New shutdown-timeout config fields must stay under RepoRuntime.stop's 30s ceiling
