@@ -17,7 +17,7 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 | **ADVERSARIAL_STAGE_EXHAUSTED** | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_exhausted` | ★ all (fan-out) |
 | **ADVERSARIAL_STAGE_STARTED** | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_stage_started` | ★ all (fan-out) |
 | **AGENT_ACTIVITY** | `src.runner_utils:_stream_and_collect` | ★ all (fan-out) |
-| **BACKGROUND_WORKER_STATUS** | `src.base_background_loop:BaseBackgroundLoop._execute_cycle`<br>`src.base_background_loop:BaseBackgroundLoop._report_cycle_failure` | ★ all (fan-out) |
+| **BACKGROUND_WORKER_STATUS** | `src.base_background_loop:BaseBackgroundLoop._execute_cycle`<br>`src.base_background_loop:BaseBackgroundLoop._report_cycle_failure`<br>`src.orchestrator:HydraFlowOrchestrator._seed_background_worker_statuses` | ★ all (fan-out) |
 | **BASELINE_UPDATE** | `src.baseline_policy:BaselinePolicy.check_approval`<br>`src.baseline_policy:BaselinePolicy.rollback` | ★ all (fan-out) |
 | **CI_CHECK** | `src.pr_manager:PRManager.wait_for_ci`<br>`src.reviewer:ReviewRunner.fix_ci` | ★ all (fan-out) |
 | **CONCERN_ADDRESSED** ⚠️ | — | — |

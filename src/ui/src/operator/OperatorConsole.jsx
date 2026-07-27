@@ -146,8 +146,13 @@ export function OperatorConsoleView({ socket = {} }) {
   const showOverview = multiRepo && repo == null
   const transcript = useMemo(() => toTranscript(events, item), [events, item])
   const vitals = useMemo(
-    () => toVitals(events, { stagingPromotion: socket.stagingPromotion }),
-    [events, socket.stagingPromotion],
+    () => toVitals(events, {
+      stagingPromotion: socket.stagingPromotion,
+      // Loop-health count comes from the sticky worker slice (registry-stable),
+      // not the moving events window — see toVitals / #10556.
+      backgroundWorkers: socket.backgroundWorkers,
+    }),
+    [events, socket.stagingPromotion, socket.backgroundWorkers],
   )
   const activity = useMemo(() => toActivityFeed(events), [events])
   // All-loops quick view: the reducer's deduped backgroundWorkers slice for the
