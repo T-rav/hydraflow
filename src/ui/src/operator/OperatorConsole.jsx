@@ -25,6 +25,7 @@ import { toPipeline } from './model/pipeline'
 import { toTranscript } from './model/transcript'
 import { toVitals } from './model/vitals'
 import { toActivityFeed } from './model/activity'
+import { VitalsCard } from './VitalsCard'
 
 const slotStyle = { minWidth: 0 }
 const placeholderStyle = {
@@ -62,14 +63,6 @@ function ItemWorkspacePlaceholder({ item, transcript, mode }) {
   return (
     <div data-testid="item-workspace-placeholder" style={placeholderStyle}>
       ItemWorkspace — item: {item ?? 'none'} · {transcript.length} rows · mode: {mode}
-    </div>
-  )
-}
-
-function VitalsCardPlaceholder({ vitals }) {
-  return (
-    <div data-testid="vitals-card-placeholder" style={placeholderStyle}>
-      VitalsCard — factory: {vitals.factory.state} · loops {vitals.loopsHealthy.ok}/{vitals.loopsHealthy.total}
     </div>
   )
 }
@@ -125,7 +118,7 @@ export function OperatorConsoleView({ socket = {} }) {
         <ItemWorkspacePlaceholder item={item} transcript={transcript} mode={mode} select={select} />
       </div>
       <div data-testid="operator-vitals-slot" style={{ ...slotStyle, gridArea: 'vitals' }}>
-        <VitalsCardPlaceholder vitals={vitals} />
+        <VitalsCard vitals={vitals} />
       </div>
       <div data-testid="operator-drawer-slot" style={{ ...slotStyle, gridArea: 'drawer' }}>
         <ActivityDrawerPlaceholder activity={activity} select={select} />

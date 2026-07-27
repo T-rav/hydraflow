@@ -70,8 +70,12 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('console-header-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('pipeline-rail-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('item-workspace-placeholder')).toBeInTheDocument()
-    expect(screen.getByTestId('vitals-card-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('activity-drawer-placeholder')).toBeInTheDocument()
+  })
+
+  it('wires the real VitalsCard into the vitals slot (Task 6)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    expect(screen.getByTestId('vitals-card')).toBeInTheDocument()
   })
 
   it('wires the pipeline adapter — the pipeline placeholder reflects the six stages', () => {
