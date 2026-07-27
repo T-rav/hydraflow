@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T20:11:03.077363+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1174
+superseded_by: 1322
 ---
 
 # ADR-0017 _triage_single naming went stale after #6089/#6190 split

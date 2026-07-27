@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T20:11:03.082372+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1176
+superseded_by: 1324
 ---
 
 # Doc+single-unit-test fixes skip MockWorld/e2e

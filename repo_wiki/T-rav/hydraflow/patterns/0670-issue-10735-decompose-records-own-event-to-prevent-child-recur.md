@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10735
 source_phase: plan
 created_at: 2026-07-27T20:01:28.594800+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0715
 ---
 
 # Decompose records own event to prevent child recursion
