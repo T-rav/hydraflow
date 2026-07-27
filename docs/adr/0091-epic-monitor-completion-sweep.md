@@ -4,7 +4,15 @@ Date: 2026-05-22
 
 ## Status
 
-Accepted
+Superseded by ADR-0105 (Autonomous Convergence via Decomposition)
+
+> **Superseded by [ADR-0105](0105-autonomous-convergence-via-decomposition.md).**
+> ADR-0105 re-split epic completion back out of the monitor tick. Completion is
+> now **event-driven** (`EpicManager._try_auto_close` / `_propagate_epic_close`,
+> fired on child completion) plus a separate **`EpicSweeperLoop`**
+> (`EpicSweeperLoop._try_sweep_epic`, ADR-0081); `EpicMonitorLoop._do_work` no
+> longer performs a completion sweep (`sweep_completed_epics` was removed). The
+> historical content below is retained unchanged.
 
 ## Enforcement
 

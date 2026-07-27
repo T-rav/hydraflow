@@ -10,7 +10,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 |---|---|---|
 | ADR-0001 | enforced | `pytest:tests/test_orchestrator_loops.py`, `pytest:tests/architecture/test_loop_count_matches_adr0001.py` |
 | ADR-0002 | enforced | `pytest:tests/test_state_machine.py` |
-| ADR-0003 | decision-of-record | — |
 | ADR-0004 | enforced | `pytest:tests/test_agent_cli.py`, `pytest:tests/test_base_runner.py` |
 | ADR-0005 | enforced | `pytest:tests/test_implement_phase.py` |
 | ADR-0007 | enforced | `pytest:tests/test_dashboard_routes_repo.py` |
@@ -64,7 +63,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0088 | enforced | `pytest:tests/test_label_drift_watcher_loop.py`, `pytest:tests/test_label_drift_watcher_integration.py` |
 | ADR-0089 | enforced | `pytest:tests/test_memory_backlog_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
 | ADR-0090 | enforced | `pytest:tests/test_atlas_routes.py` |
-| ADR-0091 | decision-of-record | — |
 | ADR-0092 | enforced | `pytest:tests/test_untrusted_text.py`, `pytest:tests/test_preflight_untrusted_fencing.py`, `pytest:tests/test_agent_cli.py`, `pytest:tests/test_agent_advanced.py` |
 | ADR-0093 | enforced | `pytest:tests/test_loop_fitness_completeness.py` |
 | ADR-0094 | enforced | `pytest:tests/test_convergence_ledger.py`, `pytest:tests/test_convergence_gate.py`, `pytest:tests/scenarios/test_convergence_review_mockworld.py`, `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
@@ -82,6 +80,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0109 | enforced | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 | ADR-0111 | enforced | `pytest:tests/test_flows.py` |
+| ADR-0112 | enforced | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 
 ## Check → ADRs it protects
 
@@ -97,6 +96,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only` | ADR-0042 |
 | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` | ADR-0065 |
 | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` | ADR-0107 |
+| `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` | ADR-0112 |
 | `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
 | `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0089 |
 | `pytest:tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |

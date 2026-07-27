@@ -197,8 +197,10 @@ def test_exemplar_adrs_classify_real():
 
 
 def test_exemplar_decision_of_record_is_missing():
-    # ADR-0003 (git worktrees) is decision-of-record with no Enforced-by.
-    assert classify_adr_enforcement(_live()[3], REPO) is EnforcementClass.MISSING
+    # ADR-0027 (single-definition rule) is decision-of-record with no
+    # Enforced-by. (ADR-0003, the former exemplar, is now Superseded by ADR-0112
+    # — clone-local isolation, #10623 — so it is no longer an Accepted ADR.)
+    assert classify_adr_enforcement(_live()[27], REPO) is EnforcementClass.MISSING
 
 
 def test_exemplar_manual_is_weak():
