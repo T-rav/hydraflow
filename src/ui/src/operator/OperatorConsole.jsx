@@ -21,6 +21,7 @@
 import React, { useMemo } from 'react'
 import { useHydraFlowSocket } from '../hooks/useHydraFlowSocket'
 import { useOperatorSelection } from './useOperatorSelection'
+import { PipelineRail } from './PipelineRail'
 import { toPipeline } from './model/pipeline'
 import { toTranscript } from './model/transcript'
 import { toVitals } from './model/vitals'
@@ -47,14 +48,6 @@ function ConsoleHeaderPlaceholder({ breadcrumb, mode }) {
   return (
     <div data-testid="console-header-placeholder" style={placeholderStyle}>
       ConsoleHeader — {trail} · mode: {mode}
-    </div>
-  )
-}
-
-function PipelineRailPlaceholder({ pipeline }) {
-  return (
-    <div data-testid="pipeline-rail-placeholder" style={placeholderStyle}>
-      PipelineRail — {pipeline.stages.length} stages
     </div>
   )
 }
@@ -112,7 +105,7 @@ export function OperatorConsoleView({ socket = {} }) {
         <ConsoleHeaderPlaceholder breadcrumb={breadcrumb} select={select} vitals={vitals} mode={mode} />
       </div>
       <div data-testid="operator-pipeline-slot" style={{ ...slotStyle, gridArea: 'pipeline' }}>
-        <PipelineRailPlaceholder pipeline={pipeline} select={select} stage={stage} />
+        <PipelineRail pipeline={pipeline} select={select} stage={stage} />
       </div>
       <div data-testid="operator-detail-slot" style={{ ...slotStyle, gridArea: 'detail' }}>
         <ItemWorkspacePlaceholder item={item} transcript={transcript} mode={mode} select={select} />
