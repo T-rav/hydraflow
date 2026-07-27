@@ -1,0 +1,95 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { OperatorConsoleView } from '../OperatorConsole'
+
+// Task 2 ships only the shell: it renders its five slots (header / pipeline /
+// detail / vitals / drawer) with placeholder children (the real components land
+// in Tasks 3-9) and wires the Task-1 adapters against an injected socket. The
+// injected `socket` prop is the seam that keeps the presentational shell
+// testable without spinning up a live HydraFlowProvider/WebSocket.
+
+// A fixture shaped like the HydraFlowContext value: events (newest-first) plus
+// the dedicated pipeline slices the reducer maintains.
+function makeSocket(overrides = {}) {
+  return {
+    events: [
+      {
+        type: 'transcript_line',
+        timestamp: '2026-07-26T12:00:02Z',
+        id: 3,
+        data: { issue: 42, line: 'running tests' },
+      },
+      {
+        type: 'orchestrator_status',
+        timestamp: '2026-07-26T12:00:01Z',
+        id: 2,
+        data: { status: 'running' },
+      },
+    ],
+    pipelineIssues: {
+      triage: [{ issue_number: 42, title: 'Fix login', status: 'active' }],
+      plan: [],
+      implement: [],
+      review: [],
+      hitl: [],
+      merged: [],
+    },
+    pipelineStats: null,
+    ...overrides,
+  }
+}
+
+describe('OperatorConsoleView — shell', () => {
+  let originalHref
+
+  beforeEach(() => {
+    originalHref = window.location.href
+    window.history.replaceState({}, '', '/')
+  })
+
+  afterEach(() => {
+    window.history.replaceState({}, '', originalHref)
+  })
+
+  it('renders the console container without crashing given a socket fixture', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    expect(screen.getByTestId('operator-console')).toBeInTheDocument()
+  })
+
+  it('renders all five layout slots', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    expect(screen.getByTestId('operator-header-slot')).toBeInTheDocument()
+    expect(screen.getByTestId('operator-pipeline-slot')).toBeInTheDocument()
+    expect(screen.getByTestId('operator-detail-slot')).toBeInTheDocument()
+    expect(screen.getByTestId('operator-vitals-slot')).toBeInTheDocument()
+    expect(screen.getByTestId('operator-drawer-slot')).toBeInTheDocument()
+  })
+
+  it('renders placeholder children for the not-yet-built components', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    expect(screen.getByTestId('console-header-placeholder')).toBeInTheDocument()
+    expect(screen.getByTestId('pipeline-rail-placeholder')).toBeInTheDocument()
+    expect(screen.getByTestId('item-workspace-placeholder')).toBeInTheDocument()
+    expect(screen.getByTestId('vitals-card-placeholder')).toBeInTheDocument()
+    expect(screen.getByTestId('activity-drawer-placeholder')).toBeInTheDocument()
+  })
+
+  it('wires the pipeline adapter — the pipeline placeholder reflects the six stages', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    expect(screen.getByTestId('pipeline-rail-placeholder')).toHaveTextContent('6')
+  })
+
+  it('reflects URL-initialised selection in the header breadcrumb placeholder', () => {
+    window.history.replaceState({}, '', '/?repo=acme%2Fweb&stage=plan')
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    // root + repo + stage = depth 3
+    expect(screen.getByTestId('console-header-placeholder')).toHaveTextContent('acme/web')
+    expect(screen.getByTestId('console-header-placeholder')).toHaveTextContent('Plan')
+  })
+
+  it('does not crash on an empty socket (no events, no pipeline slices)', () => {
+    render(<OperatorConsoleView socket={{}} />)
+    expect(screen.getByTestId('operator-console')).toBeInTheDocument()
+    expect(screen.getByTestId('pipeline-rail-placeholder')).toHaveTextContent('6')
+  })
+})
