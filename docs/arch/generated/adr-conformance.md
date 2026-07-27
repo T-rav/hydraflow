@@ -15,7 +15,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0005 | enforced | `pytest:tests/test_implement_phase.py` |
 | ADR-0007 | enforced | `pytest:tests/test_dashboard_routes_repo.py` |
 | ADR-0008 | enforced | `pytest:tests/test_dashboard_routes_repo.py` |
-| ADR-0009 | manual | `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` |
+| ADR-0009 | enforced | `pytest:tests/architecture/test_adr0009_process_per_repo_isolation.py::test_workspace_paths_are_repo_slug_scoped_and_collision_free` |
 | ADR-0010 | enforced | `pytest:tests/test_integration_worktree.py` |
 | ADR-0011 | enforced | `pytest:tests/test_epic.py`, `pytest:tests/test_release.py` |
 | ADR-0012 | enforced | `pytest:tests/test_epic_merge_coordination.py` |
@@ -39,7 +39,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0035 | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
 | ADR-0037 | enforced | `pytest:tests/test_adr_pre_validator.py` |
 | ADR-0041 | enforced | `pytest:tests/test_issue_cache.py`, `pytest:tests/test_precondition_gate.py` |
-| ADR-0042 | manual | `branch-protection ruleset review per docs/standards/branch_protection` |
+| ADR-0042 | enforced | `pytest:tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only` |
 | ADR-0043 | enforced | `pytest:tests/test_preflight_plugins.py`, `pytest:tests/test_phase_skill_filter.py` |
 | ADR-0045 | enforced | `pytest:tests/test_trust_fleet_sanity_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_trust_fleet_anomaly_detectors.py` |
 | ADR-0047 | enforced | `make:trust-contracts`, `pytest:tests/trust/contracts/test_fake_github_contract.py` |
@@ -57,7 +57,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0061 | enforced | `pytest:tests/test_atlas_routes.py` |
 | ADR-0062 | enforced | `pytest:tests/test_entry_evidence_loop.py`, `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` |
 | ADR-0064 | enforced | `pytest:tests/test_adversarial_retry_loop.py` |
-| ADR-0065 | manual | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
+| ADR-0065 | enforced | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` |
 | ADR-0071 | enforced | `pytest:tests/test_route_back.py` |
 | ADR-0083 | enforced | `pytest:tests/test_sandbox_scenario_contract.py`, `pytest:tests/test_no_screenshot_regression_tests.py` |
 | ADR-0085 | enforced | `pytest:tests/test_secret_scrub.py`, `pytest:tests/regressions/test_issue_9143_codeql_suppression.py` |
@@ -90,11 +90,11 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` | ADR-0051 |
 | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` | ADR-0023 |
 | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` | ADR-0035 |
-| `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` | ADR-0065 |
-| `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` | ADR-0009 |
 | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` | ADR-0025 |
-| `branch-protection ruleset review per docs/standards/branch_protection` | ADR-0042 |
 | `make:trust-contracts` | ADR-0047 |
+| `pytest:tests/architecture/test_adr0009_process_per_repo_isolation.py::test_workspace_paths_are_repo_slug_scoped_and_collision_free` | ADR-0009 |
+| `pytest:tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only` | ADR-0042 |
+| `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` | ADR-0065 |
 | `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
 | `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0089 |
 | `pytest:tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
@@ -199,12 +199,9 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 
 | ADR | Prose pointer |
 |---|---|
-| ADR-0009 | `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` |
 | ADR-0023 | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
 | ADR-0025 | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0035 | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
-| ADR-0042 | `branch-protection ruleset review per docs/standards/branch_protection` |
 | ADR-0051 | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |
-| ADR-0065 | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
 
 <!-- arch:generated -->

@@ -2,8 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-05-19
-**Enforcement:** manual
-**Enforced by:** Process check — `grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/` must return no live references; only this ADR and the historical date-stamped snapshot in `docs/arch/area_review_caretaking_2026-05-12.md` are allowed to mention the removed loop. Closes #8984.
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests
 **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) — Caretaker Loop Pattern (this ADR removes one of the four original caretakers); `.claude/commands/hf.audit-code.md`; `.codex/skills/hf.audit-code/SKILL.md`.
 
 ## Context

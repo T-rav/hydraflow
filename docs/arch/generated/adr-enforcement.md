@@ -7,12 +7,12 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 ## Summary
 
 - **Accepted ADRs:** 74
-- **REAL** (real asserting enforcement): 62 (83.8%)
-- **WEAK** (prose-only or tautological): 7
+- **REAL** (real asserting enforcement): 65 (87.8%)
+- **WEAK** (prose-only or tautological): 4
 - **MISSING** (no `**Enforced by:**`): 5
-- **Unenforced-decision debt** (WEAK + MISSING): **12 / 74 = 16.2%**
+- **Unenforced-decision debt** (WEAK + MISSING): **9 / 74 = 12.2%**
 
-By declared `**Enforcement:**` kind: `enforced` 62 · `manual` 7 · `decision-of-record` 5.
+By declared `**Enforcement:**` kind: `enforced` 65 · `manual` 4 · `decision-of-record` 5.
 
 ## Classification
 
@@ -25,7 +25,7 @@ By declared `**Enforcement:**` kind: `enforced` 62 · `manual` 7 · `decision-of
 | ADR-0005 | REAL | enforced | `pytest:tests/test_implement_phase.py` |
 | ADR-0007 | REAL | enforced | `pytest:tests/test_dashboard_routes_repo.py` |
 | ADR-0008 | REAL | enforced | `pytest:tests/test_dashboard_routes_repo.py` |
-| ADR-0009 | WEAK | manual | `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` |
+| ADR-0009 | REAL | enforced | `pytest:tests/architecture/test_adr0009_process_per_repo_isolation.py::test_workspace_paths_are_repo_slug_scoped_and_collision_free` |
 | ADR-0010 | REAL | enforced | `pytest:tests/test_integration_worktree.py` |
 | ADR-0011 | REAL | enforced | `pytest:tests/test_epic.py`, `pytest:tests/test_release.py` |
 | ADR-0012 | REAL | enforced | `pytest:tests/test_epic_merge_coordination.py` |
@@ -49,7 +49,7 @@ By declared `**Enforcement:**` kind: `enforced` 62 · `manual` 7 · `decision-of
 | ADR-0035 | WEAK | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
 | ADR-0037 | REAL | enforced | `pytest:tests/test_adr_pre_validator.py` |
 | ADR-0041 | REAL | enforced | `pytest:tests/test_issue_cache.py`, `pytest:tests/test_precondition_gate.py` |
-| ADR-0042 | WEAK | manual | `branch-protection ruleset review per docs/standards/branch_protection` |
+| ADR-0042 | REAL | enforced | `pytest:tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only` |
 | ADR-0043 | REAL | enforced | `pytest:tests/test_preflight_plugins.py`, `pytest:tests/test_phase_skill_filter.py` |
 | ADR-0045 | REAL | enforced | `pytest:tests/test_trust_fleet_sanity_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_trust_fleet_anomaly_detectors.py` |
 | ADR-0047 | REAL | enforced | `make:trust-contracts`, `pytest:tests/trust/contracts/test_fake_github_contract.py` |
@@ -67,7 +67,7 @@ By declared `**Enforcement:**` kind: `enforced` 62 · `manual` 7 · `decision-of
 | ADR-0061 | REAL | enforced | `pytest:tests/test_atlas_routes.py` |
 | ADR-0062 | REAL | enforced | `pytest:tests/test_entry_evidence_loop.py`, `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` |
 | ADR-0064 | REAL | enforced | `pytest:tests/test_adversarial_retry_loop.py` |
-| ADR-0065 | WEAK | manual | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
+| ADR-0065 | REAL | enforced | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` |
 | ADR-0071 | REAL | enforced | `pytest:tests/test_route_back.py` |
 | ADR-0083 | REAL | enforced | `pytest:tests/test_sandbox_scenario_contract.py`, `pytest:tests/test_no_screenshot_regression_tests.py` |
 | ADR-0085 | REAL | enforced | `pytest:tests/test_secret_scrub.py`, `pytest:tests/regressions/test_issue_9143_codeql_suppression.py` |
@@ -98,15 +98,12 @@ By declared `**Enforcement:**` kind: `enforced` 62 · `manual` 7 · `decision-of
 | ADR | Class | Kind | Pointer |
 |---|---|---|---|
 | ADR-0003 | MISSING | decision-of-record | — |
-| ADR-0009 | WEAK | manual | `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` |
 | ADR-0023 | WEAK | manual | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
 | ADR-0025 | WEAK | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0027 | MISSING | decision-of-record | — |
 | ADR-0030 | MISSING | decision-of-record | — |
 | ADR-0035 | WEAK | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
-| ADR-0042 | WEAK | manual | `branch-protection ruleset review per docs/standards/branch_protection` |
 | ADR-0051 | WEAK | manual | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |
-| ADR-0065 | WEAK | manual | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
 | ADR-0091 | MISSING | decision-of-record | — |
 | ADR-0107 | MISSING | decision-of-record | — |
 

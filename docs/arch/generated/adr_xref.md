@@ -16,7 +16,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0006 | `src.events`, `src.issue_store`, `src.orchestrator`, `src.repo_runtime`, `src.state.__init__` | — |
 | ADR-0007 | `src.dashboard`, `src.dashboard_routes._routes`, `src.dashboard_routes._state_routes`, `src.repo_runtime` | `pytest:tests/test_dashboard_routes_repo.py` |
 | ADR-0008 | `src.dashboard`, `src.dashboard_routes._routes`, `src.repo_runtime` | `pytest:tests/test_dashboard_routes_repo.py` |
-| ADR-0009 | `src.config`, `src.orchestrator`, `src.repo_runtime`, `src.workspace` | `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` |
+| ADR-0009 | `src.config`, `src.orchestrator`, `src.repo_runtime`, `src.workspace` | `pytest:tests/architecture/test_adr0009_process_per_repo_isolation.py::test_workspace_paths_are_repo_slug_scoped_and_collision_free` |
 | ADR-0010 | `src.config`, `src.docker_runner`, `src.metrics_manager`, `src.workspace` | `pytest:tests/test_integration_worktree.py` |
 | ADR-0011 | `src.epic`, `src.models`, `src.pr_manager` | `pytest:tests/test_epic.py`, `pytest:tests/test_release.py` |
 | ADR-0012 | `src.epic`, `src.epic_monitor_loop`, `src.models`, `src.post_merge_handler`, `src.review_phase._phase` | `pytest:tests/test_epic_merge_coordination.py` |
@@ -48,7 +48,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0039 | `src.adr_reviewer`, `src.triage_phase` | — |
 | ADR-0040 | `src.adr_reviewer` | — |
 | ADR-0041 | `src.caching_issue_store`, `src.issue_cache`, `src.issue_store`, `src.precondition_gate`, `src.route_back` | `pytest:tests/test_issue_cache.py`, `pytest:tests/test_precondition_gate.py` |
-| ADR-0042 | — | `branch-protection ruleset review per docs/standards/branch_protection` |
+| ADR-0042 | — | `pytest:tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only` |
 | ADR-0043 | `src.docker_runner`, `src.preflight.__init__` | `pytest:tests/test_preflight_plugins.py`, `pytest:tests/test_phase_skill_filter.py` |
 | ADR-0044 | `src.orchestrator`, `src.ports` | `scripts/hydraflow_audit/* (structural/behavioural checks), tests/test_planner.py::test_build_prompt_includes_principles_checklist, tests/test_reviewer.py::test_build_review_prompt_includes_hydraflow_principles_checks (prompt-level enforcement in plan + review phases)` |
 | ADR-0045 | `src.config`, `src.contract_refresh_loop`, `src.corpus_learning_loop`, `src.dashboard_routes._cost_rollups`, `src.discover_runner`, `src.fake_coverage_auditor_loop`, `src.flake_tracker_loop`, `src.health_monitor_loop`, `src.models`, `src.orchestrator`, `src.pr_manager`, `src.principles_audit_loop`, `src.rc_budget_loop`, `src.report_issue_loop`, `src.service_registry`, `src.shape_runner`, `src.skill_prompt_eval_loop`, `src.staging_bisect_loop`, `src.trust_fleet_sanity_loop`, `src.wiki_rot_detector_loop` | `pytest:tests/test_trust_fleet_sanity_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_trust_fleet_anomaly_detectors.py` |
@@ -71,7 +71,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0062 | `src.entry_evidence_loop`, `src.term_proposer_llm` | `pytest:tests/test_entry_evidence_loop.py`, `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` |
 | ADR-0063 | `src.auto_agent_preflight_loop`, `src.discover_runner`, `src.implement_phase`, `src.plan_phase`, `src.review_phase._phase`, `src.triage_phase` | — |
 | ADR-0064 | `src.adversarial_labels`, `src.adversarial_retry_loop`, `src.assumption_surfacer`, `src.events`, `src.models`, `src.pending_concerns`, `src.plan_council`, `src.plan_council_prompts`, `src.plan_phase`, `src.post_merge_handler`, `src.spec_ac_generator`, `src.spec_judge`, `src.wiki_carryover` | `pytest:tests/test_adversarial_retry_loop.py` |
-| ADR-0065 | `src.code_grooming_loop`, `src.config`, `src.skill_registry` | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
+| ADR-0065 | `src.code_grooming_loop`, `src.config`, `src.skill_registry` | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` |
 | ADR-0066 | `src.agent`, `src.base_runner`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0067 | `src.issue_fetcher`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0068 | `src.ports`, `src.term_proposer_loop`, `src.term_pruner_loop` | `(none) — structural subtype check planned in follow-up` |
