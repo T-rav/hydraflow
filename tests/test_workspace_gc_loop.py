@@ -30,9 +30,15 @@ def _make_loop(
     active_issue_numbers: list[int] | None = None,
     hitl_causes: dict[int, str] | None = None,
     pipeline_issues: set[int] | None = None,
+    **config_overrides: object,
 ) -> tuple[WorkspaceGCLoop, StateTracker, asyncio.Event]:
     """Build a WorkspaceGCLoop with test-friendly defaults."""
-    deps = make_bg_loop_deps(tmp_path, enabled=enabled, workspace_gc_interval=interval)
+    deps = make_bg_loop_deps(
+        tmp_path,
+        enabled=enabled,
+        workspace_gc_interval=interval,
+        **config_overrides,
+    )
 
     state = StateTracker(deps.config.state_file)
     for num, path in (active_workspaces or {}).items():
@@ -58,6 +64,10 @@ def _make_loop(
     )
     loop._issue_has_pipeline_label = AsyncMock(return_value=False)  # type: ignore[method-assign]
     loop._collect_orphaned_branches = AsyncMock(return_value=0)  # type: ignore[method-assign]
+    # Phase 5 (enumerate-and-reap, #10698) shells out to `git worktree list`;
+    # neutralize it in the shared helper so the existing issue-<N> phase tests
+    # stay hermetic. Dedicated tests below exercise the real method.
+    loop._collect_orphaned_worktrees = AsyncMock(return_value=0)  # type: ignore[method-assign]
     return loop, state, deps.stop_event
 
 
@@ -1275,11 +1285,478 @@ class TestWorkspaceGCReadsViaPort:
         fake.add_issue(42, "t", "b")  # open, no labels, no PR
         # _get_issue_state still shells out (out of #9575 scope); stub to open.
         loop._get_issue_state = AsyncMock(return_value="open")
-        # Phase 3 shells out for `git branch`; stub so the assertion below can
-        # prove the open-issue *label/PR* reads never touched a subprocess.
+        # Phases 3 and 5 shell out for `git branch` / `git worktree list`; stub
+        # both so the assertion below can prove the open-issue *label/PR* reads
+        # never touched a subprocess.
         loop._collect_orphaned_branches = AsyncMock(return_value=0)
+        loop._collect_orphaned_worktrees = AsyncMock(return_value=0)
         with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
             result = await loop._do_work()
         m.assert_not_called()
         loop._workspaces.destroy.assert_awaited_once_with(42)
         assert result["collected"] >= 1
+
+
+# ===========================================================================
+# #10698: all-root worktree coverage — branch parser + enumerate-and-reap
+# ===========================================================================
+
+
+class TestParseIssueFromBranch:
+    """The branch→issue parser must cover every real namespace + fail closed."""
+
+    @pytest.mark.parametrize(
+        ("branch", "expected"),
+        [
+            ("issue-42", 42),
+            ("agent/issue-42", 42),
+            ("refs/heads/agent/issue-42", 42),
+            ("fix/broaden-gc-coverage-10698", 10698),
+            ("feat/operator-console-shell-10556", 10556),
+            ("refactor/extract-thing-777", 777),
+            ("chore/wiki-maintenance-10461", 10461),
+            ("test/add-scenario-9001", 9001),
+            ("docs/adr-rewrite-1234", 1234),
+            ("fix/multi-9-part-88-500", 500),  # trailing suffix wins
+        ],
+    )
+    def test_parses_all_namespaces(self, branch: str, expected: int) -> None:
+        assert WorkspaceGCLoop._parse_issue_from_branch(branch) == expected
+
+    @pytest.mark.parametrize(
+        "branch",
+        [
+            None,
+            "",
+            "main",
+            "staging",
+            "rc/2026-07-26-1200",
+            "fix/no-trailing-number",
+            "feat/slug-without-issue",
+            "issue-abc",
+            "random/branch-name",
+        ],
+    )
+    def test_unparseable_returns_none(self, branch: str | None) -> None:
+        assert WorkspaceGCLoop._parse_issue_from_branch(branch) is None
+
+
+class TestBroadenedBranchReaper:
+    """Phase 3 now reaps fix/feat/… branches, not just agent/issue-*."""
+
+    def _real_branch_reaper(self, loop: WorkspaceGCLoop) -> None:
+        loop._collect_orphaned_branches = (
+            WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
+        )  # type: ignore[attr-defined,method-assign]
+
+    @pytest.mark.asyncio
+    async def test_deletes_fix_namespace_branch(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_branch_reaper(loop)
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.side_effect = ["  fix/broaden-gc-10698\n", ""]
+            count = await loop._collect_orphaned_branches()
+        assert count == 1
+        assert m.call_args_list[1][0] == (
+            "git",
+            "branch",
+            _FORCE_DEL,
+            "fix/broaden-gc-10698",
+        )
+
+    @pytest.mark.asyncio
+    async def test_lists_all_branches_no_pattern(self, tmp_path: Path) -> None:
+        """The list call is no longer scoped to agent/issue-* (#10698)."""
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_branch_reaper(loop)
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.side_effect = ["", ""]
+            await loop._collect_orphaned_branches()
+        assert m.call_args_list[0][0] == ("git", "branch", "--list")
+
+    @pytest.mark.asyncio
+    async def test_skips_protected_branches(self, tmp_path: Path) -> None:
+        """main/staging/rc branches parse to no issue → never deleted."""
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_branch_reaper(loop)
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.side_effect = ["  main\n  staging\n* rc/2026-07-26-1200\n", ""]
+            count = await loop._collect_orphaned_branches()
+        assert count == 0
+        assert m.await_count == 1  # only the list call; nothing deleted
+
+    @pytest.mark.asyncio
+    async def test_feat_branch_skipped_when_in_retry_window(
+        self, tmp_path: Path
+    ) -> None:
+        """Broadened namespaces keep the same skip guards."""
+        loop, state, _e = _make_loop(tmp_path)
+        state.increment_issue_attempts(555)  # in retry window
+        self._real_branch_reaper(loop)
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            m.side_effect = ["  feat/new-thing-555\n", ""]
+            count = await loop._collect_orphaned_branches()
+        assert count == 0
+        assert m.await_count == 1  # list only, no delete
+
+
+class TestListGitWorktrees:
+    """Porcelain parsing must yield (path, branch) and skip bare/locked."""
+
+    @pytest.mark.asyncio
+    async def test_parses_branches_and_detached(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        porcelain = (
+            "worktree /repo/main\n"
+            "HEAD abc\n"
+            "branch refs/heads/staging\n"
+            "\n"
+            "worktree /wt/fix\n"
+            "HEAD def\n"
+            "branch refs/heads/fix/broaden-10698\n"
+            "\n"
+            "worktree /wt/detached\n"
+            "HEAD 999\n"
+            "detached\n"
+        )
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            return_value=porcelain,
+        ):
+            entries = await loop._list_git_worktrees()
+        branches = {str(e.path): e.branch for e in entries}
+        assert branches["/wt/fix"] == "fix/broaden-10698"
+        assert branches["/repo/main"] == "staging"
+        assert branches["/wt/detached"] is None
+
+    @pytest.mark.asyncio
+    async def test_skips_bare_and_locked(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        porcelain = (
+            "worktree /repo/bare\n"
+            "HEAD abc\n"
+            "bare\n"
+            "\n"
+            "worktree /wt/locked\n"
+            "HEAD def\n"
+            "branch refs/heads/fix/thing-1\n"
+            "locked initializing\n"
+            "\n"
+            "worktree /wt/live\n"
+            "HEAD 111\n"
+            "branch refs/heads/fix/thing-2\n"
+        )
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            return_value=porcelain,
+        ):
+            entries = await loop._list_git_worktrees()
+        paths = {str(e.path) for e in entries}
+        assert paths == {"/wt/live"}
+
+
+class TestWorktreeGuards:
+    """Direct tests of the fail-closed worktree guards."""
+
+    @pytest.mark.asyncio
+    async def test_dirty_true_when_status_nonempty(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            return_value=" M file.py\n",
+        ):
+            assert await loop._worktree_is_dirty(Path("/wt")) is True
+
+    @pytest.mark.asyncio
+    async def test_dirty_false_when_clean(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            return_value="",
+        ):
+            assert await loop._worktree_is_dirty(Path("/wt")) is False
+
+    @pytest.mark.asyncio
+    async def test_dirty_fails_closed_on_error(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("git boom"),
+        ):
+            assert await loop._worktree_is_dirty(Path("/wt")) is True
+
+    @pytest.mark.asyncio
+    async def test_unmerged_true_when_count_positive(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            return_value="3\n",
+        ):
+            assert await loop._worktree_has_unmerged_commits(Path("/wt")) is True
+
+    @pytest.mark.asyncio
+    async def test_unmerged_false_when_zero(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            return_value="0\n",
+        ):
+            assert await loop._worktree_has_unmerged_commits(Path("/wt")) is False
+
+    @pytest.mark.asyncio
+    async def test_unmerged_fails_closed_on_error(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("bad ref"),
+        ):
+            assert await loop._worktree_has_unmerged_commits(Path("/wt")) is True
+
+    def test_too_new_false_when_min_age_zero(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_min_age_seconds=0)
+        assert loop._worktree_too_new(tmp_path) is False
+
+    def test_too_new_true_for_fresh_dir(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_min_age_seconds=3600)
+        fresh = tmp_path / "fresh"
+        fresh.mkdir()
+        assert loop._worktree_too_new(fresh) is True
+
+    def test_too_new_fails_closed_on_missing_path(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_min_age_seconds=3600)
+        assert loop._worktree_too_new(tmp_path / "nope") is True
+
+
+class TestCollectOrphanedWorktrees:
+    """Phase 5 (#10698): enumerate-and-reap across all roots, fail-closed."""
+
+    def _real_phase5(self, loop: WorkspaceGCLoop) -> None:
+        loop._collect_orphaned_worktrees = (
+            WorkspaceGCLoop._collect_orphaned_worktrees.__get__(loop)
+        )  # type: ignore[attr-defined,method-assign]
+
+    @staticmethod
+    def _dispatch(
+        *,
+        worktrees: str,
+        status: str = "",
+        revlist: str = "0",
+        removed: list[str] | None = None,
+        deleted_branches: list[str] | None = None,
+    ) -> AsyncMock:
+        """A command-aware run_subprocess fake recording reap operations."""
+
+        async def _fn(*cmd: str, **_kw: object) -> str:
+            if cmd[:3] == ("git", "worktree", "list"):
+                return worktrees
+            if cmd[:3] == ("git", "status", "--porcelain"):
+                return status
+            if cmd[:2] == ("git", "rev-list"):
+                return revlist
+            if cmd[:3] == ("git", "worktree", "remove"):
+                if removed is not None:
+                    removed.append(cmd[-1])
+                return ""
+            if cmd[:3] == ("git", "branch", "-D"):
+                if deleted_branches is not None:
+                    deleted_branches.append(cmd[-1])
+                return ""
+            return ""
+
+        return AsyncMock(side_effect=_fn)
+
+    @pytest.mark.asyncio
+    async def test_reaps_closed_issue_fix_worktree_on_nonstandard_root(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "sub-agent-worktrees"
+        wt = root / "agent-abc"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        loop._get_issue_state = AsyncMock(return_value="closed")
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/fix/broaden-gc-10698\n"
+        removed: list[str] = []
+        deleted: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(
+                worktrees=porcelain, removed=removed, deleted_branches=deleted
+            ),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 1
+        assert removed == [str(wt.resolve())]
+        assert deleted == ["fix/broaden-gc-10698"]
+
+    @pytest.mark.asyncio
+    async def test_keeps_dirty_worktree(self, tmp_path: Path) -> None:
+        root = tmp_path / "roots"
+        wt = root / "dirty"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        loop._get_issue_state = AsyncMock(return_value="closed")
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/fix/thing-10698\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, status=" M code.py\n", removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0
+        assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_keeps_open_issue_with_unmerged_commits(self, tmp_path: Path) -> None:
+        root = tmp_path / "roots"
+        wt = root / "inflight"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        loop._get_issue_state = AsyncMock(return_value="open")
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/fix/thing-10698\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, revlist="4", removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0
+        assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_keeps_worktree_not_safe_to_gc(self, tmp_path: Path) -> None:
+        root = tmp_path / "roots"
+        wt = root / "active"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/fix/thing-10698\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0
+        assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_reaps_unparseable_only_when_provably_empty(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "roots"
+        wt = root / "spike"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        # No issue resolvable from a detached worktree; clean + 0 unique commits.
+        porcelain = f"worktree {wt}\nHEAD abc\ndetached\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, revlist="0", removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 1
+        assert removed == [str(wt.resolve())]
+
+    @pytest.mark.asyncio
+    async def test_keeps_unparseable_with_unique_commits(self, tmp_path: Path) -> None:
+        root = tmp_path / "roots"
+        wt = root / "spike"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        porcelain = f"worktree {wt}\nHEAD abc\ndetached\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, revlist="2", removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0
+        assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_skips_worktree_outside_allowed_roots(self, tmp_path: Path) -> None:
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(allowed)])
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        loop._get_issue_state = AsyncMock(return_value="closed")
+        porcelain = f"worktree {outside}\nHEAD abc\nbranch refs/heads/fix/x-10698\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0
+        assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_skips_too_new_worktree(self, tmp_path: Path) -> None:
+        root = tmp_path / "roots"
+        wt = root / "fresh"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(
+            tmp_path,
+            worktree_gc_roots=[str(root)],
+            worktree_gc_min_age_seconds=3600,
+        )
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        loop._get_issue_state = AsyncMock(return_value="closed")
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/fix/x-10698\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0
+        assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_never_reaps_primary_worktree(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_phase5(loop)
+        repo_root = loop._config.repo_root.expanduser().resolve()
+        porcelain = f"worktree {repo_root}\nHEAD abc\nbranch refs/heads/staging\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0
+        assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_list_failure_returns_zero(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_phase5(loop)
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("git worktree list failed"),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0

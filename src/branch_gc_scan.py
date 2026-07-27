@@ -33,8 +33,9 @@ from typing import Literal
 # ``PRManager.find_label_drift``'s ``fixes_re``.
 _FIXES_RE = re.compile(r"(?:fixes|closes|resolves)\s+#(\d+)", re.IGNORECASE)
 
-# `agent/issue-1234` encodes its issue number in the branch name — same
-# pattern as ``WorkspaceGCLoop._AGENT_BRANCH_RE``.
+# `agent/issue-1234` encodes its issue number in the branch name — the
+# canonical namespace also parsed by
+# ``WorkspaceGCLoop._parse_issue_from_branch``.
 _AGENT_BRANCH_RE = re.compile(r"^agent/issue-(\d+)$")
 
 

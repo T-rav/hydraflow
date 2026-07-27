@@ -241,6 +241,15 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # its cursor + heartbeats (s86 idle-poll), it just never re-audits. The
     # sample→audit→cross-link path has its own unit + MockWorld scenario cover.
     object.__setattr__(config, "sampled_audit_reaudit_enabled", False)
+    # WorkspaceGCLoop Phase 5 (#10698): the all-root enumerate-and-reap phase
+    # shells out to local git (`git worktree list/status/rev-list/worktree
+    # remove/branch -D`) on the live host repo. Those are LOCAL-git spawns (no
+    # network reach, so they never wedge the air-gapped sandbox), but pinning
+    # the phase OFF keeps the sandbox deterministic — the workspace_gc
+    # scenarios (s46 idle-poll, s65 collects-stale) exercise the legacy
+    # state/orphan-dir phases only, and the all-root reaper has its own unit +
+    # MockWorld scenario cover.
+    object.__setattr__(config, "worktree_gc_all_roots_enabled", False)
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:

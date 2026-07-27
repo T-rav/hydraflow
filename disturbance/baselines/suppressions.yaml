@@ -342,4 +342,4 @@ entries:
   src/wiki_supersession_repair.py::noqa:PLC0415: 1
   src/workspace.py::noqa:E402: 1
   src/workspace.py::noqa:S311: 1
-  src/workspace_gc_loop.py::noqa:BLE001: 8
+  src/workspace_gc_loop.py::noqa:BLE001: 9
