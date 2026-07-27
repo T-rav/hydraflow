@@ -32,8 +32,63 @@ import { ActivityDrawer } from './ActivityDrawer'
 import { RepoOverview, buildRepoSummaries } from './RepoOverview'
 import { RepoSwitcher } from './RepoSwitcher'
 import { ItemWorkspace } from './ItemWorkspace'
+import { ActiveGrid } from './ActiveGrid'
 
 const slotStyle = { minWidth: 0 }
+
+const MODES = [
+  { key: 'focus', label: 'Focus' },
+  { key: 'all-active', label: 'All active' },
+]
+
+const modeToggleStyles = {
+  bar: {
+    display: 'flex',
+    gap: 4,
+    marginBottom: 8,
+  },
+  btn: {
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    background: 'var(--surface-inset)',
+    color: 'var(--text-muted)',
+    cursor: 'pointer',
+    padding: '3px 10px',
+    font: 'inherit',
+    fontSize: 11,
+    fontWeight: 600,
+  },
+  btnActive: {
+    background: 'var(--accent)',
+    color: 'var(--bg)',
+    borderColor: 'var(--accent)',
+  },
+}
+
+/**
+ * Focus <-> All-active mode toggle (Task 5). A two-button segmented control;
+ * each button calls `select('mode', key)`, which the selection hook mirrors
+ * into the URL query (`?mode=all-active`; focus is the clean default).
+ * @param {{ mode: string, select: Function }} props
+ */
+function ModeToggle({ mode, select }) {
+  return (
+    <div data-testid="mode-toggle" role="group" aria-label="Detail mode" style={modeToggleStyles.bar}>
+      {MODES.map(m => (
+        <button
+          key={m.key}
+          type="button"
+          data-testid={`mode-toggle-${m.key}`}
+          aria-pressed={mode === m.key}
+          onClick={() => select('mode', m.key)}
+          style={{ ...modeToggleStyles.btn, ...(mode === m.key ? modeToggleStyles.btnActive : null) }}
+        >
+          {m.label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 /**
  * Presentational shell. Takes the socket state as a prop so it can be rendered
@@ -97,7 +152,12 @@ export function OperatorConsoleView({ socket = {} }) {
         )}
       </div>
       <div data-testid="operator-detail-slot" style={{ ...slotStyle, gridArea: 'detail' }}>
-        <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
+        <ModeToggle mode={mode} select={select} />
+        {mode === 'all-active' ? (
+          <ActiveGrid pipeline={pipeline} events={events} select={select} />
+        ) : (
+          <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
+        )}
       </div>
       <div data-testid="operator-vitals-slot" style={{ ...slotStyle, gridArea: 'vitals' }}>
         <VitalsCard vitals={vitals} />

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { OperatorConsoleView } from '../OperatorConsole'
 
 // Task 2 ships only the shell: it renders its five slots (header / pipeline /
@@ -108,6 +108,54 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('operator-console')).toBeInTheDocument()
     // The rail always renders the six canonical stages, even with no data.
     expect(container.querySelectorAll('[data-testid^="stage-tile-"]')).toHaveLength(6)
+  })
+
+  // --- Task 5: focus <-> all-active mode toggle -------------------------------
+
+  it('renders the mode toggle, defaulting to focus (single ItemWorkspace)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    expect(screen.getByTestId('mode-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('mode-toggle-focus')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('mode-toggle-all-active')).toHaveAttribute('aria-pressed', 'false')
+    // Focus path: the single ItemWorkspace is in the detail slot; no grid.
+    expect(screen.getByTestId('item-workspace')).toBeInTheDocument()
+    expect(screen.queryByTestId('active-grid')).toBeNull()
+  })
+
+  it('toggles to all-active — swaps ItemWorkspace for ActiveGrid and persists mode to the URL', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    fireEvent.click(screen.getByTestId('mode-toggle-all-active'))
+
+    expect(screen.getByTestId('active-grid')).toBeInTheDocument()
+    expect(screen.queryByTestId('item-workspace')).toBeNull()
+    expect(screen.getByTestId('mode-toggle-all-active')).toHaveAttribute('aria-pressed', 'true')
+    // Selection is mirrored into the query string (spec §3).
+    expect(new URLSearchParams(window.location.search).get('mode')).toBe('all-active')
+  })
+
+  it('toggles back to focus — restores ItemWorkspace and clears mode from the URL', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    fireEvent.click(screen.getByTestId('mode-toggle-all-active'))
+    fireEvent.click(screen.getByTestId('mode-toggle-focus'))
+
+    expect(screen.getByTestId('item-workspace')).toBeInTheDocument()
+    expect(screen.queryByTestId('active-grid')).toBeNull()
+    // Default mode is written as a clean URL (no ?mode).
+    expect(new URLSearchParams(window.location.search).get('mode')).toBeNull()
+  })
+
+  it('restores all-active mode from the URL on load', () => {
+    window.history.replaceState({}, '', '/?mode=all-active')
+    render(<OperatorConsoleView socket={makeSocket({
+      pipelineIssues: {
+        triage: [], plan: [],
+        implement: [{ issue_number: 42, title: 'Fix login', status: 'active' }],
+        review: [], hitl: [], merged: [],
+      },
+    })} />)
+    expect(screen.getByTestId('active-grid')).toBeInTheDocument()
+    expect(screen.getByTestId('active-tile-42')).toBeInTheDocument()
+    expect(screen.queryByTestId('item-workspace')).toBeNull()
   })
 
   // --- Task 9: multi-repo overview + switcher drill ---------------------------
