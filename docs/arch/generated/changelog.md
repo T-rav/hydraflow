@@ -6,7 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
-- `0a7a5e6` — feat(events): optional per-type EventBus subscription (ADR-0114, #10660) *(2026-07-27)*
+- `98c8462` — feat(ul): entry-evidence — 5 new entry links across 5 terms (#10729) (#10729) *(2026-07-27)*
+- `30e34cb` — feat(events): optional per-type EventBus subscription (ADR-0114, #10660) (#10723) (#10723) *(2026-07-27)*
+- `b244257` — feat(adr): lineage seed pass + escalate audit to STRUCTURAL + wiki term (#10674) (#10722) (#10722) *(2026-07-27)*
 
 ## 2026-W30
 
@@ -605,7 +607,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `14e066b` — fix(subprocess): timeouts on subprocess.run in async loop paths (#8456) (#8456) *(2026-05-02)*
 - `54f940e` — feat(sandbox): catalog s02-s12 + SandboxFailureFixerLoop + 3-trigger CI (PR C of 3) (#8453) (#8453) *(2026-04-28)*
 - `e1e9c91` — feat(sandbox): docker-compose stack + harness + s01 + ADR-0052 (PR B of 3) (#8452) (#8452) *(2026-04-28)*
-- `32ef615` — feat(mockworld): foundation — Fake relocation + DI plumbing + sandbox entrypoint (PR A of 3) (#8451) (#8451) *(2026-04-28)*
 
 
 <!-- arch:generated -->

@@ -2911,6 +2911,11 @@ class BackgroundWorkerStatusPayload(TypedDict):
     status: str
     last_run: str
     details: dict[str, object]
+    # Whether the loop is enabled. Optional so the per-cycle publish path
+    # (``base_background_loop``) stays unchanged; the boot-time registry seed
+    # (``orchestrator._seed_background_worker_statuses``) sets it so the UI can
+    # distinguish an intentionally-disabled loop from a broken one (#10556).
+    enabled: NotRequired[bool]
 
 
 class LoopFitnessUpdatePayload(TypedDict):
