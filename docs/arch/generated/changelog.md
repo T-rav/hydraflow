@@ -608,6 +608,15 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `14e066b` — fix(subprocess): timeouts on subprocess.run in async loop paths (#8456) (#8456) *(2026-05-02)*
 - `54f940e` — feat(sandbox): catalog s02-s12 + SandboxFailureFixerLoop + 3-trigger CI (PR C of 3) (#8453) (#8453) *(2026-04-28)*
 - `e1e9c91` — feat(sandbox): docker-compose stack + harness + s01 + ADR-0052 (PR B of 3) (#8452) (#8452) *(2026-04-28)*
+- `32ef615` — feat(mockworld): foundation — Fake relocation + DI plumbing + sandbox entrypoint (PR A of 3) (#8451) (#8451) *(2026-04-28)*
+
+## 2026-W17
+
+- `7a0e225` — feat: CostBudgetWatcherLoop + PSH onboarding (multi-repo prereq) (#8450) (#8450) *(2026-04-26)*
+- `3738e3d` — feat(loop): PricingRefreshLoop — daily LiteLLM upstream-pricing refresh (#8449) (#8449) *(2026-04-26)*
+- `f07ec68` — feat(scaffold): scripts/scaffold_loop.py upgrade — atomic apply + 5-checkpoint patcher (#8448) (#8448) *(2026-04-26)*
+- `3f349d8` — feat(runners): BaseSubprocessRunner + AutoAgentRunner migration + Port↔Fake signature conformance (#8446) (#8446) *(2026-04-26)*
+- `3af8d25` — feat(infra): dark-factory infrastructure hardening — spec + plan + PR1 (ADR-0051 + pre-commit arch-check) (#8445) (#8445) *(2026-04-26)*
 
 
 <!-- arch:generated -->
