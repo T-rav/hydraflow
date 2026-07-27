@@ -371,7 +371,14 @@ class EventBus:
         max_history: int = 5000,
         event_log: EventLog | None = None,
     ) -> None:
-        self._subscribers: list[asyncio.Queue[HydraFlowEvent]] = []
+        # Maps each subscriber queue to its optional per-type filter
+        # (ADR-0114, #10660). ``None`` == fan-out (receives every event, the
+        # historical contract); a frozenset restricts delivery to those types.
+        # A dict (insertion-ordered) preserves the FIFO fan-out order the old
+        # list gave while letting publish() look up each queue's filter in O(1).
+        self._subscribers: dict[
+            asyncio.Queue[HydraFlowEvent], frozenset[EventType] | None
+        ] = {}
         self._history: list[HydraFlowEvent] = []
         self._max_history = max_history
         self._event_log = event_log
@@ -408,7 +415,15 @@ class EventBus:
                 self._history.append(event)
                 if len(self._history) > self._max_history:
                     self._history = self._history[-self._max_history :]
-        for queue in list(self._subscribers):
+        for queue, wanted in list(self._subscribers.items()):
+            # Publish-time per-type filter (ADR-0114, #10660): a typed
+            # subscriber only receives the EventTypes it asked for. Filtering
+            # here — BEFORE the queue put — means a high-volume type it ignores
+            # (e.g. TRANSCRIPT_LINE) never consumes its bounded slots, so the
+            # queue cannot overflow and drop a type it did care about. ``None``
+            # keeps the fan-out contract: every event reaches the subscriber.
+            if wanted is not None and event.type not in wanted:
+                continue
             try:
                 queue.put_nowait(event)
             except asyncio.QueueFull:
@@ -498,23 +513,43 @@ class EventBus:
             return {}
         return await self._event_log.rotate(max_size_bytes, max_age_days)
 
-    def subscribe(self, max_queue: int = 500) -> asyncio.Queue[HydraFlowEvent]:
-        """Return a new queue that will receive future events."""
+    def subscribe(
+        self,
+        max_queue: int = 500,
+        types: frozenset[EventType] | None = None,
+    ) -> asyncio.Queue[HydraFlowEvent]:
+        """Return a new queue that will receive future events.
+
+        When *types* is ``None`` (the default) the queue receives **every**
+        published event — the historical fan-out contract, unchanged for
+        existing untyped subscribers. When *types* is a frozenset the publish
+        path only enqueues an event whose ``type`` is in the set; filtered-out
+        types are dropped *before* the queue put, so they never consume the
+        subscriber's bounded slots (ADR-0114, #10660). This lets a consumer
+        that only acts on a few types (e.g. the #10599 wake router) avoid
+        draining — and overflowing on — high-volume types it ignores.
+        """
         queue: asyncio.Queue[HydraFlowEvent] = asyncio.Queue(maxsize=max_queue)
-        self._subscribers.append(queue)
+        self._subscribers[queue] = types
         return queue
 
     def unsubscribe(self, queue: asyncio.Queue[HydraFlowEvent]) -> None:
-        """Remove *queue* from the subscriber list."""
-        with contextlib.suppress(ValueError):
-            self._subscribers.remove(queue)
+        """Remove *queue* from the subscriber list (idempotent)."""
+        self._subscribers.pop(queue, None)
 
     @contextlib.asynccontextmanager
     async def subscription(
-        self, max_queue: int = 500
+        self,
+        max_queue: int = 500,
+        types: frozenset[EventType] | None = None,
     ) -> AsyncIterator[asyncio.Queue[HydraFlowEvent]]:
-        """Async context manager that auto-unsubscribes on exit."""
-        queue = self.subscribe(max_queue)
+        """Async context manager that auto-unsubscribes on exit.
+
+        Accepts the same optional per-type *types* filter as :meth:`subscribe`
+        (``None`` == fan-out; a frozenset restricts publish-time delivery to
+        those types — ADR-0114, #10660).
+        """
+        queue = self.subscribe(max_queue, types)
         try:
             yield queue
         finally:

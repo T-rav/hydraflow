@@ -173,6 +173,7 @@ cadence and files remediation issues on drift.
 | [0111](0111-in-framework-flow-dag-runtime.md) | In-framework flow (DAG) runtime for workers and phases | Accepted |
 | [0112](0112-per-issue-isolation-via-local-git-clone.md) | Per-Issue Isolation via Local Git Clone | Accepted |
 | [0113](0113-adr-lineage-precedent-and-divergence.md) | ADR lineage — Precedent and Divergence lines | Accepted |
+| [0114](0114-optional-per-type-eventbus-subscription.md) | Optional per-type EventBus subscription | Accepted |
 
 ## Adding a new ADR
 

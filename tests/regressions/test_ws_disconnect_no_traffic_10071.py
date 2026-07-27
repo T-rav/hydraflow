@@ -82,7 +82,7 @@ async def test_ws_handler_returns_on_disconnect_without_any_traffic(
     await asyncio.wait_for(task, timeout=5)
 
     assert not task.cancelled(), "handler must END on disconnect, not need a cancel"
-    assert event_bus._subscribers == [], "bus subscription leaked after disconnect"
+    assert event_bus._subscribers == {}, "bus subscription leaked after disconnect"
 
 
 async def test_ws_handler_ignores_stray_client_frames_but_ends_on_disconnect(
@@ -136,7 +136,7 @@ async def test_watcher_is_bounded_on_garbage_receive_stub(
     await asyncio.wait_for(endpoint(client), timeout=5)
 
     assert client.receive_calls == 1, "watcher must stop on the FIRST garbage frame"
-    assert event_bus._subscribers == []
+    assert event_bus._subscribers == {}
 
 
 async def test_watcher_treats_unknown_message_type_as_client_gone(
@@ -151,7 +151,7 @@ async def test_watcher_treats_unknown_message_type_as_client_gone(
 
     await asyncio.wait_for(asyncio.create_task(endpoint(client)), timeout=5)
 
-    assert event_bus._subscribers == []
+    assert event_bus._subscribers == {}
 
 
 async def test_merged_ws_returns_on_disconnect_without_any_traffic(
@@ -170,4 +170,4 @@ async def test_merged_ws_returns_on_disconnect_without_any_traffic(
     await asyncio.wait_for(task, timeout=5)
 
     assert not task.cancelled()
-    assert event_bus._subscribers == [], "merged path leaked its bus subscription"
+    assert event_bus._subscribers == {}, "merged path leaked its bus subscription"

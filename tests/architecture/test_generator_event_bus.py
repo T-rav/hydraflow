@@ -1,4 +1,4 @@
-from arch._models import EventBusTopology, EventEdge
+from arch._models import EventBusTopology, EventEdge, TypedSubscriber
 from arch.generators.event_bus import render_event_bus
 
 
@@ -39,6 +39,49 @@ def test_ephemeral_event_without_publisher_is_not_flagged_dead():
     )
     md = render_event_bus(topo)
     assert "**PIPELINE_SNAPSHOT** ⚠️" not in md
+
+
+def test_typed_subscriber_is_listed_and_attributed_to_its_events():
+    topo = EventBusTopology(
+        events=[
+            EventEdge(
+                event="PR_CREATED",
+                publishers=["src.pr_manager:PRManager.create_pr"],
+            ),
+            EventEdge(
+                event="TRANSCRIPT_LINE",
+                publishers=["src.runner_utils:_stream_and_collect"],
+            ),
+        ],
+        global_subscribers=["src.dashboard_routes._routes:websocket_endpoint"],
+        typed_subscribers=[
+            TypedSubscriber(
+                subscriber="src.wake_router:WakeRouter.wire", types=["PR_CREATED"]
+            )
+        ],
+    )
+    md = render_event_bus(topo)
+    # The typed consumer is listed in the preamble with its filter...
+    assert "Typed consumers" in md
+    assert "WakeRouter.wire" in md
+    # ...and attributed in the Subscribers column of the event it filters on,
+    # alongside the fan-out marker — but NOT on events it does not subscribe to.
+    pr_row = next(line for line in md.splitlines() if "**PR_CREATED**" in line)
+    transcript_row = next(
+        line for line in md.splitlines() if "**TRANSCRIPT_LINE**" in line
+    )
+    assert "WakeRouter.wire" in pr_row
+    assert "★" in pr_row
+    assert "WakeRouter.wire" not in transcript_row
+
+
+def test_no_typed_consumers_block_when_none_present():
+    topo = EventBusTopology(
+        events=[EventEdge(event="PR_CREATED", publishers=["src.x:y"])],
+        global_subscribers=["src.dash:consumer"],
+    )
+    md = render_event_bus(topo)
+    assert "Typed consumers" not in md
 
 
 def test_handles_empty_topology():

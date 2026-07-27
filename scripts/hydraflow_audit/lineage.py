@@ -31,9 +31,11 @@ from pathlib import Path
 # from genuine novelty, so each should carry a Precedent: or Divergence: line.
 # The "vitals" and "judge-independence" records named in the proposal have no
 # standalone ADR file in the corpus yet, so they are not enumerated here; the
-# seed pass (#10674 child 3) revises this set as it lands lines.
+# seed pass (#10674 child 3) revises this set as it lands lines. ADR-0114
+# (per-type EventBus subscription, #10660) defines the event fan-out contract
+# loops route on, so it joins the set with its own Precedent/Divergence lines.
 CONTROL_PLANE_ADRS: frozenset[int] = frozenset(
-    {2, 29, 44, 49, 51, 94, 95, 96, 97, 98, 99, 100, 101, 103, 104}
+    {2, 29, 44, 49, 51, 94, 95, 96, 97, 98, 99, 100, 101, 103, 104, 114}
 )
 
 # A lineage field line. ``**`` bold markers are stripped before matching, so
