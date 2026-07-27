@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { ACTIVE_STATUSES, PIPELINE_STAGES, PIPELINE_LOOPS, INTERVAL_PRESETS, EDITABLE_INTERVAL_WORKERS, REPORT_ISSUE_PRESETS, WORKER_PRESETS, PIPELINE_POLLER_PRESETS, ADR_REVIEWER_PRESETS, DEPENDABOT_MERGE_PRESETS, BACKGROUND_WORKERS, WORKER_GROUPS, WATCHDOG_TIMEOUT_PRESETS } from '../../constants'
 import { theme } from '../../theme'
+import { toLoops } from '../../operator/model/loops'
 
 describe('ACTIVE_STATUSES', () => {
   it('is an array', () => {
@@ -293,5 +294,133 @@ describe('WORKER_GROUPS', () => {
     for (const w of BACKGROUND_WORKERS) {
       expect(w.tags.length).toBeGreaterThan(0)
     }
+  })
+})
+
+// Ratchet guard (#10556): BACKGROUND_WORKERS must cover the FULL background-loop
+// registry so the operator Loops panel (src/operator/model/loops.js `toLoops`)
+// never buckets a real, reporting loop into the catch-all "Other" group.
+//
+// `LOOP_REGISTRY_WORKER_NAMES` is the authoritative set of `worker_name`s that
+// every `BaseBackgroundLoop` subclass registers (the snake_case name each loop
+// passes to `super().__init__(worker_name=...)`, which is also the WS
+// `data.worker` key the UI matches on). There is no JS-importable loop registry,
+// so it is hardcoded from the backend enumeration:
+//   grep -hoE "worker_name\s*=\s*['\"][a-z0-9_]+['\"]" src/*_loop.py
+//   (+ the 5 loops whose worker_name is the module-level _WORKER_NAME constant:
+//    edge_proposer, entry_evidence, term_proposer, term_pruner, adr_drift_resolver)
+// and cross-checked against docs/arch/generated/loops.md + functional_areas.yml.
+//
+// KEEP IN SYNC: when a loop is added/removed/renamed, update BOTH this list and
+// BACKGROUND_WORKERS in constants.js. The count sentinel below will red on drift.
+const LOOP_REGISTRY_WORKER_NAMES = [
+  'adr_conformance',
+  'adr_drift_resolver',
+  'adr_reviewer',
+  'adr_touchpoint_auditor',
+  'auto_agent_preflight',
+  'auto_tighten',
+  'branch_protection_auditor',
+  'ci_monitor',
+  'contract_refresh',
+  'convergence_oscillation',
+  'corpus_learning',
+  'cost_budget_watcher',
+  'dependabot_merge',
+  'detector_calibration',
+  'diagnostic',
+  'diagram_loop',
+  'disturbance_dampener',
+  'edge_proposer',
+  'entry_evidence',
+  'epic_monitor',
+  'epic_sweeper',
+  'erosion_metrics',
+  'escape_ledger',
+  'fail_open_monitor',
+  'fake_coverage_auditor',
+  'fitness_scorecard',
+  'flake_tracker',
+  'gate_activator',
+  'gate_health',
+  'github_cache',
+  'health_monitor',
+  'human_steering',
+  'intervention_tally',
+  'issue_refinement',
+  'label_drift_watcher',
+  'live_corpus_replay',
+  'log_ingest',
+  'memory_backlog',
+  'merge_state_watcher',
+  'pr_red_repair',
+  'pr_unsticker',
+  'pricing_refresh',
+  'principles_audit',
+  'rc_budget',
+  'repo_wiki',
+  'report_issue',
+  'retrospective',
+  'runs_gc',
+  'sampled_audit',
+  'sandbox_failure_fixer',
+  'second_order_vitals',
+  'security_patch',
+  'sentry_ingest',
+  'skill_prompt_eval',
+  'staging_bisect',
+  'staging_promotion',
+  'stale_issue',
+  'stale_issue_gc',
+  'term_proposer',
+  'term_pruner',
+  'triage_retry',
+  'trust_fleet_sanity',
+  'wiki_rot_detector',
+  'workspace_gc',
+]
+
+describe('BACKGROUND_WORKERS loop-registry coverage (#10556)', () => {
+  const workerKeys = new Set(BACKGROUND_WORKERS.map(w => w.key))
+  const groupKeys = new Set(WORKER_GROUPS.map(g => g.key))
+
+  it('reference registry lists 64 loops (sentinel — update when loops change)', () => {
+    // If the backend loop count changes, this red reminds you to reconcile the
+    // reference list AND BACKGROUND_WORKERS. See docs/arch/generated/loops.md.
+    expect(LOOP_REGISTRY_WORKER_NAMES).toHaveLength(64)
+    // No accidental duplicates in the reference list.
+    expect(new Set(LOOP_REGISTRY_WORKER_NAMES).size).toBe(64)
+  })
+
+  it('every registered loop has a BACKGROUND_WORKERS entry (nothing falls into Other)', () => {
+    const missing = LOOP_REGISTRY_WORKER_NAMES.filter(name => !workerKeys.has(name))
+    expect(missing).toEqual([])
+  })
+
+  it('every registered loop maps to a real functional-area group (never the "other" catch-all)', () => {
+    const meta = new Map(BACKGROUND_WORKERS.map(w => [w.key, w.group]))
+    for (const name of LOOP_REGISTRY_WORKER_NAMES) {
+      const group = meta.get(name)
+      // A missing entry defaults to 'other' in toLoops; assert a valid, named group.
+      expect(group, `loop "${name}" has no BACKGROUND_WORKERS group`).toBeDefined()
+      expect(groupKeys, `loop "${name}" group "${group}" is not a WORKER_GROUPS key`).toContain(group)
+    }
+  })
+
+  it('the full registry produces no "Other" category in the Loops panel view model', () => {
+    // Feed one ok snapshot per registered loop through the real toLoops adapter;
+    // the panel's catch-all "Other" bucket must be empty.
+    const workers = LOOP_REGISTRY_WORKER_NAMES.map(name => ({
+      name,
+      status: 'ok',
+      last_run: '2026-07-27T00:00:00Z',
+      details: {},
+      enabled: true,
+      interval_seconds: 300,
+    }))
+    const vm = toLoops(workers)
+    const other = vm.categories.find(c => c.key === 'other')
+    expect(other).toBeUndefined()
+    expect(vm.totals.total).toBe(64)
   })
 })
