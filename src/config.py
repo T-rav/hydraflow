@@ -110,6 +110,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("min_plan_words", "HYDRAFLOW_MIN_PLAN_WORDS", 60),
     ("max_plan_chars", "HYDRAFLOW_MAX_PLAN_CHARS", 5000),
     (
+        "plan_design_decision_hitl_threshold",
+        "HYDRAFLOW_PLAN_DESIGN_DECISION_HITL_THRESHOLD",
+        2,
+    ),
+    (
         "max_pre_quality_review_attempts",
         "HYDRAFLOW_MAX_PRE_QUALITY_REVIEW_ATTEMPTS",
         3,
@@ -138,6 +143,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         10,
     ),
     ("max_issue_attempts", "HYDRAFLOW_MAX_ISSUE_ATTEMPTS", 3),
+    (
+        "implement_no_progress_abort_attempts",
+        "HYDRAFLOW_IMPLEMENT_NO_PROGRESS_ABORT_ATTEMPTS",
+        3,
+    ),
     ("max_decomposition_depth", "HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", 2),
     (
         "max_total_decomposition_children",
@@ -163,6 +173,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
     ("epic_sweep_interval", "HYDRAFLOW_EPIC_SWEEP_INTERVAL", 3600),
     ("workspace_gc_interval", "HYDRAFLOW_WORKTREE_GC_INTERVAL", 1800),
+    (
+        "worktree_gc_min_age_seconds",
+        "HYDRAFLOW_WORKTREE_GC_MIN_AGE_SECONDS",
+        1800,
+    ),
     ("stale_issue_gc_interval", "HYDRAFLOW_STALE_ISSUE_GC_INTERVAL", 3600),
     ("stale_issue_threshold_days", "HYDRAFLOW_STALE_ISSUE_THRESHOLD_DAYS", 14),
     ("ci_monitor_interval", "HYDRAFLOW_CI_MONITOR_INTERVAL", 300),
@@ -331,6 +346,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("transcript_summary_timeout", "HYDRAFLOW_TRANSCRIPT_SUMMARY_TIMEOUT", 120),
     ("quality_timeout", "HYDRAFLOW_QUALITY_TIMEOUT", 3600),
     ("git_command_timeout", "HYDRAFLOW_GIT_COMMAND_TIMEOUT", 30),
+    ("salvage_commit_timeout", "HYDRAFLOW_SALVAGE_COMMIT_TIMEOUT", 1800),
     ("summarizer_timeout", "HYDRAFLOW_SUMMARIZER_TIMEOUT", 120),
     ("wiki_compilation_timeout", "HYDRAFLOW_WIKI_COMPILATION_TIMEOUT", 300),
     ("error_output_max_chars", "HYDRAFLOW_ERROR_OUTPUT_MAX_CHARS", 3000),
@@ -685,6 +701,18 @@ _ENV_FLOAT_RATIO_OVERRIDES: list[tuple[str, str, float]] = [
     ("cost_throttle_ratio", "HYDRAFLOW_COST_THROTTLE_RATIO", 0.8),
 ]
 
+# Formal give-up window thresholds (#10735) — one N-in-T pair per child-class.
+_ENV_INT_OVERRIDES += [
+    ("giveup_build_max_restarts", "HYDRAFLOW_GIVEUP_BUILD_MAX_RESTARTS", 3),
+    ("giveup_build_window_secs", "HYDRAFLOW_GIVEUP_BUILD_WINDOW_SECS", 3600),
+    ("giveup_review_max_restarts", "HYDRAFLOW_GIVEUP_REVIEW_MAX_RESTARTS", 3),
+    ("giveup_review_window_secs", "HYDRAFLOW_GIVEUP_REVIEW_WINDOW_SECS", 3600),
+    ("giveup_loop_max_restarts", "HYDRAFLOW_GIVEUP_LOOP_MAX_RESTARTS", 5),
+    ("giveup_loop_window_secs", "HYDRAFLOW_GIVEUP_LOOP_WINDOW_SECS", 3600),
+    ("giveup_plan_retry_max_restarts", "HYDRAFLOW_GIVEUP_PLAN_RETRY_MAX_RESTARTS", 2),
+    ("giveup_plan_retry_window_secs", "HYDRAFLOW_GIVEUP_PLAN_RETRY_WINDOW_SECS", 3600),
+]
+
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
     (
@@ -718,6 +746,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "precondition_gate_enabled",
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
+        False,
+    ),
+    (
+        "giveup_window_enabled",
+        "HYDRAFLOW_GIVEUP_WINDOW_ENABLED",
         False,
     ),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
@@ -768,6 +801,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "auto_pr_preflight_gate_enabled",
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
+        True,
+    ),
+    (
+        "auto_pr_auto_merge_enabled",
+        "HYDRAFLOW_AUTO_PR_AUTO_MERGE_ENABLED",
         True,
     ),
     (
@@ -929,6 +967,12 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_JUDGE_SELF_MOD_FAIL_CLOSED",
         False,
     ),
+    ("review_ultra_enabled", "HYDRAFLOW_REVIEW_ULTRA_ENABLED", False),
+    (
+        "review_ultra_auto_high_blast",
+        "HYDRAFLOW_REVIEW_ULTRA_AUTO_HIGH_BLAST",
+        False,
+    ),
     (
         "erosion_metrics_loop_enabled",
         "HYDRAFLOW_EROSION_METRICS_LOOP_ENABLED",
@@ -997,6 +1041,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("workspace_gc_loop_enabled", "HYDRAFLOW_WORKSPACE_GC_LOOP_ENABLED", True),
+    (
+        "worktree_gc_all_roots_enabled",
+        "HYDRAFLOW_WORKTREE_GC_ALL_ROOTS_ENABLED",
+        True,
+    ),
     ("auto_tighten_loop_enabled", "HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", True),
     ("issue_refinement_enabled", "HYDRAFLOW_ISSUE_REFINEMENT_ENABLED", True),
 ]
@@ -1030,7 +1079,7 @@ _DEPRECATED_ENV_REVERSE: dict[str, str] = {
     v: k for k, v in _DEPRECATED_ENV_ALIASES.items()
 }
 
-_ALLOWED_TOOLS_COMBO: set[str] = {"claude", "codex", "gemini", "pi"}
+_ALLOWED_TOOLS_COMBO: set[str] = {"claude", "codex"}
 
 
 def _parse_combo(env_key: str, value: str) -> tuple[str, str]:
@@ -1252,7 +1301,7 @@ class HydraFlowConfig(BaseModel):
             )
         return v
 
-    system_tool: Literal["inherit", "claude", "codex", "gemini", "pi"] = Field(
+    system_tool: Literal["inherit", "claude", "codex"] = Field(
         default="inherit",
         description="Optional global default tool for system agents; 'inherit' keeps per-agent defaults",
     )
@@ -1260,7 +1309,7 @@ class HydraFlowConfig(BaseModel):
         default="",
         description="Optional global default model for system agents; empty keeps per-agent defaults",
     )
-    background_tool: Literal["inherit", "claude", "codex", "gemini", "pi"] = Field(
+    background_tool: Literal["inherit", "claude", "codex"] = Field(
         default="inherit",
         description="Optional global default tool for background workers; 'inherit' keeps per-worker defaults",
     )
@@ -1268,7 +1317,7 @@ class HydraFlowConfig(BaseModel):
         default="",
         description="Optional global default model for background workers; empty keeps per-worker defaults",
     )
-    implementation_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    implementation_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for implementation agents",
     )
@@ -1284,7 +1333,7 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Review configuration
-    review_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    review_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for review agents",
     )
@@ -1293,7 +1342,7 @@ class HydraFlowConfig(BaseModel):
     # Independent test-adequacy verifier (#9546): a second-opinion pass with a
     # model that MUST stay independent of review_model — a shared model would
     # defeat the second opinion (the finder grading its own homework).
-    test_adequacy_verifier_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    test_adequacy_verifier_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for the independent test-adequacy verifier pass",
     )
@@ -1351,6 +1400,35 @@ class HydraFlowConfig(BaseModel):
             "configured → degraded mode (same-family verdict, ledgered). A model "
             "whose family is inside the roster does not count as independent."
         ),
+    )
+
+    # Opt-in "ultra" deep-review tier (#10555). Runs the locally-installed
+    # ``code-review`` plugin command headlessly as an extra adversarial pass;
+    # high-confidence findings fold into the verdict. Default OFF: the fan-out
+    # is expensive, so the tier only fires when this dial is on AND the issue
+    # carries the ``review:ultra`` label OR (with the auto-high-blast dial on)
+    # the diff's blast radius is "high". See ADR-0109.
+    review_ultra_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the opt-in ultra deep-review tier (#10555). Default OFF — "
+            "with defaults a review pass issues zero ultra spawns. Even when "
+            "on, the tier only fires for a ``review:ultra``-labelled issue or a "
+            "high-blast-radius diff (auto-high-blast dial), never on every PR."
+        ),
+    )
+    review_ultra_auto_high_blast: bool = Field(
+        default=False,
+        description=(
+            "When the ultra tier is enabled, also fire it automatically on any "
+            "high-blast-radius diff (critical paths / large src change) even "
+            "without the ``review:ultra`` label. Default OFF — label-only "
+            "triggering until validated (#10555)."
+        ),
+    )
+    review_ultra_model: str = Field(
+        default="sonnet",
+        description="Model for the ultra deep-review tier spawn (#10555).",
     )
 
     # CI check configuration
@@ -1466,6 +1544,23 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=10,
         description="Max total implementation attempts per issue before HITL escalation",
+    )
+    implement_no_progress_abort_attempts: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description=(
+            "No-progress early-abort threshold for ImplementPhase's flow "
+            "(#10659/#10616, P2 of #10682). When an issue reaches this attempt "
+            "number AND its immediately prior attempt produced no output (zero "
+            "commits with an error), the ``no-progress-abort`` flow node "
+            "escalates it to HITL BEFORE spending another full (up to "
+            "``agent_timeout``) build, instead of retry-thrashing to the "
+            "``max_issue_attempts`` cap. Default 3 == the default "
+            "``max_issue_attempts``, so the final futile build is skipped while "
+            "the ADR-0063 W5 corrective retry still runs; lower it to abort "
+            "sooner (fewer corrective retries) or set 0 to disable the abort."
+        ),
     )
     max_decomposition_depth: int = Field(
         default=2,
@@ -1705,6 +1800,25 @@ class HydraFlowConfig(BaseModel):
         le=86400,
         description="Workspace GC loop interval in seconds (default 30 min)",
         validation_alias=AliasChoices("workspace_gc_interval", "worktree_gc_interval"),
+    )
+    worktree_gc_roots: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Allow-list of filesystem roots the WorkspaceGCLoop may sweep for "
+            "orphan worktrees (#10698). Empty = use the known factory roots "
+            "resolved by worktree_gc_root_paths(). A worktree whose path is not "
+            "under one of these roots is never reaped (blast-radius gate)."
+        ),
+    )
+    worktree_gc_min_age_seconds: int = Field(
+        default=1800,
+        ge=0,
+        le=86400,
+        description=(
+            "Minimum age (seconds) a worktree must reach before the "
+            "WorkspaceGCLoop enumerate phase will reap it (#10698). Guards "
+            "against reaping a worktree created mid-run. 0 disables the guard."
+        ),
     )
     stale_issue_gc_interval: int = Field(
         default=3600,
@@ -2373,7 +2487,7 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-plan"],
         description="Labels for issues needing plans (OR logic)",
     )
-    planner_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    planner_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for planning agents",
     )
@@ -2383,7 +2497,7 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         description="Max fix attempts per TDD REFACTOR sub-agent before reporting failure",
     )
-    triage_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    triage_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for triage agents",
     )
@@ -2405,6 +2519,16 @@ class HydraFlowConfig(BaseModel):
             "OpenAI-compatible base URL for the 'zai' one-shot LLM provider "
             "(z.ai / GLM). The API key is read from the ZAI_API_KEY env var "
             "(a secret — never stored on config or shown in the UI)."
+        ),
+    )
+    zai_harness_base_url: str = Field(
+        default="https://api.z.ai/api/anthropic",
+        description=(
+            "Anthropic-compatible base URL for the 'zai' *harness* backend — the "
+            "endpoint the Claude CLI is pointed at (via ANTHROPIC_BASE_URL) when "
+            "an agentic role sets provider='zai', so a tool-using maintenance loop "
+            "runs on GLM. Distinct from zai_base_url (the one-shot /paas/v4 face). "
+            "The API key is read from ZAI_API_KEY (a secret — env-only)."
         ),
     )
     kimi_base_url: str = Field(
@@ -2437,6 +2561,56 @@ class HydraFlowConfig(BaseModel):
     term_proposer_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
         default="claude",
         description="Backend for the term-proposer / entry-evidence drafters.",
+    )
+    # Per-role backend dials for the AGENTIC (tool-using) roles. Unlike the
+    # one-shot dials above, these only offer harness backends: "claude" (the
+    # native Anthropic endpoint) or "zai" (the Claude CLI pointed at GLM's
+    # /api/anthropic endpoint). This is what lets an operator route maintenance
+    # loops to GLM while implement/review/plan/triage stay on Claude. Pair a
+    # "zai" dial with a glm-* model (enforced by _harmonize_tool_model_defaults).
+    #
+    # ONLY roles with a dedicated, provider-honoring spawn get a dial. Sub-spawns
+    # inherit their outer runner's provider (they share its harness), so they get
+    # NO separate dial: the test-adequacy verifier and skill sub-spawns run on
+    # implementation_provider; the AC precheck's subskill/debug closures run on
+    # ac_provider; the verification judge shares review's tool+model so it runs
+    # on review_provider. Adding a dead dial here would validate at config-load
+    # yet never route at runtime — a footgun, so we don't.
+    implementation_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for implementation agents."
+    )
+    review_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for review agents."
+    )
+    planner_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for planning agents."
+    )
+    triage_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for triage agents."
+    )
+    ac_provider: Literal["claude", "zai"] = Field(
+        default="claude", description="Harness backend for acceptance-criteria agents."
+    )
+    # One knob to route ALL maintenance loops to a backend, coherently. Unlike
+    # the old background_model (which back-filled *_model only and could strand a
+    # glm model on a claude-provider role), this sets provider AND model together
+    # on the maintenance role-set (wiki, adr-review, transcript, drift-resolver,
+    # term-proposer, triage-honeypot, pr-unstick) and NEVER touches implement/
+    # review/plan/triage. Leave at claude/"" to configure roles individually.
+    maintenance_provider: Literal["claude", "zai"] = Field(
+        default="claude",
+        description=(
+            "Backend applied to every maintenance loop (not the work loops). "
+            "Set to 'zai' to run all maintenance on GLM; pair with maintenance_model."
+        ),
+    )
+    maintenance_model: str = Field(
+        default="",
+        description=(
+            "Model applied to every maintenance loop when set (e.g. 'glm-5.2'). "
+            "Empty keeps each maintenance role's own model. Only touches the "
+            "maintenance role-set, never the work loops."
+        ),
     )
     triage_max_turns: int = Field(
         default=12,
@@ -2511,6 +2685,21 @@ class HydraFlowConfig(BaseModel):
             "Hard character budget for a plan (#9955). Kept BELOW "
             "max_impl_plan_chars so the implement boundary never truncates — "
             "truncation is information loss the plan phase paid latency for."
+        ),
+    )
+    plan_design_decision_hitl_threshold: int = Field(
+        default=2,
+        ge=1,
+        le=50,
+        description=(
+            "Number of design-decision-class CRITICAL plan-review concerns "
+            "(unresolved design decision / unvalidated core mechanism, e.g. from "
+            "the Risk-Skeptic voter or AssumptionSurfacer) that routes an issue "
+            "to `human-required` instead of swapping to `hydraflow-ready` at the "
+            "plan->ready gate. Prevents the factory force-implementing "
+            "design/research issues where the agent hangs to the timeout and "
+            "retry-thrashes (issue #10659). Implementer-addressable concerns "
+            "(buildability/coverage/AC) never count toward this threshold."
         ),
     )
     max_new_files_warning: int = Field(
@@ -2604,7 +2793,7 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Agent prompt configuration
-    subskill_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    subskill_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for low-tier subskill/tool-chain passes",
     )
@@ -2622,7 +2811,7 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Enable automatic escalation to debug model when low-tier prechecks signal risk/ambiguity",
     )
-    debug_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    debug_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for debug escalation passes",
     )
@@ -2654,6 +2843,17 @@ class HydraFlowConfig(BaseModel):
         ge=5,
         le=120,
         description="Timeout in seconds for simple git commands (rev-list, rev-parse, status)",
+    )
+    salvage_commit_timeout: int = Field(
+        default=1800,
+        ge=60,
+        le=3600,
+        description=(
+            "Timeout in seconds for the salvage 'git commit' in "
+            "AgentRunner._force_commit_uncommitted. This commit runs the repo's "
+            "pre-commit hook (quality-lite / security / arch-check), so it needs a "
+            "make-tier budget rather than the short git_command_timeout tier (#10598)."
+        ),
     )
     summarizer_timeout: int = Field(
         default=120,
@@ -2892,6 +3092,72 @@ class HydraFlowConfig(BaseModel):
             "to False to give operators a separate opt-in switch."
         ),
     )
+    # Formal give-up window (#10735, epic #10733 child 2) — OTP restart-
+    # intensity per child-class. N abnormal exits/retries within T seconds
+    # means the child is not converging under retry; the plan-retry route-back
+    # then self-solves (ADR-0105 decompose / auto-agent diagnose) instead of
+    # thrashing or dumping the issue on a human. resolve_window(config, cls) in
+    # giveup_window.py is the single threshold source for all four classes.
+    giveup_window_enabled: bool = Field(
+        default=False,
+        description=(
+            "Wire the plan-retry route-back terminal to the formal give-up "
+            "window: after giveup_plan_retry_max_restarts route-backs within "
+            "giveup_plan_retry_window_secs, self-solve (decompose/diagnose) "
+            "instead of routing back again. Off by default (feature opt-in, "
+            "and inert unless precondition_gate_enabled routes the plan-retry "
+            "loop at all)."
+        ),
+    )
+    giveup_build_max_restarts: int = Field(
+        default=3,
+        ge=1,
+        le=100,
+        description="Give-up window N for the build child-class (abnormal exits in T).",
+    )
+    giveup_build_window_secs: int = Field(
+        default=3600,
+        ge=1,
+        description="Give-up window T (seconds) for the build child-class.",
+    )
+    giveup_review_max_restarts: int = Field(
+        default=3,
+        ge=1,
+        le=100,
+        description="Give-up window N for the review child-class (abnormal exits in T).",
+    )
+    giveup_review_window_secs: int = Field(
+        default=3600,
+        ge=1,
+        description="Give-up window T (seconds) for the review child-class.",
+    )
+    giveup_loop_max_restarts: int = Field(
+        default=5,
+        ge=1,
+        le=100,
+        description="Give-up window N for the background-loop child-class.",
+    )
+    giveup_loop_window_secs: int = Field(
+        default=3600,
+        ge=1,
+        description="Give-up window T (seconds) for the background-loop child-class.",
+    )
+    giveup_plan_retry_max_restarts: int = Field(
+        default=2,
+        ge=1,
+        le=100,
+        description=(
+            "Give-up window N for the plan-retry child-class: plan->ready "
+            "route-backs within giveup_plan_retry_window_secs before the "
+            "issue self-solves. Defaults to 2 (the legacy hardcoded "
+            "max_route_backs) so behaviour is unchanged when the window is on."
+        ),
+    )
+    giveup_plan_retry_window_secs: int = Field(
+        default=3600,
+        ge=1,
+        description="Give-up window T (seconds) for the plan-retry child-class.",
+    )
     # Shadow corpus (#8786) — opt-in live sampling of production
     # subprocess calls. When enabled, every gh/git/docker/claude call
     # feeds a bounded, normalized, PII-scrubbed YAML corpus that
@@ -3029,7 +3295,7 @@ class HydraFlowConfig(BaseModel):
         default="haiku",
         description="Model for wiki compilation and synthesis",
     )
-    wiki_compilation_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    wiki_compilation_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for wiki compilation",
     )
@@ -3255,7 +3521,7 @@ class HydraFlowConfig(BaseModel):
         default="haiku",
         description="Cheap model for summarising agent transcripts into structured learnings",
     )
-    transcript_summary_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    transcript_summary_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for transcript summarization",
     )
@@ -3266,7 +3532,7 @@ class HydraFlowConfig(BaseModel):
         description="Max transcript characters to send for summarization (truncated from end)",
     )
     # Report issue worker
-    report_issue_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    report_issue_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for report-issue worker",
     )
@@ -3274,7 +3540,7 @@ class HydraFlowConfig(BaseModel):
         default="opus",
         description="Model for report-issue worker (codebase research + structured issue creation)",
     )
-    sentry_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    sentry_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for sentry_loop ingestion worker",
     )
@@ -3282,7 +3548,7 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for sentry_loop ingestion worker (issue triage + filing from Sentry events) — sonnet is sufficient; the task is stack-trace parsing + issue filing, not deep reasoning. Opus was 4-5× the cost for no measurable quality win.",
     )
-    adr_drift_resolver_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    adr_drift_resolver_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
     )
@@ -3867,7 +4133,7 @@ class HydraFlowConfig(BaseModel):
         le=5,
         description="Maximum deliberation rounds before forcing a decision",
     )
-    adr_review_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    adr_review_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for the ADR council review orchestrator",
     )
@@ -3889,11 +4155,11 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for acceptance criteria generation (post-merge)",
     )
-    ac_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    ac_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for acceptance criteria generation",
     )
-    verification_judge_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    verification_judge_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for verification judge agents",
     )
@@ -4212,7 +4478,7 @@ class HydraFlowConfig(BaseModel):
         default="sonnet",
         description="Model for the term-proposer / entry-evidence drafters.",
     )
-    term_proposer_tool: Literal["claude", "codex", "gemini", "pi"] = Field(
+    term_proposer_tool: Literal["claude", "codex"] = Field(
         default="claude",
         description="CLI backend for the term-proposer drafters (claude path only).",
     )
@@ -4628,6 +4894,18 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Per-stage timeout in seconds for the auto-PR pre-flight gate "
             "(#10013). A stage that exceeds it counts as red."
+        ),
+    )
+    auto_pr_auto_merge_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill-switch for arming auto-merge on bot PRs (#10672, Fix 2). "
+            "When True (default, preserving behavior), the auto-PR merge path "
+            "may run ``gh pr merge --auto --squash`` — but only after a "
+            "fail-closed green-gate confirms the PR's statusCheckRollup is "
+            "fully green (no failing or still-pending check). When False, "
+            "auto-merge is never armed and PRs wait for a human/shepherd merge, "
+            "without a code change."
         ),
     )
     pr_base_freshness_guard_enabled: bool = Field(
@@ -5228,6 +5506,15 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for WorkspaceGCLoop.",
     )
+    worktree_gc_all_roots_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for the WorkspaceGCLoop all-root "
+            "enumerate-and-reap phase (#10698). When False the loop keeps its "
+            "legacy state/orphan-dir/branch phases but does NOT enumerate "
+            "worktrees across every root."
+        ),
+    )
 
     # IssueRefinementLoop (spec #9957) — backlog-wide dedup, priority scoring,
     # operator digest.
@@ -5551,6 +5838,34 @@ class HydraFlowConfig(BaseModel):
         """Return the repo-scoped workspace directory path for a given issue number."""
         return self.workspace_base / self.repo_slug / f"issue-{issue_number}"
 
+    def worktree_gc_root_paths(self) -> list[Path]:
+        """Return the allow-list of roots the WorkspaceGCLoop may sweep (#10698).
+
+        When ``worktree_gc_roots`` is configured it wins verbatim. Otherwise
+        this returns the known factory worktree roots — where sub-agent,
+        manual/dev, genpr, and factory-operational worktrees are created —
+        so the enumerate-and-reap phase covers every leaking root, not just
+        ``workspace_base/repo_slug/issue-<N>``. A worktree whose path is not
+        under one of these roots is never reaped (fail-closed blast-radius
+        gate); operators widen coverage via ``HYDRAFLOW_WORKTREE_GC_ROOTS``.
+        """
+        if self.worktree_gc_roots:
+            return [Path(r).expanduser() for r in self.worktree_gc_roots]
+        home = Path.home()
+        candidates = [
+            self.workspace_base,
+            home / ".hydraflow" / "worktrees",
+            home / ".hydraflow" / "dev",
+            self.repo_root / ".claude" / "worktrees",
+        ]
+        seen: set[Path] = set()
+        roots: list[Path] = []
+        for root in candidates:
+            if root not in seen:
+                seen.add(root)
+                roots.append(root)
+        return roots
+
     @model_validator(mode="after")
     def resolve_defaults(self) -> HydraFlowConfig:
         """Resolve paths, repo slug, and apply env var overrides.
@@ -5677,11 +5992,37 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
         ):
             _apply_if_default(field, config.background_model)
 
+    # Maintenance knob: route the maintenance role-set to one backend coherently
+    # (provider AND model together), never the work loops. A model is only
+    # applied where the role actually has a *_model field (pr_unstick has none).
+    if config.maintenance_provider != "claude" or config.maintenance_model.strip():
+        for role in _MAINTENANCE_ROLES:
+            if config.maintenance_provider != "claude":
+                _apply_if_default(f"{role}_provider", config.maintenance_provider)
+            model_field = f"{role}_model"
+            if (
+                config.maintenance_model.strip()
+                and model_field in HydraFlowConfig.model_fields
+            ):
+                _apply_if_default(model_field, config.maintenance_model)
+
+
+# The maintenance role-set the maintenance_* knob routes (never the work loops).
+_MAINTENANCE_ROLES: tuple[str, ...] = (
+    "wiki_compilation",
+    "adr_review",
+    "transcript_summary",
+    "adr_drift_resolver",
+    "term_proposer",
+    "triage_honeypot",
+    "pr_unstick",
+)
 
 # Model prefix → required tool. Any model starting with a listed prefix
-# MUST pair with the given tool; any other pairing is rejected.
+# MUST pair with the given tool; any other pairing is rejected. glm-* rides the
+# Claude CLI (pointed at z.ai's Anthropic-compatible endpoint), so it requires
+# tool="claude".
 _MODEL_TOOL_REQUIRED: list[tuple[str, str]] = [
-    ("gemini", "gemini"),
     ("gpt-", "codex"),
     ("o1", "codex"),
     ("o3", "codex"),
@@ -5690,7 +6031,29 @@ _MODEL_TOOL_REQUIRED: list[tuple[str, str]] = [
     ("sonnet", "claude"),
     ("haiku", "claude"),
     ("claude-", "claude"),
+    ("glm", "claude"),
 ]
+
+# Model prefix → required provider (harness backend). A glm-* model only runs on
+# the z.ai harness backend, so its role's *_provider MUST be "zai". Anything not
+# listed is provider-agnostic on the tool axis but still subject to the inverse
+# check (a "zai" provider requires a glm-* model).
+_MODEL_PROVIDER_REQUIRED: list[tuple[str, str]] = [
+    ("glm", "zai"),
+]
+
+# Sub-spawn stages have no *_provider dial of their own — they run on the harness
+# of the outer runner(s) that spawn them. Map each to the config field(s) holding
+# those runners' providers so its model is validated against EVERY backend it can
+# actually run on (see _harmonize_tool_model_defaults). subskill/debug are
+# multi-caller: the AC precheck closures run them on ac_provider, while the
+# reviewer + verification-judge prechecks run them on review_provider — so their
+# model must be coherent with BOTH.
+_SUBSPAWN_PROVIDER_SOURCE: dict[str, tuple[str, ...]] = {
+    "test_adequacy_verifier": ("implementation_provider",),
+    "subskill": ("ac_provider", "review_provider"),
+    "debug": ("ac_provider", "review_provider"),
+}
 
 
 def _required_tool_for_model(model: str) -> str | None:
@@ -5698,6 +6061,14 @@ def _required_tool_for_model(model: str) -> str | None:
     for prefix, tool in _MODEL_TOOL_REQUIRED:
         if m.startswith(prefix):
             return tool
+    return None
+
+
+def _required_provider_for_model(model: str) -> str | None:
+    m = model.lower()
+    for prefix, provider in _MODEL_PROVIDER_REQUIRED:
+        if m.startswith(prefix):
+            return provider
     return None
 
 
@@ -5778,6 +6149,35 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
                 f"model {model!r} requires tool {required!r}"
             )
             raise ValueError(msg)
+        # Provider-scoped model validation. A role's *_provider (default
+        # "claude" for roles without a dial) must agree with its model: a glm-*
+        # model needs provider "zai", and a "zai" provider needs a glm-* model.
+        # This is what stops a background/maintenance model from silently
+        # stranding a GLM model on a claude-provider (Anthropic) spawn.
+        #
+        # Sub-spawn stages have no dial of their own — they run on the harness of
+        # the outer runner(s) that spawn them, so validate their model against
+        # EVERY provider it can run on (the verifier runs via the implementation
+        # spawn; subskill/debug run via ac_provider AND review_provider). This
+        # rejects e.g. an opus sub-spawn model while a routing runner is on GLM,
+        # and a glm sub-spawn model unless every routing runner is on GLM.
+        provider_fields = _SUBSPAWN_PROVIDER_SOURCE.get(stage, (f"{stage}_provider",))
+        providers = {getattr(config, f, "claude") for f in provider_fields}
+        required_provider = _required_provider_for_model(model)
+        for provider in providers:
+            if required_provider is not None and provider != required_provider:
+                msg = (
+                    f"{stage}: model {model!r} requires provider "
+                    f"{required_provider!r} but a routing runner is on provider "
+                    f"{provider!r}"
+                )
+                raise ValueError(msg)
+            if provider == "zai" and required_provider != "zai":
+                msg = (
+                    f"{stage}: provider 'zai' (the GLM harness) requires a glm-* "
+                    f"model, got {model!r}"
+                )
+                raise ValueError(msg)
 
 
 def _resolve_base_paths(config: HydraFlowConfig) -> None:
@@ -6200,6 +6600,18 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                 )
 
     # Combo env vars: HYDRAFLOW_<STAGE>=tool:model
+    #
+    # Precedence (#10657): an explicitly supplied value — a constructor kwarg,
+    # a config-file value, or a PATCH edit re-validated through
+    # ``model_validate`` — beats the matching ``HYDRAFLOW_*`` env var, exactly
+    # like every other ``_ENV_*_OVERRIDES`` table above. The combo loop was the
+    # sole table that applied the env value unconditionally, so a PATCH edit to
+    # a combo-covered model/tool field (``patch_config`` re-runs this loop) was
+    # silently reverted to the env value. ``__pydantic_fields_set__`` is the
+    # "was this explicitly supplied?" signal; it is snapshotted *before* the
+    # loop so combo entries can't mask each other, and it stays authoritative
+    # even though the loop adds to it as it applies env-only fields (#9717).
+    explicit_before_combo = set(config.__pydantic_fields_set__)
     for env_key, tool_field, model_field in _ENV_COMBO_OVERRIDES:
         env_val = _get_env(env_key)
         if env_val is None:
@@ -6212,14 +6624,17 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                 f"{env_key}=inherit not allowed; {tool_field} requires an explicit tool"
             )
             raise ValueError(msg)
-        object.__setattr__(config, tool_field, tool)
-        # Register as explicitly-set: object.__setattr__ bypasses Pydantic's
-        # fields-set tracking, so without this the group cascade in
-        # _apply_profile_overrides treats the field as untouched and — when
-        # the env value equals the field default — silently overwrites the
-        # operator's per-role choice (#9717).
-        config.__pydantic_fields_set__.add(tool_field)
-        if model:  # empty model only for "inherit"
+        if tool_field not in explicit_before_combo:
+            object.__setattr__(config, tool_field, tool)
+            # Register as explicitly-set: object.__setattr__ bypasses Pydantic's
+            # fields-set tracking, so without this the group cascade in
+            # _apply_profile_overrides treats the field as untouched and — when
+            # the env value equals the field default — silently overwrites the
+            # operator's per-role choice (#9717).
+            config.__pydantic_fields_set__.add(tool_field)
+        if (
+            model and model_field not in explicit_before_combo
+        ):  # empty only for "inherit"
             object.__setattr__(config, model_field, model)
             config.__pydantic_fields_set__.add(model_field)
 
@@ -6294,6 +6709,13 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
         parsed = [u.strip() for u in env_steering_users.split(",") if u.strip()]
         if parsed:
             object.__setattr__(config, "human_steering_authorized_users", parsed)
+
+    # Extra worktree-GC sweep roots (comma-separated list, special-case; #10698)
+    env_gc_roots = os.environ.get("HYDRAFLOW_WORKTREE_GC_ROOTS")
+    if env_gc_roots is not None and config.worktree_gc_roots == []:
+        parsed = [r.strip() for r in env_gc_roots.split(",") if r.strip()]
+        if parsed:
+            object.__setattr__(config, "worktree_gc_roots", parsed)
 
     # Docker resource limit overrides (validated fields handled manually
     # because str/int overrides need format/bounds validation that

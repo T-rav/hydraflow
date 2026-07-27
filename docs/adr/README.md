@@ -6,11 +6,33 @@ Lightweight ADRs documenting key design decisions in HydraFlow.
 
 Each ADR has: **Status**, **Date**, **Enforcement**, **Enforced by** (when
 required), **Context**, **Decision**, **Consequences**, and optionally
-**Alternatives considered** and **Related** links.
+**Alternatives considered** and **Related** links. A **control-plane** ADR also
+carries a lineage line (**Precedent** and/or **Divergence** — see below).
 
 When referencing source code anywhere in an ADR (Related, Context, Decision,
 Consequences), use `module:function_or_class` format (e.g. `src/config.py:HydraFlowConfig`).
 **Omit line numbers** — they drift as code evolves and become stale quickly.
+
+### Lineage — Precedent and Divergence (optional)
+
+Two optional, single-line header fields (see
+[ADR-0113](0113-adr-lineage-precedent-and-divergence.md)) let a control-plane
+ADR — a decision that defines the control system — separate *inherited*
+engineering from *genuine* divergence:
+
+- `**Precedent:** <tradition> (<canonical source>)` — the named engineering
+  tradition this decision inherits. Must be a **real, citable** tradition;
+  retrofitted branding fails review.
+- `**Divergence:** <assumption>, <forcing condition>, <rule> (<receipt>)` — the
+  assumption in that tradition that breaks here, **citing the receipt** (an
+  ADR, incident, or audit finding) that forced it. A `Divergence:` without a
+  receipt is not accepted.
+
+Write each as its own line (not a bullet); both the bold-inline and plain
+forms parse. The working heuristic: unforced invention is a defect; forced
+invention has a named forcing condition and a receipt. The `P1.17` audit check
+(advisory today, escalating to blocking once the seed pass lands) warns when a
+control-plane ADR carries neither line and flags any receipt-less `Divergence:`.
 
 ### Enforcement
 
@@ -41,7 +63,7 @@ cadence and files remediation issues on drift.
 |-----|-------|--------|
 | [0001](0001-five-concurrent-async-loops.md) | Five Concurrent Async Loops | Accepted |
 | [0002](0002-labels-as-state-machine.md) | GitHub Labels as the Pipeline State Machine | Accepted |
-| [0003](0003-git-worktrees-for-isolation.md) | Git Worktrees for Issue Isolation | Accepted |
+| [0003](0003-git-worktrees-for-isolation.md) | Git Worktrees for Issue Isolation | Superseded |
 | [0004](0004-agent-cli-as-runtime.md) | CLI-based Agent Runtime (Claude / Codex / Pi.dev) | Accepted |
 | [0005](0005-pr-recovery-and-zero-diff-branch-handling.md) | PR Recovery and Zero-Diff Branch Handling in Implement Phase | Accepted |
 | [0006](0006-repo-runtime-isolation.md) | RepoRuntime Isolation Architecture | Superseded |
@@ -128,7 +150,7 @@ cadence and files remediation issues on drift.
 | [0088](0088-label-drift-caretaker-loop.md) | LabelDriftWatcherLoop — Cross-Entity State-Machine Drift Caretaker | Accepted |
 | [0089](0089-memory-backlog-loop.md) | MemoryBacklogLoop — promote session-memory feedback to the find queue | Accepted |
 | [0090](0090-atlas-knowledge-graph-dashboard.md) | Atlas — Knowledge Graph Dashboard Surface | Accepted |
-| [0091](0091-epic-monitor-completion-sweep.md) | Fold Epic Completion Sweep into Epic Monitor | Accepted |
+| [0091](0091-epic-monitor-completion-sweep.md) | Fold Epic Completion Sweep into Epic Monitor | Superseded |
 | [0092](0092-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
 | [0093](0093-loop-fitness-as-measured-contract.md) | Loop fitness as a measured contract | Accepted |
 | [0094](0094-two-level-convergence-gate-and-ledger.md) | Two-level convergence: Gate + ConvergenceLedger | Accepted |
@@ -146,6 +168,12 @@ cadence and files remediation issues on drift.
 | [0106](0106-thread-level-event-loop-freeze-detector.md) | Thread-level event-loop freeze detector | Accepted |
 | [0107](0107-collapse-discover-shape-into-plan.md) | Collapse Discover + Shape into Plan — Triage → Plan Directly | Accepted |
 | [0108](0108-deterministic-simulation-fault-injection-evaluation.md) | Deterministic-Simulation Fault Injection on the Sandbox Compose — Evaluation | Proposed |
+| [0109](0109-ultra-review-opt-in-deep-review-tier.md) | Opt-in "ultra" deep-review tier for the review phase | Accepted |
+| [0110](0110-provider-harness-backend-split.md) | Provider/Harness Backend Split — z.ai as a Claude-harness backend | Accepted |
+| [0111](0111-in-framework-flow-dag-runtime.md) | In-framework flow (DAG) runtime for workers and phases | Accepted |
+| [0112](0112-per-issue-isolation-via-local-git-clone.md) | Per-Issue Isolation via Local Git Clone | Accepted |
+| [0113](0113-adr-lineage-precedent-and-divergence.md) | ADR lineage — Precedent and Divergence lines | Accepted |
+| [0114](0114-optional-per-type-eventbus-subscription.md) | Optional per-type EventBus subscription | Accepted |
 
 ## Adding a new ADR
 

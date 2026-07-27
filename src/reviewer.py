@@ -60,6 +60,7 @@ class ReviewRunner(BaseRunner):
 
     _log = logger
     _phase_name: ClassVar[str] = "review"
+    PROVIDER_FIELD: ClassVar[str | None] = "review_provider"
 
     @staticmethod
     def _format_code_scanning_alerts(

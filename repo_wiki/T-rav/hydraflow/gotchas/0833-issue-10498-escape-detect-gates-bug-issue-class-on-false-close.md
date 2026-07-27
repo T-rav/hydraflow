@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10498
 source_phase: plan
 created_at: 2026-07-25T01:51:29.166430+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0851
 ---
 
 # escape.detect gates bug-issue class on false_close.has_skip_regression

@@ -38,6 +38,10 @@ _WATCHDOG_SCRIPT = _REPO_ROOT / "scripts" / "factory_liveness_watchdog.py"
 _DEFAULT_PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{_LABEL}.plist"
 _DEFAULT_LOG_DIR = Path.home() / ".hydraflow" / "liveness" / "logs"
 _START_INTERVAL_SECONDS = 300
+# Tier-1 boot-correctness kernel wiring (#10734).
+_DEFAULT_WORKSPACE = Path.home() / ".hydraflow" / "factory-workspace" / "hydraflow"
+_DEFAULT_FACTORY_BRANCH = "staging"
+_DEFAULT_KNOB_PATH = Path.home() / ".hydraflow" / "liveness" / "restart.knob"
 
 
 def render_plist(
@@ -49,14 +53,32 @@ def render_plist(
     start_interval: int,
     stdout_path: Path,
     stderr_path: Path,
+    environment: dict[str, str] | None = None,
 ) -> str:
-    """Return the launchd plist XML as a string. Pure — no I/O."""
+    """Return the launchd plist XML as a string. Pure — no I/O.
+
+    ``environment`` renders an ``EnvironmentVariables`` dict so the relaunched
+    factory inherits the correct branch pin (``HYDRAFLOW_FACTORY_BRANCH=staging``)
+    — without it, a launchd relaunch inherits the shell default ``main`` and
+    boots stale (#10734).
+    """
 
     def _esc(value: str) -> str:
         return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     args = [python_executable, str(watchdog_script), *extra_args]
     program_args_xml = "\n".join(f"        <string>{_esc(a)}</string>" for a in args)
+    env_block = ""
+    if environment:
+        env_rows = "\n".join(
+            f"        <key>{_esc(k)}</key>\n        <string>{_esc(v)}</string>"
+            for k, v in environment.items()
+        )
+        env_block = f"""    <key>EnvironmentVariables</key>
+    <dict>
+{env_rows}
+    </dict>
+"""
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" \
 "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -68,7 +90,7 @@ def render_plist(
     <array>
 {program_args_xml}
     </array>
-    <key>StartInterval</key>
+{env_block}    <key>StartInterval</key>
     <integer>{start_interval}</integer>
     <key>RunAtLoad</key>
     <true/>
@@ -105,12 +127,33 @@ def load_agent(plist_path: Path, *, dry_run: bool) -> None:
     _run(["launchctl", "bootstrap", domain, str(plist_path)], dry_run=dry_run)
 
 
+def seed_restart_knob(knob_path: Path, *, dry_run: bool) -> None:
+    """Seed ``restart.knob`` with ``RESTART_ENABLED=true`` only when absent.
+
+    An existing knob is NEVER overwritten — the operator may have configured a
+    custom ``RESTART_COMMAND``/``RESTART_LABEL`` that must survive re-install.
+    """
+    if knob_path.exists():
+        return
+    if dry_run:
+        logger.info("[dry-run] would seed knob %s with RESTART_ENABLED=true", knob_path)
+        return
+    knob_path.parent.mkdir(parents=True, exist_ok=True)
+    knob_path.write_text(
+        "# Auto-seeded by install_liveness_watchdog.py (#10734).\n"
+        "RESTART_ENABLED=true\n",
+        encoding="utf-8",
+    )
+
+
 def install(
     *,
     plist_path: Path,
     log_dir: Path,
     extra_args: list[str],
     dry_run: bool,
+    environment: dict[str, str] | None = None,
+    knob_path: Path | None = None,
 ) -> None:
     if not dry_run:
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -124,6 +167,7 @@ def install(
         start_interval=_START_INTERVAL_SECONDS,
         stdout_path=log_dir / "liveness.log",
         stderr_path=log_dir / "liveness.err.log",
+        environment=environment,
     )
 
     if dry_run:
@@ -134,6 +178,9 @@ def install(
         # the freshly rendered plist (stale ProgramArguments never linger).
         unload_if_loaded(plist_path, dry_run=False)
         plist_path.write_text(xml, encoding="utf-8")
+
+    if knob_path is not None:
+        seed_restart_knob(knob_path, dry_run=dry_run)
 
     load_agent(plist_path, dry_run=dry_run)
     logger.info(
@@ -169,6 +216,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--healthz-url", default=None)
     parser.add_argument("--events-path", default=None)
     parser.add_argument("--stale-seconds", default=None)
+    parser.add_argument(
+        "--workspace",
+        type=Path,
+        default=_DEFAULT_WORKSPACE,
+        help="Isolated factory workspace the watchdog guards for boot-correctness "
+        "(#10734). Passed through as --workspace to the watchdog.",
+    )
+    parser.add_argument(
+        "--factory-branch",
+        default=_DEFAULT_FACTORY_BRANCH,
+        help="Branch the factory must run on (ADR-0042: staging). Pinned into the "
+        "plist EnvironmentVariables so a relaunch never inherits the shell "
+        "default 'main'.",
+    )
+    parser.add_argument(
+        "--knob-path",
+        type=Path,
+        default=_DEFAULT_KNOB_PATH,
+        help="Restart knob seeded with RESTART_ENABLED=true only when absent.",
+    )
     parser.add_argument(
         "--uninstall",
         action="store_true",
@@ -206,12 +273,18 @@ def main(argv: list[str] | None = None) -> int:
         extra_args += ["--events-path", args.events_path]
     if args.stale_seconds:
         extra_args += ["--stale-seconds", str(args.stale_seconds)]
+    # Wire the boot-correctness kernel: point the watchdog at the isolated
+    # workspace and the branch it must stay pinned to (#10734).
+    extra_args += ["--workspace", str(args.workspace)]
+    extra_args += ["--factory-branch", args.factory_branch]
 
     install(
         plist_path=args.plist_path,
         log_dir=args.log_dir,
         extra_args=extra_args,
         dry_run=args.dry_run,
+        environment={"HYDRAFLOW_FACTORY_BRANCH": args.factory_branch},
+        knob_path=args.knob_path,
     )
     return 0
 

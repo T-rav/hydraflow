@@ -7,6 +7,9 @@
 **Amended by:** ADR-0107 (Collapse Discover + Shape into Plan) — removes the
 `hydraflow-discover` / `hydraflow-shape` labels from the state machine.
 
+**Precedent:** Stigmergic coordination (Grassé's stigmergy, 1959) and blackboard architectures (the Hearsay-II speech-understanding system; Erman, Hayes-Roth, Lesser & Reddy, 1980) — cooperating actors coordinating through shared marks left on a common medium rather than by direct messaging
+**Divergence:** the blackboard tradition assumes a shared medium read and written only by trusted internal knowledge sources, but here the medium is an external system (GitHub issue labels) that humans and out-of-band actors mutate concurrently, so single-stage-label state is held by an atomic `swap_pipeline_labels` plus a durable `hydraflow-in-progress` build-claim marker to close the cross-actor double-pick class (receipt: #10141, #10168)
+
 ## Context
 
 HydraFlow needs a way to track which stage each issue is currently in, and to
@@ -41,6 +44,33 @@ are removed before the new one is added. This prevents the dual-label bug (where
 a crash between remove and add leaves conflicting labels).
 
 State is polled, not pushed: each loop queries GitHub for issues with its label.
+
+### State transition diagram (machine-checked)
+
+The legal pipeline-stage transitions are the *canonical edge set* of this state
+machine. They are declared once, in code, as
+`src/label_transitions.py:LABEL_TRANSITIONS` — the single source of truth the
+runtime consults and the architecture extractor reads to render
+`docs/arch/generated/labels.md`. The diagram below is the human-readable form of
+that same edge set; `tests/architecture/test_label_state_matches_adr0002.py`
+diffs the two on every PR and fails on any drift (issue #10621).
+
+```mermaid
+stateDiagram-v2
+    hydraflow_find --> hydraflow_plan: triage
+    hydraflow_plan --> hydraflow_ready: plan accepted
+    hydraflow_plan --> hydraflow_hitl: plan escalation
+    hydraflow_ready --> hydraflow_review: PR opened
+    hydraflow_ready --> hydraflow_hitl: implement escalation
+    hydraflow_review --> hydraflow_fixed: merged
+    hydraflow_review --> hydraflow_hitl: review escalation
+    hydraflow_hitl --> hydraflow_ready: human correction
+    hydraflow_hitl --> hydraflow_review: human re-review
+```
+
+Orthogonal markers (`human-required`, `hydraflow-in-progress`) coexist with a
+stage label rather than being one; they are not edges in this diagram (see the
+build-claim marker section below).
 
 ### Build-claim marker: `ready → in-progress → review` (#10168)
 

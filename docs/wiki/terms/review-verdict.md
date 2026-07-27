@@ -6,12 +6,12 @@ bounded_context: "builder"
 code_anchor: "src/models.py:ReviewVerdict"
 aliases: ["review verdict", "review decision", "review outcome"]
 related: [{"kind": "depends_on", "target": "01KY4QGA4VF2GJDCW3ZVKNBPMY"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9C1"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}]
-evidence: []
+evidence: ["01KYEF98BHWVZEC1S5YEBDJPK3"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-25T05:17:18.491284+00:00"
-updated_at: "2026-07-25T05:17:18.491288+00:00"
+updated_at: "2026-07-27T18:08:24.118398+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-07-25T05:17:18.491187+00:00"
 proposal_signals: ["S2"]

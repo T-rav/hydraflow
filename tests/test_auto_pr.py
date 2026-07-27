@@ -51,6 +51,17 @@ def test_open_automated_pr_creates_worktree_commits_and_cleans_up(
 
     def fake_gh(cmd: list[str], **_: object) -> subprocess.CompletedProcess[str]:
         gh_calls.append(cmd)
+        # #10672: the auto-merge green-gate reads statusCheckRollup before
+        # arming --auto; return a fully-green rollup so the merge is armed.
+        if "view" in cmd:
+            rollup = json.dumps(
+                {
+                    "statusCheckRollup": [
+                        {"status": "COMPLETED", "conclusion": "SUCCESS"}
+                    ]
+                }
+            )
+            return subprocess.CompletedProcess(cmd, 0, stdout=rollup, stderr="")
         return subprocess.CompletedProcess(
             cmd, 0, stdout="https://github.com/x/y/pull/1\n", stderr=""
         )
@@ -269,6 +280,15 @@ async def test_async_happy_path_opens_pr(
         gh_calls.append(cmd)
         if cmd[2] == "create":
             return "https://github.com/x/y/pull/42\n"
+        # #10672: green-gate reads statusCheckRollup before arming --auto.
+        if cmd[2] == "view":
+            return json.dumps(
+                {
+                    "statusCheckRollup": [
+                        {"status": "COMPLETED", "conclusion": "SUCCESS"}
+                    ]
+                }
+            )
         return ""
 
     monkeypatch.setattr(

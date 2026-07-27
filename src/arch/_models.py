@@ -68,11 +68,40 @@ class ModuleGraph(BaseModel):
 class EventEdge(BaseModel):
     event: str  # EventType member name, e.g. "PR_OPENED"
     publishers: list[str] = Field(default_factory=list)  # qualified module:func
-    subscribers: list[str] = Field(default_factory=list)
+    # Live-only allowlist member (``EPHEMERAL_EVENT_TYPES`` in src/events.py):
+    # fanned out to subscribers but never persisted. Never flagged "dead", even
+    # without a discoverable publisher.
+    ephemeral: bool = False
+
+
+class TypedSubscriber(BaseModel):
+    """A per-``EventType`` consumer (ADR-0114, #10660).
+
+    A call site that passes ``subscribe(types=frozenset({EventType.X, ...}))``
+    (or the ``subscription(types=...)`` form) so the publish path only enqueues
+    the listed types to its queue — the optional filter that complements, and
+    does not replace, the fan-out default.
+    """
+
+    subscriber: str  # qualified ``module:Class.func`` call site
+    # EventType member names the call filters on, sorted. May be empty when the
+    # filter set is passed as a named constant the extractor cannot resolve
+    # statically — the call is still a typed (non-fan-out) subscriber.
+    types: list[str] = Field(default_factory=list)
 
 
 class EventBusTopology(BaseModel):
     events: list[EventEdge] = Field(default_factory=list)
+    # Fan-out consumers: qualified call sites that take an argless
+    # ``subscribe()`` / ``subscription()`` queue. HydraFlow's ``EventBus``
+    # delivers every published event to every fan-out subscriber (one queue
+    # drains the whole bus).
+    global_subscribers: list[str] = Field(default_factory=list)
+    # Typed consumers: call sites that pass an optional per-``EventType`` filter
+    # via ``subscribe(types=...)`` (ADR-0114, #10660). The publish path only
+    # enqueues the listed types to their queue, so a high-volume type they
+    # ignore never fills their bounded slots.
+    typed_subscribers: list[TypedSubscriber] = Field(default_factory=list)
 
 
 class ADRRef(BaseModel):

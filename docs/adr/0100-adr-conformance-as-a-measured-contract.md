@@ -5,6 +5,9 @@
 **Enforcement:** enforced
 **Enforced by:** pytest:tests/test_adr_conformance_coverage.py
 
+**Precedent:** Design by Contract (Meyer, *Object-Oriented Software Construction*, 1988/1997) and executable-specification / fitness-function conformance
+**Divergence:** Design by Contract checks a contract at runtime against a running program, but here the "program" is a corpus of decision records that generative agents read as ground truth, so conformance is a side-effect-free check resolved at merge (the coverage ratchet) and re-executed post-merge (`AdrConformanceLoop`), and a recurring failure flips interpretation from "code drifted" to "the decision itself should be superseded" (receipt: ADR-0093, ADR-0046)
+
 ## Context
 
 HydraFlow has a **dependency** link between an ADR and the code it governs: `adr_drift.py` cites modules and trips a tripwire when they change (ADR-0056). It does not have a **conformance** link: a way to ask "does the decision still hold?" and get a machine answer. ADR-0093 pioneered a one-off `**Enforced by:**` frontmatter line pointing at a test, but that line was unparsed, unvalidated, and rendered nowhere — a convention by convention, not by construction.

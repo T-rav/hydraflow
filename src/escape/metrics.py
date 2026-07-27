@@ -244,3 +244,106 @@ def latest_by_id(records: list[EscapeRecord]) -> list[EscapeRecord]:
             order.append(record.id)
         latest[record.id] = record
     return [latest[rid] for rid in order]
+
+
+#: Attribution-confidence ordering, strongest first — picks the surviving row
+#: when one commit was detected under several sources (``high`` > ``medium`` >
+#: ``low``); an unknown/empty confidence ranks below all of them.
+_CONFIDENCE_RANK: dict[str, int] = {"high": 3, "medium": 2, "low": 1}
+
+
+def _escape_supersedes(candidate: EscapeRecord, incumbent: EscapeRecord) -> bool:
+    """True when *candidate* should replace *incumbent* for one ``detection_ref``.
+
+    An encoded row (a landed human resolution — ``encoded_as != "none-yet"``)
+    always beats an unencoded one, so a resolution is never discarded; otherwise
+    the stronger mechanical ``attribution_confidence`` wins; a full tie keeps the
+    later-appearing (``candidate``) row, since stage-1 order is latest-appearance
+    ascending.
+    """
+    cand_encoded = candidate.encoded_as != "none-yet"
+    inc_encoded = incumbent.encoded_as != "none-yet"
+    if cand_encoded != inc_encoded:
+        return cand_encoded
+    cand_rank = _CONFIDENCE_RANK.get(candidate.attribution_confidence, 0)
+    inc_rank = _CONFIDENCE_RANK.get(incumbent.attribution_confidence, 0)
+    if cand_rank != inc_rank:
+        return cand_rank > inc_rank
+    return True
+
+
+def latest_by_escape(records: list[EscapeRecord]) -> list[EscapeRecord]:
+    """Collapse *records* to one row per underlying escaping commit (pure).
+
+    Two stages, no git/network — the collapse ``EscapeLedger.read_latest``
+    delegates to, so every derived read (rate, encoding, aging, the HITL
+    surfaces) counts one commit once (#10654):
+
+    1. Collapse by ``id`` (``latest_by_id`` — the latest-appended row wins, so a
+       human resolution already supersedes its original row).
+    2. Group the stage-1 result by ``detection_ref`` — the detecting commit's own
+       sha, stable across detection sources. ``EscapeCandidate.id`` folds the
+       ``detection_source`` in, so one commit re-detected under a different
+       source (e.g. a ``bug-issue`` close that also adds a ``tests/regressions/``
+       pin, so it also classifies as ``regression-pin``) yields two ids that
+       ``latest_by_id`` can never merge; this stage merges them. Within a
+       ``detection_ref`` group keep exactly one row:
+
+       * an ``encoded_as != "none-yet"`` row wins over an unencoded one — never
+         discard a human resolution;
+       * otherwise the strongest ``attribution_confidence`` wins
+         (``high`` > ``medium`` > ``low``);
+       * ties broken by latest appearance in the stage-1 input.
+
+    Order of first appearance of each ``detection_ref`` is preserved.
+    """
+    best: dict[str, EscapeRecord] = {}
+    order: list[str] = []
+    for record in latest_by_id(records):
+        ref = _escape_key(record)
+        incumbent = best.get(ref)
+        if incumbent is None:
+            order.append(ref)
+            best[ref] = record
+        elif _escape_supersedes(record, incumbent):
+            best[ref] = record
+    return [best[ref] for ref in order]
+
+
+def _escape_key(record: EscapeRecord) -> str:
+    """The ``detection_ref`` a record collapses under in ``latest_by_escape``.
+
+    A row with no ``detection_ref`` (a minimal/synthetic escape row, or one
+    whose detecting commit is unrecorded) is its OWN escape — falls back to its
+    id so distinct no-ref rows are never folded under a single empty key (the
+    double-count fix was collapsing N distinct no-ref rows to 1). The SINGLE key
+    derivation shared by ``latest_by_escape`` and ``escape_by_id`` — they must
+    agree or an id would index a different group than the one it collapsed into.
+    """
+    return record.detection_ref or f"__noref__:{record.id}"
+
+
+def escape_by_id(records: list[EscapeRecord]) -> dict[str, EscapeRecord]:
+    """Map EVERY escape id to the row that currently represents its commit.
+
+    The reconcile-facing companion to ``latest_by_escape``. ``latest_by_escape``
+    returns one row per ``detection_ref`` and so drops the ids of the sibling
+    rows it folds away; a surfacing link, though, is keyed by the exact id it was
+    filed under. This returns a dict keyed by every id in the id-collapsed view,
+    each id pointing at the row that WON the ``detection_ref`` collapse for that
+    id's commit. So a link filed under an id ``latest_by_escape`` later folds
+    away — a low-confidence ``bug-issue`` sibling superseded by a stronger
+    ``regression-pin`` for the same commit (#10731) — still resolves to the
+    current winning row instead of vanishing from a ``{r.id: r}`` projection.
+
+    Uses the same ``detection_ref``-key derivation as ``latest_by_escape`` so a
+    no-ref row maps to itself and both sibling ids of a collapsed commit map to
+    the single survivor.
+    """
+    winner_by_ref: dict[str, EscapeRecord] = {
+        _escape_key(winner): winner for winner in latest_by_escape(records)
+    }
+    return {
+        record.id: winner_by_ref[_escape_key(record)]
+        for record in latest_by_id(records)
+    }

@@ -33,7 +33,10 @@ import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from giveup_window import SelfSolveOutcome
+
 if TYPE_CHECKING:
+    from giveup_window import GiveUpTracker, GiveUpWindow, SelfSolver
     from issue_cache import IssueCache
     from ports import PRPort
 
@@ -56,6 +59,13 @@ class RouteBackOutcome(StrEnum):
     # The route-back counter exceeded ``max_route_backs``; the issue
     # was escalated to HITL instead of being routed back again.
     ESCALATED = "escalated"
+    # The give-up window (N-in-T) was exhausted and the issue was routed
+    # to a machine self-solve (ADR-0105 decompose, or the auto-agent
+    # diagnose path) — NOT to a human. This is the give-up→self-solve
+    # terminal (#10735); ``human-required`` is applied only when the
+    # self-solve path itself exhausts (which returns ESCALATED, logged
+    # as a break).
+    SELF_SOLVED = "self_solved"
     # An unexpected failure during the route-back itself (label swap
     # raised, cache write raised). Logged at warning, returned for
     # caller awareness — the issue stays in its current state.
@@ -144,6 +154,10 @@ class RouteBackCoordinator:
         hitl_label: str,
         diagnose_label: str = "",
         max_route_backs: int = 2,
+        give_up_tracker: GiveUpTracker | None = None,
+        plan_retry_window: GiveUpWindow | None = None,
+        self_solve: SelfSolver | None = None,
+        human_required_label: str = "human-required",
     ) -> None:
         """Build the coordinator.
 
@@ -159,6 +173,17 @@ class RouteBackCoordinator:
         ``max_route_backs`` is the soft cap — once an issue has been
         routed back this many times, the next route-back attempt
         escalates instead.
+
+        **Give-up window mode (#10735).** When ``give_up_tracker`` and
+        ``plan_retry_window`` are both supplied, the monotonic
+        ``max_route_backs`` cap is superseded by a formal ``N``-in-``T``
+        restart-intensity window: the terminal fires only when ``N``
+        route-backs land within ``T`` seconds (so convergent retries that
+        DO settle within the window are never escalated). On exhaustion the
+        issue is routed to ``self_solve`` — a machine self-solve (ADR-0105
+        decompose / auto-agent diagnose), NOT ``human-required``. Human is
+        applied only if the self-solve path itself exhausts. When the window
+        is not supplied the coordinator keeps its exact legacy behaviour.
         """
         self._cache = cache
         self._prs = prs
@@ -166,10 +191,30 @@ class RouteBackCoordinator:
         self._hitl_label = hitl_label
         self._diagnose_label = diagnose_label
         self._max_route_backs = max_route_backs
+        self._give_up_tracker = give_up_tracker
+        self._plan_retry_window = plan_retry_window
+        self._self_solve = self_solve
+        self._human_required_label = human_required_label
 
     @property
     def max_route_backs(self) -> int:
         return self._max_route_backs
+
+    @property
+    def give_up_window_active(self) -> bool:
+        """True when the N-in-T give-up window supersedes the monotonic cap."""
+        return self._give_up_tracker is not None and self._plan_retry_window is not None
+
+    def reset_window(self, issue_id: int) -> None:
+        """Clear *issue_id*'s plan-retry give-up window — call on convergence.
+
+        No-op when the window is not active. The precondition gate calls this
+        for every issue that PASSES its stage preconditions, so an issue that
+        converges within the window starts fresh and never carries stale
+        restart-intensity toward a spurious self-solve.
+        """
+        if self._give_up_tracker is not None and self._plan_retry_window is not None:
+            self._give_up_tracker.reset(issue_id, self._plan_retry_window)
 
     async def route_back(
         self,
@@ -179,6 +224,7 @@ class RouteBackCoordinator:
         to_stage: str,
         reason: str,
         feedback_context: str = "",
+        issue_body: str = "",
     ) -> RouteBackResult:
         """Route *issue_id* from ``from_stage`` back to ``to_stage``.
 
@@ -234,8 +280,30 @@ class RouteBackCoordinator:
             # even if the audit trail couldn't be persisted. Phase code
             # already logs failures via the cache module itself.
 
-        if new_count > self._max_route_backs:
-            # Cap exceeded — escalate to HITL instead of routing back.
+        # Decide whether this route-back escalates. Two mutually-exclusive
+        # policies: the formal N-in-T give-up window (#10735) when wired,
+        # otherwise the legacy monotonic ``max_route_backs`` cap.
+        report_count = new_count
+        threshold = self._max_route_backs
+        if self._give_up_tracker is not None and self._plan_retry_window is not None:
+            # Give-up window mode: record this route-back as a restart-intensity
+            # event and, if N landed within T, route to a machine self-solve
+            # (decompose/diagnose) instead of routing back again. A count still
+            # below N is convergent retry — untouched.
+            report_count = self._give_up_tracker.record_and_count(
+                issue_id, self._plan_retry_window
+            )
+            threshold = self._plan_retry_window.max_restarts
+            if self._plan_retry_window.is_exhausted(report_count):
+                return await self._self_solve_terminal(
+                    issue_id,
+                    from_stage=from_stage,
+                    reason=reason,
+                    counter=report_count,
+                    issue_body=issue_body,
+                )
+        elif new_count > self._max_route_backs:
+            # Legacy monotonic cap exceeded — escalate to diagnose/HITL.
             return await self._escalate(
                 issue_id,
                 from_stage=from_stage,
@@ -243,7 +311,7 @@ class RouteBackCoordinator:
                 counter=new_count,
             )
 
-        # Under the cap — perform the label swap and return ROUTED.
+        # Under the cap/window — perform the label swap and return ROUTED.
         try:
             await self._prs.swap_pipeline_labels(issue_id, to_stage)
         except Exception as exc:  # noqa: BLE001
@@ -277,14 +345,111 @@ class RouteBackCoordinator:
             issue_id,
             from_stage,
             to_stage,
-            new_count,
-            self._max_route_backs,
+            report_count,
+            threshold,
             reason,
         )
         return RouteBackResult(
             RouteBackOutcome.ROUTED,
-            counter=new_count,
+            counter=report_count,
             reason=reason,
+        )
+
+    async def _self_solve_terminal(
+        self,
+        issue_id: int,
+        *,
+        from_stage: str,
+        reason: str,
+        counter: int,
+        issue_body: str = "",
+    ) -> RouteBackResult:
+        """Give-up window exhausted → self-solve, human only as last resort.
+
+        Escalation ladder (ADR-0105; #10735 corrected routing):
+
+          1. ``self_solve`` runs the ADR-0105 decompose terminal — split the
+             non-convergent issue into convergent children. If it decomposes,
+             the issue is superseded by an epic and ``human-required`` is never
+             applied (``SELF_SOLVED``).
+          2. If decompose declines, the self-solver falls back to the
+             auto-agent diagnose path (``SELF_SOLVED``) — still a machine move.
+          3. Only if the self-solve path itself exhausts (``EXHAUSTED``) is
+             ``human-required`` applied — a rare event, logged as a break at
+             WARNING. Routing a convergence-solvable issue straight to a human
+             is the HITL-scatter anti-pattern this window fixes.
+        """
+        outcome = SelfSolveOutcome.EXHAUSTED
+        if self._self_solve is not None:
+            try:
+                outcome = await self._self_solve.solve(
+                    issue_id,
+                    from_stage=from_stage,
+                    reason=reason,
+                    issue_body=issue_body,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "route_back: self-solve raised for issue #%d — treating as "
+                    "exhausted (human-required): %s",
+                    issue_id,
+                    exc,
+                )
+                outcome = SelfSolveOutcome.EXHAUSTED
+
+        # Record which self-solve action fired for the /api give-up surface.
+        if self._give_up_tracker is not None and self._plan_retry_window is not None:
+            self._give_up_tracker.record_action(
+                issue_id, self._plan_retry_window, outcome
+            )
+
+        if outcome in (SelfSolveOutcome.DECOMPOSED, SelfSolveOutcome.DIAGNOSED):
+            logger.info(
+                "Issue #%d give-up window exhausted after %d plan-retries — "
+                "self-solved via %s (no human)",
+                issue_id,
+                counter,
+                outcome.value,
+            )
+            return RouteBackResult(
+                RouteBackOutcome.SELF_SOLVED,
+                counter=counter,
+                reason=(
+                    f"give-up window exhausted after {counter} plan-retries; "
+                    f"self-solved via {outcome.value}"
+                ),
+            )
+
+        # Self-solve exhausted — human-required is the last resort. Logged as a
+        # break so an operator can see the rare case the machine couldn't route.
+        logger.warning(
+            "BREAK: issue #%d self-solve exhausted after give-up window "
+            "(%d plan-retries) — routing to human-required (last resort): %s",
+            issue_id,
+            counter,
+            reason,
+        )
+        try:
+            await self._prs.swap_pipeline_labels(issue_id, self._human_required_label)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "route_back: human-required escalation label swap failed for "
+                "issue #%d: %s",
+                issue_id,
+                exc,
+            )
+            return RouteBackResult(
+                RouteBackOutcome.FAILED,
+                counter=counter,
+                reason=f"human-required escalation label swap failed: {exc}",
+            )
+        return RouteBackResult(
+            RouteBackOutcome.ESCALATED,
+            counter=counter,
+            reason=(
+                f"give-up window exhausted after {counter} plan-retries; "
+                f"self-solve exhausted — human-required (last resort): {reason}"
+            ),
         )
 
     async def _escalate(

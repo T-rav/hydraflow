@@ -18,6 +18,7 @@ graph LR
     src_disturbance_detectors["src.disturbance.detectors"]
     src_erosion["src.erosion"]
     src_escape["src.escape"]
+    src_flows["src.flows"]
     src_intervention["src.intervention"]
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
@@ -39,12 +40,13 @@ graph LR
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
     src -- "16" --> src_erosion
-    src -- "10" --> src_escape
+    src -- "11" --> src_escape
+    src -- "4" --> src_flows
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
-    src -- "16" --> src_preflight
+    src -- "18" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "60" --> src_state
+    src -- "61" --> src_state
     src -- "7" --> src_telemetry
     src -- "4" --> src_vitals
     src_arch -- "1" --> src_disturbance
@@ -65,6 +67,7 @@ graph LR
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
     src_review_phase -- "1" --> src
+    src_review_phase -- "1" --> src_flows
     src_review_phase -- "1" --> src_state
     src_runners -- "1" --> src_preflight
     src_state -- "1" --> src

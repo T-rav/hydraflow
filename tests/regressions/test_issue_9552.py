@@ -85,9 +85,14 @@ def test_health_monitor_consumes_the_stall_marker() -> None:
     from health_monitor_loop import HealthMonitorLoop
 
     assert hasattr(HealthMonitorLoop, "_check_event_loop_stall")
-    source = inspect.getsource(HealthMonitorLoop._do_work)
+    # The escalation moved onto the heavy caretaker pass when the stall sweep
+    # was decoupled onto its own fast cadence (#10652); scan both halves of
+    # the cycle so the wiring is still asserted wherever it lives.
+    source = inspect.getsource(HealthMonitorLoop._do_work) + inspect.getsource(
+        HealthMonitorLoop._run_heavy_pass
+    )
     assert "_check_event_loop_stall" in source, (
-        "HealthMonitorLoop._do_work no longer runs the event-loop stall "
+        "HealthMonitorLoop's cycle no longer runs the event-loop stall "
         "escalation check (#9552) — freeze markers would rot on disk "
         "unescalated"
     )

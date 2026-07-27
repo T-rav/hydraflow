@@ -22,6 +22,7 @@ from arch._models import (
     ModuleNode,
     PortAdapterInfo,
     PortInfo,
+    TypedSubscriber,
 )
 
 
@@ -139,11 +140,34 @@ class TestEventBusTopology:
                 EventEdge(
                     event="PR_OPENED",
                     publishers=["src.orchestrator:open_pr"],
-                    subscribers=["src.review_loop:on_pr_opened"],
                 ),
+                EventEdge(event="PIPELINE_SNAPSHOT", ephemeral=True),
             ],
+            global_subscribers=["src.dashboard_routes._routes:websocket_endpoint"],
         )
         assert topo.events[0].event == "PR_OPENED"
+        assert topo.events[1].ephemeral is True
+        assert topo.global_subscribers == [
+            "src.dashboard_routes._routes:websocket_endpoint"
+        ]
+        # Typed subscribers default to empty (backward compatible).
+        assert topo.typed_subscribers == []
+
+    def test_with_typed_subscribers(self):
+        topo = EventBusTopology(
+            typed_subscribers=[
+                TypedSubscriber(
+                    subscriber="src.wake_router:WakeRouter.wire",
+                    types=["PR_CREATED", "MERGE_UPDATE"],
+                )
+            ],
+        )
+        dumped = topo.model_dump_json()
+        restored = EventBusTopology.model_validate_json(dumped)
+        assert restored.typed_subscribers[0].subscriber == (
+            "src.wake_router:WakeRouter.wire"
+        )
+        assert restored.typed_subscribers[0].types == ["PR_CREATED", "MERGE_UPDATE"]
 
 
 class TestADRRefIndex:

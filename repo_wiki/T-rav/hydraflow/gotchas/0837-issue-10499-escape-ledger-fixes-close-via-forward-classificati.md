@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10499
 source_phase: plan
 created_at: 2026-07-25T01:53:00.854351+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10499 closed
 ---
 
 # Escape-ledger fixes close via forward classification, not history rewrite

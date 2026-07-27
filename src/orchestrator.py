@@ -20,6 +20,7 @@ from human_steering import apply_steering, resolve_redo_phase
 from issue_store import STAGE_NAME_MAP, IssueStoreStage
 from models import (
     BackgroundWorkerState,
+    BackgroundWorkerStatusPayload,
     ErrorPayload,
     GitHubIssue,
     OrchestratorStatusPayload,
@@ -842,6 +843,55 @@ class HydraFlowOrchestrator:
             )
         )
 
+    async def _seed_background_worker_statuses(self) -> None:
+        """Publish an initial status for every registered background loop at boot.
+
+        The operator console derives its loop-health count from the reducer's
+        sticky ``backgroundWorkers`` slice, which accumulates
+        ``BACKGROUND_WORKER_STATUS`` events by worker name and never evicts.
+        Without a boot seed that slice only fills as loops tick, so slow loops
+        (pricing-refresh, wiki-maint, RC-promotion — hours-long intervals) are
+        absent for a long time and the count reads a partial set that climbs as
+        loops report and shrinks again as a bounded event window ages them out
+        (the 55→33 fluctuation, #10556).
+
+        Seeding one event per *registered* loop (``bg_loop_registry``, the set
+        of ``BaseBackgroundLoop`` instances — pipeline phases and other non-loop
+        workers are intentionally excluded) makes the count the loop registry:
+        accurate and stable from boot. A loop with a restored heartbeat keeps
+        its real last status; a never-run loop reports ``pending`` (or
+        ``disabled`` when its enabled flag is off) so it is counted but not
+        mistaken for a healthy tick.
+        """
+        states = self._bg_workers.get_states()
+        for name in sorted(self._bg_workers.registered_loop_names()):
+            enabled = self._bg_workers.is_enabled(name)
+            restored = states.get(name)
+            if not enabled:
+                status = "disabled"
+                last_run = (restored or {}).get("last_run") or ""
+                details = dict((restored or {}).get("details") or {})
+            elif restored is not None:
+                status = restored.get("status") or "pending"
+                last_run = restored.get("last_run") or ""
+                details = dict(restored.get("details") or {})
+            else:
+                status = "pending"
+                last_run = ""
+                details = {}
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.BACKGROUND_WORKER_STATUS,
+                    data=BackgroundWorkerStatusPayload(
+                        worker=name,
+                        status=status,
+                        last_run=last_run,
+                        details=details,
+                        enabled=enabled,
+                    ),
+                )
+            )
+
     def build_pipeline_stats(self) -> PipelineStats:
         """Build a unified snapshot of the pipeline state."""
         # ``get_queue_stats`` is orchestrator-only — not on IssueStorePort.
@@ -1084,6 +1134,10 @@ class HydraFlowOrchestrator:
         try:
             self._restore_state()
             await self._publish_status()
+            # Seed the full loop registry onto the bus before any loop ticks so
+            # the operator console's loop-health count is accurate + stable from
+            # boot rather than climbing as slow loops report (#10556).
+            await self._seed_background_worker_statuses()
             logger.info(
                 "HydraFlow starting — repo=%s label=%s workers=%d poll=%ds pipeline=%s",
                 self._config.repo,
@@ -1289,6 +1343,16 @@ class HydraFlowOrchestrator:
         loop body starts (#9888 suppressed-credit backoff) — the supervisor
         is never blocked and the task stays tracked in the map.
         """
+        if self._stop_event.is_set():
+            # Shutdown has begun: recreating a loop task now would leak a live
+            # task past ``_supervise_loops``'s cancel/gather drain, pinning
+            # ``run_status`` at "stopping" forever (#10569). A restart exists
+            # only to keep supervision alive, and supervision ends at stop.
+            # The supervisor's finally sweeps the crashed task; no hot-loop.
+            logger.debug(
+                "Skipping restart of loop %r — stop already requested", loop_name
+            )
+            return
         logger.error("Loop %r crashed — restarting: %s", loop_name, exc)
         data: ErrorPayload = {
             "message": f"Loop {loop_name} crashed and was restarted",
@@ -1335,6 +1399,12 @@ class HydraFlowOrchestrator:
 
         Returns ``False`` for unknown names or before supervision started.
         """
+        if self._stop_event.is_set():
+            # A restart requested after stop (e.g. HealthMonitorLoop's
+            # restart-first stall policy racing a shutdown) would spawn a rogue
+            # loop task that outlives ``_supervise_loops``'s drain and wedges
+            # ``run_status`` at "stopping" (#10569). Refuse once stop is set.
+            return False
         old = self._loop_tasks.get(name)
         factory = self._loop_factories.get(name)
         if old is None or factory is None:
@@ -2073,6 +2143,20 @@ class HydraFlowOrchestrator:
                 getattr(exc, "provider", PROVIDER_ANTHROPIC) or PROVIDER_ANTHROPIC
             )
 
+            # Origin gate (#10558): an AUTHORITATIVE signal came from the
+            # subprocess's own termination — the CLI's stderr / a structured HTTP
+            # 402/429/quota body — and is ground truth. Only a signal scanned from
+            # agent stdout PROSE (a diagnostic/reviewer run quoting a prior cap —
+            # the #9895 CREDIT_PROSE_SCAN class) needs the probe. The auth/
+            # availability probe structurally CANNOT detect a *weekly*-limit
+            # exhaustion (the key stays valid, so the probe passes), so routing a
+            # genuine weekly signal through it discarded it as a false positive and
+            # the factory never paused — loops then crash-thrashed against the
+            # exhausted budget. Corroborate prose-only signals; pause directly on
+            # authoritative ones. Defaults to the conservative "corroborate"
+            # stance so an untagged/unknown signal keeps the legacy probe gate.
+            authoritative = getattr(exc, "authoritative", False)
+
             # Corroborate the text-detected signal with a live API probe before
             # committing a GLOBAL pause. ``is_credit_exhaustion`` matches
             # credit-error PROSE, so a diagnostic/reviewer run that merely quotes
@@ -2090,7 +2174,8 @@ class HydraFlowOrchestrator:
             fp_last = self._credit_fp_last.get(source)
             cooldown = float(self._config.credit_fp_suppress_cooldown_seconds)
             if (
-                self._config.credit_pause_require_probe
+                not authoritative
+                and self._config.credit_pause_require_probe
                 and fp_last is not None
                 and (datetime.now(UTC) - fp_last).total_seconds() < cooldown
             ):
@@ -2109,7 +2194,8 @@ class HydraFlowOrchestrator:
                 provider, self._config
             )
             if (
-                self._config.credit_pause_require_probe
+                not authoritative
+                and self._config.credit_pause_require_probe
                 and await probe_credit_availability(
                     provider, base_url=probe_base_url, api_key=probe_api_key
                 )
@@ -2206,6 +2292,16 @@ class HydraFlowOrchestrator:
         *affected* ``None`` restarts every loop (global/legacy). A scoped pause
         passes the same set it cancelled so only those loops are recreated —
         the surviving backend/harness loops were never touched (#9807)."""
+        if self._stop_event.is_set():
+            # Stop landed during the pause: clear the pause state but do NOT
+            # recreate any loop. ``_pause_for_credits`` already short-circuits
+            # to this outcome before calling us; this guard also fail-safes any
+            # future caller so a credit pause that ends after stop never leaks a
+            # live loop past the shutdown drain and wedges "stopping" (#10569).
+            self._credits_paused_until = None
+            self._credit_paused_provider = None
+            self._credit_resume_event.clear()
+            return
         provider = self._credit_paused_provider
         self._credits_paused_until = None
         self._credit_paused_provider = None

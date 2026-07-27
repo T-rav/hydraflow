@@ -6,7 +6,7 @@ source_phase: plan
 created_at: 2026-07-22T18:20:50.899440+00:00
 status: superseded
 corroborations: 1
-superseded_by: 0006
+superseded_by: 0007
 ---
 
 # DependabotMergeLoop merges any green PR, not just Dependabot's

@@ -10,6 +10,7 @@ import { StreamView } from './components/StreamView'
 import { SessionSidebar } from './components/SessionSidebar'
 import { AtlasExplorer } from './components/atlas/AtlasExplorer'
 import { ProjectView } from './components/ProjectView'
+import { OperatorConsole } from './operator/OperatorConsole'
 import { theme } from './theme'
 import { canonicalRepoSlug } from './constants'
 
@@ -38,6 +39,62 @@ function _initialTabFromUrl() {
   if (requested === 'hitl') return 'outcomes'
   if (requested && TABS.includes(requested)) return requested
   return 'issues'
+}
+
+// --- Operator-console cutover flag (#10556, Task 10) ------------------------
+// The operator console ships OPT-IN: the classic dashboard stays the default
+// until feature-parity is human-verified (a machine can't self-verify parity
+// end-to-end), so we land the mechanism default-OFF and flip the default in a
+// follow-up. Selectable via a visible toggle AND a ?console=operator URL param,
+// with the choice persisted to localStorage — mirroring the _initialTabFromUrl
+// deep-link pattern.
+const CONSOLE_MODE_KEY = 'hydraflow-console-mode'
+
+function _readStoredConsoleMode() {
+  if (typeof window === 'undefined') return null
+  try {
+    const v = window.localStorage.getItem(CONSOLE_MODE_KEY)
+    return v === 'operator' || v === 'classic' ? v : null
+  } catch {
+    return null
+  }
+}
+
+function _persistConsoleMode(mode) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(CONSOLE_MODE_KEY, mode)
+  } catch {
+    /* ignore — private mode / storage disabled */
+  }
+}
+
+export function _initialConsoleModeFromUrl() {
+  if (typeof window === 'undefined') return 'classic'
+  const params = new URLSearchParams(window.location.search)
+  const requested = params.get('console')
+  if (requested === 'operator' || requested === 'classic') {
+    _persistConsoleMode(requested)
+    return requested
+  }
+  return _readStoredConsoleMode() || 'classic'
+}
+
+function ConsoleModeToggle({ mode, onSelect }) {
+  const toOperator = mode !== 'operator'
+  return (
+    <button
+      type="button"
+      data-testid="console-mode-toggle"
+      onClick={() => onSelect(toOperator ? 'operator' : 'classic')}
+      title={toOperator
+        ? 'Switch to the new operator console (opt-in preview)'
+        : 'Return to the classic dashboard'}
+      style={consoleToggleStyle}
+    >
+      {toOperator ? 'Operator console (preview)' : 'Classic dashboard'}
+    </button>
+  )
 }
 
 function formatResumeAt(isoString) {
@@ -301,9 +358,24 @@ function AppContent() {
 }
 
 export default function App() {
+  const [consoleMode, setConsoleMode] = useState(_initialConsoleModeFromUrl)
+
+  const selectConsoleMode = useCallback((mode) => {
+    _persistConsoleMode(mode)
+    // Reflect the choice in the URL so the view is shareable/bookmarkable,
+    // mirroring the _initialTabFromUrl deep-link pattern.
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      url.searchParams.set('console', mode)
+      window.history.replaceState({}, '', url)
+    }
+    setConsoleMode(mode)
+  }, [])
+
   return (
     <HydraFlowProvider>
-      <AppContent />
+      {consoleMode === 'operator' ? <OperatorConsole /> : <AppContent />}
+      <ConsoleModeToggle mode={consoleMode} onSelect={selectConsoleMode} />
     </HydraFlowProvider>
   )
 }
@@ -475,6 +547,25 @@ const styles = {
     fontWeight: 700,
     flexShrink: 0,
   },
+}
+
+// Floating opt-in switch between the classic dashboard and the operator
+// console. Fixed to the corner so it's always one click away without
+// disturbing either layout.
+const consoleToggleStyle = {
+  position: 'fixed',
+  right: 12,
+  bottom: 12,
+  zIndex: 1000,
+  padding: '6px 12px',
+  fontSize: 11,
+  fontWeight: 700,
+  color: theme.accent,
+  background: theme.surface,
+  border: `1px solid ${theme.accent}`,
+  borderRadius: 999,
+  cursor: 'pointer',
+  boxShadow: '0 2px 8px var(--overlay)',
 }
 
 // Pre-computed tab style variants (avoids object spread in .map())

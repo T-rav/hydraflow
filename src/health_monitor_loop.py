@@ -438,6 +438,12 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         self._sanity_noop_streak: int = 0
         self._pending: list[PendingAdjustment] = []
         self._last_log_scan: datetime | None = None
+        # Heavy-pass cadence gate (#10652). The loop now ticks on the fast
+        # stall-sweep cadence (``_get_default_interval``), but the ~9 heavy
+        # caretaker checks in ``_run_heavy_pass`` still run at most once per
+        # ``health_monitor_interval``. ``None`` ⇒ never run ⇒ boot runs a full
+        # pass, matching the pre-decoupling first-cycle behaviour.
+        self._last_heavy_pass_ts: datetime | None = None
         # Dedup for the wiki-freshness dead-man-switch — file one wiki-stale
         # issue per stall event; clear on recovery.
         self._wiki_stall_dedup = DedupStore(
@@ -475,7 +481,24 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         self._bg_workers = bg_workers
 
     def _get_default_interval(self) -> int:
-        return self._config.health_monitor_interval
+        """Poll cadence for the loop's *fast* path — the restart-first stall
+        sweep (#10652).
+
+        The sweep exists to remediate exactly the stalls
+        ``TrustFleetSanityLoop`` alerts on; if it only ran on the shared
+        ``health_monitor_interval`` (7200s) the alert could fire, be triaged,
+        and be closed several times over before remediation ever ran — the
+        churn documented on #10652. Ticking at (or faster than) the sanity
+        loop's own re-check cadence keeps remediation abreast of the alert.
+
+        The ~9 heavy caretaker checks keep their ``health_monitor_interval``
+        cadence regardless — ``_do_work`` gates them behind
+        ``_should_run_heavy_pass`` — so the faster tick costs nothing beyond
+        the cheap sweep. ``trust_fleet_sanity_interval`` is bounded at 3600s
+        (< the 7200s ``health_monitor_interval`` default), so this never makes
+        the loop poll slower than it did before the decoupling.
+        """
+        return self._config.trust_fleet_sanity_interval
 
     @property
     def _outcomes_path(self) -> Path:
@@ -491,11 +514,77 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         return self._config.repo_memory_dir / "harness_failures.jsonl"
 
     async def _do_work(self) -> dict[str, Any] | None:
-        """Execute one health-monitor cycle."""
+        """Execute one health-monitor cycle.
+
+        Two cadences share this loop (#10652):
+
+        * The **fast path** — the restart-first stall sweep
+          (``_check_worker_staleness``) — runs on **every** tick. The loop
+          polls on the fast ``_get_default_interval`` (aligned with
+          ``TrustFleetSanityLoop``'s re-check cadence), so remediation for a
+          stalled loop like ``staging_bisect`` fires close to the sanity
+          loop's staleness alert instead of up to a full
+          ``health_monitor_interval`` later.
+        * The **heavy pass** — the ~9 caretaker checks in
+          ``_run_heavy_pass`` — keeps its ``health_monitor_interval`` cadence,
+          gated by ``_should_run_heavy_pass``. Its issue-filing cadence, cost
+          and Sentry-metric volume are therefore unchanged.
+        """
         if not self._enabled_cb(self._worker_name):
             return {"status": "disabled"}
         if not self._config.health_monitor_loop_enabled:
             return {"status": "config_disabled"}
+
+        # Fast path — runs every tick. Generic stall sweep: restart-first for
+        # any silent registry loop, and the remediation half of the alert →
+        # remediation loop ``TrustFleetSanityLoop`` opens (#10652). It must
+        # poll at least as often as that alert re-checks, so it lives on the
+        # fast tick rather than behind the heavy-pass gate. Deliberately
+        # unwrapped (unlike the grandfathered dead-man-switches in the heavy
+        # pass): a sweep failure propagates to the base cycle handler, which
+        # owns credit/auth classification and surfaces a visible cycle error
+        # instead of a debug line — the tick retries.
+        await self._check_worker_staleness()
+
+        # Persistent-error actuator (#10140): a loop that keeps TICKING but keeps
+        # FAILING — complements the silent-heartbeat staleness sweep, so it runs on
+        # the SAME fast tick (not behind the 2h heavy-pass gate) or persistent
+        # worker errors would take up to health_monitor_interval to be filed
+        # (#10652). Deliberately unwrapped — a genuine bug here surfaces as a
+        # visible cycle error and retries, not a debug line.
+        await self._check_persistent_worker_errors()
+
+        if not self._should_run_heavy_pass():
+            # Sweep-only cycle: a compact, distinct status (NOT zeroed trend
+            # metrics, which would read as a real 0% first-pass rate on the
+            # dashboards). The heavy pass keeps its own 2h cadence below.
+            return {"status": "stall_sweep", "heavy_pass": False}
+
+        return await self._run_heavy_pass()
+
+    def _should_run_heavy_pass(self) -> bool:
+        """True when the ~9 heavy caretaker checks are due (#10652).
+
+        Boot (``_last_heavy_pass_ts`` unset) always runs a full pass. After
+        that the heavy body runs at most once per ``health_monitor_interval``
+        even though the loop ticks on the faster sweep cadence. ``getattr``
+        guards ``__new__``-bypassed test scaffolding that skips ``__init__``
+        (PR #8460 post-mortem).
+        """
+        last = getattr(self, "_last_heavy_pass_ts", None)
+        if last is None:
+            return True
+        elapsed_s = (datetime.now(UTC) - last).total_seconds()
+        return elapsed_s >= self._config.health_monitor_interval
+
+    async def _run_heavy_pass(self) -> dict[str, Any] | None:
+        """Run the ~9 heavy caretaker checks and emit trend metrics (#10652).
+
+        Stamps ``_last_heavy_pass_ts`` *before* the body runs so a heavy pass
+        that raises retries on its own ``health_monitor_interval`` cadence
+        rather than thrashing on every fast sweep tick.
+        """
+        self._last_heavy_pass_ts = datetime.now(UTC)
 
         # Dead-man-switch: detect a stalled TrustFleetSanityLoop (spec §12.1).
         try:
@@ -524,20 +613,6 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             await self._check_event_loop_stall()
         except Exception:
             logger.debug("event-loop stall check failed", exc_info=True)
-
-        # Generic stall sweep: restart-first for any silent registry loop.
-        # Deliberately unwrapped (unlike the grandfathered sibling checks
-        # above): a sweep failure propagates to the base cycle handler,
-        # which owns credit/auth classification and surfaces a visible
-        # cycle error instead of a debug line — the tick retries.
-        await self._check_worker_staleness()
-
-        # Persistent-error actuator (#10140): a loop that keeps TICKING but
-        # keeps FAILING (complements the silent-heartbeat sweep above).
-        # Deliberately unwrapped for the same reason — a genuine bug here
-        # should surface as a visible cycle error and retry, not vanish
-        # into a debug line.
-        await self._check_persistent_worker_errors()
 
         metrics = compute_trend_metrics(
             self._outcomes_path, self._scores_path, self._failures_path
@@ -581,6 +656,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             "stale_item_count": metrics.stale_item_count,
             "adjustments_made": adjustments_made,
             "total_outcomes": metrics.total_outcomes,
+            "heavy_pass": True,
         }
 
     # ------------------------------------------------------------------

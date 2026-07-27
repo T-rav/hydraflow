@@ -25,12 +25,21 @@ package: a watchdog that imports the thing it's watching can't run when
 that thing is broken (missing deps, syntax error from a bad deploy, etc).
 Stdlib only.
 
+Tier-1 boot-correctness kernel (#10734): when ``--workspace`` is set (the
+production install passes it), the watchdog additionally (a) refuses to start a
+factory whose ``boot_sha`` != ``origin/<factory_branch>`` HEAD or that is any
+commits behind — force-resyncing + relaunching instead of booting stale; (b)
+relaunches pinned to ``staging`` (never the shell default ``main``); (c) reaps
+orphaned ``pytest -n auto`` workers from a dead/OOM'd build; and (d) probes a
+wedged ``credits_paused_until``. All still stdlib-only and LLM-free.
+
 Usage::
 
     scripts/factory_liveness_watchdog.py [--dry-run]
         [--healthz-url URL] [--events-path PATH]
         [--stale-seconds N] [--timeout-seconds N]
         [--marker-path PATH] [--knob-path PATH]
+        [--workspace DIR] [--factory-branch BRANCH] [--dashboard-port PORT]
 
 Exit code is always 0 on a completed check (success or handled failure) so
 cron/launchd never treats a detected outage as "the watchdog itself
@@ -44,6 +53,7 @@ import json
 import logging
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import urllib.error
@@ -52,6 +62,8 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING
 
 logger = logging.getLogger("factory_liveness_watchdog")
 
@@ -66,6 +78,42 @@ _DEFAULT_TIMEOUT_SECONDS = 5.0
 #: src/boot_gap_detector.py's tail-read bound (kept independent on purpose;
 #: this script must not import from src/).
 _MAX_TAIL_LINES = 200
+
+# --- Tier-1 boot-correctness kernel defaults (#10734) ---
+#: Where the isolated factory clone lives (scripts/run-factory-isolated.sh's
+#: default workspace). Passing --workspace enables the boot-correctness guard,
+#: orphan reaper, and stuck-credit probe; omitting it keeps the legacy
+#: notify-only watchdog behaviour (backward compatible).
+_DEFAULT_WORKSPACE = Path.home() / ".hydraflow" / "factory-workspace" / "hydraflow"
+#: The two-tier model runs the factory on staging (ADR-0042); main advances only
+#: via RC promotion. A relaunch must NEVER inherit the shell default of `main`.
+_DEFAULT_FACTORY_BRANCH = "staging"
+_DEFAULT_DASHBOARD_PORT = 5555
+_LAUNCHER_SCRIPT = _REPO_ROOT / "scripts" / "run-factory-isolated.sh"
+_HTTP_POST_TIMEOUT_SECONDS = 10.0
+_LSOF_TIMEOUT_SECONDS = 5.0
+
+
+def _load_liveness_modules() -> tuple[ModuleType, ModuleType, ModuleType]:
+    """Import the stdlib-only liveness decision cores.
+
+    The import lives in a function (not module top level) so launchd — which
+    runs ``python3 scripts/factory_liveness_watchdog.py`` with only ``scripts/``
+    on ``sys.path`` — can still resolve the ``scripts.liveness`` package after
+    the repo root is inserted, without tripping the E402 "import not at top"
+    lint (PLC0415 is repo-ignored). These modules never import ``src/``.
+    """
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+    from scripts.liveness import boot_guard, credit_probe, orphan_reaper
+
+    return boot_guard, credit_probe, orphan_reaper
+
+
+if TYPE_CHECKING:  # give pyright the real module types for attribute access
+    from scripts.liveness import boot_guard, credit_probe, orphan_reaper
+else:  # runtime binding via the path-inserting loader above
+    boot_guard, credit_probe, orphan_reaper = _load_liveness_modules()
 
 
 # --------------------------------------------------------------------------
@@ -322,14 +370,276 @@ def attempt_restart(knob: dict[str, str], *, dry_run: bool) -> None:
         logger.warning("Restart action failed", exc_info=True)
 
 
-def _discover_events_path() -> Path | None:
+# --------------------------------------------------------------------------
+# Tier-1 boot-correctness kernel (#10734): boot-SHA/branch guard, orphan reaper,
+# stuck-credit probe, and the reboot actuator. All bounded + failure-tolerant.
+# --------------------------------------------------------------------------
+
+
+def _control_url(port: int, path: str) -> str:
+    return f"http://127.0.0.1:{port}{path}"
+
+
+def http_post_status(
+    url: str, *, timeout: float = _HTTP_POST_TIMEOUT_SECONDS
+) -> str | None:
+    """POST an empty body to a control endpoint; return the reply's ``status``.
+
+    Best-effort and bounded: a non-http scheme, connection error, timeout, or
+    unparseable body yields None. Used for ``/api/control/start`` (reply status
+    "started") and ``/api/control/credit-refresh" (status "resuming" /
+    "still_exhausted" / "not_paused").
+    """
+    if urllib.parse.urlparse(url).scheme not in {"http", "https"}:
+        return None
+    request = urllib.request.Request(url, data=b"", method="POST")  # noqa: S310
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:  # nosec B310
+            if not (200 <= resp.status < 400):
+                return None
+            body = resp.read()
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if isinstance(data, dict):
+        status = data.get("status")
+        return status if isinstance(status, str) else None
+    return None
+
+
+def find_port_listener_pids(
+    port: int, *, timeout: float = _LSOF_TIMEOUT_SECONDS
+) -> list[int]:
+    """PIDs listening on ``tcp:<port>`` via ``lsof``, or [] (best-effort, bounded).
+
+    No pidfile exists in HydraFlow, so the running server is located by the port
+    it holds. A missing ``lsof`` (non-macOS/Linux), non-zero exit, or timeout
+    degrades to an empty list — the relaunch below still spawns a fresh clone.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["lsof", "-ti", f"tcp:{port}"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    pids: list[int] = []
+    for token in result.stdout.split():
+        try:
+            pids.append(int(token.strip()))
+        except ValueError:
+            continue
+    return pids
+
+
+def _terminate_pid_group(pid: int) -> None:
+    """Best-effort SIGKILL of ``pid``'s whole process group; never raises.
+
+    Reuses the reaper's ``is_reapable_pid`` guard (positive-int / not-init /
+    not-self) so a fabricated or stale lsof pid can never SIGKILL init or the
+    kernel's own group.
+    """
+    if not orphan_reaper.is_reapable_pid(pid):
+        return
+    try:
+        pgid = os.getpgid(pid)
+    except (ProcessLookupError, OSError):
+        pgid = pid
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, OSError):
+        logger.warning("Could not signal process group of pid %s", pid, exc_info=True)
+
+
+def reboot_factory(
+    *,
+    workspace: Path,
+    factory_branch: str,
+    dashboard_port: int,
+    launcher: Path = _LAUNCHER_SCRIPT,
+    dry_run: bool,
+) -> bool:
+    """Force-resync + relaunch the isolated factory pinned to ``factory_branch``.
+
+    Kills the process group holding ``dashboard_port`` (there is no pidfile),
+    then spawns ``run-factory-isolated.sh`` **detached** — the launcher
+    ``exec make run``s and never returns, so it must not be waited on (a
+    ``subprocess.run`` with a timeout would kill the relaunch). Returns True when
+    a relaunch was spawned (or would be, in dry-run). Never raises.
+    """
+    if dry_run:
+        logger.info(
+            "[dry-run] would reboot factory on port %s -> branch %s (workspace %s)",
+            dashboard_port,
+            factory_branch,
+            workspace,
+        )
+        return True
+    for pid in find_port_listener_pids(dashboard_port):
+        _terminate_pid_group(pid)
+    if not launcher.exists():
+        logger.error("Launcher script missing: %s — cannot relaunch", launcher)
+        return False
+    env = {
+        **os.environ,
+        "HYDRAFLOW_FACTORY_BRANCH": factory_branch,
+        "HYDRAFLOW_FACTORY_WORKSPACE": str(workspace),
+    }
+    try:
+        subprocess.Popen(  # noqa: S603
+            ["bash", str(launcher)],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,  # detach so the kernel's own exit can't kill it
+        )
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("Factory relaunch spawn failed", exc_info=True)
+        return False
+    logger.warning(
+        "Rebooted factory: force-resync + relaunch on branch %s", factory_branch
+    )
+    return True
+
+
+def run_boot_guard(
+    *,
+    workspace: Path,
+    factory_branch: str,
+    dashboard_port: int,
+    prior_stale_reboot_at: str | None,
+    now: datetime,
+    dry_run: bool,
+) -> tuple[str | None, list[str]]:
+    """Boot-correctness guard for one tick.
+
+    Returns ``(new_stale_reboot_at, notify_messages)``. On a definite stale/
+    wrong-branch boot it force-resyncs + reboots **at most once per incident**
+    (gated by ``stale_reboot_at``); on a verified-correct idle boot it issues a
+    single ``POST /api/control/start``; the incident clears (returns None) on any
+    healthy, boot-correct tick.
+    """
+    notify: list[str] = []
+    status_url = _control_url(dashboard_port, "/api/control/status")
+    decision = boot_guard.probe_boot_correctness(
+        workspace=workspace, factory_branch=factory_branch, status_url=status_url
+    )
+    logger.info("boot-guard: %s (%s)", decision.action.value, decision.reason)
+
+    if decision.action is boot_guard.BootAction.RESYNC_REBOOT:
+        if prior_stale_reboot_at is not None:
+            # Already rebooted this incident — notify only, never re-spawn (a
+            # relaunch that keeps failing must not reboot every 5 minutes).
+            notify.append(
+                f"HydraFlow factory STILL on a stale boot ({decision.reason}) — "
+                f"rebooted at {prior_stale_reboot_at}, not retrying"
+            )
+            return prior_stale_reboot_at, notify
+        notify.append(
+            f"HydraFlow factory on a STALE boot ({decision.reason}) — resync+reboot"
+        )
+        rebooted = reboot_factory(
+            workspace=workspace,
+            factory_branch=factory_branch,
+            dashboard_port=dashboard_port,
+            dry_run=dry_run,
+        )
+        # Record the incident so the next tick does not re-spawn. In dry-run,
+        # record nothing (no side effects at all).
+        if dry_run:
+            return prior_stale_reboot_at, notify
+        return (now.isoformat() if rebooted else prior_stale_reboot_at), notify
+
+    if decision.action is boot_guard.BootAction.START:
+        if not dry_run:
+            reply = http_post_status(_control_url(dashboard_port, "/api/control/start"))
+            logger.info("boot-guard: issued /api/control/start -> %s", reply)
+        else:
+            logger.info("[dry-run] would POST /api/control/start")
+        return None, notify
+
+    # NO_ACTION: clear any prior incident marker (boot is correct/already up) but
+    # surface a notify when the reason was an unverifiable fact, not a clean boot.
+    if decision.notify:
+        notify.append(f"HydraFlow boot-guard could not verify boot: {decision.reason}")
+    return None, notify
+
+
+def run_orphan_reaper(*, dry_run: bool) -> list[int]:
+    """Reap orphaned (ppid==1) pytest workers left by a dead/OOM'd build.
+
+    Returns the reaped pids (or, in dry-run, the pids that would be reaped).
+    """
+    ps_output = orphan_reaper.enumerate_processes()
+    if ps_output is None:
+        return []
+    pids = orphan_reaper.select_orphan_pids(ps_output)
+    if not pids:
+        return []
+    if dry_run:
+        logger.info("[dry-run] would reap orphaned pytest workers: %s", pids)
+        return pids
+    reaped = orphan_reaper.reap_orphans(pids)
+    if reaped:
+        logger.warning("Reaped orphaned pytest workers: %s", reaped)
+    return reaped
+
+
+def run_credit_probe(
+    *, dashboard_port: int, prior_paused_ticks: int, status: str | None, dry_run: bool
+) -> tuple[int, list[str]]:
+    """Distinguish a live credit pause from a wedged ``credits_paused_until``.
+
+    Returns ``(new_paused_ticks, notify_messages)``. Only past the consecutive-
+    tick threshold does it POST ``/api/control/credit-refresh`` to corroborate;
+    a ``still_exhausted`` reply leaves the pause in place.
+    """
+    notify: list[str] = []
+    decision = credit_probe.classify_credit_pause(
+        status=status, paused_ticks=prior_paused_ticks
+    )
+    if decision.action is not credit_probe.CreditAction.REQUEST_REFRESH:
+        return decision.paused_ticks, notify
+
+    if dry_run:
+        logger.info("[dry-run] would probe stuck credit pause via credit-refresh")
+        return decision.paused_ticks, notify
+
+    reply = http_post_status(
+        _control_url(dashboard_port, "/api/control/credit-refresh")
+    )
+    outcome = credit_probe.interpret_refresh_response(reply)
+    logger.info("credit-probe: refresh -> %s (%s)", reply, outcome.value)
+    if outcome is credit_probe.RefreshOutcome.CONFIRMED_EXHAUSTED:
+        notify.append(
+            "HydraFlow credit pause persists and the backend confirms the account "
+            "is still exhausted — leaving it paused (genuine pause, not a wedge)"
+        )
+    else:
+        notify.append("HydraFlow cleared a stuck credit pause (backend resumed)")
+    return decision.paused_ticks, notify
+
+
+def _discover_events_path(base: Path = _REPO_ROOT) -> Path | None:
     """Best-effort default: flat ``.hydraflow/events.jsonl``, else the
-    newest ``.hydraflow/*/events.jsonl`` (repo-scoped layout)."""
-    flat = _REPO_ROOT / ".hydraflow" / "events.jsonl"
+    newest ``.hydraflow/*/events.jsonl`` (repo-scoped layout).
+
+    ``base`` defaults to the installed script's repo but is pointed at the
+    ``--workspace`` clone when set, so staleness is read from where the factory
+    actually runs, not the dev checkout the watchdog is installed into (#10734).
+    """
+    flat = base / ".hydraflow" / "events.jsonl"
     if flat.exists():
         return flat
     candidates = sorted(
-        (_REPO_ROOT / ".hydraflow").glob("*/events.jsonl"),
+        (base / ".hydraflow").glob("*/events.jsonl"),
         key=lambda p: p.stat().st_mtime if p.exists() else 0,
         reverse=True,
     )
@@ -378,10 +688,38 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--workspace",
+        type=Path,
+        default=(
+            Path(os.environ["HYDRAFLOW_FACTORY_WORKSPACE"])
+            if os.environ.get("HYDRAFLOW_FACTORY_WORKSPACE")
+            else None
+        ),
+        help="Isolated factory workspace clone. When set, enables the Tier-1 "
+        "boot-correctness guard, orphan reaper, and stuck-credit probe; events "
+        "staleness is read from here. Omit for the legacy notify-only watchdog. "
+        f"Production installs pass {_DEFAULT_WORKSPACE}.",
+    )
+    parser.add_argument(
+        "--factory-branch",
+        default=os.environ.get("HYDRAFLOW_FACTORY_BRANCH", _DEFAULT_FACTORY_BRANCH),
+        help="Branch the factory must run on (ADR-0042: staging). A stale/wrong-"
+        "branch boot is force-resynced to this branch before any start.",
+    )
+    parser.add_argument(
+        "--dashboard-port",
+        type=int,
+        default=int(
+            os.environ.get("HYDRAFLOW_DASHBOARD_PORT", _DEFAULT_DASHBOARD_PORT)
+        ),
+        help="Port the factory dashboard/API listens on (control status/start/"
+        "credit-refresh + the reboot's process-group lookup).",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Compute the decision and log it, but never call osascript/launchctl "
-        "and never write/clear the marker file.",
+        help="Compute the decision and log it, but never call osascript/launchctl, "
+        "never reboot/start/reap, and never write/clear the marker file.",
     )
     return parser
 
@@ -392,8 +730,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = build_arg_parser().parse_args(argv)
 
+    # Read events staleness from the isolated factory workspace when known —
+    # the watchdog is installed into the dev checkout, but the factory runs from
+    # its own clone, whose events.jsonl is the live signal (#10734).
+    events_base = args.workspace if args.workspace is not None else _REPO_ROOT
     events_path = (
-        Path(args.events_path) if args.events_path else _discover_events_path()
+        Path(args.events_path)
+        if args.events_path
+        else _discover_events_path(events_base)
     )
 
     healthz_ok = check_healthz(args.healthz_url, args.timeout_seconds)
@@ -431,11 +775,65 @@ def main(argv: list[str] | None = None) -> int:
     if decision.should_restart:
         attempt_restart(knob, dry_run=args.dry_run)
 
+    # --- Tier-1 boot-correctness kernel (#10734), active only with --workspace ---
+    new_stale_reboot_at: str | None = None
+    new_paused_ticks = 0
+    kernel_notifications: list[str] = []
+    if args.workspace is not None:
+        raw_sra = marker.get("stale_reboot_at") if marker else None
+        prior_stale_reboot_at = raw_sra if isinstance(raw_sra, str) else None
+        new_stale_reboot_at, boot_notify = run_boot_guard(
+            workspace=args.workspace,
+            factory_branch=args.factory_branch,
+            dashboard_port=args.dashboard_port,
+            prior_stale_reboot_at=prior_stale_reboot_at,
+            now=now,
+            dry_run=args.dry_run,
+        )
+
+        raw_ticks = marker.get("paused_ticks", 0) if marker else 0
+        prior_paused_ticks = (
+            raw_ticks
+            if isinstance(raw_ticks, int) and not isinstance(raw_ticks, bool)
+            else 0
+        )
+        status_json = boot_guard.fetch_control_status(
+            _control_url(args.dashboard_port, "/api/control/status")
+        )
+        status_str = (
+            boot_guard.extract_status_fields(status_json)[0]
+            if status_json is not None
+            else None
+        )
+        new_paused_ticks, credit_notify = run_credit_probe(
+            dashboard_port=args.dashboard_port,
+            prior_paused_ticks=prior_paused_ticks,
+            status=status_str,
+            dry_run=args.dry_run,
+        )
+
+        run_orphan_reaper(dry_run=args.dry_run)
+        kernel_notifications = boot_notify + credit_notify
+
+    for message in kernel_notifications:
+        logger.warning(message)
+        send_notification(message, dry_run=args.dry_run)
+
     if not args.dry_run:
-        if decision.new_marker is None:
-            clear_marker(args.marker_path)
+        # Merge the down-detection marker with the kernel's incident fields so a
+        # boot-correctness reboot / stuck-pause counter survives a healthy
+        # down-detection tick (which alone would clear the file).
+        final_marker: dict[str, object] = (
+            dict(decision.new_marker) if decision.new_marker else {}
+        )
+        if new_stale_reboot_at is not None:
+            final_marker["stale_reboot_at"] = new_stale_reboot_at
+        if new_paused_ticks:
+            final_marker["paused_ticks"] = new_paused_ticks
+        if final_marker:
+            write_marker(args.marker_path, final_marker)
         else:
-            write_marker(args.marker_path, decision.new_marker)
+            clear_marker(args.marker_path)
 
     return 0
 

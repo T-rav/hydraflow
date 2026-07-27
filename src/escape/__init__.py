@@ -16,8 +16,10 @@ NOT escapes.
 Layered like the sibling ``erosion`` package (mirror-the-style, don't
 cross-import): ``models`` (value objects), ``detect`` (pure detection over
 explicit commit inputs + a thin git adapter), ``attribution`` (pure
-mechanical attribution), ``ledger`` (append-only JSONL store), ``metrics``
-(pure rate/time-to-detection/encoding rollups), ``report`` (markdown render).
+mechanical attribution), ``ledger`` (append-only JSONL store), ``surfaces``
+(append-only sidecar tying a filed HITL issue back to its ledger row so a later
+resolution can close it, #10577), ``metrics`` (pure
+rate/time-to-detection/encoding rollups), ``report`` (markdown render).
 The consuming caretaker is ``escape_ledger_loop.EscapeLedgerLoop`` — a
 read-only ADR-0029 Pattern-B sensor that records, never fixes and never
 gates (the escape already became work through normal triage; the ledger is

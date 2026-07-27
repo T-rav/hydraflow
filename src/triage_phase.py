@@ -14,6 +14,7 @@ from adr_utils import (
 from config import HydraFlowConfig
 from convergence_recording import record_stage_verdict
 from events import EventBus, EventType, HydraFlowEvent
+from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from issue_decomposer import IssueDecomposer
 from models import Task, TriageResult
 from phase_utils import (
@@ -76,6 +77,55 @@ def _is_auditor_finding_stale(issue: Task, max_age_days: int) -> bool:
         return datetime.now(UTC) - created > timedelta(days=max_age_days)
     except (ValueError, AttributeError):
         return False
+
+
+# ---------------------------------------------------------------------------
+# Per-issue triage flow (P3c of #10682, ADR-0111)
+# ---------------------------------------------------------------------------
+#
+# The multi-step body of ``_triage_single_traced`` is expressed as an explicit
+# ``src.flows.Flow`` (DAG) instead of a straight-line method. Node roles map 1:1
+# to the pre-refactor body:
+#
+# * ``classify``  — the sole LLM actuator: ``TriageRunner.evaluate`` (which also
+#   runs the injection/honeypot screen internally — see the note below). An
+#   infra ``RuntimeError`` parks the issue (count 0) and ``dry_run`` short-
+#   circuits (count 1); both set ``state['_stop']`` and route to ``done``.
+# * ``route``     — the readiness disposition gate: ready → plan (or epic
+#   decompose), Sentry-noise close, already-addressed close, else park. Sets
+#   ``routing_outcome`` and performs the inline close/park side-effects exactly
+#   as before.
+# * ``record``    — mirror the classification into the IssueCache (best-effort).
+# * ``reproduce`` — bug-reproduce a bug routed to plan (#6424). A ``not_present``
+#   verdict closes the issue, records its ADVANCE verdict inline, and stops to
+#   ``done`` via ``_skip_verdict`` (the old early ``return 1``).
+# * ``swap``      — the deferred plan-stage label swap (only for ``plan``).
+# * ``done``      — terminal sink: record the ConvergenceLedger verdict (unless a
+#   path recorded it inline via ``_skip_verdict``) and finalize the int count.
+#
+# Every fail-closed early exit sets ``state['_stop']`` (routed to ``done`` by the
+# ``_flow_stopped`` guard). The LLM call lives inside ``classify`` alone; routing
+# between nodes is deterministic.
+#
+# Two deliberate parity boundaries (control-flow-made-explicit, NOT behaviour
+# change — same discipline P3a used for ``_handle_plan_failure``):
+#
+# 1. The injection/honeypot screen is NOT a separate phase-level node. It lives
+#    inside ``TriageRunner.evaluate`` (``triage_honeypot.screen_issue``), so it
+#    is confined WITHIN ``classify``. The phase never calls the honeypot
+#    directly; extracting it would require refactoring the runner and would move
+#    a side-effect — out of scope for a parity-gated, no-flag refactor.
+# 2. The pre-classify screens (duplicate / ADR / stale-auditor) and the tracing
+#    setup/teardown stay in ``_triage_single`` (outer scaffolding). They run
+#    BEFORE ``begin_trace_run``; wiring them into the traced flow would move the
+#    trace boundary (extra trace runs + phase rollups for gauntlet-closed
+#    issues) — a behaviour change. The ``store_lifecycle`` / sentry span /
+#    stop-event scaffolding likewise stays in ``_triage_one``.
+
+
+def _flow_stopped(state: FlowState) -> bool:
+    """Edge guard: a node signalled a fail-closed early exit → route to ``done``."""
+    return bool(state.get("_stop"))
 
 
 class TriagePhase:
@@ -320,7 +370,76 @@ class TriagePhase:
             self._state.end_trace_run(issue.id, trace_phase)
 
     async def _triage_single_traced(self, issue: Task) -> int:
-        """Inner triage logic — called with tracing context already set."""
+        """Inner triage logic — called with tracing context already set.
+
+        Runs the per-issue triage body as an explicit ``src.flows.Flow`` (P3c of
+        #10682, ADR-0111): ``classify -> route -> record -> reproduce -> swap ->
+        done``. The LLM triage actuator (``TriageRunner.evaluate``, which also
+        runs the injection honeypot screen) is confined to ``classify``.
+        Signature and ``int`` count contract are unchanged; the pre-classify
+        screens and tracing setup/teardown stay in the callers (see the
+        module-level diagram). The final count is read off the terminal state.
+        """
+        flow = self._build_triage_flow()
+        outcome = await flow.run(self._initial_triage_state(issue))
+        return outcome.state["count"]
+
+    @staticmethod
+    def _initial_triage_state(issue: Task) -> FlowState:
+        """Seed the triage flow's shared working state for one issue."""
+        return {"issue": issue, "routing_outcome": "unknown"}
+
+    def _build_triage_flow(
+        self,
+        *,
+        checkpoint: NodeHook | None = None,
+        kill_switch: KillSwitch | None = None,
+    ) -> Flow:
+        """Build the per-issue triage DAG (P3c of #10682, ADR-0111).
+
+        See the module-level diagram for node roles. ``checkpoint`` /
+        ``kill_switch`` stay injected per ADR-0111 so the primitive's
+        persistence + halt seams are wired-through and testable. The production
+        entry runs without a checkpoint: a single triage tick needs no resume,
+        and writing one would be a new on-disk side effect this parity-gated,
+        no-flag refactor must not introduce. Per-node ``on_node`` event wiring is
+        deferred to a later phase per ADR-0111.
+        """
+        return Flow(
+            nodes=[
+                Node("classify", self._flow_classify, kind="gate"),
+                Node("route", self._flow_route, kind="gate"),
+                Node("record", self._flow_record),
+                Node("reproduce", self._flow_reproduce, kind="gate"),
+                Node("swap", self._flow_swap),
+                Node("done", self._flow_done),
+            ],
+            edges=[
+                # First-match-wins: a stopped node skips straight to the sink.
+                Edge("classify", "done", when=_flow_stopped),
+                Edge("classify", "route"),
+                Edge("route", "record"),
+                Edge("record", "reproduce"),
+                Edge("reproduce", "done", when=_flow_stopped),
+                Edge("reproduce", "swap"),
+                Edge("swap", "done"),
+            ],
+            entry="classify",
+            checkpoint=checkpoint,
+            kill_switch=kill_switch,
+        )
+
+    # -- flow nodes ---------------------------------------------------------
+
+    async def _flow_classify(self, state: FlowState) -> FlowState:
+        """The sole LLM actuator: run ``TriageRunner.evaluate`` (honeypot inside).
+
+        Behaviour is unchanged from the head of the pre-refactor
+        ``_triage_single_traced``. An infra ``RuntimeError`` parks the issue and
+        stops (count 0); ``dry_run`` short-circuits and stops (count 1). Both are
+        the flow analogue of the old early ``return``s.
+        """
+        issue = state["issue"]
         try:
             result = await self._triage.evaluate(issue)
         except RuntimeError as exc:
@@ -349,11 +468,27 @@ class TriagePhase:
             # it on the short triage_infra_retry_interval floor the moment infra
             # recovers, instead of the 24h clarification backoff.
             self._state.mark_triage_infra_parked(issue.id)
-            return 0
+            state["count"] = 0
+            state["_stop"] = True
+            return state
 
         if self._config.dry_run:
-            return 1
+            state["count"] = 1
+            state["_stop"] = True
+            return state
 
+        state["result"] = result
+        return state
+
+    async def _flow_route(self, state: FlowState) -> FlowState:
+        """Readiness disposition gate: plan / epic / close / park.
+
+        Reproduces the pre-refactor routing if/elif exactly. Sets
+        ``routing_outcome`` and performs the inline close/park side-effects;
+        never stops (every outcome continues to ``record``).
+        """
+        issue = state["issue"]
+        result = state["result"]
         routing_outcome: str = "unknown"
         # ADR-0107: Triage routes ready issues straight to Plan — there is no
         # standalone Discover/Shape fork. The clarity_score / needs_discovery
@@ -454,6 +589,14 @@ class TriagePhase:
                 "; ".join(result.reasons),
             )
 
+        state["routing_outcome"] = routing_outcome
+        return state
+
+    async def _flow_record(self, state: FlowState) -> FlowState:
+        """Mirror the classification into the IssueCache (best-effort)."""
+        issue = state["issue"]
+        result = state["result"]
+        routing_outcome = state["routing_outcome"]
         # Mirror classification into the local JSONL cache with the
         # final routing outcome captured. Writing AFTER the routing
         # decision prevents the READY-stage precondition gate from
@@ -476,7 +619,19 @@ class TriagePhase:
                 clarity_score=result.clarity_score,
                 needs_discovery=result.needs_discovery,
             )
+        return state
 
+    async def _flow_reproduce(self, state: FlowState) -> FlowState:
+        """Bug-reproduce a bug routed to plan (#6424).
+
+        A ``not_present`` verdict closes the issue, records its ADVANCE verdict
+        inline, and stops to ``done`` via ``_skip_verdict`` (the old early
+        ``return 1``). ``unable`` / other outcomes fall through to ``swap`` so
+        the READY-stage gate handles them, exactly as before.
+        """
+        issue = state["issue"]
+        result = state["result"]
+        routing_outcome = state["routing_outcome"]
         # Reproduce bug-classified issues that were routed to plan
         # (#6424). The reproducer writes a failing test under
         # tests/regressions/ when possible, and the result is mirrored
@@ -527,7 +682,11 @@ class TriagePhase:
                         evidence,
                     )
                     self._record_triage_verdict(issue.id, routing_outcome)
-                    return 1
+                    state["routing_outcome"] = routing_outcome
+                    state["_skip_verdict"] = True
+                    state["count"] = 1
+                    state["_stop"] = True
+                    return state
                 if str(repro.outcome) == "unable":
                     logger.warning(
                         "Bug reproduction unable for issue #%d — READY "
@@ -542,7 +701,12 @@ class TriagePhase:
                     issue.id,
                     exc_info=True,
                 )
+        return state
 
+    async def _flow_swap(self, state: FlowState) -> FlowState:
+        """Deferred plan-stage label swap (only for the ``plan`` outcome)."""
+        issue = state["issue"]
+        routing_outcome = state["routing_outcome"]
         # Deferred plan-stage label swap. Now that the classification
         # record + reproduction record (if applicable) are written, the
         # implement loop's READY gate has data to check when the issue
@@ -553,10 +717,20 @@ class TriagePhase:
             self._store.enqueue_transition(issue, "plan")
             await self._transitioner.transition(issue.id, "plan")
             self._state.increment_session_counter("triaged")
+        return state
 
-        self._record_triage_verdict(issue.id, routing_outcome)
+    async def _flow_done(self, state: FlowState) -> FlowState:
+        """Terminal sink: record the ConvergenceLedger verdict + finalize count.
 
-        return 1
+        The tail of the pre-refactor ``_triage_single_traced``. Paths that
+        recorded their verdict inline (``bug_not_present``) opted out via
+        ``_skip_verdict``; the infra-park / dry-run early exits left
+        ``routing_outcome`` as ``"unknown"`` (a no-op in ``_record_triage_verdict``).
+        """
+        if not state.get("_skip_verdict"):
+            self._record_triage_verdict(state["issue"].id, state["routing_outcome"])
+        state.setdefault("count", 1)
+        return state
 
     async def _maybe_decompose(self, issue: Task, result: object) -> bool:
         """Auto-decompose a complex issue into an epic + children.

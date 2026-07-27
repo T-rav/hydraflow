@@ -30,7 +30,7 @@ import judge_independence as ji
 from audit.metrics import disagreement_rate_ci
 from audit.store import AuditSampleLedger
 from erosion.trends import TrendStore, compute_monthly_trends
-from escape.ledger import EscapeLedger
+from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from escape.metrics import rolling_escape_count
 from intervention.ledger import InterventionLedger
 from intervention.metrics import rolling_correction_count
@@ -48,7 +48,6 @@ from vitals.models import (
 if TYPE_CHECKING:
     from config import HydraFlowConfig
 
-_ESCAPE_LEDGER = "escape_ledger.jsonl"
 _EROSION_TRENDS = "erosion_trends.jsonl"
 _INTERVENTION_LEDGER = "intervention_ledger.jsonl"
 _AUDIT_SAMPLES = "audit_samples.jsonl"
@@ -78,7 +77,7 @@ def gather_series_readings(
     readings: dict[str, float | None] = {}
 
     # 1) Escapes — escapes detected within the trailing window (escape ledger).
-    escape_path = diag / _ESCAPE_LEDGER
+    escape_path = diag / ESCAPE_LEDGER_FILENAME
     if escape_path.exists():
         records = EscapeLedger(escape_path).read_latest()
         readings[SERIES_ESCAPES] = float(

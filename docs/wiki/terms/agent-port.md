@@ -5,13 +5,13 @@ kind: "port"
 bounded_context: "shared-kernel"
 code_anchor: "src/ports.py:AgentPort"
 aliases: ["agent port", "agent runner port"]
-related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}]
+related: [{"kind": "depends_on", "target": "01KR1GDECRP5Z9X3HNGX3XFS8B"}, {"kind": "depends_on", "target": "01KYABD5XVX4ZXFXT3Z76KMQZ0"}, {"kind": "depends_on", "target": "01KYBV9N8VSTKDRVDFC0FE40ZM"}]
 evidence: ["01KQNYZRM4B7DX9MWDQFHF488F"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T00:00:00.000000+00:00"
-updated_at: "2026-06-12T04:18:46.416686+00:00"
+updated_at: "2026-07-26T10:16:32.370693+00:00"
 ---
 
 ## Definition

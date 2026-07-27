@@ -186,4 +186,22 @@ describe('BugReportPanel', () => {
     render(<BugReportPanel apiBaseUrl="" reporterId="u1" onOpenReportModal={onOpenReportModal} />)
     expect(screen.getByTestId('report-panel-loading')).toBeTruthy()
   })
+
+  it('does not log a border shorthand/longhand collision warning when switching status filters (#10571)', () => {
+    mockPoller.reports = [
+      makeReport({ id: 'r1', status: 'queued' }),
+      makeReport({ id: 'r2', status: 'filed' }),
+    ]
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    render(<BugReportPanel apiBaseUrl="" reporterId="u1" onOpenReportModal={onOpenReportModal} />)
+
+    fireEvent.click(screen.getByTestId('filter-queued'))
+    fireEvent.click(screen.getByTestId('filter-all'))
+
+    const collisionWarnings = consoleSpy.mock.calls.filter(call =>
+      String(call[0]).includes('conflicting property')
+    )
+    consoleSpy.mockRestore()
+    expect(collisionWarnings).toEqual([])
+  })
 })

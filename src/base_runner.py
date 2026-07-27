@@ -25,6 +25,7 @@ from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from runner_utils import (
     AuthenticationRetryError,
     StreamConfig,
+    resolve_harness_env,
     stream_claude_process,
     terminate_processes,
 )
@@ -72,6 +73,17 @@ class BaseRunner:
     # stderr signal can raise CreditExhaustedError. Mirrors the
     # LONG_LLM_CYCLE ClassVar opt-in pattern.
     CREDIT_PROSE_SCAN: ClassVar[bool] = True
+
+    # Subclasses whose role can run on a non-Anthropic harness backend set this
+    # to the config field holding their provider dial (e.g.
+    # "implementation_provider"). None → always the native Anthropic harness.
+    PROVIDER_FIELD: ClassVar[str | None] = None
+
+    def _resolve_provider(self) -> str:
+        """The harness backend dial for this runner's spawns ("claude"/"zai")."""
+        if self.PROVIDER_FIELD is None:
+            return "claude"
+        return getattr(self._config, self.PROVIDER_FIELD, "claude")
 
     def __init__(
         self,
@@ -250,6 +262,12 @@ class BaseRunner:
                 },
             )
 
+        # Resolve this runner's harness backend once (per-spawn env override +
+        # credit-scoping provider). Default "claude" (native Anthropic) is a
+        # no-op; a runner whose role dial is "zai" runs on the GLM harness.
+        provider = self._resolve_provider()
+        harness_env = resolve_harness_env(provider, self._config)
+
         try:
             last_auth_error: AuthenticationRetryError | None = None
             for attempt in range(1, self._AUTH_RETRY_MAX + 1):
@@ -270,6 +288,8 @@ class BaseRunner:
                             gh_token=self._credentials.gh_token,
                             trace_collector=trace_collector,
                             credit_prose_scan=self.CREDIT_PROSE_SCAN,
+                            harness_env=harness_env,
+                            provider=provider,
                         ),
                     )
                     succeeded = True

@@ -40,6 +40,7 @@ from ._escape_ledger import EscapeLedgerStateMixin
 from ._fake_coverage import FakeCoverageStateMixin
 from ._flake_tracker import FlakeTrackerStateMixin
 from ._gc import StateGCMixin
+from ._give_up import GiveUpStateMixin
 from ._hitl import HITLStateMixin
 from ._human_steering import HumanSteeringStateMixin
 from ._intervention_tally import InterventionTallyStateMixin
@@ -89,6 +90,7 @@ class StateTracker(
     ReviewStateMixin,
     ReviewOrphanStateMixin,
     RouteBackStateMixin,
+    GiveUpStateMixin,
     EpicStateMixin,
     LifetimeStatsMixin,
     SessionStateMixin,

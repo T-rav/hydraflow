@@ -217,3 +217,33 @@ class TestPerProviderProbe:
                 "zai", base_url="https://api.z.ai", api_key="sk-zai"
             )
         assert result is True
+
+
+class TestZaiHarnessCreditScoping:
+    """The agentic (CLI harness) path scopes a credit-out to its backend."""
+
+    def test_cli_credit_out_tags_zai_provider(self) -> None:
+        from runner_utils import raise_if_credit_exhausted
+        from subprocess_util import CreditExhaustedError
+
+        with pytest.raises(CreditExhaustedError) as ei:
+            raise_if_credit_exhausted(
+                "insufficient balance", "", "claude", provider="zai"
+            )
+        assert ei.value.provider == "zai"
+
+    def test_cli_credit_out_defaults_anthropic(self) -> None:
+        from runner_utils import raise_if_credit_exhausted
+        from subprocess_util import CreditExhaustedError
+
+        with pytest.raises(CreditExhaustedError) as ei:
+            raise_if_credit_exhausted("usage limit reached", "", "claude")
+        assert ei.value.provider == PROVIDER_ANTHROPIC
+
+    def test_is_credit_exhaustion_detects_zai_billing_phrasings(self) -> None:
+        from subprocess_util import is_credit_exhaustion
+
+        assert is_credit_exhaustion("Error: insufficient balance") is True
+        assert is_credit_exhaustion("insufficient_quota") is True
+        # A normal transcript must NOT trip the detector.
+        assert is_credit_exhaustion("the balance sheet looks healthy") is False

@@ -197,10 +197,14 @@ def test_exemplar_adrs_classify_real():
 
 
 def test_exemplar_decision_of_record_is_missing():
-    # ADR-0003 (git worktrees) is decision-of-record with no Enforced-by.
-    assert classify_adr_enforcement(_live()[3], REPO) is EnforcementClass.MISSING
+    # ADR-0027 (single-definition rule) is decision-of-record with no
+    # Enforced-by. (ADR-0003, the former exemplar, is now Superseded by ADR-0112
+    # — clone-local isolation, #10623 — so it is no longer an Accepted ADR.)
+    assert classify_adr_enforcement(_live()[27], REPO) is EnforcementClass.MISSING
 
 
 def test_exemplar_manual_is_weak():
-    # ADR-0042 (two-tier branch) is manual with a prose ruleset-review pointer.
-    assert classify_adr_enforcement(_live()[42], REPO) is EnforcementClass.WEAK
+    # ADR-0051 (iterative production-readiness review) is genuinely process-only:
+    # manual with a prose workflow pointer, not a runnable check. (ADR-0042, the
+    # former exemplar, now carries a real asserting ruleset check — #10623.)
+    assert classify_adr_enforcement(_live()[51], REPO) is EnforcementClass.WEAK

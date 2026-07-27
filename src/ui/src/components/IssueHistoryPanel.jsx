@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef, useCallback } from 'react'
 import { theme } from '../theme'
 import { useHydraFlow } from '../context/HydraFlowContext'
+import { borderSides } from '../styles/borders'
 
 const RANGE_PRESETS = [
   { key: '24h', label: '24h', hours: 24 },
@@ -816,7 +817,9 @@ const styles = {
     color: theme.text,
   },
   button: {
-    border: `1px solid ${theme.border}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: theme.border,
     background: theme.surfaceInset,
     color: theme.textMuted,
     borderRadius: 6,
@@ -1048,7 +1051,9 @@ const styles = {
   linkedPill: {
     display: 'inline-flex',
     alignItems: 'center',
-    border: `1px solid ${theme.border}`,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: theme.border,
     borderRadius: 999,
     padding: '1px 6px',
     marginRight: 6,
@@ -1061,9 +1066,7 @@ const styles = {
     gap: 8,
     width: '100%',
     padding: '8px 10px',
-    border: 'none',
-    borderBottom: `1px solid ${theme.border}`,
-    borderLeft: `3px solid ${theme.accent}`,
+    ...borderSides({ bottom: `1px solid ${theme.border}`, left: `3px solid ${theme.accent}` }),
     background: theme.surfaceInset,
     cursor: 'pointer',
     fontSize: 12,

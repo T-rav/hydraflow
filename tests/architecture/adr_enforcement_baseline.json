@@ -1,0 +1,5 @@
+{
+  "//": "Fixed snapshot of the unenforced-decision debt (WEAK + MISSING Accepted ADRs) at ratchet landing — part of epic #10623 Task 1. Governed by docs/standards/adr_enforcement/README.md and enforced by tests/architecture/test_adr_enforcement_ratchet.py. This is a MONOTONIC ratchet: the live debt may only shrink. NEVER add an id to `baseline_snapshot` — it is a frozen literal. A NEW Accepted ADR must ship REAL enforcement (a resolving, non-mutating, asserting check) or, if the decision is genuinely process-only, a justified entry in docs/standards/adr_enforcement/exemptions.md. Pay a snapshot debt down by EITHER (a) giving the ADR a REAL asserting check and moving its id into `resolved`, OR (b) granting it a justified exemption in exemptions.md. Both drain the live grandfathered set (= baseline_snapshot - resolved - exempted).",
+  "baseline_snapshot": [3, 9, 23, 25, 27, 30, 35, 42, 51, 65, 91, 107],
+  "resolved": [9, 23, 30, 42, 65, 107]
+}

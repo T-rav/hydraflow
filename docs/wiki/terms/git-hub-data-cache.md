@@ -5,13 +5,13 @@ kind: "service"
 bounded_context: "shared-kernel"
 code_anchor: "src/github_cache_loop.py:GitHubDataCache"
 aliases: ["github data cache", "shared github snapshot", "gh api cache"]
-related: [{"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9C1"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B2"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A4"}]
+related: [{"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9C1"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B2"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A4"}, {"kind": "depends_on", "target": "01KYABD5XVX4ZXFXT3Z76KMQZ0"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}, {"kind": "depends_on", "target": "01KY4QGA4VF2GJDCW3ZVKNBPMY"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-24T15:19:40.470565+00:00"
-updated_at: "2026-07-24T15:19:40.470568+00:00"
+updated_at: "2026-07-26T10:16:32.370693+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-07-24T15:19:40.470503+00:00"
 proposal_signals: ["S2"]

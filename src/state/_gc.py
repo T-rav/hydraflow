@@ -59,6 +59,7 @@ _ISSUE_SCOPED_FIELDS = (
     "diagnosis_severities",
     "diagnostic_attempts",
     "escalation_contexts",
+    "give_up_events",
     "hitl_causes",
     "hitl_origins",
     "hitl_summaries",

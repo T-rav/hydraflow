@@ -2,10 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-04-17
-- **Enforcement:** manual
+- **Enforcement:** enforced
 - **Supersedes:** none
 - **Superseded by:** none
-- **Enforced by:** branch-protection ruleset review per docs/standards/branch_protection
+- **Enforced by:** pytest:tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only
 
 ## Context
 

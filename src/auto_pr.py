@@ -19,6 +19,7 @@ helper generalizes.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
@@ -27,7 +28,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from repro_manifest import append_manifest
 from traceability import append_req_trailer
@@ -359,7 +360,11 @@ def open_automated_pr(
                 create_proc.stdout,
             )
 
-        if auto_merge and pr_url is not None:
+        if (
+            auto_merge
+            and pr_url is not None
+            and _auto_merge_allowed(pr_url, worktree_path=worktree_path)
+        ):
             merge_proc = _run_gh(
                 ["gh", "pr", "merge", pr_url, "--auto", "--squash"],
                 cwd=worktree_path,
@@ -390,6 +395,172 @@ def _extract_pr_url(stdout: str) -> str | None:
         if stripped.startswith("https://"):
             return stripped
     return None
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed green-gate before arming auto-merge (#10672, Fix 2)
+# ---------------------------------------------------------------------------
+#
+# ``gh pr merge --auto`` fires the moment GitHub's *required* checks pass. When
+# the required set is misconfigured (the #10672 root cause: a staging ruleset
+# requiring only two trivial checks), a PR whose ``Tests``/``CI Gate`` is RED
+# auto-merges anyway (observed harm: #10663 poisoned staging HEAD). Fix 1
+# (require ``CI Gate`` on the ruleset) is the primary guard; this is the CODE
+# belt: before arming ``--auto`` we read the PR's ``statusCheckRollup`` and only
+# proceed when every non-skipped check has settled SUCCESS. Fail-closed — a
+# failure, a still-pending check, an empty rollup, or an unfetchable/unparseable
+# rollup all block auto-merge.
+
+# Conclusions/states (lower-cased) that count a check as GREEN. Anything else —
+# failing, or empty/pending — blocks the merge (fail-closed).
+_GREEN_CONCLUSIONS: frozenset[str] = frozenset({"success", "neutral", "skipped"})
+
+
+def _status_check_rollup_is_green(rollup: list[dict[str, Any]]) -> bool:
+    """True iff EVERY non-skipped ``statusCheckRollup`` check settled SUCCESS.
+
+    Fail-closed classifier for the auto-merge green-gate (#10672):
+
+    - Empty rollup → ``False`` (no checks registered yet; never arm auto-merge
+      on a PR whose CI hasn't even started).
+    - Any check still running (CheckRun ``status`` other than ``completed``) or
+      whose conclusion/state is not in :data:`_GREEN_CONCLUSIONS` → ``False``.
+      This covers failing (``failure``/``cancelled``/``timed_out``/…) AND
+      pending (empty conclusion, ``queued``/``in_progress``) alike.
+    - Otherwise (every check ``success``/``neutral``/``skipped``) → ``True``.
+
+    Handles both ``gh pr view --json statusCheckRollup`` entry shapes:
+    - CheckRun: ``{"status": "COMPLETED", "conclusion": "SUCCESS"}``
+    - StatusContext (legacy commit status): ``{"state": "SUCCESS"}``
+    """
+    if not rollup:
+        return False
+    for check in rollup:
+        # A CheckRun that hasn't completed is pending regardless of any stale
+        # conclusion it may still carry (the #10027 rerun trap). StatusContext
+        # entries have no ``status`` field, so an empty value skips this guard.
+        status = str(check.get("status") or "").strip().lower()
+        if status and status != "completed":
+            return False
+        raw = check.get("conclusion") or check.get("state") or ""
+        if str(raw).strip().lower() not in _GREEN_CONCLUSIONS:
+            return False
+    return True
+
+
+def _auto_merge_enabled() -> bool:
+    """Resolve the ``auto_pr_auto_merge_enabled`` kill-switch from live config.
+
+    Re-read on every arm attempt so a System-tab toggle takes effect on the
+    next bot PR without a restart. Defaults to enabled when no active config is
+    registered (standalone/CLI use, unit tests) — mirrors
+    :func:`_preflight_settings`.
+    """
+    from trace_collector import get_active_config
+
+    cfg = get_active_config()
+    if cfg is None:
+        return True
+    return bool(cfg.auto_pr_auto_merge_enabled)
+
+
+def _rollup_payload_is_green(payload: str, pr_url: str) -> bool:
+    """Parse a ``gh pr view --json statusCheckRollup`` payload; fail-closed.
+
+    Returns ``True`` only when the payload parses to a rollup list that
+    :func:`_status_check_rollup_is_green` accepts. Any parse problem →
+    ``False`` (never arm auto-merge on an indeterminate PR).
+    """
+    try:
+        data = json.loads(payload)
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning(
+            "auto_pr green-gate: unparseable statusCheckRollup for %s; not arming "
+            "auto-merge (fail-closed): %s",
+            pr_url,
+            exc,
+        )
+        return False
+    rollup = data.get("statusCheckRollup") if isinstance(data, dict) else None
+    if not isinstance(rollup, list):
+        logger.warning(
+            "auto_pr green-gate: statusCheckRollup missing/not-a-list for %s; not "
+            "arming auto-merge (fail-closed)",
+            pr_url,
+        )
+        return False
+    if not _status_check_rollup_is_green(rollup):
+        logger.info(
+            "auto_pr green-gate: PR %s not fully green; not arming auto-merge",
+            pr_url,
+        )
+        return False
+    return True
+
+
+def _auto_merge_allowed(pr_url: str, *, worktree_path: Path) -> bool:
+    """Fail-closed decision to arm ``gh pr merge --auto`` — sync path (#10672).
+
+    ``True`` only when the kill-switch is on AND the PR's current
+    ``statusCheckRollup`` is fully green. Any inability to fetch/parse status →
+    ``False``.
+    """
+    if not _auto_merge_enabled():
+        logger.info(
+            "auto_pr: auto-merge disabled by config (auto_pr_auto_merge_enabled); "
+            "not arming for %s",
+            pr_url,
+        )
+        return False
+    proc = _run_gh(
+        ["gh", "pr", "view", pr_url, "--json", "statusCheckRollup"],
+        cwd=worktree_path,
+    )
+    if proc.returncode != 0:
+        logger.warning(
+            "auto_pr green-gate: could not fetch statusCheckRollup for %s (rc=%s); "
+            "not arming auto-merge (fail-closed): %s",
+            pr_url,
+            proc.returncode,
+            proc.stderr or proc.stdout,
+        )
+        return False
+    return _rollup_payload_is_green(proc.stdout, pr_url)
+
+
+async def _auto_merge_allowed_async(
+    pr_url: str, *, worktree_path: Path, gh_token: str
+) -> bool:
+    """Fail-closed decision to arm ``gh pr merge --auto`` — async path (#10672)."""
+    from subprocess_util import run_subprocess  # local import: avoids cycles
+
+    if not _auto_merge_enabled():
+        logger.info(
+            "auto_pr: auto-merge disabled by config (auto_pr_auto_merge_enabled); "
+            "not arming for %s",
+            pr_url,
+        )
+        return False
+    try:
+        stdout = await run_subprocess(
+            "gh",
+            "pr",
+            "view",
+            pr_url,
+            "--json",
+            "statusCheckRollup",
+            cwd=worktree_path,
+            gh_token=gh_token,
+        )
+    except RuntimeError as exc:
+        logger.warning(
+            "auto_pr green-gate: could not fetch statusCheckRollup for %s; not arming "
+            "auto-merge (fail-closed): %s",
+            pr_url,
+            exc,
+        )
+        return False
+    return _rollup_payload_is_green(stdout, pr_url)
 
 
 # ---------------------------------------------------------------------------
@@ -718,7 +889,13 @@ async def _finalize_pr_from_worktree(
             "gh pr create succeeded for %s but no URL parsed: %r", branch, create_stdout
         )
 
-    if auto_merge and pr_url is not None:
+    if (
+        auto_merge
+        and pr_url is not None
+        and await _auto_merge_allowed_async(
+            pr_url, worktree_path=worktree_path, gh_token=gh_token
+        )
+    ):
         try:
             await run_subprocess(
                 "gh",

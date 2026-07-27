@@ -286,3 +286,5 @@ docs/arch/generated/intervention-tally.md
 # (src/second_order_vitals_loop.py) — a data-bearing runtime report, not an
 # arch-regen artifact, mirroring escape-ledger.md above (#10373).
 docs/arch/generated/second-order-vitals.md
+.playwright-mcp/
+audit-*.png

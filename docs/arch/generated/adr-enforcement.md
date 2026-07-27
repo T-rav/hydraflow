@@ -6,13 +6,13 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 71
-- **REAL** (real asserting enforcement): 59 (83.1%)
-- **WEAK** (prose-only or tautological): 7
-- **MISSING** (no `**Enforced by:**`): 5
-- **Unenforced-decision debt** (WEAK + MISSING): **12 / 71 = 16.9%**
+- **Accepted ADRs:** 75
+- **REAL** (real asserting enforcement): 71 (94.7%)
+- **WEAK** (prose-only or tautological): 3
+- **MISSING** (no `**Enforced by:**`): 1
+- **Unenforced-decision debt** (WEAK + MISSING): **4 / 75 = 5.3%**
 
-By declared `**Enforcement:**` kind: `enforced` 59 · `manual` 7 · `decision-of-record` 5.
+By declared `**Enforcement:**` kind: `enforced` 71 · `manual` 3 · `decision-of-record` 1.
 
 ## Classification
 
@@ -20,12 +20,11 @@ By declared `**Enforcement:**` kind: `enforced` 59 · `manual` 7 · `decision-of
 |---|---|---|---|
 | ADR-0001 | REAL | enforced | `pytest:tests/test_orchestrator_loops.py`, `pytest:tests/architecture/test_loop_count_matches_adr0001.py` |
 | ADR-0002 | REAL | enforced | `pytest:tests/test_state_machine.py` |
-| ADR-0003 | MISSING | decision-of-record | — |
 | ADR-0004 | REAL | enforced | `pytest:tests/test_agent_cli.py`, `pytest:tests/test_base_runner.py` |
 | ADR-0005 | REAL | enforced | `pytest:tests/test_implement_phase.py` |
 | ADR-0007 | REAL | enforced | `pytest:tests/test_dashboard_routes_repo.py` |
 | ADR-0008 | REAL | enforced | `pytest:tests/test_dashboard_routes_repo.py` |
-| ADR-0009 | WEAK | manual | `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` |
+| ADR-0009 | REAL | enforced | `pytest:tests/architecture/test_adr0009_process_per_repo_isolation.py::test_workspace_paths_are_repo_slug_scoped_and_collision_free` |
 | ADR-0010 | REAL | enforced | `pytest:tests/test_integration_worktree.py` |
 | ADR-0011 | REAL | enforced | `pytest:tests/test_epic.py`, `pytest:tests/test_release.py` |
 | ADR-0012 | REAL | enforced | `pytest:tests/test_epic_merge_coordination.py` |
@@ -37,19 +36,19 @@ By declared `**Enforcement:**` kind: `enforced` 59 · `manual` 7 · `decision-of
 | ADR-0019 | REAL | enforced | `pytest:tests/test_epic_manager.py`, `pytest:tests/test_post_merge_handler.py` |
 | ADR-0021 | REAL | enforced | `pytest:tests/test_state_persistence.py`, `pytest:tests/test_event_persistence.py`, `pytest:tests/test_data_migration_d2.py` |
 | ADR-0022 | REAL | enforced | `pytest:tests/test_integration_pipeline.py` |
-| ADR-0023 | WEAK | manual | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
+| ADR-0023 | REAL | enforced | `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` |
 | ADR-0024 | REAL | enforced | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
 | ADR-0025 | WEAK | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0027 | MISSING | decision-of-record | — |
 | ADR-0028 | REAL | enforced | `pytest:tests/test_report_event_flow.py` |
 | ADR-0029 | REAL | enforced | `pytest:tests/test_caretaker_loop_wiring.py` |
-| ADR-0030 | MISSING | decision-of-record | — |
+| ADR-0030 | REAL | enforced | `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` |
 | ADR-0032 | REAL | enforced | `pytest:tests/test_repo_wiki.py`, `pytest:tests/test_repo_wiki_store_git.py`, `pytest:tests/test_repo_wiki_ingest.py`, `pytest:tests/test_wiki_drift_detector.py`, `pytest:tests/test_wiki_drift_symbols.py`, `pytest:tests/test_wiki_semantic_drift.py`, `pytest:tests/test_repo_wiki_temporal.py`, `pytest:tests/test_wiki_corroboration.py` |
 | ADR-0034 | REAL | enforced | `pytest:tests/test_state_machine.py` |
 | ADR-0035 | WEAK | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
 | ADR-0037 | REAL | enforced | `pytest:tests/test_adr_pre_validator.py` |
 | ADR-0041 | REAL | enforced | `pytest:tests/test_issue_cache.py`, `pytest:tests/test_precondition_gate.py` |
-| ADR-0042 | WEAK | manual | `branch-protection ruleset review per docs/standards/branch_protection` |
+| ADR-0042 | REAL | enforced | `pytest:tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only` |
 | ADR-0043 | REAL | enforced | `pytest:tests/test_preflight_plugins.py`, `pytest:tests/test_phase_skill_filter.py` |
 | ADR-0045 | REAL | enforced | `pytest:tests/test_trust_fleet_sanity_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_trust_fleet_anomaly_detectors.py` |
 | ADR-0047 | REAL | enforced | `make:trust-contracts`, `pytest:tests/trust/contracts/test_fake_github_contract.py` |
@@ -67,14 +66,13 @@ By declared `**Enforcement:**` kind: `enforced` 59 · `manual` 7 · `decision-of
 | ADR-0061 | REAL | enforced | `pytest:tests/test_atlas_routes.py` |
 | ADR-0062 | REAL | enforced | `pytest:tests/test_entry_evidence_loop.py`, `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` |
 | ADR-0064 | REAL | enforced | `pytest:tests/test_adversarial_retry_loop.py` |
-| ADR-0065 | WEAK | manual | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
+| ADR-0065 | REAL | enforced | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` |
 | ADR-0071 | REAL | enforced | `pytest:tests/test_route_back.py` |
 | ADR-0083 | REAL | enforced | `pytest:tests/test_sandbox_scenario_contract.py`, `pytest:tests/test_no_screenshot_regression_tests.py` |
 | ADR-0085 | REAL | enforced | `pytest:tests/test_secret_scrub.py`, `pytest:tests/regressions/test_issue_9143_codeql_suppression.py` |
 | ADR-0088 | REAL | enforced | `pytest:tests/test_label_drift_watcher_loop.py`, `pytest:tests/test_label_drift_watcher_integration.py` |
 | ADR-0089 | REAL | enforced | `pytest:tests/test_memory_backlog_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
 | ADR-0090 | REAL | enforced | `pytest:tests/test_atlas_routes.py` |
-| ADR-0091 | MISSING | decision-of-record | — |
 | ADR-0092 | REAL | enforced | `pytest:tests/test_untrusted_text.py`, `pytest:tests/test_preflight_untrusted_fencing.py`, `pytest:tests/test_agent_cli.py`, `pytest:tests/test_agent_advanced.py` |
 | ADR-0093 | REAL | enforced | `pytest:tests/test_loop_fitness_completeness.py` |
 | ADR-0094 | REAL | enforced | `pytest:tests/test_convergence_ledger.py`, `pytest:tests/test_convergence_gate.py`, `pytest:tests/scenarios/test_convergence_review_mockworld.py`, `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
@@ -88,32 +86,25 @@ By declared `**Enforcement:**` kind: `enforced` 59 · `manual` 7 · `decision-of
 | ADR-0103 | REAL | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | REAL | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0106 | REAL | enforced | `pytest:tests/regressions/test_issue_9552.py` |
-| ADR-0107 | MISSING | decision-of-record | — |
+| ADR-0107 | REAL | enforced | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
+| ADR-0109 | REAL | enforced | `pytest:tests/test_ultra_review.py` |
+| ADR-0110 | REAL | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
+| ADR-0111 | REAL | enforced | `pytest:tests/test_flows.py` |
+| ADR-0112 | REAL | enforced | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
+| ADR-0113 | REAL | enforced | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
+| ADR-0114 | REAL | enforced | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
 
 ## Unenforced-decision debt
 
 | ADR | Class | Kind | Pointer |
 |---|---|---|---|
-| ADR-0003 | MISSING | decision-of-record | — |
-| ADR-0009 | WEAK | manual | `Process guardrail — reviewed at PR time via the process-per-repo model's operational invariants (one 'cli.py' subprocess per repo slug, no shared mutable state); no automated test asserts subprocess isolation directly.` |
-| ADR-0023 | WEAK | manual | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
 | ADR-0025 | WEAK | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0027 | MISSING | decision-of-record | — |
-| ADR-0030 | MISSING | decision-of-record | — |
 | ADR-0035 | WEAK | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
-| ADR-0042 | WEAK | manual | `branch-protection ruleset review per docs/standards/branch_protection` |
 | ADR-0051 | WEAK | manual | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |
-| ADR-0065 | WEAK | manual | `Process check — 'grep -rn 'code_grooming\|CodeGrooming' src/ tests/ docs/' must return no live references; only this ADR and the historical date-stamped snapshot in 'docs/arch/area_review_caretaking_2026-05-12.md' are allowed to mention the removed loop. Closes #8984.` |
-| ADR-0091 | MISSING | decision-of-record | — |
-| ADR-0107 | MISSING | decision-of-record | — |
 
 ## Weak / tautological enforcements
 
-Checks that resolve (the node exists) but assert nothing — hollow guards that stay green while the decision may drift. Strengthen the cited test or repoint the ADR at one that asserts the invariant.
-
-| ADR | Hollow check |
-|---|---|
-| ADR-0094 | `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
-| ADR-0095 | `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
+_(none)_
 
 <!-- arch:generated -->

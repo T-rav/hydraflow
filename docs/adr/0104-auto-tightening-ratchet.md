@@ -5,6 +5,9 @@
 **Enforcement:** enforced
 **Enforced by:** pytest:tests/test_auto_tighten_invariant.py
 
+**Precedent:** Ratchet testing / no-regression baselines — the ratchet pattern that only prevents backsliding (e.g. Betterer; coverage floors)
+**Divergence:** a ratchet normally only *prevents* regression and waits on a human to raise the floor, but here a caretaker loop closes the ratchet on itself — locking in a confirmed, attributed, stability-windowed gain automatically — and stays provably safe by being monotone-tighten-only, since raising a bar can never hide a regression while lowering one always can (receipt: ADR-0100, ADR-0101)
+
 ## Context
 
 ADR-0100 gave HydraFlow a measured conformance contract, and ADR-0093 gave loops a fitness scorecard, but a 2026-07-05 verification of both established that the system is **self-maintaining, not self-improving**. The ratchet never silently regresses, but every advance is a human commit: the P10.3 baseline, the coverage floor, the ADR grandfather set, the disturbance baselines are all raised by hand. `AdrConformanceLoop` only files issues, it never edits files. `FitnessScorecardLoop` is read-only by design, with "no optimizer, no climbing" as an explicit non-goal.

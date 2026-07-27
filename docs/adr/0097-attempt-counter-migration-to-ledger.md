@@ -7,6 +7,9 @@
 - **Enforcement:** enforced
 - **Enforced by:** pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py
 
+**Precedent:** Single source of truth / database normalization (Codd 1970) and the DRY principle (Hunt & Thomas, *The Pragmatic Programmer*)
+**Divergence:** normalization demands a lossless schema migration, but here the migrated counters are transient retry budgets, so the move deletes the old `StateData` fields with no migration shim and accepts a one-time reset to a fresh budget on the first load after deploy — the safe direction (receipt: ADR-0094)
+
 > **Superseded in part by [ADR-0102](0102-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
 
 ## Context

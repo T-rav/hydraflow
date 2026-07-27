@@ -16,16 +16,20 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from escape.ledger import EscapeLedger
 from escape.models import EscapeRecord
+from escape.surfaces import SurfacedIssue, SurfacedIssueLedger
 from escape_ledger_loop import (
     SURFACE_REASON_AGING,
     SURFACE_REASON_LOW_CONFIDENCE,
     EscapeLedgerLoop,
     _current_head_sha,
     _render_finding,
+    answered_surfacings,
     select_findings_to_surface,
     surfacing_fingerprint,
 )
+from mockworld.fakes.fake_github import FakeGitHub
 from subprocess_util import CreditExhaustedError
 from tests.helpers import make_bg_loop_deps
 
@@ -219,7 +223,11 @@ class TestCursor:
         head = _head(repo)
         state = _make_state(initial_sha=head)
         loop = _make_loop(tmp_path, repo, state=state)
-        assert await loop._do_work() == {"status": "no_new_commits", "sha": head}
+        assert await loop._do_work() == {
+            "status": "no_new_commits",
+            "sha": head,
+            "closed": 0,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +278,7 @@ class TestRecordEscapes:
         assert first["escapes_recorded"] == 1
 
         second = await loop._do_work()
-        assert second == {"status": "no_new_commits", "sha": head_sha}
+        assert second == {"status": "no_new_commits", "sha": head_sha, "closed": 0}
 
         from escape.ledger import EscapeLedger
 
@@ -402,6 +410,321 @@ class TestFindingRateBudget:
 
         with pytest.raises(CreditExhaustedError):
             await loop._surface_findings()
+
+
+# ---------------------------------------------------------------------------
+# Surfaced-issue link store (#10577): record the filed issue number
+# ---------------------------------------------------------------------------
+
+
+def _build_loop_direct(
+    tmp_path: Path,
+    repo: Path,
+    github: Any,
+    *,
+    state: MagicMock | None = None,
+) -> EscapeLedgerLoop:
+    """Build a loop WITHOUT ``_make_loop``'s create_issue AsyncMock override.
+
+    ``_make_loop`` replaces a non-AsyncMock ``create_issue`` with a stub — which
+    would clobber a real ``FakeGitHub``. This wires FakeGitHub through untouched.
+    """
+    bg = make_bg_loop_deps(tmp_path)
+    object.__setattr__(bg.config, "repo_root", repo)
+    object.__setattr__(bg.config, "data_root", tmp_path / "data")
+    object.__setattr__(bg.config, "escape_ledger_loop_enabled", True)
+    return EscapeLedgerLoop(
+        config=bg.config,
+        pr_manager=github,
+        state=state if state is not None else _make_state(),
+        dedup=_make_dedup(),
+        deps=bg.loop_deps,
+    )
+
+
+class TestRecordSurfacedLink:
+    async def test_filing_stores_link_with_returned_number(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        pr = MagicMock()
+        pr.create_issue = AsyncMock(return_value=9012)
+        # encoded => NOT aging, so only the low-confidence reason is eligible.
+        loop = _make_loop(tmp_path, repo, pr_manager=pr)
+        EscapeLedger(loop._ledger_path).append(
+            _record("bug-issue:a", confidence="low", encoded_as="regression-test")
+        )
+
+        filed, _capped = await loop._surface_findings()
+
+        assert filed == 1
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert link.issue_number == 9012
+        assert link.escape_id == "bug-issue:a"
+        assert link.reason == SURFACE_REASON_LOW_CONFIDENCE
+
+    async def test_row_eligible_under_both_reasons_stores_two_links(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        pr = MagicMock()
+        pr.create_issue = AsyncMock(side_effect=[9012, 9013])
+        loop = _make_loop(tmp_path, repo, pr_manager=pr)
+        EscapeLedger(loop._ledger_path).append(
+            _record("bug-issue:a", confidence="low", encoded_as="none-yet")
+        )
+
+        filed, _capped = await loop._surface_findings()
+
+        assert filed == 2
+        links = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert {link.issue_number for link in links} == {9012, 9013}
+        assert {link.reason for link in links} == {
+            SURFACE_REASON_LOW_CONFIDENCE,
+            SURFACE_REASON_AGING,
+        }
+
+    async def test_zero_return_stores_no_link(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        pr = MagicMock()
+        pr.create_issue = AsyncMock(return_value=0)
+        loop = _make_loop(tmp_path, repo, pr_manager=pr)
+        EscapeLedger(loop._ledger_path).append(
+            _record("bug-issue:a", confidence="low", encoded_as="regression-test")
+        )
+
+        filed, _capped = await loop._surface_findings()
+
+        assert filed == 0
+        assert SurfacedIssueLedger(loop._surfaces_path).open_links() == []
+
+    async def test_links_survive_a_second_loop_instance(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        pr = MagicMock()
+        pr.create_issue = AsyncMock(return_value=9012)
+        loop = _make_loop(tmp_path, repo, pr_manager=pr)
+        EscapeLedger(loop._ledger_path).append(
+            _record("bug-issue:a", confidence="low", encoded_as="regression-test")
+        )
+        await loop._surface_findings()
+
+        # A brand-new loop over the SAME data_root sees the persisted link.
+        loop2 = _make_loop(tmp_path, repo)
+        links = SurfacedIssueLedger(loop2._surfaces_path).open_links()
+        assert [link.issue_number for link in links] == [9012]
+
+
+# ---------------------------------------------------------------------------
+# answered_surfacings (pure reconcile policy)
+# ---------------------------------------------------------------------------
+
+
+class TestAnsweredSurfacings:
+    @staticmethod
+    def _link(reason: str) -> SurfacedIssue:
+        return SurfacedIssue(
+            fingerprint=surfacing_fingerprint("bug-issue:a", reason),
+            escape_id="bug-issue:a",
+            reason=reason,
+            issue_number=1,
+            filed_at="",
+        )
+
+    def test_low_confidence_answered_when_confidence_no_longer_low(self) -> None:
+        link = self._link(SURFACE_REASON_LOW_CONFIDENCE)
+        rec = _record("bug-issue:a", confidence="high")
+        assert answered_surfacings([link], {rec.id: rec}) == [link]
+
+    def test_low_confidence_unanswered_while_still_low(self) -> None:
+        link = self._link(SURFACE_REASON_LOW_CONFIDENCE)
+        rec = _record("bug-issue:a", confidence="low")
+        assert answered_surfacings([link], {rec.id: rec}) == []
+
+    def test_aging_answered_once_encoded(self) -> None:
+        link = self._link(SURFACE_REASON_AGING)
+        rec = _record("bug-issue:a", confidence="low", encoded_as="detector")
+        assert answered_surfacings([link], {rec.id: rec}) == [link]
+
+    def test_aging_unanswered_while_none_yet(self) -> None:
+        link = self._link(SURFACE_REASON_AGING)
+        rec = _record("bug-issue:a", encoded_as="none-yet")
+        assert answered_surfacings([link], {rec.id: rec}) == []
+
+    def test_missing_ledger_row_leaves_link_unanswered(self) -> None:
+        link = self._link(SURFACE_REASON_LOW_CONFIDENCE)
+        assert answered_surfacings([link], {}) == []
+
+
+# ---------------------------------------------------------------------------
+# _reconcile_surfaced_issues (close stranded HITL issues on resolution)
+# ---------------------------------------------------------------------------
+
+
+class TestReconcileSurfacedIssues:
+    async def test_resolution_closes_and_comments_then_is_idempotent(
+        self, tmp_path: Path
+    ) -> None:
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        loop = _build_loop_direct(tmp_path, repo, github)
+        ledger = EscapeLedger(loop._ledger_path)
+        ledger.append(
+            _record("bug-issue:a", confidence="low", encoded_as="regression-test")
+        )
+        await loop._surface_findings()
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        num = link.issue_number
+
+        ledger.append_resolution(
+            "bug-issue:a",
+            encoded_as="regression-test",
+            attribution_confidence="high",
+        )
+
+        closed = await loop._reconcile_surfaced_issues()
+        assert closed == 1
+        assert github._issues[num].state == "closed"
+        assert any("high" in str(c) for c in github._issues[num].comments)
+        comment_count = len(github._issues[num].comments)
+
+        # Terminal: the next reconcile does nothing further for this link.
+        assert await loop._reconcile_surfaced_issues() == 0
+        assert len(github._issues[num].comments) == comment_count
+
+    async def test_folded_away_low_confidence_surface_closes_on_stronger_sibling(
+        self, tmp_path: Path
+    ) -> None:
+        # #10731: a low-confidence bug-issue is surfaced, then a stronger
+        # regression-pin sibling for the SAME commit lands and folds the
+        # surfaced id out of read_latest. The reconcile must STILL close the
+        # HITL issue — the commit is now attributed off `low` — because it reads
+        # through read_latest_index, not the id-projected read_latest view.
+        from datetime import UTC, datetime
+
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        loop = _build_loop_direct(tmp_path, repo, github)
+        ledger = EscapeLedger(loop._ledger_path)
+        sha = "d15c0acef00dd15c0acef00dd15c0acef00dd15c"
+        fresh = datetime.now(UTC).isoformat()  # not aged => only the LOW surface
+
+        def _row(source: str, confidence: str, method: str) -> EscapeRecord:
+            return EscapeRecord(
+                id=f"{source}:{sha}",
+                detected_at=fresh,
+                detection_source=source,
+                detection_ref=sha,
+                originating_pr=None,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method=method,
+                attribution_confidence=confidence,
+                encoded_as="none-yet",
+                notes="",
+            )
+
+        ledger.append(_row("bug-issue", "low", "fixes-chain"))
+        await loop._surface_findings()
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert link.reason == SURFACE_REASON_LOW_CONFIDENCE
+        assert link.escape_id == f"bug-issue:{sha}"
+        num = link.issue_number
+
+        # Stronger sibling for the same commit (different id, same detection_ref)
+        # — folds bug-issue:<sha> out of read_latest.
+        ledger.append(_row("regression-pin", "medium", "regression-pin"))
+        assert f"bug-issue:{sha}" not in {r.id for r in ledger.read_latest()}
+
+        closed = await loop._reconcile_surfaced_issues()
+
+        assert closed == 1
+        assert github._issues[num].state == "closed"
+        # The comment names the answering row (the surviving medium sibling).
+        assert any("regression-pin" in str(c) for c in github._issues[num].comments)
+
+    async def test_quiet_tick_still_closes_and_reports_closed_count(
+        self, tmp_path: Path
+    ) -> None:
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        head = _head(repo)
+        loop = _build_loop_direct(tmp_path, repo, github, state=_make_state(head))
+        ledger = EscapeLedger(loop._ledger_path)
+        ledger.append(
+            _record("bug-issue:a", confidence="low", encoded_as="regression-test")
+        )
+        await loop._surface_findings()
+        ledger.append_resolution(
+            "bug-issue:a",
+            encoded_as="regression-test",
+            attribution_confidence="high",
+        )
+
+        result = await loop._do_work()
+
+        assert result == {"status": "no_new_commits", "sha": head, "closed": 1}
+
+    async def test_unresolved_escape_issue_left_open(self, tmp_path: Path) -> None:
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        loop = _build_loop_direct(tmp_path, repo, github)
+        ledger = EscapeLedger(loop._ledger_path)
+        ledger.append(
+            _record("bug-issue:a", confidence="low", encoded_as="regression-test")
+        )
+        await loop._surface_findings()
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+
+        assert await loop._reconcile_surfaced_issues() == 0
+        assert github._issues[link.issue_number].state == "open"
+
+    async def test_failing_close_leaves_link_open_for_retry(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        pr = MagicMock()
+        pr.create_issue = AsyncMock(return_value=9012)
+        pr.post_comment = AsyncMock()
+        pr.close_issue = AsyncMock(return_value=False)  # fail-soft, no raise
+        loop = _make_loop(tmp_path, repo, pr_manager=pr)
+        ledger = EscapeLedger(loop._ledger_path)
+        ledger.append(
+            _record("bug-issue:a", confidence="low", encoded_as="regression-test")
+        )
+        await loop._surface_findings()
+        ledger.append_resolution(
+            "bug-issue:a",
+            encoded_as="regression-test",
+            attribution_confidence="high",
+        )
+
+        closed = await loop._reconcile_surfaced_issues()
+
+        assert closed == 0
+        # Link stays OPEN so a later tick retries.
+        assert len(SurfacedIssueLedger(loop._surfaces_path).open_links()) == 1
+
+    async def test_credit_exhausted_from_close_propagates(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        pr = MagicMock()
+        pr.create_issue = AsyncMock(return_value=9012)
+        pr.post_comment = AsyncMock()
+        pr.close_issue = AsyncMock(side_effect=CreditExhaustedError("out"))
+        loop = _make_loop(tmp_path, repo, pr_manager=pr)
+        ledger = EscapeLedger(loop._ledger_path)
+        ledger.append(
+            _record("bug-issue:a", confidence="low", encoded_as="regression-test")
+        )
+        await loop._surface_findings()
+        ledger.append_resolution(
+            "bug-issue:a",
+            encoded_as="regression-test",
+            attribution_confidence="high",
+        )
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._reconcile_surfaced_issues()
 
 
 # ---------------------------------------------------------------------------

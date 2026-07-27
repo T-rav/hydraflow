@@ -242,9 +242,17 @@ def bare_infra_citation_nudges(
     default — the offline generator has no config) restricts nudges to the
     manual :data:`_SHARED_INFRA_MODULES` set, which is correct, just narrower.
 
+    Scoped to **live** (Accepted/Proposed) ADRs, matching
+    :meth:`adr_index.ADRIndex.adrs_touching` — the same population
+    :func:`compute_drift` draws its suppression from. Drift-suppression never
+    touches a Superseded/Deprecated ADR's citations in the first place, so
+    there is nothing for a nudge on one of those to "exactly mirror"; both the
+    per-ADR loop and the fan-out count below exclude them, or the two could
+    diverge (#10565).
+
     Output is sorted by ``(adr_number, path)`` for deterministic rendering.
     """
-    adr_list = list(adrs)
+    adr_list = [a for a in adrs if a.is_live]
     nudges: list[CitationNudge] = []
     for adr in adr_list:
         for path, cited_symbols in adr.source_symbols.items():
