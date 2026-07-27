@@ -6,11 +6,33 @@ Lightweight ADRs documenting key design decisions in HydraFlow.
 
 Each ADR has: **Status**, **Date**, **Enforcement**, **Enforced by** (when
 required), **Context**, **Decision**, **Consequences**, and optionally
-**Alternatives considered** and **Related** links.
+**Alternatives considered** and **Related** links. A **control-plane** ADR also
+carries a lineage line (**Precedent** and/or **Divergence** — see below).
 
 When referencing source code anywhere in an ADR (Related, Context, Decision,
 Consequences), use `module:function_or_class` format (e.g. `src/config.py:HydraFlowConfig`).
 **Omit line numbers** — they drift as code evolves and become stale quickly.
+
+### Lineage — Precedent and Divergence (optional)
+
+Two optional, single-line header fields (see
+[ADR-0113](0113-adr-lineage-precedent-and-divergence.md)) let a control-plane
+ADR — a decision that defines the control system — separate *inherited*
+engineering from *genuine* divergence:
+
+- `**Precedent:** <tradition> (<canonical source>)` — the named engineering
+  tradition this decision inherits. Must be a **real, citable** tradition;
+  retrofitted branding fails review.
+- `**Divergence:** <assumption>, <forcing condition>, <rule> (<receipt>)` — the
+  assumption in that tradition that breaks here, **citing the receipt** (an
+  ADR, incident, or audit finding) that forced it. A `Divergence:` without a
+  receipt is not accepted.
+
+Write each as its own line (not a bullet); both the bold-inline and plain
+forms parse. The working heuristic: unforced invention is a defect; forced
+invention has a named forcing condition and a receipt. The `P1.17` audit check
+(advisory today, escalating to blocking once the seed pass lands) warns when a
+control-plane ADR carries neither line and flags any receipt-less `Divergence:`.
 
 ### Enforcement
 
@@ -150,6 +172,7 @@ cadence and files remediation issues on drift.
 | [0110](0110-provider-harness-backend-split.md) | Provider/Harness Backend Split — z.ai as a Claude-harness backend | Accepted |
 | [0111](0111-in-framework-flow-dag-runtime.md) | In-framework flow (DAG) runtime for workers and phases | Accepted |
 | [0112](0112-per-issue-isolation-via-local-git-clone.md) | Per-Issue Isolation via Local Git Clone | Accepted |
+| [0113](0113-adr-lineage-precedent-and-divergence.md) | ADR lineage — Precedent and Divergence lines | Accepted |
 
 ## Adding a new ADR
 

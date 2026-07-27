@@ -81,6 +81,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0110 | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 | ADR-0111 | enforced | `pytest:tests/test_flows.py` |
 | ADR-0112 | enforced | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
+| ADR-0113 | enforced | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_warns` |
 
 ## Check → ADRs it protects
 
@@ -123,6 +124,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_agent_advanced.py` | ADR-0092 |
 | `pytest:tests/test_agent_cli.py` | ADR-0004, ADR-0092 |
 | `pytest:tests/test_atlas_routes.py` | ADR-0060, ADR-0061, ADR-0090 |
+| `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_warns` | ADR-0113 |
 | `pytest:tests/test_auto_agent_hitl_intake.py` | ADR-0050 |
 | `pytest:tests/test_auto_agent_preflight_loop.py` | ADR-0050 |
 | `pytest:tests/test_auto_tighten_invariant.py` | ADR-0104 |

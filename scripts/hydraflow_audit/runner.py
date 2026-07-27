@@ -61,15 +61,29 @@ def _run_one(spec: CheckSpec, ctx: CheckContext) -> Finding:
 # under test, so it must never fail PR CI.
 TELEMETRY_CHECKS = frozenset({"P10.3", "P10.7"})
 
+# ADVISORY checks are CULTURAL corpus scans that measure the ADR/doc corpus,
+# not the change under test, and start life non-blocking on purpose. P1.17
+# (ADR-0113 lineage) WARNs while the seed pass (#10674 child 3) backfills
+# Precedent:/Divergence: lines across the control-plane ADRs; like the
+# telemetry checks its WARN is reported but never flips the exit code. It is
+# slated to escalate to STRUCTURAL/blocking once every control-plane ADR carries
+# a line (#10674 child 5), at which point it is removed from this set.
+ADVISORY_CHECKS = frozenset({"P1.17"})
+
+# Checks whose WARN is reported but never fails the audit gate.
+_NON_BLOCKING_WARN_CHECKS = TELEMETRY_CHECKS | ADVISORY_CHECKS
+
 
 def overall_exit_code(findings: list[Finding]) -> int:
-    """0 if every finding is PASS/NA (or a telemetry WARN); 1 otherwise."""
+    """0 if every finding is PASS/NA (or a non-blocking-WARN check); 1 otherwise."""
     bad = {Status.FAIL, Status.WARN, Status.NOT_IMPLEMENTED}
     return (
         1
         if any(
             f.status in bad
-            and not (f.check_id in TELEMETRY_CHECKS and f.status is Status.WARN)
+            and not (
+                f.check_id in _NON_BLOCKING_WARN_CHECKS and f.status is Status.WARN
+            )
             for f in findings
         )
         else 0
