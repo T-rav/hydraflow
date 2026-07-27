@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T18:41:12.907590+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1135
+superseded_by: 1278
 ---
 
 # escape/detect.py pure core must stay git-free

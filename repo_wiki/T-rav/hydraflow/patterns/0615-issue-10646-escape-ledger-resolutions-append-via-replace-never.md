@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10646
 source_phase: plan
 created_at: 2026-07-26T12:21:36.986335+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0657
 ---
 
 # Escape ledger resolutions append via replace(), never rewrite lines

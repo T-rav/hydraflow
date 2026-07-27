@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T18:41:12.866926+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1110
+superseded_by: 1253
 ---
 
 # Fresh sandbox has no cadence marker — RC cut fires on tick 1

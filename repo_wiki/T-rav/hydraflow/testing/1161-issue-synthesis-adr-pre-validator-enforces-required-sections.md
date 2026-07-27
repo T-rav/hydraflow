@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T18:41:12.836304+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1092
+superseded_by: 1235
 ---
 
 # ADR pre-validator enforces required sections

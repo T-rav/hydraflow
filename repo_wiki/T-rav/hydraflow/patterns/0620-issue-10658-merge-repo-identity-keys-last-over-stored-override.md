@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10658
 source_phase: plan
 created_at: 2026-07-26T15:42:45.056039+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0662
 ---
 
 # Merge repo identity keys last over stored overrides

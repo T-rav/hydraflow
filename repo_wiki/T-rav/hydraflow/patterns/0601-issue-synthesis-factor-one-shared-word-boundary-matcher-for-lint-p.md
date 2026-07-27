@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T18:31:18.165031+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0567
+superseded_by: 0643
 ---
 
 # Factor one shared word-boundary matcher for lint_paraphrases and validate_draft

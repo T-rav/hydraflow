@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T18:41:12.934864+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1153
+superseded_by: 1295
 ---
 
 # Skip Tier-1 MockWorld for credit pause tests

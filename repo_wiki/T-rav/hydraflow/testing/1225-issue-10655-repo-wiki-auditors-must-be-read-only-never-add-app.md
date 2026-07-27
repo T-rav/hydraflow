@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10655
 source_phase: plan
 created_at: 2026-07-26T16:28:39.816293+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1299
 ---
 
 # repo_wiki/ auditors must be read-only; never add --apply

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10726
 source_phase: plan
 created_at: 2026-07-27T18:34:31.163851+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1300
 ---
 
 # Regression tests parse rendered body, run real CLI, assert closure

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T18:41:12.854255+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1102
+superseded_by: 1245
 ---
 
 # ADR citations must stay bare when fixing drift
