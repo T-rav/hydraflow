@@ -125,10 +125,22 @@ describe('toLoops', () => {
     expect(loop.severity).toBe('warn')
   })
 
-  it('buckets an unknown loop into Other, always last', () => {
-    const vm = toLoops([worker('ci_monitor'), worker('mystery_loop')])
-    expect(vm.categories[vm.categories.length - 1].name).toBe('Other')
-    expect(vm.categories[vm.categories.length - 1].loops[0].name).toBe('Mystery Loop')
+  it('drops unregistered workers — pipeline WORKFLOW stages and release promotion are not loops', () => {
+    // Loops == registered BACKGROUND_WORKERS only. The workflow stages
+    // (triage/plan/build/review, driven by the max_triagers/max_planners pools)
+    // and the staging<->main release-promotion flow are not background loops and
+    // must never render in the Loops panel (#10556 follow-up).
+    const vm = toLoops([
+      worker('ci_monitor'),   // registered background loop -> kept
+      worker('triage'),       // pipeline workflow stage    -> dropped
+      worker('plan'),         // pipeline workflow stage    -> dropped
+      worker('mystery_loop'), // unknown / not a loop       -> dropped
+    ])
+    const keys = vm.categories.flatMap(c => c.loops.map(l => l.key))
+    expect(keys).toEqual(['ci_monitor'])
+    expect(vm.totals.total).toBe(1)
+    // no catch-all 'Other' category is produced for non-loops
+    expect(vm.categories.some(c => c.name === 'Other')).toBe(false)
   })
 
   it('rolls up totals across all loops', () => {
