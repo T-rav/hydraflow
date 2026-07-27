@@ -19,7 +19,7 @@
  */
 
 import React from 'react'
-import { theme } from '../theme'
+import { useTokens, Card, Text } from '../styles/primitives'
 import { canonicalRepoSlug } from '../constants'
 import { buildDisplayName } from '../components/RepoSelector'
 import { OPERATOR_STAGES, toPipeline } from './model/pipeline'
@@ -99,114 +99,94 @@ export function buildRepoSummaries(socket = {}) {
 // Presentation.
 // ---------------------------------------------------------------------------
 
-const HEALTH_COLOR = {
-  ok: theme.green,
-  warn: theme.yellow,
-  bad: theme.red,
-}
+const HEALTH_COLOR_KEY = { ok: 'green', warn: 'yellow', bad: 'red' }
 
-const styles = {
-  wrapper: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
-    border: `1px solid ${theme.border}`,
-    borderRadius: 8,
-    background: theme.surface,
-    padding: 8,
-    minWidth: 0,
-  },
-  heading: {
-    fontSize: 11,
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    color: theme.textMuted,
-    padding: '2px 4px',
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    width: '100%',
-    textAlign: 'left',
-    border: `1px solid ${theme.border}`,
-    borderRadius: 6,
-    background: theme.surfaceInset,
-    color: theme.text,
-    cursor: 'pointer',
-    padding: '8px 10px',
-    minWidth: 0,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: '50%',
-    flexShrink: 0,
-  },
-  nameCol: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 2,
-    minWidth: 0,
-    flex: '1 1 auto',
-  },
-  name: {
-    fontSize: 13,
-    fontWeight: 700,
-    color: theme.textBright,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  activity: {
-    fontSize: 10,
-    color: theme.textMuted,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  mini: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    fontSize: 11,
-    color: theme.textMuted,
-    fontVariantNumeric: 'tabular-nums',
-    flexShrink: 0,
-  },
-  miniCell: {
-    display: 'inline-flex',
-    alignItems: 'baseline',
-    gap: 2,
-  },
-  miniKey: {
-    fontSize: 9,
-    textTransform: 'uppercase',
-    color: theme.textInactive,
-  },
-  miniVal: {
-    fontWeight: 700,
-    color: theme.text,
-  },
-  attention: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    borderRadius: 999,
-    padding: '2px 8px',
-    fontSize: 10,
-    fontWeight: 800,
-    color: theme.orange,
-    border: `1px solid ${theme.orange}`,
-    background: theme.orangeSubtle,
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-  },
-  healthDot: {
-    width: 10,
-    height: 10,
-    borderRadius: '50%',
-    flexShrink: 0,
-  },
+function makeStyles(t) {
+  return {
+    wrapper: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: t.space.xs,
+      padding: t.space.sm,
+      minWidth: 0,
+    },
+    heading: { letterSpacing: t.type.tracking.wide, padding: `${t.space.xxs}px ${t.space.xs}px` },
+    row: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.md,
+      width: '100%',
+      textAlign: 'left',
+      border: `1px solid ${t.color.border}`,
+      borderRadius: t.radius.md,
+      background: t.color.surfaceInset,
+      color: t.color.text,
+      cursor: 'pointer',
+      padding: `${t.space.sm}px ${t.space.md}px`,
+      minWidth: 0,
+    },
+    statusDot: (running) => ({
+      width: 8,
+      height: 8,
+      borderRadius: t.radius.pill,
+      flexShrink: 0,
+      background: running ? t.color.green : t.color.textMuted,
+    }),
+    nameCol: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: t.space.xxs,
+      minWidth: 0,
+      flex: '1 1 auto',
+    },
+    name: {
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+    activity: { fontVariantNumeric: 'tabular-nums' },
+    mini: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.xs,
+      fontSize: t.type.size.xs,
+      color: t.color.textMuted,
+      fontVariantNumeric: 'tabular-nums',
+      flexShrink: 0,
+    },
+    miniCell: {
+      display: 'inline-flex',
+      alignItems: 'baseline',
+      gap: t.space.xxs,
+    },
+    miniKey: {
+      fontSize: 9,
+      textTransform: 'uppercase',
+      color: t.color.textInactive,
+    },
+    miniVal: { fontWeight: t.type.weight.bold, color: t.color.text },
+    attention: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: t.space.xs,
+      borderRadius: t.radius.pill,
+      padding: `${t.space.xxs}px ${t.space.sm}px`,
+      fontSize: 10,
+      fontWeight: t.type.weight.bold,
+      color: t.color.orange,
+      border: `1px solid ${t.color.orange}`,
+      background: `color-mix(in srgb, ${t.color.orange} 15%, transparent)`,
+      whiteSpace: 'nowrap',
+      flexShrink: 0,
+    },
+    healthDot: (health) => ({
+      width: 10,
+      height: 10,
+      borderRadius: t.radius.pill,
+      flexShrink: 0,
+      background: t.color[HEALTH_COLOR_KEY[health]] ?? t.color.textMuted,
+    }),
+  }
 }
 
 // Short mini-pipeline labels, in lifecycle order.
@@ -226,12 +206,14 @@ const MINI_LABEL = {
  * }} props
  */
 export function RepoOverview({ repos = [], select = () => {} }) {
+  const t = useTokens()
+  const styles = makeStyles(t)
   // Single-repo (or empty) installs skip the overview entirely.
   if (!Array.isArray(repos) || repos.length <= 1) return null
 
   return (
-    <div data-testid="repo-overview" style={styles.wrapper}>
-      <div style={styles.heading}>Repositories</div>
+    <Card as="div" data-testid="repo-overview" style={styles.wrapper}>
+      <Text size="xs" weight="bold" tone="muted" uppercase style={styles.heading}>Repositories</Text>
       {repos.map(repo => {
         const attentionTotal = (repo.attention?.hitl ?? 0) + (repo.attention?.failed ?? 0)
         const health = repo.health ?? 'ok'
@@ -247,13 +229,13 @@ export function RepoOverview({ repos = [], select = () => {} }) {
               data-testid={`repo-status-${repo.slug}`}
               data-running={String(!!repo.running)}
               title={repo.running ? 'Running' : 'Stopped'}
-              style={{ ...styles.statusDot, background: repo.running ? theme.green : theme.textMuted }}
+              style={styles.statusDot(repo.running)}
             />
             <span style={styles.nameCol}>
-              <span style={styles.name}>{repo.name}</span>
-              <span data-testid={`repo-activity-${repo.slug}`} style={styles.activity}>
+              <Text as="span" size="md" weight="bold" tone="bright" style={styles.name}>{repo.name}</Text>
+              <Text as="span" size="xs" tone="muted" data-testid={`repo-activity-${repo.slug}`} style={styles.activity}>
                 {repo.lastActivity ? repo.lastActivity : 'no activity'}
-              </span>
+              </Text>
             </span>
 
             <span data-testid={`repo-mini-pipeline-${repo.slug}`} style={styles.mini}>
@@ -281,12 +263,12 @@ export function RepoOverview({ repos = [], select = () => {} }) {
               data-testid={`repo-health-${repo.slug}`}
               data-health={health}
               title={`health: ${health}`}
-              style={{ ...styles.healthDot, background: HEALTH_COLOR[health] ?? theme.textMuted }}
+              style={styles.healthDot(health)}
             />
           </button>
         )
       })}
-    </div>
+    </Card>
   )
 }
 

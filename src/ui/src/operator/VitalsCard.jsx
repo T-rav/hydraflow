@@ -15,17 +15,18 @@
  *   credits  — paused → bad · otherwise → ok
  *   sync     — in_sync → ok · behind/unknown → warn
  *
- * Phase 1 uses inline styles like the rest of the operator shell; the
- * token/primitive migration is Task 11/12. No backend change; no new deps.
+ * Phase-2 token migration (Task 12): every colour / space / radius value now
+ * resolves from the token layer via `useTokens()` and the shared primitives
+ * (`Stack` / `Text`) — no hardcoded hex, so light + dark both fall out of the
+ * token mode supplied by the console's ThemeProvider.
  */
 
 import React from 'react'
+import { useTokens, Text } from '../styles/primitives'
 
-const SEVERITY_COLOR = {
-  ok: '#3fb950', // green
-  warn: '#d29922', // amber
-  bad: '#f85149', // red
-}
+// Severity → token colour key + the `Text` tone that renders it.
+const SEVERITY_COLOR_KEY = { ok: 'green', warn: 'yellow', bad: 'red' }
+const SEVERITY_TEXT_TONE = { ok: 'success', warn: 'warning', bad: 'danger' }
 
 const SYNC_LABEL = {
   in_sync: 'in sync',
@@ -44,37 +45,53 @@ function severityForLoops({ ok, total }) {
   return ok === total ? 'ok' : 'bad'
 }
 
-function VitalRow({ vitalKey, label, value, severity, detail }) {
-  const color = SEVERITY_COLOR[severity]
+function makeStyles(t) {
+  return {
+    card: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: t.space.sm,
+      padding: t.space.sm,
+      boxSizing: 'border-box',
+    },
+    row: (severity) => ({
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'baseline',
+      gap: t.space.sm,
+      padding: `${t.space.xs}px ${t.space.sm}px`,
+      borderLeft: `3px solid ${t.color[SEVERITY_COLOR_KEY[severity]]}`,
+      borderRadius: t.radius.sm,
+      backgroundColor: `color-mix(in srgb, ${t.color.textMuted} 8%, transparent)`,
+    }),
+    value: { textAlign: 'right', minWidth: 0 },
+    detail: { display: 'block', fontWeight: t.type.weight.regular, opacity: 0.7, wordBreak: 'break-word' },
+  }
+}
+
+function VitalRow({ styles, vitalKey, label, value, severity, detail }) {
   return (
     <div
       data-testid={`vital-${vitalKey}`}
       className={`vital-row ${severity}`}
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'baseline',
-        gap: 8,
-        padding: '6px 8px',
-        borderLeft: `3px solid ${color}`,
-        borderRadius: 4,
-        background: 'rgba(127,127,127,0.06)',
-      }}
+      style={styles.row(severity)}
     >
-      <span style={{ fontSize: 12, opacity: 0.8 }}>{label}</span>
-      <span style={{ fontSize: 12, fontWeight: 600, color, textAlign: 'right', minWidth: 0 }}>
+      <Text size="sm" tone="muted">{label}</Text>
+      <Text as="span" size="sm" weight="semibold" tone={SEVERITY_TEXT_TONE[severity]} style={styles.value}>
         {value}
         {detail ? (
-          <span style={{ display: 'block', fontWeight: 400, opacity: 0.7, wordBreak: 'break-word' }}>
+          <Text as="span" size="sm" tone="muted" style={styles.detail}>
             {detail}
-          </span>
+          </Text>
         ) : null}
-      </span>
+      </Text>
     </div>
   )
 }
 
 export function VitalsCard({ vitals }) {
+  const t = useTokens()
+  const styles = makeStyles(t)
   const { factory, loopsHealthy, restarts, credits, mainStagingSync } = vitals
 
   const restartSummary = restarts.length
@@ -90,14 +107,12 @@ export function VitalsCard({ vitals }) {
   const syncDetail = mainStagingSync.openPrNumber ? `RC PR #${mainStagingSync.openPrNumber}` : null
 
   return (
-    <div
-      data-testid="vitals-card"
-      style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, boxSizing: 'border-box' }}
-    >
-      <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, opacity: 0.6 }}>
+    <div data-testid="vitals-card" style={styles.card}>
+      <Text size="xs" weight="semibold" tone="muted" uppercase>
         Vitals
-      </div>
+      </Text>
       <VitalRow
+        styles={styles}
         vitalKey="factory"
         label="Factory"
         value={factory.state}
@@ -105,18 +120,21 @@ export function VitalsCard({ vitals }) {
         detail={factory.reason}
       />
       <VitalRow
+        styles={styles}
         vitalKey="loops"
         label="Loops healthy"
         value={`${loopsHealthy.ok}/${loopsHealthy.total}`}
         severity={severityForLoops(loopsHealthy)}
       />
       <VitalRow
+        styles={styles}
         vitalKey="restarts"
         label="Restarts"
         value={restartSummary}
         severity={restarts.length ? 'bad' : 'ok'}
       />
       <VitalRow
+        styles={styles}
         vitalKey="credits"
         label="Credits"
         value={credits.paused ? 'paused' : 'ok'}
@@ -124,6 +142,7 @@ export function VitalsCard({ vitals }) {
         detail={creditsDetail}
       />
       <VitalRow
+        styles={styles}
         vitalKey="sync"
         label="main ↔ staging"
         value={SYNC_LABEL[mainStagingSync.state] ?? mainStagingSync.state}

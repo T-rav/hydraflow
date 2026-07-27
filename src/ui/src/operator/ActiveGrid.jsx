@@ -13,12 +13,13 @@
  * Clicking a tile header drills back into Focus on that item (switches
  * `mode` -> 'focus' and selects the item) so the grid doubles as a picker.
  *
- * Presentation only — no socket, no side effects; styling uses the shared
- * `theme` CSS-variable references so the dark/light paths keep working.
+ * Presentation only — no socket, no side effects. Phase-2 (Task 12): tiles use
+ * the `Card` primitive and every colour / space value resolves from
+ * `useTokens()`, so light + dark fall out of the console's ThemeProvider mode.
  */
 
 import React, { useMemo } from 'react'
-import { theme } from '../theme'
+import { useTokens, Card, Text } from '../styles/primitives'
 import { toTranscript } from './model/transcript'
 import { TranscriptStream } from './TranscriptStream'
 
@@ -35,65 +36,52 @@ export function buildingItemsOf(pipeline) {
   return build?.items ?? []
 }
 
-const styles = {
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-    gap: 10,
-    minWidth: 0,
-  },
-  tile: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
-    minWidth: 0,
-    border: `1px solid ${theme.border}`,
-    borderRadius: 8,
-    background: theme.surfaceInset,
-    padding: 8,
-    boxSizing: 'border-box',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'baseline',
-    gap: 6,
-    minWidth: 0,
-    border: 'none',
-    background: 'none',
-    color: 'inherit',
-    font: 'inherit',
-    textAlign: 'left',
-    cursor: 'pointer',
-    padding: 0,
-    width: '100%',
-  },
-  id: {
-    fontSize: 13,
-    fontWeight: 700,
-    color: theme.textBright,
-    fontVariantNumeric: 'tabular-nums',
-    flexShrink: 0,
-  },
-  title: {
-    fontSize: 12,
-    color: theme.textMuted,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    minWidth: 0,
-  },
-  empty: {
-    fontSize: 12,
-    color: theme.textMuted,
-    padding: '12px 2px',
-  },
+function makeStyles(t) {
+  return {
+    grid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+      gap: t.space.md,
+      minWidth: 0,
+    },
+    tile: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: t.space.xs,
+      minWidth: 0,
+      background: t.color.surfaceInset,
+      padding: t.space.sm,
+      boxSizing: 'border-box',
+    },
+    header: {
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: t.space.xs,
+      minWidth: 0,
+      border: 'none',
+      background: 'none',
+      color: 'inherit',
+      font: 'inherit',
+      textAlign: 'left',
+      cursor: 'pointer',
+      padding: 0,
+      width: '100%',
+    },
+    title: {
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      minWidth: 0,
+    },
+    empty: { padding: `${t.space.md}px ${t.space.xxs}px` },
+  }
 }
 
 /**
  * A single compact tile: an item header + its live transcript stream.
- * @param {{ item: {id, title}, events: Array, select?: Function }} props
+ * @param {{ item: {id, title}, events: Array, select?: Function, styles: object }} props
  */
-function ActiveTile({ item, events, select }) {
+function ActiveTile({ item, events, select, styles }) {
   const rows = useMemo(() => toTranscript(events, item.id), [events, item.id])
 
   const onFocus = () => {
@@ -105,7 +93,7 @@ function ActiveTile({ item, events, select }) {
   }
 
   return (
-    <div data-testid={`active-tile-${item.id}`} data-item-id={item.id} style={styles.tile}>
+    <Card as="div" data-testid={`active-tile-${item.id}`} data-item-id={item.id} style={styles.tile}>
       <button
         type="button"
         data-testid={`active-tile-header-${item.id}`}
@@ -113,13 +101,13 @@ function ActiveTile({ item, events, select }) {
         style={styles.header}
         title="Focus this item"
       >
-        <span style={styles.id}>#{item.id}</span>
+        <Text as="span" size="md" weight="bold" tone="bright">#{item.id}</Text>
         {item.title != null && item.title !== '' && (
-          <span style={styles.title}>{item.title}</span>
+          <Text as="span" size="sm" tone="muted" style={styles.title}>{item.title}</Text>
         )}
       </button>
       <TranscriptStream rows={rows} active />
-    </div>
+    </Card>
   )
 }
 
@@ -131,17 +119,19 @@ function ActiveTile({ item, events, select }) {
  * }} props
  */
 export function ActiveGrid({ pipeline, events = [], select }) {
+  const t = useTokens()
+  const styles = makeStyles(t)
   const items = useMemo(() => buildingItemsOf(pipeline), [pipeline])
 
   return (
     <div data-testid="active-grid" style={styles.grid}>
       {items.length === 0 ? (
-        <div data-testid="active-grid-empty" style={styles.empty}>
+        <Text as="div" size="sm" tone="muted" data-testid="active-grid-empty" style={styles.empty}>
           Nothing building right now.
-        </div>
+        </Text>
       ) : (
         items.map(item => (
-          <ActiveTile key={item.id} item={item} events={events} select={select} />
+          <ActiveTile key={item.id} styles={styles} item={item} events={events} select={select} />
         ))
       )}
     </div>

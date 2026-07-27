@@ -15,176 +15,145 @@
  * Windowing is lightweight and dependency-free (slice-by-scroll via
  * `useActivityFeed`): a spacer div holds the full scroll height while only a
  * bounded window of rows is mounted and translated into view. Presentation
- * only — no socket, no side effects; styling uses the shared `theme`
- * CSS-variable references so the dark/light paths keep working.
+ * only — no socket, no side effects. Phase-2 (Task 12): the strip surface uses
+ * the `Surface` primitive, counts use `Badge`, and every colour / space value
+ * resolves from `useTokens()`, so light + dark fall out of the console's
+ * ThemeProvider mode.
  */
 
 import React from 'react'
-import { theme } from '../theme'
+import { useTokens, Surface, Badge } from '../styles/primitives'
 import { useActivityFeed } from './useActivityFeed'
 
-function severityColor(severity) {
-  if (severity === 'error') return theme.red
-  if (severity === 'warn') return theme.yellow
-  return theme.textMuted
+function severityColor(t, severity) {
+  if (severity === 'error') return t.color.red
+  if (severity === 'warn') return t.color.yellow
+  return t.color.textMuted
 }
 
-const styles = {
-  drawer: {
-    display: 'flex',
-    flexDirection: 'column',
-    minWidth: 0,
-    borderTop: `1px solid ${theme.border}`,
-    background: theme.surface,
-  },
-  strip: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '6px 10px',
-    minWidth: 0,
-  },
-  toggle: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    flexShrink: 0,
-    background: 'transparent',
-    color: theme.text,
-    cursor: 'pointer',
-    padding: '2px 4px',
-    font: 'inherit',
-    fontWeight: 700,
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    borderRadius: 4,
-    borderWidth: 0,
-    borderStyle: 'none',
-  },
-  caret: {
-    fontSize: 10,
-    color: theme.textMuted,
-  },
-  latest: {
-    flex: '1 1 auto',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: 12,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  inlineCount: {
-    color: theme.textMuted,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  chips: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 4,
-    flexShrink: 0,
-  },
-  chip: {
-    border: `1px solid ${theme.border}`,
-    borderRadius: 10,
-    background: theme.surfaceInset,
-    color: theme.textMuted,
-    cursor: 'pointer',
-    padding: '1px 8px',
-    font: 'inherit',
-    fontSize: 10,
-    fontWeight: 600,
-    lineHeight: 1.6,
-  },
-  chipActive: {
-    background: theme.accent,
-    color: theme.bg,
-    borderColor: theme.accent,
-  },
-  newBadge: {
-    flexShrink: 0,
-    borderRadius: 10,
-    background: theme.orange,
-    color: theme.bg,
-    padding: '1px 8px',
-    fontSize: 10,
-    fontWeight: 700,
-    lineHeight: 1.6,
-    whiteSpace: 'nowrap',
-  },
-  list: {
-    overflowY: 'auto',
-    overflowX: 'hidden',
-    borderTop: `1px solid ${theme.border}`,
-  },
-  spacer: {
-    position: 'relative',
-    width: '100%',
-  },
-  window: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '0 10px',
-    boxSizing: 'border-box',
-    fontSize: 12,
-    minWidth: 0,
-  },
-  dot: {
-    display: 'inline-block',
-    width: 6,
-    height: 6,
-    borderRadius: '50%',
-    flexShrink: 0,
-  },
-  rowSummary: {
-    flex: '1 1 auto',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: theme.text,
-  },
-  count: {
-    flexShrink: 0,
-    borderRadius: 8,
-    background: theme.surfaceInset,
-    color: theme.textMuted,
-    padding: '0 6px',
-    fontSize: 10,
-    fontWeight: 700,
-    fontVariantNumeric: 'tabular-nums',
-  },
-  empty: {
-    padding: '10px',
-    fontSize: 12,
-    color: theme.textMuted,
-  },
+function makeStyles(t) {
+  return {
+    drawer: {
+      display: 'flex',
+      flexDirection: 'column',
+      minWidth: 0,
+      borderTop: `1px solid ${t.color.border}`,
+    },
+    strip: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.sm,
+      padding: `${t.space.xs}px ${t.space.md}px`,
+      minWidth: 0,
+    },
+    toggle: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: t.space.xs,
+      flexShrink: 0,
+      background: 'transparent',
+      color: t.color.text,
+      cursor: 'pointer',
+      padding: `${t.space.xxs}px ${t.space.xs}px`,
+      font: 'inherit',
+      fontWeight: t.type.weight.bold,
+      fontSize: t.type.size.xs,
+      textTransform: 'uppercase',
+      letterSpacing: t.type.tracking.wide,
+      borderRadius: t.radius.sm,
+      borderWidth: 0,
+      borderStyle: 'none',
+    },
+    caret: { fontSize: 10, color: t.color.textMuted },
+    latest: (severity) => ({
+      flex: '1 1 auto',
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      fontSize: t.type.size.sm,
+      fontVariantNumeric: 'tabular-nums',
+      color: severityColor(t, severity),
+    }),
+    inlineCount: { color: t.color.textMuted, fontVariantNumeric: 'tabular-nums' },
+    chips: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: t.space.xs,
+      flexShrink: 0,
+    },
+    chip: (active) => ({
+      border: `1px solid ${active ? t.color.accent : t.color.border}`,
+      borderRadius: t.radius.lg,
+      background: active ? t.color.accent : t.color.surfaceInset,
+      color: active ? t.color.bg : t.color.textMuted,
+      cursor: 'pointer',
+      padding: `1px ${t.space.sm}px`,
+      font: 'inherit',
+      fontSize: 10,
+      fontWeight: t.type.weight.semibold,
+      lineHeight: 1.6,
+    }),
+    list: (height) => ({
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      borderTop: `1px solid ${t.color.border}`,
+      height,
+    }),
+    spacer: (height) => ({ position: 'relative', width: '100%', height }),
+    window: (offsetTop) => ({
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      transform: `translateY(${offsetTop}px)`,
+    }),
+    row: (rowHeight) => ({
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.sm,
+      padding: `0 ${t.space.md}px`,
+      boxSizing: 'border-box',
+      fontSize: t.type.size.sm,
+      minWidth: 0,
+      height: rowHeight,
+    }),
+    dot: (severity) => ({
+      display: 'inline-block',
+      width: 6,
+      height: 6,
+      borderRadius: t.radius.pill,
+      flexShrink: 0,
+      background: severityColor(t, severity),
+    }),
+    rowSummary: {
+      flex: '1 1 auto',
+      minWidth: 0,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      color: t.color.text,
+    },
+    empty: { padding: t.space.md, fontSize: t.type.size.sm, color: t.color.textMuted },
+  }
 }
 
-function ActivityRow({ row, rowHeight }) {
+function ActivityRow({ styles, row, rowHeight }) {
   return (
     <div
       data-testid="activity-row"
       data-type={row.type}
       data-severity={row.severity}
-      style={{ ...styles.row, height: rowHeight }}
+      style={styles.row(rowHeight)}
     >
-      <span style={{ ...styles.dot, background: severityColor(row.severity) }} />
+      <span style={styles.dot(row.severity)} />
       <span style={styles.rowSummary} title={row.summary}>
         {row.summary}
       </span>
       {row.count > 1 && (
-        <span data-testid="activity-count" style={styles.count}>
+        <Badge tone="neutral" data-testid="activity-count">
           ×{row.count}
-        </span>
+        </Badge>
       )}
     </div>
   )
@@ -197,6 +166,8 @@ function ActivityRow({ row, rowHeight }) {
  *   is a read-only view.
  */
 export function ActivityDrawer({ activity = [] }) {
+  const t = useTokens()
+  const styles = makeStyles(t)
   const {
     filter,
     setFilter,
@@ -214,7 +185,7 @@ export function ActivityDrawer({ activity = [] }) {
   } = useActivityFeed(activity)
 
   return (
-    <div data-testid="activity-drawer" data-expanded={expanded} style={styles.drawer}>
+    <Surface tone="raised" as="div" data-testid="activity-drawer" data-expanded={expanded} style={styles.drawer}>
       <div data-testid="activity-strip" style={styles.strip}>
         <button
           type="button"
@@ -229,7 +200,7 @@ export function ActivityDrawer({ activity = [] }) {
 
         <span
           data-testid="activity-latest"
-          style={{ ...styles.latest, color: severityColor(latest?.severity) }}
+          style={styles.latest(latest?.severity)}
           title={latest?.summary || ''}
         >
           {latest ? latest.summary : 'No activity yet'}
@@ -244,7 +215,7 @@ export function ActivityDrawer({ activity = [] }) {
               data-testid={`activity-filter-${f.key}`}
               aria-pressed={filter === f.key}
               onClick={() => setFilter(f.key)}
-              style={{ ...styles.chip, ...(filter === f.key ? styles.chipActive : null) }}
+              style={styles.chip(filter === f.key)}
             >
               {f.label}
             </button>
@@ -252,9 +223,9 @@ export function ActivityDrawer({ activity = [] }) {
         </span>
 
         {newCount > 0 && (
-          <span data-testid="activity-new-count" style={styles.newBadge}>
+          <Badge tone="warning" data-testid="activity-new-count">
             {newCount} new
-          </span>
+          </Badge>
         )}
       </div>
 
@@ -262,22 +233,22 @@ export function ActivityDrawer({ activity = [] }) {
         <div
           data-testid="activity-list"
           onScroll={onScroll}
-          style={{ ...styles.list, height: viewportHeight }}
+          style={styles.list(viewportHeight)}
         >
           {visible.length === 0 ? (
             <div style={styles.empty}>No matching activity.</div>
           ) : (
-            <div style={{ ...styles.spacer, height: totalHeight }}>
-              <div style={{ ...styles.window, transform: `translateY(${offsetTop}px)` }}>
+            <div style={styles.spacer(totalHeight)}>
+              <div style={styles.window(offsetTop)}>
                 {visible.map(({ row, index }) => (
-                  <ActivityRow key={row.groupKey ?? `${row.type}-${index}`} row={row} rowHeight={rowHeight} />
+                  <ActivityRow key={row.groupKey ?? `${row.type}-${index}`} styles={styles} row={row} rowHeight={rowHeight} />
                 ))}
               </div>
             </div>
           )}
         </div>
       )}
-    </div>
+    </Surface>
   )
 }
 

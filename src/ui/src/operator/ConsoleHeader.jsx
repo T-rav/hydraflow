@@ -18,23 +18,27 @@
  * and `connected` flag from the injected socket (which is the HydraFlow context
  * value — `useHydraFlowSocket` is an alias for `useHydraFlow`).
  *
- * Styling uses the shared `theme` CSS-variable references so the dark/light
- * paths and the Phase-2 token migration keep working.
+ * Phase-2 (Task 12): the header surface uses the `Card` primitive and every
+ * colour / space value resolves from `useTokens()`; the tinted status/control
+ * accents are derived from token colours (subtle fills via `color-mix`), so
+ * light + dark fall out of the console's ThemeProvider mode — no hardcoded hex.
  */
 
 import React from 'react'
-import { theme } from '../theme'
+import { useTokens, Card } from '../styles/primitives'
 import { Breadcrumb } from './Breadcrumb'
 
-// Run-state → pill tone. Anything unrecognised falls back to the neutral/idle
-// look so an unexpected orchestrator status never renders as "healthy".
+// Run-state → token colour keys. Anything unrecognised falls back to the
+// neutral/idle look so an unexpected orchestrator status never renders as
+// "healthy". `tinted` marks states whose pill carries a subtle coloured fill;
+// neutral states sit on the plain surface.
 const RUNSTATE_TONE = {
-  running: { color: theme.green, border: theme.green, bg: theme.greenSubtle },
-  paused: { color: theme.orange, border: theme.orange, bg: theme.orangeSubtle },
-  stopping: { color: theme.yellow, border: theme.yellow, bg: theme.yellowSubtle },
-  idle: { color: theme.textMuted, border: theme.border, bg: theme.surface },
-  done: { color: theme.textMuted, border: theme.border, bg: theme.surface },
-  unknown: { color: theme.textMuted, border: theme.border, bg: theme.surface },
+  running: { color: 'green', tinted: true },
+  paused: { color: 'orange', tinted: true },
+  stopping: { color: 'yellow', tinted: true },
+  idle: { color: 'textMuted', tinted: false },
+  done: { color: 'textMuted', tinted: false },
+  unknown: { color: 'textMuted', tinted: false },
 }
 
 const RUNSTATE_LABEL = {
@@ -46,96 +50,101 @@ const RUNSTATE_LABEL = {
   unknown: 'Unknown',
 }
 
-const styles = {
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    flexWrap: 'wrap',
-    padding: '8px 12px',
-    border: `1px solid ${theme.border}`,
-    borderRadius: 8,
-    background: theme.surface,
-    boxSizing: 'border-box',
-    minWidth: 0,
-  },
-  breadcrumbSlot: {
-    flex: '1 1 auto',
-    minWidth: 0,
-  },
-  statusGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  pill: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 999,
-    padding: '3px 10px',
-    fontSize: 11,
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    whiteSpace: 'nowrap',
-  },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: '50%',
-    flexShrink: 0,
-  },
-  creditReason: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: theme.orange,
-    maxWidth: 280,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  vitals: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    fontSize: 11,
-    color: theme.textMuted,
-    fontVariantNumeric: 'tabular-nums',
-    whiteSpace: 'nowrap',
-  },
-  vitalStrong: {
-    color: theme.textBright,
-    fontWeight: 700,
-  },
-  vitalBad: {
-    color: theme.red,
-    fontWeight: 700,
-  },
-  controls: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    flexShrink: 0,
-  },
-  btnBase: {
-    padding: '5px 12px',
-    borderRadius: 6,
-    fontSize: 12,
-    fontWeight: 700,
-    cursor: 'pointer',
-    transition: 'opacity 0.15s',
-  },
+// A subtle fill derived from a token colour (mirrors the primitives' helper),
+// so the tint flips with the mode alongside the colour it is derived from.
+function subtle(color, pct = 15) {
+  return `color-mix(in srgb, ${color} ${pct}%, transparent)`
 }
 
-const startBtn = { ...styles.btnBase, border: `1px solid ${theme.green}`, background: theme.greenSubtle, color: theme.green }
-const stopBtn = { ...styles.btnBase, border: `1px solid ${theme.red}`, background: theme.redSubtle, color: theme.red }
-const clearBtn = { ...styles.btnBase, border: `1px solid ${theme.orange}`, background: theme.orangeSubtle, color: theme.orange }
-const disabledBtn = { opacity: 0.4, cursor: 'not-allowed' }
+function makeStyles(t) {
+  const controlBase = {
+    padding: `${t.space.xs}px ${t.space.md}px`,
+    borderRadius: t.radius.md,
+    fontSize: t.type.size.sm,
+    fontWeight: t.type.weight.bold,
+    cursor: 'pointer',
+    transition: 'opacity 0.15s',
+  }
+  const control = (colorKey) => ({
+    ...controlBase,
+    border: `1px solid ${t.color[colorKey]}`,
+    background: subtle(t.color[colorKey]),
+    color: t.color[colorKey],
+  })
+  return {
+    header: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.md,
+      flexWrap: 'wrap',
+      padding: `${t.space.sm}px ${t.space.md}px`,
+      boxSizing: 'border-box',
+      minWidth: 0,
+    },
+    breadcrumbSlot: { flex: '1 1 auto', minWidth: 0 },
+    statusGroup: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.sm,
+      flexWrap: 'wrap',
+    },
+    pill: (toneKey, tinted) => ({
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: t.space.xs,
+      borderRadius: t.radius.pill,
+      padding: `3px ${t.space.md}px`,
+      fontSize: t.type.size.xs,
+      fontWeight: t.type.weight.bold,
+      textTransform: 'uppercase',
+      letterSpacing: t.type.tracking.wide,
+      whiteSpace: 'nowrap',
+      color: t.color[toneKey],
+      border: `1px solid ${tinted ? t.color[toneKey] : t.color.border}`,
+      background: tinted ? subtle(t.color[toneKey]) : t.color.surface,
+    }),
+    dot: (toneKey) => ({
+      width: 7,
+      height: 7,
+      borderRadius: t.radius.pill,
+      flexShrink: 0,
+      background: t.color[toneKey],
+    }),
+    creditReason: {
+      fontSize: t.type.size.xs,
+      fontWeight: t.type.weight.semibold,
+      color: t.color.orange,
+      maxWidth: 280,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    },
+    vitals: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.sm,
+      fontSize: t.type.size.xs,
+      color: t.color.textMuted,
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+    },
+    vitalStrong: { color: t.color.textBright, fontWeight: t.type.weight.bold },
+    vitalBad: { color: t.color.red, fontWeight: t.type.weight.bold },
+    controls: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.xs,
+      flexShrink: 0,
+    },
+    startBtn: control('green'),
+    stopBtn: control('red'),
+    clearBtn: control('orange'),
+    disabledBtn: { opacity: 0.4, cursor: 'not-allowed' },
+  }
+}
 
-function controlStyle(base, disabled) {
-  return disabled ? { ...base, ...disabledBtn } : base
+function controlStyle(base, disabledStyle, disabled) {
+  return disabled ? { ...base, ...disabledStyle } : base
 }
 
 const EMPTY_VITALS = {
@@ -166,6 +175,9 @@ export function ConsoleHeader({
   onStop = () => {},
   onClear = () => {},
 }) {
+  const t = useTokens()
+  const styles = makeStyles(t)
+
   const factory = vitals?.factory ?? EMPTY_VITALS.factory
   const loops = vitals?.loopsHealthy ?? EMPTY_VITALS.loopsHealthy
   const credits = vitals?.credits ?? EMPTY_VITALS.credits
@@ -191,7 +203,7 @@ export function ConsoleHeader({
   const syncBehind = sync.state === 'behind'
 
   return (
-    <header data-testid="console-header" style={styles.header}>
+    <Card as="header" data-testid="console-header" style={styles.header}>
       <div style={styles.breadcrumbSlot}>
         <Breadcrumb breadcrumb={breadcrumb} select={select} />
       </div>
@@ -202,9 +214,9 @@ export function ConsoleHeader({
           data-state={state}
           role="status"
           aria-label={`Factory: ${label}`}
-          style={{ ...styles.pill, color: tone.color, border: `1px solid ${tone.border}`, background: tone.bg }}
+          style={styles.pill(tone.color, tone.tinted)}
         >
-          <span style={{ ...styles.dot, background: tone.color }} />
+          <span style={styles.dot(tone.color)} />
           {label}
         </span>
 
@@ -240,7 +252,7 @@ export function ConsoleHeader({
         <button
           type="button"
           data-testid="console-header-start"
-          style={controlStyle(startBtn, startDisabled)}
+          style={controlStyle(styles.startBtn, styles.disabledBtn, startDisabled)}
           disabled={startDisabled}
           onClick={() => onStart?.()}
         >
@@ -249,7 +261,7 @@ export function ConsoleHeader({
         <button
           type="button"
           data-testid="console-header-stop"
-          style={controlStyle(stopBtn, stopDisabled)}
+          style={controlStyle(styles.stopBtn, styles.disabledBtn, stopDisabled)}
           disabled={stopDisabled}
           onClick={() => onStop?.()}
         >
@@ -258,7 +270,7 @@ export function ConsoleHeader({
         <button
           type="button"
           data-testid="console-header-clear"
-          style={controlStyle(clearBtn, clearDisabled)}
+          style={controlStyle(styles.clearBtn, styles.disabledBtn, clearDisabled)}
           disabled={clearDisabled}
           title="Clear credit pause"
           onClick={() => onClear?.()}
@@ -266,7 +278,7 @@ export function ConsoleHeader({
           Clear
         </button>
       </div>
-    </header>
+    </Card>
   )
 }
 
