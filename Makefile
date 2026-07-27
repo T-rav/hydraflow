@@ -748,7 +748,7 @@ audit-prompts: ## Render all prompt fixtures, score against the rubric, regenera
 escape-list: ## List escape-ledger findings still awaiting a human resolution.
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/resolve_escape.py list $(ARGS)
 
-escape-resolve: ## Record a human resolution for an escape (ARGS="<id> --encoded-as <encoding>").
+escape-resolve: ## Record a human resolution for an escape (ARGS="<id> --encoded-as <encoding>" and/or "--confidence <level>").
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/resolve_escape.py resolve $(ARGS)
 
 .PHONY: arch-regen arch-check arch-serve arch-validate arch-regen-stage rebase-onto
