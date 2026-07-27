@@ -27,13 +27,13 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0019 | enforced | `pytest:tests/test_epic_manager.py`, `pytest:tests/test_post_merge_handler.py` |
 | ADR-0021 | enforced | `pytest:tests/test_state_persistence.py`, `pytest:tests/test_event_persistence.py`, `pytest:tests/test_data_migration_d2.py` |
 | ADR-0022 | enforced | `pytest:tests/test_integration_pipeline.py` |
-| ADR-0023 | manual | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
+| ADR-0023 | enforced | `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` |
 | ADR-0024 | enforced | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
 | ADR-0025 | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0027 | decision-of-record | — |
 | ADR-0028 | enforced | `pytest:tests/test_report_event_flow.py` |
 | ADR-0029 | enforced | `pytest:tests/test_caretaker_loop_wiring.py` |
-| ADR-0030 | decision-of-record | — |
+| ADR-0030 | enforced | `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` |
 | ADR-0032 | enforced | `pytest:tests/test_repo_wiki.py`, `pytest:tests/test_repo_wiki_store_git.py`, `pytest:tests/test_repo_wiki_ingest.py`, `pytest:tests/test_wiki_drift_detector.py`, `pytest:tests/test_wiki_drift_symbols.py`, `pytest:tests/test_wiki_semantic_drift.py`, `pytest:tests/test_repo_wiki_temporal.py`, `pytest:tests/test_wiki_corroboration.py` |
 | ADR-0034 | enforced | `pytest:tests/test_state_machine.py` |
 | ADR-0035 | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
@@ -78,7 +78,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0103 | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py` |
-| ADR-0107 | decision-of-record | — |
+| ADR-0107 | enforced | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0109 | enforced | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 | ADR-0111 | enforced | `pytest:tests/test_flows.py` |
@@ -88,13 +88,15 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | Check | Protects |
 |---|---|
 | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` | ADR-0051 |
-| `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` | ADR-0023 |
 | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` | ADR-0035 |
 | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` | ADR-0025 |
 | `make:trust-contracts` | ADR-0047 |
 | `pytest:tests/architecture/test_adr0009_process_per_repo_isolation.py::test_workspace_paths_are_repo_slug_scoped_and_collision_free` | ADR-0009 |
+| `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` | ADR-0023 |
+| `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` | ADR-0030 |
 | `pytest:tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only` | ADR-0042 |
 | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` | ADR-0065 |
+| `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` | ADR-0107 |
 | `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
 | `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0089 |
 | `pytest:tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
@@ -199,7 +201,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 
 | ADR | Prose pointer |
 |---|---|
-| ADR-0023 | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
 | ADR-0025 | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0035 | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
 | ADR-0051 | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |

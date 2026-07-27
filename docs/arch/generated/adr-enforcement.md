@@ -7,12 +7,12 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 ## Summary
 
 - **Accepted ADRs:** 74
-- **REAL** (real asserting enforcement): 65 (87.8%)
-- **WEAK** (prose-only or tautological): 4
-- **MISSING** (no `**Enforced by:**`): 5
-- **Unenforced-decision debt** (WEAK + MISSING): **9 / 74 = 12.2%**
+- **REAL** (real asserting enforcement): 68 (91.9%)
+- **WEAK** (prose-only or tautological): 3
+- **MISSING** (no `**Enforced by:**`): 3
+- **Unenforced-decision debt** (WEAK + MISSING): **6 / 74 = 8.1%**
 
-By declared `**Enforcement:**` kind: `enforced` 65 · `manual` 4 · `decision-of-record` 5.
+By declared `**Enforcement:**` kind: `enforced` 68 · `manual` 3 · `decision-of-record` 3.
 
 ## Classification
 
@@ -37,13 +37,13 @@ By declared `**Enforcement:**` kind: `enforced` 65 · `manual` 4 · `decision-of
 | ADR-0019 | REAL | enforced | `pytest:tests/test_epic_manager.py`, `pytest:tests/test_post_merge_handler.py` |
 | ADR-0021 | REAL | enforced | `pytest:tests/test_state_persistence.py`, `pytest:tests/test_event_persistence.py`, `pytest:tests/test_data_migration_d2.py` |
 | ADR-0022 | REAL | enforced | `pytest:tests/test_integration_pipeline.py` |
-| ADR-0023 | WEAK | manual | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
+| ADR-0023 | REAL | enforced | `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` |
 | ADR-0024 | REAL | enforced | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
 | ADR-0025 | WEAK | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0027 | MISSING | decision-of-record | — |
 | ADR-0028 | REAL | enforced | `pytest:tests/test_report_event_flow.py` |
 | ADR-0029 | REAL | enforced | `pytest:tests/test_caretaker_loop_wiring.py` |
-| ADR-0030 | MISSING | decision-of-record | — |
+| ADR-0030 | REAL | enforced | `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` |
 | ADR-0032 | REAL | enforced | `pytest:tests/test_repo_wiki.py`, `pytest:tests/test_repo_wiki_store_git.py`, `pytest:tests/test_repo_wiki_ingest.py`, `pytest:tests/test_wiki_drift_detector.py`, `pytest:tests/test_wiki_drift_symbols.py`, `pytest:tests/test_wiki_semantic_drift.py`, `pytest:tests/test_repo_wiki_temporal.py`, `pytest:tests/test_wiki_corroboration.py` |
 | ADR-0034 | REAL | enforced | `pytest:tests/test_state_machine.py` |
 | ADR-0035 | WEAK | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
@@ -88,7 +88,7 @@ By declared `**Enforcement:**` kind: `enforced` 65 · `manual` 4 · `decision-of
 | ADR-0103 | REAL | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | REAL | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0106 | REAL | enforced | `pytest:tests/regressions/test_issue_9552.py` |
-| ADR-0107 | MISSING | decision-of-record | — |
+| ADR-0107 | REAL | enforced | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0109 | REAL | enforced | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | REAL | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 | ADR-0111 | REAL | enforced | `pytest:tests/test_flows.py` |
@@ -98,14 +98,11 @@ By declared `**Enforcement:**` kind: `enforced` 65 · `manual` 4 · `decision-of
 | ADR | Class | Kind | Pointer |
 |---|---|---|---|
 | ADR-0003 | MISSING | decision-of-record | — |
-| ADR-0023 | WEAK | manual | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
 | ADR-0025 | WEAK | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0027 | MISSING | decision-of-record | — |
-| ADR-0030 | MISSING | decision-of-record | — |
 | ADR-0035 | WEAK | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
 | ADR-0051 | WEAK | manual | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |
 | ADR-0091 | MISSING | decision-of-record | — |
-| ADR-0107 | MISSING | decision-of-record | — |
 
 ## Weak / tautological enforcements
 

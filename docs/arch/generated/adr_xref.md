@@ -30,13 +30,13 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0020 | — | — |
 | ADR-0021 | `src.config`, `src.data_migration`, `src.file_util`, `src.metrics_manager`, `src.state._session` | `pytest:tests/test_state_persistence.py`, `pytest:tests/test_event_persistence.py`, `pytest:tests/test_data_migration_d2.py` |
 | ADR-0022 | `src.config`, `src.issue_store` | `pytest:tests/test_integration_pipeline.py` |
-| ADR-0023 | — | `Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").` |
+| ADR-0023 | — | `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` |
 | ADR-0024 | `src.agent`, `src.implement_phase`, `src.state.__init__` | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
 | ADR-0025 | `src.models`, `src.reviewer` | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0027 | `src.agent`, `src.reviewer` | — |
 | ADR-0028 | — | `pytest:tests/test_report_event_flow.py` |
 | ADR-0029 | — | `pytest:tests/test_caretaker_loop_wiring.py` |
-| ADR-0030 | `src.dashboard_routes._routes` | — |
+| ADR-0030 | `src.dashboard_routes._routes` | `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` |
 | ADR-0031 | `src.config`, `src.discover_phase`, `src.discover_runner`, `src.models`, `src.plan_phase`, `src.review_phase._phase`, `src.shape_phase`, `src.shape_runner`, `src.triage_phase` | `pytest:tests/test_discover_phase.py`, `pytest:tests/test_shape_phase.py`, `pytest:tests/test_discover_runner.py`, `pytest:tests/test_shape_runner.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
 | ADR-0032 | `src.base_runner`, `src.repo_wiki`, `src.repo_wiki_loop`, `src.wiki_compiler` | `pytest:tests/test_repo_wiki.py`, `pytest:tests/test_repo_wiki_store_git.py`, `pytest:tests/test_repo_wiki_ingest.py`, `pytest:tests/test_wiki_drift_detector.py`, `pytest:tests/test_wiki_drift_symbols.py`, `pytest:tests/test_wiki_semantic_drift.py`, `pytest:tests/test_repo_wiki_temporal.py`, `pytest:tests/test_wiki_corroboration.py` |
 | ADR-0033 | `src.adr_reviewer`, `src.config` | — |
@@ -113,7 +113,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0104 | — | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0105 | — | `'tests/test_issue_decomposer.py'; 'tests/test_decomposition_council.py'; 'tests/test_auto_agent_decompose_terminal.py'; 'tests/test_decomposition_depth_cap.py'; 'tests/scenarios/test_decompose_to_converge_scenario.py'; 'tests/sandbox_scenarios/scenarios/s54_decompose_to_converge.py'. Nested-lineage follow-up (#9757): 'tests/regressions/test_epic_lineage_nested_convergence.py'; 'tests/regressions/test_epic_sweeper_lineage_gate.py'; 'tests/regressions/test_epic_manager_lineage_propagation.py'; 'tests/sandbox_scenarios/scenarios/s55_nested_decompose.py'.` |
 | ADR-0106 | `src.base_background_loop`, `src.config`, `src.event_loop_watchdog`, `src.health_monitor_loop`, `src.orchestrator`, `src.settings_registry` | `pytest:tests/regressions/test_issue_9552.py` |
-| ADR-0107 | `src.discover_runner`, `src.models`, `src.plan_phase`, `src.shape_runner`, `src.triage_phase` | — |
+| ADR-0107 | `src.discover_runner`, `src.models`, `src.plan_phase`, `src.shape_runner`, `src.triage_phase` | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0108 | `src.event_loop_watchdog`, `src.health_monitor_loop`, `src.issue_fetcher`, `src.issue_store`, `src.mockworld.fakes.fake_clock`, `src.mockworld.sandbox_main`, `src.models`, `src.phase_utils`, `src.retrospective_queue`, `src.subprocess_util` | — |
 | ADR-0109 | `src.agent_cli`, `src.exception_classify`, `src.ports`, `src.review_advisor`, `src.review_phase._phase`, `src.reviewer`, `src.ultra_review` | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | `src.base_runner`, `src.runner_utils`, `src.subprocess_util` | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |

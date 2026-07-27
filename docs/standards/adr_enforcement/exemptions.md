@@ -38,4 +38,7 @@ list below):
 
 ## Active exemptions
 
-_(none — seeded empty; see the baseline for the current debt set)_
+- ADR-0025: Symmetric N×3 field-assertion coverage requires knowing which methods populate which shared-model fields and whether each has all three legs — a semantic-coverage judgment no non-tautological static check can make; enforcement is the reviewer's field-name search.
+- ADR-0027: The single-definition rule needs Rule-4 semantic exclusions (Protocol/ABC, Exception/Enum, intentional dupes) and the tree legitimately carries same-named classes across modules (e.g. per-domain `GateResult`/`CheckResult`, local `_PRPort` protocols), so any check needs a curated allow-list that re-encodes the manual review; the ADR itself defers automation behind its Rule-5 triggers.
+- ADR-0035: Toggle-assertion consistency links a config toggle to the code path it gates and to whether a given test sets that toggle in its fixture — the ADR notes static analysis of mock/fixture setups is fragile, so no non-tautological check can fail on violation.
+- ADR-0051: Iterative fresh-eyes review-until-convergence is a pure human-process cadence (Claude Code review skills, run per feature) with no on-disk invariant a test could assert.
