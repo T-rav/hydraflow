@@ -65,9 +65,13 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('operator-drawer-slot')).toBeInTheDocument()
   })
 
+  it('mounts the real ConsoleHeader in the header slot (Task 8)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    expect(screen.getByTestId('console-header')).toBeInTheDocument()
+  })
+
   it('renders placeholder children for the not-yet-built components', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
-    expect(screen.getByTestId('console-header-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('item-workspace-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('vitals-card-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('activity-drawer-placeholder')).toBeInTheDocument()
@@ -83,12 +87,12 @@ describe('OperatorConsoleView — shell', () => {
     expect(container.querySelectorAll('[data-testid^="stage-tile-"]')).toHaveLength(6)
   })
 
-  it('reflects URL-initialised selection in the header breadcrumb placeholder', () => {
+  it('reflects URL-initialised selection in the header breadcrumb', () => {
     window.history.replaceState({}, '', '/?repo=acme%2Fweb&stage=plan')
     render(<OperatorConsoleView socket={makeSocket()} />)
     // root + repo + stage = depth 3
-    expect(screen.getByTestId('console-header-placeholder')).toHaveTextContent('acme/web')
-    expect(screen.getByTestId('console-header-placeholder')).toHaveTextContent('Plan')
+    expect(screen.getByTestId('console-header')).toHaveTextContent('acme/web')
+    expect(screen.getByTestId('console-header')).toHaveTextContent('Plan')
   })
 
   it('does not crash on an empty socket (no events, no pipeline slices)', () => {
