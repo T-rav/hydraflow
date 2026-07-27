@@ -44,10 +44,20 @@ RUN apt-get update \
         [ -n "$src" ] && ln -sf "$src" "${ICU_DIR}/${lib}.so.74"; \
     done
 
-# Install Node.js 20.x via NodeSource
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+# Install Node.js 20.x via NodeSource.
+# The NodeSource CDN intermittently returns 403 (or 5xx) on setup_20.x; a
+# single-shot `curl | bash` turns that transient into a hard build failure
+# (the setup script never runs, so `apt-get install nodejs` can't find the
+# package). Retry the fetch with backoff, then run it; if the CDN is truly
+# down all retries exhaust and the build fails loudly at apt-get.
+RUN for i in 1 2 3 4 5; do \
+        curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh && break; \
+        echo "NodeSource fetch attempt $i failed (CDN 403/5xx); retrying in $((i * 5))s"; \
+        sleep $((i * 5)); \
+    done \
+    && bash /tmp/nodesource_setup.sh \
     && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /tmp/nodesource_setup.sh
 
 # Install gh CLI via official APT repo
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
