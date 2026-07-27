@@ -202,5 +202,7 @@ def test_exemplar_decision_of_record_is_missing():
 
 
 def test_exemplar_manual_is_weak():
-    # ADR-0042 (two-tier branch) is manual with a prose ruleset-review pointer.
-    assert classify_adr_enforcement(_live()[42], REPO) is EnforcementClass.WEAK
+    # ADR-0051 (iterative production-readiness review) is genuinely process-only:
+    # manual with a prose workflow pointer, not a runnable check. (ADR-0042, the
+    # former exemplar, now carries a real asserting ruleset check — #10623.)
+    assert classify_adr_enforcement(_live()[51], REPO) is EnforcementClass.WEAK
