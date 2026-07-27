@@ -85,6 +85,17 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('vitals-card')).toBeInTheDocument()
   })
 
+  it('mounts the LoopsPanel in the vitals slot (all-loops quick view)', () => {
+    render(<OperatorConsoleView socket={makeSocket({
+      backgroundWorkers: [
+        { name: 'ci_monitor', status: 'ok', last_run: '2026-07-26T12:00:00Z', details: { filed: 0 }, enabled: true, interval_seconds: 300 },
+      ],
+    })} />)
+    const vitalsSlot = screen.getByTestId('operator-vitals-slot')
+    expect(vitalsSlot).toContainElement(screen.getByTestId('loops-panel'))
+    expect(screen.getByTestId('loop-row-ci_monitor')).toBeInTheDocument()
+  })
+
   it('mounts the real PipelineRail in the pipeline slot (Task 3)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     expect(screen.getByTestId('pipeline-rail')).toBeInTheDocument()
