@@ -48,6 +48,7 @@ from contract_refresh_loop import ContractRefreshLoop
 from convergence_oscillation_loop import ConvergenceOscillationLoop
 from corpus_learning_loop import CorpusLearningLoop
 from cost_budget_watcher_loop import CostBudgetWatcherLoop  # noqa: TCH001
+from decomposition_council import DecompositionCouncil
 from dependabot_merge_loop import DependabotMergeLoop
 from detector_calibration_loop import DetectorCalibrationLoop
 from diagnostic_loop import DiagnosticLoop  # noqa: TCH001
@@ -74,6 +75,8 @@ from gate_activation_check import check_gate_activation
 from gate_activator_loop import GateActivatorLoop  # noqa: TCH001
 from gate_health_loop import GateHealthLoop
 from github_cache_loop import GitHubCacheLoop, GitHubDataCache
+from giveup_self_solve import PlanRetrySelfSolver
+from giveup_window import GiveUpClass, GiveUpTracker, GiveUpWindow, resolve_window
 from harness_insights import HarnessInsightStore
 from health_monitor_loop import HealthMonitorLoop
 from hitl_phase import HITLPhase
@@ -82,6 +85,7 @@ from human_steering_loop import HumanSteeringLoop
 from implement_phase import ImplementPhase
 from intervention_tally_loop import InterventionTallyLoop
 from issue_cache import IssueCache
+from issue_decomposer import IssueDecomposer
 from issue_fetcher import GitHubTaskFetcher, IssueFetcher
 from issue_refinement_loop import IssueRefinementLoop
 from issue_store import IssueStore
@@ -933,6 +937,31 @@ def build_services(
     # (automated diagnostic agent gets one more autonomous shot at
     # triaging the failure), HITL as fallback. Matches the existing
     # PipelineEscalator pattern in src/phase_utils.py.
+    #
+    # Formal give-up window (#10735): when enabled, the monotonic
+    # max_route_backs cap is superseded by an N-in-T restart-intensity window,
+    # and exhaustion routes to a machine self-solve (ADR-0105 decompose /
+    # auto-agent diagnose) via PlanRetrySelfSolver — NOT to human-required.
+    # human-required is applied only if the self-solve path itself exhausts.
+    give_up_tracker: GiveUpTracker | None = None
+    plan_retry_window: GiveUpWindow | None = None
+    plan_retry_self_solver: PlanRetrySelfSolver | None = None
+    if config.giveup_window_enabled:
+        # Reuse the shared epic_manager + subprocess_runner so the council's
+        # LLM calls route through the same docker/host dial as every other
+        # loop (mirrors AutoAgentPreflightLoop's own decomposer/council build).
+        giveup_decomposer = IssueDecomposer(prs, epic_manager, state, config)
+        giveup_council = DecompositionCouncil(subprocess_runner, config)
+        give_up_tracker = GiveUpTracker(state)
+        plan_retry_window = resolve_window(config, GiveUpClass.PLAN_RETRY)
+        plan_retry_self_solver = PlanRetrySelfSolver(
+            config=config,
+            state=state,
+            prs=prs,
+            decomposer=giveup_decomposer,
+            council=giveup_council,
+            diagnose_label=config.diagnose_label[0],
+        )
     route_back_coordinator = RouteBackCoordinator(
         cache=issue_cache,
         prs=prs,
@@ -940,6 +969,9 @@ def build_services(
         hitl_label=config.hitl_label[0],
         diagnose_label=config.diagnose_label[0],
         max_route_backs=2,
+        give_up_tracker=give_up_tracker,
+        plan_retry_window=plan_retry_window,
+        self_solve=plan_retry_self_solver,
     )
     # The gate enforces stage preconditions only when BOTH the cache is
     # enabled (so records exist to check) AND the dedicated gate flag

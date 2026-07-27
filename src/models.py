@@ -1907,6 +1907,32 @@ class PolicyEvent(BaseModel):
 CONVERGENCE_BOUNDARY_STAGES: tuple[str, ...] = ("triage", "plan")
 
 
+class GiveUpClassState(BaseModel):
+    """Per-``(issue, child-class)`` give-up window state (#10735).
+
+    Records the timestamps of abnormal exits/retries for one restart-intensity
+    class plus which self-solve action last fired, so the ``N``-in-``T`` window
+    can be evaluated and the current state surfaced on ``/api/*``.
+    """
+
+    # Unix timestamps of give-up events, pruned to the active window by the
+    # tracker on every record so this list stays bounded.
+    timestamps: list[float] = Field(default_factory=list)
+    # "", "decompose", "diagnose", or "human-required" — the last self-solve
+    # action the terminal fired for this class.
+    last_action: str = ""
+    # How many times the window was exhausted (a self-solve action fired).
+    action_count: int = 0
+    # When the window was last exhausted (Unix ts), or None if never.
+    last_exhausted_ts: float | None = None
+
+
+class GiveUpIssueState(BaseModel):
+    """One issue's give-up windows, keyed by child-class value (#10735)."""
+
+    classes: dict[str, GiveUpClassState] = Field(default_factory=dict)
+
+
 class ConvergenceLedger(BaseModel):
     """Single source of truth for one issue's two-level convergence state.
 
@@ -2156,6 +2182,11 @@ class StateData(BaseModel):
     # JSON-compat with the rest of StateData. See route_back.py and
     # state/_route_back.py.
     route_back_counts: dict[str, int] = Field(default_factory=dict)
+    # Per-issue give-up window events (#10735). Keyed by str(issue_id); each
+    # value carries the N-in-T restart-intensity timestamps + last self-solve
+    # action per child-class. default_factory keeps pre-change state JSON files
+    # loading without migration (schema-evolution pattern).
+    give_up_events: dict[str, GiveUpIssueState] = Field(default_factory=dict)
     # Review-orphan requeue (#9815): review-labeled issues with no open
     # agent PR (restart edge case). Strikes count consecutive PR-less
     # sightings; requeues count bounded ready-relabels before HITL.

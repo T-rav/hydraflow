@@ -49,6 +49,7 @@ from dashboard_routes._common import (
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from github_cache_loop import GitHubDataCache
+from giveup_window import GiveUpClass, resolve_window
 from issue_fetcher import IssueFetcher
 from models import (
     BGWorkerHealth,
@@ -1649,6 +1650,38 @@ def create_router(
         """Return the full state tracker snapshot as JSON."""
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
         return JSONResponse(_state.to_dict())
+
+    @router.get("/api/give-up")
+    async def get_give_up_state(
+        repo: RepoSlugParam = None,
+    ) -> JSONResponse:
+        """Give-up window state per issue (#10735, epic #10733 child 2).
+
+        Surfaces the formal restart-intensity windows: for every tracked issue,
+        the per-child-class cycle count within the window plus which self-solve
+        action last fired (decompose / diagnose / human-required). ``thresholds``
+        echoes the configured ``N``-in-``T`` per class so a reader can see how
+        close an issue is to a give-up. ``enabled`` reflects whether the window
+        actually supersedes the legacy route-back cap for this line.
+        """
+        _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
+        thresholds = {
+            cls.value: {
+                "max_restarts": (w := resolve_window(_cfg, cls)).max_restarts,
+                "window_seconds": w.window_seconds,
+            }
+            for cls in GiveUpClass
+        }
+        return JSONResponse(
+            {
+                "enabled": bool(getattr(_cfg, "giveup_window_enabled", False)),
+                "thresholds": thresholds,
+                "issues": {
+                    str(issue_id): snap
+                    for issue_id, snap in _state.all_give_up_snapshots().items()
+                },
+            }
+        )
 
     @router.get("/api/stats")
     async def get_stats(
