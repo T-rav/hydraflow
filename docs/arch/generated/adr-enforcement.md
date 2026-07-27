@@ -6,13 +6,13 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 74
-- **REAL** (real asserting enforcement): 68 (91.9%)
+- **Accepted ADRs:** 73
+- **REAL** (real asserting enforcement): 69 (94.5%)
 - **WEAK** (prose-only or tautological): 3
-- **MISSING** (no `**Enforced by:**`): 3
-- **Unenforced-decision debt** (WEAK + MISSING): **6 / 74 = 8.1%**
+- **MISSING** (no `**Enforced by:**`): 1
+- **Unenforced-decision debt** (WEAK + MISSING): **4 / 73 = 5.5%**
 
-By declared `**Enforcement:**` kind: `enforced` 68 · `manual` 3 · `decision-of-record` 3.
+By declared `**Enforcement:**` kind: `enforced` 69 · `manual` 3 · `decision-of-record` 1.
 
 ## Classification
 
@@ -20,7 +20,6 @@ By declared `**Enforcement:**` kind: `enforced` 68 · `manual` 3 · `decision-of
 |---|---|---|---|
 | ADR-0001 | REAL | enforced | `pytest:tests/test_orchestrator_loops.py`, `pytest:tests/architecture/test_loop_count_matches_adr0001.py` |
 | ADR-0002 | REAL | enforced | `pytest:tests/test_state_machine.py` |
-| ADR-0003 | MISSING | decision-of-record | — |
 | ADR-0004 | REAL | enforced | `pytest:tests/test_agent_cli.py`, `pytest:tests/test_base_runner.py` |
 | ADR-0005 | REAL | enforced | `pytest:tests/test_implement_phase.py` |
 | ADR-0007 | REAL | enforced | `pytest:tests/test_dashboard_routes_repo.py` |
@@ -74,7 +73,6 @@ By declared `**Enforcement:**` kind: `enforced` 68 · `manual` 3 · `decision-of
 | ADR-0088 | REAL | enforced | `pytest:tests/test_label_drift_watcher_loop.py`, `pytest:tests/test_label_drift_watcher_integration.py` |
 | ADR-0089 | REAL | enforced | `pytest:tests/test_memory_backlog_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
 | ADR-0090 | REAL | enforced | `pytest:tests/test_atlas_routes.py` |
-| ADR-0091 | MISSING | decision-of-record | — |
 | ADR-0092 | REAL | enforced | `pytest:tests/test_untrusted_text.py`, `pytest:tests/test_preflight_untrusted_fencing.py`, `pytest:tests/test_agent_cli.py`, `pytest:tests/test_agent_advanced.py` |
 | ADR-0093 | REAL | enforced | `pytest:tests/test_loop_fitness_completeness.py` |
 | ADR-0094 | REAL | enforced | `pytest:tests/test_convergence_ledger.py`, `pytest:tests/test_convergence_gate.py`, `pytest:tests/scenarios/test_convergence_review_mockworld.py`, `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
@@ -92,17 +90,16 @@ By declared `**Enforcement:**` kind: `enforced` 68 · `manual` 3 · `decision-of
 | ADR-0109 | REAL | enforced | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | REAL | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 | ADR-0111 | REAL | enforced | `pytest:tests/test_flows.py` |
+| ADR-0112 | REAL | enforced | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 
 ## Unenforced-decision debt
 
 | ADR | Class | Kind | Pointer |
 |---|---|---|---|
-| ADR-0003 | MISSING | decision-of-record | — |
 | ADR-0025 | WEAK | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0027 | MISSING | decision-of-record | — |
 | ADR-0035 | WEAK | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
 | ADR-0051 | WEAK | manual | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |
-| ADR-0091 | MISSING | decision-of-record | — |
 
 ## Weak / tautological enforcements
 

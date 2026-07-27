@@ -118,6 +118,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0109 | `src.agent_cli`, `src.exception_classify`, `src.ports`, `src.review_advisor`, `src.review_phase._phase`, `src.reviewer`, `src.ultra_review` | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | `src.base_runner`, `src.runner_utils`, `src.subprocess_util` | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 | ADR-0111 | `src.flows.adapters`, `src.flows.flow` | `pytest:tests/test_flows.py` |
+| ADR-0112 | `src.config`, `src.ports`, `src.workspace` | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 
 ## Module → ADRs
 
@@ -146,7 +147,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.branch_protection_auditor_loop` | ADR-0082 |
 | `src.caching_issue_store` | ADR-0041 |
 | `src.code_grooming_loop` | ADR-0065 |
-| `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065, ADR-0084, ADR-0094, ADR-0102, ADR-0103, ADR-0106 |
+| `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065, ADR-0084, ADR-0094, ADR-0102, ADR-0103, ADR-0106, ADR-0112 |
 | `src.contract_diff` | ADR-0047, ADR-0052 |
 | `src.contract_recording` | ADR-0047, ADR-0052 |
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
@@ -224,7 +225,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.plan_council_prompts` | ADR-0064 |
 | `src.plan_phase` | ADR-0014, ADR-0031, ADR-0063, ADR-0064, ADR-0096, ADR-0107 |
 | `src.planner` | ADR-0103 |
-| `src.ports` | ADR-0003, ADR-0044, ADR-0066, ADR-0067, ADR-0068, ADR-0069, ADR-0070, ADR-0109 |
+| `src.ports` | ADR-0003, ADR-0044, ADR-0066, ADR-0067, ADR-0068, ADR-0069, ADR-0070, ADR-0109, ADR-0112 |
 | `src.post_merge_handler` | ADR-0012, ADR-0014, ADR-0015, ADR-0016, ADR-0019, ADR-0064 |
 | `src.pr_manager` | ADR-0002, ADR-0005, ADR-0011, ADR-0013, ADR-0018, ADR-0045, ADR-0055, ADR-0084, ADR-0088 |
 | `src.pr_unsticker` | ADR-0077 |
@@ -301,7 +302,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.wiki_carryover` | ADR-0064 |
 | `src.wiki_compiler` | ADR-0032 |
 | `src.wiki_rot_detector_loop` | ADR-0045 |
-| `src.workspace` | ADR-0003, ADR-0009, ADR-0010, ADR-0055 |
+| `src.workspace` | ADR-0003, ADR-0009, ADR-0010, ADR-0055, ADR-0112 |
 | `src.workspace_gc_loop` | ADR-0069 |
 
 ## Symbol-Granularity Nudges

@@ -1,8 +1,15 @@
 # ADR-0003: Git Worktrees for Issue Isolation
 
-**Status:** Accepted
+**Status:** Superseded
+**Superseded by:** ADR-0112 (Per-Issue Isolation via Local Git Clone)
 **Date:** 2026-02-26
 **Enforcement:** decision-of-record
+
+> **Superseded by [ADR-0112](0112-per-issue-isolation-via-local-git-clone.md).**
+> The per-issue *isolation* decision holds, but the *mechanism* moved off
+> `git worktree add`: `WorkspaceManager` now creates an independent
+> `git clone --local` per issue (hardlinked objects, own `.git/`). The
+> historical content below is retained unchanged.
 
 Worktree isolation mechanics are exercised incidentally by
 `tests/test_integration_worktree.py`; that coverage is not treated as a
@@ -63,3 +70,4 @@ Default is a sibling directory to the repo root (e.g., `../hydraflow-worktrees/`
 - `src/ports.py:WorkspacePort` — formal interface
 - `CLAUDE.md` — "Always implement issue work on a dedicated git worktree branch"
 - ADR-0001 (Five Concurrent Async Loops) for the concurrency model that makes parallel worktrees necessary
+- Superseded by ADR-0112 (Per-Issue Isolation via Local Git Clone) — replaces `git worktree add` with an independent `git clone --local` per issue.

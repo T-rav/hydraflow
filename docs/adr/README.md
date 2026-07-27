@@ -41,7 +41,7 @@ cadence and files remediation issues on drift.
 |-----|-------|--------|
 | [0001](0001-five-concurrent-async-loops.md) | Five Concurrent Async Loops | Accepted |
 | [0002](0002-labels-as-state-machine.md) | GitHub Labels as the Pipeline State Machine | Accepted |
-| [0003](0003-git-worktrees-for-isolation.md) | Git Worktrees for Issue Isolation | Accepted |
+| [0003](0003-git-worktrees-for-isolation.md) | Git Worktrees for Issue Isolation | Superseded |
 | [0004](0004-agent-cli-as-runtime.md) | CLI-based Agent Runtime (Claude / Codex / Pi.dev) | Accepted |
 | [0005](0005-pr-recovery-and-zero-diff-branch-handling.md) | PR Recovery and Zero-Diff Branch Handling in Implement Phase | Accepted |
 | [0006](0006-repo-runtime-isolation.md) | RepoRuntime Isolation Architecture | Superseded |
@@ -128,7 +128,7 @@ cadence and files remediation issues on drift.
 | [0088](0088-label-drift-caretaker-loop.md) | LabelDriftWatcherLoop — Cross-Entity State-Machine Drift Caretaker | Accepted |
 | [0089](0089-memory-backlog-loop.md) | MemoryBacklogLoop — promote session-memory feedback to the find queue | Accepted |
 | [0090](0090-atlas-knowledge-graph-dashboard.md) | Atlas — Knowledge Graph Dashboard Surface | Accepted |
-| [0091](0091-epic-monitor-completion-sweep.md) | Fold Epic Completion Sweep into Epic Monitor | Accepted |
+| [0091](0091-epic-monitor-completion-sweep.md) | Fold Epic Completion Sweep into Epic Monitor | Superseded |
 | [0092](0092-untrusted-text-trust-boundary.md) | Untrusted-text trust boundary for agent prompts | Accepted |
 | [0093](0093-loop-fitness-as-measured-contract.md) | Loop fitness as a measured contract | Accepted |
 | [0094](0094-two-level-convergence-gate-and-ledger.md) | Two-level convergence: Gate + ConvergenceLedger | Accepted |
@@ -149,6 +149,7 @@ cadence and files remediation issues on drift.
 | [0109](0109-ultra-review-opt-in-deep-review-tier.md) | Opt-in "ultra" deep-review tier for the review phase | Accepted |
 | [0110](0110-provider-harness-backend-split.md) | Provider/Harness Backend Split — z.ai as a Claude-harness backend | Accepted |
 | [0111](0111-in-framework-flow-dag-runtime.md) | In-framework flow (DAG) runtime for workers and phases | Accepted |
+| [0112](0112-per-issue-isolation-via-local-git-clone.md) | Per-Issue Isolation via Local Git Clone | Accepted |
 
 ## Adding a new ADR
 

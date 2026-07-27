@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-07-12
-- **Supersedes:** none
+- **Supersedes:** [ADR-0091](0091-epic-monitor-completion-sweep.md) (Fold Epic Completion Sweep into Epic Monitor) — this decision re-splits epic completion out of the monitor tick that ADR-0091 folded together: completion becomes event-driven (`EpicManager._try_auto_close`) plus a separate `EpicSweeperLoop` (ADR-0081), so the monitor tick no longer sweeps.
 - **Superseded by:** none
 - **Amends:** [ADR-0084](0084-auto-agent-universal-root-cause-gate.md) (Auto-Agent as a Universal, Persistent, Root-Cause HITL Gate) — keeps its architecture, interception model, AND its terminal `human-required` hand-off; inserts an autonomous **decomposition** step *before* that terminal, so `human-required` fires only for the genuinely unmergeable / undecomposable dead-end.
 - **Related:** [ADR-0002](0002-labels-as-state-machine.md) (label state machine); [ADR-0050](0050-auto-agent-hitl-preflight.md) (auto-agent pre-flight loop); [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker loop pattern); [ADR-0044](0044-hydraflow-principles.md) (recursion safety); [ADR-0051](0051-iterative-production-readiness-review.md) (iterative review convergence); [ADR-0059](0059-advisor-pattern-self-repairing-review.md) (advisor / council pattern); [ADR-0032](0032-per-repo-wiki-knowledge-base.md) (wiki knowledge base informing the council).
