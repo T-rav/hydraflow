@@ -70,9 +70,9 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('console-header')).toBeInTheDocument()
   })
 
-  it('renders placeholder children for the not-yet-built components', () => {
+  it('mounts the real ItemWorkspace in the detail slot (Task 4)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
-    expect(screen.getByTestId('item-workspace-placeholder')).toBeInTheDocument()
+    expect(screen.getByTestId('item-workspace')).toBeInTheDocument()
   })
 
   it('mounts the real ActivityDrawer in the drawer slot (Task 7)', () => {

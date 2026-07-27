@@ -15,6 +15,92 @@ import {
   WORKSTREAM_SIDE_INSET_PX,
 } from '../styles/sectionStyles'
 
+// ---------------------------------------------------------------------------
+// Shared transcript-line row renderer (#10556 Task 4).
+//
+// Extracted here so the operator console's TranscriptStream reuses ONE formatted
+// row implementation instead of forking its own. Presentational and pure: it
+// takes a single view-model row from `toTranscript(...)`
+// (`{ ts, kind, text, meta }`, kind ∈ read|edit|run|pass|fail|agent) and renders
+// a timestamp + a colour-coded kind tag + the line text. Additive — StreamView's
+// own render path is unchanged.
+// ---------------------------------------------------------------------------
+
+// Per-kind accent for the transcript kind tag. Unknown kinds fall back to the
+// agent colour but keep their raw `data-kind` for downstream styling/tests.
+export const TRANSCRIPT_KIND_COLORS = {
+  read: theme.textMuted,
+  edit: theme.cyan,
+  run: theme.purple,
+  pass: theme.green,
+  fail: theme.red,
+  agent: theme.accent,
+}
+
+/** Extract a stable HH:MM:SS from an ISO timestamp (timezone-agnostic — the
+ * literal wall-clock in the string, so tests don't depend on the host TZ). */
+export function formatTranscriptTs(ts) {
+  if (!ts) return ''
+  const match = /T(\d{2}:\d{2}:\d{2})/.exec(String(ts))
+  return match ? match[1] : String(ts)
+}
+
+const transcriptRowStyles = {
+  row: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 8,
+    padding: '1px 0',
+    fontSize: 11,
+    lineHeight: 1.5,
+    minWidth: 0,
+  },
+  ts: {
+    flexShrink: 0,
+    fontFamily: 'monospace',
+    fontSize: 10,
+    color: theme.textMuted,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  kind: {
+    flexShrink: 0,
+    width: 40,
+    fontSize: 9,
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  text: {
+    flex: '1 1 auto',
+    minWidth: 0,
+    color: theme.text,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+}
+
+/**
+ * A single formatted transcript row.
+ * @param {{ row: { ts?: string, kind?: string, text?: string } }} props
+ */
+export function TranscriptRow({ row }) {
+  const kind = row?.kind || 'agent'
+  const color = TRANSCRIPT_KIND_COLORS[kind] || TRANSCRIPT_KIND_COLORS.agent
+  return (
+    <div data-testid="transcript-row" data-kind={kind} style={transcriptRowStyles.row}>
+      {row?.ts && (
+        <span data-testid="transcript-ts" style={transcriptRowStyles.ts}>
+          {formatTranscriptTs(row.ts)}
+        </span>
+      )}
+      <span data-testid="transcript-kind" style={{ ...transcriptRowStyles.kind, color }}>
+        {kind}
+      </span>
+      <span style={transcriptRowStyles.text}>{row?.text}</span>
+    </div>
+  )
+}
+
 // No-role stages (role: null) share the worker-less rendering branches, but each
 // carries its own semantics. 'merged' is success (green, "{N} merged"); 'hitl' is
 // an escalation bucket (red, "{N} needs human") and must NOT read as success.
