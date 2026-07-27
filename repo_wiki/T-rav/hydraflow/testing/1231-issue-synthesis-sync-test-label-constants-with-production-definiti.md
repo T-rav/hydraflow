@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T20:11:02.989271+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1157
+superseded_by: 1305
 ---
 
 # Sync test label constants with production definitions
