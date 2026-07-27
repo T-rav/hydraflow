@@ -4,7 +4,8 @@
 
 Accepted
 
-**Enforcement:** decision-of-record
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register
 
 ## Context
 

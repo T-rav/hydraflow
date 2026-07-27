@@ -3,7 +3,8 @@
 **Status:** Accepted
 **Accepted on:** 2026-07-21 — operator-approved full removal of the standalone product track (issue #9773).
 **Date:** 2026-07-21
-**Enforcement:** decision-of-record
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape
 **Supersedes:** ADR-0031 (Product Track Architecture — Discover and Shape Phases)
 **Amends:** ADR-0002 (GitHub Labels as the Pipeline State Machine); ADR-0064 (Earlier-Adversarial Pipeline — removes the Discover/Shape adversarial stages)
 

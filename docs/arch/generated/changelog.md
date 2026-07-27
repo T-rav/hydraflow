@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W30
 
+- `0fdaf04` — feat(adr): REAL enforcement for 3 debt ADRs, ratchet 12→9 (#10623 Task 3 batch 1) (#10717) (#10717) *(2026-07-26)*
 - `3ca2193` — refactor(flows): retire bespoke per-phase control code + document flow pattern (P4 of #10682) (#10703) (#10703) *(2026-07-26)*
 - `e1c0336` — refactor(triage): run triage as a flow (DAG) on the primitive (P3c of #10682) (#10702) (#10702) *(2026-07-26)*
 - `3f57972` — fix(adr): make ADR-0094/0095 enforcement checks genuinely assert (#10623 Task 2) (#10701) (#10701) *(2026-07-26)*

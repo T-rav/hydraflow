@@ -2,8 +2,8 @@
 
 **Status:** Accepted
 **Date:** 2026-03-08
-**Enforcement:** manual
-**Enforced by:** Code review checklist (see "Review checklist addition" below) — reviewers verify every test-local class is instantiated or referenced; no automated CI check exists (see "Scope boundaries").
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes
 
 ## Context
 
@@ -58,10 +58,15 @@ During code review of test files, reviewers must verify:
 - The policy covers classes defined inside test function bodies. Module-level test
   helper classes are outside scope because they are visible to linters and easier
   to audit.
-- No custom lint rule or AST-walking CI check is required at this stage; the
-  review checklist is sufficient given the low frequency of the pattern. If dead
-  class artifacts recur despite the checklist, a follow-up task should introduce
-  an automated check.
+- No custom lint rule or AST-walking CI check was required at first; the review
+  checklist was sufficient given the low frequency of the pattern. Per this
+  ADR's revisit clause (Alternatives §1), the automated check has since been
+  added under the ADR-enforcement backfill (epic #10623): the AST invariant is
+  now enforced by
+  `tests/architecture/test_adr0023_test_local_class_instantiation.py`, which
+  scans test-function bodies and requires every test-local class to be
+  instantiated or referenced — the reviewer checklist remains a complementary
+  human backstop for metaprogramming edge cases.
 
 ### Operational impact on HydraFlow workers
 
