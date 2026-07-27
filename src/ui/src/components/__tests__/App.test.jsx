@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, within, waitFor, act } from '@testing-library/react'
 import { tabActiveStyle, tabInactiveStyle, hitlBadgeStyle } from '../../App'
 
@@ -558,5 +558,77 @@ describe('Pipeline sub-tab under System', () => {
     fireEvent.click(screen.getByText('System'))
     fireEvent.click(screen.getByText('Pipeline'))
     expect(screen.getByText('Pipeline Controls')).toBeInTheDocument()
+  })
+})
+
+describe('Operator console cutover flag (#10556 Task 10)', () => {
+  // Deliberate deviation from the plan's "default on": the operator console is
+  // shipped OPT-IN. The classic dashboard stays the default until feature-parity
+  // is human-verified; flipping the default is a separate follow-up. The flag is
+  // selectable via a visible toggle AND a ?console=operator URL param, and the
+  // choice persists in localStorage (extending the _initialTabFromUrl pattern).
+  const CONSOLE_KEY = 'hydraflow-console-mode'
+  let originalHref
+
+  beforeEach(() => {
+    originalHref = window.location.href
+    window.localStorage.clear()
+    window.history.replaceState({}, '', '/')
+  })
+
+  afterEach(() => {
+    window.localStorage.clear()
+    window.history.replaceState({}, '', originalHref)
+  })
+
+  it('defaults to the classic dashboard — the operator console is opt-in', async () => {
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.getByTestId('main-tabs')).toBeInTheDocument()
+    expect(screen.queryByTestId('operator-console')).toBeNull()
+  })
+
+  it('mounts the OperatorConsole when ?console=operator is set', async () => {
+    window.history.replaceState({}, '', '/?console=operator')
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.getByTestId('operator-console')).toBeInTheDocument()
+    expect(screen.queryByTestId('main-tabs')).toBeNull()
+  })
+
+  it('stays on the classic dashboard for ?console=classic', async () => {
+    window.history.replaceState({}, '', '/?console=classic')
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.getByTestId('main-tabs')).toBeInTheDocument()
+    expect(screen.queryByTestId('operator-console')).toBeNull()
+  })
+
+  it('exposes a visible toggle that switches to the operator console and persists the choice', async () => {
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.getByTestId('main-tabs')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('console-mode-toggle'))
+    expect(screen.getByTestId('operator-console')).toBeInTheDocument()
+    expect(screen.queryByTestId('main-tabs')).toBeNull()
+    expect(window.localStorage.getItem(CONSOLE_KEY)).toBe('operator')
+  })
+
+  it('restores the operator console from a persisted choice (localStorage)', async () => {
+    window.localStorage.setItem(CONSOLE_KEY, 'operator')
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.getByTestId('operator-console')).toBeInTheDocument()
+  })
+
+  it('toggles back to the classic dashboard (and persists the reversal)', async () => {
+    window.history.replaceState({}, '', '/?console=operator')
+    const { default: App } = await import('../../App')
+    render(<App />)
+    expect(screen.getByTestId('operator-console')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('console-mode-toggle'))
+    expect(screen.getByTestId('main-tabs')).toBeInTheDocument()
+    expect(screen.queryByTestId('operator-console')).toBeNull()
+    expect(window.localStorage.getItem(CONSOLE_KEY)).toBe('classic')
   })
 })

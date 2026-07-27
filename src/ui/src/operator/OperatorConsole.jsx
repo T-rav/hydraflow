@@ -33,8 +33,20 @@ import { RepoOverview, buildRepoSummaries } from './RepoOverview'
 import { RepoSwitcher } from './RepoSwitcher'
 import { ItemWorkspace } from './ItemWorkspace'
 import { ActiveGrid } from './ActiveGrid'
+import { IdleState } from './states/IdleState'
+import { PausedState } from './states/PausedState'
+import { DisconnectedBanner } from './states/DisconnectedBanner'
+import { LoadingState } from './states/LoadingState'
 
 const slotStyle = { minWidth: 0 }
+
+// Active work sits in every stage except 'merged' (which is historical). An
+// idle repo has none of it — the calm IdleState replaces the detail workspace.
+function pipelineActiveCount(pipeline) {
+  return (pipeline?.stages || [])
+    .filter(s => s.key !== 'merged')
+    .reduce((sum, s) => sum + (s.count || 0), 0)
+}
 
 const MODES = [
   { key: 'focus', label: 'Focus' },
@@ -115,19 +127,54 @@ export function OperatorConsoleView({ socket = {} }) {
   )
   const activity = useMemo(() => toActivityFeed(events), [events])
 
+  // --- State-screen signals (Task 10) --------------------------------------
+  // `disconnected` is surfaced additively by useHydraFlowSocket (connected===false).
+  const disconnected = socket.disconnected === true
+  // "Has data" gates loading vs. disconnected: once anything has arrived we keep
+  // the last-known board instead of falling back to skeletons.
+  const activeCount = pipelineActiveCount(pipeline)
+  const hasData = events.length > 0 || socket.pipelineStats != null || activeCount > 0
+  // Loading only when the *real* context reports not-yet-connected AND nothing
+  // has landed. A bare `{}` test socket has connected===undefined (not false),
+  // so it keeps rendering the full shell — preserving the empty-socket contract.
+  const loading = socket.connected === false && !hasData && !disconnected
+  const paused = vitals?.factory?.state === 'paused'
+  // An idle repo has no active work and nothing drilled into — show the calm
+  // idle screen in the detail area (the hero/vitals stay visible).
+  const idle = activeCount === 0 && item == null && !showOverview
+  const onResume = socket.clearCreditPause || socket.startOrchestrator
+
   return (
     <div
       data-testid="operator-console"
       style={{
-        display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) 280px',
-        gridTemplateAreas: '"header header" "pipeline vitals" "detail vitals" "drawer drawer"',
-        gap: 12,
-        padding: 12,
-        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
         minHeight: '100%',
+        boxSizing: 'border-box',
       }}
     >
+      {disconnected && hasData && <DisconnectedBanner onRetry={socket.reconnect} />}
+      {paused && (
+        <div style={{ padding: '12px 12px 0' }}>
+          <PausedState reason={vitals?.factory?.reason} provider={vitals?.credits?.provider} onResume={onResume} />
+        </div>
+      )}
+      {loading ? (
+        <LoadingState />
+      ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) 280px',
+            gridTemplateAreas: '"header header" "pipeline vitals" "detail vitals" "drawer drawer"',
+            gap: 12,
+            padding: 12,
+            boxSizing: 'border-box',
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
       <div data-testid="operator-header-slot" style={{ ...slotStyle, gridArea: 'header' }}>
         <ConsoleHeader
           breadcrumb={breadcrumb}
@@ -153,7 +200,9 @@ export function OperatorConsoleView({ socket = {} }) {
       </div>
       <div data-testid="operator-detail-slot" style={{ ...slotStyle, gridArea: 'detail' }}>
         <ModeToggle mode={mode} select={select} />
-        {mode === 'all-active' ? (
+        {idle ? (
+          <IdleState />
+        ) : mode === 'all-active' ? (
           <ActiveGrid pipeline={pipeline} events={events} select={select} />
         ) : (
           <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
@@ -165,13 +214,17 @@ export function OperatorConsoleView({ socket = {} }) {
       <div data-testid="operator-drawer-slot" style={{ ...slotStyle, gridArea: 'drawer' }}>
         <ActivityDrawer activity={activity} select={select} />
       </div>
+        </div>
+      )}
     </div>
   )
 }
 
 /**
- * Default export: binds the live WebSocket/REST state and renders the shell.
- * Not mounted anywhere yet — the flagged cutover is Task 10.
+ * Default export: binds the live WebSocket/REST state (including the additive
+ * `disconnected` signal) and renders the shell. Mounted opt-in from App.jsx
+ * behind the `?console=operator` / toggle cutover flag (Task 10); the classic
+ * dashboard remains the default until parity is human-verified.
  */
 export function OperatorConsole() {
   const socket = useHydraFlowSocket()
