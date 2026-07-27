@@ -173,6 +173,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("epic_monitor_interval", "HYDRAFLOW_EPIC_MONITOR_INTERVAL", 1800),
     ("epic_sweep_interval", "HYDRAFLOW_EPIC_SWEEP_INTERVAL", 3600),
     ("workspace_gc_interval", "HYDRAFLOW_WORKTREE_GC_INTERVAL", 1800),
+    (
+        "worktree_gc_min_age_seconds",
+        "HYDRAFLOW_WORKTREE_GC_MIN_AGE_SECONDS",
+        1800,
+    ),
     ("stale_issue_gc_interval", "HYDRAFLOW_STALE_ISSUE_GC_INTERVAL", 3600),
     ("stale_issue_threshold_days", "HYDRAFLOW_STALE_ISSUE_THRESHOLD_DAYS", 14),
     ("ci_monitor_interval", "HYDRAFLOW_CI_MONITOR_INTERVAL", 300),
@@ -1019,6 +1024,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("workspace_gc_loop_enabled", "HYDRAFLOW_WORKSPACE_GC_LOOP_ENABLED", True),
+    (
+        "worktree_gc_all_roots_enabled",
+        "HYDRAFLOW_WORKTREE_GC_ALL_ROOTS_ENABLED",
+        True,
+    ),
     ("auto_tighten_loop_enabled", "HYDRAFLOW_AUTO_TIGHTEN_LOOP_ENABLED", True),
     ("issue_refinement_enabled", "HYDRAFLOW_ISSUE_REFINEMENT_ENABLED", True),
 ]
@@ -1773,6 +1783,25 @@ class HydraFlowConfig(BaseModel):
         le=86400,
         description="Workspace GC loop interval in seconds (default 30 min)",
         validation_alias=AliasChoices("workspace_gc_interval", "worktree_gc_interval"),
+    )
+    worktree_gc_roots: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Allow-list of filesystem roots the WorkspaceGCLoop may sweep for "
+            "orphan worktrees (#10698). Empty = use the known factory roots "
+            "resolved by worktree_gc_root_paths(). A worktree whose path is not "
+            "under one of these roots is never reaped (blast-radius gate)."
+        ),
+    )
+    worktree_gc_min_age_seconds: int = Field(
+        default=1800,
+        ge=0,
+        le=86400,
+        description=(
+            "Minimum age (seconds) a worktree must reach before the "
+            "WorkspaceGCLoop enumerate phase will reap it (#10698). Guards "
+            "against reaping a worktree created mid-run. 0 disables the guard."
+        ),
     )
     stale_issue_gc_interval: int = Field(
         default=3600,
@@ -5394,6 +5423,15 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for WorkspaceGCLoop.",
     )
+    worktree_gc_all_roots_enabled: bool = Field(
+        default=True,
+        description=(
+            "Deploy-time kill-switch for the WorkspaceGCLoop all-root "
+            "enumerate-and-reap phase (#10698). When False the loop keeps its "
+            "legacy state/orphan-dir/branch phases but does NOT enumerate "
+            "worktrees across every root."
+        ),
+    )
 
     # IssueRefinementLoop (spec #9957) — backlog-wide dedup, priority scoring,
     # operator digest.
@@ -5716,6 +5754,34 @@ class HydraFlowConfig(BaseModel):
     def workspace_path_for_issue(self, issue_number: int) -> Path:
         """Return the repo-scoped workspace directory path for a given issue number."""
         return self.workspace_base / self.repo_slug / f"issue-{issue_number}"
+
+    def worktree_gc_root_paths(self) -> list[Path]:
+        """Return the allow-list of roots the WorkspaceGCLoop may sweep (#10698).
+
+        When ``worktree_gc_roots`` is configured it wins verbatim. Otherwise
+        this returns the known factory worktree roots — where sub-agent,
+        manual/dev, genpr, and factory-operational worktrees are created —
+        so the enumerate-and-reap phase covers every leaking root, not just
+        ``workspace_base/repo_slug/issue-<N>``. A worktree whose path is not
+        under one of these roots is never reaped (fail-closed blast-radius
+        gate); operators widen coverage via ``HYDRAFLOW_WORKTREE_GC_ROOTS``.
+        """
+        if self.worktree_gc_roots:
+            return [Path(r).expanduser() for r in self.worktree_gc_roots]
+        home = Path.home()
+        candidates = [
+            self.workspace_base,
+            home / ".hydraflow" / "worktrees",
+            home / ".hydraflow" / "dev",
+            self.repo_root / ".claude" / "worktrees",
+        ]
+        seen: set[Path] = set()
+        roots: list[Path] = []
+        for root in candidates:
+            if root not in seen:
+                seen.add(root)
+                roots.append(root)
+        return roots
 
     @model_validator(mode="after")
     def resolve_defaults(self) -> HydraFlowConfig:
@@ -6560,6 +6626,13 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
         parsed = [u.strip() for u in env_steering_users.split(",") if u.strip()]
         if parsed:
             object.__setattr__(config, "human_steering_authorized_users", parsed)
+
+    # Extra worktree-GC sweep roots (comma-separated list, special-case; #10698)
+    env_gc_roots = os.environ.get("HYDRAFLOW_WORKTREE_GC_ROOTS")
+    if env_gc_roots is not None and config.worktree_gc_roots == []:
+        parsed = [r.strip() for r in env_gc_roots.split(",") if r.strip()]
+        if parsed:
+            object.__setattr__(config, "worktree_gc_roots", parsed)
 
     # Docker resource limit overrides (validated fields handled manually
     # because str/int overrides need format/bounds validation that

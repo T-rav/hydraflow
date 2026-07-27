@@ -349,6 +349,12 @@ class ConfigFactory:
         epic_monitor_interval: int = 1800,
         epic_sweep_interval: int = 3600,
         workspace_gc_interval: int = 1800,
+        worktree_gc_all_roots_enabled: bool = True,
+        worktree_gc_roots: list[str] | None = None,
+        # 0 in tests: worktrees created inside a test are brand-new, so a
+        # positive min_age would block every reap. The too-new guard's own
+        # test opts in with a positive value.
+        worktree_gc_min_age_seconds: int = 0,
         epic_stale_days: int = 7,
         epic_merge_strategy: Literal[
             "independent", "bundled", "bundled_hitl", "ordered"
@@ -620,6 +626,11 @@ class ConfigFactory:
                 epic_monitor_interval=epic_monitor_interval,
                 epic_sweep_interval=epic_sweep_interval,
                 workspace_gc_interval=workspace_gc_interval,
+                worktree_gc_all_roots_enabled=worktree_gc_all_roots_enabled,
+                worktree_gc_roots=worktree_gc_roots
+                if worktree_gc_roots is not None
+                else [],
+                worktree_gc_min_age_seconds=worktree_gc_min_age_seconds,
                 epic_stale_days=epic_stale_days,
                 epic_merge_strategy=epic_merge_strategy,
                 collaborator_check_enabled=collaborator_check_enabled,
