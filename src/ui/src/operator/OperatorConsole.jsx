@@ -21,6 +21,7 @@
 import React, { useMemo } from 'react'
 import { useHydraFlowSocket } from '../hooks/useHydraFlowSocket'
 import { useOperatorSelection } from './useOperatorSelection'
+import { ConsoleHeader } from './ConsoleHeader'
 import { PipelineRail } from './PipelineRail'
 import { toPipeline } from './model/pipeline'
 import { toTranscript } from './model/transcript'
@@ -42,15 +43,6 @@ const placeholderStyle = {
 // consume the same props the real components will, so the wiring proven here
 // stays valid as they land.
 // ---------------------------------------------------------------------------
-
-function ConsoleHeaderPlaceholder({ breadcrumb, mode }) {
-  const trail = breadcrumb.map(c => c.label).join(' › ')
-  return (
-    <div data-testid="console-header-placeholder" style={placeholderStyle}>
-      ConsoleHeader — {trail} · mode: {mode}
-    </div>
-  )
-}
 
 function ItemWorkspacePlaceholder({ item, transcript, mode }) {
   return (
@@ -102,7 +94,15 @@ export function OperatorConsoleView({ socket = {} }) {
       }}
     >
       <div data-testid="operator-header-slot" style={{ ...slotStyle, gridArea: 'header' }}>
-        <ConsoleHeaderPlaceholder breadcrumb={breadcrumb} select={select} vitals={vitals} mode={mode} />
+        <ConsoleHeader
+          breadcrumb={breadcrumb}
+          select={select}
+          vitals={vitals}
+          connected={socket.connected}
+          onStart={socket.startOrchestrator}
+          onStop={socket.stopOrchestrator}
+          onClear={socket.clearCreditPause}
+        />
       </div>
       <div data-testid="operator-pipeline-slot" style={{ ...slotStyle, gridArea: 'pipeline' }}>
         <PipelineRail pipeline={pipeline} select={select} stage={stage} />
