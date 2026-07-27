@@ -44,6 +44,75 @@
       --pink-subtle: rgba(247,120,186,0.15);
       --overlay: rgba(0,0,0,0.3);
       --intent-bg: rgba(88,166,255,0.06);
+
+      /* Non-colour scale tokens — mirror src/styles/tokens.js (epic 10556,
+         Phase 2, Task 11). Additive: no current consumer references these yet;
+         they formalise the spacing/radius/shadow scales at the CSS layer so the
+         token object and the stylesheet share one source of truth. */
+      --space-xxs: 2px;
+      --space-xs: 4px;
+      --space-sm: 8px;
+      --space-md: 12px;
+      --space-lg: 16px;
+      --space-xl: 24px;
+      --space-xxl: 32px;
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
+      --radius-xl: 12px;
+      --radius-pill: 999px;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+      --shadow-lg: 0 8px 24px rgba(0,0,0,0.5);
+    }
+
+    /* Light theme — dormant until a future toggle sets data-theme="light" on
+       the root element (wired in Task 12). Purely additive: the dark values in
+       :root above remain the default, so every current consumer is unchanged.
+       Colour values mirror the light palette in src/styles/tokens.js. */
+    :root[data-theme="light"] {
+      --bg: #ffffff;
+      --surface: #f6f8fa;
+      --surface-inset: #eaeef2;
+      --border: #d0d7de;
+
+      --text: #1f2328;
+      --text-bright: #0d1117;
+      --text-muted: #59636e;
+      --text-inactive: #818b98;
+
+      --accent: #0969da;
+      --green: #1a7f37;
+      --red: #cf222e;
+      --yellow: #9a6700;
+      --orange: #bc4c00;
+      --purple: #8250df;
+      --triage-green: #1a7f37;
+      --cyan: #1b7c83;
+      --pink: #bf3989;
+
+      --btn-green: #1f883d;
+      --btn-red: #cf222e;
+      --white: #ffffff;
+
+      --code-text: #0550ae;
+
+      --accent-hover: rgba(9,105,218,0.08);
+      --accent-subtle: rgba(9,105,218,0.15);
+      --muted-subtle: rgba(89,99,110,0.15);
+      --purple-subtle: rgba(130,80,223,0.15);
+      --yellow-subtle: rgba(154,103,0,0.15);
+      --orange-subtle: rgba(188,76,0,0.15);
+      --green-subtle: rgba(26,127,55,0.15);
+      --red-subtle: rgba(207,34,46,0.15);
+      --cyan-subtle: rgba(27,124,131,0.15);
+      --pink-subtle: rgba(191,57,137,0.15);
+      --overlay: rgba(31,35,40,0.3);
+      --intent-bg: rgba(9,105,218,0.06);
+
+      --shadow-sm: 0 1px 2px rgba(31,35,40,0.08);
+      --shadow-md: 0 4px 12px rgba(31,35,40,0.12);
+      --shadow-lg: 0 8px 24px rgba(31,35,40,0.16);
     }
     @keyframes stream-pulse {
       0%, 100% { opacity: 1; }
