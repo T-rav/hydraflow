@@ -7,6 +7,9 @@
 - **Enforcement:** enforced
 - **Enforced by:** pytest:tests/scenarios/test_convergence_oscillation_mockworld.py
 
+**Precedent:** Limit-cycle / hunting detection in control systems — recognizing sustained oscillation about a set-point rather than convergence to it
+**Divergence:** classical hunting detection watches one controlled variable's trajectory, but here the signal is a repeated cross-boundary finding-signature set spanning Triage/Shape/Plan/Review laps that no single stage's own detector can see, so a read-only caretaker consumes the pipeline-wide verdict history and escalates once to HITL (receipt: ADR-0096, #9706)
+
 ## Context
 
 Phase 2b (ADR-0096) made the ledger record LOOP_BACK/ADVANCE verdicts at each pipeline boundary (Triage, Shape, Plan, Review), giving the ledger a pipeline-wide verdict history for the first time. That history is observability data: no existing consumer acted on cross-boundary oscillation patterns.

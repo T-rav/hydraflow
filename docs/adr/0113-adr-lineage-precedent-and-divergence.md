@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-07-26
 **Enforcement:** enforced
-**Enforced by:** pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_warns
+**Enforced by:** pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails
 
 **Precedent:** Software traceability — the requirements-to-rationale linkage tradition (Gotel & Finkelstein, "An Analysis of the Requirements Traceability Problem", 1994; Cleland-Huang et al., *Software and Systems Traceability*, Springer 2012)
 **Divergence:** the traceability tradition links artifacts curated by people who reread the rationale before they act; here the corpus is read at *execution time* by generative agents that invent silently, so an unforced invention is indistinguishable from an inherited one — the forcing condition #10674 names — and the rule is that a control-plane ADR names its inherited tradition (Precedent) or its forced break with one (Divergence, citing a receipt), making unforced invention a visible defect (receipt: #10674, docs/proposals/lineage-pass-precedent-divergence.md)
@@ -53,7 +53,8 @@ the same header-field style ADR-0044 already uses (`**Status:**`,
 Rules:
 
 1. A **control-plane ADR** — a decision that defines the control system —
-   carries at least one of the two lines. The audit warns on absence.
+   carries at least one of the two lines. The audit fails on absence
+   (STRUCTURAL since the seed pass landed, #10674; it began advisory).
 2. The format is parseable, so the audit can extract a lineage table from the
    corpus (inherited vs novel, straight off the fields).
 3. Neither field is required on non-control-plane ADRs. The pass is about the
@@ -65,21 +66,20 @@ The control-plane set this pass targets (from the proposal, refined as the seed
 pass lands): ADR-0002, 0029, 0044, 0049, 0051, 0094–0101, 0103, 0104, plus the
 vitals and judge-independence records once they have standalone ADRs.
 
-### Enforcement — CULTURAL now, STRUCTURAL later
+### Enforcement — advisory first, now STRUCTURAL
 
 The audit gains a check under ADR-0044's P1 table (`P1.17`, implemented in
 `scripts/hydraflow_audit/checks/p1_docs.py`, backed by the pure parser in
-`scripts/hydraflow_audit/lineage.py`). It **WARNs** when a control-plane ADR
-present in the corpus carries neither line, and flags any `Divergence:` line
-that cites no receipt token. It starts **CULTURAL and advisory** — reported but
-never failing the audit gate (it is listed in
-`scripts.hydraflow_audit.runner.ADVISORY_CHECKS`) — because the seed pass that
-backfills the corpus (#10674 child 3) has not landed yet; failing the gate
-before the lines exist would only punish compliant work. Once every
-control-plane ADR carries a verified line, the check escalates to **STRUCTURAL**
-(fail on absence) and is removed from the advisory set (#10674 child 5). This
-mirrors the ratchet-and-grandfather discipline the rest of the audit uses:
-advisory until the floor is met, blocking after.
+`scripts/hydraflow_audit/lineage.py`). It **FAILs** the gate when a control-plane
+ADR present in the corpus carries neither line, and flags any `Divergence:` line
+that cites no receipt token. It **started CULTURAL and advisory** — reported but
+never failing the audit gate — while the seed pass that backfills the corpus
+(#10674 child 3) was in flight; failing the gate before the lines existed would
+only have punished compliant work. Now that every control-plane ADR carries a
+verified line, the check has **escalated to STRUCTURAL** (fail on absence) and
+been removed from `scripts.hydraflow_audit.runner.ADVISORY_CHECKS` (#10674 child
+5). This mirrors the ratchet-and-grandfather discipline the rest of the audit
+uses: advisory until the floor is met, blocking after.
 
 The check is deterministic and side-effect-free (it reads `docs/adr/*.md` and
 parses text), so it satisfies ADR-0044's requirement that an `enforced` check
@@ -104,10 +104,11 @@ resolve to a real, non-mutating artifact.
   judge-independence records get standalone ADRs.
 
 **Neutral**
-- The check is advisory today; a reader who sees P1.17 WARN in `make audit`
-  should read it as "the corpus is mid-backfill", not "this PR broke
-  something". The escalation to blocking is a separate, later decision (#10674
-  child 5) once the floor is met.
+- The check is blocking as of the seed pass (#10674): a reader who sees P1.17
+  FAIL in `make audit` should read it as "a control-plane ADR is missing its
+  lineage line, or a `Divergence:` cites no receipt", not "the corpus is
+  mid-backfill". While the seed pass was in flight the check was advisory (WARN,
+  non-blocking); that grandfather window is now closed.
 
 ## Alternatives considered
 

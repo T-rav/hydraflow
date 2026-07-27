@@ -13,6 +13,9 @@
 pytest:tests/test_loop_kill_switch_completeness.py
 pytest:tests/regressions/test_canonical_killswitch.py
 
+**Precedent:** The emergency-stop / fail-safe interlock tradition in machine safety (the E-stop; ISO 13850 / IEC 60204-1 — a live brake independent of the normal control path)
+**Divergence:** a hardware E-stop is a hardwired circuit outside the controlled system, but here the brake is a software `enabled_cb` callback that must take effect live within one tick rather than via a config edit and process restart, because a restart's 30–60s window lets the fleet's highest-autonomy loop (auto-revert) do damage (receipt: #8390)
+
 ## Context
 
 Every autonomous loop in HydraFlow needs an off switch for the same reason every engine needs an emergency brake: when a loop misbehaves in production — opens runaway PRs, floods issues, pegs CPU — the operator needs a **live** stop without editing config, rebuilding, or restarting the process. In the initial trust-fleet design some loops used a config field (e.g. `staging_enabled`) as their gate, which made the only way to stop them a config edit + orchestrator restart. That's catastrophic for dark-factory: a misbehaving loop can cause damage in the 30-60 seconds a restart takes, and some environments can't restart quickly.

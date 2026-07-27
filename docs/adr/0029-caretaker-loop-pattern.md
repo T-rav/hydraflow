@@ -8,6 +8,9 @@ Accepted (CodeGroomingLoop removed in ADR-0065 — the pattern itself remains in
 
 **Enforced by:** pytest:tests/test_caretaker_loop_wiring.py
 
+**Precedent:** Periodic background-maintenance daemons — the operating-system reaper/janitor and cron tradition of out-of-band, low-priority upkeep run independently of the main workload
+**Divergence:** those daemons run in a single process over ephemeral in-memory state, but a caretaker loop's upkeep must be idempotent across process restarts and coordinate across machines, so it persists `DedupStore` files to disk and encodes tracker state in GitHub labels (`hydraflow-ci-failure`) rather than trusting in-memory bookkeeping (receipt: ADR-0021)
+
 ## Context
 
 HydraFlow needed proactive maintenance workers — auto-closing stale issues, monitoring CI health, patching security vulnerabilities, and (originally) running code audits. These are "caretaker" concerns: low-priority, periodic, zero-token, and independent of the main pipeline.

@@ -1,9 +1,10 @@
 """Parse the ADR lineage fields (ADR-0113): ``Precedent:`` and ``Divergence:``.
 
 Pure functions over ADR text — no I/O beyond reading files handed in by path,
-no mutation. The audit's P1.17 CULTURAL check (``checks/p1_docs.py``) uses
-these to warn when a *control-plane* ADR carries neither line, and to flag any
-``Divergence:`` that cites no receipt.
+no mutation. The audit's P1.17 STRUCTURAL check (``checks/p1_docs.py``) uses
+these to fail when a *control-plane* ADR carries neither line, and to flag any
+``Divergence:`` that cites no receipt. (P1.17 began CULTURAL/advisory and
+escalated to STRUCTURAL once the seed pass backfilled the corpus — #10674.)
 
 The two fields, per ADR-0113 (which extends the ADR-0044 audit contract):
 
@@ -30,8 +31,10 @@ from pathlib import Path
 # and ADR-0113. These records must let a reviewer tell inherited engineering
 # from genuine novelty, so each should carry a Precedent: or Divergence: line.
 # The "vitals" and "judge-independence" records named in the proposal have no
-# standalone ADR file in the corpus yet, so they are not enumerated here; the
-# seed pass (#10674 child 3) revises this set as it lands lines.
+# standalone ADR file in the corpus yet, so they are not enumerated here; add
+# them when they get standalone ADRs. Every ADR in this set has been seeded with
+# a verified Precedent:/Divergence: line by the seed pass (#10674 child 3), so
+# the now-STRUCTURAL P1.17 check is green on the corpus (#10674 child 5).
 CONTROL_PLANE_ADRS: frozenset[int] = frozenset(
     {2, 29, 44, 49, 51, 94, 95, 96, 97, 98, 99, 100, 101, 103, 104}
 )
@@ -122,7 +125,7 @@ def extract_lineage_table(adr_dir: Path) -> dict[int, LineageFields]:
 
 @dataclass(frozen=True)
 class LineageGaps:
-    """What the P1.17 check warns on."""
+    """What the P1.17 check fails on."""
 
     # Control-plane ADRs present on disk carrying neither lineage line.
     control_plane_missing_both: list[int]

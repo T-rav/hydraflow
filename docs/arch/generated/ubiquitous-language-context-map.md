@@ -63,6 +63,7 @@ graph LR
     hydraflowconfig["HydraFlowConfig<br/><i>aggregate</i>"]
     issuefetcherport["IssueFetcherPort<br/><i>port</i>"]
     issuestoreport["IssueStorePort<br/><i>port</i>"]
+    lineage["Lineage<br/><i>value_object</i>"]
     observabilityport["ObservabilityPort<br/><i>port</i>"]
     plant["Plant<br/><i>control_role</i>"]
     prmanager["PRManager<br/><i>adapter</i>"]
@@ -298,6 +299,7 @@ graph LR
   issuestoreport -->|depends_on| task
   issuestoreport -->|depends_on| hitlitem
   issuestoreport -->|depends_on| reviewverdict
+  lineage -->|depends_on| adrindex
   livecorpusreplayloop -->|depends_on| hydraflowconfig
   livecorpusreplayloop -->|depends_on| basebackgroundloop
   livecorpusreplayloop -->|depends_on| statetracker

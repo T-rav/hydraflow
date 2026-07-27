@@ -247,16 +247,21 @@ def _no_line_numbers_in_adr_citations(ctx: CheckContext) -> Finding:
 
 @register("P1.17")
 def _control_plane_adrs_carry_lineage(ctx: CheckContext) -> Finding:
-    """CULTURAL (advisory): control-plane ADRs name their lineage (ADR-0113).
+    """STRUCTURAL (blocking): control-plane ADRs name their lineage (ADR-0113).
 
-    A control-plane ADR should carry a ``Precedent:`` line (the named tradition
-    it inherits) or a ``Divergence:`` line (the forced break, citing a receipt),
-    so a reviewer can tell inherited engineering from genuine novelty. This
-    *warns* — it never fails the gate — while the seed pass (#10674 child 3)
-    backfills the corpus; it is slated to escalate to STRUCTURAL once every
-    control-plane ADR carries a line (#10674 child 5). Independently, any
+    A control-plane ADR must carry a ``Precedent:`` line (the named tradition it
+    inherits) or a ``Divergence:`` line (the forced break, citing a receipt), so
+    a reviewer can tell inherited engineering from genuine novelty. This *fails*
+    the gate on a control-plane ADR that carries neither line. Independently, any
     ``Divergence:`` line that cites no receipt token (an ADR / incident /
-    ``#issue`` / audit finding) is flagged: unforced invention is a defect.
+    ``#issue`` / audit finding) is a failure: unforced invention is a defect.
+
+    This check began CULTURAL/advisory (WARN, non-blocking) while the seed pass
+    (#10674 child 3) backfilled the control-plane corpus; it escalated to
+    STRUCTURAL and left ``runner.ADVISORY_CHECKS`` once every control-plane ADR
+    carried a verified line (#10674 child 5). The escalation is the ratchet-and-
+    grandfather discipline the rest of the audit uses: advisory until the floor
+    is met, blocking after.
     """
     adr_dir = ctx.root / "docs" / "adr"
     if not adr_dir.is_dir():
@@ -277,4 +282,4 @@ def _control_plane_adrs_carry_lineage(ctx: CheckContext) -> Finding:
             f"{len(gaps.divergence_without_receipt)} Divergence: line(s) cite no "
             f"receipt — an ADR / incident / #issue / audit finding ({listed})"
         )
-    return finding("P1.17", Status.WARN, "; ".join(problems))
+    return finding("P1.17", Status.FAIL, "; ".join(problems))

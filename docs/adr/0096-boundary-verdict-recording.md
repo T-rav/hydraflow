@@ -7,6 +7,9 @@
 - **Enforcement:** enforced
 - **Enforced by:** pytest:tests/scenarios/test_convergence_pipeline_mockworld.py
 
+**Precedent:** Event sourcing / append-only decision log (Fowler) — recording each boundary decision as an immutable verdict history
+**Divergence:** in event sourcing the log is the source of truth that state is rebuilt from, but here the recorded verdicts drive no control flow (each boundary still decides by its own engine) and exist only as a passive cross-boundary history a caretaker consumes to detect multi-stage oscillation the per-stage engines cannot see (receipt: ADR-0098)
+
 > **Superseded in part by [ADR-0102](0102-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
 
 ## Context

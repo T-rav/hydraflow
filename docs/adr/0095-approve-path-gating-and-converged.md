@@ -11,6 +11,9 @@ pytest:tests/test_review_phase_core.py::TestApproveConvergenceGate
 pytest:tests/scenarios/test_convergence_review_mockworld.py
 pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py
 
+**Precedent:** Risk-based testing — scrutiny scaled to assessed risk (Gerrard & Thompson, *Risk-Based E-Business Testing*, 2002)
+**Divergence:** risk-based testing scales a human reviewer's effort, but here the assessed blast radius actuates the *number* of independent generative-judge lenses (1/2/3, unanimous-to-advance) on the merge path and the gate owns the single retry loop, because a single model pass under-detects on high-blast diffs (receipt: ADR-0051, ADR-0094)
+
 > **Superseded in part by [ADR-0102](0102-convergence-gate-general-availability.md):** the `convergence_gate_enabled` flag has been removed; the convergence gate is now the sole, always-on review path and the legacy ungated fallback is deleted. The flag-gated / dark-ship framing below is historical.
 
 ## Context
