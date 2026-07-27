@@ -32,6 +32,7 @@ from escape.resolve import (
     InvalidConfidenceError,
     InvalidEncodingError,
     NoResolutionFieldsError,
+    UnanswerableLowConfidenceError,
     UnknownEscapeIdError,
     default_ledger_path,
     list_unresolved,
@@ -201,6 +202,42 @@ class TestResolveEscapeService:
                 "bug-issue:a", ledger_path=ledger_path, attribution_confidence="bogus"
             )
 
+    def test_resolve_escape_rejects_low_confidence_with_no_encoding(
+        self, tmp_path: Path
+    ) -> None:
+        # #10747: confidence="low" with no encoded_as can never answer a
+        # low-confidence surfacing's `attribution_confidence != "low"`
+        # predicate — it would silently strand the HITL issue forever behind
+        # a spent one-shot fingerprint, so it must be rejected up front
+        # rather than appended as a row that only looks like a resolution.
+        ledger_path = tmp_path / ESCAPE_LEDGER_FILENAME
+        EscapeLedger(ledger_path).append(
+            _record("bug-issue:a", confidence="low", encoded_as="none-yet")
+        )
+        with pytest.raises(UnanswerableLowConfidenceError):
+            resolve_escape(
+                "bug-issue:a", ledger_path=ledger_path, attribution_confidence="low"
+            )
+
+    def test_resolve_escape_allows_low_confidence_when_encoding_given(
+        self, tmp_path: Path
+    ) -> None:
+        # Naming an encoding alongside confidence="low" remains legitimate —
+        # e.g. downgrading a wrong mechanical "high" while still answering
+        # the aging surface via encoded_as.
+        ledger_path = tmp_path / ESCAPE_LEDGER_FILENAME
+        EscapeLedger(ledger_path).append(
+            _record("bug-issue:a", confidence="high", encoded_as="none-yet")
+        )
+        record = resolve_escape(
+            "bug-issue:a",
+            "detector",
+            ledger_path=ledger_path,
+            attribution_confidence="low",
+        )
+        assert record.encoded_as == "detector"
+        assert record.attribution_confidence == "low"
+
     def test_list_unresolved_returns_only_none_yet_rows(self, tmp_path: Path) -> None:
         ledger_path = tmp_path / ESCAPE_LEDGER_FILENAME
         ledger = EscapeLedger(ledger_path)
@@ -275,6 +312,35 @@ class TestResolveEscapeCli:
             cli.main(["resolve", "bug-issue:a", "--ledger-path", str(ledger_path)])
 
         assert exc_info.value.code == 2
+
+    def test_cli_resolve_rejects_low_confidence_with_no_encoding(
+        self, tmp_path: Path
+    ) -> None:
+        # #10747: before --encoded-as became optional, this exact invocation
+        # ("confirm confidence=low with nothing else") was impossible because
+        # argparse required --encoded-as. Relaxing that requirement must not
+        # newly admit a "successful"-looking resolution that can never
+        # satisfy the low-confidence surfacing's answered predicate.
+        cli = _load_cli()
+        ledger_path = tmp_path / ESCAPE_LEDGER_FILENAME
+        EscapeLedger(ledger_path).append(
+            _record("bug-issue:a", confidence="low", encoded_as="none-yet")
+        )
+
+        rc = cli.main(
+            [
+                "resolve",
+                "bug-issue:a",
+                "--confidence",
+                "low",
+                "--ledger-path",
+                str(ledger_path),
+            ]
+        )
+
+        assert rc == 2
+        latest = EscapeLedger(ledger_path).read_latest()[0]
+        assert latest.notes == ""
 
     def test_cli_unknown_id_returns_nonzero(self, tmp_path: Path) -> None:
         cli = _load_cli()

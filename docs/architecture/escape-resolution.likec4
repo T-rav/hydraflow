@@ -1,5 +1,10 @@
-// Issue #10747 — escape-ledger low-confidence surfacing: the printed
-// remediation cannot satisfy its own answered-predicate.
+// Escape-ledger HITL surfacing + resolution, current behaviour after #10747:
+// each surfacing reason renders its own reason-specific remediation, naming
+// the field that actually answers that reason's `_surfacing_answered`
+// predicate. The `surfaceThenStrand` view documents the HISTORICAL defect
+// #10747 fixed (a low-confidence body that prescribed `--encoded-as` only,
+// so its own predicate could never be satisfied) — that view describes
+// pre-fix behaviour, not the current system.
 specification {
   element system
   element container
@@ -29,7 +34,7 @@ model {
         description 'Pure budget: (record, reason) pairs, reason-scoped one-shot fingerprint'
       }
       render = component '_render_finding' {
-        description 'DEFECT SITE: title is reason-aware via _SURFACE_REASON_TEXT; BODY is reason-blind — one hard-coded --encoded-as remediation for both reasons'
+        description 'Reason-aware for both title (_SURFACE_REASON_TEXT) and remediation body (_SURFACE_REASON_REMEDIATION) — each surfacing reason prescribes the field that answers its OWN _surfacing_answered predicate (#10747)'
       }
       surface = component '_surface_findings' {
         description 'create_issue -> SurfacedIssueLedger.append_surfaced(reason, issue_number)'
@@ -49,7 +54,7 @@ model {
 
     cli = container 'scripts/resolve_escape.py' {
       technology 'argparse; wrapped by Makefile escape-resolve / escape-list'
-      description '--encoded-as is required=True today; --confidence already exists but is never advertised'
+      description '--encoded-as and --confidence are each independently optional; naming neither is rejected before any ledger write (#10747)'
     }
 
     ledger = store 'EscapeLedger' {
@@ -89,11 +94,10 @@ model {
   loop.reconcile -> loop.answered 'per-link predicate'
   loop.reconcile -> hydraflow.prPort 'post_comment + close_issue'
 
-  // --- the break ---------------------------------------------------------
-  loop.render -> hydraflow.ledger 'BROKEN: low-confidence body prescribes --encoded-as only, so attribution_confidence stays "low"' {
-    technology 'DEFECT'
+  // --- historical (pre-#10747, fixed by this PR) -------------------------
+  loop.render -> hydraflow.ledger 'HISTORICAL: low-confidence body used to prescribe --encoded-as only, so attribution_confidence stayed "low"' {
+    technology 'DEFECT (fixed)'
   }
-  loop.answered -> github 'low-confidence link never answered -> issue stays open, surface re-fires under a new number'
 }
 
 views {
@@ -110,7 +114,7 @@ views {
   }
 
   dynamic view surfaceThenStrand {
-    title 'Dynamic: low-confidence surfacing strands (current, defective)'
+    title 'Dynamic: low-confidence surfacing strands (HISTORICAL — fixed by #10747, no longer current)'
 
     hydraflow.loop.select -> hydraflow.loop.render 'reason = low-confidence'
     hydraflow.loop.render -> hydraflow.loop.surface 'body prescribes --encoded-as ONLY'
@@ -124,7 +128,7 @@ views {
   }
 
   dynamic view surfaceThenClose {
-    title 'Dynamic: target behaviour after the fix'
+    title 'Dynamic: low-confidence surfacing resolves (current behaviour)'
 
     hydraflow.loop.select -> hydraflow.loop.render 'reason = low-confidence'
     hydraflow.loop.render -> hydraflow.loop.surface 'reason-aware body names --confidence'

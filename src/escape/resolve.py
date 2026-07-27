@@ -70,6 +70,19 @@ class NoResolutionFieldsError(EscapeResolveError):
     """
 
 
+class UnanswerableLowConfidenceError(EscapeResolveError):
+    """*attribution_confidence="low"* was supplied with no *encoded_as* (#10747).
+
+    A low-confidence surfacing's answered predicate is
+    ``attribution_confidence != "low"`` (``escape_ledger_loop._surfacing_answered``).
+    Recording ``attribution_confidence="low"`` without also naming an encoding
+    would append a row that can never satisfy that predicate — and because
+    surfacing is a one-shot budget per (id, reason), the HITL issue would be
+    silently stranded open forever with no way to re-fire. Name an encoding
+    with ``encoded_as``, or bump confidence off ``"low"``.
+    """
+
+
 def default_ledger_path(config: HydraFlowConfig) -> Path:
     """The repo-scoped escape ledger path — the single source of truth (#10578).
 
@@ -105,6 +118,9 @@ def resolve_escape(
     superseding row is appended sharing the original id, never a rewrite.
 
     Raises ``NoResolutionFieldsError`` when neither field is given,
+    ``UnanswerableLowConfidenceError`` when *attribution_confidence* is
+    ``"low"`` with no *encoded_as* (that combination can never answer a
+    low-confidence surfacing and would silently strand it — #10747),
     ``InvalidEncodingError`` / ``InvalidConfidenceError`` on bad input, and
     ``UnknownEscapeIdError`` when no row exists for *escape_id*.
     """
@@ -126,6 +142,13 @@ def resolve_escape(
         raise InvalidConfidenceError(
             f"attribution_confidence must be one of {', '.join(VALID_CONFIDENCES)} "
             f"(got {attribution_confidence!r})"
+        )
+    if encoded_as is None and attribution_confidence == "low":
+        raise UnanswerableLowConfidenceError(
+            "attribution_confidence='low' alone can never answer a "
+            "low-confidence surfacing and would silently strand the HITL "
+            "issue — name an encoding with encoded_as, or bump confidence "
+            "off 'low'"
         )
     ledger = EscapeLedger(Path(ledger_path))
     record = ledger.append_resolution(

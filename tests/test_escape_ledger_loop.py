@@ -343,6 +343,13 @@ class TestRenderFinding:
         assert "--confidence" in body
         assert "bug-issue:z" in body
         assert "<regression-test|stored-lesson|detector|adr>" not in body
+        # The placeholder must never offer "low" — a resolution that only
+        # confirms confidence="low" can never satisfy this surface's own
+        # answered predicate (attribution_confidence != "low") and would
+        # silently strand the HITL issue.
+        remediation_section = body.split("### Record the resolution")[1]
+        assert "<high|medium>" in remediation_section
+        assert "low" not in remediation_section
 
     def test_aging_body_still_prescribes_encoded_as(self) -> None:
         # The aging surface's remediation is unchanged by the low-confidence
