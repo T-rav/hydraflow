@@ -4,6 +4,9 @@
 **Date:** 2026-07-01
 **Enforced by:** tests/test_disturbance_ratchet.py, tests/test_disturbance_dampener_loop.py
 
+**Precedent:** Ratchet/baseline discipline in lint tooling (grandfather-then-ratchet; e.g. Betterer) and statistical-process-control baselining (Shewhart)
+**Divergence:** a lint baseline is a human-maintained snapshot a person burns down file by file, but here the baseline is committed and adversarially auditable because a caretaker loop — not a person — both fixes the code and prunes the baseline in one PR, so a prune without a real fix reappears as `new` at the next gate and blocks (receipt: ADR-0099, ADR-0029)
+
 ## Context
 
 ADR-0099 models HydraFlow's orchestration layer as a hierarchy of control loops and names, without deciding, a set of known-open control surfaces. §6 surface #3 is:

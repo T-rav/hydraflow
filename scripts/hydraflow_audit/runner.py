@@ -62,13 +62,14 @@ def _run_one(spec: CheckSpec, ctx: CheckContext) -> Finding:
 TELEMETRY_CHECKS = frozenset({"P10.3", "P10.7"})
 
 # ADVISORY checks are CULTURAL corpus scans that measure the ADR/doc corpus,
-# not the change under test, and start life non-blocking on purpose. P1.17
-# (ADR-0113 lineage) WARNs while the seed pass (#10674 child 3) backfills
-# Precedent:/Divergence: lines across the control-plane ADRs; like the
-# telemetry checks its WARN is reported but never flips the exit code. It is
-# slated to escalate to STRUCTURAL/blocking once every control-plane ADR carries
-# a line (#10674 child 5), at which point it is removed from this set.
-ADVISORY_CHECKS = frozenset({"P1.17"})
+# not the change under test, and start life non-blocking on purpose. This set is
+# empty today: P1.17 (ADR-0113 lineage) began here, WARNing while the seed pass
+# (#10674 child 3) backfilled Precedent:/Divergence: lines across the
+# control-plane ADRs, and was removed once every control-plane ADR carried a line
+# (#10674 child 5). It is now STRUCTURAL — a control-plane ADR missing a lineage
+# line, or a Divergence citing no receipt, FAILs the audit. The constant is kept
+# (empty) as the seam the next advisory-then-escalated corpus check plugs into.
+ADVISORY_CHECKS: frozenset[str] = frozenset()
 
 # Checks whose WARN is reported but never fails the audit gate.
 _NON_BLOCKING_WARN_CHECKS = TELEMETRY_CHECKS | ADVISORY_CHECKS

@@ -11,6 +11,9 @@ pytest:tests/test_human_steering_state.py
 pytest:tests/test_orchestrator_human_steering.py
 pytest:tests/test_config_env.py
 
+**Precedent:** Human supervisory control (Sheridan, *Telerobotics, Automation, and Human Supervisory Control*, MIT Press 1992) — a continuous human reference input to an otherwise autonomous process
+**Divergence:** classical supervisory control assumes the supervisor can intervene continuously, including mid-operation, but here directives (steer/pause/resume/redo/abort) apply only at phase boundaries because there is no safe per-issue mid-phase interrupt (only a fleet-wide SIGKILL), and authorization is an explicit allowlist where an empty list honors nobody (receipt: ADR-0099, ADR-0092)
+
 ## Context
 
 ADR-0099 §6 named four known-open control surfaces without deciding them. Surface #4 was:
