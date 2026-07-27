@@ -21,12 +21,14 @@
 import React, { useMemo } from 'react'
 import { useHydraFlowSocket } from '../hooks/useHydraFlowSocket'
 import { useOperatorSelection } from './useOperatorSelection'
+import { ConsoleHeader } from './ConsoleHeader'
 import { PipelineRail } from './PipelineRail'
-import { ActivityDrawer } from './ActivityDrawer'
 import { toPipeline } from './model/pipeline'
 import { toTranscript } from './model/transcript'
 import { toVitals } from './model/vitals'
 import { toActivityFeed } from './model/activity'
+import { VitalsCard } from './VitalsCard'
+import { ActivityDrawer } from './ActivityDrawer'
 
 const slotStyle = { minWidth: 0 }
 const placeholderStyle = {
@@ -43,15 +45,6 @@ const placeholderStyle = {
 // stays valid as they land.
 // ---------------------------------------------------------------------------
 
-function ConsoleHeaderPlaceholder({ breadcrumb, mode }) {
-  const trail = breadcrumb.map(c => c.label).join(' › ')
-  return (
-    <div data-testid="console-header-placeholder" style={placeholderStyle}>
-      ConsoleHeader — {trail} · mode: {mode}
-    </div>
-  )
-}
-
 function ItemWorkspacePlaceholder({ item, transcript, mode }) {
   return (
     <div data-testid="item-workspace-placeholder" style={placeholderStyle}>
@@ -60,13 +53,6 @@ function ItemWorkspacePlaceholder({ item, transcript, mode }) {
   )
 }
 
-function VitalsCardPlaceholder({ vitals }) {
-  return (
-    <div data-testid="vitals-card-placeholder" style={placeholderStyle}>
-      VitalsCard — factory: {vitals.factory.state} · loops {vitals.loopsHealthy.ok}/{vitals.loopsHealthy.total}
-    </div>
-  )
-}
 
 /**
  * Presentational shell. Takes the socket state as a prop so it can be rendered
@@ -102,7 +88,15 @@ export function OperatorConsoleView({ socket = {} }) {
       }}
     >
       <div data-testid="operator-header-slot" style={{ ...slotStyle, gridArea: 'header' }}>
-        <ConsoleHeaderPlaceholder breadcrumb={breadcrumb} select={select} vitals={vitals} mode={mode} />
+        <ConsoleHeader
+          breadcrumb={breadcrumb}
+          select={select}
+          vitals={vitals}
+          connected={socket.connected}
+          onStart={socket.startOrchestrator}
+          onStop={socket.stopOrchestrator}
+          onClear={socket.clearCreditPause}
+        />
       </div>
       <div data-testid="operator-pipeline-slot" style={{ ...slotStyle, gridArea: 'pipeline' }}>
         <PipelineRail pipeline={pipeline} select={select} stage={stage} />
@@ -111,7 +105,7 @@ export function OperatorConsoleView({ socket = {} }) {
         <ItemWorkspacePlaceholder item={item} transcript={transcript} mode={mode} select={select} />
       </div>
       <div data-testid="operator-vitals-slot" style={{ ...slotStyle, gridArea: 'vitals' }}>
-        <VitalsCardPlaceholder vitals={vitals} />
+        <VitalsCard vitals={vitals} />
       </div>
       <div data-testid="operator-drawer-slot" style={{ ...slotStyle, gridArea: 'drawer' }}>
         <ActivityDrawer activity={activity} select={select} />

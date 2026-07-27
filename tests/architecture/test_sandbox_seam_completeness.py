@@ -79,6 +79,18 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     "src/workspace_gc_loop.py::WorkspaceGCLoop._collect_orphaned_branches::run_subprocess": 2,
     # _get_issue_state's raw ``gh api`` spawn was routed through
     # PRPort.get_issue_state in #9543 — entry pruned per the shrink-only rule.
+    # #10698 all-root enumerate-and-reap phase: LOCAL-git worktree operations
+    # (`git worktree list/status/rev-list/worktree remove/branch -D`) — the
+    # same tolerated local-git class as the sibling _collect_orphaned_branches
+    # entry above (no network reach → never wedges the air-gapped sandbox), and
+    # additionally pinned OFF in the sandbox via worktree_gc_all_roots_enabled
+    # (see mockworld.sandbox_main._apply_sandbox_config_overrides), so no spawn
+    # is reachable there. Cannot be a module-level SANDBOX_SEAMS config_disable
+    # because Phases 1-4 of the same module still run in the sandbox (s46/s65).
+    "src/workspace_gc_loop.py::WorkspaceGCLoop._list_git_worktrees::run_subprocess": 1,
+    "src/workspace_gc_loop.py::WorkspaceGCLoop._worktree_is_dirty::run_subprocess": 1,
+    "src/workspace_gc_loop.py::WorkspaceGCLoop._worktree_has_unmerged_commits::run_subprocess": 1,
+    "src/workspace_gc_loop.py::WorkspaceGCLoop._reap_worktree::run_subprocess": 2,
 }
 
 
