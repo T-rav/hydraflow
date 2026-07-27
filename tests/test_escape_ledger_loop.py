@@ -591,6 +591,58 @@ class TestReconcileSurfacedIssues:
         assert await loop._reconcile_surfaced_issues() == 0
         assert len(github._issues[num].comments) == comment_count
 
+    async def test_folded_away_low_confidence_surface_closes_on_stronger_sibling(
+        self, tmp_path: Path
+    ) -> None:
+        # #10731: a low-confidence bug-issue is surfaced, then a stronger
+        # regression-pin sibling for the SAME commit lands and folds the
+        # surfaced id out of read_latest. The reconcile must STILL close the
+        # HITL issue — the commit is now attributed off `low` — because it reads
+        # through read_latest_index, not the id-projected read_latest view.
+        from datetime import UTC, datetime
+
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        loop = _build_loop_direct(tmp_path, repo, github)
+        ledger = EscapeLedger(loop._ledger_path)
+        sha = "d15c0acef00dd15c0acef00dd15c0acef00dd15c"
+        fresh = datetime.now(UTC).isoformat()  # not aged => only the LOW surface
+
+        def _row(source: str, confidence: str, method: str) -> EscapeRecord:
+            return EscapeRecord(
+                id=f"{source}:{sha}",
+                detected_at=fresh,
+                detection_source=source,
+                detection_ref=sha,
+                originating_pr=None,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method=method,
+                attribution_confidence=confidence,
+                encoded_as="none-yet",
+                notes="",
+            )
+
+        ledger.append(_row("bug-issue", "low", "fixes-chain"))
+        await loop._surface_findings()
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert link.reason == SURFACE_REASON_LOW_CONFIDENCE
+        assert link.escape_id == f"bug-issue:{sha}"
+        num = link.issue_number
+
+        # Stronger sibling for the same commit (different id, same detection_ref)
+        # — folds bug-issue:<sha> out of read_latest.
+        ledger.append(_row("regression-pin", "medium", "regression-pin"))
+        assert f"bug-issue:{sha}" not in {r.id for r in ledger.read_latest()}
+
+        closed = await loop._reconcile_surfaced_issues()
+
+        assert closed == 1
+        assert github._issues[num].state == "closed"
+        # The comment names the answering row (the surviving medium sibling).
+        assert any("regression-pin" in str(c) for c in github._issues[num].comments)
+
     async def test_quiet_tick_still_closes_and_reports_closed_count(
         self, tmp_path: Path
     ) -> None:

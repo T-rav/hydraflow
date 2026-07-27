@@ -8,6 +8,7 @@ and the Markdown render — all pure, over synthetic inputs, no git.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -444,6 +445,31 @@ class TestEscapeLedger:
         assert ledger.read_latest() == [final]
         assert ledger.read_latest()[0].encoded_as == "stored-lesson"
 
+    def test_read_latest_index_maps_every_appended_id_to_its_ref_winner(
+        self, tmp_path: Path
+    ) -> None:
+        # Two sources for one commit: read_latest folds bug-issue away, but the
+        # index still maps its id to the surviving regression-pin row (#10731).
+        sha = "ee56677201303fa4de5b1dec341447d4a12076d4"
+        ledger = EscapeLedger(tmp_path / "escape_ledger.jsonl")
+        ledger.append(_record(f"bug-issue:{sha}", source="bug-issue", confidence="low"))
+        ledger.append(
+            _record(
+                f"regression-pin:{sha}", source="regression-pin", confidence="medium"
+            )
+        )
+
+        index = ledger.read_latest_index()
+
+        assert set(index) == {f"bug-issue:{sha}", f"regression-pin:{sha}"}
+        assert all(r.detection_source == "regression-pin" for r in index.values())
+
+    def test_read_latest_index_absent_id_is_not_a_key(self, tmp_path: Path) -> None:
+        ledger = EscapeLedger(tmp_path / "escape_ledger.jsonl")
+        ledger.append(_record("bug-issue:aaaa111", source="bug-issue"))
+
+        assert "bug-issue:never-appended" not in ledger.read_latest_index()
+
 
 # ---------------------------------------------------------------------------
 # metrics
@@ -672,6 +698,72 @@ class TestMetrics:
         # ref-c appeared first (row 0), ref-a second — order preserved despite
         # ref-c's surviving row being the later-appended regression-pin one.
         assert [r.detection_ref for r in collapsed] == ["ref-c", "ref-a"]
+
+    def test_escape_by_id_empty_list(self) -> None:
+        assert metrics.escape_by_id([]) == {}
+
+    def test_escape_by_id_maps_both_sibling_ids_to_the_single_survivor(self) -> None:
+        # The #10731 case: both ids of a two-source commit map to the one row
+        # that won the detection_ref collapse (the stronger medium sibling).
+        sha = "ee56677201303fa4de5b1dec341447d4a12076d4"
+        rows = [
+            _record(f"bug-issue:{sha}", source="bug-issue", confidence="low"),
+            _record(
+                f"regression-pin:{sha}", source="regression-pin", confidence="medium"
+            ),
+        ]
+
+        index = metrics.escape_by_id(rows)
+
+        assert set(index) == {f"bug-issue:{sha}", f"regression-pin:{sha}"}
+        survivor = index[f"bug-issue:{sha}"]
+        assert survivor.detection_source == "regression-pin"
+        assert survivor is index[f"regression-pin:{sha}"]
+
+    def test_escape_by_id_resolved_row_is_the_mapped_value_for_every_sibling(
+        self,
+    ) -> None:
+        # An encoded resolution row wins the collapse; both sibling ids of the
+        # commit map to it (never discard a human resolution, #10654).
+        sha = "9196f74abcd"
+        resolved = _record(
+            f"bug-issue:{sha}",
+            source="bug-issue",
+            confidence="high",
+            encoded_as="detector",
+        )
+        sibling = _record(
+            f"regression-pin:{sha}", source="regression-pin", confidence="medium"
+        )
+
+        index = metrics.escape_by_id([resolved, sibling])
+
+        assert index[f"bug-issue:{sha}"].encoded_as == "detector"
+        assert index[f"regression-pin:{sha}"].encoded_as == "detector"
+
+    def test_escape_by_id_no_ref_rows_each_map_to_themselves(self) -> None:
+        # Rows with no detection_ref are each their own escape — not one shared
+        # entry under an empty key (mirrors latest_by_escape's no-ref fallback).
+        a = EscapeRecord(
+            id="sentry:evt-a",
+            detected_at="2026-01-02T00:00:00+00:00",
+            detection_source="sentry",
+            detection_ref="",
+            originating_pr=None,
+            originating_merge_sha="",
+            merged_at="",
+            time_to_detection_hours=None,
+            attribution_method="agent-research",
+            attribution_confidence="low",
+            encoded_as="none-yet",
+            notes="",
+        )
+        b = replace(a, id="sentry:evt-b")
+
+        index = metrics.escape_by_id([a, b])
+
+        assert index["sentry:evt-a"] is a
+        assert index["sentry:evt-b"] is b
 
 
 # ---------------------------------------------------------------------------

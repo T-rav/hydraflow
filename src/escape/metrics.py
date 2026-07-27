@@ -300,11 +300,7 @@ def latest_by_escape(records: list[EscapeRecord]) -> list[EscapeRecord]:
     best: dict[str, EscapeRecord] = {}
     order: list[str] = []
     for record in latest_by_id(records):
-        # A row with no detection_ref (a minimal/synthetic escape row, or one whose
-        # detecting commit is unrecorded) is its OWN escape — fall back to its id so
-        # absent refs don't all collapse under a single empty key (double-count fix
-        # was collapsing N distinct no-ref rows to 1).
-        ref = record.detection_ref or f"__noref__:{record.id}"
+        ref = _escape_key(record)
         incumbent = best.get(ref)
         if incumbent is None:
             order.append(ref)
@@ -312,3 +308,42 @@ def latest_by_escape(records: list[EscapeRecord]) -> list[EscapeRecord]:
         elif _escape_supersedes(record, incumbent):
             best[ref] = record
     return [best[ref] for ref in order]
+
+
+def _escape_key(record: EscapeRecord) -> str:
+    """The ``detection_ref`` a record collapses under in ``latest_by_escape``.
+
+    A row with no ``detection_ref`` (a minimal/synthetic escape row, or one
+    whose detecting commit is unrecorded) is its OWN escape — falls back to its
+    id so distinct no-ref rows are never folded under a single empty key (the
+    double-count fix was collapsing N distinct no-ref rows to 1). The SINGLE key
+    derivation shared by ``latest_by_escape`` and ``escape_by_id`` — they must
+    agree or an id would index a different group than the one it collapsed into.
+    """
+    return record.detection_ref or f"__noref__:{record.id}"
+
+
+def escape_by_id(records: list[EscapeRecord]) -> dict[str, EscapeRecord]:
+    """Map EVERY escape id to the row that currently represents its commit.
+
+    The reconcile-facing companion to ``latest_by_escape``. ``latest_by_escape``
+    returns one row per ``detection_ref`` and so drops the ids of the sibling
+    rows it folds away; a surfacing link, though, is keyed by the exact id it was
+    filed under. This returns a dict keyed by every id in the id-collapsed view,
+    each id pointing at the row that WON the ``detection_ref`` collapse for that
+    id's commit. So a link filed under an id ``latest_by_escape`` later folds
+    away — a low-confidence ``bug-issue`` sibling superseded by a stronger
+    ``regression-pin`` for the same commit (#10731) — still resolves to the
+    current winning row instead of vanishing from a ``{r.id: r}`` projection.
+
+    Uses the same ``detection_ref``-key derivation as ``latest_by_escape`` so a
+    no-ref row maps to itself and both sibling ids of a collapsed commit map to
+    the single survivor.
+    """
+    winner_by_ref: dict[str, EscapeRecord] = {
+        _escape_key(winner): winner for winner in latest_by_escape(records)
+    }
+    return {
+        record.id: winner_by_ref[_escape_key(record)]
+        for record in latest_by_id(records)
+    }

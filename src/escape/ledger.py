@@ -22,7 +22,7 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
-from escape.metrics import latest_by_escape, latest_by_id
+from escape.metrics import escape_by_id, latest_by_escape, latest_by_id
 from escape.models import EncodedAs, EscapeRecord
 from jsonl_ledger import IdentifiedJsonlLedger
 
@@ -52,6 +52,19 @@ class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
         (#10654). This is the single point every consumer reads through.
         """
         return latest_by_escape(self.read_all())
+
+    def read_latest_index(self) -> dict[str, EscapeRecord]:
+        """Map every recorded id to the row currently representing its commit.
+
+        The reconcile companion to ``read_latest``. ``read_latest`` collapses by
+        ``detection_ref`` and so drops the ids of superseded siblings, but a
+        surfacing link is keyed by the exact id it was filed under — an id the
+        collapse (#10654) may fold away in favour of a stronger-source sibling.
+        This maps EVERY id (id-collapsed) to its ``detection_ref`` winner so a
+        folded-away surfaced id still resolves to the current row, and the
+        reconcile pass answers it instead of stranding the HITL issue (#10731).
+        """
+        return escape_by_id(self.read_all())
 
     def append_resolution(
         self,
