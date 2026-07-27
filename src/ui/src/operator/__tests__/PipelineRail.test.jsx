@@ -175,6 +175,61 @@ describe('PipelineRail', () => {
     expect(screen.getByTestId('stage-colorbar-plan')).toHaveAttribute('data-severity', 'muted')
   })
 
+  // ── Stage identity colour = classic PIPELINE_STAGES palette (#10) ──────────
+  // The tile's top bar is painted in the stage's classic-dashboard identity
+  // colour (token key exposed via data-stage-color), while the severity signal
+  // is preserved on data-severity + the attention badges.
+
+  it('paints each stage bar in its classic-palette identity colour', () => {
+    render(<PipelineRail pipeline={makePipeline()} select={() => {}} />)
+    const expected = {
+      triage: 'yellow',
+      plan: 'purple',
+      implement: 'accent',
+      review: 'orange',
+      hitl: 'red',
+      merged: 'green',
+    }
+    for (const [key, colorKey] of Object.entries(expected)) {
+      expect(screen.getByTestId(`stage-colorbar-${key}`)).toHaveAttribute('data-stage-color', colorKey)
+    }
+  })
+
+  it('keeps the severity signal on the bar alongside the identity colour', () => {
+    render(<PipelineRail pipeline={makePipeline()} select={() => {}} />)
+    // The Build stage identity colour is accent, but it still signals bad severity.
+    const bar = screen.getByTestId('stage-colorbar-implement')
+    expect(bar).toHaveAttribute('data-stage-color', 'accent')
+    expect(bar).toHaveAttribute('data-severity', 'bad')
+  })
+
+  // ── Terminal stages (hitl, merged) list issue ids (#14) ────────────────────
+
+  it('lists the issue ids for the hitl and merged terminal stages', () => {
+    render(<PipelineRail pipeline={makePipeline()} select={() => {}} />)
+    const hitl = screen.getByTestId('stage-items-hitl')
+    expect(hitl).toHaveTextContent('401')
+    expect(hitl).toHaveTextContent('404')
+    const merged = screen.getByTestId('stage-items-merged')
+    expect(merged).toHaveTextContent('501')
+  })
+
+  it('selecting a terminal-stage issue id drills into that item', () => {
+    const select = vi.fn()
+    render(<PipelineRail pipeline={makePipeline()} select={select} />)
+    fireEvent.click(screen.getByTestId('stage-item-hitl-401'))
+    expect(select).toHaveBeenCalledWith('item', 401)
+  })
+
+  it('does not render heavy id+title chips for the terminal stages', () => {
+    render(<PipelineRail pipeline={makePipeline()} select={() => {}} />)
+    // hitl/merged use the compact id chips, not the workflow-stage item-chip.
+    expect(screen.queryByTestId('item-chip-401')).toBeNull()
+    expect(screen.queryByTestId('item-chip-501')).toBeNull()
+    // Workflow stages keep their full chips.
+    expect(screen.getByTestId('item-chip-201')).toBeInTheDocument()
+  })
+
   it('does not crash on an empty pipeline VM', () => {
     const { container } = render(<PipelineRail pipeline={{ stages: [] }} select={() => {}} />)
     expect(container.querySelector('[data-testid="pipeline-rail"]')).toBeInTheDocument()

@@ -30,6 +30,13 @@ describe('VitalsCard', () => {
     }
   })
 
+  it('labels the factory-state vital "Workflow", not "Factory" (#15)', () => {
+    render(<VitalsCard vitals={healthyVitals()} />)
+    const row = screen.getByTestId('vital-factory')
+    expect(row).toHaveTextContent('Workflow')
+    expect(row).not.toHaveTextContent('Factory')
+  })
+
   it('shows a restarted loop as bad and names the loop + count', () => {
     render(
       <VitalsCard vitals={healthyVitals({ restarts: [{ loop: 'triage_loop', count: 2 }] })} />,

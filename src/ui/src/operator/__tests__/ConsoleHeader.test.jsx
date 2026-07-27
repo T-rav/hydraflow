@@ -68,9 +68,17 @@ describe('ConsoleHeader', () => {
     expect(screen.queryByTestId('console-header-credit-reason')).toBeNull()
   })
 
-  it('renders aggregate vitals (loop health)', () => {
-    render(<ConsoleHeader vitals={makeVitals({ loopsHealthy: { ok: 9, total: 12 } })} />)
-    expect(screen.getByTestId('console-header-loops')).toHaveTextContent('9/12')
+  it('shows the factory runtime (uptime) instead of a redundant loop count (#12)', () => {
+    render(<ConsoleHeader vitals={makeVitals()} uptime="2h14m" />)
+    const uptime = screen.getByTestId('header-uptime')
+    expect(uptime).toHaveTextContent('2h14m')
+    // The old loop-health count (which duplicated the LoopsPanel) is gone.
+    expect(screen.queryByTestId('console-header-loops')).toBeNull()
+  })
+
+  it('renders nothing for runtime when no start signal is available (graceful)', () => {
+    render(<ConsoleHeader vitals={makeVitals()} />)
+    expect(screen.queryByTestId('header-uptime')).toBeNull()
   })
 
   it('invokes the existing stop control when Stop is clicked while running', () => {

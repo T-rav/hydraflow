@@ -72,6 +72,7 @@ function makeStyles(t) {
     rowMain: { display: 'flex', flexDirection: 'column', gap: t.space.xxs, minWidth: 0, flex: '1 1 auto' },
     nameLine: { display: 'flex', alignItems: 'baseline', gap: t.space.xs, minWidth: 0 },
     name: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+    term: { flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
     message: (expanded) => ({
       cursor: 'pointer',
       textAlign: 'left',
@@ -146,6 +147,17 @@ function LoopRow({ loop, styles }) {
           <Text as="span" size="sm" tone={loop.enabled ? 'default' : 'inactive'} style={styles.name}>
             {loop.name}
           </Text>
+          {loop.term && (
+            <Text
+              as="span"
+              size="xs"
+              tone="muted"
+              data-testid={`loop-term-${loop.id}`}
+              style={styles.term}
+            >
+              {loop.term}
+            </Text>
+          )}
           {loop.restarts > 0 && (
             <Badge tone="warning" data-testid={`loop-restarts-${loop.id}`}>{`↻${loop.restarts}`}</Badge>
           )}
