@@ -29,6 +29,8 @@ import { toVitals } from './model/vitals'
 import { toActivityFeed } from './model/activity'
 import { VitalsCard } from './VitalsCard'
 import { ActivityDrawer } from './ActivityDrawer'
+import { RepoOverview, buildRepoSummaries } from './RepoOverview'
+import { RepoSwitcher } from './RepoSwitcher'
 
 const slotStyle = { minWidth: 0 }
 const placeholderStyle = {
@@ -60,13 +62,18 @@ function ItemWorkspacePlaceholder({ item, transcript, mode }) {
  * @param {{ socket: object }} props
  */
 export function OperatorConsoleView({ socket = {} }) {
-  const { stage, item, mode, select, breadcrumb } = useOperatorSelection()
+  const { repo, stage, item, mode, select, breadcrumb } = useOperatorSelection()
   const events = socket.events ?? []
 
   const pipeline = useMemo(
     () => toPipeline({ stages: socket.pipelineIssues, stats: socket.pipelineStats }),
     [socket.pipelineIssues, socket.pipelineStats],
   )
+  // Task 9: per-repo portfolio summaries. Only a multi-repo install shows the
+  // overview / switcher; a single-repo install drills straight to the pipeline.
+  const repos = useMemo(() => buildRepoSummaries(socket), [socket])
+  const multiRepo = repos.length > 1
+  const showOverview = multiRepo && repo == null
   const transcript = useMemo(() => toTranscript(events, item), [events, item])
   const vitals = useMemo(
     () => toVitals(events, { stagingPromotion: socket.stagingPromotion }),
@@ -99,7 +106,16 @@ export function OperatorConsoleView({ socket = {} }) {
         />
       </div>
       <div data-testid="operator-pipeline-slot" style={{ ...slotStyle, gridArea: 'pipeline' }}>
-        <PipelineRail pipeline={pipeline} select={select} stage={stage} />
+        {multiRepo && (
+          <div style={{ marginBottom: 8 }}>
+            <RepoSwitcher repos={repos} current={repo} stage={stage} item={item} select={select} />
+          </div>
+        )}
+        {showOverview ? (
+          <RepoOverview repos={repos} select={select} />
+        ) : (
+          <PipelineRail pipeline={pipeline} select={select} stage={stage} />
+        )}
       </div>
       <div data-testid="operator-detail-slot" style={{ ...slotStyle, gridArea: 'detail' }}>
         <ItemWorkspacePlaceholder item={item} transcript={transcript} mode={mode} select={select} />
