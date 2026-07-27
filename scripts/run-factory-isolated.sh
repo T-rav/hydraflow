@@ -12,14 +12,19 @@
 # Config (env overrides):
 #   HYDRAFLOW_FACTORY_WORKSPACE   dir for the dedicated clone
 #                                 (default: ~/.hydraflow/factory-workspace/hydraflow)
-#   HYDRAFLOW_FACTORY_BRANCH      branch the factory runs (default: main)
+#   HYDRAFLOW_FACTORY_BRANCH      branch the factory runs (default: staging)
+#
+# Branch default is `staging`, not `main` (ADR-0042 two-tier model): the factory
+# runs on staging and `main` advances only via auto-promoted RC PRs. Defaulting
+# to `main` here booted the factory 90 commits behind, idle, after a restart
+# (2026-07-27) — the liveness kernel now also pins this via the launchd plist.
 #
 # Usage:  scripts/run-factory-isolated.sh        (or: make factory)
 set -euo pipefail
 
 DEV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 WORKSPACE="${HYDRAFLOW_FACTORY_WORKSPACE:-$HOME/.hydraflow/factory-workspace/hydraflow}"
-BRANCH="${HYDRAFLOW_FACTORY_BRANCH:-main}"
+BRANCH="${HYDRAFLOW_FACTORY_BRANCH:-staging}"
 
 # Canonicalize WORKSPACE to an absolute, symlink-resolved path BEFORE the
 # safety guard — otherwise a relative value ('.', '../hydraflow') would slip
