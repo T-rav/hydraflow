@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `480a496` — Merge origin/main into rc/2026-07-27-1534 (promotion sync) *(2026-07-27)*
+- `211694f` — feat(orchestration): formal give-up window → auto-decompose on plan-retry exhaustion (#10735) (#10745) (#10745) *(2026-07-27)*
+- `37e0845` — feat(ops): honest launchd liveness kernel — boot-SHA/branch guard + orphan reap (#10734) (#10743) (#10743) *(2026-07-27)*
 - `308a6df` — fix(operator): registry-seeded stable loop-health count, not a window/tick artifact (#10556) (#10739) (#10739) *(2026-07-27)*
 - `98c8462` — feat(ul): entry-evidence — 5 new entry links across 5 terms (#10729) (#10729) *(2026-07-27)*
 - `30e34cb` — feat(events): optional per-type EventBus subscription (ADR-0114, #10660) (#10723) (#10723) *(2026-07-27)*
@@ -36,12 +39,17 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `e2625f4` — Fixes #10567: PRPort has no get_pr_labels — PR-level label routing ... (#10584) (#10584) *(2026-07-25)*
 - `7d284d6` — Fixes #10565: Sampled re-audit disagreement: PR #10479 (structural)... (#10576) (#10576) *(2026-07-25)*
 - `1ac9d57` — docs(arch): align functional_areas.yml loop grouping with the UI (#10554) (#10554) *(2026-07-25)*
+- `65c493d` — Merge remote-tracking branch 'origin/main' into HEAD *(2026-07-25)*
 - `58b5cdc` — Fixes #10540, #10533: violation-based ADR citation conformance gate; retire activity-drift (#10547) (#10547) *(2026-07-25)*
 - `306cc57` — Fixes #10515: FakeIssueStore stamps HITL and merged snapshot entrie... (#10528) (#10528) *(2026-07-25)*
 - `585f69e` — Fixes #10509: Work Stream stage timeline: merged issues show HITL f... (#10529) (#10529) *(2026-07-25)*
 - `204d2e1` — feat(ul): term-proposer batch — 1 drafts (#10514) (#10514) *(2026-07-25)*
 - `b9f7109` — chore: remove dead crate subsystem (#10520) (#10520) *(2026-07-25)*
 - `d6bad2e` — feat(signal-control): pure control-theory substrate (Stage 1) (#10502) (#10502) *(2026-07-24)*
+- `acf3848` — fix(adr): single-colon ADR-0049 citations so drift coverage parses (#10481) (#10481) *(2026-07-24)*
+- `a8ae443` — feat(adr): nudge bare shared-infra citations toward :Symbol granularity (#10479) (#10479) *(2026-07-24)*
+- `87a4d86` — fix(gc): guard active auto-agent worktrees from stale-worktree GC (#10476) (#10476) *(2026-07-24)*
+- `625eca3` — Fixes #10457: Fleet-batch ADR-drift triage auto-close (#10474) (#10474) *(2026-07-24)*
 - `055267e` — fix(adr): single-colon ADR-0049 citations so drift coverage parses (#10481) (#10481) *(2026-07-24)*
 - `6c3cb69` — feat(adr): nudge bare shared-infra citations toward :Symbol granularity (#10479) (#10479) *(2026-07-24)*
 - `ee56677` — fix(gc): guard active auto-agent worktrees from stale-worktree GC (#10476) (#10476) *(2026-07-24)*
@@ -608,15 +616,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `14e066b` — fix(subprocess): timeouts on subprocess.run in async loop paths (#8456) (#8456) *(2026-05-02)*
 - `54f940e` — feat(sandbox): catalog s02-s12 + SandboxFailureFixerLoop + 3-trigger CI (PR C of 3) (#8453) (#8453) *(2026-04-28)*
 - `e1e9c91` — feat(sandbox): docker-compose stack + harness + s01 + ADR-0052 (PR B of 3) (#8452) (#8452) *(2026-04-28)*
-- `32ef615` — feat(mockworld): foundation — Fake relocation + DI plumbing + sandbox entrypoint (PR A of 3) (#8451) (#8451) *(2026-04-28)*
-
-## 2026-W17
-
-- `7a0e225` — feat: CostBudgetWatcherLoop + PSH onboarding (multi-repo prereq) (#8450) (#8450) *(2026-04-26)*
-- `3738e3d` — feat(loop): PricingRefreshLoop — daily LiteLLM upstream-pricing refresh (#8449) (#8449) *(2026-04-26)*
-- `f07ec68` — feat(scaffold): scripts/scaffold_loop.py upgrade — atomic apply + 5-checkpoint patcher (#8448) (#8448) *(2026-04-26)*
-- `3f349d8` — feat(runners): BaseSubprocessRunner + AutoAgentRunner migration + Port↔Fake signature conformance (#8446) (#8446) *(2026-04-26)*
-- `3af8d25` — feat(infra): dark-factory infrastructure hardening — spec + plan + PR1 (ADR-0051 + pre-commit arch-check) (#8445) (#8445) *(2026-04-26)*
 
 
 <!-- arch:generated -->
