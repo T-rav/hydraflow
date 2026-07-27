@@ -68,15 +68,19 @@ describe('OperatorConsoleView — shell', () => {
   it('renders placeholder children for the not-yet-built components', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     expect(screen.getByTestId('console-header-placeholder')).toBeInTheDocument()
-    expect(screen.getByTestId('pipeline-rail-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('item-workspace-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('vitals-card-placeholder')).toBeInTheDocument()
     expect(screen.getByTestId('activity-drawer-placeholder')).toBeInTheDocument()
   })
 
-  it('wires the pipeline adapter — the pipeline placeholder reflects the six stages', () => {
+  it('mounts the real PipelineRail in the pipeline slot (Task 3)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
-    expect(screen.getByTestId('pipeline-rail-placeholder')).toHaveTextContent('6')
+    expect(screen.getByTestId('pipeline-rail')).toBeInTheDocument()
+  })
+
+  it('wires the pipeline adapter — the rail reflects the six stages', () => {
+    const { container } = render(<OperatorConsoleView socket={makeSocket()} />)
+    expect(container.querySelectorAll('[data-testid^="stage-tile-"]')).toHaveLength(6)
   })
 
   it('reflects URL-initialised selection in the header breadcrumb placeholder', () => {
@@ -88,8 +92,9 @@ describe('OperatorConsoleView — shell', () => {
   })
 
   it('does not crash on an empty socket (no events, no pipeline slices)', () => {
-    render(<OperatorConsoleView socket={{}} />)
+    const { container } = render(<OperatorConsoleView socket={{}} />)
     expect(screen.getByTestId('operator-console')).toBeInTheDocument()
-    expect(screen.getByTestId('pipeline-rail-placeholder')).toHaveTextContent('6')
+    // The rail always renders the six canonical stages, even with no data.
+    expect(container.querySelectorAll('[data-testid^="stage-tile-"]')).toHaveLength(6)
   })
 })
