@@ -29,30 +29,9 @@ import { toVitals } from './model/vitals'
 import { toActivityFeed } from './model/activity'
 import { VitalsCard } from './VitalsCard'
 import { ActivityDrawer } from './ActivityDrawer'
+import { ItemWorkspace } from './ItemWorkspace'
 
 const slotStyle = { minWidth: 0 }
-const placeholderStyle = {
-  padding: '8px 12px',
-  borderRadius: 6,
-  fontSize: 12,
-  opacity: 0.7,
-  background: 'rgba(127,127,127,0.08)',
-}
-
-// ---------------------------------------------------------------------------
-// Placeholder children — replaced by the real components in Tasks 3-9. They
-// consume the same props the real components will, so the wiring proven here
-// stays valid as they land.
-// ---------------------------------------------------------------------------
-
-function ItemWorkspacePlaceholder({ item, transcript, mode }) {
-  return (
-    <div data-testid="item-workspace-placeholder" style={placeholderStyle}>
-      ItemWorkspace — item: {item ?? 'none'} · {transcript.length} rows · mode: {mode}
-    </div>
-  )
-}
-
 
 /**
  * Presentational shell. Takes the socket state as a prop so it can be rendered
@@ -102,7 +81,7 @@ export function OperatorConsoleView({ socket = {} }) {
         <PipelineRail pipeline={pipeline} select={select} stage={stage} />
       </div>
       <div data-testid="operator-detail-slot" style={{ ...slotStyle, gridArea: 'detail' }}>
-        <ItemWorkspacePlaceholder item={item} transcript={transcript} mode={mode} select={select} />
+        <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
       </div>
       <div data-testid="operator-vitals-slot" style={{ ...slotStyle, gridArea: 'vitals' }}>
         <VitalsCard vitals={vitals} />
