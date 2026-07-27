@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 
+from ..lineage import find_lineage_gaps
 from ..models import CheckContext, Finding, Status
 from ..registry import register
 from ._helpers import exists, file_contains, finding
@@ -242,3 +243,38 @@ def _no_line_numbers_in_adr_citations(ctx: CheckContext) -> Finding:
         "ADR citations include line numbers (drift risk); first offenders: "
         + "; ".join(hits),
     )
+
+
+@register("P1.17")
+def _control_plane_adrs_carry_lineage(ctx: CheckContext) -> Finding:
+    """CULTURAL (advisory): control-plane ADRs name their lineage (ADR-0113).
+
+    A control-plane ADR should carry a ``Precedent:`` line (the named tradition
+    it inherits) or a ``Divergence:`` line (the forced break, citing a receipt),
+    so a reviewer can tell inherited engineering from genuine novelty. This
+    *warns* — it never fails the gate — while the seed pass (#10674 child 3)
+    backfills the corpus; it is slated to escalate to STRUCTURAL once every
+    control-plane ADR carries a line (#10674 child 5). Independently, any
+    ``Divergence:`` line that cites no receipt token (an ADR / incident /
+    ``#issue`` / audit finding) is flagged: unforced invention is a defect.
+    """
+    adr_dir = ctx.root / "docs" / "adr"
+    if not adr_dir.is_dir():
+        return finding("P1.17", Status.NA, "no docs/adr/ — nothing to check")
+    gaps = find_lineage_gaps(adr_dir)
+    if gaps.clean:
+        return finding("P1.17", Status.PASS)
+    problems: list[str] = []
+    if gaps.control_plane_missing_both:
+        listed = ", ".join(f"ADR-{n:04d}" for n in gaps.control_plane_missing_both)
+        problems.append(
+            f"{len(gaps.control_plane_missing_both)} control-plane ADR(s) carry "
+            f"neither a Precedent: nor a Divergence: line ({listed})"
+        )
+    if gaps.divergence_without_receipt:
+        listed = ", ".join(f"ADR-{n:04d}" for n in gaps.divergence_without_receipt)
+        problems.append(
+            f"{len(gaps.divergence_without_receipt)} Divergence: line(s) cite no "
+            f"receipt — an ADR / incident / #issue / audit finding ({listed})"
+        )
+    return finding("P1.17", Status.WARN, "; ".join(problems))

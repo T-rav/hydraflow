@@ -5,6 +5,9 @@
 **Enforcement:** enforced
 **Enforced by:** pytest:tests/test_seed_terms.py
 
+**Precedent:** Feedback control of computing systems (Hellerstein, Diao, Parekh & Tilbury, *Feedback Control of Computing Systems*, Wiley 2004); the MAPE-K autonomic loop (Kephart & Chess, "The Vision of Autonomic Computing", 2003)
+**Divergence:** classical control regulates a running physical or software system through deterministic actuators; here the plant is software *production*, not a running system, and the actuators are generative-model CLI agents whose transfer function is stochastic and version-dependent, so identification and stability arguments cannot assume a fixed actuator (receipt: ADR-0004, ADR-0110)
+
 ## Context
 
 HydraFlow's orchestration is already, structurally, a control system, but nowhere is it named as one, so its pieces are motivated one at a time and there is no shared vocabulary for reasoning about them. Sensors are rich but scattered (`MetricsSnapshot`, `sensor_enricher`, drift detectors, LLM judges, the Loop Fitness Scorecard); actuation is strong (runner dispatch → PR → label swap); internal corrective feedback is strong (reviewer verdict → re-injected prompt). The weak, unnamed link is the controller: issue selection is FIFO by label priority (`src/issue_store.py:IssueStore._compute_stage_map`), and the rich sensor data is not fed into what-to-do-next decisions.

@@ -107,6 +107,7 @@ project-specific content — the *shape* matters more than the wording.
 | P1.14 | STRUCTURAL | docs/adr/README.md | Load-bearing ADRs are present and marked Accepted (or project equivalents exist) | For orchestration repos: ADR-0001 (loops), 0002 (labels), 0003 (worktrees), 0021 (persistence), 0022 (MockWorld), 0029 (caretakers), 0032 (wiki). Non-orchestration repos mark N/A with justification in `docs/adr/README.md` |
 | P1.15 | BEHAVIORAL | docs/wiki/gotchas.md | File has ≥5 pattern sections with example code blocks | Seed from HydraFlow's 13-section file; an empty stub does not count |
 | P1.16 | BEHAVIORAL | docs/adr/README.md | ADR source citations omit line numbers (use `module:function_or_class`) | Grep for `:\d+` in ADR prose and strip; line numbers drift as code evolves |
+| P1.17 | CULTURAL | ADR-0113 | Control-plane ADRs carry a `Precedent:` or `Divergence:` lineage line, and every `Divergence:` cites a receipt | Add a `Precedent: <tradition> (<source>)` and/or `Divergence: <assumption>, <forcing condition>, <rule> (<receipt>)` header line per ADR-0113. Advisory (WARN, never blocks) until the seed pass lands; escalates to STRUCTURAL after |
 
 ### P2. Domain-Driven Design, Ports & Adapters, Clean Architecture
 
