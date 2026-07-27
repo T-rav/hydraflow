@@ -5,6 +5,7 @@ import {
   applyFiltersAndSort,
   formatDuration,
   useTimeline,
+  toTimelineRows,
   STAGE_KEYS,
   STAGE_META,
 } from '../useTimeline'
@@ -478,5 +479,46 @@ describe('useTimeline', () => {
     act(() => result.current.setSortBy('issue'))
     expect(result.current.issues[0].issueNumber).toBe(5)
     expect(result.current.issues[1].issueNumber).toBe(1)
+  })
+})
+
+// ── toTimelineRows (operator ItemWorkspace Timeline tab, #10556 Task 4) ──
+// Additive pure export: collapses runs of same-kind transcript view-model rows
+// (from toTranscript) into compact timeline phases so the Timeline tab shows a
+// per-item phase progression instead of a raw line dump. Existing exports and
+// their behaviour are untouched.
+
+describe('toTimelineRows', () => {
+  const row = (kind, ts, text) => ({ ts, kind, text, meta: {} })
+
+  it('returns an empty array for empty / missing input', () => {
+    expect(toTimelineRows([])).toEqual([])
+    expect(toTimelineRows()).toEqual([])
+  })
+
+  it('collapses consecutive same-kind rows into one phase with a count', () => {
+    const rows = [
+      row('read', '2026-07-26T12:00:01Z', 'reading a.py'),
+      row('read', '2026-07-26T12:00:02Z', 'reading b.py'),
+      row('read', '2026-07-26T12:00:03Z', 'reading c.py'),
+    ]
+    const out = toTimelineRows(rows)
+    expect(out).toHaveLength(1)
+    expect(out[0].kind).toBe('read')
+    expect(out[0].count).toBe(3)
+    expect(out[0].firstTs).toBe('2026-07-26T12:00:01Z')
+    expect(out[0].lastTs).toBe('2026-07-26T12:00:03Z')
+    expect(out[0].lastText).toBe('reading c.py')
+  })
+
+  it('starts a new phase when the kind changes', () => {
+    const rows = [
+      row('read', '2026-07-26T12:00:01Z', 'reading a.py'),
+      row('edit', '2026-07-26T12:00:02Z', 'writing a.py'),
+      row('read', '2026-07-26T12:00:03Z', 'reading b.py'),
+    ]
+    const out = toTimelineRows(rows)
+    expect(out.map(p => p.kind)).toEqual(['read', 'edit', 'read'])
+    expect(out.every(p => p.count === 1)).toBe(true)
   })
 })

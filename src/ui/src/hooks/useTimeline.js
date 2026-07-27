@@ -344,6 +344,33 @@ export function applyFiltersAndSort(issues, filterStage, filterStatus, sortBy) {
 }
 
 /**
+ * Collapse a per-item transcript view model (rows from `toTranscript`) into
+ * compact timeline phases for the operator console's ItemWorkspace Timeline tab
+ * (#10556 Task 4). Consecutive rows of the same `kind` fold into one phase that
+ * carries a `count`, the first/last timestamps, and the latest line's text.
+ *
+ * Pure and additive: it feeds the already-formatted transcript rows into a
+ * timeline shape and never touches the event-derived timeline above.
+ *
+ * @param {Array<{ts, kind, text}>} rows — transcript VM rows (oldest-first)
+ * @returns {Array<{kind, count, firstTs, lastTs, lastText}>}
+ */
+export function toTimelineRows(rows = []) {
+  const phases = []
+  for (const r of rows || []) {
+    const last = phases[phases.length - 1]
+    if (last && last.kind === r.kind) {
+      last.count += 1
+      last.lastTs = r.ts
+      last.lastText = r.text
+    } else {
+      phases.push({ kind: r.kind, count: 1, firstTs: r.ts, lastTs: r.ts, lastText: r.text })
+    }
+  }
+  return phases
+}
+
+/**
  * Custom hook that derives timeline data from WebSocket state.
  *
  * @param {Array} events  — events array from useHydraFlowSocket

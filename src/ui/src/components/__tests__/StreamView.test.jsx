@@ -13,7 +13,7 @@ vi.mock('../../context/HydraFlowContext', async (importOriginal) => ({
   useHydraFlow: (...args) => mockUseHydraFlow(...args),
 }))
 
-const { StreamView, toStreamIssue, findWorkerTranscript } = await import('../StreamView')
+const { StreamView, toStreamIssue, findWorkerTranscript, TranscriptRow } = await import('../StreamView')
 
 function defaultHydraFlowContext(overrides = {}) {
   const defaultPipeline = { triage: [], plan: [], implement: [], review: [], merged: [] }
@@ -1375,5 +1375,24 @@ describe('Epics moved off the pipeline view (#10306)', () => {
     expect(screen.queryByTestId(`epic-badge-${baseEpic.epic_number}`)).not.toBeInTheDocument()
     // The panel's "Epics" heading must not appear on the pipeline view.
     expect(screen.queryByText('Epics')).not.toBeInTheDocument()
+  })
+})
+
+// TranscriptRow (#10556 Task 4) is the shared, presentational transcript-line
+// row renderer extracted from StreamView so the operator console's
+// TranscriptStream reuses one row implementation instead of forking its own.
+// Additive export — StreamView's own render path and tests are unchanged.
+describe('TranscriptRow (shared transcript-line renderer)', () => {
+  it('renders a kind-tagged row with a timestamp and its text', () => {
+    render(<TranscriptRow row={{ ts: '2026-07-26T12:00:02Z', kind: 'edit', text: 'writing config.py' }} />)
+    const el = screen.getByTestId('transcript-row')
+    expect(el).toHaveAttribute('data-kind', 'edit')
+    expect(screen.getByTestId('transcript-ts')).toHaveTextContent('12:00:02')
+    expect(screen.getByText('writing config.py')).toBeInTheDocument()
+  })
+
+  it('falls back to the agent kind for an unknown kind', () => {
+    render(<TranscriptRow row={{ ts: '2026-07-26T12:00:02Z', kind: 'weird', text: 'x' }} />)
+    expect(screen.getByTestId('transcript-row')).toHaveAttribute('data-kind', 'weird')
   })
 })
