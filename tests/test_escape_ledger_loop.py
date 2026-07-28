@@ -346,10 +346,14 @@ class TestRenderFinding:
         # The placeholder must never offer "low" — a resolution that only
         # confirms confidence="low" can never satisfy this surface's own
         # answered predicate (attribution_confidence != "low") and would
-        # silently strand the HITL issue.
+        # silently strand the HITL issue. Scoped to the printed command
+        # itself, not the surrounding prose, which legitimately says
+        # "low-confidence surface" — a naive whole-section check on "low"
+        # would false-positive on that prose.
         remediation_section = body.split("### Record the resolution")[1]
         assert "<high|medium>" in remediation_section
-        assert "low" not in remediation_section
+        command = remediation_section.split("```")[1]
+        assert "low" not in command
 
     def test_aging_body_still_prescribes_encoded_as(self) -> None:
         # The aging surface's remediation is unchanged by the low-confidence
