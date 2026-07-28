@@ -4,9 +4,8 @@ topic: gotchas
 source_issue: 10504
 source_phase: plan
 created_at: 2026-07-25T02:18:04.061411+00:00
-status: superseded
+status: active
 corroborations: 1
-superseded_by: 0851
 fixed_in_pr: #10521
 code_refs: src/escape/detect.py:_SHA_MARKER,src/audit/detect.py:_SHA_MARKER
 ---
