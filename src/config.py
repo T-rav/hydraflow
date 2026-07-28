@@ -1009,6 +1009,16 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
+        "sampled_audit_auto_adjudicate_enabled",
+        "HYDRAFLOW_SAMPLED_AUDIT_AUTO_ADJUDICATE_ENABLED",
+        False,
+    ),
+    (
+        "escape_ledger_auto_diagnose_enabled",
+        "HYDRAFLOW_ESCAPE_LEDGER_AUTO_DIAGNOSE_ENABLED",
+        False,
+    ),
+    (
         "second_order_vitals_loop_enabled",
         "HYDRAFLOW_SECOND_ORDER_VITALS_LOOP_ENABLED",
         True,
@@ -2120,6 +2130,21 @@ class HydraFlowConfig(BaseModel):
             "How long an escape may stay `encoded_as: none-yet` before "
             "EscapeLedgerLoop surfaces it for human triage (#10367). Every "
             "escape should terminate in an encoding (test/lesson/detector/ADR)."
+        ),
+    )
+    escape_ledger_auto_diagnose_enabled: bool = Field(
+        default=False,
+        description=(
+            "Before EscapeLedgerLoop files a LOW-CONFIDENCE escape for a human "
+            "(SURFACE_REASON_LOW_CONFIDENCE), run a machine auto-diagnose pass "
+            "(ADR-0115): trace the detecting commit, check whether the bug is "
+            "already regression-encoded, and — if real+encoded — auto-record the "
+            "resolution at high confidence (encoded-as regression-test) so the "
+            "surface self-answers; auto-dismiss a clear false positive with a "
+            "recorded reason. Only an INCONCLUSIVE diagnosis falls through to the "
+            "human surface. Off by default (feature opt-in, safe rollout); the "
+            "pass is purely mechanical (git + issue-label reads, no LLM spawn), "
+            "so it is air-gap-safe."
         ),
     )
     intervention_tally_interval: int = Field(
@@ -5486,6 +5511,20 @@ class HydraFlowConfig(BaseModel):
             "(mockworld.sandbox_main._apply_sandbox_config_overrides) so the "
             "config_disable seam is TRUE — no real `claude` is reachable on the "
             "sandbox network. The loop still samples-and-ticks + governs."
+        ),
+    )
+    sampled_audit_auto_adjudicate_enabled: bool = Field(
+        default=False,
+        description=(
+            "Before SampledAuditLoop leaves a re-audit disagreement for a human "
+            "adjudicator, run a machine auto-adjudicate pass (ADR-0115): a fresh "
+            "adversarial LLM re-reads the merged diff + the auditor's finding and "
+            "self-applies the disposition — `audit-upheld` (a real silent escape "
+            "→ crosses into the escape ledger) or `audit-refuted` (auditor false "
+            "alarm → closed with evidence). Only an INCONCLUSIVE adjudication is "
+            "left unlabelled for a human. Off by default (feature opt-in). Also "
+            "gated by sampled_audit_reaudit_enabled, so the air-gapped sandbox "
+            "(which pins re-audit OFF) reaches no adjudicator spawn either."
         ),
     )
     adr_drift_resolver_loop_enabled: bool = Field(

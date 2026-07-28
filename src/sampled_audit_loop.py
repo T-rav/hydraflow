@@ -57,6 +57,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from audit.adjudicate import (
+    AdjudicatorLLM,
+    build_adjudication_prompt,
+    parse_adjudication,
+)
 from audit.budget import MAX_DIFF_CONTEXT_CHARS, within_budget
 from audit.crosslink import sample_to_escape_record
 from audit.detect import (
@@ -64,7 +69,7 @@ from audit.detect import (
     diff_for_sha,
     merged_changes_for_range,
 )
-from audit.disposition import reconcile_disposition
+from audit.disposition import REFUTED_LABEL, UPHELD_LABEL, reconcile_disposition
 from audit.governance import DEFAULT_BASE_RATE, govern_rate, trim_history
 from audit.models import (
     AUDIT_INPUT_SOURCES,
@@ -138,6 +143,39 @@ class _CLIAuditLLM:
         )
         if result.returncode != 0:
             msg = f"audit LLM failed (rc={result.returncode}): {result.stderr[:200]}"
+            raise RuntimeError(msg)
+        return result.stdout
+
+
+class _CLIAdjudicatorLLM:
+    """Production adjudicator: one-shot RAW-text completion via the shared
+    lightweight-agent seam (ADR-0115).
+
+    Mirrors :class:`_CLIAuditLLM`; never exercised under test (the loop's
+    ``adjudicator`` kwarg injects a fake, and the sandbox pins re-audit — and so
+    adjudication — off entirely).
+    """
+
+    def __init__(self, config: HydraFlowConfig, model: str) -> None:
+        self._config = config
+        self._model = model
+
+    async def adjudicate(self, *, prompt: str) -> str:
+        result = await run_lightweight_agent(
+            runner=get_default_runner(),
+            config=self._config,
+            tool="claude",
+            model=self._model,
+            prompt=prompt,
+            source="sampled_audit_adjudicate",
+            timeout=float(_AUDIT_LLM_TIMEOUT_S),
+            issue_labels=(),
+        )
+        if result.returncode != 0:
+            msg = (
+                f"adjudicator LLM failed (rc={result.returncode}): "
+                f"{result.stderr[:200]}"
+            )
             raise RuntimeError(msg)
         return result.stdout
 
@@ -216,6 +254,7 @@ class SampledAuditLoop(BaseBackgroundLoop):
         dedup: DedupStore,
         deps: LoopDeps,
         auditor: _AuditLLM | None = None,
+        adjudicator: AdjudicatorLLM | None = None,
     ) -> None:
         super().__init__(worker_name="sampled_audit", config=config, deps=deps)
         self._prs = pr_manager
@@ -223,6 +262,11 @@ class SampledAuditLoop(BaseBackgroundLoop):
         self._dedup = dedup
         # Injected fake under test/scenario; production lazily builds _CLIAuditLLM.
         self._auditor = auditor
+        # Auto-adjudicator (ADR-0115), injected fake under test; production lazily
+        # builds _CLIAdjudicatorLLM. Only spawned when both
+        # sampled_audit_auto_adjudicate_enabled and sampled_audit_reaudit_enabled
+        # are set (the sandbox pins the latter off → no adjudicator spawn).
+        self._adjudicator = adjudicator
 
     def _get_default_interval(self) -> int:
         return self._config.sampled_audit_interval
@@ -259,11 +303,13 @@ class SampledAuditLoop(BaseBackgroundLoop):
 
         resolved = self._resolve_range()
         if isinstance(resolved, dict):
-            # Even with no new commits, reconcile prior pending disagreements so
-            # adjudication outcomes (upheld cross-links / refutations) surface on
-            # a quiet tick.
+            # Even with no new commits, adjudicate + reconcile prior pending
+            # disagreements so adjudication outcomes (upheld cross-links /
+            # refutations) surface on a quiet tick.
             await self._file_findings()
+            adjudicated = await self._auto_adjudicate()
             reconciled = await self._reconcile_pending()
+            resolved["adjudicated"] = adjudicated
             resolved["reconciled"] = reconciled
             return resolved
         repo_root, commit_range, changes, current_sha = resolved
@@ -271,6 +317,10 @@ class SampledAuditLoop(BaseBackgroundLoop):
         rate = self._current_rate()
         audited = await self._sample_and_audit(repo_root, changes, rate)
         filed = await self._file_findings()
+        # ADR-0115: machine-adjudicate the fresh disagreements (self-apply
+        # audit-upheld / audit-refuted) BEFORE reconcile, so a machine-resolvable
+        # finding never waits on a human. Reconcile then resolves the labels.
+        adjudicated = await self._auto_adjudicate()
         reconciled = await self._reconcile_pending()
         self._govern(audited)
 
@@ -285,6 +335,7 @@ class SampledAuditLoop(BaseBackgroundLoop):
             "sampled": len(audited),
             "disagreements": disagreements,
             "filed": filed,
+            "adjudicated": adjudicated,
             "reconciled": reconciled,
             "governed_rate": self._current_rate(),
         }
@@ -457,6 +508,127 @@ class SampledAuditLoop(BaseBackgroundLoop):
             ledger.update_dispositions(updated)
         return filed
 
+    # --- machine auto-adjudication (ADR-0115) ---------------------------
+
+    async def _auto_adjudicate(self) -> int:
+        """Self-apply audit-upheld / audit-refuted before any human adjudicator.
+
+        For each pending FILED disagreement not yet adjudicated, a fresh
+        adversarial adjudicator re-reads the merged diff + the auditor's finding
+        and decides: ``upheld`` (apply ``audit-upheld`` — reconcile then crosses
+        it into the escape ledger), ``refuted`` (apply ``audit-refuted`` + close
+        with evidence — an auditor false alarm), or ``inconclusive`` (leave it
+        unlabelled for a human — the genuine escalation path is preserved).
+
+        Gated by BOTH ``sampled_audit_auto_adjudicate_enabled`` and
+        ``sampled_audit_reaudit_enabled`` (the sandbox pins the latter off, so no
+        adjudicator ``claude`` is reachable there). Each disagreement is
+        adjudicated at most once (``adjudicate:<id>`` dedup) so an inconclusive
+        finding is not re-spawned every tick. Returns the count acted on.
+        """
+        if not (
+            self._config.sampled_audit_auto_adjudicate_enabled
+            and self._config.sampled_audit_reaudit_enabled
+        ):
+            return 0
+        ledger = AuditSampleLedger(self._samples_path)
+        rows = ledger.read_all()
+        pending = [
+            s
+            for s in rows
+            if s.verdict == "disagree"
+            and s.disposition == "pending"
+            and s.find_issue
+            and f"adjudicate:{s.id}" not in self._dedup.get()
+        ]
+        if not pending:
+            return 0
+        repo_root = Path(self._config.repo_root)
+        acted = 0
+        for sample in pending:
+            issue = int(sample.find_issue or 0)
+            if issue <= 0:
+                continue
+            diff = diff_for_sha(repo_root, sample.merge_sha) or ""
+            prompt = build_adjudication_prompt(sample, diff)
+            try:
+                raw = await self._adjudicate(prompt)
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "SampledAudit: adjudication failed for %s — leaving for a "
+                    "human (fail-safe)",
+                    sample.id,
+                    exc_info=True,
+                )
+                continue
+            verdict, rationale = parse_adjudication(raw)
+            # Mark adjudicated regardless of verdict: an inconclusive finding is
+            # left for a human and must not be re-spawned every tick.
+            self._dedup.set_all(self._dedup.get() | {f"adjudicate:{sample.id}"})
+            acted += await self._apply_adjudication(issue, sample, verdict, rationale)
+        return acted
+
+    async def _apply_adjudication(
+        self, issue: int, sample: AuditSample, verdict: str, rationale: str
+    ) -> int:
+        """Apply the machine adjudication verdict to *issue*; return 1 if acted.
+
+        ``inconclusive`` posts a note and leaves the issue unlabelled for a
+        human (0 acted). A failed label/close leaves the finding open+pending so
+        the next tick's reconcile still sees it (``adjudicate:<id>`` is already
+        spent, so the human path takes over — fail-safe, never a silent drop).
+        """
+        if verdict == "inconclusive":
+            try:
+                await self._prs.post_comment(
+                    issue, _adjudication_comment(sample, verdict, rationale)
+                )
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "SampledAudit: inconclusive-note post failed for #%d: %s",
+                    issue,
+                    exc,
+                )
+            logger.info(
+                "SampledAudit: %s adjudication INCONCLUSIVE → left for a human",
+                sample.id,
+            )
+            return 0
+        label = UPHELD_LABEL if verdict == "upheld" else REFUTED_LABEL
+        try:
+            await self._prs.post_comment(
+                issue, _adjudication_comment(sample, verdict, rationale)
+            )
+            await self._prs.add_labels(issue, [label])
+            if verdict == "refuted":
+                # Close-with-evidence: a not-planned close reads as a dismissal.
+                await self._prs.close_issue(issue, reason="not planned")
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "SampledAudit: could not apply %s to #%d (%s) — leaving for "
+                "reconcile/human: %s",
+                label,
+                issue,
+                sample.id,
+                exc,
+            )
+            return 0
+        logger.info(
+            "SampledAudit: %s auto-adjudicated %s (machine, no human)",
+            sample.id,
+            verdict,
+        )
+        return 1
+
+    async def _adjudicate(self, prompt: str) -> str:
+        """Complete *prompt* via the injected fake or a lazily-built CLI client."""
+        if self._adjudicator is None:
+            self._adjudicator = _CLIAdjudicatorLLM(self._config, self._auditor_model())
+        return await self._adjudicator.adjudicate(prompt=prompt)
+
     # --- adjudication reconcile -----------------------------------------
 
     async def _reconcile_pending(self) -> int:
@@ -554,6 +726,39 @@ def _with_find_issue(sample: AuditSample, issue: int) -> AuditSample:
         disposition=sample.disposition,
         find_issue=issue or None,
         escape_id=sample.escape_id,
+    )
+
+
+def _adjudication_comment(sample: AuditSample, verdict: str, rationale: str) -> str:
+    """Render the machine-adjudication comment posted to a find issue (ADR-0115).
+
+    Names the verdict and the adjudicator's rationale so a machine resolution
+    leaves the same audit trail a human adjudication would — and, for the
+    inconclusive case, tells the human exactly why it was handed to them.
+    """
+    if verdict == "upheld":
+        detail = (
+            "the finding names a real defect the gauntlet missed. Applied "
+            "`audit-upheld` — this crosses into the escape ledger as a "
+            "`sampled-audit` detection on the next reconcile."
+        )
+    elif verdict == "refuted":
+        detail = (
+            "the auditor was wrong (a nit / misread / correct-as-merged). "
+            "Applied `audit-refuted` and closed with evidence — counted against "
+            "the auditor's false-alarm budget."
+        )
+    else:
+        detail = (
+            "the machine adjudicator could not decide from the diff alone. "
+            "Left for a human — apply `audit-upheld` or `audit-refuted`."
+        )
+    return (
+        "## Machine adjudication (SampledAuditLoop, automated — ADR-0115)\n\n"
+        f"A fresh adversarial adjudicator re-read PR #{sample.pr_number}'s merged "
+        f"diff + the re-auditor's finding and returned **{verdict}**: {detail}\n\n"
+        "### Rationale\n\n"
+        f"{rationale or '(none recorded)'}\n"
     )
 
 
