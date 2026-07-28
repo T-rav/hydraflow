@@ -60,6 +60,7 @@ from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from models import WorkCycleResult
 from repo_wiki import _split_tracked_entry, parse_topic_page
+from wiki_lesson_coverage import PredecessorCoverage, assess_repo_coverage
 from wiki_rot_citations import (
     Cite,
     ShippedClaim,
@@ -379,12 +380,98 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             filed += shipped_filed
             escalated += shipped_escalated
 
+        # Continuous N-to-1 merge lesson-coverage gate (#10763). Self-repo only —
+        # anchor liveness needs AST over checked-out source, mirroring the
+        # per-cite/shipped-claim ``is_self`` gate above.
+        if is_self:
+            filed += await self._file_lesson_coverage_finds(slug, repo_root, dedup_seen)
+
         self._dedup.set_all(dedup_seen)
         return {
             "filed": filed,
             "escalated": escalated,
             "broken_subjects": broken_subjects,
         }
+
+    async def _file_lesson_coverage_finds(
+        self,
+        slug: str,
+        repo_root: Path,
+        dedup_seen: set[str],
+    ) -> int:
+        """Tier N-to-1 merge predecessors by lesson survival, file the orphans.
+
+        The continuous complement to #10758's one-shot auditor: nothing
+        otherwise stops the next ``RepoWikiLoop`` synthesis round from creating
+        a fresh ``left_on_primary`` merge that drops a predecessor's lesson
+        (#10763). Runs the same tiering as ``scripts/audit_wiki_lesson_coverage``
+        over the tracked wiki and files ONE ``hydraflow-find`` per orphaned
+        lesson — a predecessor whose live code anchors have no representation in
+        the live successor. Dedup-guarded so a standing orphan is filed once,
+        and reached only after the ``_do_work`` kill-switch gate (ADR-0049).
+
+        Returns the number of finds filed this tick. Any exception propagates
+        to :meth:`_do_work`'s per-repo handler (credit-reraise + log + skip),
+        matching the per-cite and shipped-claim passes — this method adds no
+        broad-except of its own.
+        """
+        tracked_root = Path(self._config.repo_root) / self._config.repo_wiki_path
+        if not (tracked_root / slug).is_dir():
+            return 0
+        report = assess_repo_coverage(tracked_root, slug, repo_root)
+
+        filed = 0
+        for verdict in report.orphaned():
+            dedup_key = (
+                f"wiki_rot_detector:lesson_orphan:{slug}:"
+                f"{verdict.topic}:{verdict.predecessor_id}"
+            )
+            if dedup_key in dedup_seen:
+                continue
+            await self._file_lesson_orphan(slug=slug, verdict=verdict)
+            dedup_seen.add(dedup_key)
+            filed += 1
+        return filed
+
+    async def _file_lesson_orphan(
+        self,
+        *,
+        slug: str,
+        verdict: PredecessorCoverage,
+    ) -> None:
+        """File a finding for a lesson orphaned by an N-to-1 supersession merge."""
+        anchors = ", ".join(f"`{a}`" for a in verdict.live_anchors) or "(none)"
+        title = (
+            f"Wiki lesson orphaned: {verdict.topic}/{verdict.predecessor_id} "
+            "dropped in N-to-1 merge"
+        )
+        body = "\n".join(
+            [
+                "**Automated detection — WikiRotDetectorLoop lesson-coverage "
+                "gate (#10763).**",
+                "",
+                f"- Repo: `{slug}`",
+                f"- Orphaned predecessor: `{verdict.topic}/{verdict.predecessor_id}` "
+                f"(`{verdict.predecessor_path}`)",
+                f"- Merged into live terminal: "
+                f"`{verdict.topic}/{verdict.terminal_id}` "
+                f"(`{verdict.terminal_path}`)",
+                f"- Live code anchors with no representation in the successor: "
+                f"{anchors}",
+                "",
+                "This predecessor was a genuine N-to-1 supersession merge "
+                "(`left_on_primary`): the planner re-pointed it to the round's "
+                "primary successor by title, but none of its live code anchors "
+                "appear in that successor's body — the lesson has silently left "
+                "the active corpus.",
+                "",
+                "Repair path: re-synthesise the dropped lesson into the terminal "
+                "entry (or restore the predecessor to `status: active`). Confirm "
+                "with `uv run python scripts/audit_wiki_lesson_coverage.py "
+                f"--repo {slug}`.",
+            ]
+        )
+        await self._pr.create_issue(title, body, list(_ISSUE_LABELS_FIND))
 
     # -- helpers -----------------------------------------------------------
 

@@ -360,6 +360,33 @@ def _assign_target_names(target: ast.expr) -> set[str]:
     return set()
 
 
+def module_symbols(repo_root: Path, module_path: str) -> frozenset[str]:
+    """Public accessor: the resolvable symbol names *module_path* defines.
+
+    Parses ``repo_root / module_path`` once and returns the same symbol set
+    :func:`verify_cite_ast` checks a cite against — ``def`` / ``class`` names
+    at any depth plus module-level constants. Non-Python paths, missing
+    files, and parse errors all return an empty set (never raises).
+
+    Exposed so cross-module callers (``wiki_lesson_coverage``) can build a
+    cached symbol index without importing the private
+    :func:`_collect_defined_symbols` — the repo's cross-module
+    ``_``-prefixed-import gotcha. Re-export following is intentionally *not*
+    applied here: a lesson anchor should name a symbol its own cited module
+    defines directly.
+    """
+    if not module_path.endswith(".py"):
+        return frozenset()
+    module_file = repo_root / module_path
+    if not module_file.is_file():
+        return frozenset()
+    try:
+        tree = ast.parse(module_file.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return frozenset()
+    return frozenset(_collect_defined_symbols(tree))
+
+
 def _collect_defined_symbols(tree: ast.AST) -> set[str]:
     """Return the resolvable symbol names defined by *tree*.
 
