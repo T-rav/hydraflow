@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6321
 source_phase: plan
 created_at: 2026-04-10T04:19:28.375208+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Cross-cutting methods as callbacks, not new classes

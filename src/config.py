@@ -3835,19 +3835,20 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     worker_stall_tight_loops: list[str] = Field(
-        default_factory=lambda: ["staging_bisect"],
+        default_factory=lambda: ["staging_bisect", "flake_tracker"],
         description=(
             "HealthMonitorLoop generic stall sweep (#10241): loops that opt "
             "into worker_stall_tight_multiplier instead of the blanket "
-            "3×interval+cycle_timeout remediation threshold. A short-poll / "
-            "long-cycle loop like staging_bisect (600s poll, 7200s watchdog) "
-            "has a blanket threshold (9000s) that sits ~30 min past "
-            "TrustFleetSanityLoop's own staleness alert (max(2×interval, "
-            "cycle_timeout)=7200s), leaving an alert→remediation gap in which "
-            "an anomaly issue exists but nothing remediates (#10234). Names "
-            "here fire the auto-restart closer to that alert window while "
-            "keeping the no-false-restart floor (see "
-            "worker_stall_tight_multiplier)."
+            "3×interval+cycle_timeout remediation threshold. The gap isn't "
+            "unique to short-poll/long-cycle loops like staging_bisect (600s "
+            "poll, 7200s watchdog, blanket threshold 9000s vs a 7200s trust "
+            "alert, #10234) — any trust-loop whose poll interval exceeds its "
+            "cycle_timeout has the same shape, just wider: flake_tracker "
+            "(14400s poll, 7200s watchdog) has a blanket threshold of 50400s "
+            "vs a 28800s trust alert, a ~6h window with an open anomaly issue "
+            "and no attempted remediation (#10795). Names here fire the "
+            "auto-restart closer to that alert window while keeping the "
+            "no-false-restart floor (see worker_stall_tight_multiplier)."
         ),
     )
     worker_stall_tight_multiplier: int = Field(

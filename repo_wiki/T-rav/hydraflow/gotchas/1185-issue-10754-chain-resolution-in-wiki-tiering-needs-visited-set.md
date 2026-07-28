@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10754
 source_phase: plan
 created_at: 2026-07-27T23:21:47.785770+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Chain resolution in wiki tiering needs visited-set cycle guard

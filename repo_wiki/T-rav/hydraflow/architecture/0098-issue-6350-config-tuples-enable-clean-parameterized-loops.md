@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6350
 source_phase: plan
 created_at: 2026-04-10T06:55:39.084060+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Config tuples enable clean parameterized loops

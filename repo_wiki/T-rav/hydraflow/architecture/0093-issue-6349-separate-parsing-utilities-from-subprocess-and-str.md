@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6349
 source_phase: plan
 created_at: 2026-04-10T06:47:04.972432+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Separate parsing utilities from subprocess and streaming concerns

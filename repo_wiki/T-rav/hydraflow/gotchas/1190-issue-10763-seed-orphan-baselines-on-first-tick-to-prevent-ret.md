@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10763
 source_phase: plan
 created_at: 2026-07-28T00:17:34.080259+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Seed orphan baselines on first tick to prevent retro-filing storms

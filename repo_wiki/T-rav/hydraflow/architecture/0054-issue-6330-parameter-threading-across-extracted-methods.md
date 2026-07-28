@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6330
 source_phase: plan
 created_at: 2026-04-10T05:17:59.124014+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Parameter threading across extracted methods

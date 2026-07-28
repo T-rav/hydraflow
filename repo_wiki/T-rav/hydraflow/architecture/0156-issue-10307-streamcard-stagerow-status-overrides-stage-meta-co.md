@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10307
 source_phase: plan
 created_at: 2026-07-24T04:05:15.039770+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # StreamCard StageRow: status overrides stage meta.color for escalation

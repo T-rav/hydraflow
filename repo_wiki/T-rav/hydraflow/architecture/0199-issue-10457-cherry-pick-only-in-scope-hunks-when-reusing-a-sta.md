@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10457
 source_phase: plan
 created_at: 2026-07-24T12:45:53.971873+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Cherry-pick only in-scope hunks when reusing a stalled reference commit

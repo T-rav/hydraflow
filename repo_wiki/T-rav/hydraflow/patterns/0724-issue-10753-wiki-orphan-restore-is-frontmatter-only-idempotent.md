@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10753
 source_phase: plan
 created_at: 2026-07-27T23:48:50.234485+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Wiki orphan restore is frontmatter-only, idempotent, dry-run default

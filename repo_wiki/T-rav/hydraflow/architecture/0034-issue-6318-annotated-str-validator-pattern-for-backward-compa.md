@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6318
 source_phase: plan
 created_at: 2026-04-10T04:05:05.202950+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Annotated[str, Validator] pattern for backward-compatible type narrowing

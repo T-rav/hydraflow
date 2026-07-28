@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6362
 source_phase: plan
 created_at: 2026-04-10T07:44:23.400476+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Never-raise contract uses broad exception catching
