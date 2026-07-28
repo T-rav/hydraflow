@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T00:21:29.117833+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1339
+superseded_by: 1502
 ---
 
 # Pure-function + log-line changes skip MockWorld/sandbox e2e

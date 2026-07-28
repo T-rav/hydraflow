@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10762
 source_phase: plan
 created_at: 2026-07-28T00:37:27.487485+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1542
 ---
 
 # Bare-cite resolution is presence-based, not symbol-lookup

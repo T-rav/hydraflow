@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T00:21:29.119741+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1340
+superseded_by: 1503
 ---
 
 # ADR drift regressions need paired no-drift + still-drifts checks

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10754
 source_phase: plan
 created_at: 2026-07-27T23:21:47.785762+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1536
 ---
 
 # Repo wiki auditor scripts: read-only, no --apply, no MockWorld e2e

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T00:21:29.183714+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1373
+superseded_by: 1536
 ---
 
 # repo_wiki/ auditors must be read-only; never add --apply
