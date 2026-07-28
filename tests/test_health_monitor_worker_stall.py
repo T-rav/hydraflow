@@ -303,15 +303,16 @@ async def test_missing_deps_is_silent_noop(hm_env) -> None:
 
 
 def test_config_defaults_opt_in_staging_bisect() -> None:
-    """staging_bisect ships opted-in; the tight multiplier defaults to 2."""
+    """staging_bisect and flake_tracker ship opted-in; tight multiplier is 2."""
     cfg = HydraFlowConfig(repo="hydra/hydraflow")
-    assert cfg.worker_stall_tight_loops == ["staging_bisect"]
+    assert cfg.worker_stall_tight_loops == ["staging_bisect", "flake_tracker"]
     assert cfg.worker_stall_tight_multiplier == 2
 
 
 def test_multiplier_helper_tight_for_opt_in_blanket_otherwise(hm_env) -> None:
     hm, *_ = hm_env
     assert hm._worker_stall_multiplier("staging_bisect") == 2
+    assert hm._worker_stall_multiplier("flake_tracker") == 2
     assert hm._worker_stall_multiplier("workspace_gc") == 3
 
 

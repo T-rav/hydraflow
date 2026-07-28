@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `e97750d` — feat(autonomy): auto-diagnose audit + escape surfaces before human (ADR-0115) (#10780) (#10780) *(2026-07-27)*
 - `40615e9` — fix(sandbox): renumber s50_disturbance_dampener_idle_poll to s90 (scenario-number collision) (#10774) (#10774) *(2026-07-27)*
 - `211694f` — feat(orchestration): formal give-up window → auto-decompose on plan-retry exhaustion (#10735) (#10745) (#10745) *(2026-07-27)*
 - `37e0845` — feat(ops): honest launchd liveness kernel — boot-SHA/branch guard + orphan reap (#10734) (#10743) (#10743) *(2026-07-27)*
@@ -609,7 +610,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `63e59cc` — chore(cleanup): drop redundant docstrings + comments + section markers (#8458) (#8458) *(2026-05-02)*
 - `4183700` — fix(contracts): break src→tests import — relocate _schema to src/contracts/ (#8457) (#8457) *(2026-05-02)*
 - `14e066b` — fix(subprocess): timeouts on subprocess.run in async loop paths (#8456) (#8456) *(2026-05-02)*
-- `54f940e` — feat(sandbox): catalog s02-s12 + SandboxFailureFixerLoop + 3-trigger CI (PR C of 3) (#8453) (#8453) *(2026-04-28)*
 
 
 <!-- arch:generated -->
