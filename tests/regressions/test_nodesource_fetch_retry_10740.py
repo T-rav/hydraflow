@@ -43,3 +43,27 @@ def test_nodesource_fetch_is_retried(dockerfile: str) -> None:
         f"{dockerfile} must wrap the NodeSource fetch in a retry loop so a "
         f"transient CDN 403/5xx does not fail the build (#10740)"
     )
+
+
+@pytest.mark.parametrize("dockerfile", _AGENT_DOCKERFILES)
+def test_npm_is_guaranteed_and_verified(dockerfile: str) -> None:
+    """#10756: when the NodeSource *package* repo 403s, apt falls back to
+    Debian's ``nodejs`` which ships no ``npm`` — so ``npm install -g`` later
+    dies with exit 127. The build must guarantee npm regardless of which nodejs
+    won, and verify both binaries so a half-install fails at THIS layer."""
+    text = (_REPO_ROOT / dockerfile).read_text(encoding="utf-8")
+
+    # npm must be ensured (installed as a fallback when the nodejs package that
+    # won didn't bundle it).
+    assert (
+        "command -v npm" in text and "install -y --no-install-recommends npm" in text
+    ), (
+        f"{dockerfile} must guarantee npm is present after the nodejs install "
+        f"(Debian's nodejs fallback ships no npm) — #10756"
+    )
+    # ...and both node and npm must be verified so a half-install fails loudly
+    # here, not three build steps later at `npm install -g`.
+    assert "node --version" in text and "npm --version" in text, (
+        f"{dockerfile} must verify `node --version` AND `npm --version` so a "
+        f"missing-npm install fails at this layer, not later (#10756)"
+    )
