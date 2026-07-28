@@ -119,6 +119,15 @@ async def test_regen_pr_uses_config_base_branch_and_worktree_path_specs(
         "docs/arch/.meta.json",
         "disturbance/baselines/traceability.yaml",
     ]
+    # Only a SUBSTANTIVE artifact change opens a PR: the git-log-derived
+    # changelog / traceability-matrix (and the .meta.json digest + baseline,
+    # excluded by omission — they sit outside docs/arch/generated) must not
+    # trigger a churn PR on their own. This is the flux-source fix.
+    assert captured["substantive_specs"] == [
+        "docs/arch/generated",
+        ":(exclude)docs/arch/generated/changelog.md",
+        ":(exclude)docs/arch/generated/traceability_matrix.md",
+    ]
     assert callable(captured["generate"])
 
 

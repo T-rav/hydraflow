@@ -6,9 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
-- `0d011b3` — Merge remote-tracking branch 'origin/staging' into archheal-ul-proposer-267f1662-20260728100756 *(2026-07-28)*
+- `3de3e09` — feat(ul): term-proposer batch — 1 drafts (#10796) (#10796) *(2026-07-28)*
 - `d496213` — fix(health): opt flake_tracker into tight stall-sweep remediation (#10795) (#10800) (#10800) *(2026-07-28)*
-- `8862ed1` — feat(ul): term-proposer batch — 1 drafts *(2026-07-28)*
 - `e97750d` — feat(autonomy): auto-diagnose audit + escape surfaces before human (ADR-0115) (#10780) (#10780) *(2026-07-27)*
 - `40615e9` — fix(sandbox): renumber s50_disturbance_dampener_idle_poll to s90 (scenario-number collision) (#10774) (#10774) *(2026-07-27)*
 - `211694f` — feat(orchestration): formal give-up window → auto-decompose on plan-retry exhaustion (#10735) (#10745) (#10745) *(2026-07-27)*

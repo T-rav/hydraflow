@@ -5,9 +5,13 @@ and the architecture knowledge system spec (§4.4).
 
 Tick behavior:
   1. Run runner.emit() against the current working tree.
-  2. git status --porcelain on docs/arch/generated/ and .meta.json.
-  3. If empty: log "no drift", return.
-  4. Otherwise: open (or update) a single PR using auto_pr.open_automated_pr_async.
+  2. Compare the freshly-emitted SUBSTANTIVE artifacts against the base — the
+     git-log-derived changelog / traceability matrix and the deterministic
+     .meta.json do NOT count (they are volatile, not real architecture change).
+  3. If no substantive artifact drifted: log "no drift", return (no PR). The
+     .meta.json is now a deterministic content digest, so an unchanged
+     architecture produces zero diff and no churn PR every interval.
+  4. Otherwise: open (or update) a single PR using generate_and_open_pr_async.
      The branch is fixed (arch-regen-auto) so re-running force-pushes and
      either creates a new PR or updates the existing one — gh handles
      idempotence at the branch level (open PR for branch already exists).
@@ -40,6 +44,20 @@ _KILL_SWITCH_ENV = "HYDRAFLOW_DISABLE_DIAGRAM_LOOP"
 _REGEN_BRANCH = "arch-regen-auto"
 _PR_TITLE_PREFIX = "chore(arch): regenerate architecture knowledge"
 _COVERAGE_ISSUE_TITLE = "chore(arch): unassigned functional area"
+
+# The regen PR opens only when a SUBSTANTIVE artifact changed. changelog.md and
+# traceability_matrix.md derive from a moving git-log window (drift-EXEMPT in
+# arch.runner._DRIFT_EXEMPT), .meta.json is a deterministic content digest, and
+# traceability.yaml is the ratchet baseline — none is real architecture change,
+# so none may trigger a PR on its own (it still rides along when a real artifact
+# moved). The substantive pathspec is docs/arch/generated MINUS the two
+# git-log-derived files; .meta.json and traceability.yaml sit outside that dir
+# and are excluded by omission.
+_SUBSTANTIVE_SPECS = [
+    "docs/arch/generated",
+    ":(exclude)docs/arch/generated/changelog.md",
+    ":(exclude)docs/arch/generated/traceability_matrix.md",
+]
 
 
 class DiagramLoop(BaseBackgroundLoop):
@@ -136,6 +154,11 @@ class DiagramLoop(BaseBackgroundLoop):
                 "docs/arch/.meta.json",
                 "disturbance/baselines/traceability.yaml",
             ],
+            # Only a substantive artifact change opens a PR — volatile-only
+            # churn (changelog / traceability-matrix window shift, .meta.json,
+            # baseline pct) short-circuits to no-diff. Kills the every-interval
+            # regen PR when the architecture is unchanged.
+            substantive_specs=_SUBSTANTIVE_SPECS,
             pr_title=f"{_PR_TITLE_PREFIX} — {today}",
             pr_body=self._build_pr_body(),
             base=self._config.base_branch(),
