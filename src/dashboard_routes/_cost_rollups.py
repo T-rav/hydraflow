@@ -26,6 +26,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from cost_plausibility import DEFAULT_MAX_RATE_MULTIPLE, check_cost_plausibility
 from dashboard_routes._waterfall_builder import _phase_for_source
 from model_pricing import ModelPricingTable, load_pricing
 from trace_collector import _slug_for_loop
@@ -660,13 +661,24 @@ def build_cost_by_model(
     """Return cross-loop cost broken out by model in ``[since, until)``.
 
     Each row: ``{model, cost_usd, calls, input_tokens, output_tokens,
-    cache_read_tokens, cache_write_tokens}``. Sorted descending by
-    ``cost_usd``; ties broken alphabetically by model name for deterministic
-    output. Records with empty/missing ``model`` bucket under the
+    cache_read_tokens, cache_write_tokens, cost_plausibility}``. Sorted
+    descending by ``cost_usd``; ties broken alphabetically by model name for
+    deterministic output. Records with empty/missing ``model`` bucket under the
     literal string ``"unknown"``. Unpriced models surface their token
     counts with ``cost_usd == 0.0``.
+
+    ``cost_plausibility`` is ``None`` on every healthy row; on a row whose
+    effective $/token implausibly exceeds the model's peak table rate (the
+    z.ai/GLM 6-8x mis-billing class, #10775) it carries a structured anomaly
+    and a WARNING is logged. This is a SOFT signal — it never fails the build
+    or alters the cost.
     """
     pricing = pricing or load_pricing()
+    threshold_k = float(
+        getattr(
+            config, "cost_plausibility_max_rate_multiple", DEFAULT_MAX_RATE_MULTIPLE
+        )
+    )
 
     by_model: dict[str, dict[str, float | int]] = defaultdict(_empty_model_bucket)
 
@@ -686,19 +698,48 @@ def build_cost_by_model(
             rec.get("cache_creation_input_tokens", 0) or 0
         )
 
-    rows = [
-        {
-            "model": model,
-            "cost_usd": round(float(b["cost_usd"]), 6),
-            "calls": int(b["calls"]),
-            "unpriced_calls": int(b["unpriced_calls"]),
-            "cost_unknown": int(b["unpriced_calls"]) > 0,
-            "input_tokens": int(b["input_tokens"]),
-            "output_tokens": int(b["output_tokens"]),
-            "cache_read_tokens": int(b["cache_read_tokens"]),
-            "cache_write_tokens": int(b["cache_write_tokens"]),
-        }
-        for model, b in by_model.items()
-    ]
+    rows: list[dict[str, Any]] = []
+    for model, b in by_model.items():
+        cost_usd = round(float(b["cost_usd"]), 6)
+        total_tokens = (
+            int(b["input_tokens"])
+            + int(b["output_tokens"])
+            + int(b["cache_read_tokens"])
+            + int(b["cache_write_tokens"])
+        )
+        anomaly = check_cost_plausibility(
+            model=model,
+            cost_usd=cost_usd,
+            total_tokens=total_tokens,
+            rate=pricing.get_rate(model),
+            threshold=threshold_k,
+        )
+        if anomaly is not None:
+            logger.warning(
+                "Cost-plausibility anomaly: model %r effective $%.4f/M is %.1fx its "
+                "peak table rate $%.4f/M (threshold %.1fx) over %d tokens / $%.4f — "
+                "likely a per-backend usage-semantics mis-bill (#10775)",
+                model,
+                anomaly.effective_rate_per_million,
+                anomaly.ratio,
+                anomaly.peak_rate_per_million,
+                threshold_k,
+                total_tokens,
+                cost_usd,
+            )
+        rows.append(
+            {
+                "model": model,
+                "cost_usd": cost_usd,
+                "calls": int(b["calls"]),
+                "unpriced_calls": int(b["unpriced_calls"]),
+                "cost_unknown": int(b["unpriced_calls"]) > 0,
+                "input_tokens": int(b["input_tokens"]),
+                "output_tokens": int(b["output_tokens"]),
+                "cache_read_tokens": int(b["cache_read_tokens"]),
+                "cache_write_tokens": int(b["cache_write_tokens"]),
+                "cost_plausibility": anomaly.as_dict() if anomaly else None,
+            }
+        )
     rows.sort(key=lambda r: (-r["cost_usd"], r["model"]))
     return rows
