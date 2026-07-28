@@ -37,7 +37,11 @@ from audit.models import (
     DisagreementObservation,
     MergedChange,
 )
-from audit.sampling import inclusion_probability, select_sample
+from audit.sampling import (
+    inclusion_probability,
+    is_self_chore_change,
+    select_sample,
+)
 from audit.stratify import classify_blast_radius, stratum_weight
 
 
@@ -155,6 +159,87 @@ class TestSampling:
     def test_zero_rate_selects_nothing(self) -> None:
         changes = [_change(pr=i, sha=f"s{i:039d}") for i in range(20)]
         assert select_sample(changes, base_rate=0.0, rng=random.Random(1)) == []
+
+
+# --- self/chore exclusion --------------------------------------------------
+
+
+class TestSelfChoreExclusion:
+    """The factory's own chore/maintenance merges are excluded from the sample.
+
+    Re-auditing the factory's own make-work (wiki maintenance, arch regen, RC
+    promotion, UL proposers) filed noise findings during idle windows. The
+    exclusion is applied BEFORE classification/selection so those merges are
+    never sampled, while substantive ``feat(``/``fix(`` product work still is.
+    """
+
+    _SELF_CHORE_SUBJECTS = (
+        "chore(wiki): maintenance 2026-07-24 (#10461)",
+        "chore(arch): regenerate architecture knowledge — 2026-07-24 (#10460)",
+        "chore(rc): trigger CI for rc/2026-07-24-0800 promotion PR (#10459)",
+        "chore(pricing): refresh from LiteLLM — 2026-07-24 (#10458)",
+        "feat(ul): term-proposer batch — 3 drafts (#10439)",
+    )
+
+    _SUBSTANTIVE_SUBJECTS = (
+        "feat(core): add widget (#4242)",
+        "fix(auth): patch token refresh race (#4243)",
+        "feat(wiki): N-to-1 merge lesson-survival auditor + gate (#10772)",
+        "fix(wiki): restore 3 orphaned lessons (#10779)",
+        "refactor(ports): split PRPort (#4244)",
+        "chore(deps): bump pydantic to 2.9 (#4245)",
+        "feat: bare-scope feature (#4246)",
+    )
+
+    def test_predicate_flags_self_chores(self) -> None:
+        for subject in self._SELF_CHORE_SUBJECTS:
+            assert is_self_chore_change(_change(subject=subject)), subject
+
+    def test_predicate_passes_substantive_change(self) -> None:
+        for subject in self._SUBSTANTIVE_SUBJECTS:
+            assert not is_self_chore_change(_change(subject=subject)), subject
+
+    def test_predicate_is_case_insensitive_and_tolerates_whitespace(self) -> None:
+        assert is_self_chore_change(_change(subject="  CHORE(WIKI): maintenance (#1)"))
+        assert is_self_chore_change(_change(subject="Feat(UL): term-proposer (#2)"))
+
+    def test_self_chores_never_selected_even_at_full_rate(self) -> None:
+        # base_rate 1.0 = every eligible change is certain to be selected; the
+        # self-chores must STILL be excluded (the filter precedes probability).
+        changes = [
+            _change(pr=i, subject=s) for i, s in enumerate(self._SELF_CHORE_SUBJECTS)
+        ]
+        assert select_sample(changes, base_rate=1.0, rng=random.Random(0)) == []
+
+    def test_self_chore_excluded_even_when_high_blast_radius(self) -> None:
+        # A ``chore(arch)`` merge that touches a gauntlet-marker path
+        # (``src/audit/``) would otherwise sample at CERTAINTY (weight 4). The
+        # exclusion wins over stratification — it is applied before the change is
+        # ever classified.
+        change = _change(
+            subject="chore(arch): regenerate (#10460)",
+            paths=("src/audit/detect.py", "docs/arch/generated/loop-registry.md"),
+        )
+        assert select_sample([change], base_rate=1.0, rng=random.Random(0)) == []
+
+    def test_substantive_change_still_sampled_at_full_rate(self) -> None:
+        changes = [
+            _change(pr=i, subject=s) for i, s in enumerate(self._SUBSTANTIVE_SUBJECTS)
+        ]
+        selected = select_sample(changes, base_rate=1.0, rng=random.Random(0))
+        # Every substantive change is eligible; at rate 1.0 all are selected.
+        assert [c.id for c in selected] == [c.id for c in changes]
+
+    def test_mixed_batch_keeps_only_substantive(self) -> None:
+        # A realistic idle-window batch: interleaved self-chores + one real fix.
+        real = _change(pr=99, subject="fix(auth): patch token race (#99)")
+        changes = [
+            _change(pr=1, subject="chore(wiki): maintenance 2026-07-24 (#10461)"),
+            real,
+            _change(pr=2, subject="feat(ul): term-proposer batch — 3 drafts (#10439)"),
+        ]
+        selected = select_sample(changes, base_rate=1.0, rng=random.Random(0))
+        assert [c.id for c in selected] == [real.id]
 
 
 # --- governance (Shewhart) -------------------------------------------------
