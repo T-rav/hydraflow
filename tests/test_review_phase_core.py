@@ -4509,6 +4509,14 @@ class TestWikiIngestAdvisor:
         to ``veto`` (T29 guard) — VETO actually blocks ingestion."""
         monkeypatch.setenv("HYDRAFLOW_REVIEW_ADVISOR_ENABLED", "true")
         monkeypatch.setenv("HYDRAFLOW_WIKI_INGEST_ADVISOR_ENABLED", "true")
+        # This test exercises the ADVISOR-authority (T29) veto path. With the
+        # now-default judge-independence + self-mod-fail-closed flags on AND no
+        # independent model family configured, a self-mod change short-circuits
+        # to a fail-closed VETO *before* the advisor runs (#10371) — a stronger
+        # block, but a different code path. Turn the judge short-circuit off so
+        # the advisor actually runs and its VETO is what blocks ingestion.
+        object.__setattr__(config, "judge_independence_enabled", False)
+        object.__setattr__(config, "judge_self_mod_fail_closed_enabled", False)
 
         phase = make_review_phase(config)
         wiki_store = MagicMock()

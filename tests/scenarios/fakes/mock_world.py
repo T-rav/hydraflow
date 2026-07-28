@@ -338,6 +338,10 @@ class MockWorld:
             "get_pr_diff",
             "get_pr_head_sha",
             "get_pr_diff_names",
+            # close_verification (default ON) reads commit messages on every
+            # merge; delegate to FakeGitHub so the reconciler sees a real string
+            # instead of an unwired AsyncMock.
+            "get_pr_commit_messages",
             "get_pr_approvers",
             "fetch_code_scanning_alerts",
             "wait_for_ci",

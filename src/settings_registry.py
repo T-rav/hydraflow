@@ -122,6 +122,33 @@ SETTINGS: dict[str, SettingSpec] = {
     # Live: ImplementPhase re-reads this off its shared config on every dispatch
     # (#10778), so a toggle applies to the next slot fill.
     "dispatch_overlap_guard_enabled": SettingSpec("Reliability", live=True, order=4),
+    # Self-repair defaults-on (feat/self-repair-on-by-default). These gate
+    # issue-lifecycle reliability behaviours.
+    # Restart-required: service_registry wires the PreconditionGate + the
+    # CachingIssueStore wrapper at startup, so flipping these persists + needs a
+    # restart to re-wire (honest "restart" badge).
+    "precondition_gate_enabled": SettingSpec("Reliability", live=False, order=5),
+    "caching_issue_store_enabled": SettingSpec("Reliability", live=False, order=6),
+    # Live: PostMergeHandler re-reads close_verification off its shared config on
+    # every merge event (reconcile_false_close(config=self._config, ...)).
+    "close_verification_enabled": SettingSpec("Reliability", live=True, order=7),
+    # --- Autonomy (self-repair / self-solve) -----------------------------
+    # Restart-required: service_registry builds the give-up self-solver graph at
+    # startup, so a toggle persists + needs a restart to re-wire.
+    "giveup_window_enabled": SettingSpec("Autonomy", live=False, order=0),
+    # Live: each loop re-reads the flag in its per-tick _do_work, so a toggle
+    # applies on the next cycle without a restart.
+    "sandbox_failure_fixer_enabled": SettingSpec("Autonomy", live=True, order=1),
+    "escape_ledger_auto_diagnose_enabled": SettingSpec("Autonomy", live=True, order=2),
+    # --- Governance (adjudication / independence / audit) ----------------
+    # Live: ReviewPhase re-reads these off its shared config on every review
+    # dispatch; the loops re-read their flags per tick.
+    "judge_independence_enabled": SettingSpec("Governance", live=True, order=0),
+    "judge_self_mod_fail_closed_enabled": SettingSpec("Governance", live=True, order=1),
+    "sampled_audit_auto_adjudicate_enabled": SettingSpec(
+        "Governance", live=True, order=2
+    ),
+    "wiki_anchor_prune_enabled": SettingSpec("Governance", live=True, order=3),
     # --- Event-Loop Watchdog (thread-level freeze detector, #9552) --------
     # enabled gates thread startup (captured at orchestrator start) → restart
     # badge; the other two are re-read by the watchdog thread on every poll /

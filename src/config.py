@@ -763,7 +763,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "test_adequacy_verifier_fail_closed",
         "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_FAIL_CLOSED",
-        False,
+        True,
     ),
     ("triage_honeypot_enabled", "HYDRAFLOW_TRIAGE_HONEYPOT_ENABLED", True),
     ("triage_honeypot_enforce", "HYDRAFLOW_TRIAGE_HONEYPOT_ENFORCE", False),
@@ -773,7 +773,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "close_verification_enabled",
         "HYDRAFLOW_CLOSE_VERIFICATION_ENABLED",
-        False,
+        True,
     ),
     ("sensor_enrichment_enabled", "HYDRAFLOW_SENSOR_ENRICHMENT_ENABLED", True),
     ("gh_circuit_breaker_enabled", "HYDRAFLOW_GH_CIRCUIT_BREAKER_ENABLED", True),
@@ -781,17 +781,17 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "caching_issue_store_enabled",
         "HYDRAFLOW_CACHING_ISSUE_STORE_ENABLED",
-        False,
+        True,
     ),
     (
         "precondition_gate_enabled",
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
-        False,
+        True,
     ),
     (
         "giveup_window_enabled",
         "HYDRAFLOW_GIVEUP_WINDOW_ENABLED",
-        False,
+        True,
     ),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
     ("docker_no_new_privileges", "HYDRAFLOW_DOCKER_NO_NEW_PRIVILEGES", True),
@@ -810,7 +810,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "branch_gc_delete_enabled",
         "HYDRAFLOW_BRANCH_GC_DELETE_ENABLED",
-        False,
+        True,
     ),
     ("collaborator_check_enabled", "HYDRAFLOW_COLLABORATOR_CHECK_ENABLED", True),
     ("memory_auto_approve", "HYDRAFLOW_MEMORY_AUTO_APPROVE", False),
@@ -828,7 +828,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "sandbox_failure_fixer_enabled",
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_ENABLED",
-        False,
+        True,
     ),
     ("detector_calibration_enabled", "HYDRAFLOW_DETECTOR_CALIBRATION_ENABLED", True),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
@@ -858,7 +858,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_IMPLEMENT_TWO_STAGE_REVIEW_ENABLED",
         True,
     ),
-    ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", False),
+    ("staging_enabled", "HYDRAFLOW_STAGING_ENABLED", True),
     ("rc_auto_recut_enabled", "HYDRAFLOW_RC_AUTO_RECUT_ENABLED", False),
     (
         "rc_observed_advance_close_enabled",
@@ -1000,12 +1000,12 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "judge_independence_enabled",
         "HYDRAFLOW_JUDGE_INDEPENDENCE_ENABLED",
-        False,
+        True,
     ),
     (
         "judge_self_mod_fail_closed_enabled",
         "HYDRAFLOW_JUDGE_SELF_MOD_FAIL_CLOSED",
-        False,
+        True,
     ),
     ("review_ultra_enabled", "HYDRAFLOW_REVIEW_ULTRA_ENABLED", False),
     (
@@ -1046,12 +1046,12 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "sampled_audit_auto_adjudicate_enabled",
         "HYDRAFLOW_SAMPLED_AUDIT_AUTO_ADJUDICATE_ENABLED",
-        False,
+        True,
     ),
     (
         "escape_ledger_auto_diagnose_enabled",
         "HYDRAFLOW_ESCAPE_LEDGER_AUTO_DIAGNOSE_ENABLED",
-        False,
+        True,
     ),
     (
         "second_order_vitals_loop_enabled",
@@ -1429,11 +1429,11 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     test_adequacy_verifier_fail_closed: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Treat a degraded verifier run (empty transcript / infra failure) "
-            "as an OVERRIDE instead of keeping the finder's OK (fail-soft is "
-            "the default)"
+            "as an OVERRIDE instead of keeping the finder's OK. Default ON "
+            "(fail-closed); disable via the System tab to restore fail-soft."
         ),
     )
 
@@ -1442,21 +1442,22 @@ class HydraFlowConfig(BaseModel):
     # changing behaviours (opt-in until validated) and configure the second
     # model family that satisfies the independence budget.
     judge_independence_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Route classed (structural/security/migration/self-mod) changes' "
             "post-verify verdict to an independent model family (#10371). "
-            "Merge-outcome-changing, so opt-in; the fail-open ledger + alarm "
-            "stay live regardless of this flag."
+            "Merge-outcome-changing; default ON (disable via the System tab); "
+            "the fail-open ledger + alarm stay live regardless of this flag."
         ),
     )
     judge_self_mod_fail_closed_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Fail-CLOSED for the self-modification class (#10371): a fail-open "
             "or a missing independent verdict on the factory's own instruments "
             "(gauntlet/gates/detectors/merge policy/this policy) STOPs the "
-            "merge and escalates to HITL instead of passing. Opt-in."
+            "merge and escalates to HITL instead of passing. Default ON "
+            "(disable via the System tab)."
         ),
     )
     judge_independent_model: str = Field(
@@ -1946,13 +1947,14 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     branch_gc_delete_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Allow StaleIssueLoop's branch-GC reconciler to actually delete "
             "stale unmerged `agent/issue-*` / `fix/*` branches past "
-            "`branch_gc_min_delete_age_days` (#10011). Defaults to False — "
-            "report/comment-only — because branch deletion is destructive; "
-            "the operator opts in via the System tab. "
+            "`branch_gc_min_delete_age_days` (#10011). Default ON (self-repair "
+            "on by default): deletion is bounded by the generous "
+            "`branch_gc_min_delete_age_days` floor. Disable via the System tab "
+            "for report/comment-only, since branch deletion is destructive. "
             "Env: HYDRAFLOW_BRANCH_GC_DELETE_ENABLED."
         ),
     )
@@ -2208,7 +2210,7 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     escape_ledger_auto_diagnose_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Before EscapeLedgerLoop files a LOW-CONFIDENCE escape for a human "
             "(SURFACE_REASON_LOW_CONFIDENCE), run a machine auto-diagnose pass "
@@ -2217,7 +2219,8 @@ class HydraFlowConfig(BaseModel):
             "resolution at high confidence (encoded-as regression-test) so the "
             "surface self-answers; auto-dismiss a clear false positive with a "
             "recorded reason. Only an INCONCLUSIVE diagnosis falls through to the "
-            "human surface. Off by default (feature opt-in, safe rollout); the "
+            "human surface. Default ON (self-repair on by default; disable via "
+            "the System tab); the "
             "pass is purely mechanical (git + issue-label reads, no LLM spawn), "
             "so it is air-gap-safe."
         ),
@@ -2514,11 +2517,11 @@ class HydraFlowConfig(BaseModel):
     # "done" is actually driven to a fix. Default-OFF and fully inert until
     # enabled — same rollout discipline as the G1 auto-recut actuator.
     close_verification_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Reopen + re-triage an issue a merged PR closed without a fix "
-            "delta (the #10223 false-close signature). Default-off actuator "
-            "for the P10.7 detector (#10358)."
+            "delta (the #10223 false-close signature). Default-on actuator "
+            "for the P10.7 detector (#10358); disable via the System tab."
         ),
     )
 
@@ -3159,16 +3162,16 @@ class HydraFlowConfig(BaseModel):
     # Read-through cache decorator (#6422). When enabled, IssueStore
     # is wrapped in CachingIssueStore which records every queue read
     # as a fetch snapshot and serves enrich_with_comments from the
-    # cache when records are within the TTL window. Defaults to False
-    # so that turning on issue_cache_enabled does NOT automatically
-    # change read paths — operators flip this separately after
-    # confirming write coverage.
+    # cache when records are within the TTL window. Default ON
+    # (self-repair on by default): read-through caching is active
+    # whenever issue_cache_enabled is also on. Disable via the System
+    # tab to fall back to the raw IssueStore.
     caching_issue_store_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Wrap IssueStore in CachingIssueStore for read-through "
             "caching of fetches and enrich_with_comments. Requires "
-            "issue_cache_enabled."
+            "issue_cache_enabled. Default ON; disable via the System tab."
         ),
     )
 
@@ -3183,18 +3186,19 @@ class HydraFlowConfig(BaseModel):
         ),
     )
 
-    # Precondition gate enforcement (#6423). Defaults to False so the
-    # gate is opt-in: turning on the cache (`issue_cache_enabled`)
-    # does NOT automatically activate enforcement, because a freshly-
-    # deployed cache has no historical records and would route every
-    # in-flight issue back forever. Operators flip this to True only
-    # after confirming the cache has coverage of in-flight work.
+    # Precondition gate enforcement (#6423). Default ON (self-repair on
+    # by default). The historical route-every-issue-back-forever risk on
+    # a freshly-deployed cache is now bounded by giveup_window_enabled
+    # (also default ON): after N plan-retry route-backs the give-up
+    # window self-solves (decompose/diagnose) instead of routing back
+    # again. Disable via the System tab to turn enforcement off.
     precondition_gate_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Enforce stage preconditions on the implement and review "
-            "phases. Requires issue_cache_enabled to be True. Defaults "
-            "to False to give operators a separate opt-in switch."
+            "phases. Requires issue_cache_enabled to be True. Default ON; "
+            "disable via the System tab. Bounded by giveup_window_enabled "
+            "so route-backs self-solve rather than loop forever."
         ),
     )
     # Formal give-up window (#10735, epic #10733 child 2) — OTP restart-
@@ -3204,14 +3208,14 @@ class HydraFlowConfig(BaseModel):
     # thrashing or dumping the issue on a human. resolve_window(config, cls) in
     # giveup_window.py is the single threshold source for all four classes.
     giveup_window_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Wire the plan-retry route-back terminal to the formal give-up "
             "window: after giveup_plan_retry_max_restarts route-backs within "
             "giveup_plan_retry_window_secs, self-solve (decompose/diagnose) "
-            "instead of routing back again. Off by default (feature opt-in, "
-            "and inert unless precondition_gate_enabled routes the plan-retry "
-            "loop at all)."
+            "instead of routing back again. Default ON (self-repair on by "
+            "default; disable via the System tab), and inert unless "
+            "precondition_gate_enabled routes the plan-retry loop at all."
         ),
     )
     giveup_build_max_restarts: int = Field(
@@ -3698,8 +3702,13 @@ class HydraFlowConfig(BaseModel):
         description="Integration branch name for agent PRs (when staging_enabled)",
     )
     staging_enabled: bool = Field(
-        default=False,
-        description="Master switch: when true, agent PRs target staging_branch",
+        default=True,
+        description=(
+            "Master switch (ADR-0042 two-tier release): when true, agent PRs "
+            "target staging_branch and main advances only via auto-promoted RC "
+            "PRs. Default ON; disable via the System tab for single-tier "
+            "(agent PRs target main directly)."
+        ),
     )
     rc_cadence_hours: int = Field(
         default=4,
@@ -4009,15 +4018,16 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     wiki_anchor_prune_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "When True (#9954), RepoWikiLoop runs a deterministic prune pass "
             "that marks active tracked wiki entries stale when they lack a "
             "repo-specific anchor (a src/*.py path, ADR number, loop/Port "
             "class name, or config field) — i.e. generic best-practice "
             "platitudes. Mark-only (never deletes); the flips ride the "
-            "normal batched maintenance PR. Off by default: enabling it does "
-            "the one-time cleanup of the accumulated platitude backlog. The "
+            "normal batched maintenance PR. Default ON (self-repair on by "
+            "default; disable via the System tab): it runs the prune pass "
+            "that marks anchor-less platitude entries stale. The "
             "synthesis-time gate that blocks NEW anchor-less entries is "
             "always on and independent of this flag."
         ),
@@ -5007,12 +5017,11 @@ class HydraFlowConfig(BaseModel):
 
     # Auto-agent pre-flight loop (ADR-0049, spec §5.1)
     sandbox_failure_fixer_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Static-config kill-switch for SandboxFailureFixerLoop (ADR-0049). "
-            "Ships OFF; flip to True via "
-            "HYDRAFLOW_SANDBOX_FAILURE_FIXER_ENABLED=true once one or two real "
-            "fix-cycles have been observed in production."
+            "Default ON (self-repair on by default); disable via the System "
+            "tab or HYDRAFLOW_SANDBOX_FAILURE_FIXER_ENABLED=false."
         ),
     )
     sandbox_failure_fixer_interval: int = Field(
@@ -5373,7 +5382,9 @@ class HydraFlowConfig(BaseModel):
             "deterministic violation-based citation gate "
             "(tests/test_adr_citation_conformance.py). The loop code is kept "
             "for now; set HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_LOOP_ENABLED=true "
-            "to re-enable."
+            "to re-enable. Deliberately EXCLUDED from the self-repair-on-by-"
+            "default set: its triage sibling adr_drift_resolver stays off, so "
+            "its false-positive rollups would pile up unhandled."
         ),
     )
     adr_conformance_loop_enabled: bool = Field(
@@ -5649,7 +5660,7 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     sampled_audit_auto_adjudicate_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Before SampledAuditLoop leaves a re-audit disagreement for a human "
             "adjudicator, run a machine auto-adjudicate pass (ADR-0115): a fresh "
@@ -5657,8 +5668,9 @@ class HydraFlowConfig(BaseModel):
             "self-applies the disposition — `audit-upheld` (a real silent escape "
             "→ crosses into the escape ledger) or `audit-refuted` (auditor false "
             "alarm → closed with evidence). Only an INCONCLUSIVE adjudication is "
-            "left unlabelled for a human. Off by default (feature opt-in). Also "
-            "gated by sampled_audit_reaudit_enabled, so the air-gapped sandbox "
+            "left unlabelled for a human. Default ON (self-repair on by "
+            "default; disable via the System tab). Also gated by "
+            "sampled_audit_reaudit_enabled, so the air-gapped sandbox "
             "(which pins re-audit OFF) reaches no adjudicator spawn either."
         ),
     )

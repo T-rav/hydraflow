@@ -1175,6 +1175,12 @@ class TestReviewPhaseWiring:
 
         mock_prs = AsyncMock()
         mock_prs.get_pr_diff = AsyncMock(return_value="diff text")
+        # close_verification (default ON) reads these on merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        mock_prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        mock_prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #42"
+        )
         mock_prs.push_branch = AsyncMock()
         mock_prs.merge_pr = AsyncMock(return_value=True)
         mock_prs.remove_label = AsyncMock()
@@ -1267,6 +1273,12 @@ class TestReviewPhaseWiring:
 
         mock_prs = AsyncMock()
         mock_prs.get_pr_diff = AsyncMock(return_value="diff text")
+        # close_verification (default ON) reads these on merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        mock_prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        mock_prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #42"
+        )
         mock_prs.push_branch = AsyncMock()
         mock_prs.merge_pr = AsyncMock(return_value=True)
         mock_prs.remove_label = AsyncMock()

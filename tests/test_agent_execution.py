@@ -1511,10 +1511,15 @@ class TestTestAdequacyVerifier:
         assert execute.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_degraded_verifier_run_fails_soft_by_default(
+    async def test_degraded_verifier_run_fails_soft_when_opted_out(
         self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
-        """Empty verifier transcript keeps the finder's OK (fail-soft default)."""
+        """Empty transcript keeps the finder's OK when fail-closed is opted out.
+
+        fail-closed is now the default (self-repair on by default); an operator
+        who opts out (sets the flag False) restores the fail-soft behaviour.
+        """
+        config.test_adequacy_verifier_fail_closed = False
         runner = self._runner(config, event_bus)
         execute = AsyncMock(side_effect=[_FINDER_OK, "   "])
         p1, p2, p3 = self._patches(runner, execute)

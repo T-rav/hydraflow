@@ -70,10 +70,19 @@ def _make_handler(
 ) -> PostMergeHandler:
     """Build a PostMergeHandler with standard mock dependencies."""
     state = StateTracker(config.state_file)
+    prs = AsyncMock()
+    # close_verification_enabled now defaults ON (self-repair on by default):
+    # handle_approved reconciles every close via reconcile_false_close, which
+    # reads the merged PR's changed paths + commit messages. Well-typed
+    # product-source defaults (has_fix_delta True -> is_false_close False) keep
+    # the reconciler a harmless no-op instead of running a regex over an
+    # AsyncMock. Tests exercising the false-close path override these.
+    prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+    prs.get_pr_commit_messages = AsyncMock(return_value="Implement\n\nCloses #0")
     return PostMergeHandler(
         config=config,
         state=state,
-        prs=AsyncMock(),
+        prs=prs,
         event_bus=EventBus(),
         ac_generator=ac_generator,
         retrospective=retrospective,
@@ -826,6 +835,12 @@ class TestVisualGateInHandleApproved:
         """When visual_gate_enabled is False, merge proceeds without calling gate fn."""
         handler = _make_handler(config)
         handler._prs.merge_pr = AsyncMock(return_value=True)
+        # close_verification (default ON) reads these on every merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        handler._prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #0"
+        )
         ci_gate_fn = AsyncMock(return_value=True)
         visual_gate_fn = AsyncMock(return_value=True)
 
@@ -858,6 +873,12 @@ class TestVisualGateInHandleApproved:
         )
         handler = _make_handler(cfg)
         handler._prs.merge_pr = AsyncMock(return_value=True)
+        # close_verification (default ON) reads these on every merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        handler._prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #0"
+        )
         result = ReviewResultFactory.create()
         visual_gate_fn = AsyncMock(return_value=True)
 
@@ -890,6 +911,12 @@ class TestVisualGateInHandleApproved:
         )
         handler = _make_handler(cfg)
         handler._prs.merge_pr = AsyncMock(return_value=True)
+        # close_verification (default ON) reads these on every merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        handler._prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #0"
+        )
         result = ReviewResultFactory.create()
         visual_gate_fn = AsyncMock(return_value=False)
 
@@ -923,6 +950,12 @@ class TestVisualGateInHandleApproved:
         )
         handler = _make_handler(cfg)
         handler._prs.merge_pr = AsyncMock(return_value=True)
+        # close_verification (default ON) reads these on every merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        handler._prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #0"
+        )
         result = ReviewResultFactory.create()
 
         ctx = MergeApprovalContext(
@@ -954,6 +987,12 @@ class TestVisualGateInHandleApproved:
         )
         handler = _make_handler(cfg)
         handler._prs.merge_pr = AsyncMock(return_value=True)
+        # close_verification (default ON) reads these on every merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        handler._prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #0"
+        )
         handler._bus.publish = AsyncMock()
         result = ReviewResultFactory.create()
         pr = PRInfoFactory.create()
@@ -1207,6 +1246,12 @@ class TestNarrowedExceptionHandling:
         result = ReviewResultFactory.create()
 
         handler._prs.merge_pr = AsyncMock(return_value=True)
+        # close_verification (default ON) reads these on every merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        handler._prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #0"
+        )
 
         ctx = MergeApprovalContext(
             pr=pr,
@@ -1238,6 +1283,12 @@ class TestNarrowedExceptionHandling:
         result = ReviewResultFactory.create()
 
         handler._prs.merge_pr = AsyncMock(return_value=True)
+        # close_verification (default ON) reads these on every merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        handler._prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #0"
+        )
 
         ctx = MergeApprovalContext(
             pr=pr,
@@ -1355,6 +1406,12 @@ class TestNarrowedExceptionHandling:
         result = ReviewResultFactory.create()
 
         handler._prs.merge_pr = AsyncMock(return_value=True)
+        # close_verification (default ON) reads these on every merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        handler._prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #0"
+        )
 
         # Should not raise — RuntimeError from retrospective is caught
         ctx = MergeApprovalContext(
@@ -1432,6 +1489,12 @@ class TestNarrowedExceptionHandling:
             epic_checker=None,
         )
         handler._prs.merge_pr = AsyncMock(return_value=True)
+        # close_verification (default ON) reads these on every merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        handler._prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #0"
+        )
 
         pr = PRInfoFactory.create(issue_number=7)
         issue = TaskFactory.create(id=7)
@@ -1483,6 +1546,12 @@ class TestNarrowedExceptionHandling:
             epic_checker=None,
         )
         handler._prs.merge_pr = AsyncMock(return_value=True)
+        # close_verification (default ON) reads these on every merge; well-typed
+        # product-source defaults keep the reconciler a harmless no-op.
+        handler._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        handler._prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement\n\nCloses #0"
+        )
 
         pr = PRInfoFactory.create(issue_number=7)
         issue = TaskFactory.create(id=7)
@@ -1765,7 +1834,14 @@ class TestMergePolicyGate:
         self, config: HydraFlowConfig
     ) -> None:
         """No repo-local policy: the packaged table allows the reviewed merge
-        with zero extra port/gh calls (no matchers in v1)."""
+        with zero extra port/gh calls (no matchers in v1).
+
+        close_verification is disabled here so the assertion isolates the merge
+        POLICY's port usage — the now-default close-verification reconciler
+        legitimately reads get_pr_diff_names on every merge (its own tests cover
+        that path).
+        """
+        object.__setattr__(config, "close_verification_enabled", False)
         s = _setup_approved(config)
 
         await s.call()

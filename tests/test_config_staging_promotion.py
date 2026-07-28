@@ -34,10 +34,20 @@ class TestStagingPromotionConfig:
         cfg = _make_cfg(tmp_path)
         assert cfg.staging_branch == "integration"
 
-    def test_staging_enabled_defaults_false(
+    def test_staging_enabled_defaults_true(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # staging_enabled now defaults ON (two-tier release on by default,
+        # ADR-0042); the hidden HYDRAFLOW_STAGING_ENABLED env is de-hidden.
         monkeypatch.delenv("HYDRAFLOW_STAGING_ENABLED", raising=False)
+        cfg = _make_cfg(tmp_path)
+        assert cfg.staging_enabled is True
+
+    def test_staging_enabled_env_can_disable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The de-hidden env var can still turn the master switch off.
+        monkeypatch.setenv("HYDRAFLOW_STAGING_ENABLED", "false")
         cfg = _make_cfg(tmp_path)
         assert cfg.staging_enabled is False
 
