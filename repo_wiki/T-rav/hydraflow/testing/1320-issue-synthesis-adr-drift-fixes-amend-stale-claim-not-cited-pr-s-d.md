@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T22:47:42.288121+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1246
+superseded_by: 1395
 ---
 
 # ADR drift fixes: amend stale claim, not cited PR's decision
