@@ -322,6 +322,25 @@ def commits_for_range(repo_root: Path, commit_range: str) -> list[CommitInfo] | 
     return commits
 
 
+def commit_info_for_sha(repo_root: Path, sha: str) -> CommitInfo | None:
+    """Materialize the full ``CommitInfo`` for a single *sha*, or ``None``.
+
+    The single-commit companion to ``commits_for_range`` — the escape
+    auto-diagnose (ADR-0115) re-reads the DETECTING commit (``detection_ref``)
+    to recover the bug it fixed (closing ``#N`` / an introducing sha) and the
+    paths it touched (a regression pin it added itself). Uses git's ``<sha>^!``
+    single-commit range so it works for any non-root commit; returns ``None`` on
+    any git failure or an empty read (fail-open — the diagnoser then treats the
+    evidence as thin and stays INCONCLUSIVE rather than guessing).
+    """
+    if not sha:
+        return None
+    commits = commits_for_range(repo_root, f"{sha}^!")
+    if not commits:
+        return None
+    return commits[0]
+
+
 def commit_committed_at(repo_root: Path, sha: str) -> str | None:
     """Return *sha*'s committer date (ISO-8601), or ``None`` on any git failure."""
     out = _run_git(repo_root, ["show", "-s", "--format=%cI", sha])
@@ -352,6 +371,7 @@ __all__ = [
     "AttributionMethod",
     "DetectionSource",
     "commit_committed_at",
+    "commit_info_for_sha",
     "commits_for_range",
     "count_commits_since",
     "detect_escapes",

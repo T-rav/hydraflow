@@ -121,6 +121,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0112 | `src.config`, `src.ports`, `src.workspace` | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 | ADR-0113 | — | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
 | ADR-0114 | `src.arch._models`, `src.arch.extractors.events`, `src.arch.generators.event_bus`, `src.events` | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
+| ADR-0115 | `src.audit.adjudicate`, `src.escape.auto_diagnose`, `src.escape_ledger_loop`, `src.sampled_audit_loop` | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface`, `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human`, `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed`, `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld` |
 
 ## Module → ADRs
 
@@ -143,6 +144,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.arch.extractors.events` | ADR-0114 |
 | `src.arch.generators.event_bus` | ADR-0114 |
 | `src.assumption_surfacer` | ADR-0064 |
+| `src.audit.adjudicate` | ADR-0115 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
 | `src.auto_pr` | ADR-0101 |
 | `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084, ADR-0093, ADR-0099, ADR-0106 |
@@ -188,6 +190,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.epic_monitor_loop` | ADR-0012, ADR-0080 |
 | `src.epic_sweeper_loop` | ADR-0081 |
 | `src.escalation_gate` | ADR-0015 |
+| `src.escape.auto_diagnose` | ADR-0115 |
+| `src.escape_ledger_loop` | ADR-0115 |
 | `src.event_loop_watchdog` | ADR-0106, ADR-0108 |
 | `src.events` | ADR-0006, ADR-0055, ADR-0064, ADR-0114 |
 | `src.exception_classify` | ADR-0055, ADR-0109 |
@@ -264,6 +268,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.run_recorder` | ADR-0073 |
 | `src.runner_utils` | ADR-0110 |
 | `src.runs_gc_loop` | ADR-0073 |
+| `src.sampled_audit_loop` | ADR-0115 |
 | `src.screenshot_scanner` | ADR-0018 |
 | `src.secret_scrub` | ADR-0085 |
 | `src.sentry.reverse_lookup` | ADR-0050 |

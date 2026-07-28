@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `40615e9` — fix(sandbox): renumber s50_disturbance_dampener_idle_poll to s90 (scenario-number collision) (#10774) (#10774) *(2026-07-27)*
 - `211694f` — feat(orchestration): formal give-up window → auto-decompose on plan-retry exhaustion (#10735) (#10745) (#10745) *(2026-07-27)*
 - `37e0845` — feat(ops): honest launchd liveness kernel — boot-SHA/branch guard + orphan reap (#10734) (#10743) (#10743) *(2026-07-27)*
 - `308a6df` — fix(operator): registry-seeded stable loop-health count, not a window/tick artifact (#10556) (#10739) (#10739) *(2026-07-27)*

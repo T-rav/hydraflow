@@ -64,6 +64,11 @@ from erosion.trends import (
     compute_monthly_trends,
     render_erosion_trends_markdown,
 )
+from escape.auto_diagnose import (
+    _DIAGNOSES_FILENAME,
+    EscapeAutoDiagnoser,
+    EscapeDiagnosis,
+)
 from escape.detect import (
     commit_committed_at,
     commits_for_range,
@@ -270,11 +275,15 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         state: StateTracker,
         dedup: DedupStore,
         deps: LoopDeps,
+        auto_diagnoser: EscapeAutoDiagnoser | None = None,
     ) -> None:
         super().__init__(worker_name="escape_ledger", config=config, deps=deps)
         self._prs = pr_manager
         self._state = state
         self._dedup = dedup
+        # Injected only when escape_ledger_auto_diagnose_enabled (ADR-0115); the
+        # default build leaves it None and the human surface fires as before.
+        self._auto_diagnoser = auto_diagnoser
 
     def _get_default_interval(self) -> int:
         return self._config.escape_ledger_interval
@@ -302,6 +311,10 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
     @property
     def _surfaces_path(self) -> Path:
         return self._config.diagnostics_dir / _SURFACES_FILENAME
+
+    @property
+    def _diagnoses_path(self) -> Path:
+        return self._config.diagnostics_dir / _DIAGNOSES_FILENAME
 
     # --- main tick -------------------------------------------------------
 
@@ -486,6 +499,11 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
             already_surfaced=seen,
             max_per_tick=max_issues,
         )
+        # ADR-0115: before filing a LOW-CONFIDENCE finding for a human, run the
+        # machine auto-diagnose pass. A row it resolves (real+regression-encoded)
+        # or dismisses (clear false positive) is dropped from the file list — the
+        # human sees only the genuinely INCONCLUSIVE residue.
+        to_file = await self._auto_diagnose(to_file)
         surfaces = SurfacedIssueLedger(self._surfaces_path)
         filed = 0
         for record, reason in to_file:
@@ -539,6 +557,54 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
                 max_issues,
             )
         return filed, capped
+
+    # --- machine auto-diagnose (ADR-0115) -------------------------------
+
+    async def _auto_diagnose(
+        self, to_file: list[tuple[EscapeRecord, str]]
+    ) -> list[tuple[EscapeRecord, str]]:
+        """Filter *to_file*: machine-resolve/dismiss low-confidence findings.
+
+        Only ``SURFACE_REASON_LOW_CONFIDENCE`` findings are diagnosed (the aging
+        surface asks for an encoding, a different human decision). A finding the
+        diagnoser resolves or dismisses is dropped; the human sees only the
+        INCONCLUSIVE residue. Disabled by config → unchanged. A diagnose failure
+        keeps the finding for the human (fail-safe).
+        """
+        if not self._config.escape_ledger_auto_diagnose_enabled:
+            return to_file
+        diagnoser = self._get_auto_diagnoser()
+        residue: list[tuple[EscapeRecord, str]] = []
+        for record, reason in to_file:
+            if reason != SURFACE_REASON_LOW_CONFIDENCE:
+                residue.append((record, reason))
+                continue
+            try:
+                verdict = await diagnoser.diagnose(record)
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "EscapeLedger: auto-diagnose failed for %s — filing the "
+                    "human surface (fail-safe)",
+                    record.id,
+                    exc_info=True,
+                )
+                residue.append((record, reason))
+                continue
+            if verdict is EscapeDiagnosis.INCONCLUSIVE:
+                residue.append((record, reason))
+        return residue
+
+    def _get_auto_diagnoser(self) -> EscapeAutoDiagnoser:
+        """Return the injected diagnoser, or lazily build one (production path)."""
+        if self._auto_diagnoser is None:
+            self._auto_diagnoser = EscapeAutoDiagnoser(
+                repo_root=Path(self._config.repo_root),
+                prs=self._prs,
+                ledger_path=self._ledger_path,
+                diagnoses_path=self._diagnoses_path,
+            )
+        return self._auto_diagnoser
 
     # --- reconcile answered surfaces (close stranded HITL issues) --------
 

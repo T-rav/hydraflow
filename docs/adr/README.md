@@ -174,6 +174,7 @@ cadence and files remediation issues on drift.
 | [0112](0112-per-issue-isolation-via-local-git-clone.md) | Per-Issue Isolation via Local Git Clone | Accepted |
 | [0113](0113-adr-lineage-precedent-and-divergence.md) | ADR lineage — Precedent and Divergence lines | Accepted |
 | [0114](0114-optional-per-type-eventbus-subscription.md) | Optional per-type EventBus subscription | Accepted |
+| [0115](0115-auto-diagnose-before-human-for-audit-and-escape-surfaces.md) | Auto-diagnose before human for audit + escape surfaces | Accepted |
 
 ## Adding a new ADR
 

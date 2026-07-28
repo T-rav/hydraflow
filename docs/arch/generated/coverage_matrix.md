@@ -32,7 +32,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `EpicMonitorLoop` | ✅ [0080, 0081, 0091] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ✅ `s27_epic_monitor_no_epics.py` |
 | `EpicSweeperLoop` | ✅ [0080, 0081, 0091, 0105] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ✅ `s23_epic_sweeper_no_epics.py` |
 | `ErosionMetricsLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_erosion_metrics_loop.py` | ✅ in catalog | ✅ `s80_erosion_metrics_idle_poll.py` |
-| `EscapeLedgerLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_escape_ledger_loop.py` | ✅ in catalog | ✅ `s83_escape_ledger_idle_poll.py` |
+| `EscapeLedgerLoop` | ✅ [0115] | ❌ | ✅ loops.md | ❌ | ✅ `test_escape_ledger_loop.py` | ✅ in catalog | ✅ `s83_escape_ledger_idle_poll.py` |
 | `FailOpenMonitorLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_fail_open_monitor_loop.py` | ✅ in catalog | ✅ `s84_fail_open_monitor_idle_poll.py` |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0047, 0056, 0089] | ✅ [fake-coverage-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ✅ `s29_fake_coverage_auditor_clean.py` |
 | `FitnessScorecardLoop` | ✅ [0093, 0100, 0104] | ✅ [fitness-scorecard-loop.md, loop-fitness.md] | ✅ loops.md | ❌ | ✅ `test_fitness_scorecard_loop.py` | ✅ in catalog | ❌ |
@@ -58,7 +58,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `ReportIssueLoop` | ✅ [0013, 0018, 0028, 0045] | ✅ [report-issue-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_report_issue_loop.py` | ✅ in catalog | ✅ `s19_report_issue_empty_queue.py` |
 | `RetrospectiveLoop` | ✅ [0074, 0093] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_retrospective_loop.py` | ✅ in catalog | ✅ `s18_retrospective_empty_queue.py` |
 | `RunsGCLoop` | ✅ [0073] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ✅ `s47_runs_gc_idle_poll.py` |
-| `SampledAuditLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_sampled_audit_loop.py` | ✅ in catalog | ✅ `s86_sampled_audit_idle_poll.py` |
+| `SampledAuditLoop` | ✅ [0115] | ❌ | ✅ loops.md | ❌ | ✅ `test_sampled_audit_loop.py` | ✅ in catalog | ✅ `s86_sampled_audit_idle_poll.py` |
 | `SandboxFailureFixerLoop` | ✅ [0052, 0063, 0097, 0101] | ✅ [dark-factory.md, disturbance-dampener-loop.md, feedback-backlog-to-loop-reflection.md] | ✅ loops.md | ✅ README.md | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ✅ `s38_sandbox_fixer_richer_context.py` |
 | `SecondOrderVitalsLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_second_order_vitals_loop.py` | ✅ in catalog | ✅ `s87_second_order_vitals_idle_poll.py` |
 | `SecurityPatchLoop` | ✅ [0029, 0065] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_security_patch_loop.py` | ✅ in catalog | ✅ `s21_security_patch_no_alerts.py` |
@@ -87,7 +87,7 @@ per-adapter, not per-port).
 | `IssueFetcherPort` | ✅ [0067, 0081] | ✅ [architecture-async-control.md, issue-fetcher-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueFetcher` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `IssueStorePort` | ✅ [0041] | ✅ [architecture-layers.md, issue-store-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeIssueStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `ObservabilityPort` | ✅ [0072] | ✅ [observability-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeSentry` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
-| `PRPort` | ✅ [0002, 0045, 0052, 0056, 0068, 0069, 0075, 0077, 0109] | ✅ [architecture-async-control.md, architecture-layers.md, dark-factory.md, diagram-loop.md, fake-coverage-auditor-loop.md, gotchas.md, hitl-item.md, pr-port.md, testing.md] | ✅ ports.md | ✅ README.md | ✅ `FakePR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
+| `PRPort` | ✅ [0002, 0045, 0052, 0056, 0068, 0069, 0075, 0077, 0109, 0115] | ✅ [architecture-async-control.md, architecture-layers.md, dark-factory.md, diagram-loop.md, fake-coverage-auditor-loop.md, gotchas.md, hitl-item.md, pr-port.md, testing.md] | ✅ ports.md | ✅ README.md | ✅ `FakePR` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `ReviewInsightStorePort` | ✅ [0070] | ✅ [review-insight-store-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeReviewInsightStore` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `RouteBackCounterPort` | ✅ [0071] | ✅ [route-back-counter-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeRouteBackCounter` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |
 | `WorkspacePort` | ✅ [0003, 0050, 0069, 0112] | ✅ [workspace-gc-loop.md, workspace-port.md] | ✅ ports.md | ✅ README.md | ✅ `FakeWorkspace` | N/A (per-adapter, ADR-0047) | N/A (per-adapter, ADR-0047) |

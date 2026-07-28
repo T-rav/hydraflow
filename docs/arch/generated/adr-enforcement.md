@@ -6,13 +6,13 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 75
-- **REAL** (real asserting enforcement): 71 (94.7%)
+- **Accepted ADRs:** 76
+- **REAL** (real asserting enforcement): 72 (94.7%)
 - **WEAK** (prose-only or tautological): 3
 - **MISSING** (no `**Enforced by:**`): 1
-- **Unenforced-decision debt** (WEAK + MISSING): **4 / 75 = 5.3%**
+- **Unenforced-decision debt** (WEAK + MISSING): **4 / 76 = 5.3%**
 
-By declared `**Enforcement:**` kind: `enforced` 71 · `manual` 3 · `decision-of-record` 1.
+By declared `**Enforcement:**` kind: `enforced` 72 · `manual` 3 · `decision-of-record` 1.
 
 ## Classification
 
@@ -93,6 +93,7 @@ By declared `**Enforcement:**` kind: `enforced` 71 · `manual` 3 · `decision-of
 | ADR-0112 | REAL | enforced | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 | ADR-0113 | REAL | enforced | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
 | ADR-0114 | REAL | enforced | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
+| ADR-0115 | REAL | enforced | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface`, `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human`, `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed`, `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld` |
 
 ## Unenforced-decision debt
 

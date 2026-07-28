@@ -34,13 +34,13 @@ graph LR
     src_telemetry["src.telemetry"]
     src_vitals["src.vitals"]
     src -- "7" --> src_arch
-    src -- "9" --> src_audit
+    src -- "10" --> src_audit
     src -- "14" --> src_auto_tighten
     src -- "30" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
     src -- "16" --> src_erosion
-    src -- "11" --> src_escape
+    src -- "12" --> src_escape
     src -- "4" --> src_flows
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
