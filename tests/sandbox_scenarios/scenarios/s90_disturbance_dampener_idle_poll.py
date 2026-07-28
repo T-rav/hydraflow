@@ -1,4 +1,4 @@
-"""s50 - DisturbanceDampenerLoop emits worker status for an idle poll.
+"""s90 - DisturbanceDampenerLoop emits worker status for an idle poll.
 
 Golden path: the sandbox runtime starts the real ``DisturbanceDampenerLoop``
 and an idle cycle (no runner/PR-manager wiring, empty backlog) completes
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from mockworld.seed import MockWorldSeed
 
-NAME = "s50_disturbance_dampener_idle_poll"
+NAME = "s90_disturbance_dampener_idle_poll"
 DESCRIPTION = "DisturbanceDampenerLoop performs an idle poll and emits worker status."
 
 
