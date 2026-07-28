@@ -632,6 +632,11 @@ _ENV_FLOAT_OVERRIDES: list[tuple[str, str, float]] = [
     ),
     ("loop_anomaly_cost_spike_ratio", "HYDRAFLOW_LOOP_ANOMALY_COST_SPIKE_RATIO", 5.0),
     (
+        "cost_plausibility_max_rate_multiple",
+        "HYDRAFLOW_COST_PLAUSIBILITY_MAX_RATE_MULTIPLE",
+        3.0,
+    ),
+    (
         "gh_circuit_breaker_reset_timeout_s",
         "HYDRAFLOW_GH_CIRCUIT_BREAKER_RESET_TIMEOUT_S",
         60.0,
@@ -4809,6 +4814,22 @@ class HydraFlowConfig(BaseModel):
         description=(
             "TrustFleetSanityLoop: current-day cost breach when > this × "
             "30-day median (spec §12.1; reads §4.11 cost endpoint, tolerates absence)."
+        ),
+    )
+    cost_plausibility_max_rate_multiple: float = Field(
+        default=3.0,
+        ge=1.0,
+        le=100.0,
+        description=(
+            "Cost-plausibility guard K (#10775): build_cost_by_model flags a "
+            "model whose effective $/token exceeds K x its peak table rate "
+            "(the largest of input/output/cache-write/cache-read) as a likely "
+            "per-backend usage-semantics mis-bill — the z.ai/GLM 6-8x class "
+            "(#10761). A correctly billed record's effective rate is always "
+            "<= peak, so any K >= 1.0 is false-positive-free on clean data; the "
+            "3.0 default adds headroom for char-estimate-mixed buckets. SOFT: "
+            "logs a WARNING and surfaces cost_plausibility on the row, never "
+            "fails the build or alters cost."
         ),
     )
     loop_anomaly_hitl_low_severity_count: int = Field(

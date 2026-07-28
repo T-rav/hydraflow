@@ -63,6 +63,26 @@ class ModelRate:
     # twice — once at the full input rate and again at the cache rate (#10761).
     input_includes_cache: bool = False
 
+    def peak_rate_per_million(self) -> float:
+        """Return the largest of this model's four per-million token rates.
+
+        This is the plausibility *ceiling* used by the cost-plausibility guard
+        (#10775). Because a record's effective per-token cost is a
+        token-weighted average of these same four rates, a correctly billed
+        record's effective rate can NEVER exceed the peak — regardless of
+        workload mix or backend usage semantics. An effective rate that
+        exceeds the peak therefore means cost was billed against tokens absent
+        from the token totals (double-count / rate-scale error). Peak — not a
+        mix-blend — is used precisely because it is the one reference immune to
+        false positives from an expensive output-heavy run.
+        """
+        return max(
+            self.input_cost_per_million,
+            self.output_cost_per_million,
+            self.cache_write_cost_per_million,
+            self.cache_read_cost_per_million,
+        )
+
     def estimate_cost(
         self,
         input_tokens: int,
