@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6295
 source_phase: review
 created_at: 2026-04-10T03:47:50.097407+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Layer 1 assignment for pure data constants

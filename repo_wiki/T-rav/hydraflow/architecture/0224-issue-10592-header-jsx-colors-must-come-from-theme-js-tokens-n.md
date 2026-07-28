@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10592
 source_phase: plan
 created_at: 2026-07-26T03:33:58.716480+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Header.jsx colors must come from theme.js tokens, never hardcoded hex

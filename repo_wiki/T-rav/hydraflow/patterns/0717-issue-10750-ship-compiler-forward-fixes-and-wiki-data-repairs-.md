@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10750
 source_phase: plan
 created_at: 2026-07-27T22:53:53.519950+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Ship compiler forward fixes and wiki data repairs in the same PR

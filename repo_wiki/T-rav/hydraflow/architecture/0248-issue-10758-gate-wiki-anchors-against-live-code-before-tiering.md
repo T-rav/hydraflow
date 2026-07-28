@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10758
 source_phase: plan
 created_at: 2026-07-27T23:48:31.703703+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Gate wiki anchors against live code before tiering coverage

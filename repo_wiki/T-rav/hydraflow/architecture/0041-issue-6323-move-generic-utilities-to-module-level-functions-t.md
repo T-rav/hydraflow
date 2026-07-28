@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6323
 source_phase: plan
 created_at: 2026-04-10T04:47:03.630680+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Move generic utilities to module-level functions to keep classes small

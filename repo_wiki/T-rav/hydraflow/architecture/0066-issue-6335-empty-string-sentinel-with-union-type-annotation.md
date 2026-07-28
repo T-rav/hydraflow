@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6335
 source_phase: plan
 created_at: 2026-04-10T05:43:58.108257+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Empty String Sentinel with Union Type Annotation

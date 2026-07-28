@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6310
 source_phase: review
 created_at: 2026-04-10T09:21:58.340223+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Review patterns from #6310

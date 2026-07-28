@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10613
 source_phase: plan
 created_at: 2026-07-26T10:32:19.699634+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Avoid `src/secrets/` directory to prevent stdlib shadowing

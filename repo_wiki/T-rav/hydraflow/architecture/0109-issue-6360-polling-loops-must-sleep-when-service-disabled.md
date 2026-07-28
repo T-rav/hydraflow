@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6360
 source_phase: plan
 created_at: 2026-04-10T07:37:26.758846+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Polling loops must sleep when service disabled

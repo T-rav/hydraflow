@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10655
 source_phase: plan
 created_at: 2026-07-26T16:28:39.816255+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Key wiki corpus by (topic, id), not id alone

@@ -4,7 +4,8 @@ topic: architecture
 source_issue: unknown
 source_phase: synthesis
 created_at: 2026-04-10T03:41:18.849559+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Testing Patterns: Mocking, Parametrized Assertions, and Test Helpers

@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6320
 source_phase: plan
 created_at: 2026-04-10T04:14:20.752849+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Use Literal types for bounded enum-like fields

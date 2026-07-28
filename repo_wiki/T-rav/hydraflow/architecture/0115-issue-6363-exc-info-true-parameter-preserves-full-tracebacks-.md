@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6363
 source_phase: plan
 created_at: 2026-04-10T07:48:21.129667+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # exc_info=True parameter preserves full tracebacks at lower levels

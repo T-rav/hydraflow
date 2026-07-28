@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6348
 source_phase: plan
 created_at: 2026-04-10T06:49:24.638897+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Selective EventBus threading by behavioral side effects
