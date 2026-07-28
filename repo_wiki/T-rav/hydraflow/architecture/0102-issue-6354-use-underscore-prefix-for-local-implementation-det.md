@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6354
 source_phase: plan
 created_at: 2026-04-10T07:09:55.773138+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Use underscore prefix for local implementation details in functions

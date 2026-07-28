@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6366
 source_phase: plan
 created_at: 2026-04-10T08:02:02.177024+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Dead code removal verification via grep across codebase

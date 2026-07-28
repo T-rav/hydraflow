@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10758
 source_phase: plan
 created_at: 2026-07-27T23:48:31.703718+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Only status: active citations count as wiki representation

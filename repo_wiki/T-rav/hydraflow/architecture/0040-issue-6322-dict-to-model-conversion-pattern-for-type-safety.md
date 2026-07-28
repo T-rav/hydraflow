@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6322
 source_phase: plan
 created_at: 2026-04-10T04:31:05.960687+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Dict-to-Model Conversion Pattern for Type Safety

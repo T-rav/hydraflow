@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10757
 source_phase: plan
 created_at: 2026-07-28T00:08:58.218745+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # repo_wiki entry IDs are not unique — resolve by path, fan out successors

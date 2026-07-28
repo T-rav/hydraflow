@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10747
 source_phase: review
 created_at: 2026-07-27T23:55:24.611762+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10747 closed
 ---
 
 # Architecture docs in fix-PRs must scope defect as historical

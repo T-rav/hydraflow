@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10590
 source_phase: plan
 created_at: 2026-07-26T04:12:39.569036+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Scope synthesis claim unions to each entry's own `supersedes` list, not a global blob

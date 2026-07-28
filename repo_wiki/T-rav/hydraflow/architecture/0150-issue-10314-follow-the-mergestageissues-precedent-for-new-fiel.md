@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10314
 source_phase: plan
 created_at: 2026-07-22T18:34:32.045574+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Follow the mergeStageIssues precedent for new field-union reducer helpers in HydraFlowContext.jsx

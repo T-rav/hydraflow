@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10654
 source_phase: plan
 created_at: 2026-07-26T16:24:44.376113+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Collapse supersession: resolved beats confidence beats latest

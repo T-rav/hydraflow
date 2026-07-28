@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6358
 source_phase: plan
 created_at: 2026-04-10T07:30:03.436784+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Deferred imports remain at usage sites with lint suppression

@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10758
 source_phase: plan
 created_at: 2026-07-27T23:48:31.703711+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Key wiki corpus entries by (topic, id), not id alone

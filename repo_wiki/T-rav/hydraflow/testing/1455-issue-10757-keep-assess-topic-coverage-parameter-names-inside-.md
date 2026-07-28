@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10757
 source_phase: plan
 created_at: 2026-07-28T00:08:58.218752+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Keep assess_topic_coverage parameter names inside the probe's alias table

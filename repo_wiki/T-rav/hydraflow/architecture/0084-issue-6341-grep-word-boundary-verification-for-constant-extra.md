@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6341
 source_phase: plan
 created_at: 2026-04-10T06:22:03.281162+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Grep word-boundary verification for constant extraction refactors

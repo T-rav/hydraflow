@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6315
 source_phase: plan
 created_at: 2026-04-10T03:43:46.872729+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Dead-code removal: three-phase decomposition pattern

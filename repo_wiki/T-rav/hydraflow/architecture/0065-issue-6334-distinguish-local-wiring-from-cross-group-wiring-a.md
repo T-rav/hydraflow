@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6334
 source_phase: plan
 created_at: 2026-04-10T05:40:10.652318+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Distinguish local wiring from cross-group wiring at architecture boundary

@@ -4,7 +4,8 @@ topic: architecture
 source_issue: 6325
 source_phase: plan
 created_at: 2026-04-10T04:51:52.058659+00:00
-status: active
+status: stale
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Logger names resolve to full module path from __name__
