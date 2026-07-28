@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10799
 source_phase: plan
 created_at: 2026-07-28T10:31:44.654960+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Derive container id from first event id, never array index
