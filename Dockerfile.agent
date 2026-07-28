@@ -45,11 +45,13 @@ RUN apt-get update \
     done
 
 # Install Node.js 20.x via NodeSource.
-# The NodeSource CDN intermittently returns 403 (or 5xx) on setup_20.x; a
-# single-shot `curl | bash` turns that transient into a hard build failure
-# (the setup script never runs, so `apt-get install nodejs` can't find the
-# package). Retry the fetch with backoff, then run it; if the CDN is truly
-# down all retries exhaust and the build fails loudly at apt-get.
+# The NodeSource CDN intermittently 403s on BOTH setup_20.x and its package
+# repo. (1) Retry the setup-script fetch with backoff. (2) When the NodeSource
+# *package* repo is unreachable during apt install, apt silently falls back to
+# Debian's `nodejs` — which does NOT bundle npm (Debian ships npm separately),
+# so a later `npm install -g` dies with exit 127. So guarantee npm regardless
+# of which nodejs won, then verify BOTH binaries so a half-install fails loudly
+# HERE, not three steps later.
 RUN for i in 1 2 3 4 5; do \
         curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh && break; \
         echo "NodeSource fetch attempt $i failed (CDN 403/5xx); retrying in $((i * 5))s"; \
@@ -57,6 +59,8 @@ RUN for i in 1 2 3 4 5; do \
     done \
     && bash /tmp/nodesource_setup.sh \
     && apt-get install -y --no-install-recommends nodejs \
+    && { command -v npm >/dev/null 2>&1 || apt-get install -y --no-install-recommends npm; } \
+    && node --version && npm --version \
     && rm -rf /var/lib/apt/lists/* /tmp/nodesource_setup.sh
 
 # Install gh CLI via official APT repo
