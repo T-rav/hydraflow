@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T22:37:52.936152+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0659
+superseded_by: 0761
 ---
 
 # create_streaming_process env= param is a no-op in docker

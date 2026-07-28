@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10785
 source_phase: plan
 created_at: 2026-07-28T09:16:36.126413+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # cost_unknown/unpriced_calls must render "unknown", never $0.00

@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10753
 source_phase: plan
 created_at: 2026-07-27T23:48:50.234467+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0778
 ---
 
 # Content-word overlap zero cliff marks safe orphan restore set
