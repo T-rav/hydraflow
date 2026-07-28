@@ -57,6 +57,7 @@ graph LR
     disturbancedampenerloop["DisturbanceDampenerLoop<br/><i>loop</i>"]
     error["Error<br/><i>control_role</i>"]
     eventbus["EventBus<br/><i>service</i>"]
+    eventtype["EventType<br/><i>value_object</i>"]
     githubdatacache["GitHubDataCache<br/><i>service</i>"]
     governor["Governor<br/><i>control_role</i>"]
     humansteeringloop["HumanSteeringLoop<br/><i>control_role</i>"]
