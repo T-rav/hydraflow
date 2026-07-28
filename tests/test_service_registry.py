@@ -121,9 +121,11 @@ class TestBuildServices:
     def test_phase_store_is_raw_store_when_caching_disabled(
         self, config: HydraFlowConfig
     ) -> None:
-        """When caching_issue_store_enabled is False (default),
-        phase_store points at the raw IssueStore — not a wrapper."""
-        # Defaults: issue_cache_enabled=True, caching_issue_store_enabled=False
+        """When caching_issue_store_enabled is False, phase_store points at
+        the raw IssueStore — not a wrapper."""
+        # caching_issue_store_enabled now defaults True (self-repair on by
+        # default), so opt out explicitly to exercise the raw-store path.
+        config.caching_issue_store_enabled = False  # type: ignore[misc]
         bus = EventBus()
         state = StateTracker(config.state_file)
         stop_event = asyncio.Event()

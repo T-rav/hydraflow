@@ -838,8 +838,12 @@ class TestAnchorPruneFlagGating:
     @pytest.mark.asyncio
     async def test_prune_skipped_when_flag_disabled(self, git_repo: Path) -> None:
         tracked_root = self._seed_anchorless(git_repo)
-        # _make_config defaults wiki_anchor_prune_enabled to False.
-        loop = _stub_loop(_make_config(git_repo))
+        # wiki_anchor_prune_enabled now defaults True (self-repair on by
+        # default), so opt out explicitly to exercise the disabled path.
+        config = _make_config(git_repo).model_copy(
+            update={"wiki_anchor_prune_enabled": False}
+        )
+        loop = _stub_loop(config)
         loop._wiki_compiler = None
 
         result = await loop._lint_and_compile_repos(

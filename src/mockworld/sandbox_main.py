@@ -224,6 +224,15 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     #   - rc_promotion_health_enabled (G1): the only caller of _main_staging_gap
     #     (the compare read); the health signal's two other fields are state-only.
     # All four have their own unit tests.
+    #
+    # ``staging_enabled`` itself now defaults ON in production
+    # (feat/self-repair-on-by-default), so pin it OFF here too: the sandbox must
+    # start every scenario single-tier (agent PRs → main, StagingPromotionLoop
+    # a no-op) unless the scenario's seed re-enables staging (s82). Without this
+    # pin the production default would silently activate the promotion loop in
+    # every air-gapped scenario. ``apply_seed_config_overrides`` runs after this
+    # and turns it back on for the seeds that ask for it.
+    object.__setattr__(config, "staging_enabled", False)
     object.__setattr__(config, "evidence_pack_enabled", False)
     object.__setattr__(config, "rc_observed_advance_close_enabled", False)
     object.__setattr__(config, "rc_auto_recut_enabled", False)

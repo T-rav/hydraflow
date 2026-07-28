@@ -4,10 +4,11 @@ The G3 actuator reopens + re-triages an issue a merged PR closed without a fix
 delta (the #10223 false-close signature). Two invariants are load-bearing and
 must never silently regress:
 
-1. **Default-OFF and fully inert.** With the flag off the controller must make
-   NO port calls and change no behaviour — the same rollout discipline as the
-   G1 auto-recut actuator. A refactor that reads the diff before the flag check
-   would break the "changes nothing until enabled" contract.
+1. **Fully inert when disabled.** The actuator now ships default-ON (self-repair
+   on by default), but with the flag explicitly OFF (operator opt-out) the
+   controller must make NO port calls and change no behaviour. A refactor that
+   reads the diff before the flag check would break the "changes nothing when
+   disabled" contract.
 2. **Never reopen a legitimate close.** A fix-delta close or a
    ``Skip-Regression:`` close must be left untouched, using the exact same
    signature the P10.7 detector uses (reused, not reimplemented).
@@ -30,12 +31,13 @@ def _cfg(tmp_path: Path, *, enabled: bool) -> HydraFlowConfig:
     )
 
 
-def test_default_off_flag_makes_no_port_calls(tmp_path: Path) -> None:
-    """Default is False and the disabled path never touches the port."""
+def test_disabled_flag_makes_no_port_calls(tmp_path: Path) -> None:
+    """The disabled (opt-out) path never touches the port."""
     import asyncio
 
-    # Ships default-OFF: a fresh config must not have the actuator armed.
-    assert HydraFlowConfig(data_root=tmp_path).close_verification_enabled is False
+    # Now ships default-ON (self-repair on by default); the disabled path
+    # (operator opt-out) must still leave the actuator fully inert.
+    assert HydraFlowConfig(data_root=tmp_path).close_verification_enabled is True
 
     spy: PRPort = AsyncMock(spec=PRPort)
     result = asyncio.run(
