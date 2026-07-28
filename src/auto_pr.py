@@ -792,6 +792,7 @@ async def _finalize_pr_from_worktree(
     fail: Callable[[str], AutoPrResult],
     preflight: Sequence[str],
     req_id: str | None = None,
+    substantive_specs: list[str] | None = None,
 ) -> AutoPrResult:
     """Commit already-staged worktree changes, push, open the PR, auto-merge.
 
@@ -800,18 +801,27 @@ async def _finalize_pr_from_worktree(
     generated directly in the worktree). The caller owns worktree creation,
     staging (``git add``), and teardown (``finally``); this runs the
     preflight-gate → commit → push → label → pr-create → auto-merge tail.
+
+    ``substantive_specs`` narrows the no-diff decision: when given, only staged
+    changes matching those git pathspecs count toward opening a PR. Volatile-only
+    artifacts staged alongside (e.g. the git-log-derived ``changelog.md`` or the
+    ``.meta.json`` digest) no longer force a PR on their own — they still ride
+    along in the commit when a substantive artifact DID change. Default
+    (``None``) preserves the all-staged behavior for every other caller.
     """
     from subprocess_util import run_subprocess  # noqa: PLC0415
 
-    # Empty staged diff → nothing to PR.
+    # Empty (substantive) staged diff → nothing to PR. This is what stops
+    # DiagramLoop opening a churn PR when only volatile artifacts moved.
+    diff_cmd = ["git", "diff", "--cached", "--quiet"]
+    if substantive_specs:
+        diff_cmd += ["--", *substantive_specs]
     try:
-        await run_subprocess(
-            "git", "diff", "--cached", "--quiet", cwd=worktree_path, gh_token=gh_token
-        )
-        logger.info("auto_pr: empty staged diff for %s", branch)
+        await run_subprocess(*diff_cmd, cwd=worktree_path, gh_token=gh_token)
+        logger.info("auto_pr: no substantive staged diff for %s", branch)
         return AutoPrResult(status="no-diff", pr_url=None, branch=branch)
     except RuntimeError:
-        pass  # non-zero → there IS a diff; proceed.
+        pass  # non-zero → there IS a substantive diff; proceed.
 
     # Pre-flight quality-lite gate (#10013): red → the PR is never opened
     # (no commit, no push, no ``gh pr create``); the caller's existing
@@ -1112,6 +1122,7 @@ async def generate_and_open_pr_async(
     labels: list[str] | None = None,
     req_id: str | None = None,
     preflight: Sequence[str] | None = None,
+    substantive_specs: list[str] | None = None,
 ) -> AutoPrResult:
     """Open a PR for content GENERATED inside the worktree — never touching repo_root.
 
@@ -1143,6 +1154,12 @@ async def generate_and_open_pr_async(
         preflight: Pre-flight gate stages (#10013); ``None`` →
             :data:`PREFLIGHT_FULL`, docs-only callers pass
             :data:`PREFLIGHT_DOCS_ONLY`.
+        substantive_specs: git pathspecs that decide whether a PR opens. When
+            given, a staged diff confined to paths OUTSIDE these specs (e.g.
+            volatile ``.meta.json`` / ``changelog.md`` churn) short-circuits to
+            ``no-diff`` — no branch, no push, no PR. Those volatile paths are
+            still committed when a substantive one changed. ``None`` (default)
+            means every staged change counts, preserving prior behavior.
 
     All other args mirror :func:`open_automated_pr_async`.
     """
@@ -1234,6 +1251,7 @@ async def generate_and_open_pr_async(
             commit_author_email=commit_author_email,
             fail=_fail,
             preflight=PREFLIGHT_FULL if preflight is None else tuple(preflight),
+            substantive_specs=substantive_specs,
         )
     finally:
         await _remove_worktree_async(repo_root, worktree_path, branch, gh_token)

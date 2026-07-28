@@ -133,6 +133,30 @@ def test_check_no_conflict_after_two_emits_same_repo(populated_repo: Path):
     assert check(repo_root=populated_repo, generated_dir=out) == 0
 
 
+def test_committed_meta_is_deterministic_content_digest(populated_repo: Path):
+    # The committed .meta.json must carry ONLY content digests — no wall-clock
+    # `regenerated_at`, no HEAD `commit_sha`/`source_sha` — so two regens of
+    # unchanged source produce byte-identical committed artifacts and DiagramLoop
+    # stops opening a churn PR every interval. Volatile provenance lives in the
+    # gitignored .meta.local.json sidecar. See
+    # tests/regressions/test_arch_regen_deterministic.py.
+    import json
+
+    from arch.runner import emit
+
+    out = populated_repo / "docs/arch/generated"
+    emit(repo_root=populated_repo, out_dir=out)
+    meta_text = (out.parent / ".meta.json").read_text()
+    meta = json.loads(meta_text)
+    assert "regenerated_at" not in meta_text
+    assert "commit_sha" not in meta_text
+    assert meta["content_sha"]
+    # Sidecar carries the volatile stamp for the freshness badge.
+    sidecar = json.loads((out.parent / ".meta.local.json").read_text())
+    assert sidecar["regenerated_at"]
+    assert "commit_sha" in sidecar
+
+
 def test_drift_exempt_pins_git_log_window_artifacts():
     # Both artifacts derive from a moving `git log` window: in CI the check
     # runs from the PR *merge commit*, so any squash-merge landing on the

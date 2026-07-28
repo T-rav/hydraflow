@@ -9,13 +9,22 @@ Two modes:
 Both modes share the same ``_compute_artifacts()`` core. The runner replaces
 the ``{{ARCH_FOOTER}}`` sentinel with a stable ``<!-- arch:generated -->``
 HTML comment so the body of every emitted file is byte-stable across
-branches. The live stamp (commit SHA + UTC timestamp + freshness badge)
-lives exclusively in ``.meta.json``.
+branches.
+
+The committed ``.meta.json`` is a DETERMINISTIC content digest: every value
+derives from artifact CONTENT, never from git HEAD or the wall-clock, so two
+emits of identical source produce a byte-identical ``.meta.json``. That is
+what lets ``DiagramLoop``'s no-diff gate fire when the architecture is
+unchanged instead of opening a churn PR every interval. The volatile live
+stamp (commit SHA + UTC timestamp) that drives the freshness badge lives in a
+gitignored ``docs/arch/.meta.local.json`` sidecar — never committed, so it
+cannot cause a diff.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -222,17 +231,28 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
     return artifacts
 
 
-def _stamp_footer(body: str, sha: str, source_sha: str) -> str:
-    """Replace {{ARCH_FOOTER}} with a stable placeholder.
+# Committed metadata file (deterministic content digest) and its gitignored
+# volatile sidecar (wall-clock + HEAD sha, for the live freshness badge).
+_META_NAME = ".meta.json"
+_META_LOCAL_NAME = ".meta.local.json"
 
-    `sha`/`source_sha` are kept in the signature because they still drive the
-    `.meta.json` stamp written by `emit()`; they are intentionally NOT embedded
-    in the committed artifact body. The live stamp (sha, timestamp, badge)
-    lives exclusively in `.meta.json` so committed artifact bodies are
-    byte-stable across branches — eliminating an entire class of
-    footer-only merge conflict (the MergeStateWatcher recovery cost). The
-    MkDocs site re-emits fresh artifacts on every Pages deploy and reads the
-    live stamp from `.meta.json`, so readers still see current data.
+
+def _sha256(text: str) -> str:
+    """Hex SHA-256 of a UTF-8 string — the content digest primitive."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _stamp_footer(body: str) -> str:
+    """Replace {{ARCH_FOOTER}} with a stable, branch-agnostic placeholder.
+
+    The committed artifact body carries NO sha and NO timestamp — only a
+    ``<!-- arch:generated -->`` HTML comment — so two emits of the same source
+    produce byte-identical bodies across branches, eliminating an entire class
+    of footer-only merge conflict (the MergeStateWatcher recovery cost). The
+    content digest lives in the committed ``.meta.json``; the volatile stamp
+    (sha, timestamp, badge) lives in the gitignored ``.meta.local.json``
+    sidecar. The MkDocs site re-emits fresh artifacts on every Pages deploy and
+    reads the live stamp from that sidecar, so readers still see current data.
     """
     return body.replace("{{ARCH_FOOTER}}", "<!-- arch:generated -->")
 
@@ -242,20 +262,46 @@ def emit(*, repo_root: Path, out_dir: Path) -> None:
     out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    sha = _commit_sha(repo_root)
     artifacts = _compute_artifacts(repo_root)
+    per_artifact_sha: dict[str, str] = {}
     for name, body in artifacts.items():
-        # Per-artifact source SHA equals overall HEAD in v1; refined per-artifact
-        # in Plan C if needed.
-        stamped = _stamp_footer(body, sha=sha, source_sha=sha)
+        stamped = _stamp_footer(body)
         (out_dir / name).write_text(stamped)
+        per_artifact_sha[name] = _sha256(stamped)
 
+    # Committed ``.meta.json`` is DETERMINISTIC: every value derives from
+    # artifact CONTENT (not git HEAD, not the wall-clock), so identical source →
+    # byte-identical ``.meta.json``. This is the flux-source fix — two
+    # consecutive regens of unchanged architecture produce zero diff, so
+    # DiagramLoop stops opening a churn PR every interval. Keys are sorted so
+    # dict-insertion order can never introduce a diff.
+    overall_sha = _sha256(
+        "".join(per_artifact_sha[n] for n in sorted(per_artifact_sha))
+    )
     meta = {
+        "content_sha": overall_sha,
+        "artifacts": {
+            n: {"content_sha": per_artifact_sha[n]} for n in sorted(per_artifact_sha)
+        },
+    }
+    (out_dir.parent / _META_NAME).write_text(
+        json.dumps(meta, indent=2, sort_keys=True) + "\n"
+    )
+
+    # Volatile provenance → gitignored sidecar. Preserves the live freshness
+    # signal (regenerated_at + HEAD sha, consumed by arch.freshness.compute_badge
+    # / the MkDocs site) WITHOUT committing a churning file. Never staged by any
+    # caller, so it cannot cause a diff or a merge conflict.
+    sha = _commit_sha(repo_root)
+    local_meta = {
         "regenerated_at": datetime.now(UTC).isoformat(),
         "commit_sha": sha,
-        "artifacts": {n: {"source_sha": sha} for n in artifacts},
+        "content_sha": overall_sha,
+        "artifacts": {n: {"source_sha": sha} for n in sorted(per_artifact_sha)},
     }
-    (out_dir.parent / ".meta.json").write_text(json.dumps(meta, indent=2))
+    (out_dir.parent / _META_LOCAL_NAME).write_text(
+        json.dumps(local_meta, indent=2) + "\n"
+    )
 
 
 def _strip_footer(text: str) -> str:

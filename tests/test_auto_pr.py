@@ -1227,6 +1227,127 @@ async def test_generate_and_open_pr_no_diff_when_generate_writes_nothing(
     assert not any(c[:3] == ("gh", "pr", "create") for c in gh_calls)
 
 
+def _seed_arch_on_base(local_repo: Path, base: str = "main") -> None:
+    """Commit a baseline ``docs/arch/generated/`` (a substantive loops.md and a
+    volatile changelog.md) to *base* and push, so a worktree branched off
+    ``origin/{base}`` can mutate them."""
+    gen = local_repo / "docs" / "arch" / "generated"
+    gen.mkdir(parents=True, exist_ok=True)
+    (gen / "loops.md").write_text("# loops\n\nL1\n\n<!-- arch:generated -->\n")
+    (gen / "changelog.md").write_text(
+        "# changelog\n\n- c0\n\n<!-- arch:generated -->\n"
+    )
+    (local_repo / "docs" / "arch" / ".meta.json").write_text(
+        '{"content_sha": "seed"}\n'
+    )
+    subprocess.run(["git", "-C", str(local_repo), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(local_repo), "commit", "-m", "seed arch"], check=True
+    )
+    subprocess.run(["git", "-C", str(local_repo), "push", "origin", base], check=True)
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_pr_substantive_specs_skips_volatile_only(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only volatile artifacts changed (changelog + .meta.json) → no-diff, no PR.
+
+    The DiagramLoop churn fix: a git-log window shift in ``changelog.md`` (and
+    the ``.meta.json`` digest riding it) must NOT open a regen PR when no
+    substantive artifact drifted — even though those paths ARE staged.
+    """
+    from auto_pr import generate_and_open_pr_async
+
+    _seed_arch_on_base(local_repo)
+
+    gh_calls: list[tuple[str, ...]] = []
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        gh_calls.append(cmd)
+        return "https://github.com/x/y/pull/50\n" if cmd[2] == "create" else ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    async def generate(worktree: Path) -> None:
+        gen = worktree / "docs" / "arch" / "generated"
+        # changelog window moves; loops.md (substantive) is untouched.
+        (gen / "changelog.md").write_text(
+            "# changelog\n\n- c0\n- c1\n\n<!-- arch:generated -->\n"
+        )
+        (worktree / "docs" / "arch" / ".meta.json").write_text(
+            '{"content_sha": "moved"}\n'
+        )
+
+    result = await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="arch-regen-auto",
+        generate=generate,
+        path_specs=["docs/arch/generated", "docs/arch/.meta.json"],
+        substantive_specs=[
+            "docs/arch/generated",
+            ":(exclude)docs/arch/generated/changelog.md",
+        ],
+        pr_title="chore(arch): regen",
+        pr_body="b",
+        auto_merge=False,
+    )
+
+    assert result.status == "no-diff"
+    assert not any(c[:3] == ("gh", "pr", "create") for c in gh_calls)
+
+
+@pytest.mark.asyncio
+async def test_generate_and_open_pr_substantive_specs_opens_on_real_change(
+    local_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A substantive artifact (loops.md) changed → PR opens even though a
+    volatile artifact (changelog.md) moved in the same regen."""
+    from auto_pr import generate_and_open_pr_async
+
+    _seed_arch_on_base(local_repo)
+
+    gh_calls: list[tuple[str, ...]] = []
+
+    def gh_handler(cmd: tuple[str, ...]) -> str:
+        gh_calls.append(cmd)
+        return "https://github.com/x/y/pull/51\n" if cmd[2] == "create" else ""
+
+    monkeypatch.setattr(
+        "subprocess_util.run_subprocess",
+        _real_run_subprocess_stub(gh_handler=gh_handler),
+    )
+
+    async def generate(worktree: Path) -> None:
+        gen = worktree / "docs" / "arch" / "generated"
+        (gen / "loops.md").write_text(  # substantive drift
+            "# loops\n\nL1\nL2\n\n<!-- arch:generated -->\n"
+        )
+        (gen / "changelog.md").write_text(  # volatile, rides along
+            "# changelog\n\n- c0\n- c1\n\n<!-- arch:generated -->\n"
+        )
+
+    result = await generate_and_open_pr_async(
+        repo_root=local_repo,
+        branch="arch-regen-auto",
+        generate=generate,
+        path_specs=["docs/arch/generated"],
+        substantive_specs=[
+            "docs/arch/generated",
+            ":(exclude)docs/arch/generated/changelog.md",
+        ],
+        pr_title="chore(arch): regen",
+        pr_body="b",
+        auto_merge=False,
+    )
+
+    assert result.status == "opened"
+    assert any(c[:3] == ("gh", "pr", "create") for c in gh_calls)
+
+
 @pytest.mark.asyncio
 async def test_generate_and_open_pr_resolves_lazy_body_after_generate(
     local_repo: Path, monkeypatch: pytest.MonkeyPatch
