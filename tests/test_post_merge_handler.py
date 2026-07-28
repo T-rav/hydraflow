@@ -67,6 +67,8 @@ def _make_handler(
     epic_checker=None,
     update_bg_worker_status=None,
     store=None,
+    wiki_store=None,
+    wiki_compiler=None,
 ) -> PostMergeHandler:
     """Build a PostMergeHandler with standard mock dependencies."""
     state = StateTracker(config.state_file)
@@ -90,6 +92,8 @@ def _make_handler(
         epic_checker=epic_checker,
         update_bg_worker_status=update_bg_worker_status,
         store=store,
+        wiki_store=wiki_store,
+        wiki_compiler=wiki_compiler,
     )
 
 
@@ -1828,6 +1832,96 @@ class TestMergePolicyGate:
 
         s.handler._prs.merge_pr.assert_awaited_once()
         s.escalate_fn.assert_not_awaited()
+
+
+class TestSelfMaintenanceWikiSkip:
+    """The reflection → wiki bridge must fire for genuine product change but
+    skip the factory's own chore/maintenance merges (kill the flux source:
+    self-maintenance no longer documents itself into another chore(wiki) PR).
+    """
+
+    @staticmethod
+    def _queued(config: HydraFlowConfig) -> list:
+        from wiki_maint_queue import MaintenanceQueue, default_queue_path
+
+        return MaintenanceQueue(path=default_queue_path(config)).peek()
+
+    @staticmethod
+    def _setup_with_wiki(config: HydraFlowConfig, **kwargs):
+        from repo_wiki import RepoWikiStore
+
+        return _setup_approved(
+            config,
+            wiki_store=RepoWikiStore(config.repo_root / "wiki"),
+            wiki_compiler=MagicMock(),
+            **kwargs,
+        )
+
+    @pytest.mark.asyncio
+    async def test_genuine_feature_merge_enqueues_wiki_ingest(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from reflections import append_reflection, read_reflections
+
+        s = self._setup_with_wiki(config)
+        # Default factory branch is agent/issue-42, title "Fix the frobnicator"
+        # — a real pipeline item, not self-maintenance.
+        append_reflection(
+            config,
+            s.pr.issue_number,
+            phase="implement",
+            content="gotcha: guard against None before dereferencing the port",
+        )
+
+        await s.call()
+
+        tasks = self._queued(config)
+        assert len(tasks) == 1
+        assert tasks[0].kind == "ingest-entry"
+        # Bridge cleared the log after a successful promote.
+        assert read_reflections(config, s.pr.issue_number) == ""
+
+    @pytest.mark.asyncio
+    async def test_self_chore_wiki_maint_branch_skips_ingest(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from reflections import append_reflection, read_reflections
+
+        s = self._setup_with_wiki(config)
+        object.__setattr__(s.pr, "branch", "hydraflow/wiki-maint-20260728")
+        append_reflection(
+            config,
+            s.pr.issue_number,
+            phase="implement",
+            content="should never reach the wiki",
+        )
+
+        await s.call()
+
+        # No ingest-entry enqueued, and the reflection log was dropped (not
+        # left to accumulate) since a self-maintenance chore has no learning.
+        assert self._queued(config) == []
+        assert read_reflections(config, s.pr.issue_number) == ""
+
+    @pytest.mark.asyncio
+    async def test_self_chore_by_title_scope_skips_ingest(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A chore(arch)/feat(ul)-titled item processed on an agent/issue-N
+        branch is still recognised as self-maintenance via its title scope."""
+        from reflections import append_reflection
+
+        s = self._setup_with_wiki(
+            config,
+            issue_kwargs={"title": "chore(arch): regenerate architecture knowledge"},
+        )
+        append_reflection(
+            config, s.pr.issue_number, phase="implement", content="self-chore"
+        )
+
+        await s.call()
+
+        assert self._queued(config) == []
 
     @pytest.mark.asyncio
     async def test_default_packaged_policy_allows_pipeline_approved_merge(
