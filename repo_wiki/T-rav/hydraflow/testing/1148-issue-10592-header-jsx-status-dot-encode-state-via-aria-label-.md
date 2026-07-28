@@ -4,9 +4,8 @@ topic: testing
 source_issue: 10592
 source_phase: plan
 created_at: 2026-07-26T03:33:58.716466+00:00
-status: superseded
+status: active
 corroborations: 1
-superseded_by: 1154
 ---
 
 # Header.jsx status dot: encode state via aria-label/title, not visible text, with data-testid anchor

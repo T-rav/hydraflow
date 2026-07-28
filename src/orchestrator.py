@@ -862,6 +862,13 @@ class HydraFlowOrchestrator:
         its real last status; a never-run loop reports ``pending`` (or
         ``disabled`` when its enabled flag is off) so it is counted but not
         mistaken for a healthy tick.
+
+        Every seeded event carries ``seeded=True``. A restored ``error`` status
+        is a genuine prior-session failure and must count toward loop-health,
+        but it is NOT a live cycle — replaying it must not inflate the operator
+        console's restart window. The flag lets the restart tally exclude seed
+        replays while loop-health still reflects each loop's current status
+        (#10751).
         """
         states = self._bg_workers.get_states()
         for name in sorted(self._bg_workers.registered_loop_names()):
@@ -888,6 +895,7 @@ class HydraFlowOrchestrator:
                         last_run=last_run,
                         details=details,
                         enabled=enabled,
+                        seeded=True,
                     ),
                 )
             )
