@@ -2947,6 +2947,13 @@ class BackgroundWorkerStatusPayload(TypedDict):
     # (``orchestrator._seed_background_worker_statuses``) sets it so the UI can
     # distinguish an intentionally-disabled loop from a broken one (#10556).
     enabled: NotRequired[bool]
+    # True only on the boot-time registry seed's replay of a loop's *persisted*
+    # last status. The per-cycle publish path never sets it. A restored ``error``
+    # status is a real prior-session failure, but replaying it as a fresh event
+    # must NOT be tallied as a live restart/error in the operator console's
+    # restart window — consumers key off this flag to exclude seed replays while
+    # still counting the loop's current status toward loop-health (#10751).
+    seeded: NotRequired[bool]
 
 
 class LoopFitnessUpdatePayload(TypedDict):

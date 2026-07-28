@@ -65,9 +65,17 @@ export function toVitals(events, extras = {}) {
   // carries each loop's *current* status, not a count of how many times it has
   // errored, so restarts are always read from the event window (mirrors how
   // `toLoops` correlates restart counts by worker name).
+  //
+  // Skip boot-seed replays (`seeded === true`): the orchestrator's boot seed
+  // republishes each loop's *persisted* last status, so a loop that was in
+  // error when the process last stopped would otherwise phantom-inflate the
+  // restart count on every restart even though nothing failed this session
+  // (#10751). A real live failure comes through the per-cycle path with no
+  // `seeded` flag and is still counted.
   const errorCountByLoop = new Map()
   for (const e of list) {
     if (e?.type !== 'background_worker_status') continue
+    if (e.data?.seeded === true) continue
     const worker = e.data?.worker
     if (!worker) continue
     if (e.data?.status === 'error') {
