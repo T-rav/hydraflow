@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_74 terms across 3 bounded contexts._
+_75 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -98,6 +98,18 @@ Subprocess runner for the implement phase: launches a `claude -p` process inside
 - Phase name is fixed: _phase_name == 'implement'.
 - The runner commits inside the worktree but never pushes or opens a PR — that work belongs to downstream phases.
 - Self-check checklist is dynamically extended with checklist items from recurring review escalations.
+
+## AgentSkill
+
+**Kind:** `value_object` · **Context:** `builder` · **Anchor:** `src/skill_registry.py:AgentSkill` · **Confidence:** `accepted`
+**Aliases:** `skill`, `post-implementation check`, `quality gate`
+
+AgentSkill is a declarative specification of a post-implementation quality check that runs against the branch diff after the implementation agent finishes. Each skill carries a name, a one-line purpose injected into the agent prompt, a prompt builder, a result parser that extracts structured pass/fail findings from the agent transcript, and a blocking flag that determines whether a failed check stops the pipeline. Built-in skills — diff-sanity, scope-check, plan-compliance, test-adequacy, discover-completeness, and shape-coherence — are registered in execution order and orchestrated by AgentRunner._run_skill(). The test-adequacy skill additionally carries a VerifierSpec for an independent second-opinion pass.
+
+**Invariants:**
+- Skills execute in registration order (BUILTIN_SKILLS list); ordering is significant.
+- A blocking skill failure stops the pipeline; a non-blocking failure is logged as a warning.
+- Setting the skill's config_key field on HydraFlowConfig to 0 disables that skill.
 
 ## BaseBackgroundLoop
 
