@@ -1,9 +1,10 @@
 """WikiRotDetectorLoop — weekly wiki cite freshness detector (spec §4.9).
 
 Walks every ``RepoWikiStore``-registered repo, extracts cited code
-references from each wiki entry via three patterns (``path.py:symbol``,
-dotted ``src.module.Class``, and bare identifiers inside ``python``
-fences — hints only), and verifies each hard cite against:
+references from each wiki entry via four patterns (``path.py:symbol``,
+dotted ``src.module.Class``, bare identifiers inside ``python`` fences —
+hints only, and Style-D bare tool/script names in imperative prose such as
+"Run ``foo_tool``" — #10762), and verifies each hard cite against:
 
 - **HydraFlow-self** (``config.repo_root``) via AST introspection —
   catches re-exports and ``__init__.py`` re-bindings that grep misses.
@@ -50,8 +51,9 @@ Kill-switch: :meth:`LoopDeps.enabled_cb` with ``worker_name="wiki_rot_detector"`
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
@@ -64,10 +66,12 @@ from wiki_lesson_coverage import PredecessorCoverage, assess_repo_coverage
 from wiki_rot_citations import (
     Cite,
     ShippedClaim,
+    build_symbol_corpus,
     extract_cites,
     extract_fenced_hints,
     extract_shipped_claims,
     fuzzy_suggest,
+    resolve_bare_cite,
     verify_cite_ast,
     verify_cite_grep,
 )
@@ -111,8 +115,42 @@ class _WikiScanEntry:
 
 _MAX_ATTEMPTS = 3
 _EXCERPT_CHARS = 500
+_SUMMARY_MAX_LINES = 50
 _ISSUE_LABELS_FIND: tuple[str, ...] = ("hydraflow-find", "wiki-rot")
 _ISSUE_LABELS_ESCALATE: tuple[str, ...] = ("hitl-escalation", "wiki-rot-stuck")
+
+
+@dataclass
+class _FilingBudget:
+    """Per-tick issue-filing budget (issue #10767).
+
+    Bounds only the number of ``hydraflow-find`` *filing* calls per tick — the
+    ``broken_subjects`` tracking set that drives ``reconcile_open`` is never
+    gated (patterns/0576: a cap-suppressed subject omitted from that set would
+    read as "resolved" and wrongly auto-close a live escalation). Once the cap
+    is reached, further broken cites are collected into :attr:`overflow` and
+    reported as a single summary issue instead of one issue each, so the loop's
+    blast radius is bounded by construction rather than by how conservative
+    each extractor happens to be.
+    """
+
+    cap: int
+    filed: int = 0
+    overflow: list[str] = field(default_factory=list)
+
+    def allow(self) -> bool:
+        """Return ``True`` while the tick still has filing budget.
+
+        ``cap`` is validated ``ge=1`` in config, so there is always room for
+        at least one filing before the summary path engages.
+        """
+        return self.filed < self.cap
+
+    def note_filed(self) -> None:
+        self.filed += 1
+
+    def note_overflow(self, line: str) -> None:
+        self.overflow.append(line)
 
 
 class WikiRotDetectorLoop(BaseBackgroundLoop):
@@ -178,6 +216,11 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             # least one seeded repo (cite extraction yields 0 otherwise).
             repos.insert(0, self_slug)
 
+        # Per-tick filing budget (issue #10767): bounds the number of
+        # hydraflow-find issues opened across ALL repos + cite styles in one
+        # tick. Overflow is summarized into a single issue below.
+        budget = _FilingBudget(cap=self._config.wiki_rot_detector_max_issues_per_tick)
+
         scanned = 0
         filed = 0
         escalated = 0
@@ -185,7 +228,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         active_subjects: set[str] = set()
         for slug in repos:
             try:
-                result = await self._tick_repo(slug, self_slug)
+                result = await self._tick_repo(slug, self_slug, budget)
             except Exception as exc:  # noqa: BLE001
                 reraise_on_credit_or_bug(exc)
                 logger.exception("wiki_rot_detector: slug=%s failed", slug)
@@ -195,6 +238,10 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             filed += result["filed"]
             escalated += result["escalated"]
             active_subjects |= result["broken_subjects"]
+
+        # One summary issue for everything that overflowed the per-tick cap,
+        # instead of one issue per cite (#10767).
+        filed += await self._file_rot_summary(budget)
 
         # Open-escalation re-verify: cites fixed by later changes auto-close
         # their stuck escalations instead of waiting for a human. Skipped on
@@ -260,6 +307,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         self,
         slug: str,
         self_slug: str,
+        budget: _FilingBudget,
     ) -> _TickResult:
         """Scan one repo's wiki entries, verify cites, file issues, and
         escalate repeat offenders.
@@ -270,6 +318,10 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         broken), which drive open-escalation re-verification. Failures on
         a single entry are logged and skipped — the tick never aborts
         mid-repo.
+
+        *budget* bounds per-tick issue filing (#10767); it is shared across
+        repos so the cap is a whole-tick guard, and its overflow is summarized
+        by the caller.
         """
         filed = 0
         escalated = 0
@@ -278,6 +330,13 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         entries = self._load_wiki_entries(slug)
         is_self = slug == self_slug and bool(self_slug)
         repo_root = Path(self._config.repo_root)
+
+        # Style-D bare-cite resolution corpus (#10762). Self-repo only — a
+        # managed repo has no local checkout to resolve bare names against, so
+        # its bare cites are never reported. Built once here (self is scanned
+        # once per tick), never cached on the instance, to avoid cross-tick
+        # staleness.
+        corpus = build_symbol_corpus(repo_root) if is_self else None
 
         # Tracked per-entry layout (issue #10586): the flat/compiled scan above
         # never walks the tracked ``repo_wiki/`` root, so shipped claims written
@@ -316,7 +375,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             for cite in cites:
                 if cite.raw in suppressed_refs:
                     continue  # covered by the shipped-claim finding below
-                broken, suggestion = self._check_cite(cite, repo_root, is_self)
+                broken, suggestion = self._check_cite(cite, repo_root, is_self, corpus)
                 if not broken:
                     continue
                 subject = f"{slug}:{cite.raw}"
@@ -327,6 +386,18 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                 if dedup_key in dedup_seen:
                     continue
 
+                # Per-tick filing cap (#10767): gate the FILING only. The
+                # subject is already in broken_subjects; add it to the dedup
+                # set either way so an overflowed cite is recorded once,
+                # summarized, and not re-filed on later ticks.
+                dedup_seen.add(dedup_key)
+                if not budget.allow():
+                    budget.note_overflow(
+                        _overflow_line(subject, str(entry_path), cite.style)
+                    )
+                    continue
+
+                budget.note_filed()
                 filed += 1
                 await self._file_find(
                     slug=slug,
@@ -339,7 +410,6 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                     source_type=scan_entry.source_type,
                     source_issue=scan_entry.source_issue,
                 )
-                dedup_seen.add(dedup_key)
 
                 attempts = self._state.inc_wiki_rot_attempts(subject)
                 if attempts >= _MAX_ATTEMPTS:
@@ -356,6 +426,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                 claims=uncorroborated,
                 dedup_seen=dedup_seen,
                 broken_subjects=broken_subjects,
+                budget=budget,
             )
             filed += shipped_filed
             escalated += shipped_escalated
@@ -376,6 +447,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                 claims=uncorroborated,
                 dedup_seen=dedup_seen,
                 broken_subjects=broken_subjects,
+                budget=budget,
             )
             filed += shipped_filed
             escalated += shipped_escalated
@@ -622,13 +694,16 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         claims: list[ShippedClaim],
         dedup_seen: set[str],
         broken_subjects: set[str],
+        budget: _FilingBudget,
     ) -> tuple[int, int]:
         """File findings + escalations for uncorroborated shipped claims.
 
         Shared by the flat topic-page loop and the tracked per-entry scan
         (issue #10586) so both verify shipped claims through the identical
         dedup / attempt / escalation path. Returns ``(filed, escalated)`` and
-        mutates *dedup_seen* / *broken_subjects* in place.
+        mutates *dedup_seen* / *broken_subjects* in place. Filing is gated by
+        the shared per-tick *budget* (#10767); overflow is summarized by the
+        caller.
         """
         filed = 0
         escalated = 0
@@ -641,6 +716,14 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             if dedup_key in dedup_seen:
                 continue
 
+            dedup_seen.add(dedup_key)
+            if not budget.allow():
+                budget.note_overflow(
+                    _overflow_line(subject, str(scan_entry.path), "shipped")
+                )
+                continue
+
+            budget.note_filed()
             filed += 1
             await self._file_shipped_find(
                 slug=slug,
@@ -651,7 +734,6 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
                 source_type=scan_entry.source_type,
                 source_issue=scan_entry.source_issue,
             )
-            dedup_seen.add(dedup_key)
 
             attempts = self._state.inc_wiki_rot_attempts(subject)
             if attempts >= _MAX_ATTEMPTS:
@@ -694,6 +776,7 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         cite: Cite,
         repo_root: Path,
         is_self: bool,
+        corpus: frozenset[str] | None = None,
     ) -> tuple[bool, str | None]:
         """Verify *cite* and emit a fuzzy suggestion when plausible.
 
@@ -704,6 +787,18 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
         """
         if cite.style == "fenced_hint":
             return (False, None)  # hints never trigger fires
+
+        if cite.style == "bare":
+            # Style-D bare cites (#10762) carry no module/symbol pair, so they
+            # resolve by presence against the symbol corpus rather than AST.
+            # Self-repo only: a managed repo has no local corpus, so a bare
+            # cite there is never reported (avoids false positives). This
+            # branch MUST precede the ``verify_cite_ast`` path below — that
+            # helper answers "does module M define symbol S", and a bare cite
+            # has neither, so it would always read as broken.
+            if not is_self or corpus is None:
+                return (False, None)
+            return (not resolve_bare_cite(cite.symbol, corpus), None)
 
         module_path = cite.module_as_path()
 
@@ -922,6 +1017,59 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
             list(_ISSUE_LABELS_ESCALATE),
         )
 
+    async def _file_rot_summary(self, budget: _FilingBudget) -> int:
+        """File ONE summary issue for cites over the per-tick filing cap.
+
+        When more than ``wiki_rot_detector_max_issues_per_tick`` new broken
+        cites surface in a single tick, the overflow is reported as a single
+        ``hydraflow-find`` issue rather than one issue per cite (#10767) — the
+        loop's blast radius is bounded by construction. The overflowed subjects
+        are already recorded in the dedup store by :meth:`_tick_repo`, so they
+        are not re-filed on later ticks; the summary is deduped by a digest of
+        its own contents to stay idempotent. Returns ``1`` if a summary was
+        filed, else ``0``.
+        """
+        if not budget.overflow:
+            return 0
+
+        lines = sorted(budget.overflow)
+        # Non-cryptographic: a short content digest that keeps the summary
+        # issue idempotent across retries. ``usedforsecurity=False`` marks it
+        # as such (bandit B324).
+        digest = hashlib.sha1(
+            "\n".join(lines).encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:12]
+        dedup_key = f"wiki_rot_detector:summary:{digest}"
+        seen = self._dedup.get()
+        if dedup_key in seen:
+            return 0
+
+        count = len(lines)
+        shown = lines[:_SUMMARY_MAX_LINES]
+        body_lines = [
+            "**Automated detection — WikiRotDetectorLoop per-tick filing cap "
+            "(spec §4.9 / issue #10767).**",
+            "",
+            f"{count} broken cite(s) exceeded the per-tick filing cap of "
+            f"`{budget.cap}` and are summarized here instead of one issue "
+            "each. Each is recorded in the rot dedup store and will not be "
+            "re-filed; resolve or prune them, then close this issue.",
+            "",
+            "### Cites over cap",
+            "",
+            *shown,
+        ]
+        if count > len(shown):
+            body_lines.append(f"- …and {count - len(shown)} more.")
+        await self._pr.create_issue(
+            f"Wiki rot: {count} cites over per-tick filing cap",
+            "\n".join(body_lines),
+            list(_ISSUE_LABELS_FIND),
+        )
+        seen.add(dedup_key)
+        self._dedup.set_all(seen)
+        return 1
+
     async def _reconcile_closed_escalations(self) -> None:
         """Poll closed ``wiki-rot-stuck`` escalations and clear the
         matching dedup key + attempt counter.  Called at the top of
@@ -960,6 +1108,11 @@ class WikiRotDetectorLoop(BaseBackgroundLoop):
 
 
 # -- module helpers --------------------------------------------------------
+
+
+def _overflow_line(subject: str, entry_path: str, style: str) -> str:
+    """Render one bullet line for the per-tick-cap summary issue (#10767)."""
+    return f"- `{subject}` — `{entry_path}` ({style})"
 
 
 def _parse_escalation_subject(title: str, body: str) -> str | None:
