@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T12:54:49.498869+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0739
+superseded_by: 0850
 ---
 
 # ADR citations must be symbol-qualified, not bare file paths

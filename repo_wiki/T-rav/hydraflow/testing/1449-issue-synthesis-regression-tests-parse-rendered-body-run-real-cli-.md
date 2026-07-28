@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T00:21:29.185637+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1374
+superseded_by: 1537
 ---
 
 # Regression tests parse rendered body, run real CLI, assert closure

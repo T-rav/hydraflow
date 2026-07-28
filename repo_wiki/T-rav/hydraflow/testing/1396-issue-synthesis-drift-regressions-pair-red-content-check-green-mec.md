@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T00:21:29.083648+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1321
+superseded_by: 1484
 ---
 
 # Drift regressions pair red content-check + green mechanism-check

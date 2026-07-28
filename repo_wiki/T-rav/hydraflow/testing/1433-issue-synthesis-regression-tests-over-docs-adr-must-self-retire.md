@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T00:21:29.154177+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1358
+superseded_by: 1521
 ---
 
 # Regression tests over docs/adr must self-retire

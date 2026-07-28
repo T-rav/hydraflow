@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10788
 source_phase: plan
 created_at: 2026-07-28T09:50:57.002347+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1465
 ---
 
 # New PRManager methods must mirror on PRPort and FakeGitHub
