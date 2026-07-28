@@ -472,6 +472,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("rc_budget_interval", "HYDRAFLOW_RC_BUDGET_INTERVAL", 14400),
     ("wiki_rot_detector_interval", "HYDRAFLOW_WIKI_ROT_DETECTOR_INTERVAL", 604800),
     (
+        "wiki_rot_detector_max_issues_per_tick",
+        "HYDRAFLOW_WIKI_ROT_DETECTOR_MAX_ISSUES_PER_TICK",
+        10,
+    ),
+    (
         "adr_touchpoint_auditor_interval",
         "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_INTERVAL",
         14400,
@@ -4436,6 +4441,19 @@ class HydraFlowConfig(BaseModel):
         ge=86400,
         le=2_592_000,
         description="Seconds between WikiRotDetectorLoop ticks (default 7d)",
+    )
+    wiki_rot_detector_max_issues_per_tick: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description=(
+            "Finding-rate budget: max hydraflow-find issues WikiRotDetectorLoop "
+            "files in one tick across all repos and cite styles (#10767). Cites "
+            "over the cap are summarized into a SINGLE issue instead of one "
+            "each. Gates FILING only — ``broken_subjects`` accumulation is never "
+            "capped, so ``reconcile_open`` cannot wrongly auto-close a live "
+            "escalation for a merely rate-limited cite (patterns/0576)."
+        ),
     )
 
     # Caretaker — AdrTouchpointAuditorLoop (ADR-0056)
