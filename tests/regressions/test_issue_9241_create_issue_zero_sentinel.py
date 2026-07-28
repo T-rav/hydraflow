@@ -134,6 +134,7 @@ async def test_zero_sentinel_does_not_commit_record_or_dedup(env) -> None:
         "filed": 0,
         "skipped": 0,
         "escalated": 0,
+        "summarized": 0,
     }
     pr.create_issue.assert_awaited_once()
 
@@ -171,6 +172,7 @@ async def test_real_number_commits_and_records(env) -> None:
         "filed": 1,
         "skipped": 0,
         "escalated": 0,
+        "summarized": 0,
     }
     after = load_mirror_entry(entry_path)
     assert after.status == "issue-open"
@@ -215,6 +217,7 @@ async def test_escalation_zero_sentinel_does_not_dedup(env) -> None:
         "filed": 0,
         "skipped": 0,
         "escalated": 0,
+        "summarized": 0,
     }
     pr.create_issue.assert_awaited_once()
     # No dedup add — escalation retries next cycle once gh recovers.

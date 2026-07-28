@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
+from filing_budget import FilingBudget
 from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
 from models import CONVERGENCE_BOUNDARY_STAGES
 
@@ -93,6 +94,14 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
 
         escalated = 0
         scanned = 0
+        deferred = 0
+        # Per-tick filing cap (#10777): ledgers scale with in-flight issues, so
+        # many simultaneously-oscillating issues could file one HITL issue each.
+        # Over the cap, escalations are deferred (the ledger is NOT marked
+        # escalated) and retried next tick — a rate limit, not a drop.
+        budget = FilingBudget(
+            cap=self._config.convergence_oscillation_max_issues_per_tick
+        )
 
         for issue_number, ledger in self._state.iter_convergence_ledgers():
             # PR-keyed sandbox_fix rows share the GitHub issue-number namespace
@@ -131,6 +140,16 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
             )
 
             if fires:
+                if not budget.allow():
+                    deferred += 1
+                    logger.warning(
+                        "convergence_oscillation: per-tick filing cap %d "
+                        "reached; deferring escalation for #%d (retries next "
+                        "tick)",
+                        budget.cap,
+                        issue_number,
+                    )
+                    continue
                 # Identify which boundary stages are currently LOOP_BACK so the
                 # body gives operators a quick read on where the churn is. Reads
                 # the SAME CONVERGENCE_BOUNDARY_STAGES constant that
@@ -171,6 +190,7 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
                     await self._pr.create_issue(title, body, labels)
                     self._state.mark_oscillation_escalated(issue_number)
                     escalated += 1
+                    budget.note_filed()
                 except Exception as exc:  # noqa: BLE001
                     reraise_on_credit_or_bug(exc)
                     logger.warning(
@@ -179,4 +199,9 @@ class ConvergenceOscillationLoop(BaseBackgroundLoop):
                         exc_info=True,
                     )
 
-        return {"status": "ok", "scanned": scanned, "escalated": escalated}
+        return {
+            "status": "ok",
+            "scanned": scanned,
+            "escalated": escalated,
+            "deferred": deferred,
+        }

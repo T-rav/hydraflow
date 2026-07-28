@@ -30,6 +30,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
+from filing_budget import FilingBudget, file_overflow_summary, overflow_line
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
 
 if TYPE_CHECKING:
@@ -493,11 +494,23 @@ class GateHealthLoop(BaseBackgroundLoop):
         return findings
 
     async def _file_findings(self, findings: list[dict[str, Any]]) -> int:
-        filed = 0
+        # Per-tick filing cap (#10777): findings scale with distinct CI checks
+        # and analyzed runs (suspected_hang is keyed per run_id), so a bad
+        # window could file one issue per finding. Over the cap, findings are
+        # recorded (so they are not re-filed individually) and folded into ONE
+        # summary issue.
+        budget = FilingBudget(cap=self._config.gate_health_max_issues_per_tick)
         seen = self._finding_dedup.get()
         for finding in findings:
             fingerprint = finding_fingerprint(finding)
             if fingerprint in seen:
+                continue
+            if not budget.allow():
+                seen = seen | {fingerprint}
+                self._finding_dedup.set_all(seen)
+                budget.note_overflow(
+                    overflow_line(fingerprint, str(finding.get("kind", "finding")))
+                )
                 continue
             title, body = _render_finding(finding)
             try:
@@ -510,9 +523,18 @@ class GateHealthLoop(BaseBackgroundLoop):
                 continue
             seen = seen | {fingerprint}
             self._finding_dedup.set_all(seen)
-            filed += 1
+            budget.note_filed()
             logger.info("Gate health: filed finding %s", fingerprint)
-        return filed
+        summary_filed = await file_overflow_summary(
+            create_issue=self._prs.create_issue,
+            dedup=self._finding_dedup,
+            budget=budget,
+            key_prefix="gate_health",
+            labels=["hydraflow-find"],
+            title="Gate health: findings over per-tick filing cap",
+            intro="**Automated — GateHealthLoop per-tick filing cap (#10777).**",
+        )
+        return budget.filed + summary_filed
 
 
 def _render_finding(finding: dict[str, Any]) -> tuple[str, str]:

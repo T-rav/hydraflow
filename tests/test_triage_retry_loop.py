@@ -347,3 +347,33 @@ def test_default_interval_matches_config(env) -> None:
     cfg, _, _ = env
     loop = _make_loop(env)
     assert loop._get_default_interval() == cfg.triage_infra_retry_interval
+
+
+@pytest.mark.asyncio
+async def test_per_tick_cap_bounds_hitl_escalations(env) -> None:
+    """#10777: a mass re-park files at most ``cap`` HITL issues in one tick.
+
+    Over-cap exhausted issues are deferred (last-attempt NOT advanced) so they
+    escalate on a later tick — a rate limit on filing, never a silent drop.
+    """
+    cfg, state, pr = env
+    cap = cfg.triage_retry_max_issues_per_tick
+    state.get_triage_retry_attempts.return_value = cfg.triage_retry_max_attempts
+    pr.list_issues_by_label.return_value = [
+        {
+            "number": 300 + i,
+            "title": f"Still vague #{300 + i}",
+            "body": "Auto-Retry: Triage\n\n**Missing:**\n- Acceptance criteria\n",
+            "updated_at": "2026-05-01T00:00:00Z",
+        }
+        for i in range(cap + 3)
+    ]
+    loop = _make_loop(env)
+
+    result = await loop._do_work()
+
+    assert result["escalated"] == cap
+    assert result["escalation_deferred"] == 3
+    assert pr.create_issue.await_count == cap
+    # Deferred issues never advanced their last-attempt clock → retry next tick.
+    assert state.set_triage_retry_last_attempt.call_count == cap

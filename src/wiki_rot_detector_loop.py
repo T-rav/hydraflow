@@ -53,13 +53,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
+from filing_budget import FilingBudget as _FilingBudget
 from models import WorkCycleResult
 from repo_wiki import _split_tracked_entry, parse_topic_page
 from wiki_lesson_coverage import PredecessorCoverage, assess_repo_coverage
@@ -119,38 +120,11 @@ _SUMMARY_MAX_LINES = 50
 _ISSUE_LABELS_FIND: tuple[str, ...] = ("hydraflow-find", "wiki-rot")
 _ISSUE_LABELS_ESCALATE: tuple[str, ...] = ("hitl-escalation", "wiki-rot-stuck")
 
-
-@dataclass
-class _FilingBudget:
-    """Per-tick issue-filing budget (issue #10767).
-
-    Bounds only the number of ``hydraflow-find`` *filing* calls per tick — the
-    ``broken_subjects`` tracking set that drives ``reconcile_open`` is never
-    gated (patterns/0576: a cap-suppressed subject omitted from that set would
-    read as "resolved" and wrongly auto-close a live escalation). Once the cap
-    is reached, further broken cites are collected into :attr:`overflow` and
-    reported as a single summary issue instead of one issue each, so the loop's
-    blast radius is bounded by construction rather than by how conservative
-    each extractor happens to be.
-    """
-
-    cap: int
-    filed: int = 0
-    overflow: list[str] = field(default_factory=list)
-
-    def allow(self) -> bool:
-        """Return ``True`` while the tick still has filing budget.
-
-        ``cap`` is validated ``ge=1`` in config, so there is always room for
-        at least one filing before the summary path engages.
-        """
-        return self.filed < self.cap
-
-    def note_filed(self) -> None:
-        self.filed += 1
-
-    def note_overflow(self, line: str) -> None:
-        self.overflow.append(line)
+# ``_FilingBudget`` is the shared per-tick issue-filing gate (extracted to
+# ``filing_budget`` in #10777). Imported under its original private name so the
+# broken-subject overflow accounting in ``_tick_repo`` reads unchanged; note
+# that ``broken_subjects`` (which drives ``reconcile_open``) is deliberately
+# NEVER gated by the budget — see patterns/0576.
 
 
 class WikiRotDetectorLoop(BaseBackgroundLoop):

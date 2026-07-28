@@ -91,9 +91,12 @@ class TestConvergenceOscillationMockWorld:
         results = await world.run_with_loops(["convergence_oscillation"], cycles=1)
 
         stats = results["convergence_oscillation"]
-        assert stats == {"status": "ok", "scanned": 1, "escalated": 1}, (
-            f"unexpected stats: {stats}"
-        )
+        assert stats == {
+            "status": "ok",
+            "scanned": 1,
+            "escalated": 1,
+            "deferred": 0,
+        }, f"unexpected stats: {stats}"
 
         # Exactly one new issue must have been created by the loop.
         created = [

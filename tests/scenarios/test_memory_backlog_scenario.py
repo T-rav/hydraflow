@@ -118,7 +118,13 @@ class TestMemoryBacklogScenario:
 
         result = await loop._do_work()
 
-        assert result == {"status": "ok", "filed": 1, "skipped": 0, "escalated": 0}
+        assert result == {
+            "status": "ok",
+            "filed": 1,
+            "skipped": 0,
+            "escalated": 0,
+            "summarized": 0,
+        }
         assert len(github._issues) == 1
         issue = next(iter(github._issues.values()))
         assert "feedback-alpha" in issue.title
