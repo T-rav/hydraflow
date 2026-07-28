@@ -1,12 +1,15 @@
 /**
  * OperatorConsole — the pipeline-centric operator shell (epic #10556, Task 2).
  *
- * This is the layout container for the new operator console. It owns four
- * slots — header, pipeline (hero), detail, vitals — consumes the existing
- * WebSocket state via `useHydraFlowSocket` and turns it into the Task-1 view
- * models (`toPipeline` / `toTranscript` / `toVitals`), and threads the
- * URL-synced selection from `useOperatorSelection` down to its children. The
- * bottom Activity drawer was removed (#11) to reclaim vertical space; its
+ * This is the layout container for the new operator console. It owns five
+ * slots — header, pipeline (hero), detail, vitals, and a full-width bottom
+ * timeline — consumes the existing WebSocket state via `useHydraFlowSocket` and
+ * turns it into the Task-1 view models (`toPipeline` / `toTranscript` /
+ * `toVitals` / `toTimeline`), and threads the URL-synced selection from
+ * `useOperatorSelection` down to its children. The old bottom Activity drawer was
+ * removed (#11); its reclaimed space now hosts the phase-container timeline
+ * (`TimelinePanel`, feat/operator-timeline), a vertical timeline of pipeline
+ * phases with events + PR/commit diffs folded inside each phase. The
  * `ActivityDrawer` component still exists but is no longer mounted here.
  *
  * Task 2 ships the shell only: the real child components (PipelineRail,
@@ -34,6 +37,7 @@ import { ConsoleHeader } from './ConsoleHeader'
 import { PipelineRail } from './PipelineRail'
 import { toPipeline } from './model/pipeline'
 import { toTranscript } from './model/transcript'
+import { toTimeline } from './model/timeline'
 import { toVitals, factoryUptimeLabel } from './model/vitals'
 import { toLoops } from './model/loops'
 import { toReleasePromotion } from './model/release'
@@ -47,6 +51,7 @@ import { RepoOverview, buildRepoSummaries } from './RepoOverview'
 import { RepoSwitcher } from './RepoSwitcher'
 import { ItemWorkspace } from './ItemWorkspace'
 import { ActiveGrid } from './ActiveGrid'
+import { TimelinePanel } from './TimelinePanel'
 import { IdleState } from './states/IdleState'
 import { PausedState } from './states/PausedState'
 import { DisconnectedBanner } from './states/DisconnectedBanner'
@@ -74,16 +79,18 @@ function makeStyles(t) {
       boxSizing: 'border-box',
     },
     pausedWrap: { padding: `${t.space.md}px ${t.space.md}px 0` },
-    // The Activity drawer row was removed (#11), reclaiming its vertical space.
-    // In focus mode the detail area spans BOTH columns full-width (#8) — the
-    // vitals column then only rides the pipeline row; every other mode keeps
-    // vitals spanning the pipeline + detail rows.
+    // The Activity drawer row was removed (#11); its reclaimed bottom space now
+    // hosts the full-width phase-container timeline (feat/operator-timeline),
+    // spanning BOTH columns beneath the detail/vitals rows. In focus mode the
+    // detail area spans both columns full-width (#8) — the vitals column then only
+    // rides the pipeline row; every other mode keeps vitals spanning the pipeline
+    // + detail rows. The timeline row is always full-width at the bottom.
     grid: (focusFull) => ({
       display: 'grid',
       gridTemplateColumns: 'minmax(0, 1fr) 280px',
       gridTemplateAreas: focusFull
-        ? '"header header" "pipeline vitals" "detail detail"'
-        : '"header header" "pipeline vitals" "detail vitals"',
+        ? '"header header" "pipeline vitals" "detail detail" "timeline timeline"'
+        : '"header header" "pipeline vitals" "detail vitals" "timeline timeline"',
       gap: t.space.md,
       padding: t.space.md,
       boxSizing: 'border-box',
@@ -155,6 +162,11 @@ export function OperatorConsoleView({ socket = {}, now = Date.now() }) {
   const multiRepo = repos.length > 1
   const showOverview = multiRepo && repo == null
   const transcript = useMemo(() => toTranscript(events, item), [events, item])
+  // Phase-container timeline (feat/operator-timeline): the event stream folded
+  // into chronological phase cards. `now` is injected so the open phase's
+  // duration is deterministic; `item` scopes it to the drilled issue (all active
+  // issues when nothing is drilled in).
+  const timeline = useMemo(() => toTimeline(events, { item, now }), [events, item, now])
   const vitals = useMemo(
     () => toVitals(events, {
       stagingPromotion: socket.stagingPromotion,
@@ -263,6 +275,9 @@ export function OperatorConsoleView({ socket = {}, now = Date.now() }) {
               <VitalsCard vitals={vitals} />
               <LoopsPanel loops={loops} />
               <SettingsSummary summary={settings} onOpenSettings={() => setSettingsOpen(true)} />
+            </div>
+            <div data-testid="operator-timeline-slot" style={styles.slot('timeline')}>
+              <TimelinePanel timeline={timeline} />
             </div>
           </div>
         )}

@@ -99,6 +99,29 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('loops-category-toggle-repo_health')).toBeInTheDocument()
   })
 
+  it('mounts the phase timeline in the reclaimed bottom slot (feat/operator-timeline)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    const slot = screen.getByTestId('operator-timeline-slot')
+    expect(slot).toBeInTheDocument()
+    // The timeline panel lives in the full-width bottom slot (PR2 reclaimed the
+    // old drawer space); with no phase_change in the fixture it renders empty.
+    expect(slot).toContainElement(screen.getByTestId('timeline-panel'))
+  })
+
+  it('folds phase_change events into the bottom timeline (a phase container renders)', () => {
+    const socket = makeSocket({
+      // Newest-first, as the reducer stores: a PR opened during the Build phase.
+      events: [
+        { type: 'pr_created', timestamp: '2026-07-26T12:10:00Z', id: 6, data: { pr: 820, issue: 42, url: 'https://gh/pull/820' } },
+        { type: 'phase_change', timestamp: '2026-07-26T12:05:00Z', id: 5, data: { phase: 'implement', issue: 42 } },
+      ],
+    })
+    render(<OperatorConsoleView socket={socket} now={Date.parse('2026-07-26T12:12:00Z')} />)
+    expect(screen.getByTestId('timeline-phase-implement')).toBeInTheDocument()
+    // The pr_created folds inside the phase as a diff row.
+    expect(screen.getByTestId('timeline-diff-6')).toBeInTheDocument()
+  })
+
   it('mounts the real PipelineRail in the pipeline slot (Task 3)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     expect(screen.getByTestId('pipeline-rail')).toBeInTheDocument()

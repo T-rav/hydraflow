@@ -48,12 +48,22 @@ function groupableKey(type, data) {
   return null // not groupable
 }
 
-function summarize(type, data) {
+/**
+ * Human-readable one-line summary for a single event, keyed by type. Exported so
+ * other view-model adapters (e.g. `model/timeline.js`) reuse the SAME event→text
+ * logic instead of re-deriving it — the activity feed and the phase timeline can
+ * never drift on how an event reads.
+ * @param {string} type
+ * @param {object} [data]
+ * @returns {string}
+ */
+export function summarizeEvent(type, data) {
   const d = data || {}
   switch (type) {
     case 'transcript_line': return String(d.line ?? '')
     case 'error': return d.message || 'Error'
     case 'system_alert': return d.message || 'System alert'
+    case 'pr_created': return d.pr ? `PR #${d.pr} opened` : 'PR opened'
     case 'merge_update': return `PR #${d.pr} ${d.status || ''}`.trim()
     case 'review_update': return `PR #${d.pr} → ${d.verdict || d.status || ''}`.trim()
     case 'hitl_escalation': return d.pr ? `PR #${d.pr} escalated to HITL` : `Issue #${d.issue} escalated to HITL`
@@ -93,7 +103,7 @@ export function toActivityFeed(events) {
       ts: event.timestamp,
       type,
       severity: severityOf(type, data),
-      summary: summarize(type, data),
+      summary: summarizeEvent(type, data),
       // Non-groupable rows get a unique, deterministic key so they never
       // collapse and can serve as stable list keys downstream.
       groupKey: groupable ? gKey : `${type}#${event.id ?? event.timestamp ?? ''}#${idx}`,
