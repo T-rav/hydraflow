@@ -1200,6 +1200,23 @@ class HydraFlowConfig(BaseModel):
         default=1, ge=1, le=5, description="Concurrent HITL correction agents"
     )
 
+    # Dispatch-overlap guard (#10778) — pre-flight admission check that holds a
+    # ready issue from concurrent dispatch when its predicted scope (a shared
+    # referenced issue number, or an identical concrete file path) overlaps an
+    # already-dispatched in-flight unit, serializing the two instead of building
+    # them at once (the #10754 double-resolution class). Live: ImplementPhase
+    # re-reads this off its shared config on every dispatch, so a toggle applies
+    # to the next slot fill. Kill-switch: when off, every ready issue dispatches
+    # as before with no overlap check.
+    dispatch_overlap_guard_enabled: bool = Field(
+        default=True,
+        description=(
+            "Hold a ready issue from concurrent dispatch when its predicted "
+            "scope overlaps an in-flight build (shared issue reference or file), "
+            "serializing rather than building both at once (#10778)."
+        ),
+    )
+
     # Work-queue discipline (#10037) — how IssueStore orders each stage queue.
     # ``IssueRefinementLoop`` (#9957) produces the P0/P1/P2 labels these read.
     # Default is 'weighted_mix': priority-driven selection is the intended

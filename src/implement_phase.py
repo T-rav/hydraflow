@@ -15,6 +15,7 @@ from adr_utils import is_adr_issue_title, next_adr_number
 from agent import AgentRunner
 from beads_manager import BeadsManager
 from config import HydraFlowConfig
+from dispatch_overlap import DispatchOverlapTracker
 from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from harness_insights import (
     FailureCategory,
@@ -146,6 +147,11 @@ class ImplementPhase:
         self._summarizer = transcript_summarizer
         self._active_issues: set[int] = set()
         self._active_issues_lock = asyncio.Lock()
+        # Dispatch-overlap guard (#10778): pre-flight admission check that
+        # serializes concurrently-dispatched units whose predicted scopes
+        # overlap. Scopes are reserved at dispatch time (in ``_supply_live``)
+        # and released when a worker exits (in ``_worker``'s ``finally``).
+        self._dispatch_overlap = DispatchOverlapTracker()
         self._suggest_memory = MemorySuggester(config)
         self._zero_diff_memory_filed: set[int] = set()
         self._precondition_gate = precondition_gate
@@ -390,28 +396,67 @@ class ImplementPhase:
             async def _supply_live() -> list[Task]:
                 from stage_preconditions import Stage  # noqa: PLC0415
 
-                while True:
-                    batch = self._store.get_implementable(1)
-                    if not batch:
-                        return []
-                    if self._precondition_gate is None:
+                guard_on = self._config.dispatch_overlap_guard_enabled
+                # Units held this round for scope overlap (#10778). They are
+                # kept out of the ready queue while we pull the next candidate,
+                # then re-enqueued in the ``finally`` so a later refill round
+                # re-dispatches them — so a held unit never blocks a
+                # non-overlapping one from taking the free slot now.
+                held: list[Task] = []
+                try:
+                    while True:
+                        batch = self._store.get_implementable(1)
+                        if not batch:
+                            return []
+                        if self._precondition_gate is not None:
+                            gated = await self._precondition_gate.filter_and_route(
+                                batch, Stage.READY
+                            )
+                            if not gated:
+                                # Gate failure: filter_and_route already routed
+                                # it back. Release the in-flight claim
+                                # get_implementable took so it doesn't leak, then
+                                # keep pulling — the next may pass.
+                                release_batch_in_flight(
+                                    self._store, {t.id for t in batch}
+                                )
+                                continue
+                            batch = gated
+                        if guard_on:
+                            candidate = batch[0]
+                            hold = self._dispatch_overlap.reserve_or_hold(candidate)
+                            if hold is not None:
+                                # Predicted-scope overlap with an in-flight build
+                                # (#10778): serialize by holding this unit; the
+                                # ``finally`` re-enqueues it so it re-dispatches
+                                # once the blocking unit frees its slot.
+                                logger.info(
+                                    "Issue #%d held from concurrent dispatch — "
+                                    "%s overlap with in-flight issue #%d (%s); "
+                                    "serializing to a later round (#10778)",
+                                    hold.held_id,
+                                    hold.reason.kind,
+                                    hold.blocking_id,
+                                    hold.reason.detail,
+                                )
+                                held.append(candidate)
+                                continue
                         issues.extend(batch)
                         return batch
-                    gated = await self._precondition_gate.filter_and_route(
-                        batch, Stage.READY
-                    )
-                    if gated:
-                        issues.extend(gated)
-                        return gated
-                    # Gate failure: filter_and_route already routed it back.
-                    # Release the in-flight claim get_implementable took so it
-                    # doesn't leak, then keep pulling — the next may pass.
-                    release_batch_in_flight(self._store, {t.id for t in batch})
+                finally:
+                    for task in held:
+                        # Put held units back on the ready queue (this also
+                        # clears the in-flight claim get_implementable took) so
+                        # the next refill round can re-dispatch them.
+                        self._store.enqueue_transition(task, "ready")
 
             supply = _supply_live
 
         async def _worker(idx: int, issue: Task) -> WorkerResult:
             if self._stop_event.is_set():
+                # Reserved at supply time (#10778); release before the early
+                # exit so a stop mid-fill can't leak the reservation.
+                self._dispatch_overlap.release(issue.id)
                 return WorkerResult(
                     issue_number=issue.id,
                     branch=f"agent/issue-{issue.id}",
@@ -461,6 +506,9 @@ class ImplementPhase:
                             self._active_issues.discard(issue.id)
                             if self._active_issues_cb:
                                 self._active_issues_cb()
+                        # Free this unit's dispatch-overlap reservation (#10778)
+                        # so any unit held for overlapping it can now dispatch.
+                        self._dispatch_overlap.release(issue.id)
                         release_batch_in_flight(self._store, {issue.id})
                         # Clear the durable build claim on every exit (#10168).
                         # Success already swapped it away at PR-open (no-op
