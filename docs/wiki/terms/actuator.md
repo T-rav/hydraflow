@@ -5,13 +5,13 @@ kind: "control_role"
 bounded_context: "shared-kernel"
 code_anchor: "src/base_runner.py:BaseRunner"
 aliases: []
-related: [{"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}, {"kind": "depends_on", "target": "01KVJPAQ8987YPSRSWWWJJTBSG"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K6"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KXV30G7W143XRZFQM9SCSX27"}, {"kind": "depends_on", "target": "01KY4QKSBGMKHY3AV0JJ0QNMMD"}]
+related: [{"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}, {"kind": "depends_on", "target": "01KVJPAQ8987YPSRSWWWJJTBSG"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K6"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KXV30G7W143XRZFQM9SCSX27"}, {"kind": "depends_on", "target": "01KY4QKSBGMKHY3AV0JJ0QNMMD"}, {"kind": "depends_on", "target": "01KYM003P7D6GN4KSS1X9RBEXQ"}]
 evidence: ["01KQNZNK5DWPQ75W9HBCJX2DJ0", "01KQP0XFBGMB32VFGNPV8GZ26R"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-01T02:34:42.393494+00:00"
-updated_at: "2026-07-24T05:34:07.706352+00:00"
+updated_at: "2026-07-28T19:17:03.630439+00:00"
 ---
 
 ## Definition

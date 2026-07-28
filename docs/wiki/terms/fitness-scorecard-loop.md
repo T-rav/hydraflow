@@ -5,13 +5,13 @@ kind: "loop"
 bounded_context: "caretaker"
 code_anchor: "src/fitness_scorecard_loop.py:FitnessScorecardLoop"
 aliases: ["fitness scorecard", "fitness scorecard loop", "loop fitness scorecard"]
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01JZ9FK3C0M03HYR42BF33W0C3"}, {"kind": "depends_on", "target": "01JZ9FK3C0M01HYR42BF11W0A1"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01JZ9FK3C0M03HYR42BF33W0C3"}, {"kind": "depends_on", "target": "01JZ9FK3C0M01HYR42BF11W0A1"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KYM003P7D6GN4KSS1X9RBEXQ"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-06-30T00:00:00.000000+00:00"
-updated_at: "2026-07-18T19:31:17.682213+00:00"
+updated_at: "2026-07-28T19:17:03.630439+00:00"
 ---
 
 ## Definition
