@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `211694f` — feat(orchestration): formal give-up window → auto-decompose on plan-retry exhaustion (#10735) (#10745) (#10745) *(2026-07-27)*
+- `37e0845` — feat(ops): honest launchd liveness kernel — boot-SHA/branch guard + orphan reap (#10734) (#10743) (#10743) *(2026-07-27)*
 - `308a6df` — fix(operator): registry-seeded stable loop-health count, not a window/tick artifact (#10556) (#10739) (#10739) *(2026-07-27)*
 - `98c8462` — feat(ul): entry-evidence — 5 new entry links across 5 terms (#10729) (#10729) *(2026-07-27)*
 - `30e34cb` — feat(events): optional per-type EventBus subscription (ADR-0114, #10660) (#10723) (#10723) *(2026-07-27)*
@@ -607,7 +609,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `4183700` — fix(contracts): break src→tests import — relocate _schema to src/contracts/ (#8457) (#8457) *(2026-05-02)*
 - `14e066b` — fix(subprocess): timeouts on subprocess.run in async loop paths (#8456) (#8456) *(2026-05-02)*
 - `54f940e` — feat(sandbox): catalog s02-s12 + SandboxFailureFixerLoop + 3-trigger CI (PR C of 3) (#8453) (#8453) *(2026-04-28)*
-- `e1e9c91` — feat(sandbox): docker-compose stack + harness + s01 + ADR-0052 (PR B of 3) (#8452) (#8452) *(2026-04-28)*
 
 
 <!-- arch:generated -->
