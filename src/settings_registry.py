@@ -119,6 +119,9 @@ SETTINGS: dict[str, SettingSpec] = {
     # Live: GitHubDataCache.get_issues_by_label re-reads the bound on every
     # call (#9814), so a change applies to the next cached read.
     "github_cache_issue_list_ttl_s": SettingSpec("Reliability", live=True, order=3),
+    # Live: ImplementPhase re-reads this off its shared config on every dispatch
+    # (#10778), so a toggle applies to the next slot fill.
+    "dispatch_overlap_guard_enabled": SettingSpec("Reliability", live=True, order=4),
     # --- Event-Loop Watchdog (thread-level freeze detector, #9552) --------
     # enabled gates thread startup (captured at orchestrator start) → restart
     # badge; the other two are re-read by the watchdog thread on every poll /
