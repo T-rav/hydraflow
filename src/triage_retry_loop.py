@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from exception_classify import reraise_on_credit_or_bug
+from filing_budget import FilingBudget
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -118,6 +119,7 @@ class TriageRetryLoop(BaseBackgroundLoop):
             "scanned": 0,
             "retried": 0,
             "escalated": 0,
+            "escalation_deferred": 0,
             "skipped_recent": 0,
             "skipped_disabled": 0,
             "reconciled": 0,
@@ -154,6 +156,12 @@ class TriageRetryLoop(BaseBackgroundLoop):
             return stats
 
         now = datetime.now(UTC)
+        # Per-tick escalation-filing cap (#10777): a mass re-park (e.g. an infra
+        # outage that parked the whole board) would otherwise file one HITL
+        # issue per exhausted parked issue in a single tick. Over the cap,
+        # escalations are deferred (last-attempt timestamp NOT advanced) and
+        # retried next tick — a rate limit on filing volume, not a drop.
+        budget = FilingBudget(cap=self._config.triage_retry_max_issues_per_tick)
 
         for issue in issues:
             number = int(issue.get("number") or 0)
@@ -200,7 +208,17 @@ class TriageRetryLoop(BaseBackgroundLoop):
                 if not infra_parked and (
                     attempts >= self._config.triage_retry_max_attempts
                 ):
+                    if not budget.allow():
+                        stats["escalation_deferred"] += 1
+                        logger.warning(
+                            "triage_retry: per-tick escalation cap %d reached; "
+                            "deferring HITL for #%d (retries next tick)",
+                            budget.cap,
+                            number,
+                        )
+                        continue
                     await self._escalate_to_hitl(number, issue, attempts)
+                    budget.note_filed()
                     stats["escalated"] += 1
                 else:
                     await self._retry_triage(number, issue, attempts)

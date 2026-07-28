@@ -34,6 +34,7 @@ from typing import Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
+from filing_budget import FilingBudget, file_overflow_summary, overflow_line
 from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
 
 logger = logging.getLogger("hydraflow.detector_calibration")
@@ -177,11 +178,22 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
         }
 
     async def _file_findings(self, churning: dict[str, list[int]]) -> int:
-        filed = 0
+        # Per-tick filing cap (#10777): churning subjects are mined from up to
+        # 500 closed escalations, so a fleet-wide churn spike could file one
+        # issue per subject. Over the cap, subjects are recorded (so they are
+        # not re-filed individually) and folded into ONE summary issue.
+        budget = FilingBudget(cap=self._config.detector_calibration_max_issues_per_tick)
         keys = self._dedup.get()
         for norm, numbers in churning.items():
             dedup_key = f"detector_calibration:{_digest(norm)}"
             if dedup_key in keys:
+                continue
+            if not budget.allow():
+                keys = keys | {dedup_key}
+                self._dedup.set_all(keys)
+                budget.note_overflow(
+                    overflow_line(norm[:100], f"{len(numbers)}x/{_WINDOW_DAYS}d")
+                )
                 continue
             refs = ", ".join(f"#{n}" for n in numbers)
             title = (
@@ -208,8 +220,19 @@ class DetectorCalibrationLoop(BaseBackgroundLoop):
             await self._pr.create_issue(title, body, list(_ISSUE_LABELS))
             keys = keys | {dedup_key}
             self._dedup.set_all(keys)
-            filed += 1
-        return filed
+            budget.note_filed()
+        summary_filed = await file_overflow_summary(
+            create_issue=self._pr.create_issue,
+            dedup=self._dedup,
+            budget=budget,
+            key_prefix="detector_calibration",
+            labels=_ISSUE_LABELS,
+            title="Detector calibration: churning subjects over per-tick filing cap",
+            intro=(
+                "**Automated — DetectorCalibrationLoop per-tick filing cap (#10777).**"
+            ),
+        )
+        return budget.filed + summary_filed
 
     async def _autoclose_recovered(
         self, churning: dict[str, list[int]], *, scan_was_capped: bool = False

@@ -232,6 +232,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("artifact_max_size_mb", "HYDRAFLOW_ARTIFACT_MAX_SIZE_MB", 500),
     ("runs_gc_interval", "HYDRAFLOW_RUNS_GC_INTERVAL", 3600),
     ("gate_health_interval", "HYDRAFLOW_GATE_HEALTH_INTERVAL", 604800),
+    (
+        "gate_health_max_issues_per_tick",
+        "HYDRAFLOW_GATE_HEALTH_MAX_ISSUES_PER_TICK",
+        5,
+    ),
     ("gate_health_run_window", "HYDRAFLOW_GATE_HEALTH_RUN_WINDOW", 50),
     ("gate_health_min_attempts", "HYDRAFLOW_GATE_HEALTH_MIN_ATTEMPTS", 3),
     (
@@ -390,6 +395,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("auditor_finding_max_age_days", "HYDRAFLOW_AUDITOR_FINDING_MAX_AGE_DAYS", 14),
     ("triage_max_turns", "HYDRAFLOW_TRIAGE_MAX_TURNS", 12),
     ("triage_retry_interval", "HYDRAFLOW_TRIAGE_RETRY_INTERVAL", 86400),
+    (
+        "triage_retry_max_issues_per_tick",
+        "HYDRAFLOW_TRIAGE_RETRY_MAX_ISSUES_PER_TICK",
+        5,
+    ),
     ("triage_retry_max_attempts", "HYDRAFLOW_TRIAGE_RETRY_MAX_ATTEMPTS", 3),
     ("triage_infra_retry_interval", "HYDRAFLOW_TRIAGE_INFRA_RETRY_INTERVAL", 900),
     ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
@@ -419,6 +429,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
     ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 1800),
     ("principles_audit_interval", "HYDRAFLOW_PRINCIPLES_AUDIT_INTERVAL", 604800),
+    (
+        "principles_audit_max_issues_per_tick",
+        "HYDRAFLOW_PRINCIPLES_AUDIT_MAX_ISSUES_PER_TICK",
+        5,
+    ),
     ("principles_audit_timeout_seconds", "HYDRAFLOW_PRINCIPLES_AUDIT_TIMEOUT", 1800),
     (
         "sandbox_failure_fixer_interval",
@@ -426,6 +441,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         3600,
     ),
     ("detector_calibration_interval", "HYDRAFLOW_DETECTOR_CALIBRATION_INTERVAL", 3600),
+    (
+        "detector_calibration_max_issues_per_tick",
+        "HYDRAFLOW_DETECTOR_CALIBRATION_MAX_ISSUES_PER_TICK",
+        3,
+    ),
     ("auto_agent_preflight_interval", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_INTERVAL", 120),
     ("auto_agent_max_attempts", "HYDRAFLOW_AUTO_AGENT_MAX_ATTEMPTS", 3),
     (
@@ -468,6 +488,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "memory_backlog_interval_seconds",
         "HYDRAFLOW_MEMORY_BACKLOG_INTERVAL",
         86_400,
+    ),
+    (
+        "memory_backlog_max_issues_per_tick",
+        "HYDRAFLOW_MEMORY_BACKLOG_MAX_ISSUES_PER_TICK",
+        5,
     ),
     ("rc_budget_interval", "HYDRAFLOW_RC_BUDGET_INTERVAL", 14400),
     ("wiki_rot_detector_interval", "HYDRAFLOW_WIKI_ROT_DETECTOR_INTERVAL", 604800),
@@ -538,6 +563,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "convergence_oscillation_interval",
         "HYDRAFLOW_CONVERGENCE_OSCILLATION_INTERVAL",
         3600,
+    ),
+    (
+        "convergence_oscillation_max_issues_per_tick",
+        "HYDRAFLOW_CONVERGENCE_OSCILLATION_MAX_ISSUES_PER_TICK",
+        3,
     ),
     (
         "convergence_oscillation_window",
@@ -1913,6 +1943,18 @@ class HydraFlowConfig(BaseModel):
             "sub-label (ADR-0063 W2)."
         ),
     )
+    triage_retry_max_issues_per_tick: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description=(
+            "Max hitl-escalation issues TriageRetryLoop files in one tick "
+            "(#10777). A mass re-park (e.g. an infra outage that parked the "
+            "whole board) would otherwise file one HITL issue per exhausted "
+            "parked issue in a single tick. Over-cap issues are deferred and "
+            "retried next tick — a rate limit on filing volume, not a drop."
+        ),
+    )
     triage_infra_retry_interval: int = Field(
         default=900,
         ge=60,
@@ -2018,6 +2060,17 @@ class HydraFlowConfig(BaseModel):
             "job whose duration lands within this many seconds of its "
             "workflow's configured timeout-minutes is a candidate hang, "
             "not a generic cancellation"
+        ),
+    )
+    gate_health_max_issues_per_tick: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description=(
+            "Max hydraflow-find issues GateHealthLoop files in one tick "
+            "(#10777). Findings scale with distinct CI checks and analyzed "
+            "runs; over-cap findings are folded into a single summary issue "
+            "instead of one issue each — a rate limit on filing volume."
         ),
     )
     pr_red_repair_interval: int = Field(
@@ -4390,6 +4443,17 @@ class HydraFlowConfig(BaseModel):
         le=604_800,
         description="Cadence for MemoryBacklogLoop (default 24h, range 1h–7d).",
     )
+    memory_backlog_max_issues_per_tick: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description=(
+            "Max memory-backlog issues MemoryBacklogLoop files in one tick "
+            "(#10777). A batch of newly-pending mirror entries would otherwise "
+            "file one issue each; over-cap entries are folded into a single "
+            "summary issue instead."
+        ),
+    )
     memory_backlog_enabled: bool = Field(
         default=True,
         description=(
@@ -4691,6 +4755,17 @@ class HydraFlowConfig(BaseModel):
             "oscillation escalation."
         ),
     )
+    convergence_oscillation_max_issues_per_tick: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Max HITL oscillation issues ConvergenceOscillationLoop files in "
+            "one tick (#10777). Ledgers scale with in-flight issues; over-cap "
+            "oscillating ledgers are deferred (NOT marked escalated) and "
+            "retried next tick — a rate limit on filing volume, not a drop."
+        ),
+    )
     contracts_sandbox_repo: str = Field(
         default="T-rav-Hydra-Ops/hydraflow-contracts-sandbox",
         description=(
@@ -4826,6 +4901,17 @@ class HydraFlowConfig(BaseModel):
             "timeout every tick); too high weakens wedged-child protection."
         ),
     )
+    principles_audit_max_issues_per_tick: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description=(
+            "Max principles-drift issues PrinciplesAuditLoop files in one tick "
+            "(#10777). Filing scales as managed_repos x regressed checks; "
+            "over-cap regressions are deferred and retried next tick — a rate "
+            "limit on filing volume, not a durable backlog."
+        ),
+    )
 
     # Data-governance prompt gate (CH-6, issue #9734)
     repo_data_class: str = Field(
@@ -4881,6 +4967,17 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="Seconds between DetectorCalibrationLoop cycles (default 1h).",
+    )
+    detector_calibration_max_issues_per_tick: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description=(
+            "Max detector-calibration issues DetectorCalibrationLoop files in "
+            "one tick (#10777). Churning subjects are mined from up to 500 "
+            "closed escalations; over-cap subjects are folded into a single "
+            "summary issue instead of one issue each."
+        ),
     )
     auto_agent_preflight_enabled: bool = Field(
         default=True,

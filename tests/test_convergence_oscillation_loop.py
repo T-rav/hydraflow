@@ -109,7 +109,7 @@ async def test_oscillating_ledger_escalates(tmp_path: Path) -> None:
 
     result = await loop._do_work()
 
-    assert result == {"status": "ok", "scanned": 1, "escalated": 1}
+    assert result == {"status": "ok", "scanned": 1, "escalated": 1, "deferred": 0}
     assert pr.create_issue.await_count == 1
     # The escalation issue must carry the HITL escalation label + the
     # convergence marker; a wrong-label regression would otherwise pass silently.
@@ -133,7 +133,7 @@ async def test_already_escalated_ledger_skipped(tmp_path: Path) -> None:
 
     result = await loop._do_work()
 
-    assert result == {"status": "ok", "scanned": 1, "escalated": 0}
+    assert result == {"status": "ok", "scanned": 1, "escalated": 0, "deferred": 0}
     pr.create_issue.assert_not_called()
 
 
@@ -148,7 +148,7 @@ async def test_converged_ledger_skipped(tmp_path: Path) -> None:
 
     result = await loop._do_work()
 
-    assert result == {"status": "ok", "scanned": 1, "escalated": 0}
+    assert result == {"status": "ok", "scanned": 1, "escalated": 0, "deferred": 0}
     pr.create_issue.assert_not_called()
 
 
@@ -163,7 +163,7 @@ async def test_non_oscillating_ledger_skipped(tmp_path: Path) -> None:
 
     result = await loop._do_work()
 
-    assert result == {"status": "ok", "scanned": 1, "escalated": 0}
+    assert result == {"status": "ok", "scanned": 1, "escalated": 0, "deferred": 0}
     pr.create_issue.assert_not_called()
 
 
@@ -225,9 +225,9 @@ async def test_dedup_two_cycles_escalate_once(tmp_path: Path) -> None:
     result2 = await loop._do_work()
 
     # First cycle escalates.
-    assert result1 == {"status": "ok", "scanned": 1, "escalated": 1}
+    assert result1 == {"status": "ok", "scanned": 1, "escalated": 1, "deferred": 0}
     # Second cycle scans again but skips the already-escalated issue.
-    assert result2 == {"status": "ok", "scanned": 1, "escalated": 0}
+    assert result2 == {"status": "ok", "scanned": 1, "escalated": 0, "deferred": 0}
     # create_issue must be called exactly once across both cycles.
     assert pr.create_issue.await_count == 1
 
@@ -263,7 +263,7 @@ async def test_temporal_oscillation_deferred_while_laps_below_cap(
     result = await loop._do_work()
 
     # Should NOT escalate because laps < cap.
-    assert result == {"status": "ok", "scanned": 1, "escalated": 0}
+    assert result == {"status": "ok", "scanned": 1, "escalated": 0, "deferred": 0}
     pr.create_issue.assert_not_called()
 
 
@@ -289,7 +289,7 @@ async def test_temporal_oscillation_fires_at_cap(tmp_path: Path) -> None:
 
     result = await loop._do_work()
 
-    assert result == {"status": "ok", "scanned": 1, "escalated": 1}
+    assert result == {"status": "ok", "scanned": 1, "escalated": 1, "deferred": 0}
     pr.create_issue.assert_awaited_once()
 
 
@@ -311,7 +311,7 @@ async def test_snapshot_arm_unaffected_by_temporal_deferral(tmp_path: Path) -> N
 
     result = await loop._do_work()
 
-    assert result == {"status": "ok", "scanned": 1, "escalated": 1}
+    assert result == {"status": "ok", "scanned": 1, "escalated": 1, "deferred": 0}
     pr.create_issue.assert_awaited_once()
 
 
@@ -343,5 +343,34 @@ async def test_sandbox_fix_only_ledger_is_skipped_not_scanned(tmp_path: Path) ->
     result = await loop._do_work()
 
     # scanned=0: the sandbox_fix ledger is filtered before the scanned counter.
-    assert result == {"status": "ok", "scanned": 0, "escalated": 0}
+    assert result == {"status": "ok", "scanned": 0, "escalated": 0, "deferred": 0}
     pr.create_issue.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_per_tick_cap_defers_overflow_escalations(tmp_path: Path) -> None:
+    """#10777: more oscillating ledgers than the cap → only `cap` escalate.
+
+    Over-cap ledgers are deferred (NOT marked escalated) so they surface on a
+    later tick — a rate limit on filing, never a silent drop.
+    """
+    state = StateTracker(tmp_path / "state.json")
+    pr = _make_pr_manager()
+    loop = _make_loop(tmp_path, state, pr)
+    cap = loop._config.convergence_oscillation_max_issues_per_tick
+
+    for issue_number in range(200, 200 + cap + 2):
+        _seed_oscillating_ledger(state, issue_number)
+
+    result = await loop._do_work()
+
+    assert result["escalated"] == cap
+    assert result["deferred"] == 2
+    assert pr.create_issue.await_count == cap
+
+    # Deferred ledgers stay un-escalated so the next tick retries them.
+    escalated_flags = [
+        state.get_convergence_ledger(n).oscillation_escalated
+        for n in range(200, 200 + cap + 2)
+    ]
+    assert sum(bool(f) for f in escalated_flags) == cap

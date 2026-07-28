@@ -226,3 +226,58 @@ async def test_capped_scan_skips_autoclose(loop_env) -> None:
     stats = await loop._do_work()
     pr.close_issue.assert_not_awaited()
     assert stats["autoclosed"] == 0
+
+
+async def test_per_tick_cap_folds_overflow_into_one_summary(loop_env) -> None:
+    """#10777: >cap churning subjects file `cap` issues + ONE summary, not N."""
+    loop, pr = loop_env
+    cap = loop._config.detector_calibration_max_issues_per_tick
+    n_subjects = cap + 3
+    closed = []
+    num = 500
+    for i in range(n_subjects):
+        # Distinct non-numeric subject slugs → distinct normalized subjects;
+        # two closes each puts every subject over the churn threshold.
+        subj = (
+            f"HITL: fake coverage gap FakeGitHub:surface-{chr(97 + i)} unresolved after"
+        )
+        closed.append(_closed(num, f"{subj} 3"))
+        closed.append(_closed(num + 1, f"{subj} 6", age_days=2))
+        num += 2
+    pr.list_closed_issues_by_label.return_value = closed
+
+    stats = await loop._do_work()
+
+    # cap individual issues + exactly one summary issue.
+    assert pr.create_issue.await_count == cap + 1
+    assert stats["filed"] == cap + 1
+    summaries = [
+        c.args[0]
+        for c in pr.create_issue.await_args_list
+        if "over per-tick filing cap" in c.args[0]
+    ]
+    assert len(summaries) == 1
+
+
+async def test_at_cap_files_no_summary(loop_env) -> None:
+    """Exactly `cap` churning subjects → all filed individually, no summary."""
+    loop, pr = loop_env
+    cap = loop._config.detector_calibration_max_issues_per_tick
+    closed = []
+    num = 700
+    for i in range(cap):
+        subj = (
+            f"HITL: fake coverage gap FakeGitHub:region-{chr(97 + i)} unresolved after"
+        )
+        closed.append(_closed(num, f"{subj} 3"))
+        closed.append(_closed(num + 1, f"{subj} 6", age_days=2))
+        num += 2
+    pr.list_closed_issues_by_label.return_value = closed
+
+    stats = await loop._do_work()
+
+    assert pr.create_issue.await_count == cap
+    assert stats["filed"] == cap
+    assert not any(
+        "over per-tick filing cap" in c.args[0] for c in pr.create_issue.await_args_list
+    )
