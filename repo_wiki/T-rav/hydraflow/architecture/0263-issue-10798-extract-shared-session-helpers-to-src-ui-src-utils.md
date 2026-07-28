@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10798
 source_phase: plan
 created_at: 2026-07-28T10:05:46.407746+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Extract shared session helpers to `src/ui/src/utils/sessions.js`

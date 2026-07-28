@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T11:16:04.357298+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0686
+superseded_by: 0799
 ---
 
 # Config field naming mirrors sibling fields for discoverability

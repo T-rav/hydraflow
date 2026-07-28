@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10788
 source_phase: plan
 created_at: 2026-07-28T09:50:57.002317+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Omit optional payload keys on failure — never fabricate zeros
