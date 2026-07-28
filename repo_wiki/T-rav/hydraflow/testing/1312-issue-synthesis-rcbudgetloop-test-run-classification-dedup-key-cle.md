@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T22:47:42.274541+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1238
+superseded_by: 1387
 ---
 
 # RcBudgetLoop: test run classification + dedup-key clearing together

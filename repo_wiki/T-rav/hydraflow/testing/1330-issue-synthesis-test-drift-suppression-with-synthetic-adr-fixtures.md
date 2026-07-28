@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T22:47:42.304804+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1256
+superseded_by: 1405
 ---
 
 # Test drift-suppression with synthetic ADR fixtures

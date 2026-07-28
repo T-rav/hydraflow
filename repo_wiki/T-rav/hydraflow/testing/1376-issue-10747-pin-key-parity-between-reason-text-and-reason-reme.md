@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10747
 source_phase: plan
 created_at: 2026-07-27T22:30:25.834987+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1451
 ---
 
 # Pin key-parity between reason-text and reason-remediation maps

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T22:47:42.316365+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1263
+superseded_by: 1412
 ---
 
 # Source PRManager test fixtures from real gh CLI output

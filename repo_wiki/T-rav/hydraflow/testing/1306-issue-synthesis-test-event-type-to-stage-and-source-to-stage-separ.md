@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T22:47:42.264492+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1232
+superseded_by: 1381
 ---
 
 # Test EVENT_TYPE_TO_STAGE and SOURCE_TO_STAGE separately

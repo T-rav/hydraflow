@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T22:47:42.327917+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1270
+superseded_by: 1419
 ---
 
 # Pure _SHARED_INFRA_MODULES edits need only unit coverage

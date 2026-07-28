@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T22:47:42.344158+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1279
+superseded_by: 1428
 ---
 
 # Map legacy bare dedup keys to specific reason in migration
