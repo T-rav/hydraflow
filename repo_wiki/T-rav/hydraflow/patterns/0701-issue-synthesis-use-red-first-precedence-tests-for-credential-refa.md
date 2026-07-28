@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-27T22:37:52.933579+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0656
+superseded_by: 0758
 ---
 
 # Use red-first precedence tests for credential refactors

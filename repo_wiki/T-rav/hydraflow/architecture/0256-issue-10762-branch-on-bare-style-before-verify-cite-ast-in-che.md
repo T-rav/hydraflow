@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10762
 source_phase: plan
 created_at: 2026-07-28T00:37:27.487544+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Branch on bare style before verify_cite_ast in _check_cite

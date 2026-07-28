@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 10785
 source_phase: plan
 created_at: 2026-07-28T09:16:36.126419+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # source_to_phase keys map 1:1 to OPERATOR_STAGES; hitl/merged excluded

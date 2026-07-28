@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10762
 source_phase: plan
 created_at: 2026-07-28T00:37:27.487529+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Ship metavariable denylist with new wiki-rot cite styles

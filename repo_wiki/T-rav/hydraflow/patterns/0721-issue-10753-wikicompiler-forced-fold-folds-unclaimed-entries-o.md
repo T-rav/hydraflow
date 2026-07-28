@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10753
 source_phase: plan
 created_at: 2026-07-27T23:48:50.234442+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0777
 ---
 
 # WikiCompiler forced fold folds unclaimed entries onto unrelated primaries
