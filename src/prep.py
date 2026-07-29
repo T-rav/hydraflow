@@ -94,7 +94,13 @@ HYDRAFLOW_LABELS: tuple[tuple[str, str, str], ...] = (
 #   e99695 amber           -> ``*-stuck`` exhausted-retry escalations
 #   5319e7 purple          -> ``*-drift`` / ``*-anomaly`` detector findings
 #   e4e669 yellow          -> find-queue ad-hoc signal labels
+#   b60205/d93f0b/fbca04   -> P0/P1/P2 triage priorities (severity ramp)
 HYDRAFLOW_LITERAL_LABELS: tuple[tuple[str, str, str], ...] = (
+    # --- triage priorities (set by grooming, not by loops; listed here so a
+    #     freshly registered repo gets them without a manual `gh label create`) ---
+    ("P0", "b60205", "Urgent: blocks factory operation or causes active harm"),
+    ("P1", "d93f0b", "Important: substantive engineering work"),
+    ("P2", "fbca04", "Low: docs, polish, follow-ups"),
     # --- escalation root (bare literal; config field resolves to the
     #     hydraflow-prefixed variant, so this bare name is never created by it) ---
     ("hitl-escalation", "b60205", "Stuck-loop HITL escalation (bare literal label)"),
