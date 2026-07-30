@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `1dc70d1` — feat(prompts): per-prompt setpoints — bind each prompt to its own past *(2026-07-30)*
+- `3eff48a` — feat(prompts): prompts as a measured contract — registry ratchet + fitness function *(2026-07-30)*
 - `819e0a4` — feat(ul): edge-proposer — 12 new edges across 12 terms (#10815) (#10815) *(2026-07-30)*
 - `9e01094` — fix(arch): deterministic regen so unchanged architecture produces no diff/PR (#10811) (#10811) *(2026-07-28)*
 - `3de3e09` — feat(ul): term-proposer batch — 1 drafts (#10796) (#10796) *(2026-07-28)*

@@ -8,6 +8,10 @@
 - **Enforcement:** enforced
 - **Binds:** both
 
+**Precedent:** the measured-contract tradition established for loops in ADR-0093 — a required contract per artifact, a mechanical completeness test, and a grandfather-then-shrink allowlist backfilled toward zero (source: ADR-0093, docs/superpowers/specs/2026-06-30-loop-fitness-scorecard-design.md)
+
+**Divergence:** that tradition assumes the contract measures the artifact's *behaviour*, which is observable in operation, but a prompt's rubric score measures its *form* — statically observable and only loosely coupled to its effect — so a form floor alone rewards adding tags and edge-case boilerplate without changing what the prompt asks for; the forcing condition is the measured state at adoption (registry drifted to 25 of 65 builders unnoticed while 96% of scored prompts fail the rubric at High severity), and the rule is that the form score is inadmissible alone: it pairs with an outcome series, per-prompt setpoints bind each prompt to its own past rather than to a fleet mean, and `outcome_paired` stays false until that join lands (receipt: #10855, #10853, docs/prompt-audit-2026-04-20.md)
+
 **Enforced by:**
 pytest:tests/test_prompt_registry_completeness.py
 pytest:tests/test_prompt_fitness.py
