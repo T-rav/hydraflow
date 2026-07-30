@@ -96,11 +96,17 @@ def test_high_severity_share_matches_baseline(fitness) -> None:
 
 
 def test_every_registered_prompt_actually_scores(fitness) -> None:
-    """A fixture that no longer renders drops silently out of the score."""
-    assert fitness.scored_prompts >= 37, (
-        f"only {fitness.scored_prompts} prompts scored (expected >= 37). A "
-        "fixture stopped rendering, so its prompt is now unmeasured — that is "
-        "a coverage regression wearing a passing test."
+    """A fixture that no longer renders drops silently out of the score.
+
+    Derived from the baseline, not a hand-pinned floor. It was pinned at
+    ``>= 37`` while 59 prompts actually scored, so 22 could stop rendering
+    before it tripped — a floor written the same day it was already stale.
+    """
+    assert fitness.scored_prompts >= len(PROMPT_BASELINE), (
+        f"only {fitness.scored_prompts} prompts scored, but PROMPT_BASELINE "
+        f"pins {len(PROMPT_BASELINE)}. A fixture stopped rendering, so its "
+        "prompt is now unmeasured — a coverage regression wearing a passing "
+        "test."
     )
 
 

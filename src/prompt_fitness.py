@@ -84,6 +84,14 @@ GRANDFATHERED_TARGET = 0
 GRANDFATHERED_BURNDOWN_ORIGIN = ("2026-07-30", 30)
 GRANDFATHERED_MAX = 6
 
+# Pins for the two other escape hatches. EXCLUDED_MODULES hides a module from
+# discovery entirely, and ``unrenderable=True`` registers a prompt that is
+# never rendered or scored. Both were unbounded and unguarded, which made
+# either one a quieter route to "coverage went up" than the allowlist it sits
+# beside. Currently zero unrenderable targets: keep it that way.
+EXCLUDED_MODULES_MAX = 5
+UNRENDERABLE_MAX = 0
+
 
 def _module_name(path: Path) -> str:
     """Dotted module name relative to src/, e.g. ``audit.adjudicate``.
@@ -117,11 +125,25 @@ def discovered_builders() -> dict[str, list[str]]:
 
 
 def registered_modules() -> set[str]:
-    """Modules named in a PROMPT_REGISTRY AuditTarget builder path."""
-    text = _AUDIT.read_text()
-    return {
-        m for m in discovered_builders() if re.search(rf"[\"\']{re.escape(m)}\.", text)
-    }
+    """Modules owning a builder named by a real ``AuditTarget``.
+
+    Reads the registry structurally rather than grepping the file's text. The
+    text search credited coverage for any quoted occurrence of the module name,
+    so writing ``"research_runner."`` in a comment or docstring was enough to
+    claim a module as covered and delete it from the allowlist — no fixture, no
+    scoring, and the coverage number went up. An ``unrenderable`` target is not
+    counted: it is registered but never rendered or scored, so crediting it
+    would close the gap on paper while measuring nothing.
+    """
+    audit = _load_audit_module()
+    modules = discovered_builders()  # hoisted: this walks every AST under src/
+    owners: set[str] = set()
+    for target in audit.PROMPT_REGISTRY:
+        if target.unrenderable:
+            continue
+        qualname = target.builder_qualname
+        owners.update(m for m in modules if qualname.startswith(f"{m}."))
+    return owners
 
 
 # Criterion numbers from ADR-0087, for readable reporting.

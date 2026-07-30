@@ -18,11 +18,14 @@ from __future__ import annotations
 import pytest
 
 from prompt_fitness import (
+    EXCLUDED_MODULES,
+    EXCLUDED_MODULES_MAX,
     GRANDFATHERED,
     GRANDFATHERED_BURNDOWN_ORIGIN,
     GRANDFATHERED_DEADLINE,
     GRANDFATHERED_MAX,
     GRANDFATHERED_TARGET,
+    UNRENDERABLE_MAX,
     discovered_builders,
     registered_modules,
 )
@@ -164,3 +167,48 @@ def test_registry_qualnames_resolve_to_the_module_they_name() -> None:
             f"{target.name}: declared {target.builder_qualname} but resolves "
             f"to {resolved}. Register the owning module's path, not a re-export."
         )
+
+
+def test_unrenderable_targets_are_pinned_and_justified() -> None:
+    """``unrenderable=True`` registers a prompt that is never scored.
+
+    It is a legitimate escape for a builder that genuinely cannot be rendered,
+    but it is also a hatch: flip the flag, delete the fixture and the baseline
+    entry, and every assertion here stays green while a High-severity prompt
+    leaves the measured set. ``registered_modules()`` no longer credits
+    coverage for one; this pins the count and forces a stated reason.
+    """
+    from scripts.audit_prompts import PROMPT_REGISTRY  # noqa: PLC0415
+
+    unrenderable = [t for t in PROMPT_REGISTRY if t.unrenderable]
+    assert len(unrenderable) <= UNRENDERABLE_MAX, (
+        f"{len(unrenderable)} unrenderable targets (pinned at "
+        f"{UNRENDERABLE_MAX}): {[t.name for t in unrenderable]}. An "
+        "unrenderable target is registered but never scored — fix the fixture "
+        "rather than exempting the prompt."
+    )
+    unexplained = [t.name for t in unrenderable if not t.unrenderable_reason.strip()]
+    assert not unexplained, (
+        f"unrenderable targets with no stated reason: {unexplained}. An "
+        "exemption with a reason is a decision; without one it is rot."
+    )
+
+
+def test_excluded_modules_are_pinned_and_still_justified() -> None:
+    """EXCLUDED_MODULES is the one allowlist with no ratchet on it.
+
+    GRANDFATHERED has three guards; this had none, so a module with a real
+    builder could be excluded outright and the diff would read as *progress* —
+    the allowlist gets smaller while a prompt goes unmeasured. Pinned by size,
+    and every entry must still name why it is not model-bound text.
+    """
+    assert len(EXCLUDED_MODULES) <= EXCLUDED_MODULES_MAX, (
+        f"EXCLUDED_MODULES grew to {len(EXCLUDED_MODULES)} (pinned at "
+        f"{EXCLUDED_MODULES_MAX}). Excluding a module hides its builders from "
+        "discovery entirely — register the prompt instead."
+    )
+    unexplained = sorted(m for m, why in EXCLUDED_MODULES.items() if not why.strip())
+    assert not unexplained, (
+        f"EXCLUDED_MODULES entries with no reason: {unexplained}. Every "
+        "exclusion states why the module is not model-bound text."
+    )

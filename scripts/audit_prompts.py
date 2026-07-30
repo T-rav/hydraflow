@@ -851,11 +851,22 @@ def _real_config_defaults() -> dict[str, object]:
         cfg = HydraFlowConfig()
     except Exception:  # pragma: no cover - audit must run without a full env
         return {}
-    return {
-        name: getattr(cfg, name)
-        for name in type(cfg).model_fields  # pydantic v2
-        if isinstance(getattr(cfg, name, None), int | bool | str)
-    }
+    # Captures lists, dicts and floats as well as scalars. An earlier filter of
+    # ``int | bool | str`` dropped 40 list fields and 4 dicts, which is why
+    # ``required_plugins`` and ``phase_skills`` fell through to the harness's
+    # empty stubs: seven prompts rendered with no "## Available Skills" section
+    # at all, 733-1393 chars of imperative prose that production always injects
+    # and the audit therefore never scored. Paths are excluded deliberately —
+    # they are machine-specific and would interpolate this filesystem into the
+    # rendered prompts, breaking the reproducibility the scoring relies on.
+    captured: dict[str, object] = {}
+    for name in type(cfg).model_fields:  # pydantic v2
+        value = getattr(cfg, name, None)
+        if isinstance(value, Path):
+            continue
+        if isinstance(value, int | bool | str | float | list | dict):
+            captured[name] = value
+    return captured
 
 
 def _real_config_default(name: str) -> object | None:
@@ -870,38 +881,23 @@ class _MinimalConfig:
         import tempfile
         from pathlib import Path as _Path
 
-        self.dry_run = False
-        self.max_impl_plan_chars = 50_000
-        self.max_review_feedback_chars = 50_000
-        self.error_output_max_chars = 50_000
-        self.max_common_feedback_chars = 50_000
-        # Planner-specific fields
-        self.max_planner_comment_chars = 1_000
-        self.max_planner_line_chars = 500
-        self.max_planner_failed_plan_chars = 4_000
-        self.max_issue_body_chars = 10_000
-        self.find_label = ["hydraflow-find"]
-        self.required_plugins: list[str] = []
-        self.phase_skills: dict[str, list[str]] = {}
-        # Agent / reviewer fields
-        self.test_command = "make test"
+        # Deliberately sets almost nothing. Every truncation limit, budget and
+        # feature flag is left UNSET so ``__getattr__`` resolves it from the
+        # real HydraFlowConfig defaults. Setting them here silently shadowed
+        # ``__getattr__`` — which is how four fields sat at 50_000 against
+        # production values of 2_000-6_000 (up to 25x), letting the audit score
+        # text production truncates. Only values that must be harness-specific
+        # for determinism are set below: absolute paths and the repo slug would
+        # otherwise interpolate this machine's filesystem into the prompts.
         self.repo_root = _Path(".")
         self.data_root = _Path(tempfile.mkdtemp())
         self.plans_dir = self.data_root / "plans"
         self.memory_dir = self.data_root / "memory"
-        self.min_review_findings = 3
-        self.use_quality_gate_in_review = True
-        self.max_ci_fix_attempts = 3
         self.repo = "owner/repo"
         # Repo-scoped data dirs (ADR-0021 D2): mirror HydraFlowConfig so prompt
         # builders that read repo_memory_dir resolve a real path here too.
         self.repo_data_root = self.data_root / self.repo.replace("/", "-")
         self.repo_memory_dir = self.repo_data_root / "memory"
-        self.review_insight_window = 50
-        self.review_pattern_threshold = 3
-        # ADR reviewer fields
-        self.adr_review_approval_threshold = 2
-        self.adr_review_max_rounds = 3
 
     def data_path(self, *parts: object) -> object:
         return self.data_root.joinpath(*[str(p) for p in parts])

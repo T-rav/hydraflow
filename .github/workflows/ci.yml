@@ -52,6 +52,13 @@ jobs:
               - 'tests/**'
               - 'pyproject.toml'
               - 'uv.lock'
+              # scripts/ is load-bearing for gates, not just tooling:
+              # PROMPT_REGISTRY lives in scripts/audit_prompts.py, so without
+              # this a PR that deletes AuditTargets skips the very tests that
+              # guard the registry (ADR-0116). Deliberately over-inclusive —
+              # enumeration failure is merely expensive when a filter decides
+              # whether to TEST, and fatal when it decides whether to BLOCK.
+              - 'scripts/**'
             arch:
               - 'src/arch/**'
               - 'tests/architecture/**'
@@ -140,7 +147,7 @@ jobs:
           predicate-quantifier: 'every'
           filters: |
             core_python:
-              - '{src/**/*.py,tests/**,pyproject.toml,uv.lock}'
+              - '{src/**/*.py,tests/**,pyproject.toml,uv.lock,scripts/**}'
               - '!src/arch/**'
               - '!tests/architecture/**'
               - '!tests/regressions/**'
