@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import importlib
 import inspect
 import json
@@ -218,6 +219,192 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Adjacent",
         "src/adr_reviewer.py:273",
     ),
+    # --- Backfill 2026-07-30 (ADR-0116 ratchet): gate/verification adjacents ---
+    AuditTarget(
+        "scope_check",
+        "scope_check.build_scope_check_prompt",
+        "tests/fixtures/prompts/scope_check.json",
+        "Adjacent",
+        "src/scope_check.py",
+    ),
+    AuditTarget(
+        "plan_compliance",
+        "plan_compliance.build_plan_compliance_prompt",
+        "tests/fixtures/prompts/plan_compliance.json",
+        "Plan",
+        "src/plan_compliance.py",
+    ),
+    AuditTarget(
+        "ultra_review",
+        "ultra_review.build_ultra_review_prompt",
+        "tests/fixtures/prompts/ultra_review.json",
+        "Review",
+        "src/ultra_review.py",
+    ),
+    AuditTarget(
+        "shape_coherence",
+        "shape_coherence.build_shape_coherence_prompt",
+        "tests/fixtures/prompts/shape_coherence.json",
+        "Adjacent",
+        "src/shape_coherence.py",
+    ),
+    AuditTarget(
+        "discover_completeness",
+        "discover_completeness.build_discover_completeness_prompt",
+        "tests/fixtures/prompts/discover_completeness.json",
+        "Adjacent",
+        "src/discover_completeness.py",
+    ),
+    AuditTarget(
+        "triage_honeypot",
+        "triage_honeypot.build_honeypot_prompt",
+        "tests/fixtures/prompts/triage_honeypot.json",
+        "Triage",
+        "src/triage_honeypot.py",
+    ),
+    # --- Verification judge / acceptance criteria (backfill 2026-07-30) ---
+    AuditTarget(
+        "verification_judge_code_validation",
+        "verification_judge.VerificationJudge._build_code_validation_prompt",
+        "tests/fixtures/prompts/verification_judge_code_validation.json",
+        "Adjacent",
+        "src/verification_judge.py:252",
+    ),
+    AuditTarget(
+        "verification_judge_instructions_validation",
+        "verification_judge.VerificationJudge._build_instructions_validation_prompt",
+        "tests/fixtures/prompts/verification_judge_instructions_validation.json",
+        "Adjacent",
+        "src/verification_judge.py:300",
+    ),
+    AuditTarget(
+        "verification_judge_refinement",
+        "verification_judge.VerificationJudge._build_refinement_prompt",
+        "tests/fixtures/prompts/verification_judge_refinement.json",
+        "Adjacent",
+        "src/verification_judge.py:330",
+    ),
+    AuditTarget(
+        "verification_judge_precheck",
+        "verification_judge.VerificationJudge._build_precheck_prompt",
+        "tests/fixtures/prompts/verification_judge_precheck.json",
+        "Adjacent",
+        "src/verification_judge.py:364",
+    ),
+    AuditTarget(
+        "acceptance_criteria_build",
+        "acceptance_criteria.AcceptanceCriteriaGenerator._build_prompt",
+        "tests/fixtures/prompts/acceptance_criteria_build.json",
+        "Adjacent",
+        "src/acceptance_criteria.py:134",
+    ),
+    AuditTarget(
+        "acceptance_criteria_precheck",
+        "acceptance_criteria.AcceptanceCriteriaGenerator._build_precheck_prompt",
+        "tests/fixtures/prompts/acceptance_criteria_precheck.json",
+        "Adjacent",
+        "src/acceptance_criteria.py:194",
+    ),
+    # --- Discover / refinement / audit adjacents (backfill 2026-07-30) ---
+    AuditTarget(
+        "discover_expander",
+        "discover_expander.build_expander_prompt",
+        "tests/fixtures/prompts/discover_expander.json",
+        "Adjacent",
+        "src/discover_expander.py:57",
+    ),
+    AuditTarget(
+        "entry_evidence",
+        "entry_evidence_loop._build_prompt",
+        "tests/fixtures/prompts/entry_evidence.json",
+        "Adjacent",
+        "src/entry_evidence_loop.py:64",
+    ),
+    AuditTarget(
+        "implement_spec_review",
+        "implement_spec_reviewer.build_spec_review_prompt",
+        "tests/fixtures/prompts/implement_spec_review.json",
+        "Implement",
+        "src/implement_spec_reviewer.py:165",
+    ),
+    AuditTarget(
+        "issue_refinement_dup",
+        "issue_refinement.build_dup_judgment_prompt",
+        "tests/fixtures/prompts/issue_refinement_dup.json",
+        "Triage",
+        "src/issue_refinement.py:392",
+    ),
+    AuditTarget(
+        "issue_refinement_priority",
+        "issue_refinement.build_priority_prompt",
+        "tests/fixtures/prompts/issue_refinement_priority.json",
+        "Triage",
+        "src/issue_refinement.py:457",
+    ),
+    AuditTarget(
+        "sampled_audit",
+        "sampled_audit_loop.build_audit_prompt",
+        "tests/fixtures/prompts/sampled_audit.json",
+        "Review",
+        "src/sampled_audit_loop.py:183",
+    ),
+    # --- Shape / review-advisor / council (backfill 2026-07-30) ---
+    AuditTarget(
+        "shape_runner_turn",
+        "shape_runner.ShapeRunner._build_turn_prompt",
+        "tests/fixtures/prompts/shape_runner_turn.json",
+        "Plan",
+        "src/shape_runner.py:346",
+    ),
+    AuditTarget(
+        "shape_runner_advocate",
+        "shape_runner.ShapeRunner._build_advocate_prompt",
+        "tests/fixtures/prompts/shape_runner_advocate.json",
+        "Plan",
+        "src/shape_runner.py:545",
+    ),
+    AuditTarget(
+        "shape_runner_critic",
+        "shape_runner.ShapeRunner._build_critic_prompt",
+        "tests/fixtures/prompts/shape_runner_critic.json",
+        "Plan",
+        "src/shape_runner.py:591",
+    ),
+    AuditTarget(
+        "review_advisor_preflight",
+        "review_advisor.PreFlightAdvisor._build_prompt",
+        "tests/fixtures/prompts/review_advisor_preflight.json",
+        "Review",
+        "src/review_advisor.py:1232",
+    ),
+    AuditTarget(
+        "review_advisor_postverify",
+        "review_advisor.PostVerifyAdvisor._build_prompt",
+        "tests/fixtures/prompts/review_advisor_postverify.json",
+        "Review",
+        "src/review_advisor.py:1066",
+    ),
+    AuditTarget(
+        "review_advisor_midflight",
+        "review_advisor.MidFlightAdvisor._render_prompt",
+        "tests/fixtures/prompts/review_advisor_midflight.json",
+        "Review",
+        "src/review_advisor.py:1335",
+    ),
+    AuditTarget(
+        "decomposition_council_direction",
+        "decomposition_council.DecompositionCouncil._build_direction_prompt",
+        "tests/fixtures/prompts/decomposition_council_direction.json",
+        "Triage",
+        "src/decomposition_council.py:201",
+    ),
+    AuditTarget(
+        "decomposition_council_validation",
+        "decomposition_council.DecompositionCouncil._build_validation_prompt",
+        "tests/fixtures/prompts/decomposition_council_validation.json",
+        "Triage",
+        "src/decomposition_council.py:290",
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -307,7 +494,7 @@ def score_specific(rendered: str) -> str:
 # Rubric #3 — XML tag structure
 # ---------------------------------------------------------------------------
 
-_TAG_PAIR = re.compile(r"<(\w+)>.*?</\1>", re.DOTALL)
+_TAG_PAIR = re.compile(r"<(\w+)(?:\s[^>]*)?>.*?</\1>", re.DOTALL)
 _EXCLUDED_TAGS = frozenset({"thinking", "scratchpad"})
 
 
@@ -332,7 +519,14 @@ _STRUCTURED_CUES = (
     r"fields:",
     r"`[a-z_][a-z0-9_]*`",
 )
-_EXAMPLE_PRESENT = (r"<example>", r"\bExample:", r"<example ")
+_EXAMPLE_PRESENT = (
+    r"<example>",
+    r"<example ",
+    # ``Example:``, ``Example 1:``, ``Example 2 — exact_dup/high:``. Numbered
+    # few-shot blocks are the common house style; matching only ``Example:``
+    # scored four-example prompts as having none.
+    r"\bExample\b\s*\d*\s*[:—-]",
+)
 
 
 def score_examples(rendered: str) -> str:
@@ -576,6 +770,26 @@ def render(builder_callable, *, args: dict, faked_deps: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=1)
+def _real_config_defaults() -> dict[str, object]:
+    """Field defaults from the real HydraFlowConfig, or {} if unavailable."""
+    try:
+        from config import HydraFlowConfig  # noqa: PLC0415
+
+        cfg = HydraFlowConfig()
+    except Exception:  # pragma: no cover - audit must run without a full env
+        return {}
+    return {
+        name: getattr(cfg, name)
+        for name in type(cfg).model_fields  # pydantic v2
+        if isinstance(getattr(cfg, name, None), int | bool | str)
+    }
+
+
+def _real_config_default(name: str) -> object | None:
+    return _real_config_defaults().get(name)
+
+
 class _MinimalConfig:
     """Minimal stand-in for HydraFlowConfig — builders typically read only a
     handful of ``max_*_chars`` fields and booleans. Extend as needed."""
@@ -621,8 +835,15 @@ class _MinimalConfig:
         return self.data_root.joinpath(*[str(p) for p in parts])
 
     def __getattr__(self, name: str) -> object:
-        # Fallback: any unrecognized config attr resolves to a large int.
-        # Prevents AttributeError when builders reach for new max_* fields.
+        # Fall back to the REAL HydraFlowConfig default before inventing a
+        # number. A hardcoded 50_000 renders a prompt production would have
+        # truncated (e.g. max_review_diff_chars is 15_000 in production), so the
+        # audit would score text the model never receives — the fixture stops
+        # standing for the production prompt, which is the one thing the eval
+        # has to be true about.
+        real = _real_config_default(name)
+        if real is not None:
+            return real
         if name.startswith("max_") and name.endswith("_chars"):
             return 50_000
         raise AttributeError(name)

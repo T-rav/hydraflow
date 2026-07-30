@@ -1,0 +1,16 @@
+{
+  "builder": "bug_reproducer.BugReproducer._build_prompt",
+  "args": {
+    "task": {
+      "id": 9861,
+      "title": "Escape digest drops the ISO-53 week and 500s on an unparseable detected_at",
+      "body": "Filed from the sampled-audit adjudication on PR #9820 (upheld). Two defects in `escape.digest.build_digest`, both reachable from the live `GET /api/insights/escape-digest` route.\n\n## 1. ISO-week keys are sorted as strings\n\n`build_digest` buckets records with `f\"{year}-W{week:02d}\"` from `datetime.isocalendar()`, then takes the newest N with `sorted(grouped, reverse=True)[:weeks]`. ISO week-numbering years are not calendar years, so the string order and the chronological order disagree at a year boundary.\n\nConcretely: `2027-01-02T10:00:00+00:00` is ISO `2026-W53` (2026 is a 53-week ISO year), and `2027-01-05T10:00:00+00:00` is `2027-W01`. Expected newest-first order is `[\"2027-W01\", \"2026-W53\"]`. Observed on staging@7c1f9ad: `2026-W53` is ranked below `2026-W30` and falls outside the default 8-week window, so an escape recorded in the last week of December disappears from the digest.\n\n## 2. One malformed timestamp 500s the whole digest\n\n`datetime.fromisoformat(rec.detected_at)` is called unguarded. Issue #9812's acceptance list required an unparseable `detected_at` to land in an `unknown` bucket and be logged once per digest build. Instead the ValueError propagates out of the route handler.\n\nReproduced by hand against a copy of the 2026-07 ledger:\n\n```\n$ jq -r '.detected_at' escape_ledger.jsonl | sed -n '17p'\n2026-07-1O T09:14:00+00:00     # capital O, hand-edited row from the #10498 migration\n$ curl -s -o /dev/null -w '%{http_code}\\n' localhost:8000/api/insights/escape-digest?weeks=8\n500\n```\n\nServer log:\n\n```\nERROR  uvicorn.error:h11_impl.py:407 Exception in ASGI application\n  File \"/app/src/escape/digest.py\", line 33, in build_digest\n    stamp = datetime.fromisoformat(rec.detected_at)\nValueError: Invalid isoformat string: '2026-07-1O T09:14:00+00:00'\n```\n\n## Expected\n\n- Newest-first ordering by real week start date, so `2026-W53` outranks `2026-W30`.\n- An unparseable `detected_at` is counted in an `unknown` bucket, logged once per digest build, and never fails the request.\n\n## Affected\n\n- `src/escape/digest.py` (`build_digest`)\n- `src/server_routes_insights.py` (`escape_digest` route, 500 surface)\n- Existing coverage in `tests/test_escape_digest.py` spans 2026-W28 and 2026-W30 only, so neither defect is exercised today.",
+      "tags": ["bug", "hydraflow-find", "area:observability"],
+      "comments": [
+        "Adjudicator upheld the auditor on both counts; the by_stratum gap is tracked separately as #9862.",
+        "Confirmed the 500 is reachable from the dashboard Insights tab, not just curl."
+      ]
+    }
+  },
+  "faked_deps": {}
+}

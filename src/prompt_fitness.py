@@ -58,51 +58,59 @@ EXCLUDED_MODULES: dict[str, str] = {
 
 # Modules with builders but no registry entry, as of 2026-07-30. SHRINKS ONLY;
 # ``GRANDFATHERED_MAX`` pins the size so a new builder cannot be waved through.
-# Backfill order by blast radius: verification_judge (4 builders), shape_runner
-# (3), review_advisor (3), then the two-builder modules, then the singles.
+# Started at 30; the first backfill wave cleared the highest-blast-radius modules
+# (verification_judge, shape_runner, review_advisor, decomposition_council and
+# the acceptance-criteria/spec-review pair). What remains is mostly single-builder
+# caretaker and adjacent loops, tracked to zero by GRANDFATHERED_DEADLINE.
 GRANDFATHERED: frozenset[str] = frozenset(
     {
-        "acceptance_criteria",
-        "adjudicate",
         "adr_drift_triage_llm",
         "adversarial_agent_runner",
+        "audit.adjudicate",
         "bug_reproducer",
-        "classify",
-        "decomposition_council",
-        "design_ai",
-        "discover_completeness",
-        "discover_expander",
         "discover_runner",
         "disturbance_dampener_loop",
-        "entry_evidence_loop",
-        "implement_spec_reviewer",
-        "issue_refinement",
-        "plan_compliance",
+        "intervention.classify",
+        "onboarding.design_ai",
         "plan_touchpoint_expander",
         "pr_red_repair_loop",
+        "preflight.runner",
         "research_runner",
-        "review_advisor",
-        "runner",
-        "sampled_audit_loop",
         "sandbox_failure_fixer_loop",
-        "scope_check",
-        "shape_coherence",
-        "shape_runner",
         "term_proposer_llm",
-        "triage_honeypot",
-        "ultra_review",
-        "verification_judge",
     }
 )
-GRANDFATHERED_MAX = 30
+
+# Burn-down, not just a ceiling. A ratchet stops the gap growing; it does not
+# make it close, so an untouched allowlist stays green forever. GRANDFATHERED_MAX
+# is the ceiling *for today*; GRANDFATHERED_DEADLINE is the date by which it must
+# have fallen to GRANDFATHERED_TARGET. Past that date the test fails until either
+# the backfill lands or the schedule is renegotiated in a commit that says why —
+# which makes coverage debt a dated commitment rather than a note.
+GRANDFATHERED_DEADLINE = "2026-09-30"
+GRANDFATHERED_TARGET = 0
+GRANDFATHERED_BURNDOWN_ORIGIN = ("2026-07-30", 30)
+GRANDFATHERED_MAX = 14
+
+
+def _module_name(path: Path) -> str:
+    """Dotted module name relative to src/, e.g. ``audit.adjudicate``.
+
+    Keyed on the dotted path rather than the bare stem: two files can share a
+    stem (``arch/runner.py`` and ``preflight/runner.py`` both stem to
+    ``runner``), which would collapse them into one key and hide one of them.
+    The dotted name is also the importable name, so a registry entry can be
+    constructed from it directly.
+    """
+    return ".".join(path.relative_to(_SRC).with_suffix("").parts)
 
 
 def discovered_builders() -> dict[str, list[str]]:
-    """Module stem -> prompt-builder function names, found by AST walk."""
+    """Dotted module name -> prompt-builder function names, found by AST walk."""
     out: dict[str, list[str]] = {}
     for path in sorted(_SRC.rglob("*.py")):
-        module = path.stem
-        if module in EXCLUDED_MODULES:
+        module = _module_name(path)
+        if module in EXCLUDED_MODULES or path.stem in EXCLUDED_MODULES:
             continue
         try:
             tree = ast.parse(path.read_text(errors="replace"))
@@ -190,6 +198,8 @@ class PromptFitness:
 # check is per prompt, by name. A prompt may only shed failures; gaining one
 # fails the build even if every aggregate improves.
 PROMPT_BASELINE: dict[str, frozenset[int]] = {
+    "acceptance_criteria_build": frozenset({3, 4, 8}),
+    "acceptance_criteria_precheck": frozenset({2, 3, 5, 8}),
     "adr_reviewer": frozenset({3, 7, 8}),
     "agent_build_prompt_first_attempt": frozenset({1, 4, 7, 8}),
     "agent_build_prompt_with_prior_failure": frozenset({1, 4, 7, 8}),
@@ -199,22 +209,46 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "agent_quality_fix": frozenset({2, 3, 8}),
     "conflict_build": frozenset({1, 3, 8}),
     "conflict_rebuild": frozenset({1, 3, 8}),
+    "decomposition_council_direction": frozenset({3, 4, 7, 8}),
+    "decomposition_council_validation": frozenset({1, 3, 4, 6, 7}),
     "diagnostic_runner": frozenset({1, 2, 3, 4, 7, 8}),
     "diff_sanity": frozenset({3}),
+    "discover_completeness": frozenset({1, 3, 4, 7, 8}),
+    "discover_expander": frozenset({3, 4, 8}),
+    "entry_evidence": frozenset({1, 3, 4, 7, 8}),
     "hitl_build_prompt": frozenset({3, 8}),
+    "implement_spec_review": frozenset({1, 3, 4, 7, 8}),
+    "issue_refinement_dup": frozenset({7, 8}),
+    "issue_refinement_priority": frozenset({1, 7, 8}),
+    "plan_compliance": frozenset({1, 3, 4, 7, 8}),
     "plan_reviewer": frozenset({1, 3, 8}),
     "planner_build_prompt_first_attempt": frozenset({1, 3, 6}),
     "planner_retry": frozenset({1, 3, 4}),
     "pr_unsticker_ci_fix": frozenset({1, 3, 4, 8}),
     "pr_unsticker_ci_timeout": frozenset({1, 3, 4, 8}),
+    "review_advisor_midflight": frozenset({3, 4, 7, 8}),
+    "review_advisor_postverify": frozenset({3, 4, 6, 7, 8}),
+    "review_advisor_preflight": frozenset({3, 4, 8}),
     "reviewer_build_review": frozenset({1, 3, 6, 7, 8}),
     "reviewer_ci_fix": frozenset({1, 2, 3, 7, 8}),
     "reviewer_review_fix": frozenset({3, 4, 7, 8}),
+    "sampled_audit": frozenset({1, 3, 4, 7, 8}),
+    "scope_check": frozenset({1, 2, 3, 7, 8}),
+    "shape_coherence": frozenset({1, 3, 4, 7, 8}),
+    "shape_runner_advocate": frozenset({1, 3, 4, 7, 8}),
+    "shape_runner_critic": frozenset({1, 3, 4, 5, 8}),
+    "shape_runner_turn": frozenset({1, 3, 4, 6, 8}),
     "spec_match_requirements_gap": frozenset({1, 2, 3, 8}),
     "test_adequacy": frozenset({2, 3, 8}),
     "test_adequacy_verifier": frozenset({1, 3, 7, 8}),
     "triage_build_prompt": frozenset({1, 3, 4, 7}),
     "triage_decomposition": frozenset({1, 3, 4, 7, 8}),
+    "triage_honeypot": frozenset({1, 4, 8}),
+    "ultra_review": frozenset({2, 3, 4, 7, 8}),
+    "verification_judge_code_validation": frozenset({1, 3, 4, 7, 8}),
+    "verification_judge_instructions_validation": frozenset({1, 3, 4, 8}),
+    "verification_judge_precheck": frozenset({3, 4, 8}),
+    "verification_judge_refinement": frozenset({1, 3, 8}),
 }
 
 
@@ -251,6 +285,51 @@ def per_prompt_scores() -> dict[str, frozenset[int]]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Unformatted-placeholder leak. Not an ADR-0087 rubric criterion — a
+# correctness bug the rubric cannot see. Shared prompt fragments are written as
+# ``str.format`` templates (see ``runner_constants.MEMORY_SUGGESTION_PROMPT``);
+# a caller that interpolates the constant into an f-string without
+# ``.format(context=...)`` ships a literal "{context}" to the model. Two callers
+# had done exactly that (``shape_runner``, ``discover_runner``), found by the
+# 2026-07-30 fixture backfill, invisible to all eight rubric criteria.
+#
+# Braces are legitimate inside code: fenced blocks, inline spans, and diff lines
+# all carry f-strings and deliberate ``### P{N}`` templates. Those are stripped
+# before scanning, so the check fires only on a placeholder left in prose.
+# ---------------------------------------------------------------------------
+
+_FENCED_CODE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE = re.compile(r"`[^`\n]*`")
+_DIFF_LINE = re.compile(r"^[+-].*$", re.MULTILINE)
+_PLACEHOLDER = re.compile(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})")
+
+
+def placeholder_leaks(rendered: str) -> frozenset[str]:
+    """Names of ``str.format`` placeholders left unsubstituted in prose."""
+    prose = _FENCED_CODE.sub(" ", rendered)
+    prose = _INLINE_CODE.sub(" ", prose)
+    prose = _DIFF_LINE.sub(" ", prose)
+    return frozenset(m.group(1) for m in _PLACEHOLDER.finditer(prose))
+
+
+def prompt_placeholder_leaks() -> dict[str, frozenset[str]]:
+    """Prompt name -> leaked placeholder names, for prompts that leak any."""
+    audit = _load_audit_module()
+    out: dict[str, frozenset[str]] = {}
+    for target in audit.PROMPT_REGISTRY:
+        if target.unrenderable:
+            continue
+        try:
+            rendered = audit.render_target(target)
+        except Exception:  # pragma: no cover - reported by prompt_regressions
+            continue
+        leaked = placeholder_leaks(rendered)
+        if leaked:
+            out[target.name] = leaked
+    return out
+
+
 def prompt_regressions() -> list[PromptRegression]:
     """Prompts that gained a failing criterion, or stopped rendering.
 
@@ -270,6 +349,39 @@ def prompt_regressions() -> list[PromptRegression]:
         if gained:
             out.append(PromptRegression(name, gained, baseline - now))
     return out
+
+
+def baseline_criterion_fail_rates() -> dict[int, float]:
+    """Fail rates implied by ``PROMPT_BASELINE`` — the aggregates, derived.
+
+    Hand-pinned fleet ceilings are not stable under coverage changes: adding a
+    newly-measured bad prompt raises every average even though nothing
+    regressed, so the only way to keep a pinned number green is to raise it,
+    which is indistinguishable from covering up a real regression. Deriving the
+    aggregates from the per-prompt baselines removes that ambiguity — the
+    expectation updates only when a baseline entry is added or tightened, and
+    there is no constant left to fudge.
+    """
+    total = len(PROMPT_BASELINE)
+    if not total:
+        return dict.fromkeys(CRITERIA, 0.0)
+    return {
+        c: sum(1 for fails in PROMPT_BASELINE.values() if c in fails) / total
+        for c in CRITERIA
+    }
+
+
+def baseline_high_severity_share() -> float:
+    """High-severity share implied by ``PROMPT_BASELINE``."""
+    total = len(PROMPT_BASELINE)
+    if not total:
+        return 0.0
+    highs = sum(
+        1
+        for fails in PROMPT_BASELINE.values()
+        if len(fails) >= 2 or 1 in fails or 6 in fails
+    )
+    return highs / total
 
 
 def _load_audit_module():

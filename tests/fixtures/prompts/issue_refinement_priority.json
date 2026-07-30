@@ -1,0 +1,7 @@
+{
+  "builder": "issue_refinement.build_priority_prompt",
+  "args": {},
+  "faked_deps": {
+    "issue": "refinement_issue_9877"
+  }
+}

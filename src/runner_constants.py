@@ -6,7 +6,9 @@ from __future__ import annotations
 # conflict-resolution prompts.  Each caller uses
 # `MEMORY_SUGGESTION_PROMPT.format(context=...)` with its own context value:
 # "implementation", "planning", "review", "correction", "conflict resolution",
-# or "rebuild".
+# "rebuild", "shaping conversation", or "discovery run". Interpolating the
+# constant unformatted leaks a literal "{context}" to the model — caught by
+# test_no_prompt_leaks_an_unformatted_placeholder (ADR-0116).
 MEMORY_SUGGESTION_PROMPT = """\
 ## Optional: Tribal-Knowledge Suggestion
 

@@ -24,26 +24,27 @@ import pytest
 from prompt_fitness import (
     CRITERIA,
     PROMPT_BASELINE,
+    baseline_criterion_fail_rates,
+    baseline_high_severity_share,
     fitness_summary,
     per_prompt_scores,
+    placeholder_leaks,
+    prompt_placeholder_leaks,
     prompt_regressions,
 )
 
-# Measured 2026-07-30. Lower the ceilings / raise the floor as prompts improve;
-# never the reverse. Raising a ceiling is the defect this file exists to catch.
-_MIN_REGISTRY_COVERAGE = 0.30
-_MAX_GRANDFATHERED = 30
-_MAX_HIGH_SEVERITY_SHARE = 0.96
-_MAX_CRITERION_FAIL_RATE: dict[int, float] = {
-    1: 0.72,  # leads with the request
-    2: 0.24,  # specific over vague
-    3: 0.88,  # XML tag structure — the near-universal failure
-    4: 0.40,  # examples present
-    5: 0.00,  # output contract stated — already clean, must stay clean
-    6: 0.08,  # long-context placement
-    7: 0.44,  # chain-of-thought scaffold
-    8: 0.84,  # edge cases named
-}
+# Coverage floor and allowlist ceiling are still pinned constants: they measure
+# the size of the gap, which only ever improves deliberately.
+_MIN_REGISTRY_COVERAGE = 0.67
+_MAX_GRANDFATHERED = 14
+
+# The fleet aggregates are NOT pinned constants any more. A hand-pinned ceiling
+# is unstable under coverage changes — registering a newly-measured bad prompt
+# raises every average even though nothing regressed, so the only way to keep the
+# number green is to raise it, which is indistinguishable from covering up a real
+# regression. They are derived from PROMPT_BASELINE instead, so the expectation
+# moves only when a baseline entry is added or tightened, and the binding check
+# for regression is per-prompt (below).
 
 
 @pytest.fixture(scope="module")
@@ -67,29 +68,37 @@ def test_grandfathered_count_does_not_grow(fitness) -> None:
     )
 
 
-def test_high_severity_share_does_not_worsen(fitness) -> None:
-    assert fitness.high_severity_share <= _MAX_HIGH_SEVERITY_SHARE, (
-        f"High-severity share rose to {fitness.high_severity_share:.2%} "
-        f"(ceiling {_MAX_HIGH_SEVERITY_SHARE:.2%}). "
-        f"Counts: {fitness.severity_counts}."
+@pytest.mark.parametrize("criterion", sorted(CRITERIA))
+def test_criterion_fail_rate_matches_baseline(fitness, criterion: int) -> None:
+    """Aggregates must equal what the per-prompt baselines imply.
+
+    Not "<= a ceiling": exact agreement. A drift in either direction means the
+    baselines and the measured corpus disagree, which is the state where a
+    regression can hide behind an aggregate that still looks acceptable.
+    """
+    expected = baseline_criterion_fail_rates()[criterion]
+    actual = fitness.criterion_fail_rates.get(criterion, 0.0)
+    assert actual == pytest.approx(expected, abs=0.001), (
+        f"criterion {criterion} ({CRITERIA[criterion]}) fail rate is "
+        f"{actual:.2%}, but PROMPT_BASELINE implies {expected:.2%}. Either a "
+        "prompt changed without its baseline being updated, or the baseline is "
+        "stale. Per-prompt detail is in test_no_prompt_gains_a_failing_criterion."
     )
 
 
-@pytest.mark.parametrize("criterion", sorted(_MAX_CRITERION_FAIL_RATE))
-def test_criterion_fail_rate_does_not_worsen(fitness, criterion: int) -> None:
-    ceiling = _MAX_CRITERION_FAIL_RATE[criterion]
-    actual = fitness.criterion_fail_rates.get(criterion, 0.0)
-    assert actual <= ceiling, (
-        f"criterion {criterion} ({CRITERIA[criterion]}) fail rate rose to "
-        f"{actual:.2%} (ceiling {ceiling:.2%}). Fix the prompt or record a "
-        "decision before raising the ceiling."
+def test_high_severity_share_matches_baseline(fitness) -> None:
+    expected = baseline_high_severity_share()
+    assert fitness.high_severity_share == pytest.approx(expected, abs=0.001), (
+        f"High-severity share is {fitness.high_severity_share:.2%}, but "
+        f"PROMPT_BASELINE implies {expected:.2%}. Counts: "
+        f"{fitness.severity_counts}."
     )
 
 
 def test_every_registered_prompt_actually_scores(fitness) -> None:
     """A fixture that no longer renders drops silently out of the score."""
-    assert fitness.scored_prompts >= 25, (
-        f"only {fitness.scored_prompts} prompts scored (expected >= 25). A "
+    assert fitness.scored_prompts >= 37, (
+        f"only {fitness.scored_prompts} prompts scored (expected >= 37). A "
         "fixture stopped rendering, so its prompt is now unmeasured — that is "
         "a coverage regression wearing a passing test."
     )
@@ -169,3 +178,41 @@ def test_baseline_is_not_looser_than_reality() -> None:
         f"{stale}. Tighten the baseline in the same commit that improved them, "
         "or the win is given back silently the next time they regress."
     )
+
+
+# --------------------------------------------------------------------------
+# Unformatted-placeholder leak — a correctness bug the ADR-0087 rubric is
+# blind to. See the note above ``placeholder_leaks`` in src/prompt_fitness.py.
+# --------------------------------------------------------------------------
+
+
+def test_no_prompt_leaks_an_unformatted_placeholder() -> None:
+    leaks = prompt_placeholder_leaks()
+    assert not leaks, (
+        "Prompts shipping a literal str.format placeholder to the model: "
+        + "; ".join(f"{name} leaks {sorted(v)}" for name, v in sorted(leaks.items()))
+        + ". A shared fragment was interpolated into an f-string without "
+        ".format(...). Format it at the call site."
+    )
+
+
+def test_placeholder_detector_catches_the_bug_it_was_written_for() -> None:
+    """Guards the detector: if it stops firing, the gate is decoration.
+
+    The exact defect found on 2026-07-30 — MEMORY_SUGGESTION_PROMPT
+    interpolated unformatted by shape_runner and discover_runner.
+    """
+    from runner_constants import MEMORY_SUGGESTION_PROMPT  # noqa: PLC0415
+
+    assert "context" in placeholder_leaks(MEMORY_SUGGESTION_PROMPT), (
+        "placeholder_leaks no longer detects an unformatted {context} in "
+        "MEMORY_SUGGESTION_PROMPT, the defect it was written to catch"
+    )
+
+
+def test_placeholder_detector_ignores_braces_in_code() -> None:
+    """Code legitimately contains braces; only prose leaks are bugs."""
+    assert not placeholder_leaks("Use `### P{N} — Name` for phase headings")
+    assert not placeholder_leaks('```python\nraise E(f"{key}: {attempts}")\n```')
+    assert not placeholder_leaks('+        grouped[f"{year}-W{week:02d}"].append(r)')
+    assert placeholder_leaks("This {context} may have surfaced knowledge")

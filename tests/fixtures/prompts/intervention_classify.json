@@ -1,0 +1,7 @@
+{
+  "builder": "intervention.classify.build_classification_prompt",
+  "args": {
+    "free_text": "Stop widening the digest tests to make the red go away. I watched three commits on agent/issue-9861 loosen the boundary assertion instead of fixing the ordering, and the sandbox scenario is failing downstream of the same defect, not independently of it.\n\nGo back to the accepted plan for #9861. The bug is in build_digest's key ordering: sort by the real week start date, not by the key string. You also call _warn_once in _parse_stamp and never defined it, which is the NameError in CI. Fix those two things, then re-run the 2026-W53 boundary test and the unknown-bucket test.\n\nDo not touch src/server_routes_insights.py in this PR. The date-serialization 500 is real but it belongs to #9862, and mixing it in here is what made the last review round unreadable. If you disagree with any of this, say so on the issue before pushing again rather than pushing a fourth attempt."
+  },
+  "faked_deps": {}
+}

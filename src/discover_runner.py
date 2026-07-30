@@ -649,7 +649,7 @@ config change.
 - Quality over quantity — 3 deep insights beat 10 shallow bullet points.
 - Challenge your own assumptions — what could you be wrong about?
 
-{MEMORY_SUGGESTION_PROMPT}
+{MEMORY_SUGGESTION_PROMPT.format(context="discovery run")}
 """
         plugin_skills_section = format_plugin_skills_for_prompt(
             skills_for_phase(

@@ -78,7 +78,15 @@ So the binding check is **per prompt, by name**: `PROMPT_BASELINE` in `src/promp
 
 This is what makes editing a prompt behave like editing tested code: the failure names the prompt and the criterion (`diff_sanity: now also fails [3] (XML tag structure)`), not a moved average.
 
+**Fleet aggregates are asserted as derived, not pinned by hand.** An earlier revision hardcoded each criterion's fail rate. That is unstable under exactly the change this ADR wants most: registering six previously-unmeasured bad prompts raises every average without any prompt regressing, so keeping a hand-pinned number green requires editing it upward, which is indistinguishable in a diff from covering up a real regression. The aggregates are now computed from `PROMPT_BASELINE` and asserted to agree with reality exactly. Coverage growth moves them freely; a per-prompt regression is what fails the build.
+
 Remaining part of this clause: the CI wiring of `make audit-prompts` for report regeneration. Enforcement already runs in CI via the pytest suite.
+
+### 5a. Coverage debt is a dated commitment, not a note
+
+A ratchet stops the gap growing. It does not make it close: an untouched allowlist stays green forever, which is the same measured-but-not-enforced defect this ADR exists to fix, one level down. `GRANDFATHERED_MAX` is therefore the ceiling *for today*, and `GRANDFATHERED_DEADLINE` (2026-09-30) is the date by which the allowlist must reach `GRANDFATHERED_TARGET` (zero). Past that date the build fails until either the backfill lands or the deadline moves in a commit that states why.
+
+`GRANDFATHERED_BURNDOWN_ORIGIN` records where the debt started (30 modules on 2026-07-30) so the schedule can be checked rather than asserted, and `test_burndown_schedule_is_coherent` fails if the schedule is set to commit to nothing — a target at or above the origin, or a deadline before it.
 
 ### 6. Rubric score pairs with an outcome measure, and this is not optional
 
@@ -106,6 +114,25 @@ Measured 2026-07-30 over all 78 Accepted ADRs: **74 REAL, 3 WEAK, 1 MISSING.**
 - **`_MISSING_ENFORCEMENT`** (ADR-0027) is debt and **shrinks only.** Pinned at 1.
 
 Recording the difference is the point: an exception with a reason is a decision, and an exception without one is rot wearing the same clothes.
+
+### 9. The measure is itself subject to correction, and correcting it is not a threshold change
+
+A gate that reports failures which are not real teaches people to route around it, and a gate whose harness scores text other than what ships is not measuring the contract at all. Both turned up during the backfill and both were fixed, because a floor pinned on top of an invalid measure encodes the invalidity:
+
+- **Harness fidelity.** `_MinimalConfig` in `scripts/audit_prompts.py` hardcoded `max_review_diff_chars = 50000` where production defaults to `15000`. The audit could therefore score a prompt containing text production would have truncated. It now defers to the real `HydraFlowConfig` defaults, inventing a value only for fields the real config does not define.
+- **Detector false positives.** The criterion-3 tag matcher required a bare `<tag>`, so `<issue_content number="9812">` scored as no tags at all, and it fed criterion 6's long-context placement check as well. The criterion-4 matcher accepted `Example:` but not the house style `Example 1 — exact_dup/high:`, scoring four-example prompts as having none. Both were false *failures*, which is the dangerous direction: the gate was pushing prompt authors to strip tag attributes and renumber examples to satisfy it. Fixing them removed 4 false failures and introduced 0 new ones (criterion 3: 90.7% → 86.0%, criterion 4: 58.1% → 53.5%).
+
+**A measure correction is distinguishable from a threshold relaxation, and the distinction must be stated in the commit.** A relaxation moves a floor to accommodate worse reality; a correction changes what reality is read as, and its before/after per-criterion delta is reported. The headline finding survived both corrections here, which is the evidence they were corrections and not rescues.
+
+### 10. A defect class the rubric cannot see
+
+The eight criteria score structure. They are blind to a prompt being *wrong*, and the backfill found an instance: `shape_runner` and `discover_runner` interpolated `MEMORY_SUGGESTION_PROMPT` into an f-string without `.format(context=...)`, shipping a literal `{context}` to the model. `runner_constants.py` documents the required call; four other callers honour it. All eight criteria passed this text happily, and it had been live in two loops.
+
+`placeholder_leaks()` closes the class rather than the two instances: it strips fenced blocks, inline spans, and diff lines — where braces are legitimate, including deliberate `### P{N}` templates and f-strings inside diffs under review — and fails on a `str.format` placeholder left in prose. Zero leaks across all registered prompts after the fix.
+
+Three tests, because a detector that stops detecting is worse than no detector: the gate itself, a test asserting it still fires on the exact 2026-07-30 defect, and a test asserting it stays quiet on the four brace-in-code shapes that would otherwise make it noise.
+
+**The general point: a rubric bounds what it was written to look for.** Registering a prompt is worth more than the score it produces, because rendering it at all is what surfaces defects no criterion anticipated. Coverage is the load-bearing series in §5 for that reason, not the fail rates.
 
 ## Consequences
 

@@ -1,0 +1,9 @@
+{
+  "builder": "implement_spec_reviewer.build_spec_review_prompt",
+  "args": {
+    "max_diff_chars": 12000
+  },
+  "faked_deps": {
+    "inp": "escape_digest_spec_review"
+  }
+}

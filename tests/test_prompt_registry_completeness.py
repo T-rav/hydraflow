@@ -15,9 +15,14 @@ wrong dependency and was caught by the disturbance ratchet.
 
 from __future__ import annotations
 
+import pytest
+
 from prompt_fitness import (
     GRANDFATHERED,
+    GRANDFATHERED_BURNDOWN_ORIGIN,
+    GRANDFATHERED_DEADLINE,
     GRANDFATHERED_MAX,
+    GRANDFATHERED_TARGET,
     discovered_builders,
     registered_modules,
 )
@@ -63,3 +68,73 @@ def test_discovery_finds_the_known_registered_builders() -> None:
             "PROMPT_REGISTRY registers one. The naming convention in "
             "_BUILDER_NAME (src/prompt_fitness.py) has drifted from the code."
         )
+
+
+# --------------------------------------------------------------------------
+# Burn-down. The ratchet above stops the gap growing; it does not make it
+# close. An untouched allowlist stays green forever, which is the same
+# measured-but-not-enforced pattern one level down. This turns coverage debt
+# into a dated commitment: past the deadline the build fails until either the
+# backfill lands or the schedule is renegotiated in a commit that says why.
+# --------------------------------------------------------------------------
+
+
+def test_coverage_debt_is_burned_down_on_schedule() -> None:
+    from datetime import date  # noqa: PLC0415
+
+    deadline = date.fromisoformat(GRANDFATHERED_DEADLINE)
+    today = date.today()
+    remaining = len(GRANDFATHERED)
+    if today <= deadline or remaining <= GRANDFATHERED_TARGET:
+        return
+    origin_date, origin_count = GRANDFATHERED_BURNDOWN_ORIGIN
+    pytest.fail(
+        f"Prompt-coverage burn-down missed its deadline: {remaining} module(s) "
+        f"still unregistered on {today}, target {GRANDFATHERED_TARGET} by "
+        f"{GRANDFATHERED_DEADLINE} (started at {origin_count} on {origin_date}).\n"
+        "Either register the remaining builders, or move "
+        "GRANDFATHERED_DEADLINE in src/prompt_fitness.py in a commit that "
+        "states why the debt is being carried longer. Silently carrying it is "
+        "the failure this test exists to prevent."
+    )
+
+
+def test_burndown_schedule_is_coherent() -> None:
+    """A schedule that cannot be checked is decoration."""
+    from datetime import date  # noqa: PLC0415
+
+    origin_date, origin_count = GRANDFATHERED_BURNDOWN_ORIGIN
+    assert date.fromisoformat(GRANDFATHERED_DEADLINE) > date.fromisoformat(
+        origin_date
+    ), "GRANDFATHERED_DEADLINE must be after the burn-down origin date"
+    assert origin_count > GRANDFATHERED_TARGET, (
+        f"GRANDFATHERED_TARGET ({GRANDFATHERED_TARGET}) must be below the "
+        f"origin count ({origin_count}), or the schedule commits to nothing"
+    )
+    assert len(GRANDFATHERED) <= origin_count, (
+        f"the allowlist ({len(GRANDFATHERED)}) exceeds its burn-down origin "
+        f"({origin_count}) — the debt grew, which the ratchet should have caught"
+    )
+
+
+def test_every_registry_category_appears_in_the_report() -> None:
+    """A target in an unlisted category is silently dropped from the report.
+
+    ``write_markdown`` iterates ``_CATEGORY_ORDER`` and skips anything else, so
+    a target given a novel category (there is no "Shape" category, for example)
+    is scored but never printed — registered, measured, and invisible, which is
+    the reporting equivalent of the gap this module exists to close.
+    """
+    from scripts.audit_prompts import (  # noqa: PLC0415
+        _CATEGORY_ORDER,
+        PROMPT_REGISTRY,
+    )
+
+    known = set(_CATEGORY_ORDER)
+    used = {t.category for t in PROMPT_REGISTRY}
+    assert not used - known, (
+        f"PROMPT_REGISTRY uses categories absent from _CATEGORY_ORDER: "
+        f"{sorted(used - known)}. These targets are scored but omitted from "
+        "the generated report. Add the category to _CATEGORY_ORDER in "
+        "scripts/audit_prompts.py, or reuse an existing one."
+    )
