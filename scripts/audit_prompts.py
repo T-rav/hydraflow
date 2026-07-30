@@ -515,6 +515,45 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Adjacent",
         "src/research_runner.py",
     ),
+    # --- Builders that module-granular coverage had hidden (2026-07-30) ---
+    # Coverage counted modules, so these five sat inside already-"covered"
+    # modules with no fixture and no score. Three had also evaded the naming
+    # convention and were renamed to conform per ADR-0116 §3.
+    AuditTarget(
+        "agent_tdd_subagent",
+        "agent.AgentRunner._build_tdd_subagent_prompt",
+        "tests/fixtures/prompts/agent_tdd_subagent.json",
+        "Implement",
+        "src/agent.py:508",
+    ),
+    AuditTarget(
+        "reviewer_precheck",
+        "reviewer.ReviewRunner._build_precheck_prompt",
+        "tests/fixtures/prompts/reviewer_precheck.json",
+        "Review",
+        "src/reviewer.py",
+    ),
+    AuditTarget(
+        "spec_match_self_review",
+        "spec_match.build_self_review_prompt",
+        "tests/fixtures/prompts/spec_match_self_review.json",
+        "Adjacent",
+        "src/spec_match.py",
+    ),
+    AuditTarget(
+        "prompt_refiner_refine",
+        "prompt_refiner.build_refine_prompt",
+        "tests/fixtures/prompts/prompt_refiner_refine.json",
+        "Adjacent",
+        "src/prompt_refiner.py:117",
+    ),
+    AuditTarget(
+        "review_advisor_midflight_section",
+        "review_advisor.build_mid_flight_prompt",
+        "tests/fixtures/prompts/review_advisor_midflight_section.json",
+        "Review",
+        "src/review_advisor.py:1367",
+    ),
 ]
 
 # ---------------------------------------------------------------------------

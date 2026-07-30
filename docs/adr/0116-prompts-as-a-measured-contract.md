@@ -64,8 +64,8 @@ Measured at adoption (2026-07-30). The left column is the state that motivated t
 
 | Measure | At discovery | At adoption |
 |---|---|---|
-| Registry coverage | 30.2% (13 of 43 modules) | **100%** (43 of 43) |
-| Prompts scored | 25 | **65** |
+| Registry coverage (per builder) | 38.8% (26 of 67 builders) | **100%** (67 of 67) |
+| Prompts scored | 25 | **70** |
 | Unregistered modules (`GRANDFATHERED`) | 30 | **0** |
 | High-severity share | 96% (24 of 25) | **95.4%** (62 of 65) |
 | Criterion 8 (edge cases named) | 84% | **52.5%** |
@@ -168,7 +168,8 @@ Three tests, because a detector that stops detecting is worse than no detector: 
 
 ## Consequences
 
-- 30 unregistered modules became **0**. Every prompt builder in `src/` is registered, rendered to a fixture and scored. `GRANDFATHERED_MAX` is now 0, so a new builder cannot be exempted at all — and if a future subsystem genuinely needs to carry debt, raising the ceiling forces moving the deadline too, because a stale deadline with a non-empty allowlist fails the build.
+- 30 unregistered modules became **0**, and coverage is now counted **per builder rather than per module**. That change matters more than the backfill: module granularity reported 100% while five builders inside already-"covered" modules had no fixture and no score, two of them invisible that way since April. `GRANDFATHERED_MAX` is now 0, so a new builder cannot be exempted at all — and if a future subsystem genuinely needs to carry debt, raising the ceiling forces moving the deadline too, because a stale deadline with a non-empty allowlist fails the build.
+- Three builders had **evaded the naming convention** and were renamed to conform per §3 rather than exempted (`agent._build_tdd_subagent_prompt`, `review_advisor.build_mid_flight_prompt`, `prompt_refiner.build_refine_prompt`). The `prompt_refiner` module-level exclusion was hiding the third behind a reason that was only true of a *different* function in the same file; function-level exclusions (`EXCLUDED_BUILDERS`) now carry reasons that have to be true of the one thing they exempt.
 - New prompts cannot land unregistered; the failure mode that produced this gap closes structurally rather than by vigilance.
 - The rubric gains a resting state once §5 lands, so it stops being a finding generator.
 - ADR-0087 stops being a three-month-old proposal and becomes a contract.

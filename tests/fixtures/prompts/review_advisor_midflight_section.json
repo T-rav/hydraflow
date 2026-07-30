@@ -1,0 +1,7 @@
+{
+  "builder": "review_advisor.build_mid_flight_prompt",
+  "args": {},
+  "faked_deps": {
+    "surface_config": "pr_review"
+  }
+}

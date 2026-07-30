@@ -17,6 +17,7 @@ read as a coherent trace through the factory rather than unrelated toy data.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from adr_drift_triage_llm import TriageContext
@@ -1985,6 +1986,26 @@ _REGISTRY: dict[tuple[str, str], Any] = {
     ],
     ("repo_wiki_store", "digest_9861"): _DigestWikiStore(),
 }
+
+
+# --- prompt_refiner.build_refine_prompt / review_advisor.build_mid_flight_prompt
+# Both take arguments the JSON loader cannot express: real Paths that must
+# exist on disk, and a live SurfaceAdvisorConfig. The refiner reads the case
+# dir's README.md and expected_transcript.txt plus the real builder module
+# named by SKILL_BUILDER_MODULES, so repo_root has to be the actual repo.
+_REFINE_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REFINE_CASE_DIR = Path(__file__).resolve().parent / "refine_case"
+_REFINE_FAILURE_TRANSCRIPT = """VERDICT: pass
+The diff applies cleanly and the change is small. No concerns.
+"""
+
+_REGISTRY[("repo_root", "refine_diff_sanity")] = _REFINE_REPO_ROOT
+_REGISTRY[("case_dir", "refine_diff_sanity")] = _REFINE_CASE_DIR
+_REGISTRY[("failure_transcript", "refine_diff_sanity")] = _REFINE_FAILURE_TRANSCRIPT
+
+from review_advisor import SURFACE_ADVISOR_CONFIGS  # noqa: E402
+
+_REGISTRY[("surface_config", "pr_review")] = SURFACE_ADVISOR_CONFIGS["pr_review"]
 
 
 def get_fake(kind: str, shape: str) -> Any:

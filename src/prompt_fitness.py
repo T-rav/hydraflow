@@ -7,8 +7,10 @@ better. This module is that measure for the prompt layer.
 
 Three series, deliberately kept together because each one alone is gameable:
 
-* ``registry_coverage`` — registered modules / discovered modules. Rises as the
-  ``GRANDFATHERED`` allowlist shrinks.
+* ``registry_coverage`` — registered **builders** / discovered builders. Counted
+  per builder, not per module: a module with five builders and one fixture used
+  to read as fully covered, which reported 100% while five builders had no
+  fixture and no score at all.
 * ``severity_counts`` — High / Medium / Low over registered prompts, scored by
   the ADR-0087 rubric via ``scripts/audit_prompts.py``.
 * ``criterion_fail_rates`` — per-criterion fail rate, so a broad structural
@@ -48,12 +50,28 @@ _BUILDER_NAME = re.compile(
 
 # Modules excluded by category, with the reason. An unexplained exclusion is how
 # a real prompt hides, so every entry names why it is not model-bound text.
+#
+# ``prompt_refiner`` used to sit here on the grounds that it "renders builder
+# source, not a prompt". That is true of ``render_builder_prompt`` and false of
+# the module: ``build_refine_prompt`` in the same file returns text ending
+# "Reply with a single ```diff fence." A module-level exclusion hid a real
+# prompt behind a reason that only covered one of its functions, so exclusions
+# that apply to a single function now live in EXCLUDED_BUILDERS instead.
 EXCLUDED_MODULES: dict[str, str] = {
     "_skill_prompt_eval": "get/set helpers for eval state",
     "prompt_gate_alerts": "operator alerting, not assembly",
     "prompt_stats": "measurement over a built prompt",
-    "prompt_refiner": "renders builder source, not a prompt",
     "prompt_fitness": "this module measures prompts, it does not build them",
+}
+
+# Function-level exclusions, keyed ``module.function``. Narrower than excluding
+# a whole module, which is the point: the reason has to be true of the one
+# thing it exempts.
+EXCLUDED_BUILDERS: dict[str, str] = {
+    "prompt_refiner.render_builder_prompt": (
+        "executes another module's builder in isolation and returns ITS output; "
+        "assembles no prompt text of its own"
+    ),
 }
 
 # Modules with builders but no registry entry. EMPTY as of 2026-07-30: the
@@ -115,6 +133,8 @@ def discovered_builders() -> dict[str, list[str]]:
             if isinstance(
                 node, ast.FunctionDef | ast.AsyncFunctionDef
             ) and _BUILDER_NAME.match(node.name):
+                if f"{module}.{node.name}" in EXCLUDED_BUILDERS:
+                    continue
                 out.setdefault(module, []).append(node.name)
     return out
 
@@ -141,6 +161,37 @@ def registered_modules() -> set[str]:
     return owners
 
 
+def all_builders() -> set[str]:
+    """Every discovered builder as ``module.function``."""
+    return {
+        f"{m}.{b}" for m, builders in discovered_builders().items() for b in builders
+    }
+
+
+def registered_builders() -> set[str]:
+    """Builders with at least one renderable ``AuditTarget``.
+
+    Coverage is counted per *builder*, not per module. Module granularity
+    overstated it badly: a module with five builders and one fixture read as
+    fully covered, which reported 100% while five builders across four
+    already-"covered" modules had no fixture and no score at all. Two of them
+    (``reviewer._build_precheck_prompt``, ``spec_match.build_self_review_prompt``)
+    had been invisible that way since the registry was built.
+    """
+    audit = _load_audit_module()
+    modules = discovered_builders()
+    out: set[str] = set()
+    for target in audit.PROMPT_REGISTRY:
+        if target.unrenderable:
+            continue
+        qualname = target.builder_qualname
+        leaf = qualname.rsplit(".", 1)[-1]
+        for module in modules:
+            if qualname.startswith(f"{module}.") and leaf in modules[module]:
+                out.add(f"{module}.{leaf}")
+    return out
+
+
 # Criterion numbers from ADR-0087, for readable reporting.
 CRITERIA: dict[int, str] = {
     1: "leads with the request",
@@ -160,6 +211,9 @@ SEVERITY_ORDER = ("High", "Medium", "Low")
 class PromptFitness:
     """Fitness scorecard for the prompt layer (ADR-0116)."""
 
+    # Counted per BUILDER, not per module: a module with five builders and one
+    # fixture used to read as fully covered. Field names kept for compatibility
+    # with the existing scorecard consumers.
     discovered_modules: int
     registered_modules: int
     grandfathered: int
@@ -169,7 +223,7 @@ class PromptFitness:
 
     @property
     def registry_coverage(self) -> float:
-        """Registered / discovered. 1.0 when the allowlist reaches zero."""
+        """Registered builders / discovered builders."""
         if self.discovered_modules == 0:
             return 1.0
         return self.registered_modules / self.discovered_modules
@@ -218,6 +272,7 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "agent_pre_quality_review": frozenset({3, 5, 8}),
     "agent_pre_quality_run_tool": frozenset({1, 2, 3, 5, 8}),
     "agent_quality_fix": frozenset({2, 3, 5, 8}),
+    "agent_tdd_subagent": frozenset({2, 3, 5}),
     "audit_adjudicate": frozenset({3, 4, 7, 8}),
     "bug_reproducer": frozenset({3, 8}),
     "conflict_build": frozenset({1, 3, 8}),
@@ -246,12 +301,15 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "pr_unsticker_ci_fix": frozenset({1, 3, 4, 5, 8}),
     "pr_unsticker_ci_timeout": frozenset({1, 3, 5, 8}),
     "preflight_auto_agent": frozenset({1, 4}),
+    "prompt_refiner_refine": frozenset({3, 4, 5, 7, 8}),
     "research_runner": frozenset({1, 3, 4, 7, 8}),
     "review_advisor_midflight": frozenset({3, 8}),
+    "review_advisor_midflight_section": frozenset({3, 4, 7, 8}),
     "review_advisor_postverify": frozenset({3, 4, 7}),
     "review_advisor_preflight": frozenset({3, 4}),
     "reviewer_build_review": frozenset({1, 3, 7}),
     "reviewer_ci_fix": frozenset({1, 2, 3, 5, 7}),
+    "reviewer_precheck": frozenset({2, 3, 5, 8}),
     "reviewer_review_fix": frozenset({3, 4, 5, 7}),
     "sampled_audit": frozenset({1, 3, 4, 7, 8}),
     "sandbox_failure_fixer": frozenset({3, 4, 5, 8}),
@@ -261,6 +319,7 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "shape_runner_critic": frozenset({1, 3, 4, 5, 8}),
     "shape_runner_turn": frozenset({1, 3, 4}),
     "spec_match_requirements_gap": frozenset({2, 3, 5, 8}),
+    "spec_match_self_review": frozenset({1, 3, 5, 7, 8}),
     "term_proposer": frozenset({1, 3, 7}),
     "test_adequacy": frozenset({2, 3, 5}),
     "test_adequacy_verifier": frozenset({1, 3, 5, 7}),
@@ -322,18 +381,64 @@ def per_prompt_scores() -> dict[str, frozenset[int]]:
 # before scanning, so the check fires only on a placeholder left in prose.
 # ---------------------------------------------------------------------------
 
-_FENCED_CODE = re.compile(r"```.*?```", re.DOTALL)
+_FENCE_LINE = re.compile(r"^\s*```")
 _INLINE_CODE = re.compile(r"`[^`\n]*`")
 _DIFF_LINE = re.compile(r"^[+-].*$", re.MULTILINE)
 _PLACEHOLDER = re.compile(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})")
 
 
+def _strip_fenced_code(text: str) -> str:
+    """Drop fenced code blocks, pairing fences by line rather than by regex.
+
+    A non-greedy ``r"```.*?```"`` breaks on *nested* fences: a prompt that
+    embeds a source file inside ```` ```python ```` where that file itself
+    contains a ```` ```diff ```` block matches only as far as the inner
+    opening fence, leaving the rest of the embedded source exposed as prose.
+    That produced a false leak report for ``prompt_refiner_refine``, whose
+    whole purpose is to hand a builder's source to the model.
+
+    Toggling on every fence line treats the entire embedded region as code,
+    which is the correct reading: everything between the outer fences is
+    payload, nesting included.
+    """
+    out: list[str] = []
+    in_code = False
+    for line in text.splitlines():
+        if _FENCE_LINE.match(line):
+            in_code = not in_code
+            continue
+        if not in_code:
+            out.append(line)
+    return "\n".join(out)
+
+
 def placeholder_leaks(rendered: str) -> frozenset[str]:
     """Names of ``str.format`` placeholders left unsubstituted in prose."""
-    prose = _FENCED_CODE.sub(" ", rendered)
+    prose = _strip_fenced_code(rendered)
     prose = _INLINE_CODE.sub(" ", prose)
     prose = _DIFF_LINE.sub(" ", prose)
     return frozenset(m.group(1) for m in _PLACEHOLDER.finditer(prose))
+
+
+# Prompts whose payload is arbitrary source code, where a brace-wrapped
+# identifier is content rather than an unsubstituted placeholder.
+#
+# This is an exemption, not a detector improvement, because no content-based
+# heuristic can win here. ``prompt_refiner_refine`` embeds a builder module
+# verbatim inside a ```python fence, and that module contains its own ```diff
+# fence — so the fences nest with the same delimiter, which is ambiguous
+# markdown that neither a non-greedy regex nor line-level toggling can resolve.
+# The prompt's entire purpose is to hand source to the model, so the payload
+# will always contain whatever that source contains.
+#
+# Pinned by size: an exemption with a reason is a decision, one without is rot.
+PLACEHOLDER_LEAK_EXEMPT: dict[str, str] = {
+    "prompt_refiner_refine": (
+        "embeds a builder module's source verbatim for the model to patch; the "
+        "module's own f-string templates are payload, not leaked placeholders"
+    ),
+}
+PLACEHOLDER_LEAK_EXEMPT_MAX = 1
 
 
 def prompt_placeholder_leaks() -> dict[str, frozenset[str]]:
@@ -346,6 +451,8 @@ def prompt_placeholder_leaks() -> dict[str, frozenset[str]]:
         try:
             rendered = audit.render_target(target)
         except Exception:  # pragma: no cover - reported by prompt_regressions
+            continue
+        if target.name in PLACEHOLDER_LEAK_EXEMPT:
             continue
         leaked = placeholder_leaks(rendered)
         if leaked:
@@ -426,8 +533,9 @@ def fitness_summary(*, outcome_paired: bool = False) -> PromptFitness:
     completeness ratchet uses, so coverage and the gate cannot disagree.
     """
     audit = _load_audit_module()
-    discovered = set(discovered_builders())
-    registered = registered_modules()
+    # Builder granularity, not module. See registered_builders().
+    discovered = all_builders()
+    registered = registered_builders()
 
     severity_counts: dict[str, int] = dict.fromkeys(SEVERITY_ORDER, 0)
     fail_counts: dict[int, int] = dict.fromkeys(CRITERIA, 0)

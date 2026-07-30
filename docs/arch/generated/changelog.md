@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `742c61d` — Prompt registry coverage reaches 100%: 43/43 modules, 65 prompts *(2026-07-30)*
 - `fb4a97a` — Calibrate the rubric detectors; pin every corrected verdict *(2026-07-30)*
 - `acb47ba` — Prompt coverage 67% -> 86%: fix render_target for subpackage builders *(2026-07-30)*
 - `b140518` — Backfill prompt coverage to 67%, add burn-down, fix the measure's validity *(2026-07-30)*

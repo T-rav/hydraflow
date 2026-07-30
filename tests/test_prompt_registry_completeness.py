@@ -25,15 +25,29 @@ from prompt_fitness import (
     GRANDFATHERED_DEADLINE,
     GRANDFATHERED_MAX,
     GRANDFATHERED_TARGET,
+    PLACEHOLDER_LEAK_EXEMPT,
+    PLACEHOLDER_LEAK_EXEMPT_MAX,
     UNRENDERABLE_MAX,
+    all_builders,
     discovered_builders,
-    registered_modules,
+    registered_builders,
 )
 
 
 def test_every_prompt_builder_is_registered() -> None:
+    """Per BUILDER, not per module.
+
+    Module granularity reported 100% coverage while five builders inside
+    already-"covered" modules had no fixture and no score — a module with five
+    builders and one fixture counted as fully covered. Two of them
+    (``reviewer._build_precheck_prompt``, ``spec_match.build_self_review_prompt``)
+    had been invisible that way since the registry was built in April.
+    """
+    grandfathered_builders = {
+        b for b in all_builders() if b.rsplit(".", 1)[0] in GRANDFATHERED
+    }
     unregistered = sorted(
-        set(discovered_builders()) - registered_modules() - GRANDFATHERED
+        all_builders() - registered_builders() - grandfathered_builders
     )
     assert not unregistered, (
         "Prompt builders with no PROMPT_REGISTRY entry (never rendered to a "
@@ -211,4 +225,26 @@ def test_excluded_modules_are_pinned_and_still_justified() -> None:
     assert not unexplained, (
         f"EXCLUDED_MODULES entries with no reason: {unexplained}. Every "
         "exclusion states why the module is not model-bound text."
+    )
+
+
+def test_placeholder_leak_exemptions_are_pinned_and_justified() -> None:
+    """The leak gate has one escape; it must stay small and stay explained."""
+    assert len(PLACEHOLDER_LEAK_EXEMPT) <= PLACEHOLDER_LEAK_EXEMPT_MAX, (
+        f"PLACEHOLDER_LEAK_EXEMPT grew to {len(PLACEHOLDER_LEAK_EXEMPT)} "
+        f"(pinned at {PLACEHOLDER_LEAK_EXEMPT_MAX}). A literal placeholder "
+        "reaching the model is a bug; exempting the prompt is not the fix "
+        "unless its payload is genuinely arbitrary source code."
+    )
+    unexplained = sorted(
+        n for n, why in PLACEHOLDER_LEAK_EXEMPT.items() if not why.strip()
+    )
+    assert not unexplained, f"exemptions with no reason: {unexplained}"
+    from scripts.audit_prompts import PROMPT_REGISTRY  # noqa: PLC0415
+
+    known = {t.name for t in PROMPT_REGISTRY}
+    stale = sorted(set(PLACEHOLDER_LEAK_EXEMPT) - known)
+    assert not stale, (
+        f"PLACEHOLDER_LEAK_EXEMPT names prompts not in the registry: {stale}. "
+        "A stale exemption silently covers whatever takes that name next."
     )
