@@ -138,3 +138,29 @@ def test_every_registry_category_appears_in_the_report() -> None:
         "the generated report. Add the category to _CATEGORY_ORDER in "
         "scripts/audit_prompts.py, or reuse an existing one."
     )
+
+
+def test_registry_qualnames_resolve_to_the_module_they_name() -> None:
+    """A re-export resolves fine but credits the wrong module.
+
+    ``registered_modules()`` matches the dotted module name against the text of
+    the registry, so registering ``audit.adjudicate``'s builder via a call-site
+    re-export (``sampled_audit_loop.build_adjudication_prompt``) would render
+    and score happily while leaving ``audit.adjudicate`` in the allowlist —
+    coverage credited to a module that does not own the prompt. This asserts
+    every qualname resolves to exactly the module it names.
+    """
+    from scripts.audit_prompts import (  # noqa: PLC0415
+        PROMPT_REGISTRY,
+        _resolve_owner,
+    )
+
+    for target in PROMPT_REGISTRY:
+        if target.unrenderable:
+            continue
+        module, attrs = _resolve_owner(target.builder_qualname)
+        resolved = f"{module.__name__}." + ".".join(attrs)
+        assert resolved == target.builder_qualname, (
+            f"{target.name}: declared {target.builder_qualname} but resolves "
+            f"to {resolved}. Register the owning module's path, not a re-export."
+        )
