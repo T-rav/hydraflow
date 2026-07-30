@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T00:21:29.057304+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1307
+superseded_by: 1470
 ---
 
 # Feature toggles need config field + _ENV_INT_OVERRIDES tested
