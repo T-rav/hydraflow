@@ -21,7 +21,13 @@ from __future__ import annotations
 
 import pytest
 
-from prompt_fitness import CRITERIA, fitness_summary
+from prompt_fitness import (
+    CRITERIA,
+    PROMPT_BASELINE,
+    fitness_summary,
+    per_prompt_scores,
+    prompt_regressions,
+)
 
 # Measured 2026-07-30. Lower the ceilings / raise the floor as prompts improve;
 # never the reverse. Raising a ceiling is the defect this file exists to catch.
@@ -100,4 +106,66 @@ def test_form_score_is_not_a_quality_claim(fitness) -> None:
     assert fitness.outcome_paired is False, (
         "outcome_paired is True but the outcome join has not landed. If it "
         "has, update this test and ADR-0116 §6 together."
+    )
+
+
+# --------------------------------------------------------------------------
+# Per-prompt setpoints (ADR-0116 §5). The floors above are fleet aggregates and
+# mask per-prompt regression: one prompt can degrade while another improves and
+# the mean never moves. These bind each prompt to its own past, which is what
+# makes editing a prompt behave like editing tested code.
+# --------------------------------------------------------------------------
+
+
+def test_no_prompt_gains_a_failing_criterion() -> None:
+    regressions = [r for r in prompt_regressions() if not r.unrenderable]
+    assert not regressions, "\n".join(
+        [
+            "Prompt(s) gained a failing criterion against their baseline:",
+            *(
+                f"  - {r.prompt}: now also fails "
+                f"{sorted(r.new_fails)} "
+                f"({', '.join(CRITERIA[c] for c in sorted(r.new_fails))})"
+                for r in regressions
+            ),
+            "",
+            "A prompt may only shed failures. If the change is intended, fix the",
+            "prompt; if the baseline is genuinely wrong, update PROMPT_BASELINE",
+            "in src/prompt_fitness.py in the same commit and say why.",
+        ]
+    )
+
+
+def test_no_prompt_stops_rendering() -> None:
+    """A fixture that breaks drops the prompt from scoring — an invisible loss."""
+    broken = [r.prompt for r in prompt_regressions() if r.unrenderable]
+    assert not broken, (
+        f"Prompt(s) in PROMPT_BASELINE no longer render: {broken}. Their "
+        "fixtures broke, so they are now unmeasured — a coverage regression "
+        "wearing a passing test."
+    )
+
+
+def test_baseline_covers_every_scored_prompt() -> None:
+    """A scored prompt absent from the baseline is unpinned and free to rot."""
+    unpinned = sorted(set(per_prompt_scores()) - set(PROMPT_BASELINE))
+    assert not unpinned, (
+        f"Scored prompts with no PROMPT_BASELINE entry: {unpinned}. Add them "
+        "with their current failing criteria so they are pinned against their "
+        "own past."
+    )
+
+
+def test_baseline_is_not_looser_than_reality() -> None:
+    """Guards the baseline itself: stale entries silently widen the allowance."""
+    current = per_prompt_scores()
+    stale = {
+        name: sorted(baseline - current[name])
+        for name, baseline in PROMPT_BASELINE.items()
+        if name in current and (baseline - current[name])
+    }
+    assert not stale, (
+        "PROMPT_BASELINE allows failures these prompts no longer have: "
+        f"{stale}. Tighten the baseline in the same commit that improved them, "
+        "or the win is given back silently the next time they regress."
     )

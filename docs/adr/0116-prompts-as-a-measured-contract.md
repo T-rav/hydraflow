@@ -67,7 +67,13 @@ Measured at adoption (2026-07-30), and the numbers are why this ADR exists:
 
 Three of the eight criteria fail on most prompts. Pinning that state is not an endorsement of it — it stops the drift that produced it, and makes every subsequent improvement visible as a floor that moves. A change that worsens any measure fails the build.
 
-The per-prompt setpoint (a minimum score each prompt must hold, so the rubric goes quiet inside the band) and the CI wiring of `make audit-prompts` are the remaining part of this clause; the fleet-level floors land now.
+**Fleet aggregates alone are insufficient, and this is the load-bearing part of the clause.** High-severity share and per-criterion fail rates are means over 25 prompts, so one prompt can degrade while another improves and the aggregate never moves — per-prompt regression is invisible. That also violates the never-compare-only-track-against-its-own-past rule this project holds elsewhere.
+
+So the binding check is **per prompt, by name**: `PROMPT_BASELINE` in `src/prompt_fitness.py` pins the exact criteria each of the 25 scored prompts fails today, and `prompt_regressions()` reports any prompt that gains one. A prompt may only shed failures. Four assertions guard it, including two that guard the baseline itself — a scored prompt with no baseline entry is unpinned and free to rot, and a baseline looser than reality silently gives back a win the next time that prompt regresses.
+
+This is what makes editing a prompt behave like editing tested code: the failure names the prompt and the criterion (`diff_sanity: now also fails [3] (XML tag structure)`), not a moved average.
+
+Remaining part of this clause: the CI wiring of `make audit-prompts` for report regeneration. Enforcement already runs in CI via the pytest suite.
 
 ### 6. Rubric score pairs with an outcome measure, and this is not optional
 
@@ -90,7 +96,7 @@ The cheapest way to raise a rubric score is to add tags and edge-case boilerplat
 - The rubric gains a resting state once §5 lands, so it stops being a finding generator.
 - ADR-0087 stops being a three-month-old proposal and becomes a contract.
 - Cost: one completeness test, one CI wiring, one allowlist, and fixtures backfilled at ratchet pace. No new loop, no new subsystem.
-- **Landing with this ADR:** §1-§4, plus §5's fitness function and fleet-level ratcheting floors. **Deferred and tracked separately:** §5's per-prompt setpoints and the CI wiring of `make audit-prompts`, and §6's outcome pairing. The ADR records the whole contract so the deferred parts are visible obligations rather than forgotten intent, and `test_form_score_is_not_a_quality_claim` fails if anyone starts treating the form score as a quality claim before §6 lands.
+- **Landing with this ADR:** §1-§4, plus §5's fitness function, fleet-level floors, **and the per-prompt setpoints**. **Deferred and tracked separately:** the CI wiring of `make audit-prompts` (report regeneration only — enforcement already runs in CI via pytest), and §6's outcome pairing (#10855). The ADR records the whole contract so the deferred parts are visible obligations rather than forgotten intent, and `test_form_score_is_not_a_quality_claim` fails if anyone starts treating the form score as a quality claim before §6 lands.
 
 ## Precedent / Divergence
 

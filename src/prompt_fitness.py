@@ -183,6 +183,95 @@ class PromptFitness:
         }
 
 
+# Per-prompt setpoints: the exact criteria each prompt fails today (2026-07-30).
+# This is the difference between "the fleet average held" and "this prompt did
+# not get worse". Fleet aggregates mask per-prompt regression — one prompt can
+# degrade while another improves and the mean never moves — so the binding
+# check is per prompt, by name. A prompt may only shed failures; gaining one
+# fails the build even if every aggregate improves.
+PROMPT_BASELINE: dict[str, frozenset[int]] = {
+    "adr_reviewer": frozenset({3, 7, 8}),
+    "agent_build_prompt_first_attempt": frozenset({1, 4, 7, 8}),
+    "agent_build_prompt_with_prior_failure": frozenset({1, 4, 7, 8}),
+    "agent_build_prompt_with_review_feedback": frozenset({1, 4, 7, 8}),
+    "agent_pre_quality_review": frozenset({3, 8}),
+    "agent_pre_quality_run_tool": frozenset({1, 2, 3, 8}),
+    "agent_quality_fix": frozenset({2, 3, 8}),
+    "conflict_build": frozenset({1, 3, 8}),
+    "conflict_rebuild": frozenset({1, 3, 8}),
+    "diagnostic_runner": frozenset({1, 2, 3, 4, 7, 8}),
+    "diff_sanity": frozenset({3}),
+    "hitl_build_prompt": frozenset({3, 8}),
+    "plan_reviewer": frozenset({1, 3, 8}),
+    "planner_build_prompt_first_attempt": frozenset({1, 3, 6}),
+    "planner_retry": frozenset({1, 3, 4}),
+    "pr_unsticker_ci_fix": frozenset({1, 3, 4, 8}),
+    "pr_unsticker_ci_timeout": frozenset({1, 3, 4, 8}),
+    "reviewer_build_review": frozenset({1, 3, 6, 7, 8}),
+    "reviewer_ci_fix": frozenset({1, 2, 3, 7, 8}),
+    "reviewer_review_fix": frozenset({3, 4, 7, 8}),
+    "spec_match_requirements_gap": frozenset({1, 2, 3, 8}),
+    "test_adequacy": frozenset({2, 3, 8}),
+    "test_adequacy_verifier": frozenset({1, 3, 7, 8}),
+    "triage_build_prompt": frozenset({1, 3, 4, 7}),
+    "triage_decomposition": frozenset({1, 3, 4, 7, 8}),
+}
+
+
+@dataclass(frozen=True)
+class PromptRegression:
+    """One prompt that gained a failing criterion, or stopped rendering."""
+
+    prompt: str
+    new_fails: frozenset[int]
+    resolved: frozenset[int]
+    unrenderable: bool = False
+
+
+def per_prompt_scores() -> dict[str, frozenset[int]]:
+    """Prompt name -> currently failing criterion numbers.
+
+    A prompt whose fixture no longer renders is omitted, which
+    :func:`prompt_regressions` reports as a regression rather than silently
+    dropping from the scored set.
+    """
+    audit = _load_audit_module()
+    out: dict[str, frozenset[int]] = {}
+    for target in audit.PROMPT_REGISTRY:
+        if target.unrenderable:
+            continue
+        try:
+            rendered = audit.render_target(target)
+        except Exception:  # pragma: no cover - surfaced as unrenderable below
+            continue
+        card = audit.score(rendered)
+        out[target.name] = frozenset(
+            k for k, verdict in card.scores.items() if verdict == "Fail"
+        )
+    return out
+
+
+def prompt_regressions() -> list[PromptRegression]:
+    """Prompts that gained a failing criterion, or stopped rendering.
+
+    Improvements are reported too (``resolved``) so the baseline can be tightened
+    deliberately rather than drifting loose.
+    """
+    current = per_prompt_scores()
+    out: list[PromptRegression] = []
+    for name, baseline in sorted(PROMPT_BASELINE.items()):
+        if name not in current:
+            out.append(
+                PromptRegression(name, frozenset(), frozenset(), unrenderable=True)
+            )
+            continue
+        now = current[name]
+        gained = now - baseline
+        if gained:
+            out.append(PromptRegression(name, gained, baseline - now))
+    return out
+
+
 def _load_audit_module():
     """Import scripts/audit_prompts.py without requiring it on sys.path."""
     spec = importlib.util.spec_from_file_location("_audit_prompts", _AUDIT)
