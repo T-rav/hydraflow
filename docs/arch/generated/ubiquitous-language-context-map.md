@@ -57,6 +57,7 @@ graph LR
     disturbancedampenerloop["DisturbanceDampenerLoop<br/><i>loop</i>"]
     error["Error<br/><i>control_role</i>"]
     eventbus["EventBus<br/><i>service</i>"]
+    eventtype["EventType<br/><i>value_object</i>"]
     githubdatacache["GitHubDataCache<br/><i>service</i>"]
     governor["Governor<br/><i>control_role</i>"]
     humansteeringloop["HumanSteeringLoop<br/><i>control_role</i>"]
@@ -90,6 +91,7 @@ graph LR
   actuator -->|depends_on| hydraflowconfig
   actuator -->|depends_on| tribalwikistore
   actuator -->|depends_on| subprocessrunner
+  actuator -->|depends_on| eventtype
   adrcouncilreviewer -->|depends_on| eventbus
   adrcouncilreviewer -->|depends_on| hydraflowconfig
   adrcouncilreviewer -->|depends_on| credentials
@@ -127,11 +129,13 @@ graph LR
   agentrunner -->|implements| actuator
   agentrunner -->|depends_on| tribalwikistore
   agentrunner -->|depends_on| subprocessrunner
+  agentrunner -->|depends_on| eventtype
   basebackgroundloop -->|depends_on| eventbus
   basebackgroundloop -->|depends_on| hydraflowconfig
   basebackgroundloop -->|depends_on| fitnesscontext
   basebackgroundloop -->|depends_on| loopfitness
   basebackgroundloop -->|depends_on| creditexhaustederror
+  basebackgroundloop -->|depends_on| eventtype
   botprport -->|depends_on| hydraflowconfig
   botprport -->|depends_on| basebackgroundloop
   botprport -->|depends_on| governor
@@ -156,6 +160,7 @@ graph LR
   controller -->|depends_on| eventbus
   controller -->|depends_on| hydraflowconfig
   controller -->|depends_on| task
+  controller -->|depends_on| eventtype
   corpuslearningloop -->|depends_on| basebackgroundloop
   corpuslearningloop -->|depends_on| hydraflowconfig
   corpuslearningloop -->|depends_on| statetracker
@@ -192,6 +197,7 @@ graph LR
   dependabotmergeloop -->|depends_on| dedupstore
   dependabotmergeloop -->|depends_on| githubdatacache
   dependabotmergeloop -->|depends_on| reviewverdict
+  dependabotmergeloop -->|depends_on| eventtype
   diagnosticloop -->|depends_on| basebackgroundloop
   diagnosticloop -->|depends_on| prport
   diagnosticloop -->|depends_on| hydraflowconfig
@@ -200,6 +206,7 @@ graph LR
   diagnosticloop -->|depends_on| governor
   diagnosticloop -->|depends_on| dedupstore
   diagnosticloop -->|depends_on| creditexhaustederror
+  diagnosticloop -->|depends_on| eventtype
   diagramloop -->|depends_on| basebackgroundloop
   diagramloop -->|depends_on| hydraflowconfig
   diagramloop -->|implements| basebackgroundloop
@@ -255,6 +262,7 @@ graph LR
   fitnessscorecardloop -->|depends_on| fitnesscontext
   fitnessscorecardloop -->|depends_on| loopfitness
   fitnessscorecardloop -->|implements| basebackgroundloop
+  fitnessscorecardloop -->|depends_on| eventtype
   flaketrackerloop -->|depends_on| hydraflowconfig
   flaketrackerloop -->|depends_on| basebackgroundloop
   flaketrackerloop -->|depends_on| statetracker
@@ -283,6 +291,7 @@ graph LR
   governor -->|depends_on| fitnesscontext
   governor -->|depends_on| loopfitness
   governor -->|depends_on| creditexhaustederror
+  governor -->|depends_on| eventtype
   hitlitem -->|depends_on| githubcacheloop
   hitlitem -->|depends_on| prport
   hitlitem -->|depends_on| prmanager
@@ -313,6 +322,7 @@ graph LR
   mergestatewatcherloop -->|implements| basebackgroundloop
   mergestatewatcherloop -->|depends_on| governor
   mergestatewatcherloop -->|depends_on| dedupstore
+  mergestatewatcherloop -->|depends_on| eventtype
   observabilityport -->|depends_on| task
   observabilityport -->|depends_on| hitlitem
   observabilityport -->|depends_on| reviewverdict
@@ -326,6 +336,7 @@ graph LR
   prmanager -->|depends_on| hydraflowconfig
   prmanager -->|depends_on| hitlitem
   prmanager -->|depends_on| reviewverdict
+  prmanager -->|depends_on| eventtype
   prport -->|depends_on| task
   prport -->|depends_on| hitlitem
   prport -->|depends_on| reviewverdict
@@ -352,6 +363,7 @@ graph LR
   reportissueloop -->|depends_on| subprocessrunner
   reportissueloop -->|depends_on| prmanager
   reportissueloop -->|depends_on| dedupstore
+  reportissueloop -->|depends_on| eventtype
   repowikistore -->|depends_on| dedupstore
   reviewinsightstoreport -->|depends_on| task
   reviewinsightstoreport -->|depends_on| hitlitem
@@ -374,6 +386,7 @@ graph LR
   set_point -->|depends_on| eventbus
   set_point -->|depends_on| hydraflowconfig
   set_point -->|depends_on| task
+  set_point -->|depends_on| eventtype
   skillpromptevalloop -->|depends_on| basebackgroundloop
   skillpromptevalloop -->|depends_on| hydraflowconfig
   skillpromptevalloop -->|depends_on| statetracker

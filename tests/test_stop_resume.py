@@ -468,7 +468,9 @@ class TestWorktreePreservation:
 
         phase._reviewers.review = AsyncMock(side_effect=_review_and_stop)
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
-        phase._prs.get_pr_diff_names = AsyncMock(return_value=[])
+        # Product-source path so the now-default close-verification reconciler
+        # treats the merge as a legitimate close (no reopen) rather than crashing.
+        phase._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
         phase._prs.push_branch = AsyncMock(return_value=True)
         phase._prs.remove_label = AsyncMock()
         phase._prs.add_labels = AsyncMock()
@@ -505,7 +507,9 @@ class TestWorktreePreservation:
         result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
         phase._reviewers.review = AsyncMock(return_value=result)
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
-        phase._prs.get_pr_diff_names = AsyncMock(return_value=[])
+        # Product-source path so the now-default close-verification reconciler
+        # treats the merge as a legitimate close (no reopen) rather than crashing.
+        phase._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
         phase._prs.push_branch = AsyncMock(return_value=True)
 
         async def _merge_and_stop(_pr_number: int) -> bool:
@@ -542,7 +546,9 @@ class TestWorktreePreservation:
         result = ReviewResultFactory.create(verdict=ReviewVerdict.APPROVE)
         phase._reviewers.review = AsyncMock(return_value=result)
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
-        phase._prs.get_pr_diff_names = AsyncMock(return_value=[])
+        # Product-source path so the now-default close-verification reconciler
+        # treats the merge as a legitimate close (no reopen) rather than crashing.
+        phase._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
         phase._prs.push_branch = AsyncMock(return_value=True)
         phase._prs.merge_pr = AsyncMock(return_value=True)
         phase._prs.remove_label = AsyncMock()
@@ -596,7 +602,9 @@ class TestReviewPhaseStop:
 
         phase._reviewers.review = AsyncMock(side_effect=_review_side_effect)
         phase._prs.get_pr_diff = AsyncMock(return_value="diff text")
-        phase._prs.get_pr_diff_names = AsyncMock(return_value=[])
+        # Product-source path so the now-default close-verification reconciler
+        # treats the merge as a legitimate close (no reopen) rather than crashing.
+        phase._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
         phase._prs.push_branch = AsyncMock(return_value=True)
         phase._prs.merge_pr = AsyncMock(return_value=True)
         phase._prs.remove_label = AsyncMock()

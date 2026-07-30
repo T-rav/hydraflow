@@ -125,7 +125,14 @@ def _make_dedup() -> Any:
     return dedup
 
 
-def _build_loop(tmp_path: Path, repo: Path, github: Any, state: Any) -> Any:
+def _build_loop(
+    tmp_path: Path,
+    repo: Path,
+    github: Any,
+    state: Any,
+    *,
+    auto_diagnose: bool = False,
+) -> Any:
     from escape_ledger_loop import EscapeLedgerLoop
     from tests.helpers import make_bg_loop_deps
 
@@ -133,6 +140,7 @@ def _build_loop(tmp_path: Path, repo: Path, github: Any, state: Any) -> Any:
     object.__setattr__(bg.config, "repo_root", repo)
     object.__setattr__(bg.config, "data_root", tmp_path / "data")
     object.__setattr__(bg.config, "escape_ledger_loop_enabled", True)
+    object.__setattr__(bg.config, "escape_ledger_auto_diagnose_enabled", auto_diagnose)
     return EscapeLedgerLoop(
         config=bg.config,
         pr_manager=github,
@@ -140,6 +148,36 @@ def _build_loop(tmp_path: Path, repo: Path, github: Any, state: Any) -> Any:
         dedup=_make_dedup(),
         deps=bg.loop_deps,
     )
+
+
+def _seed_bug_fix_with_regression(repo: Path, issue: int) -> tuple[str, str]:
+    """A regression pin lands first, THEN a `fix: … fixes #N` commit.
+
+    The regression commit is BEFORE the analysed base, so the range holds only
+    the low-confidence bug-issue fix — but the pin is in HEAD's tree for the
+    auto-diagnose `git grep`. Returns (base_sha, head_sha).
+    """
+    reg = repo / "tests" / "regressions"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / f"test_bug_{issue}.py").write_text(
+        f"# regression pin for #{issue}\ndef test_bug(): pass\n"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", f"test: pin regression for #{issue}")
+    base = _head(repo)
+    (repo / "src" / "crash.py").write_text("def crash():\n    return 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", f"fix: resolve crash (fixes #{issue})")
+    return base, _head(repo)
+
+
+def _seed_bug_fix_no_regression(repo: Path, issue: int) -> tuple[str, str]:
+    """A `fix: … fixes #N` commit with NO regression pin — inconclusive."""
+    base = _head(repo)
+    (repo / "src" / "widget.py").write_text("def widget():\n    return 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", f"fix: repair widget (fixes #{issue})")
+    return base, _head(repo)
 
 
 class TestEscapeLedgerScenario:
@@ -413,3 +451,114 @@ class TestEscapeLedgerScenario:
 
         issue = github._issues[link.issue_number]
         assert issue.state == "closed"
+
+    async def test_confidence_only_resolution_closes_low_confidence_surfaced_issue(
+        self, tmp_path: Path
+    ) -> None:
+        # #10747: an operator confirming attribution confidence ALONE (via the
+        # operator service, no --encoded-as) must answer the low-confidence
+        # surface end-to-end — the exact HITL path this issue's finding named.
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        state = _make_state(_head(repo))
+        loop = _build_loop(tmp_path, repo, github, state)
+
+        from datetime import UTC, datetime
+
+        from escape.ledger import EscapeLedger
+        from escape.models import EscapeRecord
+        from escape.resolve import resolve_escape
+        from escape.surfaces import SurfacedIssueLedger
+
+        fresh = datetime.now(UTC).isoformat()  # not aged => only the LOW surface
+        ledger = EscapeLedger(loop._ledger_path)
+        ledger.append(
+            EscapeRecord(
+                id="hotfix:4702cf9",
+                detected_at=fresh,
+                detection_source="hotfix",
+                detection_ref="4702cf9",
+                originating_pr=None,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="blame-intersect",
+                attribution_confidence="low",
+                encoded_as="none-yet",
+                notes="",
+            )
+        )
+
+        filed, _capped = await loop._surface_findings()
+        assert filed == 1
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert link.reason == "low-confidence"
+
+        # Operator confirms confidence via the service, WITHOUT naming an
+        # encoding — the encoding is still unknown.
+        resolved = resolve_escape(
+            "hotfix:4702cf9",
+            ledger_path=loop._ledger_path,
+            attribution_confidence="medium",
+            notes="attribution confirmed via blame",
+        )
+        assert resolved.encoded_as == "none-yet"
+
+        result = await loop._do_work()
+        assert result["status"] == "no_new_commits"
+        assert result["closed"] == 1
+
+        issue = github._issues[link.issue_number]
+        assert issue.state == "closed"
+
+
+class TestEscapeAutoDiagnoseScenario:
+    """ADR-0115: the machine auto-diagnose fires before the human surface."""
+
+    async def test_real_and_encoded_escape_is_auto_resolved_not_filed(
+        self, tmp_path: Path
+    ) -> None:
+        # End-to-end over FakeGitHub + a real repo: a low-confidence bug-issue
+        # escape whose bug is already regression-encoded is auto-resolved (high
+        # confidence, encoded-as regression-test) and NO HITL issue is filed.
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base_sha, head_sha = _seed_bug_fix_with_regression(repo, 123)
+
+        state = _make_state(base_sha)
+        loop = _build_loop(tmp_path, repo, github, state, auto_diagnose=True)
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ok"
+        assert result["escapes_recorded"] == 1
+        assert result["filed"] == 0, "machine-resolvable escape must not reach a human"
+        assert state._cursor["sha"] == head_sha
+
+        from escape.ledger import EscapeLedger
+
+        resolved = EscapeLedger(loop._ledger_path).read_latest()[0]
+        assert resolved.attribution_confidence == "high"
+        assert resolved.encoded_as == "regression-test"
+
+    async def test_inconclusive_escape_still_files_the_human_surface(
+        self, tmp_path: Path
+    ) -> None:
+        # No regression encoding and an unknown referenced issue → the machine
+        # cannot resolve or dismiss, so the human surface IS filed (the genuine
+        # escalation path is preserved).
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base_sha, _head_sha = _seed_bug_fix_no_regression(repo, 777)
+
+        state = _make_state(base_sha)
+        loop = _build_loop(tmp_path, repo, github, state, auto_diagnose=True)
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ok"
+        assert result["escapes_recorded"] == 1
+        assert result["filed"] == 1, "inconclusive escape must still reach a human"

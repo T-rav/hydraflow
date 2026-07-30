@@ -53,6 +53,35 @@ class ModelRate:
     output_cost_per_million: float
     cache_write_cost_per_million: float
     cache_read_cost_per_million: float
+    # Whether this backend's reported ``input_tokens`` INCLUDES the cached
+    # (cache-read/cache-creation) tokens. Anthropic reports ``input_tokens``
+    # EXCLUDING cache, so the default is False and Claude accounting is
+    # unchanged. z.ai / GLM reports OpenAI-style ``prompt_tokens`` that
+    # INCLUDE the cached tokens (with the cached subset in
+    # ``prompt_tokens_details.cached_tokens``), so its input count must have
+    # the cache subtracted before billing to avoid charging cached tokens
+    # twice — once at the full input rate and again at the cache rate (#10761).
+    input_includes_cache: bool = False
+
+    def peak_rate_per_million(self) -> float:
+        """Return the largest of this model's four per-million token rates.
+
+        This is the plausibility *ceiling* used by the cost-plausibility guard
+        (#10775). Because a record's effective per-token cost is a
+        token-weighted average of these same four rates, a correctly billed
+        record's effective rate can NEVER exceed the peak — regardless of
+        workload mix or backend usage semantics. An effective rate that
+        exceeds the peak therefore means cost was billed against tokens absent
+        from the token totals (double-count / rate-scale error). Peak — not a
+        mix-blend — is used precisely because it is the one reference immune to
+        false positives from an expensive output-heavy run.
+        """
+        return max(
+            self.input_cost_per_million,
+            self.output_cost_per_million,
+            self.cache_write_cost_per_million,
+            self.cache_read_cost_per_million,
+        )
 
     def estimate_cost(
         self,
@@ -61,9 +90,22 @@ class ModelRate:
         cache_write_tokens: int = 0,
         cache_read_tokens: int = 0,
     ) -> float:
-        """Return estimated cost in USD for the given token counts."""
+        """Return estimated cost in USD for the given token counts.
+
+        For backends where ``input_includes_cache`` is set (z.ai/GLM,
+        OpenAI ``prompt_tokens`` semantics), the cached tokens are subtracted
+        from the billable input so they are charged ONCE — at the cache rate —
+        instead of both at the full input rate and the cache rate (#10761).
+        Anthropic/Claude (``input_includes_cache`` False) is billed as-is,
+        because its ``input_tokens`` already excludes cache.
+        """
+        billable_input = input_tokens
+        if self.input_includes_cache:
+            billable_input = max(
+                0, input_tokens - cache_read_tokens - cache_write_tokens
+            )
         return (
-            self.input_cost_per_million * input_tokens
+            self.input_cost_per_million * billable_input
             + self.output_cost_per_million * output_tokens
             + self.cache_write_cost_per_million * cache_write_tokens
             + self.cache_read_cost_per_million * cache_read_tokens
@@ -121,6 +163,7 @@ class ModelPricingTable:
                 cache_read_cost_per_million=float(
                     entry.get("cache_read_cost_per_million", 0.0)
                 ),
+                input_includes_cache=bool(entry.get("input_includes_cache", False)),
             )
             self._rates[model_id] = rate
             for alias in entry.get("aliases", []):

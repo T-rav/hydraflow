@@ -2,16 +2,20 @@
  * OperatorConsole — the pipeline-centric operator shell (epic #10556, Task 2).
  *
  * This is the layout container for the new operator console. It owns five
- * slots — header, pipeline (hero), detail, vitals, drawer — consumes the
- * existing WebSocket state via `useHydraFlowSocket` and turns it into the four
- * Task-1 view models (`toPipeline` / `toTranscript` / `toVitals` /
- * `toActivityFeed`), and threads the URL-synced selection from
- * `useOperatorSelection` down to its children.
+ * slots — header, pipeline (hero), detail, vitals, and a full-width bottom
+ * timeline — consumes the existing WebSocket state via `useHydraFlowSocket` and
+ * turns it into the Task-1 view models (`toPipeline` / `toTranscript` /
+ * `toVitals` / `toTimeline`), and threads the URL-synced selection from
+ * `useOperatorSelection` down to its children. The old bottom Activity drawer was
+ * removed (#11); its reclaimed space now hosts the phase-container timeline
+ * (`TimelinePanel`, feat/operator-timeline), a vertical timeline of pipeline
+ * phases with events + PR/commit diffs folded inside each phase. The
+ * `ActivityDrawer` component still exists but is no longer mounted here.
  *
  * Task 2 ships the shell only: the real child components (PipelineRail,
- * ItemWorkspace, VitalsCard, ActivityDrawer, ConsoleHeader) land in Tasks 3-9,
- * so each slot renders a small, prop-consuming placeholder for now. Nothing is
- * wired into the live dashboard yet — the behind-a-flag cutover is Task 10.
+ * ItemWorkspace, VitalsCard, ConsoleHeader) land in Tasks 3-9, so each slot
+ * renders a small, prop-consuming placeholder for now. Nothing is wired into
+ * the live dashboard yet — the behind-a-flag cutover is Task 10.
  *
  * `OperatorConsole` (default) binds the real socket hook. `OperatorConsoleView`
  * (named) is the presentational shell that takes an injected `socket` — the
@@ -24,7 +28,7 @@
  * `useTokens()` — no inline literals, no hardcoded hex.
  */
 
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import { useHydraFlowSocket } from '../hooks/useHydraFlowSocket'
 import { ThemeProvider, useTokens } from '../styles/primitives'
 import { useThemeMode } from './useThemeMode'
@@ -33,16 +37,21 @@ import { ConsoleHeader } from './ConsoleHeader'
 import { PipelineRail } from './PipelineRail'
 import { toPipeline } from './model/pipeline'
 import { toTranscript } from './model/transcript'
-import { toVitals } from './model/vitals'
-import { toActivityFeed } from './model/activity'
+import { toTimeline } from './model/timeline'
+import { toVitals, factoryUptimeLabel } from './model/vitals'
 import { toLoops } from './model/loops'
+import { toReleasePromotion } from './model/release'
+import { toSettingsSummary } from './model/settingsSummary'
 import { VitalsCard } from './VitalsCard'
 import { LoopsPanel } from './LoopsPanel'
-import { ActivityDrawer } from './ActivityDrawer'
+import { ReleasePromotionStrip } from './ReleasePromotionStrip'
+import { SettingsSummary } from './SettingsSummary'
+import { SettingsDrawer } from './SettingsDrawer'
 import { RepoOverview, buildRepoSummaries } from './RepoOverview'
 import { RepoSwitcher } from './RepoSwitcher'
 import { ItemWorkspace } from './ItemWorkspace'
 import { ActiveGrid } from './ActiveGrid'
+import { TimelinePanel } from './TimelinePanel'
 import { IdleState } from './states/IdleState'
 import { PausedState } from './states/PausedState'
 import { DisconnectedBanner } from './states/DisconnectedBanner'
@@ -70,16 +79,24 @@ function makeStyles(t) {
       boxSizing: 'border-box',
     },
     pausedWrap: { padding: `${t.space.md}px ${t.space.md}px 0` },
-    grid: {
+    // The Activity drawer row was removed (#11); its reclaimed bottom space now
+    // hosts the full-width phase-container timeline (feat/operator-timeline),
+    // spanning BOTH columns beneath the detail/vitals rows. In focus mode the
+    // detail area spans both columns full-width (#8) — the vitals column then only
+    // rides the pipeline row; every other mode keeps vitals spanning the pipeline
+    // + detail rows. The timeline row is always full-width at the bottom.
+    grid: (focusFull) => ({
       display: 'grid',
       gridTemplateColumns: 'minmax(0, 1fr) 280px',
-      gridTemplateAreas: '"header header" "pipeline vitals" "detail vitals" "drawer drawer"',
+      gridTemplateAreas: focusFull
+        ? '"header header" "pipeline vitals" "detail detail" "timeline timeline"'
+        : '"header header" "pipeline vitals" "detail vitals" "timeline timeline"',
       gap: t.space.md,
       padding: t.space.md,
       boxSizing: 'border-box',
       flex: 1,
       minHeight: 0,
-    },
+    }),
     slot: (area) => ({ minWidth: 0, gridArea: area }),
     vitalsSlot: { minWidth: 0, gridArea: 'vitals', display: 'flex', flexDirection: 'column', gap: t.space.md },
     switcherWrap: { marginBottom: t.space.sm },
@@ -128,7 +145,7 @@ function ModeToggle({ mode, select, styles }) {
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {} }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now() }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
@@ -145,6 +162,11 @@ export function OperatorConsoleView({ socket = {} }) {
   const multiRepo = repos.length > 1
   const showOverview = multiRepo && repo == null
   const transcript = useMemo(() => toTranscript(events, item), [events, item])
+  // Phase-container timeline (feat/operator-timeline): the event stream folded
+  // into chronological phase cards. `now` is injected so the open phase's
+  // duration is deterministic; `item` scopes it to the drilled issue (all active
+  // issues when nothing is drilled in).
+  const timeline = useMemo(() => toTimeline(events, { item, now }), [events, item, now])
   const vitals = useMemo(
     () => toVitals(events, {
       stagingPromotion: socket.stagingPromotion,
@@ -154,13 +176,27 @@ export function OperatorConsoleView({ socket = {} }) {
     }),
     [events, socket.stagingPromotion, socket.backgroundWorkers],
   )
-  const activity = useMemo(() => toActivityFeed(events), [events])
+  // Factory runtime (#12): a compact uptime label derived from the socket's best
+  // start signal (active session's started_at, else a session id that encodes
+  // its start), measured against the injected `now`. '' when no start signal
+  // exists so the header renders nothing.
+  const uptime = useMemo(() => factoryUptimeLabel(socket, now), [socket, now])
   // All-loops quick view: the reducer's deduped backgroundWorkers slice for the
   // per-loop snapshot, plus the raw events for restart/error correlation.
   const loops = useMemo(
     () => toLoops(socket.backgroundWorkers, { events }),
     [socket.backgroundWorkers, events],
   )
+  // Release Promotion (staging<->main, ADR-0042) — a distinct concern from the
+  // workflow pipeline and the background loops; its own strip near the pipeline.
+  const release = useMemo(
+    () => toReleasePromotion(socket.stagingPromotion, { backgroundWorkers: socket.backgroundWorkers }),
+    [socket.stagingPromotion, socket.backgroundWorkers],
+  )
+  // Settings at-a-glance (key runtime config) + a drawer that reuses the classic
+  // System tab for the full configuration surface.
+  const settings = useMemo(() => toSettingsSummary(socket.config), [socket.config])
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // --- State-screen signals (Task 10) --------------------------------------
   // `disconnected` is surfaced additively by useHydraFlowSocket (connected===false).
@@ -177,6 +213,10 @@ export function OperatorConsoleView({ socket = {} }) {
   // An idle repo has no active work and nothing drilled into — show the calm
   // idle screen in the detail area (the hero/vitals stay visible).
   const idle = activeCount === 0 && item == null && !showOverview
+  // Focus mode (a single ItemWorkspace) claims the full detail width (#8): the
+  // detail area spans both grid columns. All-active / overview / idle keep the
+  // vitals column beside the detail row.
+  const focusFull = !showOverview && !idle && mode !== 'all-active'
   const onResume = socket.clearCreditPause || socket.startOrchestrator
 
   return (
@@ -191,12 +231,13 @@ export function OperatorConsoleView({ socket = {} }) {
         {loading ? (
           <LoadingState />
         ) : (
-          <div style={styles.grid}>
+          <div style={styles.grid(focusFull)}>
             <div data-testid="operator-header-slot" style={styles.slot('header')}>
               <ConsoleHeader
                 breadcrumb={breadcrumb}
                 select={select}
                 vitals={vitals}
+                uptime={uptime}
                 connected={socket.connected}
                 onStart={socket.startOrchestrator}
                 onStop={socket.stopOrchestrator}
@@ -214,13 +255,18 @@ export function OperatorConsoleView({ socket = {} }) {
               ) : (
                 <PipelineRail pipeline={pipeline} select={select} stage={stage} />
               )}
+              {!showOverview && <ReleasePromotionStrip release={release} />}
             </div>
-            <div data-testid="operator-detail-slot" style={styles.slot('detail')}>
+            <div
+              data-testid="operator-detail-slot"
+              data-fullwidth={focusFull ? 'true' : 'false'}
+              style={styles.slot('detail')}
+            >
               <ModeToggle mode={mode} select={select} styles={styles} />
               {idle ? (
                 <IdleState />
               ) : mode === 'all-active' ? (
-                <ActiveGrid pipeline={pipeline} events={events} select={select} />
+                <ActiveGrid pipeline={pipeline} events={events} now={now} select={select} />
               ) : (
                 <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
               )}
@@ -228,12 +274,14 @@ export function OperatorConsoleView({ socket = {} }) {
             <div data-testid="operator-vitals-slot" style={styles.vitalsSlot}>
               <VitalsCard vitals={vitals} />
               <LoopsPanel loops={loops} />
+              <SettingsSummary summary={settings} onOpenSettings={() => setSettingsOpen(true)} />
             </div>
-            <div data-testid="operator-drawer-slot" style={styles.slot('drawer')}>
-              <ActivityDrawer activity={activity} select={select} />
+            <div data-testid="operator-timeline-slot" style={styles.slot('timeline')}>
+              <TimelinePanel timeline={timeline} />
             </div>
           </div>
         )}
+        <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </div>
     </ThemeProvider>
   )

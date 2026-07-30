@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10258
 source_phase: plan
 created_at: 2026-07-22T09:21:49.448712+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Re-verify PR gate state at merge time, not just at plan time

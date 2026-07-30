@@ -13,6 +13,8 @@ targets wrap these with ``PYTHONPATH=src``)::
     python scripts/resolve_escape.py list
     python scripts/resolve_escape.py resolve <escape-id> --encoded-as regression-test \
         --confidence high --notes "pinned by tests/regressions/test_x.py"
+    python scripts/resolve_escape.py resolve <escape-id> --confidence medium \
+        --notes "attribution confirmed, encoding not yet known"
 
 Filesystem-only: it reads and appends the append-only JSONL ledger, no git / gh /
 network. ``--ledger-path`` overrides the default repo-scoped location resolved
@@ -63,9 +65,10 @@ def build_parser() -> argparse.ArgumentParser:
     resolve.add_argument("escape_id", help="The escape id, e.g. 'bug-issue:9196f74'.")
     resolve.add_argument(
         "--encoded-as",
-        required=True,
+        default=None,
         choices=list(VALID_ENCODINGS),
-        help="How the escape was encoded (closes it out).",
+        help="How the escape was encoded (closes it out). Optional if "
+        "--confidence is given instead.",
     )
     resolve.add_argument(
         "--confidence",
@@ -95,7 +98,8 @@ def _ledger_path(raw: str | None) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the CLI; returns a process exit code (0 ok, 2 on operator-input error)."""
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     ledger_path = _ledger_path(args.ledger_path)
 
     if args.command == "list":
@@ -110,6 +114,10 @@ def main(argv: list[str] | None = None) -> int:
                 f"confidence {record.attribution_confidence})"
             )
         return 0
+
+    if args.encoded_as is None and args.confidence is None:
+        # exits 2 — same contract as argparse's own "required" errors.
+        parser.error("resolve requires --encoded-as and/or --confidence")
 
     try:
         record = resolve_escape(

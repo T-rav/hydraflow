@@ -286,5 +286,13 @@ docs/arch/generated/intervention-tally.md
 # (src/second_order_vitals_loop.py) — a data-bearing runtime report, not an
 # arch-regen artifact, mirroring escape-ledger.md above (#10373).
 docs/arch/generated/second-order-vitals.md
+
+# arch.runner --emit writes the VOLATILE regen stamp (wall-clock + HEAD sha)
+# here, keeping the committed docs/arch/.meta.json a deterministic content
+# digest. Gitignored so it never enters a commit and DiagramLoop stops opening
+# a churn PR every interval for unchanged architecture. The live freshness
+# badge (arch.freshness) reads this sidecar, re-emitted fresh on every Pages
+# deploy. See tests/regressions/test_arch_regen_deterministic.py.
+docs/arch/.meta.local.json
 .playwright-mcp/
 audit-*.png

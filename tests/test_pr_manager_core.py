@@ -1806,6 +1806,9 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         created_labels.add(args[create_idx + 1])
 
     assert created_labels == {
+        "P0",  # triage priorities: startup-ensured so a fresh repo has them
+        "P1",
+        "P2",
         "custom-find",
         "custom-plan",
         "custom-ready",

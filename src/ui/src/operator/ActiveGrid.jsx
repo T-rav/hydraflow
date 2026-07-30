@@ -3,24 +3,32 @@
  *
  * Where Focus mode drills a single item into the full `ItemWorkspace`, the
  * all-active mode fans out: a responsive grid of compact live transcripts, one
- * tile per BUILDING item — the pipeline VM's Build (`implement`) stage. Each
- * tile streams that item's own transcript by running the Task-1 `toTranscript`
- * adapter for its id and feeding the rows straight into the Task-4
- * `TranscriptStream` (reuse, don't reimplement the stream). Tiles add and remove
- * as the building set changes, so the grid always mirrors what the factory is
- * actively working right now.
+ * tile per item the factory is actively working — across EVERY workflow stage
+ * (triage → plan → build → review), not just Build. Each tile streams that
+ * item's own transcript by running the Task-1 `toTranscript` adapter for its id
+ * and feeding the rows straight into the Task-4 `TranscriptStream` (reuse, don't
+ * reimplement the stream). Tiles add and remove as the active set changes, so
+ * the grid always mirrors what the factory is working right now, and each tile
+ * shows how long that item has been running (issue #7 / #13).
  *
  * Clicking a tile header drills back into Focus on that item (switches
  * `mode` -> 'focus' and selects the item) so the grid doubles as a picker.
  *
- * Presentation only — no socket, no side effects. Phase-2 (Task 12): tiles use
- * the `Card` primitive and every colour / space value resolves from
- * `useTokens()`, so light + dark fall out of the console's ThemeProvider mode.
+ * Presentation only — no socket, no side effects. Stage-completeness and the
+ * relative-duration derivation live in `model/pipeline.js`
+ * (`activeWorkflowItems`, `stageDurationLabel`) so this component stays a pure
+ * view. The clock is injected via the `now` prop (defaulting to `Date.now()` at
+ * render) — the model formatter never reads the wall clock — so durations are
+ * deterministic under test. Phase-2 (Task 12): tiles use the `Card` primitive
+ * and every colour / space value resolves from `useTokens()`, so light + dark
+ * fall out of the console's ThemeProvider mode.
  */
 
 import React, { useMemo } from 'react'
 import { useTokens, Card, Text } from '../styles/primitives'
 import { toTranscript } from './model/transcript'
+import { activeWorkflowItems, stageColorKey, stageDurationLabel, stageTransitionTs } from './model/pipeline'
+import { PULSE_ANIMATION } from '../constants'
 import { TranscriptStream } from './TranscriptStream'
 
 /**
@@ -53,11 +61,19 @@ function makeStyles(t) {
       padding: t.space.sm,
       boxSizing: 'border-box',
     },
+    headerRow: {
+      display: 'flex',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: t.space.xs,
+      minWidth: 0,
+    },
     header: {
       display: 'flex',
       alignItems: 'baseline',
       gap: t.space.xs,
       minWidth: 0,
+      flex: '1 1 auto',
       border: 'none',
       background: 'none',
       color: 'inherit',
@@ -65,8 +81,27 @@ function makeStyles(t) {
       textAlign: 'left',
       cursor: 'pointer',
       padding: 0,
-      width: '100%',
     },
+    meta: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: t.space.xs,
+      flex: '0 0 auto',
+    },
+    // The tile's live indicator (#17/#18): a dot painted in the item's STAGE
+    // colour (classic palette) replacing the old generic green "LIVE" pulse. An
+    // unknown stage falls back to the neutral muted tone. The dot BLINKS (shared
+    // stream-pulse) while the item is actively working, and sits SOLID while it
+    // is merely queued in the stage (#18).
+    stageDot: (stage, working) => ({
+      display: 'inline-block',
+      width: 7,
+      height: 7,
+      borderRadius: t.radius.pill,
+      flexShrink: 0,
+      background: t.color[stageColorKey(stage)] ?? t.color.textMuted,
+      ...(working ? { animation: PULSE_ANIMATION } : {}),
+    }),
     title: {
       overflow: 'hidden',
       textOverflow: 'ellipsis',
@@ -78,11 +113,34 @@ function makeStyles(t) {
 }
 
 /**
- * A single compact tile: an item header + its live transcript stream.
- * @param {{ item: {id, title}, events: Array, select?: Function, styles: object }} props
+ * A single compact tile: an item header (id + title, a stage-coloured live dot,
+ * the stage label, and a `stage / total` running duration) plus its live
+ * transcript stream.
+ *
+ * The item has no timestamp of its own (the pipeline snapshot's `PipelineIssue`
+ * carries none), so its durations are derived from the item's own event stream:
+ *   - TOTAL = now − the earliest `toTranscript` row (first-seen activity);
+ *   - STAGE = now − the most recent stage transition, inferred from the rows'
+ *     `meta.source` via `stageTransitionTs`; when no transition is observed the
+ *     tile shows just the total (#17).
+ * `now` is injected so the durations are deterministic under test. The dot takes
+ * the item's stage colour (classic palette), replacing the old generic "LIVE".
+ *
+ * @param {{ item: {id, title, stage?, stageLabel?}, events: Array, now: number, select?: Function, styles: object }} props
  */
-function ActiveTile({ item, events, select, styles }) {
+function ActiveTile({ item, events, now, select, styles }) {
   const rows = useMemo(() => toTranscript(events, item.id), [events, item.id])
+  // Rows are oldest-first; the first row's ts is the item's start-of-activity.
+  const startTs = rows.length > 0 ? rows[0].ts : null
+  const totalDuration = stageDurationLabel(startTs, now)
+  // Stage duration: elapsed since the most recent observed stage transition.
+  // Null (single observed stage) → fall back to just the total.
+  const stageTs = stageTransitionTs(rows)
+  const stageDuration = stageTs != null ? stageDurationLabel(stageTs, now) : ''
+  const durationText =
+    stageDuration && stageDuration !== totalDuration
+      ? `${stageDuration} / ${totalDuration}`
+      : totalDuration
 
   const onFocus = () => {
     // Jump back to Focus on this item — mode first (orthogonal to depth), then
@@ -94,19 +152,42 @@ function ActiveTile({ item, events, select, styles }) {
 
   return (
     <Card as="div" data-testid={`active-tile-${item.id}`} data-item-id={item.id} style={styles.tile}>
-      <button
-        type="button"
-        data-testid={`active-tile-header-${item.id}`}
-        onClick={onFocus}
-        style={styles.header}
-        title="Focus this item"
-      >
-        <Text as="span" size="md" weight="bold" tone="bright">#{item.id}</Text>
-        {item.title != null && item.title !== '' && (
-          <Text as="span" size="sm" tone="muted" style={styles.title}>{item.title}</Text>
-        )}
-      </button>
-      <TranscriptStream rows={rows} active />
+      <div style={styles.headerRow}>
+        <button
+          type="button"
+          data-testid={`active-tile-header-${item.id}`}
+          onClick={onFocus}
+          style={styles.header}
+          title="Focus this item"
+        >
+          <Text as="span" size="md" weight="bold" tone="bright">#{item.id}</Text>
+          {item.title != null && item.title !== '' && (
+            <Text as="span" size="sm" tone="muted" style={styles.title}>{item.title}</Text>
+          )}
+        </button>
+        <div style={styles.meta}>
+          <span
+            data-testid={`active-stage-dot-${item.id}`}
+            data-stage-color={stageColorKey(item.stage) ?? ''}
+            data-working={item.status === 'active'}
+            aria-hidden="true"
+            style={styles.stageDot(item.stage, item.status === 'active')}
+          />
+          {item.stageLabel != null && item.stageLabel !== '' && (
+            <Text as="span" size="xs" tone="muted" uppercase data-testid={`active-stage-${item.id}`}>
+              {item.stageLabel}
+            </Text>
+          )}
+          {durationText !== '' && (
+            <Text as="span" size="xs" tone="muted" data-testid={`active-duration-${item.id}`}>
+              {durationText}
+            </Text>
+          )}
+        </div>
+      </div>
+      {/* The tile header now owns the live/stage indicator (#17), so the stream's
+          own generic green "Live" pulse is suppressed to avoid a duplicate. */}
+      <TranscriptStream rows={rows} active={false} />
     </Card>
   )
 }
@@ -115,23 +196,33 @@ function ActiveTile({ item, events, select, styles }) {
  * @param {{
  *   pipeline?: { stages?: Array },
  *   events?: Array,
+ *   now?: number,
  *   select?: Function,
  * }} props
  */
-export function ActiveGrid({ pipeline, events = [], select }) {
+export function ActiveGrid({ pipeline, events = [], now = Date.now(), select }) {
   const t = useTokens()
   const styles = makeStyles(t)
-  const items = useMemo(() => buildingItemsOf(pipeline), [pipeline])
+  // Every actively-worked item across the workflow stages (triage → plan →
+  // build → review), not just the Build stage — issue #13.
+  const items = useMemo(() => activeWorkflowItems(pipeline), [pipeline])
 
   return (
     <div data-testid="active-grid" style={styles.grid}>
       {items.length === 0 ? (
         <Text as="div" size="sm" tone="muted" data-testid="active-grid-empty" style={styles.empty}>
-          Nothing building right now.
+          Nothing active right now.
         </Text>
       ) : (
         items.map(item => (
-          <ActiveTile key={item.id} styles={styles} item={item} events={events} select={select} />
+          <ActiveTile
+            key={`${item.stage}-${item.id}`}
+            styles={styles}
+            item={item}
+            events={events}
+            now={now}
+            select={select}
+          />
         ))
       )}
     </div>

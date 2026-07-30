@@ -387,6 +387,22 @@ class TestEscapeLedger:
         assert resolution.notes == "pending human review"
         assert resolution.attribution_confidence == "low"
 
+    def test_append_resolution_confidence_only_carries_encoded_as_forward(
+        self, tmp_path: Path
+    ) -> None:
+        # A human may confirm attribution confidence without naming an
+        # encoding — encoded_as must carry forward untouched (#10747).
+        ledger = EscapeLedger(tmp_path / "escape_ledger.jsonl")
+        ledger.append(_record("bug-issue:x", confidence="low", encoded_as="none-yet"))
+
+        resolution = ledger.append_resolution(
+            "bug-issue:x", attribution_confidence="medium"
+        )
+
+        assert resolution is not None
+        assert resolution.attribution_confidence == "medium"
+        assert resolution.encoded_as == "none-yet"
+
     def test_append_resolution_can_override_confidence_and_notes(
         self, tmp_path: Path
     ) -> None:

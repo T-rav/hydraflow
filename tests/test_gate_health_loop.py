@@ -435,3 +435,32 @@ class TestSuspectedHangLoopWiring:
 
         assert result["filed"] == 0
         prs.create_issue.assert_not_awaited()
+
+
+class TestGateHealthPerTickCap:
+    @pytest.mark.asyncio
+    async def test_overflow_folds_into_one_summary(self, tmp_path: Path) -> None:
+        """#10777: >cap findings file `cap` issues + ONE summary issue."""
+        loop, prs = _make_loop(tmp_path)
+        cap = loop._config.gate_health_max_issues_per_tick
+        findings = [
+            {
+                "kind": "born_broken",
+                "check": f"Check-{i}",
+                "failures": 5,
+                "first_seen": "2026-07-01T00:00:00Z",
+                "last_seen": "2026-07-19T00:00:00Z",
+            }
+            for i in range(cap + 2)
+        ]
+
+        filed = await loop._file_findings(findings)
+
+        assert prs.create_issue.await_count == cap + 1
+        assert filed == cap + 1
+        summaries = [
+            c.args[0]
+            for c in prs.create_issue.await_args_list
+            if "over per-tick filing cap" in c.args[0]
+        ]
+        assert len(summaries) == 1

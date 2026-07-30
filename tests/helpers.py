@@ -309,6 +309,13 @@ class ConfigFactory:
         pr_unstick_batch_size: int = 10,
         max_sessions_per_repo: int = 10,
         execution_mode: Literal["host", "docker"] = "host",
+        # staging_enabled now defaults ON in production (self-repair on by
+        # default, ADR-0042), but the test factory pins it OFF: every existing
+        # ConfigFactory caller was written for single-tier (base_branch()=main),
+        # and MockWorld fake-git has no "staging" ref. Staging behaviour has its
+        # own dedicated tests (test_config_staging_promotion, test_*_base_branch,
+        # test_staging_promotion_loop) that set this True explicitly.
+        staging_enabled: bool = False,
         docker_image: str = "ghcr.io/t-rav/hydraflow-agent:latest",
         docker_cpu_limit: float = 2.0,
         docker_memory_limit: str = "4g",
@@ -587,6 +594,7 @@ class ConfigFactory:
                 pr_unstick_batch_size=pr_unstick_batch_size,
                 max_sessions_per_repo=max_sessions_per_repo,
                 execution_mode=execution_mode,
+                staging_enabled=staging_enabled,
                 docker_image=docker_image,
                 docker_cpu_limit=docker_cpu_limit,
                 docker_memory_limit=docker_memory_limit,
@@ -1037,6 +1045,12 @@ class PipelineHarness:
         self.prs.get_pr_diff = AsyncMock(return_value="diff --git a/x b/x")
         self.prs.get_pr_head_sha = AsyncMock(return_value="abc123")
         self.prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+        # close_verification (default ON) reads commit messages on merge;
+        # well-typed value keeps the reconciler a no-op (product-source diff
+        # above -> is_false_close False) instead of hitting an AsyncMock.
+        self.prs.get_pr_commit_messages = AsyncMock(
+            return_value="Implement feature\n\nCloses #0"
+        )
         self.prs.get_pr_approvers = AsyncMock(return_value=["octocat"])
         self.prs.fetch_code_scanning_alerts = AsyncMock(return_value=[])
         self.prs.wait_for_ci = AsyncMock(return_value=(True, "CI passed"))
@@ -1858,6 +1872,18 @@ def make_review_phase(
     # This applies regardless of default_mocks — every test that reaches
     # an APPROVE verdict needs the gate's det check to pass.
     phase._prs.fetch_code_scanning_alerts = AsyncMock(return_value=None)
+
+    # close_verification_enabled now defaults ON (self-repair on by default):
+    # PostMergeHandler.handle_approved reconciles every close via
+    # reconcile_false_close, which reads the merged PR's changed paths + commit
+    # messages. Default them to well-typed values — a product-source path so
+    # has_fix_delta() is True -> is_false_close() is False -> the reconciler is
+    # a harmless no-op instead of running SKIP_REGRESSION_RE over an AsyncMock.
+    # Applies regardless of default_mocks: any APPROVE->merge test reaches this.
+    phase._prs.get_pr_diff_names = AsyncMock(return_value=["src/app.py"])
+    phase._prs.get_pr_commit_messages = AsyncMock(
+        return_value=f"Implement feature\n\nCloses #{issue_number}"
+    )
 
     if default_mocks:
         from tests.conftest import ReviewResultFactory

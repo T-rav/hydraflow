@@ -6,6 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `ed39cc6` — Merge origin/main into rc/2026-07-30-1058 (promotion sync) *(2026-07-30)*
+- `819e0a4` — feat(ul): edge-proposer — 12 new edges across 12 terms (#10815) (#10815) *(2026-07-30)*
+- `9e01094` — fix(arch): deterministic regen so unchanged architecture produces no diff/PR (#10811) (#10811) *(2026-07-28)*
+- `3de3e09` — feat(ul): term-proposer batch — 1 drafts (#10796) (#10796) *(2026-07-28)*
+- `d496213` — fix(health): opt flake_tracker into tight stall-sweep remediation (#10795) (#10800) (#10800) *(2026-07-28)*
+- `e97750d` — feat(autonomy): auto-diagnose audit + escape surfaces before human (ADR-0115) (#10780) (#10780) *(2026-07-27)*
+- `40615e9` — fix(sandbox): renumber s50_disturbance_dampener_idle_poll to s90 (scenario-number collision) (#10774) (#10774) *(2026-07-27)*
+- `bbde918` — chore(rc): regenerate arch artifacts after promotion merge *(2026-07-27)*
 - `480a496` — Merge origin/main into rc/2026-07-27-1534 (promotion sync) *(2026-07-27)*
 - `211694f` — feat(orchestration): formal give-up window → auto-decompose on plan-retry exhaustion (#10735) (#10745) (#10745) *(2026-07-27)*
 - `37e0845` — feat(ops): honest launchd liveness kernel — boot-SHA/branch guard + orphan reap (#10734) (#10743) (#10743) *(2026-07-27)*
@@ -614,8 +622,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `63e59cc` — chore(cleanup): drop redundant docstrings + comments + section markers (#8458) (#8458) *(2026-05-02)*
 - `4183700` — fix(contracts): break src→tests import — relocate _schema to src/contracts/ (#8457) (#8457) *(2026-05-02)*
 - `14e066b` — fix(subprocess): timeouts on subprocess.run in async loop paths (#8456) (#8456) *(2026-05-02)*
-- `54f940e` — feat(sandbox): catalog s02-s12 + SandboxFailureFixerLoop + 3-trigger CI (PR C of 3) (#8453) (#8453) *(2026-04-28)*
-- `e1e9c91` — feat(sandbox): docker-compose stack + harness + s01 + ADR-0052 (PR B of 3) (#8452) (#8452) *(2026-04-28)*
 
 
 <!-- arch:generated -->

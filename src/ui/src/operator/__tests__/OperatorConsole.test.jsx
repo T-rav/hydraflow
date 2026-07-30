@@ -56,13 +56,14 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('operator-console')).toBeInTheDocument()
   })
 
-  it('renders all five layout slots', () => {
+  it('renders the four layout slots (the bottom drawer was removed, #11)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     expect(screen.getByTestId('operator-header-slot')).toBeInTheDocument()
     expect(screen.getByTestId('operator-pipeline-slot')).toBeInTheDocument()
     expect(screen.getByTestId('operator-detail-slot')).toBeInTheDocument()
     expect(screen.getByTestId('operator-vitals-slot')).toBeInTheDocument()
-    expect(screen.getByTestId('operator-drawer-slot')).toBeInTheDocument()
+    // The Activity drawer slot is gone (#11) — its vertical space is reclaimed.
+    expect(screen.queryByTestId('operator-drawer-slot')).toBeNull()
   })
 
   it('mounts the real ConsoleHeader in the header slot (Task 8)', () => {
@@ -75,9 +76,9 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('item-workspace')).toBeInTheDocument()
   })
 
-  it('mounts the real ActivityDrawer in the drawer slot (Task 7)', () => {
+  it('no longer mounts the ActivityDrawer (removed, #11)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
-    expect(screen.getByTestId('activity-drawer')).toBeInTheDocument()
+    expect(screen.queryByTestId('activity-drawer')).toBeNull()
   })
 
   it('wires the real VitalsCard into the vitals slot (Task 6)', () => {
@@ -93,7 +94,32 @@ describe('OperatorConsoleView — shell', () => {
     })} />)
     const vitalsSlot = screen.getByTestId('operator-vitals-slot')
     expect(vitalsSlot).toContainElement(screen.getByTestId('loops-panel'))
-    expect(screen.getByTestId('loop-row-ci_monitor')).toBeInTheDocument()
+    // Categories start collapsed; the ci_monitor loop flowing through groups it
+    // under its Repo Health category header (rows appear once expanded).
+    expect(screen.getByTestId('loops-category-toggle-repo_health')).toBeInTheDocument()
+  })
+
+  it('mounts the phase timeline in the reclaimed bottom slot (feat/operator-timeline)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    const slot = screen.getByTestId('operator-timeline-slot')
+    expect(slot).toBeInTheDocument()
+    // The timeline panel lives in the full-width bottom slot (PR2 reclaimed the
+    // old drawer space); with no phase_change in the fixture it renders empty.
+    expect(slot).toContainElement(screen.getByTestId('timeline-panel'))
+  })
+
+  it('folds phase_change events into the bottom timeline (a phase container renders)', () => {
+    const socket = makeSocket({
+      // Newest-first, as the reducer stores: a PR opened during the Build phase.
+      events: [
+        { type: 'pr_created', timestamp: '2026-07-26T12:10:00Z', id: 6, data: { pr: 820, issue: 42, url: 'https://gh/pull/820' } },
+        { type: 'phase_change', timestamp: '2026-07-26T12:05:00Z', id: 5, data: { phase: 'implement', issue: 42 } },
+      ],
+    })
+    render(<OperatorConsoleView socket={socket} now={Date.parse('2026-07-26T12:12:00Z')} />)
+    expect(screen.getByTestId('timeline-phase-implement')).toBeInTheDocument()
+    // The pr_created folds inside the phase as a diff row.
+    expect(screen.getByTestId('timeline-diff-6')).toBeInTheDocument()
   })
 
   it('mounts the real PipelineRail in the pipeline slot (Task 3)', () => {
@@ -119,6 +145,38 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('operator-console')).toBeInTheDocument()
     // The rail always renders the six canonical stages, even with no data.
     expect(container.querySelectorAll('[data-testid^="stage-tile-"]')).toHaveLength(6)
+  })
+
+  // --- #12: header shows factory runtime, not a redundant loop count ----------
+
+  it('shows the factory runtime in the header when a session start is known', () => {
+    const socket = makeSocket({
+      sessions: [{ id: 'acme-20260727T100000', status: 'active', started_at: '2026-07-27T10:00:00Z' }],
+      currentSessionId: 'acme-20260727T100000',
+    })
+    render(<OperatorConsoleView socket={socket} now={Date.parse('2026-07-27T12:14:00Z')} />)
+    expect(screen.getByTestId('header-uptime')).toHaveTextContent('2h14m')
+    // The old redundant loop-health count is gone from the header.
+    expect(screen.queryByTestId('console-header-loops')).toBeNull()
+  })
+
+  it('renders no runtime readout when no start signal is available', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    expect(screen.queryByTestId('header-uptime')).toBeNull()
+  })
+
+  // --- #8: focus mode spans the full detail width -----------------------------
+
+  it('spans the detail slot full width in focus mode', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    // Default mode is focus with an active item → full-width detail.
+    expect(screen.getByTestId('operator-detail-slot')).toHaveAttribute('data-fullwidth', 'true')
+  })
+
+  it('does not span full width in all-active mode (vitals keeps its column)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    fireEvent.click(screen.getByTestId('mode-toggle-all-active'))
+    expect(screen.getByTestId('operator-detail-slot')).toHaveAttribute('data-fullwidth', 'false')
   })
 
   // --- Task 5: focus <-> all-active mode toggle -------------------------------

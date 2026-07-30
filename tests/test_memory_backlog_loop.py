@@ -123,6 +123,7 @@ async def test_pending_entry_files_one_issue_and_updates_frontmatter(
         "filed": 1,
         "skipped": 0,
         "escalated": 0,
+        "summarized": 0,
     }
     pr.create_issue.assert_awaited_once()
     after = load_mirror_entry(entry_path)
@@ -151,6 +152,7 @@ async def test_already_dedup_skips(env) -> None:
         "filed": 0,
         "skipped": 1,
         "escalated": 0,
+        "summarized": 0,
     }
     pr.create_issue.assert_not_called()
 
@@ -171,6 +173,7 @@ async def test_third_attempt_escalates(env) -> None:
         "filed": 0,
         "skipped": 0,
         "escalated": 1,
+        "summarized": 0,
     }
     pr.create_issue.assert_awaited_once()
     call_args = pr.create_issue.await_args
@@ -197,6 +200,7 @@ async def test_wontfix_and_promoted_entries_skipped(env) -> None:
         "filed": 0,
         "skipped": 0,
         "escalated": 0,
+        "summarized": 0,
     }
     pr.create_issue.assert_not_called()
 
@@ -394,3 +398,28 @@ async def test_reconcile_closed_escalations_routes_through_prport(
     state.clear_memory_backlog_attempts.assert_called_once_with(
         "memory_backlog:some-slug"
     )
+
+
+@pytest.mark.asyncio
+async def test_per_tick_cap_folds_overflow_into_one_summary(env) -> None:
+    """#10777: >cap pending entries file `cap` issues + ONE summary, not N."""
+    cfg, _state, pr, _dedup, mirror_dir = env
+    cap = cfg.memory_backlog_max_issues_per_tick
+    for i in range(cap + 2):
+        _write_mirror_entry(mirror_dir, f"feedback-{i}")
+    pr.create_issue.return_value = 4242
+    loop = _make_loop(env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._commit_mirror_updates = AsyncMock(return_value=None)
+
+    result = await loop._do_work()
+
+    assert result["filed"] == cap
+    assert result["summarized"] == 1
+    assert pr.create_issue.await_count == cap + 1
+    summaries = [
+        c.args[0]
+        for c in pr.create_issue.await_args_list
+        if "over per-tick filing cap" in c.args[0]
+    ]
+    assert len(summaries) == 1

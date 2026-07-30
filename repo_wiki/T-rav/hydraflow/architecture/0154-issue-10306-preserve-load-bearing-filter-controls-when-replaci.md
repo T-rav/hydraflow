@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10306
 source_phase: plan
 created_at: 2026-07-24T03:48:07.536888+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Preserve load-bearing filter controls when replacing a table with a card grid

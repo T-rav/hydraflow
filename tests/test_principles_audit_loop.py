@@ -872,3 +872,42 @@ async def test_run_git_bound_unaffected_by_audit_knob(
     await loop._run_git("fetch", cwd=tmp_path)
 
     assert captured["timeout"] == 120
+
+
+async def test_fire_for_slug_respects_per_tick_filing_cap(loop_env):
+    """#10777: a fleet-wide regression files at most `cap` issues per tick.
+
+    Over-cap regressions are deferred (drift-attempt counter untouched) so they
+    surface on a later tick — a rate limit on filing, never a silent drop.
+    """
+    from filing_budget import FilingBudget
+
+    cfg, state, pr = loop_env
+    stop = asyncio.Event()
+    state.increment_drift_attempts.return_value = 1  # < STRUCTURAL threshold
+    loop = PrinciplesAuditLoop(config=cfg, state=state, pr_manager=pr, deps=_deps(stop))
+
+    cap = cfg.principles_audit_max_issues_per_tick
+    regressions = [f"P{i}.1" for i in range(cap + 3)]
+    report = {
+        "findings": [
+            {
+                "check_id": cid,
+                "severity": "STRUCTURAL",
+                "principle": "P1",
+                "source": "docs/adr/0001",
+                "what": "doc exists",
+                "remediation": "write docs",
+                "message": "missing file",
+                "status": "FAIL",
+            }
+            for cid in regressions
+        ]
+    }
+    budget = FilingBudget(cap=cap)
+
+    fire = await loop._fire_for_slug("acme/widget", regressions, report, {}, budget)
+
+    assert fire["filed"] == cap
+    assert fire["deferred"] == 3
+    assert pr.create_issue.await_count == cap

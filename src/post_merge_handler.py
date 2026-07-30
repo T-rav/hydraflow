@@ -13,6 +13,7 @@ from close_verification import reconcile_false_close
 from config import HydraFlowConfig
 from epic import EpicCompletionChecker
 from events import EventBus, EventType, HydraFlowEvent
+from factory_maintenance import is_factory_self_maintenance
 from knowledge_metrics import metrics as _metrics
 from merge_policy import (
     ROLE_ORCHESTRATOR_REVIEWER,
@@ -646,7 +647,39 @@ class PostMergeHandler:
                         exc_info=True,
                     )
 
-        if self._wiki_store is not None and self._wiki_compiler is not None:
+        # Skip every wiki-ingest emission when the merged item is the
+        # factory's own chore/maintenance work (chore(wiki)/chore(arch)/
+        # feat(ul)/rc, ul-* / arch-regen-auto / wiki-maint branches). Left
+        # unfiltered, a self-maintenance merge promotes its reflections into
+        # the wiki, which opens another chore(wiki): maintenance PR, which
+        # merges, which reflects again — the factory documenting its own
+        # busywork. The wiki must track meaningful external/feature change,
+        # not the factory eating its own tail. A genuine feat/fix still
+        # ingests: the predicate is narrow by design (see factory_maintenance).
+        is_self_maintenance = is_factory_self_maintenance(
+            branch=pr.branch,
+            title=issue.title,
+            labels=issue.tags,
+        )
+        if is_self_maintenance:
+            logger.info(
+                "PR #%d (issue #%d, branch %s): skipping wiki reflection / "
+                "shipped-gap ingest — factory self-maintenance chore, not "
+                "product change",
+                pr.number,
+                pr.issue_number,
+                pr.branch,
+            )
+            # Drop the accumulated reflection log so it doesn't grow unbounded:
+            # a self-maintenance chore carries no product learning to promote,
+            # and the bridge (skipped below) is what would normally clear it.
+            clear_reflections(self._config, pr.issue_number)
+
+        if (
+            not is_self_maintenance
+            and self._wiki_store is not None
+            and self._wiki_compiler is not None
+        ):
             # Enqueue the issue's reflections as ingest-entry tasks. The
             # RepoWikiLoop applies them inside its ephemeral worktree so
             # they ride the maintenance PR (#9836). This is a sync,
@@ -668,12 +701,14 @@ class PostMergeHandler:
         # the merged issue carried pending concerns to post-merge with
         # no matching ConcernResolution. Pure detect + publish — wiki
         # persistence is RepoWikiLoop's job (see its event subscription)
-        # so we don't block the merge path on filesystem writes.
-        await self._safe_hook(
-            "shipped-with-known-gap emission",
-            self._maybe_emit_shipped_with_known_gap(pr.issue_number, pr.number),
-            pr.issue_number,
-        )
+        # so we don't block the merge path on filesystem writes. Skipped for
+        # self-maintenance: it has no adversarial concerns worth documenting.
+        if not is_self_maintenance:
+            await self._safe_hook(
+                "shipped-with-known-gap emission",
+                self._maybe_emit_shipped_with_known_gap(pr.issue_number, pr.number),
+                pr.issue_number,
+            )
 
         verdict: JudgeVerdict | None = None
         if self._verification_judge:

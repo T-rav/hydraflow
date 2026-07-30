@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 import trace_collector
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
+from filing_budget import FilingBudget
 from models import WorkCycleResult
 from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
@@ -101,8 +102,16 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             "regressions_filed": 0,
             "regressions_closed": 0,
             "escalations_filed": 0,
+            "regressions_deferred": 0,
             "ready_flips": 0,
         }
+
+        # Per-tick filing cap (#10777): filing scales as managed_repos x
+        # regressed checks, so a fleet-wide regression could file one issue per
+        # (repo, check). ONE budget spans the whole tick (self + every managed
+        # repo). Over the cap, regressions are deferred (attempt counter NOT
+        # incremented) and retried next tick — a rate limit, not a drop.
+        budget = FilingBudget(cap=self._config.principles_audit_max_issues_per_tick)
 
         # 0) Reconcile closed escalation issues — resets drift_attempts so
         # the "closing this issue clears the counter" promise in the
@@ -140,10 +149,11 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
             self_regressions = self._diff_regressions(self_last, self_snapshot)
             if self_regressions:
                 fire = await self._fire_for_slug(
-                    _HYDRAFLOW_SELF, self_regressions, self_report, self_last
+                    _HYDRAFLOW_SELF, self_regressions, self_report, self_last, budget
                 )
                 stats["regressions_filed"] += fire["filed"]
                 stats["escalations_filed"] += fire["escalated"]
+                stats["regressions_deferred"] += fire["deferred"]
             else:
                 # All green — update the last-green reference.
                 self._state.set_last_green_audit(_HYDRAFLOW_SELF, self_snapshot)
@@ -165,9 +175,12 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
                 last = self._state.get_last_green_audit(mr.slug)
                 regressions = self._diff_regressions(last, snapshot)
                 if regressions:
-                    fire = await self._fire_for_slug(mr.slug, regressions, report, last)
+                    fire = await self._fire_for_slug(
+                        mr.slug, regressions, report, last, budget
+                    )
                     stats["regressions_filed"] += fire["filed"]
                     stats["escalations_filed"] += fire["escalated"]
+                    stats["regressions_deferred"] += fire["deferred"]
                 else:
                     self._state.set_last_green_audit(mr.slug, snapshot)
             except Exception as exc:  # noqa: BLE001
@@ -496,18 +509,33 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         regressions: list[str],
         report: dict[str, Any],
         last_green: dict[str, str],
+        budget: FilingBudget,
     ) -> dict[str, int]:
-        """File drift issues + escalations for every regression on this slug."""
-        stats = {"filed": 0, "escalated": 0}
+        """File drift issues + escalations for every regression on this slug.
+
+        *budget* is the tick-wide per-tick filing cap (#10777) shared across
+        this slug and every other slug audited this tick. Once it is exhausted,
+        remaining regressions are deferred (their drift-attempt counter is NOT
+        incremented) so they surface on the next tick rather than flooding the
+        board in one pass.
+        """
+        stats = {"filed": 0, "escalated": 0, "deferred": 0}
         findings_by_id = {f["check_id"]: f for f in report.get("findings", [])}
         for check_id in regressions:
             finding = findings_by_id.get(check_id)
             if not finding:
                 continue
+            if not budget.allow():
+                stats["deferred"] += 1
+                continue
             last_status = last_green.get(check_id, "PASS")
             await self._file_drift_issue(slug, finding, last_status)
+            budget.note_filed()
             stats["filed"] += 1
-            if await self._maybe_escalate(slug, check_id, finding["severity"]):
+            if budget.allow() and await self._maybe_escalate(
+                slug, check_id, finding["severity"]
+            ):
+                budget.note_filed()
                 stats["escalated"] += 1
         return stats
 

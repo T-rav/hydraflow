@@ -6,7 +6,11 @@
  *   - a run-state pill driven by the Task-1 vitals VM (`toVitals`), colour-coded
  *     by orchestrator status, that surfaces the credit-pause reason (+ the
  *     provider that ran out) when the factory is paused on credits;
- *   - a compact aggregate-vitals readout (loop health, restarts, main↔staging);
+ *   - the factory RUNTIME / uptime (#12) — how long the factory has been running,
+ *     compact ("2h14m"); this replaces the old loop-health count, which merely
+ *     duplicated the LoopsPanel side card. Rendered only when a start signal is
+ *     known (the shell passes '' otherwise, so nothing shows);
+ *   - a compact aggregate-vitals readout (restarts, main↔staging);
  *   - Start / Stop / Clear controls wired to the *existing* orchestrator control
  *     calls (`startOrchestrator` / `stopOrchestrator` / `clearCreditPause`) — the
  *     same handlers the legacy Header.jsx uses — threaded in as
@@ -158,6 +162,7 @@ const EMPTY_VITALS = {
 /**
  * @param {{
  *   vitals?: object,          // toVitals(...) view model
+ *   uptime?: string,          // factoryUptimeLabel(...) — '' hides the readout
  *   breadcrumb?: Array,       // useOperatorSelection().breadcrumb
  *   select?: (kind: string, value: unknown) => void,
  *   connected?: boolean,      // socket.connected — controls disabled when false
@@ -168,6 +173,7 @@ const EMPTY_VITALS = {
  */
 export function ConsoleHeader({
   vitals = EMPTY_VITALS,
+  uptime = '',
   breadcrumb = [],
   select = () => {},
   connected = false,
@@ -179,7 +185,6 @@ export function ConsoleHeader({
   const styles = makeStyles(t)
 
   const factory = vitals?.factory ?? EMPTY_VITALS.factory
-  const loops = vitals?.loopsHealthy ?? EMPTY_VITALS.loopsHealthy
   const credits = vitals?.credits ?? EMPTY_VITALS.credits
   const restarts = vitals?.restarts ?? EMPTY_VITALS.restarts
   const sync = vitals?.mainStagingSync ?? EMPTY_VITALS.mainStagingSync
@@ -199,7 +204,6 @@ export function ConsoleHeader({
   const clearDisabled = !connected || !paused
 
   const restartTotal = restarts.reduce((sum, r) => sum + (r?.count ?? 0), 0)
-  const loopsBad = loops.total > 0 && loops.ok < loops.total
   const syncBehind = sync.state === 'behind'
 
   return (
@@ -232,9 +236,11 @@ export function ConsoleHeader({
         )}
 
         <span style={styles.vitals}>
-          <span data-testid="console-header-loops">
-            loops <span style={loopsBad ? styles.vitalBad : styles.vitalStrong}>{loops.ok}/{loops.total}</span>
-          </span>
+          {uptime && (
+            <span data-testid="header-uptime" title="Factory runtime">
+              runtime <span style={styles.vitalStrong}>{uptime}</span>
+            </span>
+          )}
           {restartTotal > 0 && (
             <span data-testid="console-header-restarts">
               restarts <span style={styles.vitalBad}>{restartTotal}</span>

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
+from filing_budget import FilingBudget, file_overflow_summary, overflow_line
 from memory_backlog_mirror import (
     dedup_key_for,
     pending_entries,
@@ -122,10 +123,20 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
         escalated = 0
         filed_issue_numbers: list[int] = []
         dedup = self._dedup.get()
+        # Per-tick filing cap (#10777): a batch of newly-pending mirror entries
+        # would otherwise file one issue each. Over the cap, entries are
+        # recorded (so they are not re-filed individually) and folded into ONE
+        # summary issue below.
+        budget = FilingBudget(cap=self._config.memory_backlog_max_issues_per_tick)
         for entry in pending_entries(mirror):
             key = dedup_key_for(entry.slug)
             if key in dedup:
                 skipped += 1
+                continue
+            if not budget.allow():
+                dedup.add(key)
+                self._dedup.set_all(dedup)
+                budget.note_overflow(overflow_line(entry.slug, entry.name))
                 continue
             attempts = self._state.inc_memory_backlog_attempts(key)
             try:
@@ -155,8 +166,20 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
                 reraise_on_credit_or_bug(exc)
                 logger.exception("filing memory-backlog issue for %s", entry.slug)
                 continue
+            budget.note_filed()
             dedup.add(key)
             self._dedup.set_all(dedup)
+
+        summarized = await file_overflow_summary(
+            create_issue=self._pr.create_issue,
+            dedup=self._dedup,
+            budget=budget,
+            key_prefix="memory_backlog",
+            labels=list(self._config.find_label)
+            + list(self._config.memory_backlog_label),
+            title="Memory backlog: entries over per-tick filing cap",
+            intro="**Automated — MemoryBacklogLoop per-tick filing cap (#10777).**",
+        )
 
         if filed_issue_numbers:
             await self._commit_mirror_updates(filed_issue_numbers)
@@ -166,6 +189,7 @@ class MemoryBacklogLoop(BaseBackgroundLoop):
             "filed": filed,
             "skipped": skipped,
             "escalated": escalated,
+            "summarized": summarized,
         }
 
     async def _commit_mirror_updates(self, issue_numbers: list[int]) -> None:

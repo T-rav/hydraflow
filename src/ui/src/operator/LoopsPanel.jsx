@@ -72,6 +72,7 @@ function makeStyles(t) {
     rowMain: { display: 'flex', flexDirection: 'column', gap: t.space.xxs, minWidth: 0, flex: '1 1 auto' },
     nameLine: { display: 'flex', alignItems: 'baseline', gap: t.space.xs, minWidth: 0 },
     name: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+    term: { flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
     message: (expanded) => ({
       cursor: 'pointer',
       textAlign: 'left',
@@ -88,6 +89,34 @@ function makeStyles(t) {
         ? { whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
         : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }),
     }),
+  }
+}
+
+// Per-category collapse state persists across reloads, and categories start
+// COLLAPSED — the panel opens compact and the operator expands only the areas
+// they care about, with that choice remembered. One JSON map under a single key.
+const LOOPS_OPEN_KEY = 'hydraflow-operator-loops-open'
+
+function readLoopsOpenState() {
+  if (typeof window === 'undefined' || !window.localStorage) return {}
+  try {
+    const raw = window.localStorage.getItem(LOOPS_OPEN_KEY)
+    const parsed = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function persistLoopsOpenState(key, open) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  try {
+    const map = readLoopsOpenState()
+    map[key] = open
+    window.localStorage.setItem(LOOPS_OPEN_KEY, JSON.stringify(map))
+  } catch {
+    // Ignore persistence failures (private mode / quota) — collapse still works
+    // for the session, it just won't be remembered.
   }
 }
 
@@ -118,6 +147,17 @@ function LoopRow({ loop, styles }) {
           <Text as="span" size="sm" tone={loop.enabled ? 'default' : 'inactive'} style={styles.name}>
             {loop.name}
           </Text>
+          {loop.term && (
+            <Text
+              as="span"
+              size="xs"
+              tone="muted"
+              data-testid={`loop-term-${loop.id}`}
+              style={styles.term}
+            >
+              {loop.term}
+            </Text>
+          )}
           {loop.restarts > 0 && (
             <Badge tone="warning" data-testid={`loop-restarts-${loop.id}`}>{`↻${loop.restarts}`}</Badge>
           )}
@@ -145,15 +185,22 @@ function LoopRow({ loop, styles }) {
  * @param {{ category: object, styles: object }} props
  */
 function LoopCategory({ category, styles }) {
-  const [open, setOpen] = useState(true)
+  // Start collapsed; restore a remembered open state if the operator expanded
+  // this category before (persisted per category key across reloads).
+  const [open, setOpen] = useState(() => readLoopsOpenState()[category.key] === true)
   const allOk = category.ok === category.count
+  const toggle = () => setOpen(prev => {
+    const next = !prev
+    persistLoopsOpenState(category.key, next)
+    return next
+  })
   return (
     <div data-testid={`loops-category-${category.key}`}>
       <button
         type="button"
         data-testid={`loops-category-toggle-${category.key}`}
         aria-expanded={open}
-        onClick={() => setOpen(v => !v)}
+        onClick={toggle}
         style={styles.categoryHeader}
       >
         <span style={styles.caret} aria-hidden="true">{open ? '▾' : '▸'}</span>

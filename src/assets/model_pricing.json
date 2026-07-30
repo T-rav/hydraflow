@@ -224,10 +224,12 @@
         "zai/glm-5.2",
         "glm-5p2"
       ],
+      "pricing_source": "https://docs.z.ai/guides/capabilities/cache (GLM-5.2: $1.40/M input, $4.40/M output, $0.26/M cached input)",
       "input_cost_per_million": 1.4,
       "output_cost_per_million": 4.4,
       "cache_write_cost_per_million": 1.4,
-      "cache_read_cost_per_million": 0.26
+      "cache_read_cost_per_million": 0.26,
+      "input_includes_cache": true
     },
     "kimi-k3": {
       "provider": "moonshot",

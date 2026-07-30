@@ -39,6 +39,69 @@ _DEF_RE = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*\(", re.MULTILINE)
 _CLASS_RE = re.compile(r"^\s*class\s+(\w+)\s*[:(]", re.MULTILINE)
 _CALL_RE = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
+# Style-D: a bare backticked tool/script name in *imperative* prose — e.g.
+# "Run ``wiki_lesson_coverage``", "invoke ``foo_bar.py``". A bare cite carries
+# no module/symbol pair (Style-A/B do), so it can't be AST-verified; it is
+# resolved by *presence* against a corpus of module/script basenames + defined
+# symbols (:func:`build_symbol_corpus` / :func:`resolve_bare_cite`).
+#
+# Precision is the whole game here (#10762, #10768). An ungated scan of
+# ``repo_wiki`` for backticked snake_case tokens flags ~52 identifiers absent
+# from the code surface, but roughly half are ordinary prose that merely
+# *looks* like an identifier (``cancel_fn``, ``abandoned_at``, ``setup_method``,
+# ``bank_order``). Restricting extraction to imperative "run / invoke /
+# execute" position — the verb directly governing the backtick, with only a
+# short connective ("the", "python", "script"…) allowed between — collapses
+# that to the genuine dead-tool cites only. Empirically it flags exactly one
+# token corpus-wide: ``wiki_lesson_coverage`` (issue #10754's phantom tool).
+# Bare filename references in non-imperative prose (illustrative examples of a
+# problem, e.g. "the untracked draft ``test_issue_10411.py``") are deliberately
+# NOT flagged — they are examples, not runnable-tool cites.
+_STYLE_D_VERB = (
+    r"(?:run|runs|running|invoke|invokes|invoking|execute|executes|executing)"
+)
+_STYLE_D_CONNECTIVE = r"(?:the|a|an|python3?|script|tool|command|make|via|using)"
+_STYLE_D_RE = re.compile(
+    rf"(?i)\b{_STYLE_D_VERB}\b(?:\s+{_STYLE_D_CONNECTIVE})*\s+`([^`\n]+)`"
+)
+
+# Shape gate: a snake_case identifier with at least one underscore. Requiring
+# an underscore keeps bare single prose words (``run``, ``print``) out of the
+# candidate set without a large denylist.
+_BARE_SNAKE_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
+
+# Script suffixes stripped for basename resolution — ``foo.py`` and ``foo``
+# resolve to the same module stem.
+_BARE_SCRIPT_SUFFIXES: tuple[str, ...] = (".py", ".sh")
+
+# Documentation metavariables — placeholder tool/module names used to teach the
+# cite grammar (including the wiki entry that documents Style-D itself). They
+# never name a real tool, so they must never self-report as broken cites.
+_BARE_METAVARS: frozenset[str] = frozenset(
+    {
+        "my_module",
+        "my_tool",
+        "my_script",
+        "your_module",
+        "some_module",
+        "some_tool",
+        "some_script",
+        "some_function",
+        "some_missing_tool",  # gotchas/1186's Style-D grammar example (#10754)
+        "snake_case",
+        "foo_bar",
+        "foo_baz",
+    }
+)
+
+
+def _bare_basename(token: str) -> str:
+    """Strip a trailing ``.py`` / ``.sh`` so ``foo.py`` resolves as ``foo``."""
+    for suffix in _BARE_SCRIPT_SUFFIXES:
+        if token.endswith(suffix):
+            return token[: -len(suffix)]
+    return token
+
 
 @dataclass(frozen=True)
 class Cite:
@@ -51,16 +114,17 @@ class Cite:
 
     module: str
     symbol: str
-    style: str  # "colon" | "dotted" | "fenced_hint"
+    style: str  # "colon" | "dotted" | "fenced_hint" | "bare"
     raw: str
 
     def module_as_path(self) -> str:
         """Return ``module`` normalised to a slashed ``.py`` path.
 
         Style-A is already slashed; Style-B is dotted (``src.foo.bar``
-        → ``src/foo/bar.py``); Style-C (fence hint) has no module path
-        and returns an empty string — callers must skip AST verification
-        for hints.
+        → ``src/foo/bar.py``); Style-C (fence hint) and Style-D (bare
+        imperative cite) have no module path and return an empty string —
+        callers must skip AST verification for both (a bare cite resolves
+        via :func:`resolve_bare_cite`, a hint is context-only).
         """
         if self.style == "colon":
             return self.module
@@ -105,12 +169,18 @@ def _is_placeholder_cite(module: str, symbol: str) -> bool:
 
 
 def extract_cites(text: str) -> list[Cite]:
-    """Extract Style-A + Style-B hard cites from arbitrary markdown/prose.
+    """Extract Style-A + Style-B + Style-D hard cites from markdown/prose.
 
     Deduplicated by ``(module, symbol, style)``.  Fenced-code hints
     (Style-C) are **excluded** — see :func:`extract_fenced_hints`.
     Documentation placeholder cites (:func:`_is_placeholder_cite`) are
     likewise excluded so the detector never flags its own format examples.
+
+    Style-D (bare backticked tool/script name in imperative position) carries
+    no module/symbol pair, so its ``Cite`` has ``module=""`` and
+    ``style="bare"``; the caller resolves it by presence via
+    :func:`resolve_bare_cite` against :func:`build_symbol_corpus` rather than
+    AST verification.
     """
     seen: set[tuple[str, str, str]] = set()
     out: list[Cite] = []
@@ -153,6 +223,21 @@ def extract_cites(text: str) -> list[Cite]:
             continue
         seen.add(key)
         out.append(Cite(module=module, symbol=symbol, style="dotted", raw=path))
+
+    for m in _STYLE_D_RE.finditer(text):
+        raw = m.group(1).strip()
+        base = _bare_basename(raw)
+        # Shape gate (snake_case, ≥1 underscore) + metavariable denylist keep
+        # ordinary prose and self-referential grammar examples out.
+        if not _BARE_SNAKE_RE.match(base):
+            continue
+        if base in _BARE_METAVARS:
+            continue
+        key = ("", base, "bare")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(Cite(module="", symbol=base, style="bare", raw=raw))
 
     return out
 
@@ -360,6 +445,33 @@ def _assign_target_names(target: ast.expr) -> set[str]:
     return set()
 
 
+def module_symbols(repo_root: Path, module_path: str) -> frozenset[str]:
+    """Public accessor: the resolvable symbol names *module_path* defines.
+
+    Parses ``repo_root / module_path`` once and returns the same symbol set
+    :func:`verify_cite_ast` checks a cite against — ``def`` / ``class`` names
+    at any depth plus module-level constants. Non-Python paths, missing
+    files, and parse errors all return an empty set (never raises).
+
+    Exposed so cross-module callers (``wiki_lesson_coverage``) can build a
+    cached symbol index without importing the private
+    :func:`_collect_defined_symbols` — the repo's cross-module
+    ``_``-prefixed-import gotcha. Re-export following is intentionally *not*
+    applied here: a lesson anchor should name a symbol its own cited module
+    defines directly.
+    """
+    if not module_path.endswith(".py"):
+        return frozenset()
+    module_file = repo_root / module_path
+    if not module_file.is_file():
+        return frozenset()
+    try:
+        tree = ast.parse(module_file.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return frozenset()
+    return frozenset(_collect_defined_symbols(tree))
+
+
 def _collect_defined_symbols(tree: ast.AST) -> set[str]:
     """Return the resolvable symbol names defined by *tree*.
 
@@ -418,6 +530,59 @@ def _follow_reexports(tree: ast.AST, module_file: Path, symbol: str) -> set[str]
         if symbol in sub_syms and (symbol in imported or "*" in imported):
             return sub_syms
     return set()
+
+
+# ---------------------------------------------------------------------------
+# Bare-cite corpus resolution (Style-D, issue #10762)
+# ---------------------------------------------------------------------------
+
+
+def build_symbol_corpus(
+    repo_root: Path,
+    roots: tuple[str, ...] = ("src", "scripts", "tests"),
+) -> frozenset[str]:
+    """Return the set of names a Style-D bare cite may resolve against.
+
+    Two name classes, so a bare cite for either a script or a symbol resolves:
+
+    * **File stems** — every ``*.py`` / ``*.sh`` basename under *roots*, so a
+      bare script cite (``run `foo_bar.py```) resolves to its module file.
+    * **Defined symbols** — every ``def`` / ``class`` / module-level
+      assignment name across the ``*.py`` tree
+      (:func:`_collect_defined_symbols`), so a bare function / CLI-entry cite
+      (``run `wiki_lesson_coverage```) resolves.
+
+    Build is tolerant: unreadable, binary, or syntactically-broken files are
+    skipped rather than raised, so one bad file cannot abort a weekly tick.
+    Self-repo only — a managed repo has no local checkout to resolve against,
+    so callers must not build (or consult) a corpus for one.
+    """
+    names: set[str] = set()
+    for root in roots:
+        base = repo_root / root
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix in _BARE_SCRIPT_SUFFIXES:
+                names.add(path.stem)
+            if path.suffix == ".py":
+                try:
+                    tree = ast.parse(path.read_text(encoding="utf-8"))
+                except (SyntaxError, UnicodeDecodeError, OSError, ValueError):
+                    continue
+                names |= _collect_defined_symbols(tree)
+    return frozenset(names)
+
+
+def resolve_bare_cite(name: str, corpus: frozenset[str]) -> bool:
+    """Return ``True`` iff *name* (a Style-D bare cite) resolves in *corpus*.
+
+    A trailing ``.py`` / ``.sh`` is stripped first so ``foo.py`` and ``foo``
+    resolve identically against the module basenames in *corpus*.
+    """
+    return _bare_basename(name) in corpus
 
 
 # ---------------------------------------------------------------------------

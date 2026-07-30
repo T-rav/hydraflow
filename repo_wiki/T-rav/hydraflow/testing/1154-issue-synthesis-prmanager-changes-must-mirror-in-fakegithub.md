@@ -6,7 +6,7 @@ source_phase: synthesis
 created_at: 2026-07-27T18:41:12.816133+00:00
 status: superseded
 corroborations: 1
-supersedes: 1085,1148
+supersedes: 1085
 superseded_by: 1228
 ---
 

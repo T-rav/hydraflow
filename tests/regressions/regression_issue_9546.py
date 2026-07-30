@@ -72,7 +72,10 @@ class TestModelIndependencePin:
             "is the same model grading its own homework"
         )
 
-    def test_fail_soft_is_the_default_policy(self) -> None:
-        # Fail-closed is the opt-in knob; flipping the default would turn every
-        # degraded verifier run (infra blip, empty transcript) into a retry.
-        assert HydraFlowConfig().test_adequacy_verifier_fail_closed is False
+    def test_fail_closed_is_the_default_policy(self) -> None:
+        # Self-repair on by default (feat/self-repair-on-by-default): fail-closed
+        # is now the default, so a degraded verifier run (infra blip, empty
+        # transcript) is treated as an OVERRIDE. Fail-soft is now the opt-OUT
+        # knob (set the flag False). A flip back to default-False would silently
+        # re-open the fail-soft hole this behaviour closes.
+        assert HydraFlowConfig().test_adequacy_verifier_fail_closed is True

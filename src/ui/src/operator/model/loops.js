@@ -24,7 +24,7 @@
  * Output shape:
  *   toLoops(workerStatus | events, { events }?) -> {
  *     categories: [{ key, name, count, ok, loops: [{
- *       id, key, name, status, severity, lastMessage, lastError,
+ *       id, key, name, term, status, severity, lastMessage, lastError,
  *       restarts, lastRunTs, enabled, interval,
  *     }] }],
  *     totals: { ok, total, restarted, disabled },
@@ -35,9 +35,11 @@
 
 import { BACKGROUND_WORKERS, WORKER_GROUPS } from '../../constants'
 
-// worker key (snake_case, === WS `data.worker`) -> { label, group }
+// worker key (snake_case, === WS `data.worker`) -> { label, term, group }.
+// `term` is the canonical control-theory ubiquitous-language name (ADR-0053/0099)
+// carried as secondary sub-text under the descriptive `label`; null when absent.
 const WORKER_META = new Map(
-  BACKGROUND_WORKERS.map(w => [w.key, { label: w.label, group: w.group }]),
+  BACKGROUND_WORKERS.map(w => [w.key, { label: w.label, term: w.term ?? null, group: w.group }]),
 )
 // group key -> display label, in the canonical WORKER_GROUPS order.
 const GROUP_LABEL = new Map(WORKER_GROUPS.map(g => [g.key, g.label]))
@@ -162,7 +164,14 @@ function summarizeDetails(details) {
  * @param {{ events?: Array }} [extras] - raw events for restart/error correlation
  */
 export function toLoops(input, extras = {}) {
-  const workers = resolveWorkers(input)
+  // Loops == registered BACKGROUND workers only. The pipeline WORKFLOW stages
+  // (triage / plan / build / review — driven by the max_triagers/max_planners/…
+  // worker pools) and the staging<->main RELEASE PROMOTION flow are NOT
+  // background loops; they belong to the PipelineRail / release views. Keep only
+  // workers present in the canonical BACKGROUND_WORKERS registry (ratchet-
+  // enforced to match src/*_loop.py), so any workflow/promotion status that
+  // leaks onto the bus never shows up here as a "loop".
+  const workers = resolveWorkers(input).filter(w => w?.name != null && WORKER_META.has(w.name))
   const events = Array.isArray(extras.events)
     ? extras.events
     : (Array.isArray(input) && looksLikeEvents(input) ? input : [])
@@ -186,6 +195,7 @@ export function toLoops(input, extras = {}) {
       id: key,
       key,
       name: meta?.label ?? prettifyKey(key),
+      term: meta?.term ?? null,
       group: meta?.group ?? OTHER_KEY,
       status: w.status ?? 'unknown',
       severity,

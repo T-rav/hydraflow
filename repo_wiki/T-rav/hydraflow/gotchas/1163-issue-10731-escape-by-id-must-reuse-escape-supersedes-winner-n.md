@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10731
 source_phase: plan
 created_at: 2026-07-27T18:39:53.932375+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # escape_by_id must reuse _escape_supersedes winner, not re-derive it

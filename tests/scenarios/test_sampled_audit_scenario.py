@@ -102,7 +102,15 @@ def _make_dedup() -> Any:
     return dedup
 
 
-def _build_loop(tmp_path: Path, repo: Path, github: Any, state: Any) -> Any:
+def _build_loop(
+    tmp_path: Path,
+    repo: Path,
+    github: Any,
+    state: Any,
+    *,
+    auto_adjudicate: bool = False,
+    adjudicator: Any = None,
+) -> Any:
     from sampled_audit_loop import SampledAuditLoop
     from tests.helpers import make_bg_loop_deps
 
@@ -111,6 +119,9 @@ def _build_loop(tmp_path: Path, repo: Path, github: Any, state: Any) -> Any:
     object.__setattr__(bg.config, "data_root", tmp_path / "data")
     object.__setattr__(bg.config, "sampled_audit_loop_enabled", True)
     object.__setattr__(bg.config, "sampled_audit_reaudit_enabled", True)
+    object.__setattr__(
+        bg.config, "sampled_audit_auto_adjudicate_enabled", auto_adjudicate
+    )
     return SampledAuditLoop(
         config=bg.config,
         pr_manager=github,
@@ -118,7 +129,17 @@ def _build_loop(tmp_path: Path, repo: Path, github: Any, state: Any) -> Any:
         dedup=_make_dedup(),
         deps=bg.loop_deps,
         auditor=_FakeAuditor(),
+        adjudicator=adjudicator,
     )
+
+
+class _FakeAdjudicator:
+    def __init__(self, verdict: str) -> None:
+        self._verdict = verdict
+
+    async def adjudicate(self, *, prompt: str) -> str:
+        _ = prompt
+        return f'{{"verdict": "{self._verdict}", "rationale": "scenario"}}'
 
 
 class TestSampledAuditScenario:
@@ -188,3 +209,82 @@ class TestSampledAuditScenario:
         assert len(escapes) == 1
         assert escapes[0].detection_source == "sampled-audit"
         assert escapes[0].originating_pr == 61
+
+
+class TestSampledAuditAutoAdjudicateScenario:
+    """ADR-0115: the machine adjudicator self-resolves a disagreement — no human."""
+
+    async def test_upheld_auto_adjudication_crosslinks_without_a_human(
+        self, tmp_path: Path
+    ) -> None:
+        # End-to-end: a sampled disagreement is filed, then the MACHINE
+        # adjudicator upholds it (applies audit-upheld) and reconcile crosses it
+        # into the escape ledger — no human ever touches the find issue.
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base, head = _seed_merged_pr(repo, pr=71)
+
+        state = _make_state(base)
+        loop = _build_loop(
+            tmp_path,
+            repo,
+            github,
+            state,
+            auto_adjudicate=True,
+            adjudicator=_FakeAdjudicator("upheld"),
+        )
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ok"
+        assert result["disagreements"] == 1
+        assert result["filed"] == 1
+        assert result["adjudicated"] == 1
+        assert result["reconciled"] == 1
+        assert state._store["sha"] == head
+
+        from audit.store import AuditSampleLedger
+        from escape.ledger import EscapeLedger
+
+        sample = AuditSampleLedger(loop._samples_path).read_all()[0]
+        # The machine self-applied audit-upheld — no human labelled it.
+        labels = await github.get_issue_labels(sample.find_issue)
+        assert "audit-upheld" in labels
+        # And it crossed into the escape ledger, all in one tick.
+        escapes = EscapeLedger(loop._escape_ledger_path).read_all()
+        assert len(escapes) == 1
+        assert escapes[0].detection_source == "sampled-audit"
+        assert escapes[0].originating_pr == 71
+
+    async def test_refuted_auto_adjudication_closes_without_a_human(
+        self, tmp_path: Path
+    ) -> None:
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base, _head = _seed_merged_pr(repo, pr=72)
+
+        state = _make_state(base)
+        loop = _build_loop(
+            tmp_path,
+            repo,
+            github,
+            state,
+            auto_adjudicate=True,
+            adjudicator=_FakeAdjudicator("refuted"),
+        )
+
+        result = await loop._do_work()
+
+        assert result["adjudicated"] == 1
+
+        from audit.store import AuditSampleLedger
+        from escape.ledger import EscapeLedger
+
+        sample = AuditSampleLedger(loop._samples_path).read_all()[0]
+        labels = await github.get_issue_labels(sample.find_issue)
+        assert "audit-refuted" in labels
+        assert github._issues[sample.find_issue].state == "closed"
+        # A false alarm never fabricates an escape.
+        assert EscapeLedger(loop._escape_ledger_path).read_all() == []

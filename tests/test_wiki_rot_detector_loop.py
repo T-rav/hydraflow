@@ -155,7 +155,7 @@ async def test_do_work_partial_scan_skips_autoclose(
     loop = _loop(loop_env)
     loop._reconcile_closed_escalations = AsyncMock(return_value=None)
 
-    async def boom(slug: str, self_slug: str) -> dict:
+    async def boom(slug: str, self_slug: str, budget: object) -> dict:
         raise RuntimeError("scan failed")
 
     monkeypatch.setattr(loop, "_tick_repo", boom)

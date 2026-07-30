@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10726
 source_phase: plan
 created_at: 2026-07-27T18:34:31.163857+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Escape ledger is append-only JSONL, last-row-wins

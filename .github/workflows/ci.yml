@@ -38,6 +38,7 @@ jobs:
       dockerfiles: ${{ steps.filter.outputs.dockerfiles }}
       compose: ${{ steps.filter.outputs.compose }}
       sandbox_scenarios: ${{ steps.filter.outputs.sandbox_scenarios }}
+      config: ${{ steps.filter.outputs.config }}
       dashboard: ${{ steps.filter.outputs.dashboard }}
       subprocess_signal: ${{ steps.filter.outputs.subprocess_signal }}
     steps:
@@ -79,6 +80,14 @@ jobs:
               - 'docker-compose*.yml'
             sandbox_scenarios:
               - 'tests/sandbox_scenarios/**'
+            config:
+              # Startup-behaviour files that can wedge the full-machine sandbox
+              # WITHOUT touching mockworld/orchestrator/service_registry — so the
+              # sandbox-fast subset would otherwise skip and miss it. #10846: a
+              # one-line precondition_gate default flip in config.py rerouted
+              # every READY issue to plan forever; prep.py ensures startup labels.
+              - 'src/config.py'
+              - 'src/prep.py'
             dashboard:
               # The dashboard FRONT-end and the BACK-end the browser scenarios
               # boot (the real dashboard server + repo-runtime registry). #9347
@@ -571,7 +580,8 @@ jobs:
         needs.changes.outputs.mockworld == 'true' ||
         needs.changes.outputs.dockerfiles == 'true' ||
         needs.changes.outputs.compose == 'true' ||
-        needs.changes.outputs.sandbox_scenarios == 'true'
+        needs.changes.outputs.sandbox_scenarios == 'true' ||
+        needs.changes.outputs.config == 'true'
       )
     steps:
       - uses: actions/checkout@v4

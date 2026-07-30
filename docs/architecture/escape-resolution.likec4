@@ -1,0 +1,144 @@
+// Escape-ledger HITL surfacing + resolution, current behaviour after #10747:
+// each surfacing reason renders its own reason-specific remediation, naming
+// the field that actually answers that reason's `_surfacing_answered`
+// predicate. The `surfaceThenStrand` view documents the HISTORICAL defect
+// #10747 fixed (a low-confidence body that prescribed `--encoded-as` only,
+// so its own predicate could never be satisfied) — that view describes
+// pre-fix behaviour, not the current system.
+specification {
+  element system
+  element container
+  element component
+  element actor
+  element store
+
+  relationship reads
+  relationship writes
+  relationship broken {
+    technology 'DEFECT'
+  }
+}
+
+model {
+  operator = actor 'Human operator' {
+    description 'Reads the filed HITL issue and runs the command it prints'
+  }
+
+  hydraflow = system 'HydraFlow' {
+
+    loop = container 'EscapeLedgerLoop' {
+      technology 'src/escape_ledger_loop.py (BaseBackgroundLoop, Pattern B read-only)'
+      description 'Detects escapes, surfaces HITL findings, reconciles answered ones'
+
+      select = component 'select_findings_to_surface' {
+        description 'Pure budget: (record, reason) pairs, reason-scoped one-shot fingerprint'
+      }
+      render = component '_render_finding' {
+        description 'Reason-aware for both title (_SURFACE_REASON_TEXT) and remediation body (_SURFACE_REASON_REMEDIATION) — each surfacing reason prescribes the field that answers its OWN _surfacing_answered predicate (#10747)'
+      }
+      surface = component '_surface_findings' {
+        description 'create_issue -> SurfacedIssueLedger.append_surfaced(reason, issue_number)'
+      }
+      answered = component '_surfacing_answered' {
+        description 'low-confidence <- attribution_confidence != "low"; aging <- encoded_as != "none-yet"'
+      }
+      reconcile = component '_reconcile_surfaced_issues' {
+        description 'post_comment + close_issue + append_closed for answered links'
+      }
+    }
+
+    resolveSvc = container 'escape.resolve' {
+      technology 'src/escape/resolve.py (pure service, filesystem only)'
+      description 'resolve_escape / list_unresolved / VALID_ENCODINGS / VALID_CONFIDENCES'
+    }
+
+    cli = container 'scripts/resolve_escape.py' {
+      technology 'argparse; wrapped by Makefile escape-resolve / escape-list'
+      description '--encoded-as and --confidence are each independently optional; naming neither is rejected before any ledger write (#10747)'
+    }
+
+    ledger = store 'EscapeLedger' {
+      technology 'src/escape/ledger.py — append-only JSONL, escape_ledger.jsonl'
+      description 'append_resolution appends a superseding row; overrides confidence ONLY when explicitly supplied'
+    }
+
+    surfaces = store 'SurfacedIssueLedger' {
+      technology 'src/escape/surfaces.py — append-only JSONL'
+      description 'fingerprint -> issue_number -> open/closed link, carries the surfacing reason'
+    }
+
+    prPort = container 'PRPort / PRManager' {
+      technology 'src/ports.py — create_issue / post_comment / close_issue'
+      description 'Every GitHub call in this flow goes through the Port (hexagonal boundary)'
+    }
+  }
+
+  github = system 'GitHub' {
+    description 'Issues carrying the escape-ledger + hydraflow-plan labels'
+  }
+
+  // --- flow wiring -------------------------------------------------------
+  loop.select -> loop.render 'passes (record, reason)'
+  loop.render -> loop.surface 'title + body'
+  loop.surface -> hydraflow.prPort 'create_issue(title, body, labels)'
+  hydraflow.prPort -> github 'files HITL issue'
+  loop.surface -> hydraflow.surfaces 'append_surfaced(fingerprint, reason, issue_number)'
+
+  operator -> github 'reads the printed remediation'
+  operator -> hydraflow.cli 'make escape-resolve ARGS=...'
+  hydraflow.cli -> hydraflow.resolveSvc 'resolve_escape(id, encoded_as, confidence?, notes?)'
+  hydraflow.resolveSvc -> hydraflow.ledger 'append_resolution (new superseding row)'
+
+  loop.reconcile -> hydraflow.surfaces 'open_links()'
+  loop.reconcile -> hydraflow.ledger 'read_latest_index()'
+  loop.reconcile -> loop.answered 'per-link predicate'
+  loop.reconcile -> hydraflow.prPort 'post_comment + close_issue'
+
+  // --- historical (pre-#10747, fixed by this PR) -------------------------
+  loop.render -> hydraflow.ledger 'HISTORICAL: low-confidence body used to prescribe --encoded-as only, so attribution_confidence stayed "low"' {
+    technology 'DEFECT (fixed)'
+  }
+}
+
+views {
+  view index {
+    title 'Escape-ledger HITL surface + resolution (context)'
+    include *
+    include hydraflow.*
+  }
+
+  view loopInternals of hydraflow.loop {
+    title 'EscapeLedgerLoop components — render vs answered asymmetry'
+    include *
+    include hydraflow.ledger, hydraflow.surfaces, hydraflow.prPort
+  }
+
+  dynamic view surfaceThenStrand {
+    title 'Dynamic: low-confidence surfacing strands (HISTORICAL — fixed by #10747, no longer current)'
+
+    hydraflow.loop.select -> hydraflow.loop.render 'reason = low-confidence'
+    hydraflow.loop.render -> hydraflow.loop.surface 'body prescribes --encoded-as ONLY'
+    hydraflow.loop.surface -> hydraflow.prPort 'create_issue'
+    hydraflow.prPort -> github 'issue #10747 filed'
+    operator -> hydraflow.cli 'runs the printed command'
+    hydraflow.cli -> hydraflow.resolveSvc 'encoded_as=regression-test, confidence=None'
+    hydraflow.resolveSvc -> hydraflow.ledger 'row: encoded_as set, confidence STILL "low"'
+    hydraflow.loop.reconcile -> hydraflow.loop.answered 'low-confidence predicate'
+    hydraflow.loop.answered -> hydraflow.loop.reconcile 'False -> nothing closed'
+  }
+
+  dynamic view surfaceThenClose {
+    title 'Dynamic: low-confidence surfacing resolves (current behaviour)'
+
+    hydraflow.loop.select -> hydraflow.loop.render 'reason = low-confidence'
+    hydraflow.loop.render -> hydraflow.loop.surface 'reason-aware body names --confidence'
+    hydraflow.loop.surface -> hydraflow.prPort 'create_issue'
+    operator -> hydraflow.cli 'make escape-resolve ARGS="<id> --confidence high --notes ..."'
+    hydraflow.cli -> hydraflow.resolveSvc 'encoded_as optional when confidence given'
+    hydraflow.resolveSvc -> hydraflow.ledger 'superseding row: confidence = high'
+    hydraflow.loop.reconcile -> hydraflow.loop.answered 'low-confidence predicate'
+    hydraflow.loop.answered -> hydraflow.loop.reconcile 'True'
+    hydraflow.loop.reconcile -> hydraflow.prPort 'post_comment + close_issue'
+    hydraflow.prPort -> github 'HITL issue closed'
+  }
+}
