@@ -60,7 +60,12 @@ def test_testing_1073_lesson_is_represented_in_active_terminal() -> None:
     )
     assert verdict.tier == "represented"
     assert "file_memory_suggestion" in verdict.surviving_anchors
-    assert verdict.terminal_id == "1432"
+    # #10753's invariant is that the lesson is represented in *an* active
+    # terminal (not orphaned) — the exact terminal id drifts as the live wiki
+    # corpus grows (was "1432", "1520" after 2026-07-30 wiki maintenance), so
+    # asserting a magic number just re-breaks on every corpus change. Pin the
+    # invariant instead: it resolves to a non-empty active terminal.
+    assert verdict.terminal_id
 
 
 def test_live_corpus_has_no_actionable_orphans() -> None:
