@@ -64,20 +64,12 @@ EXCLUDED_MODULES: dict[str, str] = {
 # caretaker and adjacent loops, tracked to zero by GRANDFATHERED_DEADLINE.
 GRANDFATHERED: frozenset[str] = frozenset(
     {
-        "adr_drift_triage_llm",
         "adversarial_agent_runner",
-        "audit.adjudicate",
-        "bug_reproducer",
         "discover_runner",
-        "disturbance_dampener_loop",
-        "intervention.classify",
         "onboarding.design_ai",
         "plan_touchpoint_expander",
-        "pr_red_repair_loop",
         "preflight.runner",
         "research_runner",
-        "sandbox_failure_fixer_loop",
-        "term_proposer_llm",
     }
 )
 
@@ -90,7 +82,7 @@ GRANDFATHERED: frozenset[str] = frozenset(
 GRANDFATHERED_DEADLINE = "2026-09-30"
 GRANDFATHERED_TARGET = 0
 GRANDFATHERED_BURNDOWN_ORIGIN = ("2026-07-30", 30)
-GRANDFATHERED_MAX = 14
+GRANDFATHERED_MAX = 6
 
 
 def _module_name(path: Path) -> str:
@@ -200,6 +192,7 @@ class PromptFitness:
 PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "acceptance_criteria_build": frozenset({3, 4, 8}),
     "acceptance_criteria_precheck": frozenset({2, 3, 5, 8}),
+    "adr_drift_triage": frozenset({1, 3, 4, 7, 8}),
     "adr_reviewer": frozenset({3, 7, 8}),
     "agent_build_prompt_first_attempt": frozenset({1, 4, 7, 8}),
     "agent_build_prompt_with_prior_failure": frozenset({1, 4, 7, 8}),
@@ -207,6 +200,8 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "agent_pre_quality_review": frozenset({3, 8}),
     "agent_pre_quality_run_tool": frozenset({1, 2, 3, 8}),
     "agent_quality_fix": frozenset({2, 3, 8}),
+    "audit_adjudicate": frozenset({3, 4, 7, 8}),
+    "bug_reproducer": frozenset({3, 4, 8}),
     "conflict_build": frozenset({1, 3, 8}),
     "conflict_rebuild": frozenset({1, 3, 8}),
     "decomposition_council_direction": frozenset({3, 4, 7, 8}),
@@ -215,15 +210,18 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "diff_sanity": frozenset({3}),
     "discover_completeness": frozenset({1, 3, 4, 7, 8}),
     "discover_expander": frozenset({3, 4, 8}),
+    "disturbance_dampener": frozenset({1, 3, 4, 5, 8}),
     "entry_evidence": frozenset({1, 3, 4, 7, 8}),
     "hitl_build_prompt": frozenset({3, 8}),
     "implement_spec_review": frozenset({1, 3, 4, 7, 8}),
+    "intervention_classify": frozenset({2, 3, 4, 7, 8}),
     "issue_refinement_dup": frozenset({7, 8}),
     "issue_refinement_priority": frozenset({1, 7, 8}),
     "plan_compliance": frozenset({1, 3, 4, 7, 8}),
     "plan_reviewer": frozenset({1, 3, 8}),
     "planner_build_prompt_first_attempt": frozenset({1, 3, 6}),
     "planner_retry": frozenset({1, 3, 4}),
+    "pr_red_repair_dispatch": frozenset({1, 3, 4, 8}),
     "pr_unsticker_ci_fix": frozenset({1, 3, 4, 8}),
     "pr_unsticker_ci_timeout": frozenset({1, 3, 4, 8}),
     "review_advisor_midflight": frozenset({3, 4, 7, 8}),
@@ -233,12 +231,14 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "reviewer_ci_fix": frozenset({1, 2, 3, 7, 8}),
     "reviewer_review_fix": frozenset({3, 4, 7, 8}),
     "sampled_audit": frozenset({1, 3, 4, 7, 8}),
+    "sandbox_failure_fixer": frozenset({1, 3, 4, 8}),
     "scope_check": frozenset({1, 2, 3, 7, 8}),
     "shape_coherence": frozenset({1, 3, 4, 7, 8}),
     "shape_runner_advocate": frozenset({1, 3, 4, 7, 8}),
     "shape_runner_critic": frozenset({1, 3, 4, 5, 8}),
     "shape_runner_turn": frozenset({1, 3, 4, 6, 8}),
     "spec_match_requirements_gap": frozenset({1, 2, 3, 8}),
+    "term_proposer": frozenset({1, 3, 4, 7, 8}),
     "test_adequacy": frozenset({2, 3, 8}),
     "test_adequacy_verifier": frozenset({1, 3, 7, 8}),
     "triage_build_prompt": frozenset({1, 3, 4, 7}),

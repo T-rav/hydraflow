@@ -405,6 +405,69 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Triage",
         "src/decomposition_council.py:290",
     ),
+    # --- Caretaker / adjudication loops (backfill 2026-07-30) ---
+    AuditTarget(
+        "adr_drift_triage",
+        "adr_drift_triage_llm.AdrDriftTriageLLM._build_prompt",
+        "tests/fixtures/prompts/adr_drift_triage.json",
+        "Adjacent",
+        "src/adr_drift_triage_llm.py:137",
+    ),
+    # NOTE: this builder's output is used twice — as the agent prompt AND as the
+    # burn-down PR body (`pr_body=self._build_prompt(unit)`,
+    # src/disturbance_dampener_loop.py:173). Rubric remediation here also
+    # rewrites what operators read on the PR.
+    AuditTarget(
+        "disturbance_dampener",
+        "disturbance_dampener_loop.DisturbanceDampenerLoop._build_prompt",
+        "tests/fixtures/prompts/disturbance_dampener.json",
+        "Adjacent",
+        "src/disturbance_dampener_loop.py:178",
+    ),
+    AuditTarget(
+        "term_proposer",
+        "term_proposer_llm.TermProposerLLM._build_prompt",
+        "tests/fixtures/prompts/term_proposer.json",
+        "Adjacent",
+        "src/term_proposer_llm.py:176",
+    ),
+    AuditTarget(
+        "intervention_classify",
+        "intervention.classify.build_classification_prompt",
+        "tests/fixtures/prompts/intervention_classify.json",
+        "Adjacent",
+        "src/intervention/classify.py:135",
+    ),
+    AuditTarget(
+        "bug_reproducer",
+        "bug_reproducer.BugReproducer._build_prompt",
+        "tests/fixtures/prompts/bug_reproducer.json",
+        "Triage",
+        "src/bug_reproducer.py:199",
+    ),
+    # These two render Markdown envelope files (prompts/auto_agent/*.md), not
+    # Python literals, so rubric remediation for them lands in Markdown.
+    AuditTarget(
+        "pr_red_repair_dispatch",
+        "pr_red_repair_loop.PrRedRepairLoop._build_dispatch_prompt",
+        "tests/fixtures/prompts/pr_red_repair.json",
+        "Review",
+        "src/pr_red_repair_loop.py:753",
+    ),
+    AuditTarget(
+        "sandbox_failure_fixer",
+        "sandbox_failure_fixer_loop.SandboxFailureFixerLoop._build_prompt",
+        "tests/fixtures/prompts/sandbox_failure_fixer.json",
+        "Review",
+        "src/sandbox_failure_fixer_loop.py:202",
+    ),
+    AuditTarget(
+        "audit_adjudicate",
+        "audit.adjudicate.build_adjudication_prompt",
+        "tests/fixtures/prompts/audit_adjudicate.json",
+        "Review",
+        "src/audit/adjudicate.py:60",
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -691,6 +754,14 @@ class LoadedFixture:
     builder: str
     args: dict
     faked_deps: dict
+    # Instance attributes a builder reads off ``self`` that ``__new__`` bypassed.
+    # Declared per fixture rather than stubbed globally in ``render_target``:
+    # a null stub silently guts the prompt (``sandbox_failure_fixer`` renders
+    # 1917 chars with a null PR port versus 6131 with a real one, because the CI
+    # log and commit diffs come only from the port), and hardcoding one
+    # scenario's fake into the harness applies it to every builder. Shape:
+    # ``{"_prs": {"fake": "prs_port", "shape": "settled_red_9871"}}``.
+    instance_attrs: dict = field(default_factory=dict)
 
 
 def _coerce_task_dicts(args: dict) -> dict:
@@ -732,6 +803,7 @@ def load_fixture(path: str) -> LoadedFixture:
         builder=data["builder"],
         args=coerced_args,
         faked_deps=data.get("faked_deps", {}),
+        instance_attrs=data.get("instance_attrs", {}),
     )
 
 
@@ -862,18 +934,48 @@ class _NullContextCache:
         return "", False
 
 
+def _resolve_owner(qualname: str) -> tuple[object, list[str]]:
+    """Split a dotted qualname into (owning module, remaining attribute chain).
+
+    Imports the *longest* importable prefix rather than assuming the first
+    segment is the module and the second a class. Builders in subpackages
+    (``audit.adjudicate.build_adjudication_prompt``,
+    ``intervention.classify.build_classification_prompt``) broke the old
+    assumption two different ways depending on import order: in a fresh process
+    ``getattr(audit, "adjudicate")`` raised AttributeError because no
+    ``__init__`` imports the submodule, and under pytest — where another test
+    had already imported it — ``cls.__new__(cls)`` raised
+    ``TypeError: module.__new__(X): X is not a type object``.
+
+    Registering those via a call-site re-export would resolve without this, but
+    ``prompt_fitness.registered_modules()`` matches the dotted module name
+    against the registry text, so the credit would land on the wrong module and
+    leave the real one sitting in the allowlist.
+    """
+    parts = qualname.split(".")
+    for cut in range(len(parts) - 1, 0, -1):
+        try:
+            module = importlib.import_module(".".join(parts[:cut]))
+        except ImportError:
+            continue
+        return module, parts[cut:]
+    raise ImportError(f"no importable module prefix in {qualname!r}")
+
+
 def render_target(target: AuditTarget) -> str:
     """Resolve qualname, load fixture, call the builder, return rendered text."""
+    from tests.fixtures.prompts.fakes import get_fake  # noqa: PLC0415
+
     fixture = load_fixture(target.fixture_path)
-    parts = target.builder_qualname.split(".")
-    module = importlib.import_module(parts[0])
-    if len(parts) == 2:
-        callable_obj = getattr(module, parts[1])
-    elif len(parts) == 3:
-        cls = getattr(module, parts[1])
-        descriptor = inspect.getattr_static(cls, parts[2])
+    module, attrs = _resolve_owner(target.builder_qualname)
+    if len(attrs) == 1:
+        callable_obj = getattr(module, attrs[0])
+    elif len(attrs) == 2:
+        cls_name, method_name = attrs
+        cls = getattr(module, cls_name)
+        descriptor = inspect.getattr_static(cls, method_name)
         if isinstance(descriptor, staticmethod | classmethod):
-            callable_obj = getattr(cls, parts[2])
+            callable_obj = getattr(cls, method_name)
         else:
             instance = cls.__new__(cls)
             instance._config = _MinimalConfig()
@@ -893,7 +995,9 @@ def render_target(target: AuditTarget) -> str:
             # AttributeError. Both call sites are None-safe.
             instance._adr_index = None
             instance._tribal_wiki_store = None
-            callable_obj = getattr(instance, parts[2])
+            for attr, spec in fixture.instance_attrs.items():
+                setattr(instance, attr, get_fake(spec["fake"], spec["shape"]))
+            callable_obj = getattr(instance, method_name)
     else:
         raise ValueError(f"unsupported qualname depth: {target.builder_qualname!r}")
     return render(callable_obj, args=fixture.args, faked_deps=fixture.faked_deps)

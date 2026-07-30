@@ -35,8 +35,8 @@ from prompt_fitness import (
 
 # Coverage floor and allowlist ceiling are still pinned constants: they measure
 # the size of the gap, which only ever improves deliberately.
-_MIN_REGISTRY_COVERAGE = 0.67
-_MAX_GRANDFATHERED = 14
+_MIN_REGISTRY_COVERAGE = 0.86
+_MAX_GRANDFATHERED = 6
 
 # The fleet aggregates are NOT pinned constants any more. A hand-pinned ceiling
 # is unstable under coverage changes — registering a newly-measured bad prompt

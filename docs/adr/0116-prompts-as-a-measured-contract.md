@@ -59,18 +59,24 @@ A standard that cannot be violated-and-detected is not a standard. ADR-0087 keep
 
 A gate answers registered-or-not. Per ADR-0093 a contract also needs a **measure**, so `src/prompt_fitness.py` computes the prompt layer's scorecard: `registry_coverage`, `severity_counts`, `criterion_fail_rates`, and the allowlist size. `tests/test_prompt_fitness.py` pins every one of them at its measured value and asserts they may move only in the improving direction.
 
-Measured at adoption (2026-07-30), and the numbers are why this ADR exists:
+Measured at adoption (2026-07-30). The left column is the state that motivated the ADR; the right is after the backfill landed in the same PR, because a floor pinned at 30% coverage would have locked in the gap it was written to close:
 
-| Measure | Value |
-|---|---|
-| Registry coverage | **30.2%** (13 of 43 modules) |
-| High-severity share | **96%** (24 of 25 scored) |
-| Criterion 3 (XML tags) fail rate | **88%** |
-| Criterion 8 (edge cases named) fail rate | **84%** |
-| Criterion 1 (leads with the request) fail rate | **72%** |
-| Criterion 5 (output contract) fail rate | 0% |
+| Measure | At discovery | At adoption |
+|---|---|---|
+| Registry coverage | 30.2% (13 of 43 modules) | **86.0%** (37 of 43) |
+| Prompts scored | 25 | **59** |
+| Unregistered modules (`GRANDFATHERED`) | 30 | **6** |
+| High-severity share | 96% (24 of 25) | **98.3%** (58 of 59) |
+| Criterion 8 (edge cases named) | 84% | **91.5%** |
+| Criterion 3 (XML tags) | 88% | **89.8%** |
+| Criterion 1 (leads with the request) | 72% | **66.1%** |
+| Criterion 4 (examples present) | — | **66.1%** |
+| Criterion 7 (chain-of-thought scaffold) | — | **52.5%** |
+| Criterion 5 (output contract) | 0% | 5.1% |
 
-Three of the eight criteria fail on most prompts. Pinning that state is not an endorsement of it — it stops the drift that produced it, and makes every subsequent improvement visible as a floor that moves. A change that worsens any measure fails the build.
+**The fail rates went up as coverage went up, and that is the expected direction.** Newly measured prompts were not better than the measured ones; they were simply unmeasured. Reading the rise as a regression would be exactly the error §5's derived-aggregates change exists to prevent — no prompt regressed, the denominator grew. This is also why coverage, not the fail rates, is the series to watch: the rates are a census of a population that is still being enumerated.
+
+Five of the eight criteria fail on more than half the fleet. Pinning that state is not an endorsement of it — it stops the drift that produced it, and makes every subsequent improvement visible as a floor that moves. A change that worsens any per-prompt score fails the build.
 
 **Fleet aggregates alone are insufficient, and this is the load-bearing part of the clause.** High-severity share and per-criterion fail rates are means over 25 prompts, so one prompt can degrade while another improves and the aggregate never moves — per-prompt regression is invisible. That also violates the never-compare-only-track-against-its-own-past rule this project holds elsewhere.
 
@@ -136,10 +142,11 @@ Three tests, because a detector that stops detecting is worse than no detector: 
 
 ## Consequences
 
-- 30 unregistered modules become a shrinking, tracked series rather than an invisible gap.
+- 30 unregistered modules became 6, on a dated schedule to zero, rather than an invisible gap.
 - New prompts cannot land unregistered; the failure mode that produced this gap closes structurally rather than by vigilance.
 - The rubric gains a resting state once §5 lands, so it stops being a finding generator.
 - ADR-0087 stops being a three-month-old proposal and becomes a contract.
+- **The backfill paid for itself in defects, not scores.** Rendering previously-unrendered prompts surfaced: a literal `{context}` shipping to the model from two live loops (§10), a harness truncation limit 3.3× production's (§9), two rubric detectors producing false failures (§9), `render_target` unable to resolve any builder in a subpackage — which had silently made four modules unregisterable — and a report generator that drops targets in unlisted categories. None of these is a rubric criterion. This is the argument for coverage as the primary series.
 - Cost: one completeness test, one CI wiring, one allowlist, and fixtures backfilled at ratchet pace. No new loop, no new subsystem.
 - **Landing with this ADR:** §1-§4, plus §5's fitness function, fleet-level floors, **and the per-prompt setpoints**. **Deferred and tracked separately:** the CI wiring of `make audit-prompts` (report regeneration only — enforcement already runs in CI via pytest), and §6's outcome pairing (#10855). The ADR records the whole contract so the deferred parts are visible obligations rather than forgotten intent, and `test_form_score_is_not_a_quality_claim` fails if anyone starts treating the form score as a quality claim before §6 lands.
 

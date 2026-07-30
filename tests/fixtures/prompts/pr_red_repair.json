@@ -5,5 +5,11 @@
   },
   "faked_deps": {
     "pr": "settled_red_9871"
+  },
+  "instance_attrs": {
+    "_prs": {
+      "fake": "prs_port",
+      "shape": "settled_red_9871"
+    }
   }
 }
