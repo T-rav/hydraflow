@@ -6,9 +6,13 @@ pinned at the value measured on 2026-07-30 and may only move in the improving
 direction. A change that worsens any of them fails here, which is what makes
 the contract a contract rather than a report nobody reads.
 
-The floors are deliberately unflattering. 96% of scored prompts are High
-severity and registry coverage is 30%; pinning the current state stops the drift
+The floors are deliberately unflattering. Registry coverage is now 100% — every
+prompt builder in ``src/`` is registered, rendered and scored — but 94.9% of
+those 65 prompts are still High severity. Pinning that state stops the drift
 that produced it and makes every improvement visible as a floor that moves.
+
+Coverage reaching 100% is the *end of the counting*, not the end of the work:
+the fleet's rubric scores are now measured honestly rather than partially.
 
 **These are FORM measures.** Per ADR-0116 §6 a rising score is not a quality
 claim until the outcome pairing lands, which is why
@@ -35,8 +39,8 @@ from prompt_fitness import (
 
 # Coverage floor and allowlist ceiling are still pinned constants: they measure
 # the size of the gap, which only ever improves deliberately.
-_MIN_REGISTRY_COVERAGE = 0.86
-_MAX_GRANDFATHERED = 6
+_MIN_REGISTRY_COVERAGE = 1.0
+_MAX_GRANDFATHERED = 0
 
 # The fleet aggregates are NOT pinned constants any more. A hand-pinned ceiling
 # is unstable under coverage changes — registering a newly-measured bad prompt

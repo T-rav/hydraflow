@@ -468,6 +468,53 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Review",
         "src/audit/adjudicate.py:60",
     ),
+    # --- Final backfill 2026-07-30: GRANDFATHERED reaches zero ---
+    AuditTarget(
+        "adversarial_agent_compose",
+        "adversarial_agent_runner.SubprocessAgentRunner._compose_prompt",
+        "tests/fixtures/prompts/adversarial_agent_compose.json",
+        "Implement",
+        "src/adversarial_agent_runner.py",
+    ),
+    AuditTarget(
+        "discover_runner",
+        "discover_runner.DiscoverRunner._build_prompt",
+        "tests/fixtures/prompts/discover_runner.json",
+        "Adjacent",
+        "src/discover_runner.py",
+    ),
+    AuditTarget(
+        "onboarding_design_ai",
+        "onboarding.design_ai._build_claude_prompt",
+        "tests/fixtures/prompts/onboarding_design_ai.json",
+        "Adjacent",
+        "src/onboarding/design_ai.py",
+    ),
+    AuditTarget(
+        "plan_touchpoint_expander",
+        "plan_touchpoint_expander.PlanTouchpointExpander._build_prompt",
+        "tests/fixtures/prompts/plan_touchpoint_expander.json",
+        "Plan",
+        "src/plan_touchpoint_expander.py",
+    ),
+    # Renders the prompts/auto_agent/*.md envelope templates rather than a
+    # Python literal, so this is the one registered entry whose remediation
+    # lands in Markdown. The other 18 templates in that directory are still
+    # outside AST discovery entirely — tracked separately.
+    AuditTarget(
+        "preflight_auto_agent",
+        "preflight.runner.render_prompt",
+        "tests/fixtures/prompts/preflight_auto_agent.json",
+        "Review",
+        "src/preflight/runner.py",
+    ),
+    AuditTarget(
+        "research_runner",
+        "research_runner.ResearchRunner._build_prompt",
+        "tests/fixtures/prompts/research_runner.json",
+        "Adjacent",
+        "src/research_runner.py",
+    ),
 ]
 
 # ---------------------------------------------------------------------------

@@ -56,22 +56,17 @@ EXCLUDED_MODULES: dict[str, str] = {
     "prompt_fitness": "this module measures prompts, it does not build them",
 }
 
-# Modules with builders but no registry entry, as of 2026-07-30. SHRINKS ONLY;
-# ``GRANDFATHERED_MAX`` pins the size so a new builder cannot be waved through.
-# Started at 30; the first backfill wave cleared the highest-blast-radius modules
-# (verification_judge, shape_runner, review_advisor, decomposition_council and
-# the acceptance-criteria/spec-review pair). What remains is mostly single-builder
-# caretaker and adjacent loops, tracked to zero by GRANDFATHERED_DEADLINE.
-GRANDFATHERED: frozenset[str] = frozenset(
-    {
-        "adversarial_agent_runner",
-        "discover_runner",
-        "onboarding.design_ai",
-        "plan_touchpoint_expander",
-        "preflight.runner",
-        "research_runner",
-    }
-)
+# Modules with builders but no registry entry. EMPTY as of 2026-07-30: the
+# backfill went 30 -> 0 in one PR, so every prompt builder in src/ is now
+# registered, rendered to a fixture and scored.
+#
+# The machinery stays. GRANDFATHERED_MAX = 0 means a new builder cannot be
+# waved through at all -- it must be registered, not exempted. If a future
+# subsystem genuinely needs to carry debt, raising the ceiling is a deliberate
+# edit that also has to move GRANDFATHERED_DEADLINE, because a stale deadline
+# with a non-empty allowlist fails the build. That is the point: the debt
+# cannot come back quietly.
+GRANDFATHERED: frozenset[str] = frozenset({})
 
 # Burn-down, not just a ceiling. A ratchet stops the gap growing; it does not
 # make it close, so an untouched allowlist stays green forever. GRANDFATHERED_MAX
@@ -82,7 +77,7 @@ GRANDFATHERED: frozenset[str] = frozenset(
 GRANDFATHERED_DEADLINE = "2026-09-30"
 GRANDFATHERED_TARGET = 0
 GRANDFATHERED_BURNDOWN_ORIGIN = ("2026-07-30", 30)
-GRANDFATHERED_MAX = 6
+GRANDFATHERED_MAX = 0
 
 # Pins for the two other escape hatches. EXCLUDED_MODULES hides a module from
 # discovery entirely, and ``unrenderable=True`` registers a prompt that is
@@ -216,6 +211,7 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "acceptance_criteria_precheck": frozenset({2, 3, 5, 8}),
     "adr_drift_triage": frozenset({1, 3, 7, 8}),
     "adr_reviewer": frozenset({3, 7}),
+    "adversarial_agent_compose": frozenset({1, 3, 4}),
     "agent_build_prompt_first_attempt": frozenset({1}),
     "agent_build_prompt_with_prior_failure": frozenset({1}),
     "agent_build_prompt_with_review_feedback": frozenset({1}),
@@ -232,6 +228,7 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "diff_sanity": frozenset({3, 5, 8}),
     "discover_completeness": frozenset({1, 3, 5, 7}),
     "discover_expander": frozenset({3, 5, 8}),
+    "discover_runner": frozenset({1, 3, 4, 7}),
     "disturbance_dampener": frozenset({3, 4, 5}),
     "entry_evidence": frozenset({1, 3, 4, 8}),
     "hitl_build_prompt": frozenset({3, 8}),
@@ -239,13 +236,17 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "intervention_classify": frozenset({3, 4, 7, 8}),
     "issue_refinement_dup": frozenset({8}),
     "issue_refinement_priority": frozenset({8}),
+    "onboarding_design_ai": frozenset({3, 4, 8}),
     "plan_compliance": frozenset({3, 5, 7}),
     "plan_reviewer": frozenset({3}),
+    "plan_touchpoint_expander": frozenset({3, 4, 5, 8}),
     "planner_build_prompt_first_attempt": frozenset({1, 3}),
     "planner_retry": frozenset({1, 3, 4, 5}),
     "pr_red_repair_dispatch": frozenset({3, 4, 8}),
     "pr_unsticker_ci_fix": frozenset({1, 3, 4, 5, 8}),
     "pr_unsticker_ci_timeout": frozenset({1, 3, 5, 8}),
+    "preflight_auto_agent": frozenset({1, 4}),
+    "research_runner": frozenset({1, 3, 4, 7, 8}),
     "review_advisor_midflight": frozenset({3, 8}),
     "review_advisor_postverify": frozenset({3, 4, 7}),
     "review_advisor_preflight": frozenset({3, 4}),

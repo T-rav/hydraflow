@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `fb4a97a` — Calibrate the rubric detectors; pin every corrected verdict *(2026-07-30)*
 - `acb47ba` — Prompt coverage 67% -> 86%: fix render_target for subpackage builders *(2026-07-30)*
 - `b140518` — Backfill prompt coverage to 67%, add burn-down, fix the measure's validity *(2026-07-30)*
 - `52dcef7` — feat(adr): enforce that every Accepted ADR has a real fitness check *(2026-07-30)*

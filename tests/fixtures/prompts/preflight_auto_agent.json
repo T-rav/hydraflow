@@ -1,0 +1,20 @@
+{
+  "builder": "preflight.runner.render_prompt",
+  "args": {
+    "sub_label": "hydraflow-review-stuck",
+    "issue_number": 9861,
+    "repo_slug": "t-rav/hydraflow",
+    "worktree_path": "/data/hydraflow/worktrees/agent-issue-9861",
+    "prompt_template": "review-stuck"
+  },
+  "faked_deps": {
+    "persona": "review_stuck",
+    "issue_body": "bug_9861",
+    "issue_comments_block": "review_stuck_9861",
+    "escalation_context_block": "review_stuck_9861",
+    "wiki_excerpts_block": "review_stuck_9861",
+    "sentry_events_block": "review_stuck_9861",
+    "recent_commits_block": "review_stuck_9861",
+    "prior_attempts_block": "review_stuck_9861"
+  }
+}

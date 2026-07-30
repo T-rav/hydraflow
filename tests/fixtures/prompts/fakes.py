@@ -31,13 +31,35 @@ from disturbance.registry import DIMENSIONS
 from implement_spec_reviewer import SpecReviewInput
 from issue_refinement import RefinementIssue
 from models import (
+    AttemptRecord,
     ConversationTurn,
+    EscalationContext,
     NewIssueSpec,
+    PlanFinding,
+    PlanFindingSeverity,
     ProductDirection,
     ShapeConversation,
     ShapeResult,
+    Task,
 )
+from onboarding.models import BootstrapDraft, BootstrapSpec
+
+# `_SYSTEM_PROMPT` is module-private to plan_touchpoint_expander, but it is
+# literally the first argument `SubprocessAgentRunner._compose_prompt` receives
+# on this call path (`self._agent.run(_SYSTEM_PROMPT, prompt)`), so the adapter
+# fixture reads it instead of carrying a copy.
+from plan_touchpoint_expander import (
+    _SYSTEM_PROMPT as _PLAN_TOUCHPOINT_SYSTEM_PROMPT,
+)
+from plan_touchpoint_expander import (
+    PlanTouchpointExpander,
+)
+from preflight.audit import PreflightAuditEntry
+from preflight.context import CommitRef, IssueComment
+from preflight.playbooks import get_playbook
+from preflight.runner import render_blocks
 from review_advisor import FocusArea, PostVerifyInput, PreFlightInput, ReviewPlan
+from sentry.reverse_lookup import SentryEvent
 from term_proposer_llm import DraftContext
 from ubiquitous_language import BoundedContext, Candidate, Term, TermKind
 
@@ -1415,6 +1437,496 @@ def disagreement_rate(rows: list[AuditSample]) -> tuple[float, float, float]:
 )
 
 
+# ---------------------------------------------------------------------------
+# Same scenario, the last six allowlisted modules (2026-07-30 backfill)
+#
+# Continues the #9812 lifecycle already traced above. PlanReviewer blocked the
+# digest plan on its first pass, which dispatches the touchpoint expander; the
+# expander's two prompts are also what the subprocess CLI adapter concatenates,
+# so both fixtures read the SAME two strings from the real module rather than
+# copies (a copy is how a fixture stops standing for the production prompt).
+# Bug #9861 — the ISO-53 / unparseable-timestamp defect the re-auditor named on
+# PR #9820 — is what the research pass explores and what the auto-agent
+# preflight is dispatched on once PR #9871 will not leave review. The onboarding
+# draft is the same team spinning the digest out into its own repo.
+# ---------------------------------------------------------------------------
+
+# Blocking + non-blocking mix on purpose: `_build_prompt` re-filters to
+# critical/high, so a fixture of only blocking findings never exercises the
+# filter and would render the same prompt whether the filter existed or not.
+_PLAN_FINDINGS_DIGEST: list[PlanFinding] = [
+    PlanFinding(
+        severity=PlanFindingSeverity.CRITICAL,
+        dimension="correctness",
+        description=(
+            'Task 1 keys buckets on f"{year}-W{week:02d}" from '
+            "datetime.isocalendar() but orders them with sorted(grouped, "
+            "reverse=True) — a string sort over ISO week-numbering years. "
+            "2026-W53 sorts below 2027-W01 and falls out of an 8-week window "
+            "that should contain it, and the plan's own test list stops at "
+            "'records spanning a year boundary (2025-W01 vs 2024-W52)', which "
+            "is the case string sorting happens to get right."
+        ),
+        suggestion=(
+            "Order buckets by date.fromisocalendar(year, week, 1), and name the "
+            "2026-W53 case explicitly in the test list."
+        ),
+    ),
+    PlanFinding(
+        severity=PlanFindingSeverity.CRITICAL,
+        dimension="edge_cases",
+        description=(
+            "The issue's acceptance list requires an unparseable detected_at to "
+            "land in an 'unknown' bucket and be logged once per digest build. "
+            "Task 1 says the same thing in one line but Task 2 adds no guard at "
+            "the route, so one malformed row raises out of the handler and the "
+            "whole digest 500s — the failure the acceptance criterion exists to "
+            "prevent. No task owns the three-state distinction (real zero week / "
+            "empty ledger / endpoint failed) the shaping conversation settled on."
+        ),
+        suggestion=(
+            "Give Task 1 a _parse_stamp helper returning None, and make Task 2 "
+            "assert the payload carries the requested window alongside buckets."
+        ),
+    ),
+    PlanFinding(
+        severity=PlanFindingSeverity.HIGH,
+        dimension="scope_creep",
+        description=(
+            "Task 1 declares by_stratum on WeekBucket, Task 2 returns b.__dict__ "
+            "straight out of the route, and Task 3 renders neither — so the "
+            "documented response shape, the served shape, and the rendered shape "
+            "are three different things. Either the stratum split is in scope "
+            "(then Task 2 and Task 3 must carry it) or it is not (then drop it "
+            "from Task 1)."
+        ),
+        suggestion=(
+            "Pick one. If in scope, name the serialized field in Task 2 and the "
+            "column in Task 3."
+        ),
+    ),
+    PlanFinding(
+        severity=PlanFindingSeverity.MEDIUM,
+        dimension="convention",
+        description=(
+            "Task 4 says 'wiki entry under docs/wiki/patterns.md' without the "
+            "json:entry machine block every entry in that file carries."
+        ),
+        suggestion="Name the json:entry id in Task 4.",
+    ),
+    PlanFinding(
+        severity=PlanFindingSeverity.INFO,
+        dimension="test_strategy",
+        description=(
+            "A benchmark over the 41-row ledger would be cheap and would catch "
+            "the per-request full read if the cache is ever removed."
+        ),
+    ),
+]
+
+# The expander's own user message, built by the real classmethod, and the
+# system prompt the expander pairs it with. Registered as fakes (rather than
+# pasted into the adapter's fixture) because `SubprocessAgentRunner` is the
+# adapter that carries exactly this pair to the CLI — a copy would let the
+# composed prompt drift away from the two strings production concatenates.
+_EXPANDER_SYSTEM_PROMPT = _PLAN_TOUCHPOINT_SYSTEM_PROMPT
+_EXPANDER_USER_MESSAGE_9812 = PlanTouchpointExpander._build_prompt(
+    plan=_ESCAPE_DIGEST_PLAN,
+    findings=_PLAN_FINDINGS_DIGEST,
+)
+
+
+# ---------------------------------------------------------------------------
+# Onboarding design chat: the digest spun out into its own repo.
+#
+# 14 chat messages on purpose — `_build_claude_prompt` renders only the last
+# 12, so a shorter history never exercises the truncation that decides what the
+# model can still see. Ids and timestamps pinned: BootstrapDraft defaults are
+# uuid4() and now().
+# ---------------------------------------------------------------------------
+
+_ESCAPE_INSIGHTS_CHAT: list[dict[str, str]] = [
+    {"role": "operator", "content": "New repo for the escape digest work."},
+    {
+        "role": "assistant",
+        "content": "What should it be called, and who owns it?",
+    },
+    {"role": "operator", "content": "escape-insights, owner t-rav."},
+    {
+        "role": "assistant",
+        "content": (
+            "Updated name, owner. Current draft is escape-insights (private) "
+            "with Python 3.11 + FastAPI."
+        ),
+    },
+    {
+        "role": "operator",
+        "content": (
+            "It reads the escape ledger over HTTP and renders the weekly digest "
+            "we shipped in #9812. Same ISO-week buckets, same detection-source "
+            "split, but standalone so a second HydraFlow deployment can point at "
+            "it without inheriting our Insights tab."
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": "Updated description. Do you want React, Next.js, or no UI?",
+    },
+    {"role": "operator", "content": "React. Nothing server-rendered this time."},
+    {
+        "role": "assistant",
+        "content": (
+            "Updated tech_stack. Current draft is escape-insights (private) "
+            "with Python 3.11 + FastAPI."
+        ),
+    },
+    {
+        "role": "operator",
+        "content": (
+            "Coverage floor 85, not 80 — this thing is going to be read by "
+            "people making gate decisions and I do not want a thin test suite "
+            "under it."
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": "Updated coverage_floor. Draft the spec when these look right.",
+    },
+    {
+        "role": "operator",
+        "content": (
+            "Branch protection and required reviews on, and turn on secret "
+            "scanning — it will hold a read token for the ledger host."
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "Updated safety_guards. Current draft is escape-insights (private) "
+            "with Python 3.11 + FastAPI."
+        ),
+    },
+    {
+        "role": "operator",
+        "content": (
+            "Public or private I am genuinely not sure about. The digest numbers "
+            "are not secret but the PR numbers in it are ours."
+        ),
+    },
+    {
+        "role": "assistant",
+        "content": (
+            "Keeping visibility private until you decide. Private is reversible; "
+            "publishing a repo that has already carried PR numbers is not."
+        ),
+    },
+]
+
+_ESCAPE_INSIGHTS_DRAFT = BootstrapDraft(
+    id="01JZ9Q2R5T8W1B4E7H0K3N6Q9T",
+    spec=BootstrapSpec(
+        name="escape-insights",
+        description=(
+            "Standalone read-only service that renders the HydraFlow "
+            "escape-ledger weekly digest: ISO-week buckets, counts by detection "
+            "source and blast-radius stratum, top PRs per week."
+        ),
+        owner="t-rav",
+        visibility="private",
+        tech_stack=["python", "FastAPI", "React"],
+        safety_guards=["branch-protection", "required-reviews", "secret-scanning"],
+        coverage_floor=85,
+        package_name="escape_insights",
+        label_prefix="hydraflow",
+        main_branch="main",
+        staging_branch="staging",
+    ),
+    status="draft",
+    materialize_status="not_started",
+    push_status="not_started",
+    created_at="2026-07-27T09:14:00+00:00",
+    updated_at="2026-07-28T16:02:00+00:00",
+    events=[],
+    chat_messages=_ESCAPE_INSIGHTS_CHAT,
+    extracted_fields={},
+    current_plan="Plan 01",
+    plan_draft=[],
+)
+
+
+# ---------------------------------------------------------------------------
+# Auto-agent preflight on bug #9861: PR #9871 would not leave review.
+#
+# The six *_block strings are produced by the real `preflight.runner`
+# render_blocks — fencing is ADR-0092 load-bearing, so a hand-written fenced
+# string in JSON would be a copy of the thing under audit. The blocks are
+# non-empty deliberately: each one has an explicit "(no ...)" placeholder
+# branch, and a fixture that takes the placeholder branch renders an envelope
+# with nothing in it.
+# ---------------------------------------------------------------------------
+
+_BUG_9861_BODY = """\
+## What is wrong
+
+The weekly escape digest shipped in #9812 (PR #9820) drops whole weeks and can
+500 the Insights tab. Two defects, both in `escape.digest.build_digest`:
+
+1. **ISO-53 weeks fall out of the window.** Buckets are keyed
+   `f"{year}-W{week:02d}"` from `datetime.isocalendar()` and then ordered with
+   `sorted(grouped, reverse=True)` — a string sort. ISO week-numbering years do
+   not align with calendar years, so `2026-W53` sorts below `2027-W01` and is
+   dropped from an 8-week window that should contain it.
+2. **One bad timestamp 500s the whole digest.** `datetime.fromisoformat(
+   rec.detected_at)` is unguarded, so a single unparseable row raises
+   `ValueError` out of the route handler. The #9812 acceptance list explicitly
+   required that row to land in an `unknown` bucket and be logged once per
+   build.
+
+## Evidence
+
+- Found by `SampledAuditLoop` re-auditing merge `7c1f9ad` (audit sample
+  `01JZ9M4T7K2B5N8Q1D4G7J0M3R`, verdict `disagree`, upheld on adjudication).
+- Sentry `HYDRAFLOW-4C7` — 11 events / 3 users on
+  `GET /api/insights/escape-digest`, `ValueError: Invalid isoformat string`.
+- The merged tests cover `2026-W28` vs `2026-W30` only, which is the case
+  string sorting happens to get right.
+
+## Constraints
+
+- The ledger is append-only (ADR-0114). Fix the reader; do not rewrite rows.
+- `WeekBucket` is already serialized to the API response via `b.__dict__`, so
+  adding a field changes the wire shape.
+"""
+
+_BUG_9861_TASK = Task(
+    id=9861,
+    title=(
+        "Weekly escape digest drops ISO-53 weeks and 500s on an unparseable detected_at"
+    ),
+    body=_BUG_9861_BODY,
+    tags=["bug", "hydraflow-research", "area:observability", "P1"],
+    comments=[],
+    created_at="2026-07-28T07:55:00Z",
+)
+
+# The review-stuck specialist persona, read from the real playbook registry:
+# `run_preflight` passes `playbook.persona`, so a literal string here would be
+# a second copy of a value the registry owns.
+_REVIEW_STUCK_PERSONA = get_playbook("review-stuck").persona
+
+_AUTO_AGENT_WIKI_EXCERPTS_9861 = """\
+# Repo Wiki: t-rav/hydraflow
+
+__241 entries across 11 topics__
+
+## Gotchas
+
+### ISO week keys are not sortable as strings
+`datetime.isocalendar()` returns an ISO week-numbering year, which is not the
+calendar year: 2025-12-29 is 2026-W01 and 2027-01-02 is 2026-W53. Any code that
+formats `{year}-W{week}` and then sorts the keys lexically will misorder the
+boundary and silently drop weeks from a fixed-size window. Sort with
+`date.fromisocalendar(year, week, 1)` instead.
+_Source: #9861 (bug)_
+
+### A route that parses persisted text must not trust it
+Every append-only ledger in the factory has at least one row written by an
+older schema. `fromisoformat` on a persisted timestamp is a 500 waiting for the
+oldest row in the file. Parse defensively at the read boundary and route the
+unparseable case to an explicit bucket the UI can render.
+_Source: #9861 (bug)_
+
+## Patterns
+
+### Weekly escape digest
+`escape.digest.build_digest` collapses the append-only escape ledger into ISO
+week buckets for the Insights tab. The ledger stays the source of truth; the
+digest is a derived read, cached in memory on the `EscapeLedger` instance and
+invalidated on append. The disagreement bound from `SampledAuditLoop` and the
+escape rate shown here answer different questions: the bound estimates what the
+gauntlet is still missing, the digest counts what it already missed.
+_Source: #9812 (feature)_
+"""
+
+_AUTO_AGENT_BLOCKS_9861 = render_blocks(
+    issue_comments=[
+        IssueComment(
+            author="t-rav",
+            body=(
+                "Auditor was right and this is worse than it reads: the chart "
+                "looked fine the whole time. Fix the ordering and the parse in "
+                "one PR, and add the 2026-W53 case to the tests — that is the "
+                "case the merged tests skipped."
+            ),
+            created_at="2026-07-28T08:12:00Z",
+        ),
+        IssueComment(
+            author="hydraflow-bot",
+            body=(
+                "SandboxFailureFixerLoop attempt 1/3 dispatched on PR #9871 "
+                "(scenario issue-to-merge, terminal-label assertion). Attempt "
+                "returned no diff; escalating per ADR-0063."
+            ),
+            created_at="2026-07-29T05:11:40Z",
+        ),
+    ],
+    escalation_context=EscalationContext(
+        cause=(
+            "PR #9871 settled red: the issue-to-merge sandbox scenario asserts "
+            "terminal labels {'hydraflow-fixed'} and the PR is parked at "
+            "{'hydraflow-review', 'hydraflow-hitl'}. Three review passes, one "
+            "failing unit test, no diff from the sandbox failure fixer."
+        ),
+        origin_phase="review",
+        ci_logs=_SANDBOX_SCENARIO_LOG_9871,
+        review_comments=[
+            "ReviewRunner pass 1: _newest_first is correct but build_digest "
+            "still calls sorted() on the unknown-bucket path — split behavior.",
+            "ReviewRunner pass 2: _parse_stamp swallows every exception "
+            "(noqa: BLE001). Narrow it to ValueError/TypeError.",
+            "ReviewRunner pass 3: test_iso_year_boundary_keeps_both_weeks "
+            "passes locally and fails in the sandbox tier — the sandbox seeds "
+            "the ledger through the label state machine, so the failure is a "
+            "pipeline assertion, not this assertion.",
+        ],
+        pr_number=9871,
+        code_scanning_alerts=[],
+        previous_attempts=[
+            AttemptRecord(
+                attempt_number=1,
+                changes_made=True,
+                error_summary=(
+                    "quality gate: 1 failing test "
+                    "(tests/test_escape_digest.py::"
+                    "test_unparseable_timestamp_lands_in_unknown_bucket)"
+                ),
+                timestamp="2026-07-29T04:41:00Z",
+            ),
+            AttemptRecord(
+                attempt_number=2,
+                changes_made=False,
+                error_summary=(
+                    "sandbox tier red: scenario issue-to-merge terminal-label "
+                    "assertion; no diff produced"
+                ),
+                timestamp="2026-07-29T05:06:12Z",
+            ),
+        ],
+        agent_transcript=(
+            "[implement] _newest_first added, ordering test green.\n"
+            "[implement] _parse_stamp added; unknown bucket renders.\n"
+            "[review] pass 3: sandbox scenario still asserts hydraflow-fixed; "
+            "PR stayed at hydraflow-review. Could not reproduce locally — the "
+            "label transition is driven by the pipeline, not by this branch."
+        ),
+    ),
+    wiki_excerpts=_AUTO_AGENT_WIKI_EXCERPTS_9861,
+    sentry_events=[
+        SentryEvent(
+            sentry_id="HYDRAFLOW-4C7",
+            title="ValueError: Invalid isoformat string",
+            message=(
+                "GET /api/insights/escape-digest — "
+                "datetime.fromisoformat(rec.detected_at)"
+            ),
+            level="error",
+            last_seen="2026-07-27T22:41:03Z",
+            permalink="https://sentry.io/organizations/t-rav/issues/HYDRAFLOW-4C7/",
+            event_count=11,
+            user_count=3,
+        ),
+        SentryEvent(
+            sentry_id="HYDRAFLOW-4D1",
+            title="KeyError: 'by_stratum'",
+            message="insights.js renderEscapeDigest — bucket.by_stratum undefined",
+            level="warning",
+            last_seen="2026-07-26T13:07:55Z",
+            permalink="https://sentry.io/organizations/t-rav/issues/HYDRAFLOW-4D1/",
+            event_count=4,
+            user_count=2,
+        ),
+    ],
+    recent_commits=[
+        CommitRef(
+            sha="3f8a1c92b7e04d15a9c2f8e6b1d3a5c7e9f0b2d4",
+            title="fix(digest): sort week buckets by real date, not key string",
+            author="hydraflow-agent",
+            date="2026-07-29T04:22:11Z",
+        ),
+        CommitRef(
+            sha="b71e0d45c8f19a26b0d3e9f7c2a4b6d8f0a1c3e5",
+            title="fix(digest): unparseable detected_at goes to the unknown bucket",
+            author="hydraflow-agent",
+            date="2026-07-29T04:38:02Z",
+        ),
+        CommitRef(
+            sha="c02d5e17a9b28c34d1e4f0a8b3c5d7e9f1a2b4c6",
+            title="test(digest): cover the 2026-W53 boundary and the unknown bucket",
+            author="hydraflow-agent",
+            date="2026-07-29T04:51:47Z",
+        ),
+    ],
+    prior_attempts=[
+        PreflightAuditEntry(
+            ts="2026-07-29T05:41:18Z",
+            issue=9861,
+            sub_label="hydraflow-review-stuck",
+            attempt_n=1,
+            prompt_hash="9f4c1b7e",
+            cost_usd=0.41,
+            wall_clock_s=612.4,
+            tokens=118_442,
+            status="retry",
+            pr_url=None,
+            diagnosis=(
+                "Reproduced the sandbox failure but not its cause. The scenario "
+                "asserts the PR reaches hydraflow-fixed; the branch's own tests "
+                "are green. Ruled out: the ordering fix (verified against "
+                "2026-W53), the parse guard (verified against a malformed row). "
+                "Did not read the label-transition path that moves a PR out of "
+                "hydraflow-review, which is where the assertion actually fails."
+            ),
+            llm_summary=(
+                "Fix looks correct; the red is in the pipeline's label "
+                "transition, not in the digest change. Next pass should start "
+                "from the label state machine, not from the digest tests."
+            ),
+            repo="t-rav-hydraflow",
+        ),
+    ],
+)
+
+
+# ---------------------------------------------------------------------------
+# Repo-wiki slice for the research pass on #9861.
+#
+# `BaseRunner._inject_memory` is the only conditional section in the research
+# prompt, and it reads `self._wiki_store` — an attribute `__new__` bypassed, so
+# without this fake the section renders empty and the fixture never shows where
+# the wiki context sits relative to the instructions. `query_with_tags` (not
+# `query`) is what the real RepoWikiStore exposes and what `_inject_repo_wiki`
+# prefers, so a `query`-only fake would silently skip the temporal-tag weave.
+# ---------------------------------------------------------------------------
+
+
+class _DigestWikiStore:
+    """Two-topic ``RepoWikiStore`` read slice, keyed to the digest defect."""
+
+    def query_with_tags(
+        self,
+        _repo_slug: str,
+        keywords: list[str] | None = None,
+        topics: list[str] | None = None,
+        max_chars: int = 15_000,
+    ) -> tuple[str, dict[str, str]]:
+        tags = {
+            "ISO week keys are not sortable as strings": "recently added",
+            "A route that parses persisted text must not trust it": ("recently added"),
+            "Weekly escape digest": "stable for 1 month (+2)",
+        }
+        return _AUTO_AGENT_WIKI_EXCERPTS_9861[:max_chars], tags
+
+
 _REGISTRY: dict[tuple[str, str], Any] = {
     ("repo_wiki_store", "empty"): _EmptyRepoWikiStore(),
     ("manifest", "minimal"): _MINIMAL_MANIFEST,
@@ -1442,6 +1954,36 @@ _REGISTRY: dict[tuple[str, str], Any] = {
     ("unit", "disturbance_suppressions_digest"): _BURNDOWN_UNIT_DIGEST,
     ("pr", "settled_red_9871"): _PR_LIST_ITEM_9871,
     ("prs_port", "settled_red_9871"): _SettledRedPRPort(),
+    # Same scenario, the last six allowlist modules: the blocked plan review
+    # (expander + the CLI adapter that carries its two prompts), the research
+    # pass and auto-agent preflight on bug #9861, and the onboarding chat.
+    ("plan", "escape_digest"): _ESCAPE_DIGEST_PLAN,
+    ("findings", "digest_plan_blocking"): _PLAN_FINDINGS_DIGEST,
+    ("system_prompt", "plan_touchpoint_expander"): _EXPANDER_SYSTEM_PROMPT,
+    ("user_message", "plan_touchpoint_expander"): _EXPANDER_USER_MESSAGE_9812,
+    ("draft", "escape_insights_onboarding"): _ESCAPE_INSIGHTS_DRAFT,
+    ("task", "bug_9861"): _BUG_9861_TASK,
+    ("issue_body", "bug_9861"): _BUG_9861_BODY,
+    ("persona", "review_stuck"): _REVIEW_STUCK_PERSONA,
+    ("issue_comments_block", "review_stuck_9861"): _AUTO_AGENT_BLOCKS_9861[
+        "issue_comments_block"
+    ],
+    ("escalation_context_block", "review_stuck_9861"): _AUTO_AGENT_BLOCKS_9861[
+        "escalation_context_block"
+    ],
+    ("wiki_excerpts_block", "review_stuck_9861"): _AUTO_AGENT_BLOCKS_9861[
+        "wiki_excerpts_block"
+    ],
+    ("sentry_events_block", "review_stuck_9861"): _AUTO_AGENT_BLOCKS_9861[
+        "sentry_events_block"
+    ],
+    ("recent_commits_block", "review_stuck_9861"): _AUTO_AGENT_BLOCKS_9861[
+        "recent_commits_block"
+    ],
+    ("prior_attempts_block", "review_stuck_9861"): _AUTO_AGENT_BLOCKS_9861[
+        "prior_attempts_block"
+    ],
+    ("repo_wiki_store", "digest_9861"): _DigestWikiStore(),
 }
 
 

@@ -64,10 +64,10 @@ Measured at adoption (2026-07-30). The left column is the state that motivated t
 
 | Measure | At discovery | At adoption |
 |---|---|---|
-| Registry coverage | 30.2% (13 of 43 modules) | **86.0%** (37 of 43) |
-| Prompts scored | 25 | **59** |
-| Unregistered modules (`GRANDFATHERED`) | 30 | **6** |
-| High-severity share | 96% (24 of 25) | **94.9%** (56 of 59) |
+| Registry coverage | 30.2% (13 of 43 modules) | **100%** (43 of 43) |
+| Prompts scored | 25 | **65** |
+| Unregistered modules (`GRANDFATHERED`) | 30 | **0** |
+| High-severity share | 96% (24 of 25) | **95.4%** (62 of 65) |
 | Criterion 8 (edge cases named) | 84% | **52.5%** |
 | Criterion 3 (XML tags) | 88% | **89.8%** |
 | Criterion 1 (leads with the request) | 72% | **49.2%** |
@@ -168,7 +168,7 @@ Three tests, because a detector that stops detecting is worse than no detector: 
 
 ## Consequences
 
-- 30 unregistered modules became 6, on a dated schedule to zero, rather than an invisible gap.
+- 30 unregistered modules became **0**. Every prompt builder in `src/` is registered, rendered to a fixture and scored. `GRANDFATHERED_MAX` is now 0, so a new builder cannot be exempted at all — and if a future subsystem genuinely needs to carry debt, raising the ceiling forces moving the deadline too, because a stale deadline with a non-empty allowlist fails the build.
 - New prompts cannot land unregistered; the failure mode that produced this gap closes structurally rather than by vigilance.
 - The rubric gains a resting state once §5 lands, so it stops being a finding generator.
 - ADR-0087 stops being a three-month-old proposal and becomes a contract.
