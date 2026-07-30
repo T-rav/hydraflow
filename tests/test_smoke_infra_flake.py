@@ -139,7 +139,12 @@ class TestClassifyCdn5xx:
     def test_dependency_names_the_host(self) -> None:
         match = classify_infra_flake(CDN_5XX_LOG)
         assert match is not None
-        assert "cli.github.com" in match.dependency
+        # The host is a backtick-delimited token in the label ("package CDN
+        # `cli.github.com`"). Assert on that exact token rather than a bare
+        # `"host" in url` substring check — the latter trips CodeQL's
+        # py/incomplete-url-substring-sanitization (a false positive here: this
+        # is a log-classifier label, not URL validation).
+        assert match.dependency.split("`")[1] == "cli.github.com"
 
     def test_astral_502_is_recognised(self) -> None:
         match = classify_infra_flake(ASTRAL_5XX_LOG)
