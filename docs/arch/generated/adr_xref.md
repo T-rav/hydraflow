@@ -93,7 +93,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0084 | `src.auto_agent_preflight_loop`, `src.base_background_loop`, `src.config`, `src.issue_store`, `src.models`, `src.pr_manager`, `src.preflight.agent`, `src.preflight.context`, `src.preflight.decision`, `src.preflight.runner` | — |
 | ADR-0085 | `src.secret_scrub` | `pytest:tests/test_secret_scrub.py`, `pytest:tests/regressions/test_issue_9143_codeql_suppression.py` |
 | ADR-0086 | `src.contracts.shadow`, `src.live_corpus_replay_loop` | — |
-| ADR-0087 | `src.prompt_builder`, `src.prompt_template` | — |
+| ADR-0087 | `src.prompt_builder`, `src.prompt_template` | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_audit_prompts.py` |
 | ADR-0088 | `src.label_drift_watcher_loop`, `src.models`, `src.pr_manager` | `pytest:tests/test_label_drift_watcher_loop.py`, `pytest:tests/test_label_drift_watcher_integration.py` |
 | ADR-0089 | `src.memory_backlog_loop`, `src.memory_backlog_mirror` | `pytest:tests/test_memory_backlog_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
 | ADR-0090 | `src.dashboard_routes._atlas_routes`, `src.ubiquitous_language` | `pytest:tests/test_atlas_routes.py` |
@@ -122,6 +122,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0113 | — | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
 | ADR-0114 | `src.arch._models`, `src.arch.extractors.events`, `src.arch.generators.event_bus`, `src.events` | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
 | ADR-0115 | `src.audit.adjudicate`, `src.escape.auto_diagnose`, `src.escape_ledger_loop`, `src.sampled_audit_loop` | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface`, `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human`, `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed`, `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld` |
+| ADR-0116 | `src.prompt_fitness` | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_prompt_fitness.py` |
 
 ## Module → ADRs
 
@@ -251,6 +252,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.pricing_refresh_loop` | ADR-0078 |
 | `src.principles_audit_loop` | ADR-0045 |
 | `src.prompt_builder` | ADR-0087 |
+| `src.prompt_fitness` | ADR-0116 |
 | `src.prompt_template` | ADR-0087 |
 | `src.rc_budget_loop` | ADR-0045 |
 | `src.repo_runtime` | ADR-0006, ADR-0007, ADR-0008, ADR-0009, ADR-0038 |
