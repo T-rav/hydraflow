@@ -16,6 +16,7 @@
 pytest:tests/test_prompt_registry_completeness.py
 pytest:tests/test_prompt_fitness.py
 pytest:tests/test_adr_enforcement_completeness.py
+pytest:tests/test_prompt_rubric_calibration.py
 
 ## Context
 
@@ -43,7 +44,7 @@ Every model-bound prompt has a registry entry, a rendered fixture, and a score. 
 
 ### 2. Registry completeness is enforced by a ratchet
 
-`tests/test_prompt_registry_completeness.py` asserts every prompt builder in `src/` appears in `PROMPT_REGISTRY`. Modules awaiting a fixture sit in `_GRANDFATHERED`, whose size is pinned by `_GRANDFATHERED_MAX` and **shrinks only** — lowering it as modules are backfilled, never raising it. This lets 30 modules land incrementally instead of as one unreviewable sweep, while closing the new-builder hole immediately.
+`tests/test_prompt_registry_completeness.py` asserts every prompt builder in `src/` appears in `PROMPT_REGISTRY`. Modules awaiting a fixture sit in `GRANDFATHERED`, whose size is pinned by `GRANDFATHERED_MAX` and **shrinks only** — lowering it as modules are backfilled, never raising it. This lets 30 modules land incrementally instead of as one unreviewable sweep, while closing the new-builder hole immediately.
 
 ### 3. Discovery is mechanical, not curated
 
@@ -66,17 +67,19 @@ Measured at adoption (2026-07-30). The left column is the state that motivated t
 | Registry coverage | 30.2% (13 of 43 modules) | **86.0%** (37 of 43) |
 | Prompts scored | 25 | **59** |
 | Unregistered modules (`GRANDFATHERED`) | 30 | **6** |
-| High-severity share | 96% (24 of 25) | **98.3%** (58 of 59) |
-| Criterion 8 (edge cases named) | 84% | **91.5%** |
+| High-severity share | 96% (24 of 25) | **94.9%** (56 of 59) |
+| Criterion 8 (edge cases named) | 84% | **52.5%** |
 | Criterion 3 (XML tags) | 88% | **89.8%** |
-| Criterion 1 (leads with the request) | 72% | **66.1%** |
-| Criterion 4 (examples present) | — | **66.1%** |
-| Criterion 7 (chain-of-thought scaffold) | — | **52.5%** |
-| Criterion 5 (output contract) | 0% | 5.1% |
+| Criterion 1 (leads with the request) | 72% | **49.2%** |
+| Criterion 4 (examples present) | — | **42.4%** |
+| Criterion 7 (chain-of-thought scaffold) | — | **30.5%** |
+| Criterion 5 (output contract) | 0% | **39.0%** |
 
-**The fail rates went up as coverage went up, and that is the expected direction.** Newly measured prompts were not better than the measured ones; they were simply unmeasured. Reading the rise as a regression would be exactly the error §5's derived-aggregates change exists to prevent — no prompt regressed, the denominator grew. This is also why coverage, not the fail rates, is the series to watch: the rates are a census of a population that is still being enumerated.
+The adoption column is post-backfill **and post-calibration** (§9a), so it is not comparable to the discovery column criterion by criterion. Coverage growth pushed the rates up; detector calibration pushed most of them back down and criterion 5's sharply up.
 
-Five of the eight criteria fail on more than half the fleet. Pinning that state is not an endorsement of it — it stops the drift that produced it, and makes every subsequent improvement visible as a floor that moves. A change that worsens any per-prompt score fails the build.
+**Where coverage alone moved a rate, up was the expected direction.** Newly measured prompts were not better than the measured ones; they were simply unmeasured. Reading the rise as a regression would be exactly the error §5's derived-aggregates change exists to prevent — no prompt regressed, the denominator grew. This is also why coverage, not the fail rates, is the series to watch: the rates are a census of a population that is still being enumerated.
+
+After calibration, two criteria still fail on more than half the fleet (3 at 89.8%, 8 at 52.5%), and criteria 3 and 7 have never been passed by any prompt — the codebase structures prompts with markdown, not XML tags, and uses no reasoning scaffolds. That is a real finding about the fleet, not a detector artifact; §9a checked. Pinning that state is not an endorsement of it — it stops the drift that produced it, and makes every subsequent improvement visible as a floor that moves. A change that worsens any per-prompt score fails the build.
 
 **Fleet aggregates alone are insufficient, and this is the load-bearing part of the clause.** High-severity share and per-criterion fail rates are means over 25 prompts, so one prompt can degrade while another improves and the aggregate never moves — per-prompt regression is invisible. That also violates the never-compare-only-track-against-its-own-past rule this project holds elsewhere.
 
@@ -128,7 +131,30 @@ A gate that reports failures which are not real teaches people to route around i
 - **Harness fidelity.** `_MinimalConfig` in `scripts/audit_prompts.py` hardcoded `max_review_diff_chars = 50000` where production defaults to `15000`. The audit could therefore score a prompt containing text production would have truncated. It now defers to the real `HydraFlowConfig` defaults, inventing a value only for fields the real config does not define.
 - **Detector false positives.** The criterion-3 tag matcher required a bare `<tag>`, so `<issue_content number="9812">` scored as no tags at all, and it fed criterion 6's long-context placement check as well. The criterion-4 matcher accepted `Example:` but not the house style `Example 1 — exact_dup/high:`, scoring four-example prompts as having none. Both were false *failures*, which is the dangerous direction: the gate was pushing prompt authors to strip tag attributes and renumber examples to satisfy it. Fixing them removed 4 false failures and introduced 0 new ones (criterion 3: 90.7% → 86.0%, criterion 4: 58.1% → 53.5%).
 
-**A measure correction is distinguishable from a threshold relaxation, and the distinction must be stated in the commit.** A relaxation moves a floor to accommodate worse reality; a correction changes what reality is read as, and its before/after per-criterion delta is reported. The headline finding survived both corrections here, which is the evidence they were corrections and not rescues.
+**A measure correction is distinguishable from a threshold relaxation, and the distinction must be stated in the commit.** A relaxation moves a floor to accommodate worse reality; a correction changes what reality is read as, and its before/after per-criterion delta is reported.
+
+### 9a. The full detector calibration (2026-07-30)
+
+Adversarial review of this PR found the two fixes above were not the whole set, and that one of them was materially overstated. Both corrections were made and the whole rubric was calibrated. **The detectors were producing false failures on natural English, which is the dangerous direction: the gate was instructing authors to make prompts worse to satisfy it.**
+
+| Criterion | Before | After | Defect corrected |
+|---|---|---|---|
+| 1 leads with the request | 66.1% | **49.2%** | Strip regex had no backreference, so it matched *across* tags: a prompt wrapped in a root `<task>` reduced to `</task>` and failed. Satisfying criterion 3 broke criterion 1. `IMPERATIVE_VERBS` also omitted `determine`/`evaluate`/`analyze`, which criterion 7 already treated as decision verbs — the rubric disagreed with itself. |
+| 2 specific over vague | 16.9% | **11.9%** | A literal JSON object — the most specific output spec a prompt can carry — matched no cue. |
+| 3 XML tag structure | 89.8% | 89.8% | No further defect. Still zero passes across 59 prompts: a real finding, not an artifact. |
+| 4 examples present | 66.1% | **42.4%** | `\bExample\b` excluded the plural, so a block of four few-shot cases under an `Examples:` heading scored as none. |
+| 5 output contract stated | 5.1% | **39.0%** | A bare `do not` matched 48 of 59 prompts and was the sole carrier for 35. The celebrated 0% fail rate measured the ubiquity of an English phrase. **This rate rising is the criterion becoming informative, not 20 prompts regressing.** |
+| 6 long-context placement | 8.5% | **1.7%** | Two opposite defects: a small early tag plus 18k of trailing payload passed, because a `return` *inside* the payload counted as the last instruction; and a long prompt of pure instructions failed for having no tagged block, making the criterion a duplicate of criterion 3. |
+| 7 chain-of-thought scaffold | 52.5% | **30.5%** | Applicability was decided by scanning the payload, so a quoted comment saying "I will approve" made a summarisation prompt look like a decision prompt. Ten prompts demanding JSON-only output were pinned failing a criterion they could only satisfy by breaking their own parser. |
+| 8 edge cases named | 91.5% | **52.5%** | The noun had to follow `if` immediately, so `If the diff is empty, return NO_CHANGES.` scored as naming no edge case. A `fallback` inside a diff under review passed. |
+
+68 false failures removed, 21 newly detected. Criterion 8's 91.5% — one of the headline numbers this ADR was written on — was substantially a regex artifact.
+
+**Two principles came out of this and bind going forward.** First, several criteria ask what the prompt *instructs*, and a rendered prompt also contains the issue body, the diff and the CI log; scanning the whole text answers a different question. `_instruction_prose` separates the two, preserving `<thinking>` because that is instruction, not payload. Second, over-correction is as bad as the original defect and reads as a green build: `test_every_criterion_still_discriminates` fails if any detector can no longer return both a Fail and a non-Fail, and the first attempt at criterion 6 was caught by exactly this — it went silent on 56 of 59 prompts.
+
+`tests/test_prompt_rubric_calibration.py` pins every one of these verdicts to the input that was scored wrong, because a detector that stops detecting reports a clean bill of health it did not earn.
+
+Markdown sections are deliberately *not* treated as context blocks for criterion 6: a `## Diff` heading has no closing delimiter, so the section runs to the next heading or to EOF and swallows the trailing instruction, scoring a correctly-ordered prompt as misplaced. A criterion that is silent beats one that is confidently wrong.
 
 ### 10. A defect class the rubric cannot see
 

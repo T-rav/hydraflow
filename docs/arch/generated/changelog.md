@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `acb47ba` — Prompt coverage 67% -> 86%: fix render_target for subpackage builders *(2026-07-30)*
+- `b140518` — Backfill prompt coverage to 67%, add burn-down, fix the measure's validity *(2026-07-30)*
+- `52dcef7` — feat(adr): enforce that every Accepted ADR has a real fitness check *(2026-07-30)*
 - `1b4b452` — docs(adr): add ADR-0113 lineage lines to ADR-0116 *(2026-07-30)*
 - `1dc70d1` — feat(prompts): per-prompt setpoints — bind each prompt to its own past *(2026-07-30)*
 - `3eff48a` — feat(prompts): prompts as a measured contract — registry ratchet + fitness function *(2026-07-30)*

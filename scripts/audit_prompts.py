@@ -471,9 +471,49 @@ PROMPT_REGISTRY: list[AuditTarget] = [
 ]
 
 # ---------------------------------------------------------------------------
+# Shared: separating instructions from the data embedded in a prompt.
+#
+# Several criteria ask a question about what the prompt *tells the model to do*.
+# Scanning the whole rendered text answers a different question, because a
+# rendered prompt also contains the issue body, the diff and the CI log. That
+# produced verified false verdicts: criterion 7 fired because the word
+# "approve" appeared in a quoted comment, and criterion 8 passed on
+# "+ def fallback(): pass" sitting inside a diff under review. Both were
+# reading the payload and scoring it as instruction.
+# ---------------------------------------------------------------------------
+
+_FENCED = re.compile(r"```.*?```", re.DOTALL)
+_INLINE = re.compile(r"`[^`\n]*`")
+_DIFF = re.compile(r"^[+-].*$", re.MULTILINE)
+
+
+def _strip_payload_tags(match: re.Match[str]) -> str:
+    """Blank a tagged block unless it is a reasoning scaffold.
+
+    ``<thinking>`` and ``<scratchpad>`` are instruction, not payload — they are
+    the very cue criterion 7 looks for. ``_EXCLUDED_TAGS`` already draws this
+    line for criterion 3; stripping them here made a prompt that carries a
+    scaffold score as though it had none.
+    """
+    return " " if match.group(1).lower() not in _EXCLUDED_TAGS else match.group(0)
+
+
+def _instruction_prose(rendered: str) -> str:
+    """The prompt with embedded payload removed: tagged blocks, code, diffs."""
+    prose = _TAG_PAIR.sub(_strip_payload_tags, rendered)
+    prose = _FENCED.sub(" ", prose)
+    prose = _INLINE.sub(" ", prose)
+    return _DIFF.sub(" ", prose)
+
+
+# ---------------------------------------------------------------------------
 # Rubric #1 — leads with the request
 # ---------------------------------------------------------------------------
 
+# The rubric disagreed with itself about what an imperative is: `determine`,
+# `evaluate`, `rank`, `choose` and `score` counted as decision verbs for
+# criterion 7 but not as imperatives here, so "Determine whether the plan is
+# compliant." led with a request and was scored as not doing so.
 IMPERATIVE_VERBS = frozenset(
     {
         "produce",
@@ -486,6 +526,25 @@ IMPERATIVE_VERBS = frozenset(
         "propose",
         "write",
         "summarize",
+        "determine",
+        "evaluate",
+        "analyze",
+        "analyse",
+        "assess",
+        "identify",
+        "rank",
+        "choose",
+        "select",
+        "score",
+        "judge",
+        "extract",
+        "list",
+        "explain",
+        "compare",
+        "check",
+        "verify",
+        "fix",
+        "implement",
     }
 )
 
@@ -496,7 +555,30 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def score_leads_with_request(rendered: str) -> str:
-    stripped = re.sub(r"<\w+>.*?</\w+>", "", rendered, flags=re.DOTALL).strip()
+    # Strips *embedded data* so the leading instruction can be found. Was
+    # `r"<\w+>.*?</\w+>"` — no backreference, so it matched across different
+    # tags and stripped from the first opening tag to the first closing one
+    # anywhere after it. A prompt wrapped in a root <task> tag reduced to
+    # "</task>", which meant satisfying criterion 3 (add tag structure)
+    # actively broke criterion 1. It was also attribute-blind, the same bug
+    # already fixed in criterion 3.
+    #
+    # A tag pair spanning nearly the whole prompt is a wrapper, not embedded
+    # data: removing it leaves nothing to score. Those are unwrapped instead.
+    def strip_embedded(text: str) -> str:
+        out: list[str] = []
+        last = 0
+        for match in _TAG_PAIR.finditer(text):
+            if (match.end() - match.start()) / max(len(text), 1) > 0.9:
+                continue  # root wrapper — keep its contents
+            out.append(text[last : match.start()])
+            last = match.end()
+        out.append(text[last:])
+        return "".join(out)
+
+    stripped = strip_embedded(rendered).strip()
+    # Unwrap a root tag so the request inside it is visible to the scan.
+    stripped = re.sub(r"^<(\w+)(?:\s[^>]*)?>|</\w+>\s*$", "", stripped).strip()
     sentences = _split_sentences(stripped)
     for idx, sentence in enumerate(sentences):
         words = set(re.findall(r"[A-Za-z]+", sentence.lower()))
@@ -525,7 +607,17 @@ OUTPUT_ARTIFACT_NOUNS = (
     r"\bdiff\b",
     r"\bsummary\b",
 )
-SCHEMA_CUES = (r"fields:", r"keys:", r"schema", r"`[a-z_][a-z0-9_]*`")
+# A literal JSON object with quoted keys is the most specific output spec a
+# prompt can carry, and matched none of the old cues — `fields:` and `keys:`
+# match zero prompts in the corpus, leaving an inline `code` span as the sole
+# carrier for 28 of 59, which `make test` satisfies.
+SCHEMA_CUES = (
+    r"fields:",
+    r"keys:",
+    r"schema",
+    r"`[a-z_][a-z0-9_]*`",
+    r"\{\s*\"[a-z_][a-z0-9_]*\"\s*:",
+)
 SUCCESS_CRITERIA_CUES = (
     r"\bmust\b",
     r"\bshould\b",
@@ -581,6 +673,10 @@ _STRUCTURED_CUES = (
     r"format:",
     r"fields:",
     r"`[a-z_][a-z0-9_]*`",
+    # A literal JSON object is the clearest possible structured-output cue and
+    # matched none of the above, so a prompt showing its exact response shape
+    # was judged not to need examples.
+    r"\{\s*\"[a-z_][a-z0-9_]*\"\s*:",
 )
 _EXAMPLE_PRESENT = (
     r"<example>",
@@ -588,7 +684,14 @@ _EXAMPLE_PRESENT = (
     # ``Example:``, ``Example 1:``, ``Example 2 — exact_dup/high:``. Numbered
     # few-shot blocks are the common house style; matching only ``Example:``
     # scored four-example prompts as having none.
-    r"\bExample\b\s*\d*\s*[:—-]",
+    # ``Example:``, ``Example 1:``, ``Example 2 — exact_dup/high:``, and the
+    # plural forms. ``\bExample\b`` excluded ``Examples:`` outright, so a block
+    # of four few-shot cases under an ``Examples:`` heading scored as none.
+    r"\bExamples?\b\s*\d*\s*[:—\-\n]",
+    r"^#+\s*Examples?\b",
+    r"\be\.g\.",
+    r"\bfor instance\b",
+    r"\bSample (?:input|output|response)\b",
 )
 
 
@@ -603,15 +706,20 @@ def score_examples(rendered: str) -> str:
 # Rubric #5 — output contract explicit
 # ---------------------------------------------------------------------------
 
+# ``do not`` was removed: it matched 48 of 59 prompts and was the sole carrier
+# for 35 of them, so a 0% fail rate measured the ubiquity of a English phrase
+# rather than the presence of an output contract. What remains names a format.
 _OUTPUT_CONTRACT_CUES = (
     r"respond with",
-    r"do not",
+    r"do not (?:add|include|emit|output|return|wrap|prefix|explain)",
     r"no prose",
     r"no markdown",
     r"no apolog",
     r"output format",
     r"return only",
     r"the output must",
+    r"\{\s*\"[a-z_][a-z0-9_]*\"\s*:",
+    r"exactly one JSON",
 )
 
 
@@ -626,33 +734,86 @@ def score_output_contract(rendered: str) -> str:
 LONG_CONTEXT_THRESHOLD = 10_000
 
 
+# An embedded context block is long payload the prompt wraps around. Counting
+# only XML tag pairs meant a prompt embedding its diff in a fenced block had
+# "no context", so the criterion could not see the misplacement it exists to
+# catch. Fenced blocks count too.
+#
+# Markdown sections deliberately do NOT count. A `## Diff` heading has no
+# closing delimiter, so the section runs to the next heading or to EOF —
+# which swallows the trailing instruction into the "context block" and scores
+# a correctly-ordered prompt as misplaced. Without an end delimiter there is
+# no sound way to tell where the payload stops, and a criterion that is silent
+# is better than one that is confidently wrong.
+
+
 def _largest_tagged_block_end(rendered: str) -> int:
     best_end = -1
     best_len = -1
+
+    def consider(start: int, end: int) -> None:
+        nonlocal best_end, best_len
+        if end - start > best_len:
+            best_len = end - start
+            best_end = end
+
     for match in _TAG_PAIR.finditer(rendered):
         if match.group(1).lower() in _EXCLUDED_TAGS:
             continue
-        length = match.end() - match.start()
-        if length > best_len:
-            best_len = length
-            best_end = match.end()
+        consider(match.start(), match.end())
+    for match in _FENCED.finditer(rendered):
+        consider(match.start(), match.end())
     return best_end
 
 
+def _blank_payload(rendered: str) -> str:
+    """Payload replaced by spaces, so offsets into the original are preserved.
+
+    ``_instruction_prose`` collapses payload to a single space, which is right
+    for cue matching and wrong here — this criterion compares *positions*.
+    """
+
+    def blank(match: re.Match[str]) -> str:
+        return " " * (match.end() - match.start())
+
+    out = _TAG_PAIR.sub(blank, rendered)
+    out = _FENCED.sub(blank, out)
+    out = _INLINE.sub(blank, out)
+    return _DIFF.sub(blank, out)
+
+
 def _last_imperative_offset(rendered: str) -> int:
+    """Offset of the last imperative verb in the *instructions*.
+
+    Scanning the raw text let a `return` inside a trailing diff count as the
+    final instruction, so a prompt with one small early tag pair and 18k of
+    untagged trailing code scored Pass — the exact misplacement this criterion
+    exists to catch.
+    """
     verbs = "|".join(sorted(IMPERATIVE_VERBS))
     last = -1
-    for match in re.finditer(rf"\b({verbs})\b", rendered, re.IGNORECASE):
+    for match in re.finditer(
+        rf"\b({verbs})\b", _blank_payload(rendered), re.IGNORECASE
+    ):
         last = match.start()
     return last
 
 
 def score_long_context_placement(rendered: str) -> str:
+    """Is the long embedded context placed before the final instruction?
+
+    Only meaningful when there *is* embedded context. A 10k prompt of pure
+    instructions has nothing to misplace, but scored Fail because no tagged
+    block was found — which made this criterion a duplicate of criterion 3
+    ("does it have XML tags") for every long prompt.
+    """
     if len(rendered) < LONG_CONTEXT_THRESHOLD:
         return "N/A"
     block_end = _largest_tagged_block_end(rendered)
+    if block_end == -1:
+        return "N/A"
     last_imp = _last_imperative_offset(rendered)
-    if block_end == -1 or last_imp == -1:
+    if last_imp == -1:
         return "Fail"
     return "Pass" if block_end < last_imp else "Fail"
 
@@ -678,30 +839,64 @@ _DECISION_VERBS = frozenset(
 _COT_CUES = (r"<thinking>", r"<scratchpad>", r"think step by step", r"reason first")
 
 
+# A prompt that demands a bare machine-readable answer is not a candidate for
+# an inline reasoning scaffold: instructing it to emit <thinking> would break
+# the caller's parser. ADR-0087 §1 says <thinking> is output-side, not input,
+# and ten prompts were pinned failing this criterion while explicitly
+# requiring JSON-only output — a floor they could only satisfy by breaking
+# themselves.
+_STRICT_OUTPUT_CUES = (
+    r"return only",
+    r"respond with only",
+    r"output only",
+    r"\bJSON only\b",
+    r"only a JSON",
+    r"nothing else",
+    r"no other text",
+    r"no prose",
+)
+
+
 def score_cot(rendered: str) -> str:
-    words = set(re.findall(r"[A-Za-z]+", rendered.lower()))
-    applicable = bool(words & _DECISION_VERBS)
-    if not applicable:
+    # Applicability is judged on the instructions, not the payload. Scanning
+    # the whole text meant a quoted comment saying "I will approve the PR"
+    # made a summarisation prompt look like a decision prompt.
+    prose = _instruction_prose(rendered)
+    words = set(re.findall(r"[A-Za-z]+", prose.lower()))
+    if not words & _DECISION_VERBS:
         return "N/A"
-    return "Pass" if _any_hit(_COT_CUES, rendered) else "Fail"
+    if _any_hit(_STRICT_OUTPUT_CUES, prose):
+        return "N/A"
+    return "Pass" if _any_hit(_COT_CUES, prose) else "Fail"
 
 
 # ---------------------------------------------------------------------------
 # Rubric #8 — edge cases named
 # ---------------------------------------------------------------------------
 
+# The condition word and the edge-case noun are allowed to be separated. The
+# old `if (empty|missing|...)` demanded they be adjacent, so the natural
+# phrasing never matched: "If the diff is empty, return NO_CHANGES." scored as
+# naming no edge case, and 9 of 54 criterion-8 Fails were this artifact.
 _EDGE_CASE_CUES = (
-    r"if (empty|missing|truncated|unclear|no \w+)",
-    r"when the \w+ (is not|cannot|fails)",
+    r"\b(?:if|when|where|should|unless)\b[^.\n]{0,60}?\b"
+    r"(?:empty|missing|absent|truncated|unclear|unsure|ambiguous|none|"
+    r"no longer|not (?:present|available|found)|cannot|can't|fails?|"
+    r"invalid|malformed|unavailable)\b",
     r"\botherwise,",
     r"in case of",
     r"\bfallback\b",
     r"do not assume",
+    r"\bedge cases?\b",
+    r"\bif (?:you )?(?:are )?(?:in )?doubt\b",
 )
 
 
 def score_edge_cases(rendered: str) -> str:
-    return "Pass" if _any_hit(_EDGE_CASE_CUES, rendered) else "Fail"
+    # Scored over instructions only. `+ def fallback(): pass` inside a diff
+    # under review used to Pass this criterion — the payload naming an edge
+    # case is not the prompt naming one.
+    return "Pass" if _any_hit(_EDGE_CASE_CUES, _instruction_prose(rendered)) else "Fail"
 
 
 # ---------------------------------------------------------------------------
