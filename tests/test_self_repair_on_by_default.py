@@ -1,8 +1,16 @@
 """Guard: self-repair + safety behaviours ship default-ON as System-tab toggles.
 
-feat/self-repair-on-by-default flipped 13 dormant self-repair/safety flags from
+feat/self-repair-on-by-default flipped dormant self-repair/safety flags from
 default-OFF to default-ON and exposed each as a runtime-mutable System-tab
 toggle (settings_registry.SETTINGS -> the PATCH /api/control/config allowlist).
+11 remain default-ON (SELF_REPAIR_FLAGS).
+
+Two flags — ``precondition_gate_enabled`` and ``caching_issue_store_enabled``
+(OPT_IN_AFTER_CACHE_FLAGS) — were reverted to default-OFF (#10846/#10845): the
+precondition gate needs review_stored cache coverage the factory lacks on a
+cold cache, so ON reroutes every READY issue back to plan forever and wedges
+the full-machine pipeline (RC promotion + post-merge smoke). They stay runtime
+toggles so an operator can opt in after confirming coverage.
 
 ``adr_touchpoint_auditor_loop_enabled`` was deliberately dropped from the flip
 (kept default-OFF): it re-enables the activity-based ADR-drift auditor #10540
@@ -10,10 +18,11 @@ retired for a ~70% false-positive rate, and its triage sibling
 ``adr_drift_resolver_loop_enabled`` stays off — so its rollups would pile up
 unhandled. It is pinned OFF here alongside the other landmines.
 
-These tests fail-closed on two regressions:
-  1. An accidental flip-back of any of the 14 defaults to False.
-  2. Dropping any of the 14 from the runtime-mutable settings registry (which
-     would make it un-toggleable from the System tab without a redeploy).
+These tests fail-closed on:
+  1. An accidental flip-back of any default-ON self-repair flag to False.
+  2. An accidental flip-ON of the opt-in-after-cache flags.
+  3. Dropping any flag from the runtime-mutable settings registry (which would
+     make it un-toggleable from the System tab without a redeploy).
 
 They also pin the deliberately-excluded landmines OFF so a future change can't
 quietly fold them into the self-repair set.
@@ -30,21 +39,30 @@ from settings_registry import (
     mutable_field_names,
 )
 
-# The 13 flags flipped to default-ON and wired as System-tab toggles.
+# The 11 flags flipped to default-ON and wired as System-tab toggles.
 SELF_REPAIR_FLAGS: tuple[str, ...] = (
     "giveup_window_enabled",
     "escape_ledger_auto_diagnose_enabled",
     "sampled_audit_auto_adjudicate_enabled",
-    "precondition_gate_enabled",
     "sandbox_failure_fixer_enabled",
     "close_verification_enabled",
     "judge_self_mod_fail_closed_enabled",
     "test_adequacy_verifier_fail_closed",
     "staging_enabled",
     "branch_gc_delete_enabled",
-    "caching_issue_store_enabled",
     "wiki_anchor_prune_enabled",
     "judge_independence_enabled",
+)
+
+# Reverted to default-OFF: opt-in-after-cache-coverage flags. #10791 flipped
+# these ON, but the precondition gate needs review_stored cache coverage the
+# factory lacks on a cold cache — so ON reroutes every READY issue back to
+# plan forever and the full-machine pipeline wedges (RC promotion + post-merge
+# smoke, #10846/#10845). They stay runtime-mutable System-tab toggles so an
+# operator can opt in after confirming coverage; they just no longer default ON.
+OPT_IN_AFTER_CACHE_FLAGS: tuple[str, ...] = (
+    "precondition_gate_enabled",
+    "caching_issue_store_enabled",
 )
 
 # Deliberately held OFF (disturbance dampener) / landmines that must stay off.
@@ -127,10 +145,50 @@ def test_env_bool_override_defaults_track_flipped_fields() -> None:
 
 
 def test_all_flipped_flags_accounted_for() -> None:
-    """Exactly 13 self-repair flags, all default-ON and all registered."""
-    assert len(SELF_REPAIR_FLAGS) == 13
-    assert len(set(SELF_REPAIR_FLAGS)) == 13
+    """Exactly 11 self-repair flags, all default-ON and all registered."""
+    assert len(SELF_REPAIR_FLAGS) == 11
+    assert len(set(SELF_REPAIR_FLAGS)) == 11
     mutable = mutable_field_names()
     for flag in SELF_REPAIR_FLAGS:
         assert HydraFlowConfig.model_fields[flag].default is True
         assert flag in mutable
+
+
+@pytest.mark.parametrize("flag", OPT_IN_AFTER_CACHE_FLAGS)
+def test_opt_in_flag_defaults_false(flag: str) -> None:
+    """Opt-in-after-cache flags reverted to default-OFF (#10846/#10845).
+
+    Enabling the precondition gate without review_stored cache coverage
+    reroutes every READY issue back to plan forever, wedging the full-machine
+    pipeline. These must default False; operators opt in via the System tab.
+    """
+    default = HydraFlowConfig.model_fields[flag].default
+    assert default is False, (
+        f"{flag} must default False (opt-in after cache coverage); got {default!r}"
+    )
+
+
+@pytest.mark.parametrize("flag", OPT_IN_AFTER_CACHE_FLAGS)
+def test_opt_in_flag_still_runtime_toggle(flag: str) -> None:
+    """Default-OFF, but still a runtime-mutable System-tab toggle to opt in."""
+    assert flag in SETTINGS, f"{flag} missing from settings_registry.SETTINGS"
+    assert flag in mutable_field_names(), (
+        f"{flag} not runtime-mutable; an operator could not opt in from the "
+        f"System tab without a redeploy"
+    )
+
+
+def test_opt_in_env_bool_override_sentinels_are_false() -> None:
+    """_ENV_BOOL_OVERRIDES sentinel must track the (now False) field default.
+
+    The override loop only applies HYDRAFLOW_* env values when the field is at
+    its default; a stale True sentinel here would silently stop the env var
+    from opting the gate on.
+    """
+    table = {field: default for field, _env, default in _ENV_BOOL_OVERRIDES}
+    for flag in OPT_IN_AFTER_CACHE_FLAGS:
+        if flag in table:
+            assert table[flag] is False, (
+                f"_ENV_BOOL_OVERRIDES sentinel for {flag} must be False to "
+                f"match the reverted field default; got {table[flag]!r}"
+            )

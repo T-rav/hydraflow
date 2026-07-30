@@ -123,8 +123,8 @@ class TestBuildServices:
     ) -> None:
         """When caching_issue_store_enabled is False, phase_store points at
         the raw IssueStore — not a wrapper."""
-        # caching_issue_store_enabled now defaults True (self-repair on by
-        # default), so opt out explicitly to exercise the raw-store path.
+        # caching_issue_store_enabled defaults False (opt-in after cache
+        # coverage); set it explicitly to pin the raw-store path.
         config.caching_issue_store_enabled = False  # type: ignore[misc]
         bus = EventBus()
         state = StateTracker(config.state_file)

@@ -781,12 +781,12 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "caching_issue_store_enabled",
         "HYDRAFLOW_CACHING_ISSUE_STORE_ENABLED",
-        True,
+        False,
     ),
     (
         "precondition_gate_enabled",
         "HYDRAFLOW_PRECONDITION_GATE_ENABLED",
-        True,
+        False,
     ),
     (
         "giveup_window_enabled",
@@ -3167,11 +3167,14 @@ class HydraFlowConfig(BaseModel):
     # whenever issue_cache_enabled is also on. Disable via the System
     # tab to fall back to the raw IssueStore.
     caching_issue_store_enabled: bool = Field(
-        default=True,
+        default=False,
         description=(
             "Wrap IssueStore in CachingIssueStore for read-through "
             "caching of fetches and enrich_with_comments. Requires "
-            "issue_cache_enabled. Default ON; disable via the System tab."
+            "issue_cache_enabled. Opt-in (default OFF): enable via the "
+            "System tab after confirming cache coverage — it is the "
+            "store that populates the review_stored records the "
+            "precondition gate reads."
         ),
     )
 
@@ -3186,19 +3189,22 @@ class HydraFlowConfig(BaseModel):
         ),
     )
 
-    # Precondition gate enforcement (#6423). Default ON (self-repair on
-    # by default). The historical route-every-issue-back-forever risk on
-    # a freshly-deployed cache is now bounded by giveup_window_enabled
-    # (also default ON): after N plan-retry route-backs the give-up
-    # window self-solves (decompose/diagnose) instead of routing back
-    # again. Disable via the System tab to turn enforcement off.
+    # Precondition gate enforcement (#6423). OPT-IN — default OFF. Enabling
+    # it on a factory whose issue cache has no review_stored coverage yet
+    # reroutes every READY issue back to `plan` forever: has_clean_review
+    # can never be satisfied, so the full-machine pipeline advances nothing
+    # (wedged RC promotion + post-merge smoke 2026-07-28 → #10846/#10845 when
+    # #10791 flipped it on globally). giveup_window_enabled bounds the loop
+    # but does not make the issue advance. Operators flip this ON via the
+    # System tab AFTER confirming cache coverage (see service_registry).
     precondition_gate_enabled: bool = Field(
-        default=True,
+        default=False,
         description=(
             "Enforce stage preconditions on the implement and review "
-            "phases. Requires issue_cache_enabled to be True. Default ON; "
-            "disable via the System tab. Bounded by giveup_window_enabled "
-            "so route-backs self-solve rather than loop forever."
+            "phases. Requires issue_cache_enabled AND cache coverage of "
+            "review_stored records. Opt-in (default OFF): enable via the "
+            "System tab after confirming coverage, else READY issues route "
+            "back to plan forever and the full-machine pipeline wedges."
         ),
     )
     # Formal give-up window (#10735, epic #10733 child 2) — OTP restart-
