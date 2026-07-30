@@ -1,19 +1,19 @@
 {
   "artifacts": {
     "adr-conformance.md": {
-      "content_sha": "5bc985c096c7ce67279d4b645481a40c28b388a34258717de0e58c9666efd5d7"
+      "content_sha": "d97e5186ee6d3ccacb380f188bd70d89190112680a78bba7dd964fc5bcabc3d1"
     },
     "adr-enforcement.md": {
-      "content_sha": "5872d68cd4e82bcfd9aba9eed4acbfac3e62e294debc2d3cbef83f2e6cc87894"
+      "content_sha": "0b7b7414dee3d1442ef7fd4c7d38a71a8bf2dbe996a16f400b8319e7cddd889c"
     },
     "adr_xref.md": {
-      "content_sha": "e54533287b5af57d6fb7d6bb839b84fe5cf17d52c9796f7b5918ac61b43acc52"
+      "content_sha": "e92fb3644b49962c896da7da4b5bdc4810c63f2009ca8a2140f442067971317d"
     },
     "ai_system_inventory.md": {
       "content_sha": "276213916e30d4cda4595574595e5d7ce92a66b955246857cd8f69b5d0b0ff07"
     },
     "changelog.md": {
-      "content_sha": "a757a75bbe715ae92d31776e1cd5d6102ea5a1237fa1331e37bde5d8ff1258a1"
+      "content_sha": "603902625b6cee638cf6ad0e0e4ceebd83e174215c71a40f248f59ac58661977"
     },
     "coverage_matrix.md": {
       "content_sha": "c912700d4bafe22ec4eaf248632d9a052f28eff9d0cf2ef02832b5fff02734ae"
@@ -52,5 +52,5 @@
       "content_sha": "b9112ce7bb5358e4c710f59628f2f14c69e1fb0a576dfc66d1753e60cfa36e9a"
     }
   },
-  "content_sha": "5fd562085d707fe5e77a3ce413f8fe85a2dcf7e122caf56fc099cdf52c7e48ca"
+  "content_sha": "2c1063f354168ece3d23275c2d94e216dbc84f0fa10665fac5b3f444d4639c95"
 }

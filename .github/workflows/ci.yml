@@ -440,6 +440,11 @@ jobs:
         # run SERIALLY here (they also have the signal-context lane below); the
         # rest of tests/regressions/ is xdist-safe and parallelizes. Keep the
         # reap-file list in sync with the Makefile REAP_TESTS.
+        # test_auto_pr_preflight_gate.py joins the serial list for a different
+        # reason: it is the same xdist-unsafe class as test_auto_pr_preflight.py
+        # (patches subprocess_util.run_subprocess + auto_pr's runner prefix), so
+        # a bled mock leaves the patch unapplied and it asserts on the wrong
+        # preflight stage. Passes single-threaded.
         run: |
           set -euo pipefail
           REAP="tests/regressions/test_reap_processlookuperror.py \
@@ -447,7 +452,8 @@ jobs:
             tests/regressions/test_issue_9579.py \
             tests/regressions/test_issue_9911_stop_path_reap.py \
             tests/regressions/test_issue_9641_unified_group_kill.py \
-            tests/regressions/test_hostrunner_reap_grandchildren.py"
+            tests/regressions/test_hostrunner_reap_grandchildren.py \
+            tests/regressions/test_auto_pr_preflight_gate.py"
           IGNORES=""; for f in $REAP; do IGNORES="$IGNORES --ignore=$f"; done
           PYTHONPATH=src uv run pytest tests/regressions/ $IGNORES -n auto --dist loadscope --reruns 2 --reruns-delay 1 -q
           PYTHONPATH=src uv run pytest $REAP -q

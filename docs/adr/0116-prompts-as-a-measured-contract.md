@@ -15,6 +15,7 @@
 **Enforced by:**
 pytest:tests/test_prompt_registry_completeness.py
 pytest:tests/test_prompt_fitness.py
+pytest:tests/test_adr_enforcement_completeness.py
 
 ## Context
 
@@ -92,6 +93,19 @@ So every prompt's rubric score is reported alongside its task-outcome series, fr
 ### 7. Stated gaming failure mode
 
 The cheapest way to raise a rubric score is to add tags and edge-case boilerplate without changing what the prompt asks for. Detection is §6's pairing plus a diff-level check that a score-improving change altered instruction content, not only markup: a change that raises the score while leaving the imperative and the constraints byte-identical is the signature.
+
+### 8. The same gate applies to ADRs themselves
+
+While building this, the identical gap turned up one artifact class up: `classify_adr_enforcement` has existed since ADR-0100 and its output is published to `docs/arch/generated/adr-enforcement.md`, but **nothing failed when an ADR landed without a runnable check.** Measured, not enforced — the same defect this ADR exists to close for prompts. ADR-0027 is the evidence it already drifted: no `**Enforced by:**` at all, and CI stayed green.
+
+Measured 2026-07-30 over all 78 Accepted ADRs: **74 REAL, 3 WEAK, 1 MISSING.**
+
+`tests/test_adr_enforcement_completeness.py` closes it, with a distinction that matters:
+
+- **`_PROSE_ONLY`** (ADR-0025, ADR-0035, ADR-0051) are **declared permanent exceptions, not debt.** Their enforcement is genuinely a human convention — ADR-0051's own text says *"a process convention, not a runnable check"*, and 0025/0035 name review-checklist steps over symmetric field-assertion coverage and toggle-state test matching, neither of which has a proposed mechanical equivalent. Pinned at 3, each with a justification, so they read as decided rather than unfinished.
+- **`_MISSING_ENFORCEMENT`** (ADR-0027) is debt and **shrinks only.** Pinned at 1.
+
+Recording the difference is the point: an exception with a reason is a decision, and an exception without one is rot wearing the same clothes.
 
 ## Consequences
 

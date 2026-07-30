@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `1b4b452` — docs(adr): add ADR-0113 lineage lines to ADR-0116 *(2026-07-30)*
 - `1dc70d1` — feat(prompts): per-prompt setpoints — bind each prompt to its own past *(2026-07-30)*
 - `3eff48a` — feat(prompts): prompts as a measured contract — registry ratchet + fitness function *(2026-07-30)*
 - `819e0a4` — feat(ul): edge-proposer — 12 new edges across 12 terms (#10815) (#10815) *(2026-07-30)*
