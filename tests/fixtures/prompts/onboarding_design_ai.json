@@ -1,0 +1,9 @@
+{
+  "builder": "onboarding.design_ai._build_claude_prompt",
+  "args": {
+    "message": "Go with private for now and draft the spec. One more thing before you do: the ledger read token has to come from the environment, not a config file in the repo, and I want that in the spec rather than discovered later."
+  },
+  "faked_deps": {
+    "draft": "escape_insights_onboarding"
+  }
+}

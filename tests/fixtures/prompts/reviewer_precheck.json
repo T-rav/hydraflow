@@ -1,0 +1,22 @@
+{
+  "builder": "reviewer.ReviewRunner._build_precheck_prompt",
+  "args": {
+    "pr": {
+      "number": 9820,
+      "issue_number": 9812,
+      "branch": "agent/issue-9812",
+      "url": ""
+    },
+    "issue": {
+      "id": 9812,
+      "title": "Retry transient S3 upload failures",
+      "body": "Intermittent 503s on large uploads. Needs bounded backoff.",
+      "tags": [
+        "bug"
+      ],
+      "comments": []
+    },
+    "diff": "--- a/src/uploader.py\n+++ b/src/uploader.py\n@@ -12,6 +12,22 @@\n+    time.sleep(min(2 ** attempt, 8))  # backoff 0\n+    time.sleep(min(2 ** attempt, 8))  # backoff 1\n+    time.sleep(min(2 ** attempt, 8))  # backoff 2\n+    time.sleep(min(2 ** attempt, 8))  # backoff 3\n+    time.sleep(min(2 ** attempt, 8))  # backoff 4\n+    time.sleep(min(2 ** attempt, 8))  # backoff 5\n+    time.sleep(min(2 ** attempt, 8))  # backoff 6\n+    time.sleep(min(2 ** attempt, 8))  # backoff 7\n+    time.sleep(min(2 ** attempt, 8))  # backoff 8\n+    time.sleep(min(2 ** attempt, 8))  # backoff 9\n+    time.sleep(min(2 ** attempt, 8))  # backoff 10\n+    time.sleep(min(2 ** attempt, 8))  # backoff 11\n+    time.sleep(min(2 ** attempt, 8))  # backoff 12\n+    time.sleep(min(2 ** attempt, 8))  # backoff 13\n+    time.sleep(min(2 ** attempt, 8))  # backoff 14\n+    time.sleep(min(2 ** attempt, 8))  # backoff 15\n+    time.sleep(min(2 ** attempt, 8))  # backoff 16\n+    time.sleep(min(2 ** attempt, 8))  # backoff 17\n+    time.sleep(min(2 ** attempt, 8))  # backoff 18\n+    time.sleep(min(2 ** attempt, 8))  # backoff 19\n+    time.sleep(min(2 ** attempt, 8))  # backoff 20\n+    time.sleep(min(2 ** attempt, 8))  # backoff 21\n+    time.sleep(min(2 ** attempt, 8))  # backoff 22\n+    time.sleep(min(2 ** attempt, 8))  # backoff 23\n+    time.sleep(min(2 ** attempt, 8))  # backoff 24\n+    time.sleep(min(2 ** attempt, 8))  # backoff 25\n+    time.sleep(min(2 ** attempt, 8))  # backoff 26\n+    time.sleep(min(2 ** attempt, 8))  # backoff 27\n+    time.sleep(min(2 ** attempt, 8))  # backoff 28\n+    time.sleep(min(2 ** attempt, 8))  # backoff 29\n+    time.sleep(min(2 ** attempt, 8))  # backoff 30\n+    time.sleep(min(2 ** attempt, 8))  # backoff 31\n+    time.sleep(min(2 ** attempt, 8))  # backoff 32\n+    time.sleep(min(2 ** attempt, 8))  # backoff 33\n+    time.sleep(min(2 ** attempt, 8))  # backoff 34\n+    time.sleep(min(2 ** attempt, 8))  # backoff 35\n+    time.sleep(min(2 ** attempt, 8))  # backoff 36\n+    time.sleep(min(2 ** attempt, 8))  # backoff 37\n+    time.sleep(min(2 ** attempt, 8))  # backoff 38\n+    time.sleep(min(2 ** attempt, 8))  # backoff 39"
+  },
+  "faked_deps": {}
+}

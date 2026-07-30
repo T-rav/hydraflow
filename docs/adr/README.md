@@ -146,7 +146,7 @@ cadence and files remediation issues on drift.
 | [0084](0084-auto-agent-universal-root-cause-gate.md) | Auto-Agent as a Universal, Persistent, Root-Cause HITL Gate | Proposed |
 | [0085](0085-secrets-never-persist-in-audit-stream.md) | Secrets never persist in the canonical audit stream | Accepted |
 | [0086](0086-live-corpus-replay-loop.md) | LiveCorpusReplayLoop: Shadow-Corpus Drift Detection | Proposed |
-| [0087](0087-prompt-structure-standard.md) | Prompt structure standard (XML tags, 8-criterion rubric, mechanical scoring) | Proposed |
+| [0087](0087-prompt-structure-standard.md) | Prompt structure standard (XML tags, 8-criterion rubric, mechanical scoring) | Accepted |
 | [0088](0088-label-drift-caretaker-loop.md) | LabelDriftWatcherLoop — Cross-Entity State-Machine Drift Caretaker | Accepted |
 | [0089](0089-memory-backlog-loop.md) | MemoryBacklogLoop — promote session-memory feedback to the find queue | Accepted |
 | [0090](0090-atlas-knowledge-graph-dashboard.md) | Atlas — Knowledge Graph Dashboard Surface | Accepted |
@@ -175,6 +175,7 @@ cadence and files remediation issues on drift.
 | [0113](0113-adr-lineage-precedent-and-divergence.md) | ADR lineage — Precedent and Divergence lines | Accepted |
 | [0114](0114-optional-per-type-eventbus-subscription.md) | Optional per-type EventBus subscription | Accepted |
 | [0115](0115-auto-diagnose-before-human-for-audit-and-escape-surfaces.md) | Auto-diagnose before human for audit + escape surfaces | Accepted |
+| [0116](0116-prompts-as-a-measured-contract.md) | Prompts as a measured contract | Accepted |
 
 ## Adding a new ADR
 

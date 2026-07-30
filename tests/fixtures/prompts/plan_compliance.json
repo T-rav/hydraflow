@@ -1,0 +1,10 @@
+{
+  "builder": "plan_compliance.build_plan_compliance_prompt",
+  "args": {
+    "issue_number": 4711,
+    "issue_title": "Retry transient S3 throttling in the archive uploader",
+    "diff": "diff --git a/src/upload_retry.py b/src/upload_retry.py\nindex 1a2b3c4..5d6e7f8 100644\n--- a/src/upload_retry.py\n+++ b/src/upload_retry.py\n@@ -12,9 +12,24 @@ from botocore.exceptions import ClientError\n \n def upload_with_retry(bucket: str, key: str, body: bytes, *, attempts: int = 3) -> None:\n-    client = boto3.client(\"s3\")\n-    client.put_object(Bucket=bucket, Key=key, Body=body)\n+    client = boto3.client(\"s3\")\n+    last: ClientError | None = None\n+    for attempt in range(attempts):\n+        try:\n+            client.put_object(Bucket=bucket, Key=key, Body=body)\n+            return\n+        except ClientError as exc:\n+            code = exc.response.get(\"Error\", {}).get(\"Code\", \"\")\n+            if code not in _RETRYABLE:\n+                raise\n+            last = exc\n+            time.sleep(min(2 ** attempt, 8))\n+    raise UploadFailed(f\"{key}: {attempts} attempts exhausted\") from last\n",
+    "plan_text": "1. Add a `_RETRYABLE` frozenset of S3 error codes that are safe to retry\n   (SlowDown, ServiceUnavailable, InternalError, RequestTimeout).\n2. Wrap `put_object` in a bounded retry loop with exponential backoff capped\n   at 8 seconds; do not retry non-retryable codes such as AccessDenied.\n3. Raise a typed `UploadFailed` carrying the last ClientError as __cause__ so\n   callers can distinguish exhaustion from a hard failure.\n4. Unit-test each branch: success first try, success after two retries,\n   non-retryable raised immediately, exhaustion raising UploadFailed.\n"
+  },
+  "faked_deps": {}
+}

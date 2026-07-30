@@ -6,7 +6,7 @@ subprocess spawns; nothing here talks to the network.
 
 Holdout invariant: a case directory carrying a ``HOLDOUT`` marker is a
 held-out honeypot. It must NEVER enter refiner context — the synthesizer
-cannot overfit to traps it cannot see. ``assemble_refine_context`` raises on
+cannot overfit to traps it cannot see. ``build_refine_prompt`` raises on
 holdout input; validation (loop side) always includes 100% of holdouts.
 """
 
@@ -35,7 +35,7 @@ SKILL_BUILDER_MODULES: dict[str, str] = {
 # The overfit precondition: auto-refinement's only guard against a synthesized
 # patch overfitting to the single regressed case is the holdout gate — the
 # candidate must survive 100% of the skill's honeypots, which the synthesizer
-# never saw (``assemble_refine_context`` refuses holdout input). A skill with
+# never saw (``build_refine_prompt`` refuses holdout input). A skill with
 # NO holdout coverage has no such gate, so an auto-merge candidate for it could
 # silently overfit; we refuse to auto-refine it (outcome ``not_refinable``)
 # until holdouts exist.
@@ -114,7 +114,7 @@ _LENGTH_PROBE_EXTRA_KWARGS: dict[str, dict[str, str]] = {
 }
 
 
-def assemble_refine_context(
+def build_refine_prompt(
     repo_root: Path, case_dir: Path, skill_name: str, failure_transcript: str
 ) -> str:
     if (case_dir / _HOLDOUT_MARKER).is_file():
@@ -243,7 +243,7 @@ def discover_validation_case_ids(cases_dir: Path, regressed_case_id: str) -> lis
     dir) and every benign sentinel (``expected_catcher.txt == "none"``), deduped
     (a benign holdout satisfies both tests) and sorted for a stable ``--cases``
     argument. 100% of holdouts are always included: the synthesizer never saw
-    them (``assemble_refine_context`` refuses holdout input), so passing them all
+    them (``build_refine_prompt`` refuses holdout input), so passing them all
     proves the candidate did not overfit to traps it could not read.
 
     Scans the WORKTREE's cases dir (never imports tests code). A missing dir

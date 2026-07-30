@@ -1,0 +1,7 @@
+{
+  "builder": "disturbance_dampener_loop.DisturbanceDampenerLoop._build_prompt",
+  "args": {},
+  "faked_deps": {
+    "unit": "disturbance_suppressions_digest"
+  }
+}

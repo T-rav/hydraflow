@@ -1,0 +1,8 @@
+{
+  "builder": "adversarial_agent_runner.SubprocessAgentRunner._compose_prompt",
+  "args": {},
+  "faked_deps": {
+    "system_prompt": "plan_touchpoint_expander",
+    "user_message": "plan_touchpoint_expander"
+  }
+}

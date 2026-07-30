@@ -1,0 +1,11 @@
+{
+  "builder": "agent.AgentRunner._build_tdd_subagent_prompt",
+  "args": {
+    "plan_comment": "## Task Graph\n\n### P1 \u2014 Retry wrapper\n**Files:** src/uploader.py, tests/test_uploader.py\n**Tests:** test_retries_on_503, test_gives_up_after_max\n**Depends on:** none\n\n### P2 \u2014 Wire into the upload path\n**Files:** src/upload_service.py\n**Tests:** test_service_uses_retry_wrapper\n**Depends on:** P1\n",
+    "bead_mapping": {
+      "P1": "bead-9812-a",
+      "P2": "bead-9812-b"
+    }
+  },
+  "faked_deps": {}
+}

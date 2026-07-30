@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import importlib
 import inspect
 import json
@@ -218,12 +219,387 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Adjacent",
         "src/adr_reviewer.py:273",
     ),
+    # --- Backfill 2026-07-30 (ADR-0116 ratchet): gate/verification adjacents ---
+    AuditTarget(
+        "scope_check",
+        "scope_check.build_scope_check_prompt",
+        "tests/fixtures/prompts/scope_check.json",
+        "Adjacent",
+        "src/scope_check.py",
+    ),
+    AuditTarget(
+        "plan_compliance",
+        "plan_compliance.build_plan_compliance_prompt",
+        "tests/fixtures/prompts/plan_compliance.json",
+        "Plan",
+        "src/plan_compliance.py",
+    ),
+    AuditTarget(
+        "ultra_review",
+        "ultra_review.build_ultra_review_prompt",
+        "tests/fixtures/prompts/ultra_review.json",
+        "Review",
+        "src/ultra_review.py",
+    ),
+    AuditTarget(
+        "shape_coherence",
+        "shape_coherence.build_shape_coherence_prompt",
+        "tests/fixtures/prompts/shape_coherence.json",
+        "Adjacent",
+        "src/shape_coherence.py",
+    ),
+    AuditTarget(
+        "discover_completeness",
+        "discover_completeness.build_discover_completeness_prompt",
+        "tests/fixtures/prompts/discover_completeness.json",
+        "Adjacent",
+        "src/discover_completeness.py",
+    ),
+    AuditTarget(
+        "triage_honeypot",
+        "triage_honeypot.build_honeypot_prompt",
+        "tests/fixtures/prompts/triage_honeypot.json",
+        "Triage",
+        "src/triage_honeypot.py",
+    ),
+    # --- Verification judge / acceptance criteria (backfill 2026-07-30) ---
+    AuditTarget(
+        "verification_judge_code_validation",
+        "verification_judge.VerificationJudge._build_code_validation_prompt",
+        "tests/fixtures/prompts/verification_judge_code_validation.json",
+        "Adjacent",
+        "src/verification_judge.py:252",
+    ),
+    AuditTarget(
+        "verification_judge_instructions_validation",
+        "verification_judge.VerificationJudge._build_instructions_validation_prompt",
+        "tests/fixtures/prompts/verification_judge_instructions_validation.json",
+        "Adjacent",
+        "src/verification_judge.py:300",
+    ),
+    AuditTarget(
+        "verification_judge_refinement",
+        "verification_judge.VerificationJudge._build_refinement_prompt",
+        "tests/fixtures/prompts/verification_judge_refinement.json",
+        "Adjacent",
+        "src/verification_judge.py:330",
+    ),
+    AuditTarget(
+        "verification_judge_precheck",
+        "verification_judge.VerificationJudge._build_precheck_prompt",
+        "tests/fixtures/prompts/verification_judge_precheck.json",
+        "Adjacent",
+        "src/verification_judge.py:364",
+    ),
+    AuditTarget(
+        "acceptance_criteria_build",
+        "acceptance_criteria.AcceptanceCriteriaGenerator._build_prompt",
+        "tests/fixtures/prompts/acceptance_criteria_build.json",
+        "Adjacent",
+        "src/acceptance_criteria.py:134",
+    ),
+    AuditTarget(
+        "acceptance_criteria_precheck",
+        "acceptance_criteria.AcceptanceCriteriaGenerator._build_precheck_prompt",
+        "tests/fixtures/prompts/acceptance_criteria_precheck.json",
+        "Adjacent",
+        "src/acceptance_criteria.py:194",
+    ),
+    # --- Discover / refinement / audit adjacents (backfill 2026-07-30) ---
+    AuditTarget(
+        "discover_expander",
+        "discover_expander.build_expander_prompt",
+        "tests/fixtures/prompts/discover_expander.json",
+        "Adjacent",
+        "src/discover_expander.py:57",
+    ),
+    AuditTarget(
+        "entry_evidence",
+        "entry_evidence_loop._build_prompt",
+        "tests/fixtures/prompts/entry_evidence.json",
+        "Adjacent",
+        "src/entry_evidence_loop.py:64",
+    ),
+    AuditTarget(
+        "implement_spec_review",
+        "implement_spec_reviewer.build_spec_review_prompt",
+        "tests/fixtures/prompts/implement_spec_review.json",
+        "Implement",
+        "src/implement_spec_reviewer.py:165",
+    ),
+    AuditTarget(
+        "issue_refinement_dup",
+        "issue_refinement.build_dup_judgment_prompt",
+        "tests/fixtures/prompts/issue_refinement_dup.json",
+        "Triage",
+        "src/issue_refinement.py:392",
+    ),
+    AuditTarget(
+        "issue_refinement_priority",
+        "issue_refinement.build_priority_prompt",
+        "tests/fixtures/prompts/issue_refinement_priority.json",
+        "Triage",
+        "src/issue_refinement.py:457",
+    ),
+    AuditTarget(
+        "sampled_audit",
+        "sampled_audit_loop.build_audit_prompt",
+        "tests/fixtures/prompts/sampled_audit.json",
+        "Review",
+        "src/sampled_audit_loop.py:183",
+    ),
+    # --- Shape / review-advisor / council (backfill 2026-07-30) ---
+    AuditTarget(
+        "shape_runner_turn",
+        "shape_runner.ShapeRunner._build_turn_prompt",
+        "tests/fixtures/prompts/shape_runner_turn.json",
+        "Plan",
+        "src/shape_runner.py:346",
+    ),
+    AuditTarget(
+        "shape_runner_advocate",
+        "shape_runner.ShapeRunner._build_advocate_prompt",
+        "tests/fixtures/prompts/shape_runner_advocate.json",
+        "Plan",
+        "src/shape_runner.py:545",
+    ),
+    AuditTarget(
+        "shape_runner_critic",
+        "shape_runner.ShapeRunner._build_critic_prompt",
+        "tests/fixtures/prompts/shape_runner_critic.json",
+        "Plan",
+        "src/shape_runner.py:591",
+    ),
+    AuditTarget(
+        "review_advisor_preflight",
+        "review_advisor.PreFlightAdvisor._build_prompt",
+        "tests/fixtures/prompts/review_advisor_preflight.json",
+        "Review",
+        "src/review_advisor.py:1232",
+    ),
+    AuditTarget(
+        "review_advisor_postverify",
+        "review_advisor.PostVerifyAdvisor._build_prompt",
+        "tests/fixtures/prompts/review_advisor_postverify.json",
+        "Review",
+        "src/review_advisor.py:1066",
+    ),
+    AuditTarget(
+        "review_advisor_midflight",
+        "review_advisor.MidFlightAdvisor._render_prompt",
+        "tests/fixtures/prompts/review_advisor_midflight.json",
+        "Review",
+        "src/review_advisor.py:1335",
+    ),
+    AuditTarget(
+        "decomposition_council_direction",
+        "decomposition_council.DecompositionCouncil._build_direction_prompt",
+        "tests/fixtures/prompts/decomposition_council_direction.json",
+        "Triage",
+        "src/decomposition_council.py:201",
+    ),
+    AuditTarget(
+        "decomposition_council_validation",
+        "decomposition_council.DecompositionCouncil._build_validation_prompt",
+        "tests/fixtures/prompts/decomposition_council_validation.json",
+        "Triage",
+        "src/decomposition_council.py:290",
+    ),
+    # --- Caretaker / adjudication loops (backfill 2026-07-30) ---
+    AuditTarget(
+        "adr_drift_triage",
+        "adr_drift_triage_llm.AdrDriftTriageLLM._build_prompt",
+        "tests/fixtures/prompts/adr_drift_triage.json",
+        "Adjacent",
+        "src/adr_drift_triage_llm.py:137",
+    ),
+    # NOTE: this builder's output is used twice — as the agent prompt AND as the
+    # burn-down PR body (`pr_body=self._build_prompt(unit)`,
+    # src/disturbance_dampener_loop.py:173). Rubric remediation here also
+    # rewrites what operators read on the PR.
+    AuditTarget(
+        "disturbance_dampener",
+        "disturbance_dampener_loop.DisturbanceDampenerLoop._build_prompt",
+        "tests/fixtures/prompts/disturbance_dampener.json",
+        "Adjacent",
+        "src/disturbance_dampener_loop.py:178",
+    ),
+    AuditTarget(
+        "term_proposer",
+        "term_proposer_llm.TermProposerLLM._build_prompt",
+        "tests/fixtures/prompts/term_proposer.json",
+        "Adjacent",
+        "src/term_proposer_llm.py:176",
+    ),
+    AuditTarget(
+        "intervention_classify",
+        "intervention.classify.build_classification_prompt",
+        "tests/fixtures/prompts/intervention_classify.json",
+        "Adjacent",
+        "src/intervention/classify.py:135",
+    ),
+    AuditTarget(
+        "bug_reproducer",
+        "bug_reproducer.BugReproducer._build_prompt",
+        "tests/fixtures/prompts/bug_reproducer.json",
+        "Triage",
+        "src/bug_reproducer.py:199",
+    ),
+    # These two render Markdown envelope files (prompts/auto_agent/*.md), not
+    # Python literals, so rubric remediation for them lands in Markdown.
+    AuditTarget(
+        "pr_red_repair_dispatch",
+        "pr_red_repair_loop.PrRedRepairLoop._build_dispatch_prompt",
+        "tests/fixtures/prompts/pr_red_repair.json",
+        "Review",
+        "src/pr_red_repair_loop.py:753",
+    ),
+    AuditTarget(
+        "sandbox_failure_fixer",
+        "sandbox_failure_fixer_loop.SandboxFailureFixerLoop._build_prompt",
+        "tests/fixtures/prompts/sandbox_failure_fixer.json",
+        "Review",
+        "src/sandbox_failure_fixer_loop.py:202",
+    ),
+    AuditTarget(
+        "audit_adjudicate",
+        "audit.adjudicate.build_adjudication_prompt",
+        "tests/fixtures/prompts/audit_adjudicate.json",
+        "Review",
+        "src/audit/adjudicate.py:60",
+    ),
+    # --- Final backfill 2026-07-30: GRANDFATHERED reaches zero ---
+    AuditTarget(
+        "adversarial_agent_compose",
+        "adversarial_agent_runner.SubprocessAgentRunner._compose_prompt",
+        "tests/fixtures/prompts/adversarial_agent_compose.json",
+        "Implement",
+        "src/adversarial_agent_runner.py",
+    ),
+    AuditTarget(
+        "discover_runner",
+        "discover_runner.DiscoverRunner._build_prompt",
+        "tests/fixtures/prompts/discover_runner.json",
+        "Adjacent",
+        "src/discover_runner.py",
+    ),
+    AuditTarget(
+        "onboarding_design_ai",
+        "onboarding.design_ai._build_claude_prompt",
+        "tests/fixtures/prompts/onboarding_design_ai.json",
+        "Adjacent",
+        "src/onboarding/design_ai.py",
+    ),
+    AuditTarget(
+        "plan_touchpoint_expander",
+        "plan_touchpoint_expander.PlanTouchpointExpander._build_prompt",
+        "tests/fixtures/prompts/plan_touchpoint_expander.json",
+        "Plan",
+        "src/plan_touchpoint_expander.py",
+    ),
+    # Renders the prompts/auto_agent/*.md envelope templates rather than a
+    # Python literal, so this is the one registered entry whose remediation
+    # lands in Markdown. The other 18 templates in that directory are still
+    # outside AST discovery entirely — tracked separately.
+    AuditTarget(
+        "preflight_auto_agent",
+        "preflight.runner.render_prompt",
+        "tests/fixtures/prompts/preflight_auto_agent.json",
+        "Review",
+        "src/preflight/runner.py",
+    ),
+    AuditTarget(
+        "research_runner",
+        "research_runner.ResearchRunner._build_prompt",
+        "tests/fixtures/prompts/research_runner.json",
+        "Adjacent",
+        "src/research_runner.py",
+    ),
+    # --- Builders that module-granular coverage had hidden (2026-07-30) ---
+    # Coverage counted modules, so these five sat inside already-"covered"
+    # modules with no fixture and no score. Three had also evaded the naming
+    # convention and were renamed to conform per ADR-0116 §3.
+    AuditTarget(
+        "agent_tdd_subagent",
+        "agent.AgentRunner._build_tdd_subagent_prompt",
+        "tests/fixtures/prompts/agent_tdd_subagent.json",
+        "Implement",
+        "src/agent.py:508",
+    ),
+    AuditTarget(
+        "reviewer_precheck",
+        "reviewer.ReviewRunner._build_precheck_prompt",
+        "tests/fixtures/prompts/reviewer_precheck.json",
+        "Review",
+        "src/reviewer.py",
+    ),
+    AuditTarget(
+        "spec_match_self_review",
+        "spec_match.build_self_review_prompt",
+        "tests/fixtures/prompts/spec_match_self_review.json",
+        "Adjacent",
+        "src/spec_match.py",
+    ),
+    AuditTarget(
+        "prompt_refiner_refine",
+        "prompt_refiner.build_refine_prompt",
+        "tests/fixtures/prompts/prompt_refiner_refine.json",
+        "Adjacent",
+        "src/prompt_refiner.py:117",
+    ),
+    AuditTarget(
+        "review_advisor_midflight_section",
+        "review_advisor.build_mid_flight_prompt",
+        "tests/fixtures/prompts/review_advisor_midflight_section.json",
+        "Review",
+        "src/review_advisor.py:1367",
+    ),
 ]
+
+# ---------------------------------------------------------------------------
+# Shared: separating instructions from the data embedded in a prompt.
+#
+# Several criteria ask a question about what the prompt *tells the model to do*.
+# Scanning the whole rendered text answers a different question, because a
+# rendered prompt also contains the issue body, the diff and the CI log. That
+# produced verified false verdicts: criterion 7 fired because the word
+# "approve" appeared in a quoted comment, and criterion 8 passed on
+# "+ def fallback(): pass" sitting inside a diff under review. Both were
+# reading the payload and scoring it as instruction.
+# ---------------------------------------------------------------------------
+
+_FENCED = re.compile(r"```.*?```", re.DOTALL)
+_INLINE = re.compile(r"`[^`\n]*`")
+_DIFF = re.compile(r"^[+-].*$", re.MULTILINE)
+
+
+def _strip_payload_tags(match: re.Match[str]) -> str:
+    """Blank a tagged block unless it is a reasoning scaffold.
+
+    ``<thinking>`` and ``<scratchpad>`` are instruction, not payload — they are
+    the very cue criterion 7 looks for. ``_EXCLUDED_TAGS`` already draws this
+    line for criterion 3; stripping them here made a prompt that carries a
+    scaffold score as though it had none.
+    """
+    return " " if match.group(1).lower() not in _EXCLUDED_TAGS else match.group(0)
+
+
+def _instruction_prose(rendered: str) -> str:
+    """The prompt with embedded payload removed: tagged blocks, code, diffs."""
+    prose = _TAG_PAIR.sub(_strip_payload_tags, rendered)
+    prose = _FENCED.sub(" ", prose)
+    prose = _INLINE.sub(" ", prose)
+    return _DIFF.sub(" ", prose)
+
 
 # ---------------------------------------------------------------------------
 # Rubric #1 — leads with the request
 # ---------------------------------------------------------------------------
 
+# The rubric disagreed with itself about what an imperative is: `determine`,
+# `evaluate`, `rank`, `choose` and `score` counted as decision verbs for
+# criterion 7 but not as imperatives here, so "Determine whether the plan is
+# compliant." led with a request and was scored as not doing so.
 IMPERATIVE_VERBS = frozenset(
     {
         "produce",
@@ -236,6 +612,25 @@ IMPERATIVE_VERBS = frozenset(
         "propose",
         "write",
         "summarize",
+        "determine",
+        "evaluate",
+        "analyze",
+        "analyse",
+        "assess",
+        "identify",
+        "rank",
+        "choose",
+        "select",
+        "score",
+        "judge",
+        "extract",
+        "list",
+        "explain",
+        "compare",
+        "check",
+        "verify",
+        "fix",
+        "implement",
     }
 )
 
@@ -246,7 +641,30 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def score_leads_with_request(rendered: str) -> str:
-    stripped = re.sub(r"<\w+>.*?</\w+>", "", rendered, flags=re.DOTALL).strip()
+    # Strips *embedded data* so the leading instruction can be found. Was
+    # `r"<\w+>.*?</\w+>"` — no backreference, so it matched across different
+    # tags and stripped from the first opening tag to the first closing one
+    # anywhere after it. A prompt wrapped in a root <task> tag reduced to
+    # "</task>", which meant satisfying criterion 3 (add tag structure)
+    # actively broke criterion 1. It was also attribute-blind, the same bug
+    # already fixed in criterion 3.
+    #
+    # A tag pair spanning nearly the whole prompt is a wrapper, not embedded
+    # data: removing it leaves nothing to score. Those are unwrapped instead.
+    def strip_embedded(text: str) -> str:
+        out: list[str] = []
+        last = 0
+        for match in _TAG_PAIR.finditer(text):
+            if (match.end() - match.start()) / max(len(text), 1) > 0.9:
+                continue  # root wrapper — keep its contents
+            out.append(text[last : match.start()])
+            last = match.end()
+        out.append(text[last:])
+        return "".join(out)
+
+    stripped = strip_embedded(rendered).strip()
+    # Unwrap a root tag so the request inside it is visible to the scan.
+    stripped = re.sub(r"^<(\w+)(?:\s[^>]*)?>|</\w+>\s*$", "", stripped).strip()
     sentences = _split_sentences(stripped)
     for idx, sentence in enumerate(sentences):
         words = set(re.findall(r"[A-Za-z]+", sentence.lower()))
@@ -275,7 +693,17 @@ OUTPUT_ARTIFACT_NOUNS = (
     r"\bdiff\b",
     r"\bsummary\b",
 )
-SCHEMA_CUES = (r"fields:", r"keys:", r"schema", r"`[a-z_][a-z0-9_]*`")
+# A literal JSON object with quoted keys is the most specific output spec a
+# prompt can carry, and matched none of the old cues — `fields:` and `keys:`
+# match zero prompts in the corpus, leaving an inline `code` span as the sole
+# carrier for 28 of 59, which `make test` satisfies.
+SCHEMA_CUES = (
+    r"fields:",
+    r"keys:",
+    r"schema",
+    r"`[a-z_][a-z0-9_]*`",
+    r"\{\s*\"[a-z_][a-z0-9_]*\"\s*:",
+)
 SUCCESS_CRITERIA_CUES = (
     r"\bmust\b",
     r"\bshould\b",
@@ -307,7 +735,7 @@ def score_specific(rendered: str) -> str:
 # Rubric #3 — XML tag structure
 # ---------------------------------------------------------------------------
 
-_TAG_PAIR = re.compile(r"<(\w+)>.*?</\1>", re.DOTALL)
+_TAG_PAIR = re.compile(r"<(\w+)(?:\s[^>]*)?>.*?</\1>", re.DOTALL)
 _EXCLUDED_TAGS = frozenset({"thinking", "scratchpad"})
 
 
@@ -331,8 +759,26 @@ _STRUCTURED_CUES = (
     r"format:",
     r"fields:",
     r"`[a-z_][a-z0-9_]*`",
+    # A literal JSON object is the clearest possible structured-output cue and
+    # matched none of the above, so a prompt showing its exact response shape
+    # was judged not to need examples.
+    r"\{\s*\"[a-z_][a-z0-9_]*\"\s*:",
 )
-_EXAMPLE_PRESENT = (r"<example>", r"\bExample:", r"<example ")
+_EXAMPLE_PRESENT = (
+    r"<example>",
+    r"<example ",
+    # ``Example:``, ``Example 1:``, ``Example 2 — exact_dup/high:``. Numbered
+    # few-shot blocks are the common house style; matching only ``Example:``
+    # scored four-example prompts as having none.
+    # ``Example:``, ``Example 1:``, ``Example 2 — exact_dup/high:``, and the
+    # plural forms. ``\bExample\b`` excluded ``Examples:`` outright, so a block
+    # of four few-shot cases under an ``Examples:`` heading scored as none.
+    r"\bExamples?\b\s*\d*\s*[:—\-\n]",
+    r"^#+\s*Examples?\b",
+    r"\be\.g\.",
+    r"\bfor instance\b",
+    r"\bSample (?:input|output|response)\b",
+)
 
 
 def score_examples(rendered: str) -> str:
@@ -346,15 +792,20 @@ def score_examples(rendered: str) -> str:
 # Rubric #5 — output contract explicit
 # ---------------------------------------------------------------------------
 
+# ``do not`` was removed: it matched 48 of 59 prompts and was the sole carrier
+# for 35 of them, so a 0% fail rate measured the ubiquity of a English phrase
+# rather than the presence of an output contract. What remains names a format.
 _OUTPUT_CONTRACT_CUES = (
     r"respond with",
-    r"do not",
+    r"do not (?:add|include|emit|output|return|wrap|prefix|explain)",
     r"no prose",
     r"no markdown",
     r"no apolog",
     r"output format",
     r"return only",
     r"the output must",
+    r"\{\s*\"[a-z_][a-z0-9_]*\"\s*:",
+    r"exactly one JSON",
 )
 
 
@@ -369,33 +820,86 @@ def score_output_contract(rendered: str) -> str:
 LONG_CONTEXT_THRESHOLD = 10_000
 
 
+# An embedded context block is long payload the prompt wraps around. Counting
+# only XML tag pairs meant a prompt embedding its diff in a fenced block had
+# "no context", so the criterion could not see the misplacement it exists to
+# catch. Fenced blocks count too.
+#
+# Markdown sections deliberately do NOT count. A `## Diff` heading has no
+# closing delimiter, so the section runs to the next heading or to EOF —
+# which swallows the trailing instruction into the "context block" and scores
+# a correctly-ordered prompt as misplaced. Without an end delimiter there is
+# no sound way to tell where the payload stops, and a criterion that is silent
+# is better than one that is confidently wrong.
+
+
 def _largest_tagged_block_end(rendered: str) -> int:
     best_end = -1
     best_len = -1
+
+    def consider(start: int, end: int) -> None:
+        nonlocal best_end, best_len
+        if end - start > best_len:
+            best_len = end - start
+            best_end = end
+
     for match in _TAG_PAIR.finditer(rendered):
         if match.group(1).lower() in _EXCLUDED_TAGS:
             continue
-        length = match.end() - match.start()
-        if length > best_len:
-            best_len = length
-            best_end = match.end()
+        consider(match.start(), match.end())
+    for match in _FENCED.finditer(rendered):
+        consider(match.start(), match.end())
     return best_end
 
 
+def _blank_payload(rendered: str) -> str:
+    """Payload replaced by spaces, so offsets into the original are preserved.
+
+    ``_instruction_prose`` collapses payload to a single space, which is right
+    for cue matching and wrong here — this criterion compares *positions*.
+    """
+
+    def blank(match: re.Match[str]) -> str:
+        return " " * (match.end() - match.start())
+
+    out = _TAG_PAIR.sub(blank, rendered)
+    out = _FENCED.sub(blank, out)
+    out = _INLINE.sub(blank, out)
+    return _DIFF.sub(blank, out)
+
+
 def _last_imperative_offset(rendered: str) -> int:
+    """Offset of the last imperative verb in the *instructions*.
+
+    Scanning the raw text let a `return` inside a trailing diff count as the
+    final instruction, so a prompt with one small early tag pair and 18k of
+    untagged trailing code scored Pass — the exact misplacement this criterion
+    exists to catch.
+    """
     verbs = "|".join(sorted(IMPERATIVE_VERBS))
     last = -1
-    for match in re.finditer(rf"\b({verbs})\b", rendered, re.IGNORECASE):
+    for match in re.finditer(
+        rf"\b({verbs})\b", _blank_payload(rendered), re.IGNORECASE
+    ):
         last = match.start()
     return last
 
 
 def score_long_context_placement(rendered: str) -> str:
+    """Is the long embedded context placed before the final instruction?
+
+    Only meaningful when there *is* embedded context. A 10k prompt of pure
+    instructions has nothing to misplace, but scored Fail because no tagged
+    block was found — which made this criterion a duplicate of criterion 3
+    ("does it have XML tags") for every long prompt.
+    """
     if len(rendered) < LONG_CONTEXT_THRESHOLD:
         return "N/A"
     block_end = _largest_tagged_block_end(rendered)
+    if block_end == -1:
+        return "N/A"
     last_imp = _last_imperative_offset(rendered)
-    if block_end == -1 or last_imp == -1:
+    if last_imp == -1:
         return "Fail"
     return "Pass" if block_end < last_imp else "Fail"
 
@@ -421,30 +925,64 @@ _DECISION_VERBS = frozenset(
 _COT_CUES = (r"<thinking>", r"<scratchpad>", r"think step by step", r"reason first")
 
 
+# A prompt that demands a bare machine-readable answer is not a candidate for
+# an inline reasoning scaffold: instructing it to emit <thinking> would break
+# the caller's parser. ADR-0087 §1 says <thinking> is output-side, not input,
+# and ten prompts were pinned failing this criterion while explicitly
+# requiring JSON-only output — a floor they could only satisfy by breaking
+# themselves.
+_STRICT_OUTPUT_CUES = (
+    r"return only",
+    r"respond with only",
+    r"output only",
+    r"\bJSON only\b",
+    r"only a JSON",
+    r"nothing else",
+    r"no other text",
+    r"no prose",
+)
+
+
 def score_cot(rendered: str) -> str:
-    words = set(re.findall(r"[A-Za-z]+", rendered.lower()))
-    applicable = bool(words & _DECISION_VERBS)
-    if not applicable:
+    # Applicability is judged on the instructions, not the payload. Scanning
+    # the whole text meant a quoted comment saying "I will approve the PR"
+    # made a summarisation prompt look like a decision prompt.
+    prose = _instruction_prose(rendered)
+    words = set(re.findall(r"[A-Za-z]+", prose.lower()))
+    if not words & _DECISION_VERBS:
         return "N/A"
-    return "Pass" if _any_hit(_COT_CUES, rendered) else "Fail"
+    if _any_hit(_STRICT_OUTPUT_CUES, prose):
+        return "N/A"
+    return "Pass" if _any_hit(_COT_CUES, prose) else "Fail"
 
 
 # ---------------------------------------------------------------------------
 # Rubric #8 — edge cases named
 # ---------------------------------------------------------------------------
 
+# The condition word and the edge-case noun are allowed to be separated. The
+# old `if (empty|missing|...)` demanded they be adjacent, so the natural
+# phrasing never matched: "If the diff is empty, return NO_CHANGES." scored as
+# naming no edge case, and 9 of 54 criterion-8 Fails were this artifact.
 _EDGE_CASE_CUES = (
-    r"if (empty|missing|truncated|unclear|no \w+)",
-    r"when the \w+ (is not|cannot|fails)",
+    r"\b(?:if|when|where|should|unless)\b[^.\n]{0,60}?\b"
+    r"(?:empty|missing|absent|truncated|unclear|unsure|ambiguous|none|"
+    r"no longer|not (?:present|available|found)|cannot|can't|fails?|"
+    r"invalid|malformed|unavailable)\b",
     r"\botherwise,",
     r"in case of",
     r"\bfallback\b",
     r"do not assume",
+    r"\bedge cases?\b",
+    r"\bif (?:you )?(?:are )?(?:in )?doubt\b",
 )
 
 
 def score_edge_cases(rendered: str) -> str:
-    return "Pass" if _any_hit(_EDGE_CASE_CUES, rendered) else "Fail"
+    # Scored over instructions only. `+ def fallback(): pass` inside a diff
+    # under review used to Pass this criterion — the payload naming an edge
+    # case is not the prompt naming one.
+    return "Pass" if _any_hit(_EDGE_CASE_CUES, _instruction_prose(rendered)) else "Fail"
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +1035,14 @@ class LoadedFixture:
     builder: str
     args: dict
     faked_deps: dict
+    # Instance attributes a builder reads off ``self`` that ``__new__`` bypassed.
+    # Declared per fixture rather than stubbed globally in ``render_target``:
+    # a null stub silently guts the prompt (``sandbox_failure_fixer`` renders
+    # 1917 chars with a null PR port versus 6131 with a real one, because the CI
+    # log and commit diffs come only from the port), and hardcoding one
+    # scenario's fake into the harness applies it to every builder. Shape:
+    # ``{"_prs": {"fake": "prs_port", "shape": "settled_red_9871"}}``.
+    instance_attrs: dict = field(default_factory=dict)
 
 
 def _coerce_task_dicts(args: dict) -> dict:
@@ -538,6 +1084,7 @@ def load_fixture(path: str) -> LoadedFixture:
         builder=data["builder"],
         args=coerced_args,
         faked_deps=data.get("faked_deps", {}),
+        instance_attrs=data.get("instance_attrs", {}),
     )
 
 
@@ -576,6 +1123,37 @@ def render(builder_callable, *, args: dict, faked_deps: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=1)
+def _real_config_defaults() -> dict[str, object]:
+    """Field defaults from the real HydraFlowConfig, or {} if unavailable."""
+    try:
+        from config import HydraFlowConfig  # noqa: PLC0415
+
+        cfg = HydraFlowConfig()
+    except Exception:  # pragma: no cover - audit must run without a full env
+        return {}
+    # Captures lists, dicts and floats as well as scalars. An earlier filter of
+    # ``int | bool | str`` dropped 40 list fields and 4 dicts, which is why
+    # ``required_plugins`` and ``phase_skills`` fell through to the harness's
+    # empty stubs: seven prompts rendered with no "## Available Skills" section
+    # at all, 733-1393 chars of imperative prose that production always injects
+    # and the audit therefore never scored. Paths are excluded deliberately —
+    # they are machine-specific and would interpolate this filesystem into the
+    # rendered prompts, breaking the reproducibility the scoring relies on.
+    captured: dict[str, object] = {}
+    for name in type(cfg).model_fields:  # pydantic v2
+        value = getattr(cfg, name, None)
+        if isinstance(value, Path):
+            continue
+        if isinstance(value, int | bool | str | float | list | dict):
+            captured[name] = value
+    return captured
+
+
+def _real_config_default(name: str) -> object | None:
+    return _real_config_defaults().get(name)
+
+
 class _MinimalConfig:
     """Minimal stand-in for HydraFlowConfig — builders typically read only a
     handful of ``max_*_chars`` fields and booleans. Extend as needed."""
@@ -584,45 +1162,37 @@ class _MinimalConfig:
         import tempfile
         from pathlib import Path as _Path
 
-        self.dry_run = False
-        self.max_impl_plan_chars = 50_000
-        self.max_review_feedback_chars = 50_000
-        self.error_output_max_chars = 50_000
-        self.max_common_feedback_chars = 50_000
-        # Planner-specific fields
-        self.max_planner_comment_chars = 1_000
-        self.max_planner_line_chars = 500
-        self.max_planner_failed_plan_chars = 4_000
-        self.max_issue_body_chars = 10_000
-        self.find_label = ["hydraflow-find"]
-        self.required_plugins: list[str] = []
-        self.phase_skills: dict[str, list[str]] = {}
-        # Agent / reviewer fields
-        self.test_command = "make test"
+        # Deliberately sets almost nothing. Every truncation limit, budget and
+        # feature flag is left UNSET so ``__getattr__`` resolves it from the
+        # real HydraFlowConfig defaults. Setting them here silently shadowed
+        # ``__getattr__`` — which is how four fields sat at 50_000 against
+        # production values of 2_000-6_000 (up to 25x), letting the audit score
+        # text production truncates. Only values that must be harness-specific
+        # for determinism are set below: absolute paths and the repo slug would
+        # otherwise interpolate this machine's filesystem into the prompts.
         self.repo_root = _Path(".")
         self.data_root = _Path(tempfile.mkdtemp())
         self.plans_dir = self.data_root / "plans"
         self.memory_dir = self.data_root / "memory"
-        self.min_review_findings = 3
-        self.use_quality_gate_in_review = True
-        self.max_ci_fix_attempts = 3
         self.repo = "owner/repo"
         # Repo-scoped data dirs (ADR-0021 D2): mirror HydraFlowConfig so prompt
         # builders that read repo_memory_dir resolve a real path here too.
         self.repo_data_root = self.data_root / self.repo.replace("/", "-")
         self.repo_memory_dir = self.repo_data_root / "memory"
-        self.review_insight_window = 50
-        self.review_pattern_threshold = 3
-        # ADR reviewer fields
-        self.adr_review_approval_threshold = 2
-        self.adr_review_max_rounds = 3
 
     def data_path(self, *parts: object) -> object:
         return self.data_root.joinpath(*[str(p) for p in parts])
 
     def __getattr__(self, name: str) -> object:
-        # Fallback: any unrecognized config attr resolves to a large int.
-        # Prevents AttributeError when builders reach for new max_* fields.
+        # Fall back to the REAL HydraFlowConfig default before inventing a
+        # number. A hardcoded 50_000 renders a prompt production would have
+        # truncated (e.g. max_review_diff_chars is 15_000 in production), so the
+        # audit would score text the model never receives — the fixture stops
+        # standing for the production prompt, which is the one thing the eval
+        # has to be true about.
+        real = _real_config_default(name)
+        if real is not None:
+            return real
         if name.startswith("max_") and name.endswith("_chars"):
             return 50_000
         raise AttributeError(name)
@@ -641,18 +1211,48 @@ class _NullContextCache:
         return "", False
 
 
+def _resolve_owner(qualname: str) -> tuple[object, list[str]]:
+    """Split a dotted qualname into (owning module, remaining attribute chain).
+
+    Imports the *longest* importable prefix rather than assuming the first
+    segment is the module and the second a class. Builders in subpackages
+    (``audit.adjudicate.build_adjudication_prompt``,
+    ``intervention.classify.build_classification_prompt``) broke the old
+    assumption two different ways depending on import order: in a fresh process
+    ``getattr(audit, "adjudicate")`` raised AttributeError because no
+    ``__init__`` imports the submodule, and under pytest — where another test
+    had already imported it — ``cls.__new__(cls)`` raised
+    ``TypeError: module.__new__(X): X is not a type object``.
+
+    Registering those via a call-site re-export would resolve without this, but
+    ``prompt_fitness.registered_modules()`` matches the dotted module name
+    against the registry text, so the credit would land on the wrong module and
+    leave the real one sitting in the allowlist.
+    """
+    parts = qualname.split(".")
+    for cut in range(len(parts) - 1, 0, -1):
+        try:
+            module = importlib.import_module(".".join(parts[:cut]))
+        except ImportError:
+            continue
+        return module, parts[cut:]
+    raise ImportError(f"no importable module prefix in {qualname!r}")
+
+
 def render_target(target: AuditTarget) -> str:
     """Resolve qualname, load fixture, call the builder, return rendered text."""
+    from tests.fixtures.prompts.fakes import get_fake  # noqa: PLC0415
+
     fixture = load_fixture(target.fixture_path)
-    parts = target.builder_qualname.split(".")
-    module = importlib.import_module(parts[0])
-    if len(parts) == 2:
-        callable_obj = getattr(module, parts[1])
-    elif len(parts) == 3:
-        cls = getattr(module, parts[1])
-        descriptor = inspect.getattr_static(cls, parts[2])
+    module, attrs = _resolve_owner(target.builder_qualname)
+    if len(attrs) == 1:
+        callable_obj = getattr(module, attrs[0])
+    elif len(attrs) == 2:
+        cls_name, method_name = attrs
+        cls = getattr(module, cls_name)
+        descriptor = inspect.getattr_static(cls, method_name)
         if isinstance(descriptor, staticmethod | classmethod):
-            callable_obj = getattr(cls, parts[2])
+            callable_obj = getattr(cls, method_name)
         else:
             instance = cls.__new__(cls)
             instance._config = _MinimalConfig()
@@ -672,7 +1272,9 @@ def render_target(target: AuditTarget) -> str:
             # AttributeError. Both call sites are None-safe.
             instance._adr_index = None
             instance._tribal_wiki_store = None
-            callable_obj = getattr(instance, parts[2])
+            for attr, spec in fixture.instance_attrs.items():
+                setattr(instance, attr, get_fake(spec["fake"], spec["shape"]))
+            callable_obj = getattr(instance, method_name)
     else:
         raise ValueError(f"unsupported qualname depth: {target.builder_qualname!r}")
     return render(callable_obj, args=fixture.args, faked_deps=fixture.faked_deps)
@@ -721,7 +1323,18 @@ def write_markdown(
     top_fail_ids = [c for c, _ in total_fails.most_common(3)]
 
     lines: list[str] = []
-    lines.append("# Prompt Audit — 2026-04-20")
+    # No date in the title. It used to read "2026-04-20", the date of the first
+    # audit, but this file is regenerated by `make audit-prompts` — so a reader
+    # saw July data under an April heading. A *live* date is the wrong fix: once
+    # regeneration is wired into CI, a heading that changes daily makes every
+    # run look like drift. The counts below say what this covers; ADR-0116's
+    # fitness scorecard is the tracked series.
+    lines.append("# Prompt Audit")
+    lines.append("")
+    lines.append(
+        "Regenerated by `make audit-prompts`. Scores are ADR-0087 rubric FORM "
+        "only and are not a quality claim on their own — see ADR-0116 §6."
+    )
     lines.append("")
 
     # Section 1: Summary

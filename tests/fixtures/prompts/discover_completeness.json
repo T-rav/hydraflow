@@ -1,0 +1,11 @@
+{
+  "builder": "discover_completeness.build_discover_completeness_prompt",
+  "args": {
+    "issue_number": 4711,
+    "issue_title": "Retry transient S3 throttling in the archive uploader",
+    "issue_body": "Uploads to the archive bucket fail intermittently during nightly batch\nruns. Sentry shows 41 ClientError(SlowDown) events between 02:00 and 03:00 UTC\nwith no retry attempted, so the whole batch aborts on the first throttle.\n\nExpected: transient S3 throttling should be retried with backoff.\nActual: a single SlowDown aborts the run and the remaining files are skipped.\n",
+    "brief": "The archive uploader has no retry path. S3 throttling (SlowDown) is\nexpected under burst load and is documented as retryable. Two call sites use\n`upload_with_retry`; both are batch paths where a bounded retry is safe. No\nidempotency concern: put_object with the same key is idempotent.\n",
+    "guidance": "Name the retryable code set explicitly and state the idempotency assumption."
+  },
+  "faked_deps": {}
+}

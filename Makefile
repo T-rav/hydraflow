@@ -43,13 +43,21 @@ REAP_TESTS := tests/regressions/test_reap_processlookuperror.py \
   tests/regressions/test_issue_9579.py \
   tests/regressions/test_issue_9911_stop_path_reap.py \
   tests/regressions/test_issue_9641_unified_group_kill.py \
-  tests/regressions/test_hostrunner_reap_grandchildren.py
+  tests/regressions/test_hostrunner_reap_grandchildren.py \
+  tests/regressions/test_auto_pr_preflight_gate.py
 # Paths run SERIALLY (excluded from the parallel run). review_phase_metrics:
 # leaked review_advisor mock (#10119). test_auto_pr_preflight: a mock from
 # another test bleeds into the shared xdist worker (the runner patch is not
 # applied → gate runs 0 commands, plus a pydantic TypeAdapter AttributeError
 # from a MagicMock-contaminated type) — passes single-threaded (#10500).
-# REAP_TESTS: subprocess-group reap races.
+# REAP_TESTS: subprocess-group reap races, PLUS
+# test_auto_pr_preflight_gate.py — same xdist-unsafe class as
+# test_auto_pr_preflight.py above: it monkeypatches
+# subprocess_util.run_subprocess and auto_pr._PREFLIGHT_RUNNER_PREFIX, so a
+# mock bleeding across the shared worker leaves the runner patch unapplied and
+# the gate asserts on the wrong stage. Passes single-threaded; fails only in the
+# parallel bulk. The "rest of tests/regressions/ is xdist-safe" claim above did
+# not hold for this file.
 # Everything else — including tests/scenarios (#10111) — parallelizes.
 PYTEST_SERIAL_PATHS ?= tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py $(REAP_TESTS)
 PYTEST_SERIAL_IGNORE := $(addprefix --ignore=,$(PYTEST_SERIAL_PATHS))

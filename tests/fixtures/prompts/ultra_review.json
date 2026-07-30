@@ -1,0 +1,8 @@
+{
+  "builder": "ultra_review.build_ultra_review_prompt",
+  "args": {
+    "pr_number": 4712,
+    "diff": "diff --git a/src/upload_retry.py b/src/upload_retry.py\nindex 1a2b3c4..5d6e7f8 100644\n--- a/src/upload_retry.py\n+++ b/src/upload_retry.py\n@@ -12,9 +12,24 @@ from botocore.exceptions import ClientError\n \n def upload_with_retry(bucket: str, key: str, body: bytes, *, attempts: int = 3) -> None:\n-    client = boto3.client(\"s3\")\n-    client.put_object(Bucket=bucket, Key=key, Body=body)\n+    client = boto3.client(\"s3\")\n+    last: ClientError | None = None\n+    for attempt in range(attempts):\n+        try:\n+            client.put_object(Bucket=bucket, Key=key, Body=body)\n+            return\n+        except ClientError as exc:\n+            code = exc.response.get(\"Error\", {}).get(\"Code\", \"\")\n+            if code not in _RETRYABLE:\n+                raise\n+            last = exc\n+            time.sleep(min(2 ** attempt, 8))\n+    raise UploadFailed(f\"{key}: {attempts} attempts exhausted\") from last\n"
+  },
+  "faked_deps": {}
+}

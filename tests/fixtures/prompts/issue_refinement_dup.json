@@ -1,0 +1,8 @@
+{
+  "builder": "issue_refinement.build_dup_judgment_prompt",
+  "args": {},
+  "faked_deps": {
+    "a": "refinement_issue_9812",
+    "b": "refinement_issue_9877"
+  }
+}

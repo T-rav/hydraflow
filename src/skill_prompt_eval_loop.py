@@ -45,7 +45,7 @@ from prompt_refiner import (
     PROMPT_LENGTH_DRIFT_LIMIT,
     REFINABLE_SKILLS,
     SKILL_BUILDER_MODULES,
-    assemble_refine_context,
+    build_refine_prompt,
     check_tripwires,
     discover_validation_case_ids,
     length_drift_exceeds,
@@ -802,7 +802,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         case_id = str(case["case_id"])
         case_dir = cfg.repo_root / _CASES_REL / case_id
         try:
-            context = assemble_refine_context(
+            context = build_refine_prompt(
                 cfg.repo_root,
                 case_dir,
                 skill_name,

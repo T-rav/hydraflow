@@ -60,6 +60,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0071 | enforced | `pytest:tests/test_route_back.py` |
 | ADR-0083 | enforced | `pytest:tests/test_sandbox_scenario_contract.py`, `pytest:tests/test_no_screenshot_regression_tests.py` |
 | ADR-0085 | enforced | `pytest:tests/test_secret_scrub.py`, `pytest:tests/regressions/test_issue_9143_codeql_suppression.py` |
+| ADR-0087 | enforced | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_audit_prompts.py` |
 | ADR-0088 | enforced | `pytest:tests/test_label_drift_watcher_loop.py`, `pytest:tests/test_label_drift_watcher_integration.py` |
 | ADR-0089 | enforced | `pytest:tests/test_memory_backlog_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
 | ADR-0090 | enforced | `pytest:tests/test_atlas_routes.py` |
@@ -84,6 +85,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0113 | enforced | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
 | ADR-0114 | enforced | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
 | ADR-0115 | enforced | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface`, `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human`, `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed`, `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld` |
+| ADR-0116 | enforced | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_prompt_fitness.py`, `pytest:tests/test_adr_enforcement_completeness.py`, `pytest:tests/test_prompt_rubric_calibration.py` |
 
 ## Check → ADRs it protects
 
@@ -124,6 +126,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` | ADR-0062 |
 | `pytest:tests/scenarios/test_telemetry_e2e.py` | ADR-0055 |
 | `pytest:tests/test_adr_conformance_coverage.py` | ADR-0100 |
+| `pytest:tests/test_adr_enforcement_completeness.py` | ADR-0116 |
 | `pytest:tests/test_adr_pre_validator.py` | ADR-0037 |
 | `pytest:tests/test_adr_touchpoint_auditor_loop.py` | ADR-0056 |
 | `pytest:tests/test_adversarial_retry_loop.py` | ADR-0064 |
@@ -132,6 +135,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_atlas_routes.py` | ADR-0060, ADR-0061, ADR-0090 |
 | `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld` | ADR-0115 |
 | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` | ADR-0113 |
+| `pytest:tests/test_audit_prompts.py` | ADR-0087 |
 | `pytest:tests/test_auto_agent_hitl_intake.py` | ADR-0050 |
 | `pytest:tests/test_auto_agent_preflight_loop.py` | ADR-0050 |
 | `pytest:tests/test_auto_tighten_invariant.py` | ADR-0104 |
@@ -176,6 +180,9 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_preflight_decision_hitl_widened.py` | ADR-0050 |
 | `pytest:tests/test_preflight_plugins.py` | ADR-0043 |
 | `pytest:tests/test_preflight_untrusted_fencing.py` | ADR-0092 |
+| `pytest:tests/test_prompt_fitness.py` | ADR-0116 |
+| `pytest:tests/test_prompt_registry_completeness.py` | ADR-0087, ADR-0116 |
+| `pytest:tests/test_prompt_rubric_calibration.py` | ADR-0116 |
 | `pytest:tests/test_release.py` | ADR-0011 |
 | `pytest:tests/test_repo_wiki.py` | ADR-0032 |
 | `pytest:tests/test_repo_wiki_ingest.py` | ADR-0032 |
