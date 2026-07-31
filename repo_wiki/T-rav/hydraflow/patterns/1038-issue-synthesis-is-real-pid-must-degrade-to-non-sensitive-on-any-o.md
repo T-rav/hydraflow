@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:49:30.456651+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0971
+superseded_by: 1107
 ---
 
 # is_real_pid must degrade to non-sensitive on any os.get* raise

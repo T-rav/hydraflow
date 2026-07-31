@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10872
 source_phase: plan
 created_at: 2026-07-31T05:36:11.799861+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Validate config_overrides names against model_fields, not _real_config_defaults
