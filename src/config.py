@@ -6633,6 +6633,36 @@ def _get_env(key: str) -> str | None:
     return None
 
 
+def declared_env_keys() -> frozenset[str]:
+    """Every env var key any ``_ENV_*_OVERRIDES`` table (or deprecated alias)
+    reads, regardless of prefix.
+
+    Derived at runtime from the override tables themselves — never hand-list
+    these keys elsewhere. Callers needing a hermetic environment (e.g. the
+    test suite's session-scoped isolation fixture) should scrub this whole
+    set rather than a ``HYDRAFLOW_``/``HYDRA_`` prefix rule alone, since
+    several overrides (``SENTRY_ORG``, ``OTEL_SERVICE_NAME``, ``HF_ENV``, ...)
+    follow third-party naming conventions instead (#10876).
+    """
+    keys: set[str] = set()
+    for table in (
+        _ENV_INT_OVERRIDES,
+        _ENV_STR_OVERRIDES,
+        _ENV_FLOAT_OVERRIDES,
+        _ENV_OPT_FLOAT_OVERRIDES,
+        _ENV_OPT_INT_OVERRIDES,
+        _ENV_FLOAT_RATIO_OVERRIDES,
+        _ENV_BOOL_OVERRIDES,
+    ):
+        keys.update(env_key for _field, env_key, _default in table)
+    keys.update(env_key for _field, env_key in _ENV_LITERAL_OVERRIDES)
+    keys.update(env_key for _field, env_key, _enum_cls in _ENV_ENUM_OVERRIDES)
+    keys.update(env_key for env_key, _tool_field, _model_field in _ENV_COMBO_OVERRIDES)
+    keys.update(_DEPRECATED_ENV_ALIASES.keys())
+    keys.update(_DEPRECATED_ENV_ALIASES.values())
+    return frozenset(keys)
+
+
 def _apply_env_overrides(config: HydraFlowConfig) -> None:
     """Apply all data-driven and special-case env var overrides."""
 
