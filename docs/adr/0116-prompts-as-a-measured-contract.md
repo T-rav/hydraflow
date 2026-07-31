@@ -120,7 +120,7 @@ Measured 2026-07-30 over all 78 Accepted ADRs: **74 REAL, 3 WEAK, 1 MISSING.**
 `tests/test_adr_enforcement_completeness.py` closes it, with a distinction that matters:
 
 - **`_PROSE_ONLY`** (ADR-0025, ADR-0035, ADR-0051) are **declared permanent exceptions, not debt.** Their enforcement is genuinely a human convention — ADR-0051's own text says *"a process convention, not a runnable check"*, and 0025/0035 name review-checklist steps over symmetric field-assertion coverage and toggle-state test matching, neither of which has a proposed mechanical equivalent. Pinned at 3, each with a justification, so they read as decided rather than unfinished.
-- **`_MISSING_ENFORCEMENT`** (ADR-0027) is debt and **shrinks only.** Pinned at 1.
+- **`_MISSING_ENFORCEMENT`** is debt and **shrinks only.** It held one entry (ADR-0027) at measurement time, pinned at 1. Trigger C of ADR-0027's own Rule 5 fired under #10867: the automated duplicate-class check landed, ADR-0027 reclassified REAL, and the allowlist emptied — the pin tightened to 0 (see `docs/adr/0027-duplicate-class-merge-artifact-pattern.md`). The ratchet only ever moves this direction; re-widening it past 0 needs a recorded decision, not an append.
 
 Recording the difference is the point: an exception with a reason is a decision, and an exception without one is rot wearing the same clothes.
 
