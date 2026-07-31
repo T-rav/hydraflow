@@ -24,7 +24,7 @@ model {
 
     rulesets = component 'staging protect / main protect' {
       #live
-      description 'Live required_status_checks. Live staging requires CI Gate; contract does not -> drift.'
+      description 'Live required_status_checks. Live staging requires CI Gate; the contract now declares it too (fixed by #10878).'
     }
     legacyProtection = component 'branches/{b}/protection' {
       #live
@@ -42,12 +42,12 @@ model {
 
       toml = component 'gates.toml' {
         #contract #changeArea
-        description 'SOURCE OF TRUTH. [[gate]] records = (dimension, binding). ADD the CI Gate record here.'
+        description 'SOURCE OF TRUTH. [[gate]] records = (dimension, binding). CI Gate record declared here, closing the drift (#10878).'
         technology 'TOML'
       }
       stagingJson = component 'staging_ruleset.json' {
         #generated #changeArea
-        description 'GENERATED. Today: Detect Changes + discover-projects. After fix: + CI Gate.'
+        description 'GENERATED. Requires Detect Changes, discover-projects, CI Gate.'
       }
       mainJson = component 'main_ruleset.json' {
         #generated
@@ -55,7 +55,7 @@ model {
       }
       readme = component 'README.md' {
         #generated #changeArea
-        description 'Gate table inside <!-- generated:gates --> block is generated; surrounding prose ("2 required checks") is hand-written and must be edited.'
+        description 'Gate table inside <!-- generated:gates --> block is generated; surrounding prose is hand-written and must stay in sync with the declared count ("3 required checks", reconciled by #10878).'
       }
       runbook = component 'ADDING-A-GATE.md' {
         description 'Ordering rule: a gate must be green on the base branch BEFORE being required. CI Gate already is.'
@@ -114,22 +114,19 @@ model {
     tests = container 'Tests pinning the staging context set' {
       #changeArea
       tContract = component 'tests/test_gates_contract.py' {
-        description 'test_contract_staging_requires_two_contexts — exact set, must widen'
+        description 'test_contract_staging_requires_baseline_plus_ci_gate — pins the 3-context staging set including CI Gate'
       }
       tResolve = component 'tests/test_gates_resolve.py' {
-        description 'test_resolve_staging_contexts — exact list, must widen'
+        description 'test_resolve_staging_contexts — pins the 3-context staging list including CI Gate'
       }
       tCap = component 'tests/test_gates_capability_resolve.py' {
-        description 'test_real_contract_output_unchanged_by_filtering — exact list, must widen'
-      }
-      tRegression = component 'tests/regressions/test_issue_10878.py' {
-        description 'NEW: pins contract declares CI Gate + canonical matches recorded live payload'
+        description 'test_real_contract_output_unchanged_by_filtering — pins capability-filtered output including CI Gate'
       }
     }
   }
 
   // --- authoring / generation flow ---
-  dev -> hf.gates.toml 'adds [[gate]] CI Gate record'
+  dev -> hf.gates.toml 'declared [[gate]] CI Gate record (#10878)'
   dev -> hf.gen.genCli 'make gen-gates'
   hf.gen.genCli -> hf.gen.contractPy 'load_gates(gates.toml)'
   hf.gen.contractPy -> hf.gates.toml 'reads'
@@ -156,13 +153,12 @@ model {
 
   // --- enforcement flow ---
   gh.actions -> hf.ci.ciGateJob 'runs on PRs to main/staging'
-  gh.rulesets -> hf.ci.ciGateJob 'requires "CI Gate" context (live today, contract after fix)'
+  gh.rulesets -> hf.ci.ciGateJob 'requires "CI Gate" context (live and contract now agree)'
 
   // --- test pins ---
   hf.tests.tContract -> hf.gates.toml 'asserts staging gate set'
   hf.tests.tResolve -> hf.gen.resolvePy 'asserts resolve_contexts("staging")'
   hf.tests.tCap -> hf.gen.resolvePy 'asserts real-contract output'
-  hf.tests.tRegression -> hf.apply.auditCore 'undeclared_legacy_contexts == [] ; diff_ruleset == []'
 }
 
 views {
@@ -184,31 +180,31 @@ views {
       1. Ruleset drift: diff_ruleset(canonical, live) — the reported staging DRIFT.
       2. Undeclared legacy drift: live ruleset contexts UNION classic-protection
          contexts, minus contract-declared contexts — the reported "CI Gate" line.
-      Both point at the same missing [[gate]] record.
+      Both pointed at the same missing [[gate]] record, now declared (#10878).
     '''
     include *
     include gh.rulesets, gh.legacyProtection, hf.gates.stagingJson, dev
   }
 
   dynamic view fixSequence {
-    title 'Fix sequence — declare, regenerate, verify (no live mutation needed)'
+    title 'Fix sequence (applied for #10878) — declare, regenerate, verify, no live mutation needed'
 
     dev -> hf.gates.toml 'add [[gate]] CI Gate: dimension=ci-aggregate, required_on=["staging"], workflow=ci.yml, job=ci-gate, status=active'
     dev -> hf.gen.genCli 'make gen-gates'
     hf.gen.genCli -> hf.gen.validatePy 'producer ("ci.yml","ci-gate") exists -> no violation'
     hf.gen.genCli -> hf.gates.stagingJson 'now requires Detect Changes, discover-projects, CI Gate'
     hf.gen.genCli -> hf.gates.readme 'generated table gains the CI Gate row'
-    dev -> hf.tests.tRegression 'red -> green'
+    dev -> hf.tests.tContract 'widened staging assertion: red -> green'
     hf.apply.auditorLoop -> hf.apply.auditCore 'next tick: audit_repo()'
     hf.apply.auditCore -> gh.rulesets 'live already has all three contexts'
     hf.apply.auditorLoop -> dev 'report.clean -> auto-close the drift issue'
   }
 
   dynamic view lossyApplyHazard {
-    title 'Hazard — following the issue body literally regresses #10672'
+    title 'Hazard avoided — following the issue body literally would have regressed #10672'
 
-    dev -> hf.apply.setupCli 'python scripts/setup_branch_protection.py --apply (as the issue body prescribes)'
-    hf.apply.setupCli -> hf.gates.stagingJson 'load canonical (CI Gate absent)'
+    dev -> hf.apply.setupCli 'python scripts/setup_branch_protection.py --apply (as the issue body prescribed, before gates.toml declared CI Gate)'
+    hf.apply.setupCli -> hf.gates.stagingJson 'load canonical (CI Gate absent, pre-#10878 state)'
     hf.apply.setupCli -> gh.rulesets 'PUT verbatim -> CI Gate silently de-required'
     gh.rulesets -> hf.ci.ciGateJob 'no longer gates merges'
     gh.actions -> dev 'red PR auto-merges and poisons staging HEAD (the #10663 harm class)'
