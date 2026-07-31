@@ -46,6 +46,7 @@ from json import dumps
 from typing import TYPE_CHECKING
 
 from file_util import append_jsonl
+from prompt_observatory import observe
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -271,6 +272,21 @@ def _emit_audit(config: HydraFlowConfig, decision: GateDecision) -> None:
         logger.warning("prompt gate audit write failed", exc_info=True)
 
 
+def _observe_shape(
+    prompt: str, *, config: HydraFlowConfig, source: str, tool: str
+) -> None:
+    """Record the prompt's structural shape. Best-effort, never raises.
+
+    ``observe`` is itself best-effort; this second guard covers the case where
+    the module is present but its import-time state is broken. Measurement must
+    never stop a prompt the gate allowed.
+    """
+    try:
+        observe(prompt, config=config, source=source, tool=tool)
+    except Exception:  # pragma: no cover - observation is never load-bearing
+        logger.debug("prompt shape observation failed", exc_info=True)
+
+
 def gate_prompt(
     prompt: str,
     *,
@@ -289,6 +305,11 @@ def gate_prompt(
     :class:`PromptGateBlockedError`. Every regulated decision emits an audit
     record.
     """
+    # Record the prompt's SHAPE before any class branching, so the observed
+    # denominator covers every gated prompt — not just regulated ones, which
+    # is all the audit stream below sees. Never raises; see prompt_observatory.
+    _observe_shape(prompt, config=config, source=source, tool=tool)
+
     data_class = effective_data_class(config.repo_data_class, issue_labels)
     if not is_regulated(data_class):
         return GateResult(

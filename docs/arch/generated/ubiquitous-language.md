@@ -447,7 +447,7 @@ Pydantic-validated runtime configuration aggregate for the HydraFlow orchestrato
 ## HydraFlowEvent
 
 **Kind:** `domain_event` · **Context:** `shared-kernel` · **Anchor:** `src/events.py:HydraFlowEvent` · **Confidence:** `accepted`
-**Aliases:** `event`, `bus event`, `published event`
+**Aliases:** `bus event`, `published event`
 
 A single event published on the in-process EventBus. Carries a monotonic id (for frontend dedup), an EventType discriminator, an ISO timestamp, a typed data payload, and optional session/repo context. HydraFlowEvents are fanned out live to subscribers, retained in in-memory history, and persisted to an append-only JSONL log for replay; persisted IDs are advanced past historical maxima so live events never collide with replayed ones.
 
