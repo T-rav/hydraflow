@@ -67,6 +67,34 @@ def test_rendered_corpus_is_byte_identical_with_and_without_env_overrides(
     assert overridden == baseline
 
 
+def test_full_rendered_prompt_corpus_is_byte_identical_with_and_without_env_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The issue's acceptance criterion literally, not just the intermediate
+    captured-field dict: actual rendered prompt text for every registry
+    target must be byte-identical whether or not a representative
+    HYDRAFLOW_* override set is exported in the audit's environment. The
+    dict-level test above is a good proxy since ``_MinimalConfig.__getattr__``
+    reads straight from that dict, but only rendering the real corpus proves
+    no builder bypasses that layer."""
+    from scripts.audit_prompts import PROMPT_REGISTRY, render_target
+
+    targets = [t for t in PROMPT_REGISTRY if not t.unrenderable]
+    assert len(targets) >= 60  # sanity: registry isn't accidentally empty/gutted
+
+    baseline = {t.name: render_target(t) for t in targets}
+
+    monkeypatch.setenv("HYDRAFLOW_MIN_REVIEW_FINDINGS", "9")
+    monkeypatch.setenv("HYDRAFLOW_MAX_REVIEW_DIFF_CHARS", "50000")
+    monkeypatch.setenv("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "leaked-user")
+    monkeypatch.setenv("SENTRY_ORG", "leaked-org")
+    monkeypatch.setenv("GIT_AUTHOR_NAME", "Leaked Committer")
+    _real_config_defaults.cache_clear()
+    overridden = {t.name: render_target(t) for t in targets}
+
+    assert overridden == baseline
+
+
 def test_git_identity_leak_from_dotenv_does_not_reach_the_corpus(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
