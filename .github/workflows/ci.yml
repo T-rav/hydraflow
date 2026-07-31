@@ -68,6 +68,13 @@ jobs:
               # unrelated build went red (#10926). Same rule as scripts/**
               # above — under-inclusive is merely expensive for a TEST filter.
               - 'docs/wiki/**'
+              # prompts/**: the auto-agent Markdown templates are model-bound
+              # prompts. tests/test_audit_prompts.py renders one of them
+              # (preflight_auto_agent) and prompt_observatory reconciles all of
+              # them, so editing a template must run those tests. Found by
+              # tests/test_ci_path_filter_completeness.py, which exists because
+              # this same omission caused two incidents in two days.
+              - 'prompts/**'
             arch:
               - 'src/arch/**'
               - 'tests/architecture/**'
@@ -156,7 +163,7 @@ jobs:
           predicate-quantifier: 'every'
           filters: |
             core_python:
-              - '{src/**/*.py,tests/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**}'
+              - '{src/**/*.py,tests/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,prompts/**}'
               - '!src/arch/**'
               - '!tests/architecture/**'
               - '!tests/regressions/**'
