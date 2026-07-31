@@ -39,7 +39,9 @@ def test_load_audit_module_is_public_and_returns_the_audit_module() -> None:
     assert hasattr(audit, "score")
 
 
-def test_private_delegate_returns_whatever_the_public_function_returns(monkeypatch) -> None:
+def test_private_delegate_returns_whatever_the_public_function_returns(
+    monkeypatch,
+) -> None:
     """Proves delegation, not a parallel implementation: patching the public
     function must change what the private alias returns."""
     sentinel = object()
@@ -111,9 +113,13 @@ def _references_private_load_audit_module(
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            if module == _OWNER_MODULE or module.endswith(f".{_OWNER_MODULE}"):
-                if any(alias.name == "_load_audit_module" for alias in node.names):
-                    offenders.append(node)
+            is_owner_module = module == _OWNER_MODULE or module.endswith(
+                f".{_OWNER_MODULE}"
+            )
+            if is_owner_module and any(
+                alias.name == "_load_audit_module" for alias in node.names
+            ):
+                offenders.append(node)
         elif isinstance(node, ast.Attribute) and node.attr == "_load_audit_module":
             offenders.append(node)
     return offenders
@@ -125,9 +131,7 @@ def test_detector_flags_import_from_of_the_private_symbol() -> None:
 
 
 def test_detector_flags_attribute_access_to_the_private_symbol() -> None:
-    tree = ast.parse(
-        "import prompt_fitness\nprompt_fitness._load_audit_module()\n"
-    )
+    tree = ast.parse("import prompt_fitness\nprompt_fitness._load_audit_module()\n")
     assert len(_references_private_load_audit_module(tree)) == 1
 
 
