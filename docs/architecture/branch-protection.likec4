@@ -1,0 +1,216 @@
+// Issue #10878 — branch-protection ruleset drift (ADR-0082)
+// Change area: the declarative gate contract -> generated rulesets -> live GitHub.
+
+specification {
+  element system
+  element container
+  element component
+  element datastore
+  element external
+
+  tag contract
+  tag generated
+  tag changeArea
+  tag live
+}
+
+model {
+  dev = external 'Maintainer' {
+    description 'Runs `make gen-gates` and setup_branch_protection.py'
+  }
+
+  gh = external 'GitHub' {
+    description 'Rulesets API + classic branch-protection API + Actions'
+
+    rulesets = component 'staging protect / main protect' {
+      #live
+      description 'Live required_status_checks. Live staging requires CI Gate; contract does not -> drift.'
+    }
+    legacyProtection = component 'branches/{b}/protection' {
+      #live
+      description 'Classic API. 404 on this repo (clean). Second enforcement layer GitHub applies independently.'
+    }
+    actions = component 'GitHub Actions' {
+      description 'Runs ci.yml / quality.yml on PRs to main + staging'
+    }
+  }
+
+  hf = system 'HydraFlow' {
+
+    gates = container 'Gate contract (docs/standards/branch_protection)' {
+      #contract
+
+      toml = component 'gates.toml' {
+        #contract #changeArea
+        description 'SOURCE OF TRUTH. [[gate]] records = (dimension, binding). ADD the CI Gate record here.'
+        technology 'TOML'
+      }
+      stagingJson = component 'staging_ruleset.json' {
+        #generated #changeArea
+        description 'GENERATED. Today: Detect Changes + discover-projects. After fix: + CI Gate.'
+      }
+      mainJson = component 'main_ruleset.json' {
+        #generated
+        description 'GENERATED. 14 contexts. Unchanged by this fix.'
+      }
+      readme = component 'README.md' {
+        #generated #changeArea
+        description 'Gate table inside <!-- generated:gates --> block is generated; surrounding prose ("2 required checks") is hand-written and must be edited.'
+      }
+      runbook = component 'ADDING-A-GATE.md' {
+        description 'Ordering rule: a gate must be green on the base branch BEFORE being required. CI Gate already is.'
+      }
+    }
+
+    gen = container 'scripts/gates + gen_gates' {
+      genCli = component 'scripts/gen_gates.py' {
+        description 'Renders artifacts; --check fails CI on drift (Gates Drift workflow)'
+      }
+      contractPy = component 'scripts/gates/contract.py' {
+        description 'load_gates() -> Contract[Gate, BranchEnvelope, RepoProfile]'
+      }
+      resolvePy = component 'scripts/gates/resolve.py' {
+        #changeArea
+        description 'resolve_contexts(contract, branch) = active AND branch in required_on AND gate_applies; render_ruleset()'
+      }
+      validatePy = component 'scripts/gates/validate.py' {
+        description 'Every active gate needs a real (workflow, job) producer + real make_target'
+      }
+      coveragePy = component 'scripts/gates/coverage.py' {
+        description 'unsatisfied_dimensions(): a required dimension with no bindable active gate hard-fails'
+      }
+      docsTable = component 'scripts/gates/docs_table.py' {
+        description 'Renders the README gate table rows'
+      }
+      workflowJobs = component 'scripts/gates/workflow_jobs.py' {
+        description 'index_workflow_jobs() -> {(workflow_file, job_key)}'
+      }
+    }
+
+    apply = container 'Apply + audit' {
+      setupCli = component 'scripts/setup_branch_protection.py' {
+        description 'Dry-run / --apply (PUT canonical verbatim) / --audit. PUT is LOSSY: drops live-only contexts.'
+      }
+      auditCore = component 'src/branch_protection_audit.py' {
+        description 'diff_ruleset(), undeclared_legacy_contexts(), audit_repo(). Shared by CLI and loop.'
+      }
+      auditorLoop = component 'src/branch_protection_auditor_loop.py' {
+        description 'ADR-0082/0029/0049 caretaker. Files one issue per drift signature; auto-closes when report.clean.'
+      }
+    }
+
+    ci = container 'CI workflows' {
+      ciGateJob = component 'ci.yml : ci-gate ("CI Gate")' {
+        #changeArea
+        description 'Umbrella aggregator. if: always(), needs all conditional jobs, SKIPPED counts as pass. The producer the new gate record binds to.'
+      }
+      changesJob = component 'ci.yml : changes ("Detect Changes")'
+      discoverJob = component 'quality.yml : discover-projects'
+      gatesDriftJob = component 'gates-drift.yml : Gates Drift' {
+        description 'Runs `gen_gates --check`; red until artifacts are regenerated'
+      }
+    }
+
+    tests = container 'Tests pinning the staging context set' {
+      #changeArea
+      tContract = component 'tests/test_gates_contract.py' {
+        description 'test_contract_staging_requires_two_contexts — exact set, must widen'
+      }
+      tResolve = component 'tests/test_gates_resolve.py' {
+        description 'test_resolve_staging_contexts — exact list, must widen'
+      }
+      tCap = component 'tests/test_gates_capability_resolve.py' {
+        description 'test_real_contract_output_unchanged_by_filtering — exact list, must widen'
+      }
+      tRegression = component 'tests/regressions/test_issue_10878.py' {
+        description 'NEW: pins contract declares CI Gate + canonical matches recorded live payload'
+      }
+    }
+  }
+
+  // --- authoring / generation flow ---
+  dev -> hf.gates.toml 'adds [[gate]] CI Gate record'
+  dev -> hf.gen.genCli 'make gen-gates'
+  hf.gen.genCli -> hf.gen.contractPy 'load_gates(gates.toml)'
+  hf.gen.contractPy -> hf.gates.toml 'reads'
+  hf.gen.genCli -> hf.gen.resolvePy 'render_ruleset(contract, branch)'
+  hf.gen.genCli -> hf.gen.validatePy 'validate(contract, job_index)'
+  hf.gen.validatePy -> hf.gen.workflowJobs 'index_workflow_jobs(.github/workflows)'
+  hf.gen.workflowJobs -> hf.ci.ciGateJob 'finds ("ci.yml","ci-gate")'
+  hf.gen.genCli -> hf.gen.coveragePy 'unsatisfied_dimensions()'
+  hf.gen.genCli -> hf.gen.docsTable 'render_docs_table()'
+  hf.gen.genCli -> hf.gates.stagingJson 'writes'
+  hf.gen.genCli -> hf.gates.mainJson 'writes'
+  hf.gen.genCli -> hf.gates.readme 'writes generated block'
+  hf.ci.gatesDriftJob -> hf.gen.genCli 'gen_gates --check (CI drift gate)'
+
+  // --- apply / audit flow ---
+  dev -> hf.apply.setupCli 'setup_branch_protection.py --apply/--audit'
+  hf.apply.setupCli -> hf.apply.auditCore 'diff_ruleset / load_canonical'
+  hf.apply.setupCli -> gh.rulesets 'PUT canonical ruleset (verbatim, lossy)'
+  hf.apply.auditorLoop -> hf.apply.auditCore 'audit_repo()'
+  hf.apply.auditCore -> hf.gates.stagingJson 'load_canonical()'
+  hf.apply.auditCore -> gh.rulesets 'gh api /repos/{r}/rulesets'
+  hf.apply.auditCore -> gh.legacyProtection 'gh api branches/{b}/protection (404 -> None)'
+  hf.apply.auditorLoop -> dev 'files drift issue #10878; auto-closes when clean'
+
+  // --- enforcement flow ---
+  gh.actions -> hf.ci.ciGateJob 'runs on PRs to main/staging'
+  gh.rulesets -> hf.ci.ciGateJob 'requires "CI Gate" context (live today, contract after fix)'
+
+  // --- test pins ---
+  hf.tests.tContract -> hf.gates.toml 'asserts staging gate set'
+  hf.tests.tResolve -> hf.gen.resolvePy 'asserts resolve_contexts("staging")'
+  hf.tests.tCap -> hf.gen.resolvePy 'asserts real-contract output'
+  hf.tests.tRegression -> hf.apply.auditCore 'undeclared_legacy_contexts == [] ; diff_ruleset == []'
+}
+
+views {
+  view index {
+    title 'Context — gate contract vs live GitHub protection'
+    include *
+    include hf.*, gh.*
+  }
+
+  view contractPipeline of hf.gates {
+    title 'Generation pipeline — gates.toml is the only hand-edited input'
+    include *
+    include hf.gen.*, hf.ci.ciGateJob, dev
+  }
+
+  view driftDetection of hf.apply {
+    title 'Two independent drift classes (ADR-0082)'
+    description '''
+      1. Ruleset drift: diff_ruleset(canonical, live) — the reported staging DRIFT.
+      2. Undeclared legacy drift: live ruleset contexts UNION classic-protection
+         contexts, minus contract-declared contexts — the reported "CI Gate" line.
+      Both point at the same missing [[gate]] record.
+    '''
+    include *
+    include gh.rulesets, gh.legacyProtection, hf.gates.stagingJson, dev
+  }
+
+  dynamic view fixSequence {
+    title 'Fix sequence — declare, regenerate, verify (no live mutation needed)'
+
+    dev -> hf.gates.toml 'add [[gate]] CI Gate: dimension=ci-aggregate, required_on=["staging"], workflow=ci.yml, job=ci-gate, status=active'
+    dev -> hf.gen.genCli 'make gen-gates'
+    hf.gen.genCli -> hf.gen.validatePy 'producer ("ci.yml","ci-gate") exists -> no violation'
+    hf.gen.genCli -> hf.gates.stagingJson 'now requires Detect Changes, discover-projects, CI Gate'
+    hf.gen.genCli -> hf.gates.readme 'generated table gains the CI Gate row'
+    dev -> hf.tests.tRegression 'red -> green'
+    hf.apply.auditorLoop -> hf.apply.auditCore 'next tick: audit_repo()'
+    hf.apply.auditCore -> gh.rulesets 'live already has all three contexts'
+    hf.apply.auditorLoop -> dev 'report.clean -> auto-close the drift issue'
+  }
+
+  dynamic view lossyApplyHazard {
+    title 'Hazard — following the issue body literally regresses #10672'
+
+    dev -> hf.apply.setupCli 'python scripts/setup_branch_protection.py --apply (as the issue body prescribes)'
+    hf.apply.setupCli -> hf.gates.stagingJson 'load canonical (CI Gate absent)'
+    hf.apply.setupCli -> gh.rulesets 'PUT verbatim -> CI Gate silently de-required'
+    gh.rulesets -> hf.ci.ciGateJob 'no longer gates merges'
+    gh.actions -> dev 'red PR auto-merges and poisons staging HEAD (the #10663 harm class)'
+  }
+}
