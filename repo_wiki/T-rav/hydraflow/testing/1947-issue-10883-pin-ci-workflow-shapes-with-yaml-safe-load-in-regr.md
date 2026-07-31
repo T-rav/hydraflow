@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10883
 source_phase: plan
 created_at: 2026-07-31T07:40:16.906981+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Pin CI workflow shapes with yaml.safe_load in regression tests
