@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10904
 source_phase: plan
 created_at: 2026-07-31T10:40:34.520364+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2072
 ---
 
 # Parse both sides at runtime in drift-guard tests

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10904
 source_phase: plan
 created_at: 2026-07-31T10:40:34.520325+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Makefile export + ?= lets env bleed into descendant make

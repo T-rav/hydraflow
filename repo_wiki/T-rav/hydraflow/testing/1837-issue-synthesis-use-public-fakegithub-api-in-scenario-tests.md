@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:59:05.723434+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1732
+superseded_by: 1964
 ---
 
 # Use public FakeGitHub API in scenario tests

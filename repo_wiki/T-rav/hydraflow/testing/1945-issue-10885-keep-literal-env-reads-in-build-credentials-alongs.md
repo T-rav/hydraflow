@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10885
 source_phase: plan
 created_at: 2026-07-31T07:40:02.824238+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2070
 ---
 
 # Keep literal env reads in build_credentials alongside CREDENTIAL_ENV_KEYS

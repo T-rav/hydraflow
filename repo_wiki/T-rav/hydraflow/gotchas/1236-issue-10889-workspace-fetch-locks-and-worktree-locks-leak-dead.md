@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10889
 source_phase: plan
 created_at: 2026-07-31T10:36:59.292304+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # workspace._FETCH_LOCKS and _WORKTREE_LOCKS leak dead-loop locks
