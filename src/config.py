@@ -814,6 +814,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("collaborator_check_enabled", "HYDRAFLOW_COLLABORATOR_CHECK_ENABLED", True),
     ("memory_auto_approve", "HYDRAFLOW_MEMORY_AUTO_APPROVE", False),
+    ("prompt_observatory_enabled", "HYDRAFLOW_PROMPT_OBSERVATORY_ENABLED", True),
     ("visual_gate_enabled", "HYDRAFLOW_VISUAL_GATE_ENABLED", False),
     ("visual_gate_bypass", "HYDRAFLOW_VISUAL_GATE_BYPASS", False),
     ("visual_validation_enabled", "HYDRAFLOW_VISUAL_VALIDATION_ENABLED", True),
@@ -3528,6 +3529,14 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Visual gate
+    prompt_observatory_enabled: bool = Field(
+        default=True,
+        description=(
+            "Record prompt SHAPES (structural hashes, never content) at the "
+            "CH-6 gate, so prompt coverage has an observed denominator rather "
+            "than one inferred from builder naming conventions (#10857)"
+        ),
+    )
     visual_gate_enabled: bool = Field(
         default=False,
         description="Require visual validation gate before merge finalization",
@@ -5983,6 +5992,18 @@ class HydraFlowConfig(BaseModel):
         action, pattern-hit NAMES and counts — never prompt content.
         """
         return self.repo_data_root / "metrics" / "prompt_gate" / "gate_audit.jsonl"
+
+    @property
+    def prompt_observatory_path(self) -> Path:
+        """Repo-scoped observed-prompt-shape ledger (#10857, #10858).
+
+        JSONL records of prompt SHAPES seen at the CH-6 gate: a structural
+        hash, the source, the tool, and anchor digests — never prompt content,
+        the same discipline as ``prompt_gate_audit_path``. Feeds the observed
+        side of prompt coverage, where the denominator is what the factory
+        actually sent rather than what a naming convention could find.
+        """
+        return self.repo_data_root / "metrics" / "prompt_gate" / "observed_shapes.jsonl"
 
     @property
     def approval_records_path(self) -> Path:

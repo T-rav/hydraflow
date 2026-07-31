@@ -1,0 +1,19 @@
+---
+id: 1294
+topic: patterns
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-31T12:41:40.095089+00:00
+status: superseded
+corroborations: 1
+supersedes: 1223
+superseded_by: 1368
+---
+
+# Use startswith on posix paths, not substring in, for scope checks
+
+When checking whether a changed path falls inside a maintenance loop's write scope, use `path.startswith(scope)` on normalized lowercase posix paths — never `scope in path` (substring match).
+
+Example: `src/audit/docs_wiki.py` contains the substring `docs/wiki` but is NOT inside `docs/wiki/` scope. Substring matching would falsely exclude it. See also: patterns — Self-chore exclusion requires path corroboration.
+
+**Why:** `in` operator admits paths that merely contain the scope string as a substring, re-opening the escape hole the scope table was built to close.

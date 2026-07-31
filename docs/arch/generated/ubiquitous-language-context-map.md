@@ -62,6 +62,7 @@ graph LR
     governor["Governor<br/><i>control_role</i>"]
     humansteeringloop["HumanSteeringLoop<br/><i>control_role</i>"]
     hydraflowconfig["HydraFlowConfig<br/><i>aggregate</i>"]
+    hydraflowevent["HydraFlowEvent<br/><i>domain_event</i>"]
     issuefetcherport["IssueFetcherPort<br/><i>port</i>"]
     issuestoreport["IssueStorePort<br/><i>port</i>"]
     lineage["Lineage<br/><i>value_object</i>"]

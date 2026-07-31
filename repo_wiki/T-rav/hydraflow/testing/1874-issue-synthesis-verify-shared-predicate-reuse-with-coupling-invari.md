@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:59:06.100005+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1769
+superseded_by: 2001
 ---
 
 # Verify shared-predicate reuse with coupling invariant

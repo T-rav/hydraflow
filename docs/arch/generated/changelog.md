@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `ca3023d` — review: fix stale pre-automation Consequences bullets in ADR-0027 (PR #10901) *(2026-07-31)*
 - `9094e0d` — review: fix stale ADR-0116 cross-reference to ADR-0027 debt pin (PR #10901) *(2026-07-31)*
 - `b01adc9` — review: fix ADR-0027 body/header contradiction + likec4 id collision (PR #10901) *(2026-07-31)*
 - `6427e61` — Fixes #10867: enforce ADR-0027 with a dead-duplicate-model-class check *(2026-07-31)*

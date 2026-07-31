@@ -86,6 +86,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0114 | enforced | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
 | ADR-0115 | enforced | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface`, `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human`, `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed`, `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld` |
 | ADR-0116 | enforced | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_prompt_fitness.py`, `pytest:tests/test_adr_enforcement_completeness.py`, `pytest:tests/test_prompt_rubric_calibration.py` |
+| ADR-0117 | enforced | `pytest:tests/test_prompt_observatory.py` |
 
 ## Check → ADRs it protects
 
@@ -182,6 +183,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_preflight_plugins.py` | ADR-0043 |
 | `pytest:tests/test_preflight_untrusted_fencing.py` | ADR-0092 |
 | `pytest:tests/test_prompt_fitness.py` | ADR-0116 |
+| `pytest:tests/test_prompt_observatory.py` | ADR-0117 |
 | `pytest:tests/test_prompt_registry_completeness.py` | ADR-0087, ADR-0116 |
 | `pytest:tests/test_prompt_rubric_calibration.py` | ADR-0116 |
 | `pytest:tests/test_release.py` | ADR-0011 |

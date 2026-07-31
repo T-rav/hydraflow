@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T11:05:52.442812+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1120
+superseded_by: 1259
 ---
 
 # WikiCompiler supersession edges must be per-output, not cartesian

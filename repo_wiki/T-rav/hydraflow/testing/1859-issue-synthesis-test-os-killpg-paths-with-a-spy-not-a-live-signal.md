@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:59:05.956123+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1754
+superseded_by: 1986
 ---
 
 # Test os.killpg paths with a spy, not a live signal
