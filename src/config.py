@@ -6696,15 +6696,17 @@ def env_override_keys() -> frozenset[str]:
     directly for fields the tables don't model (list-typed fields, JSON-shaped
     overrides, values needing custom bounds validation). Those keys are
     hand-listed below; ``tests/architecture/test_config_env_key_coverage.py``
-    AST-scans ``config.py`` for every literal env key read via
-    ``os.environ``/``_get_env`` and fails the build if one is added without a
-    matching entry here (or that test's small credentials-only exemption set,
-    for keys ``build_credentials()`` reads that never reach ``HydraFlowConfig``
-    fields) — so this list cannot silently drift out of sync (#10859).
+    BFS-walks the actual ``resolve_defaults`` call graph (not all of
+    ``config.py`` — ``build_credentials()`` reads its own env vars but is
+    never called from ``resolve_defaults``, so it's outside this graph by
+    construction, not via an exemption list) and fails the build if a
+    non-``HYDRAFLOW_``/``HYDRA_``/``GIT_``-prefixed literal is read anywhere
+    in it without a matching entry here — so this list cannot silently drift
+    out of sync (#10859).
 
     Callers building a hermetic ``HydraFlowConfig`` (:func:`declared_default_config`)
     should scrub this whole set — plus, belt-and-braces, any currently-set
-    ``HYDRAFLOW_``/``HYDRA_``-prefixed key, since a key can land in
+    ``HYDRAFLOW_``/``HYDRA_``/``GIT_``-prefixed key, since a key can land in
     ``config.py`` and still be missed here on review.
     """
     return declared_env_keys() | {
@@ -6745,7 +6747,12 @@ def declared_default_config(**overrides: Any) -> HydraFlowConfig:
     restored (even if construction raises):
 
     1. ``os.environ`` — every key in :func:`env_override_keys`, plus any
-       currently-set ``HYDRAFLOW_``/``HYDRA_``-prefixed key, is popped.
+       currently-set ``HYDRAFLOW_``/``HYDRA_``/``GIT_``-prefixed key, is
+       popped. The prefix set matches exactly what
+       ``tests/architecture/test_config_env_key_coverage.py`` treats as
+       "safe" without an explicit :func:`env_override_keys` entry — if the
+       two ever drift apart, a new prefixed env read could pass that ratchet
+       while still leaking through here.
     2. ``repo_root/.env`` — ``_dotenv_lookup`` (the git-identity fallback)
        reads this file directly, bypassing ``os.environ`` entirely, so
        scrubbing ``os.environ`` alone cannot suppress it. Unless the caller
@@ -6759,7 +6766,7 @@ def declared_default_config(**overrides: Any) -> HydraFlowConfig:
     Harness/test-only — not for use on any hot or concurrent path.
     """
     scrub_keys = env_override_keys() | {
-        key for key in os.environ if key.startswith(("HYDRAFLOW_", "HYDRA_"))
+        key for key in os.environ if key.startswith(("HYDRAFLOW_", "HYDRA_", "GIT_"))
     }
     saved_env = {key: os.environ.pop(key) for key in scrub_keys if key in os.environ}
     try:

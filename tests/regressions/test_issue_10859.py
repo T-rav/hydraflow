@@ -26,7 +26,6 @@ import inspect
 from pathlib import Path
 
 import pytest
-
 from scripts.audit_prompts import _real_config_defaults
 
 

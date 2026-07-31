@@ -841,6 +841,31 @@ class TestDeclaredDefaultConfig:
         cfg = declared_default_config()
         assert cfg.git_user_name == ""
 
+    def test_scrubs_a_git_prefixed_key_not_individually_listed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Belt-and-braces: tests/architecture/test_config_env_key_coverage.py
+        treats any GIT_-prefixed literal as a safe prefix, not requiring an
+        explicit env_override_keys() entry. That's only sound if
+        declared_default_config() actually scrubs the whole GIT_ prefix —
+        not just the four keys currently hand-listed — so a future GIT_-
+        prefixed env read added anywhere in resolve_defaults's call graph
+        can't pass that architecture ratchet while still leaking through
+        here."""
+        import config as config_module
+
+        monkeypatch.setenv("GIT_SOME_FUTURE_KEY", "leaked")
+        seen: dict[str, bool] = {}
+        original = config_module._resolve_base_paths
+
+        def _spy(cfg: HydraFlowConfig) -> None:
+            seen["present"] = "GIT_SOME_FUTURE_KEY" in os.environ
+            original(cfg)
+
+        monkeypatch.setattr(config_module, "_resolve_base_paths", _spy)
+        declared_default_config()
+        assert seen["present"] is False
+
     def test_ignores_json_shaped_managed_repos_env_override(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
