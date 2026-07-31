@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T04:20:59.073645+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1676
+superseded_by: 1875
 ---
 
 # Wiki-lint drift regressions assert full live-wiki lint

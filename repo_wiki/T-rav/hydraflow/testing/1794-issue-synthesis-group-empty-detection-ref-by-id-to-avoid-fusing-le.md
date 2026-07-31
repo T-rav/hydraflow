@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T04:20:59.123630+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1700
+superseded_by: 1899
 ---
 
 # Group empty detection_ref by id to avoid fusing legacy rows

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T04:20:59.104698+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1691
+superseded_by: 1890
 ---
 
 # Regression tests on repo_wiki entries must skip when pruned

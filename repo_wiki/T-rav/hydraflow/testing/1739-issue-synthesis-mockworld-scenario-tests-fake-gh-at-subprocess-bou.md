@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T04:20:59.010080+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1645
+superseded_by: 1844
 ---
 
 # MockWorld scenario tests fake gh at subprocess boundary
