@@ -119,6 +119,20 @@ def test_coverage_job_still_excluded_from_ci_gate() -> None:
     assert "coverage" not in _ci_doc()["jobs"]["ci-gate"]["needs"]
 
 
+def test_coverage_job_both_legs_pass_cov_append() -> None:
+    # Pre-mortem risk 1 (plan): if either leg drops --cov-append, that leg's
+    # coverage data is never combined with the other's — --cov-fail-under=70
+    # would then silently pass against a partial total instead of the real
+    # one, hiding coverage loss instead of failing loud.
+    runs = _pytest_run_lines("coverage")
+    assert len(runs) == 2
+    for run in runs:
+        assert "--cov-append" in run, (
+            f"pytest invocation is missing --cov-append — the other leg's "
+            f"coverage data would be silently dropped: {run!r}"
+        )
+
+
 def _makefile_text() -> str:
     return (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 
@@ -145,3 +159,15 @@ def test_makefile_coverage_target_reuses_shared_serial_vars() -> None:
     body = _make_target_body("coverage")
     assert "$(PYTEST_PARALLEL)" in body
     assert "$(PYTEST_SERIAL_PATHS)" in body
+
+
+def test_makefile_coverage_target_both_legs_pass_cov_append() -> None:
+    # Pre-mortem risk 1 (plan): same silent-coverage-loss guard as the ci.yml
+    # coverage job, pinned locally too so `make coverage` cannot drift from CI.
+    body = _make_target_body("coverage")
+    assert body.count("--cov-append") == 2
+
+
+def test_makefile_test_cov_target_both_legs_pass_cov_append() -> None:
+    body = _make_target_body("test-cov")
+    assert body.count("--cov-append") == 2
