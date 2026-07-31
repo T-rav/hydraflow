@@ -5,7 +5,7 @@ source_issue: 10876
 source_phase: plan
 created_at: 2026-07-31T05:37:16.290781+00:00
 status: active
-corroborations: 1
+corroborations: 4
 ---
 
 # Derive test scrub sets from declared_env_keys(), never hand-list them
