@@ -5840,6 +5840,15 @@ class HydraFlowConfig(BaseModel):
             self.hitl_label,
             self.hitl_active_label,
             self.hitl_autofix_label,
+            # ``diagnose`` and ``parked`` are route-back STAGES (the docstring
+            # for ``in_progress_label`` below enumerates "hitl/diagnose/parked/
+            # ready" as the swap targets) — but were omitted here, so
+            # ``swap_pipeline_labels`` never cleared ``hydraflow-diagnose`` /
+            # ``hydraflow-parked`` on transition. A diagnosed issue then
+            # accumulated stale stage labels and jammed the pipeline (self-
+            # diagnosed on #10785: diagnose label survived the ready swap).
+            self.diagnose_label,
+            self.parked_label,
             self.fixed_label,
             self.verify_label,
         ):
