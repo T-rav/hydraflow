@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:59:06.635832+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1828
+superseded_by: 2059
 ---
 
 # Reject lazy honeycomb construction — late install captures zero spans

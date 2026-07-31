@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:59:06.109105+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1771
+superseded_by: 2003
 ---
 
 # _in_retry_window() regression coverage in test_issue_10459.py

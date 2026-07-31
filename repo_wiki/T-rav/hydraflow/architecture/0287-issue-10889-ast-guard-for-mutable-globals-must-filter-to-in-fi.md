@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10889
 source_phase: plan
 created_at: 2026-07-31T10:36:59.292311+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # AST guard for mutable globals must filter to in-file mutated literals
