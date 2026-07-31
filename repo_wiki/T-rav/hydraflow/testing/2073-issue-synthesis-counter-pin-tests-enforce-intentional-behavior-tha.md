@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:54.427277+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1955
+superseded_by: 2202
 ---
 
 # Counter-pin tests enforce intentional behavior that looks buggy

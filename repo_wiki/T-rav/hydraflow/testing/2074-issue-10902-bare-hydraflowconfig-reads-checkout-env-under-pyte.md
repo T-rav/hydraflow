@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10902
 source_phase: plan
 created_at: 2026-07-31T11:38:13.878494+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2203
 ---
 
 # Bare HydraFlowConfig() reads checkout .env under pytest via _find_repo_root

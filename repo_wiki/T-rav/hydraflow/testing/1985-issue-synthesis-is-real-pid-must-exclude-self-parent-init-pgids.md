@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.214229+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1858
+superseded_by: 2115
 ---
 
 # is_real_pid must exclude self/parent/init pgids

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.991516+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1920
+superseded_by: 2176
 ---
 
 # Amend ADRs same-commit as src/ deletions they cite

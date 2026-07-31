@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10890
 source_phase: plan
 created_at: 2026-07-31T12:12:42.365154+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2208
 ---
 
 # `_add_tool_call` is the cross-backend span-event funnel
