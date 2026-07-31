@@ -97,14 +97,38 @@ def _model_class_definitions(src_root: Path) -> dict[str, list[Path]]:
     return by_name
 
 
-def _imports_name_from_module(tree: ast.Module, module: str, name: str) -> bool:
-    return any(
-        isinstance(node, ast.ImportFrom)
-        and node.level == 0
-        and node.module in (module, f"src.{module}")
-        and any(alias.name == name for alias in node.names)
-        for node in ast.walk(tree)
-    )
+def _package_of(path: Path, src_root: Path) -> str:
+    """Dotted package a relative import inside *path* resolves against —
+    *path* itself if it's an ``__init__.py`` (a package), else its parent
+    package, mirroring Python's ``__package__`` semantics."""
+    dotted = _module_name(path, src_root)
+    if path.name == "__init__.py":
+        return dotted
+    return dotted.rsplit(".", 1)[0] if "." in dotted else ""
+
+
+def _resolve_relative_module(path: Path, src_root: Path, node: ast.ImportFrom) -> str:
+    """Absolute dotted module a ``from .foo import Bar`` in *path* targets."""
+    package = _package_of(path, src_root)
+    bits = package.rsplit(".", node.level - 1) if package else [""]
+    base = bits[0]
+    return f"{base}.{node.module}" if node.module else base
+
+
+def _imports_name_from_module(
+    tree: ast.Module, module: str, name: str, importer_path: Path, src_root: Path
+) -> bool:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if not any(alias.name == name for alias in node.names):
+            continue
+        if node.level == 0:
+            if node.module in (module, f"src.{module}"):
+                return True
+        elif _resolve_relative_module(importer_path, src_root, node) == module:
+            return True
+    return False
 
 
 def _referenced_within_file(tree: ast.Module, name: str) -> bool:
@@ -137,7 +161,9 @@ def _dead_duplicate_definitions(src_root: Path) -> list[str]:
             module = _module_name(defpath, src_root)
             imported_elsewhere = any(
                 other != defpath
-                and _imports_name_from_module(_tree(other), module, name)
+                and _imports_name_from_module(
+                    _tree(other), module, name, other, src_root
+                )
                 for other in _all_source_files(src_root)
             )
             if imported_elsewhere:
