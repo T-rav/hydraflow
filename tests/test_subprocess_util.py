@@ -1039,8 +1039,7 @@ class TestGhCircuitBreaker:
 
         subprocess_util._gh_semaphore = None
         subprocess_util._rate_limit_until = None
-        subprocess_util._gh_circuit_breaker = None
-        subprocess_util._gh_circuit_breaker_enabled = False
+        subprocess_util.reset_gh_circuit_breaker()
 
     @staticmethod
     def _runner(stderr: str = "", returncode: int = 0, stdout: str = "done"):
@@ -1052,6 +1051,35 @@ class TestGhCircuitBreaker:
         runner = MagicMock()
         runner.run_simple = _run
         return runner
+
+    @pytest.mark.asyncio
+    async def test_reset_restores_initial_state(self) -> None:
+        """``reset_gh_circuit_breaker()`` returns the module to its import state.
+
+        A test (or the breaker's kill-switch path) that opened the breaker needs
+        a supported way back to the initial state instead of reaching into the
+        private names. Without it an OPEN breaker leaks onto every later test on
+        the same xdist worker, which then fails fast on unrelated gh/git calls
+        (#10907).
+        """
+        import subprocess_util
+        from subprocess_util import (
+            configure_gh_circuit_breaker,
+            reset_gh_circuit_breaker,
+        )
+
+        configure_gh_concurrency(5)
+        configure_gh_circuit_breaker(enabled=True, max_failures=1, reset_timeout=60.0)
+        fail = self._runner(stderr="fatal: unable to access (HTTP 500)", returncode=1)
+        with pytest.raises(RuntimeError):
+            await run_subprocess("gh", "api", "x", runner=fail)
+        assert subprocess_util._gh_circuit_breaker is not None
+        assert subprocess_util._gh_circuit_breaker.state == "open"
+
+        reset_gh_circuit_breaker()
+
+        assert subprocess_util._gh_circuit_breaker is None
+        assert subprocess_util._gh_circuit_breaker_enabled is False
 
     @pytest.mark.asyncio
     async def test_opens_after_max_consecutive_failures_then_fails_fast(self) -> None:
@@ -1190,8 +1218,7 @@ class TestRunSubprocessResult:
 
         subprocess_util._gh_semaphore = None
         subprocess_util._rate_limit_until = None
-        subprocess_util._gh_circuit_breaker = None
-        subprocess_util._gh_circuit_breaker_enabled = False
+        subprocess_util.reset_gh_circuit_breaker()
 
     @staticmethod
     def _runner(stderr: str = "", returncode: int = 0, stdout: str = "done"):

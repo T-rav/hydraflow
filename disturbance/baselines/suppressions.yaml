@@ -299,7 +299,7 @@ entries:
   src/stream_parser.py::noqa:PLR0911: 1
   "src/subprocess_util.py::noqa:BLE001\u2014observabilitymustneverbreakthecallpath": 1
   src/subprocess_util.py::noqa:PLC0415: 1
-  src/subprocess_util.py::noqa:PLW0603: 9
+  src/subprocess_util.py::noqa:PLW0603: 10
   src/subprocess_util.py::noqa:PLW2901: 2
   src/subprocess_util.py::noqa:S101: 1
   src/subprocess_util.py::noqa:S311: 1

@@ -287,17 +287,24 @@ def setup_test_environment():
 
 @pytest.fixture(autouse=True)
 def _reset_gh_semaphore():
-    """Reset the global gh semaphore and rate-limit state between tests.
+    """Reset the global gh semaphore, rate-limit, and circuit-breaker state.
 
     This directly mutates module-level private state in ``subprocess_util``
     (``_gh_semaphore`` and ``_rate_limit_until``) to prevent cross-test
     leakage.  See module-level note above regarding the coupling trade-off.
+
+    The circuit breaker is cleared through its public ``reset_gh_circuit_breaker``
+    entrypoint: without it, a test that tripped the breaker OPEN left it OPEN for
+    every later test on the same xdist worker, which then failed fast on
+    unrelated gh/git calls (#10907).
     """
     subprocess_util._gh_semaphore = None
     subprocess_util._rate_limit_until = None
+    subprocess_util.reset_gh_circuit_breaker()
     yield
     subprocess_util._gh_semaphore = None
     subprocess_util._rate_limit_until = None
+    subprocess_util.reset_gh_circuit_breaker()
 
 
 @pytest.fixture(autouse=True)
