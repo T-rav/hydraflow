@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10878
 source_phase: plan
 created_at: 2026-07-31T07:10:49.839600+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # ADDING-A-GATE.md ordering rule: job must be green before requiring
