@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:49:30.651886+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1016
+superseded_by: 1152
 ---
 
 # ConvergenceOscillationLoop label doesn't exist; use fleet-level series

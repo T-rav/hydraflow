@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 10874
 source_phase: plan
 created_at: 2026-07-31T06:49:10.357855+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0105
 ---
 
 # Bare imports are canonical; src.X prefix splits class identity
