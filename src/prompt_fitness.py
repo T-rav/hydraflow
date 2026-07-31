@@ -516,7 +516,12 @@ def baseline_high_severity_share() -> float:
 
 
 def load_audit_module() -> ModuleType:
-    """Import scripts/audit_prompts.py without requiring it on sys.path."""
+    """Import scripts/audit_prompts.py without requiring it on sys.path.
+
+    Executes the module fresh on every call rather than caching it: two
+    calls never return the same object, so callers must not rely on
+    identity across calls.
+    """
     spec = importlib.util.spec_from_file_location("_audit_prompts", _AUDIT)
     if spec is None or spec.loader is None:  # pragma: no cover - defensive
         raise ImportError(f"cannot load {_AUDIT}")

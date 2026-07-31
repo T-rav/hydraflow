@@ -39,6 +39,14 @@ def test_load_audit_module_is_public_and_returns_the_audit_module() -> None:
     assert hasattr(audit, "score")
 
 
+def test_load_audit_module_execs_fresh_on_every_call() -> None:
+    """Pins the contract documented on load_audit_module() itself: it re-execs
+    scripts/audit_prompts.py on every call rather than caching it, so two
+    calls never return the same object. A future caching/memoizing "cleanup"
+    of the now-public loader would silently break this."""
+    assert load_audit_module() is not load_audit_module()
+
+
 def test_private_delegate_returns_whatever_the_public_function_returns(
     monkeypatch,
 ) -> None:
