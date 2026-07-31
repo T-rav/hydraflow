@@ -1,0 +1,83 @@
+specification {
+  element system
+  element component
+  element artifact
+  element test
+
+  relationship reads
+  relationship classifies
+  relationship gates
+}
+
+model {
+  adrCorpus = artifact 'docs/adr/*.md' {
+    description 'ADR-0027 flips **Enforcement:** decision-of-record -> enforced + **Enforced by:** pytest:...'
+  }
+
+  conformance = system 'ADR conformance engine' {
+    index = component 'src/adr_index.py' {
+      description 'scan_adr_directory -> ADR(enforcement, enforced_by: Check[])'
+    }
+    classify = component 'src/adr_conformance.py' {
+      description 'classify_adr_enforcement -> REAL | WEAK | MISSING; resolve_check, is_mutating, check_is_tautological'
+    }
+    generator = component 'src/arch/generators/adr_enforcement.py' {
+      description 'render_adr_enforcement -> docs/arch/generated/adr-enforcement.md (via src/arch/runner.py)'
+    }
+  }
+
+  ratchet = system 'Enforcement debt ratchet' {
+    baseline = artifact 'tests/architecture/adr_enforcement_baseline.json' {
+      description 'frozen baseline_snapshot (12 ids) + resolved[]; ADD 27 to resolved'
+    }
+    exemptions = artifact 'docs/standards/adr_enforcement/exemptions.md' {
+      description 'allow-list; REMOVE the ADR-0027 bullet'
+    }
+    ratchetTest = test 'tests/architecture/test_adr_enforcement_ratchet.py' {
+      description 'resolved-vs-exempt disjoint; resolved ids must classify REAL'
+    }
+  }
+
+  newCheck = test 'tests/architecture/test_adr0027_duplicate_model_class_definitions.py' {
+    description 'AST scan of src/**/*.py for data-model classes (BaseModel | @dataclass | TypedDict) defined in >1 module; Rule-4 structural exclusions (Protocol/ABC/Enum/Exception) + curated justified allow-list'
+  }
+
+  srcTree = artifact 'src/**/*.py' {
+    description '993 classes; 8 cross-module data-model duplicates today'
+  }
+
+  sibling = test 'tests/architecture/test_adr0023_test_local_class_instantiation.py' {
+    description 'template: sibling merge-artifact ADR already paid down to REAL'
+  }
+
+  newCheck -> srcTree 'reads'
+  adrCorpus -> newCheck 'Enforced by:'
+  conformance.index -> adrCorpus 'reads'
+  conformance.classify -> conformance.index 'classifies'
+  conformance.classify -> newCheck 'resolve_check(pytest node exists)'
+  conformance.generator -> conformance.classify 'renders'
+  ratchet.ratchetTest -> conformance.classify 'imports'
+  ratchet.ratchetTest -> ratchet.baseline 'reads'
+  ratchet.ratchetTest -> ratchet.exemptions 'reads'
+  ratchet.ratchetTest -> adrCorpus 'gates'
+  sibling -> newCheck 'pattern for'
+}
+
+views {
+  view index {
+    title 'ADR-0027: MISSING -> REAL'
+    include *
+    include conformance.*, ratchet.*
+  }
+
+  dynamic view classifyFlow {
+    title 'How ADR-0027 becomes REAL'
+    conformance.index -> adrCorpus 'parse Enforcement + Enforced by'
+    conformance.classify -> conformance.index 'ADR(enforcement=enforced, checks=[pytest:...])'
+    conformance.classify -> newCheck 'resolve_check: node defined?'
+    conformance.classify -> ratchet.ratchetTest 'REAL'
+    ratchet.ratchetTest -> ratchet.baseline 'requires 27 in resolved'
+    ratchet.ratchetTest -> ratchet.exemptions 'requires 27 absent'
+    conformance.generator -> conformance.classify 'regenerate adr-enforcement.md (0 MISSING)'
+  }
+}

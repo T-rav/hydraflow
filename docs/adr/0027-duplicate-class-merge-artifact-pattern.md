@@ -1,7 +1,8 @@
 # ADR-0027: Duplicate Class Definitions — Merge-Artifact Pattern
 
 **Status:** Accepted
-**Enforcement:** decision-of-record
+**Enforcement:** enforced
+**Enforced by:** pytest:tests/architecture/test_adr0027_duplicate_model_class_definitions.py::test_no_dead_duplicate_model_class_definitions
 **Date:** 2026-03-18
 
 ## Context
