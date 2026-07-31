@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.958882+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1914
+superseded_by: 2170
 ---
 
 # Derive test personas from preflight.playbooks.get_playbook

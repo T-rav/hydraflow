@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:54.201588+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1933
+superseded_by: 2189
 ---
 
 # Config-gated prompt branches: render via fixture overrides

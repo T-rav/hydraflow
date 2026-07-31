@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:41:40.110461+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1229
+superseded_by: 1374
 ---
 
 # Derive env override keys from _ENV_* tables, never hand-list

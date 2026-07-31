@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:54.226053+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1935
+superseded_by: 2191
 ---
 
 # Run full make quality for conftest changes, not file-targeted
