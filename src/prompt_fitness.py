@@ -150,7 +150,7 @@ def registered_modules() -> set[str]:
     counted: it is registered but never rendered or scored, so crediting it
     would close the gap on paper while measuring nothing.
     """
-    audit = _load_audit_module()
+    audit = load_audit_module()
     modules = discovered_builders()  # hoisted: this walks every AST under src/
     owners: set[str] = set()
     for target in audit.PROMPT_REGISTRY:
@@ -178,7 +178,7 @@ def registered_builders() -> set[str]:
     (``reviewer._build_precheck_prompt``, ``spec_match.build_self_review_prompt``)
     had been invisible that way since the registry was built.
     """
-    audit = _load_audit_module()
+    audit = load_audit_module()
     modules = discovered_builders()
     out: set[str] = set()
     for target in audit.PROMPT_REGISTRY:
@@ -351,7 +351,7 @@ def per_prompt_scores() -> dict[str, frozenset[int]]:
     :func:`prompt_regressions` reports as a regression rather than silently
     dropping from the scored set.
     """
-    audit = _load_audit_module()
+    audit = load_audit_module()
     out: dict[str, frozenset[int]] = {}
     for target in audit.PROMPT_REGISTRY:
         if target.unrenderable:
@@ -443,7 +443,7 @@ PLACEHOLDER_LEAK_EXEMPT_MAX = 1
 
 def prompt_placeholder_leaks() -> dict[str, frozenset[str]]:
     """Prompt name -> leaked placeholder names, for prompts that leak any."""
-    audit = _load_audit_module()
+    audit = load_audit_module()
     out: dict[str, frozenset[str]] = {}
     for target in audit.PROMPT_REGISTRY:
         if target.unrenderable:
@@ -514,7 +514,7 @@ def baseline_high_severity_share() -> float:
     return highs / total
 
 
-def _load_audit_module():
+def load_audit_module():
     """Import scripts/audit_prompts.py without requiring it on sys.path."""
     spec = importlib.util.spec_from_file_location("_audit_prompts", _AUDIT)
     if spec is None or spec.loader is None:  # pragma: no cover - defensive
@@ -525,6 +525,11 @@ def _load_audit_module():
     return module
 
 
+def _load_audit_module():
+    """Deprecated alias for :func:`load_audit_module`; kept for callers not yet migrated."""
+    return load_audit_module()
+
+
 def fitness_summary(*, outcome_paired: bool = False) -> PromptFitness:
     """Compute the prompt-layer fitness scorecard.
 
@@ -532,7 +537,7 @@ def fitness_summary(*, outcome_paired: bool = False) -> PromptFitness:
     ADR-0087 rubric. Discovery counts come from the same convention the
     completeness ratchet uses, so coverage and the gate cannot disagree.
     """
-    audit = _load_audit_module()
+    audit = load_audit_module()
     # Builder granularity, not module. See registered_builders().
     discovered = all_builders()
     registered = registered_builders()
