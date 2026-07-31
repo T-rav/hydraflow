@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T04:20:59.138473+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1707
+superseded_by: 1906
 ---
 
 # Bare-cite resolution is presence-based, not symbol-lookup

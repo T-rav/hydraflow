@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10867
 source_phase: plan
 created_at: 2026-07-31T03:20:17.216750+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Allow-listed architecture tests need anti-vacuity and stale-entry checks
