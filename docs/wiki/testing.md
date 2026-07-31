@@ -422,3 +422,18 @@ Surface 2 covers the working tree: `.githooks/pre-push` runs `scripts/check_regr
 ```json:entry
 {"id":"01KRREGRESSIONROT9597HOSTED","title":"Regression-rot detector — hosted in StaleIssueLoop, not a new loop (#9597)","topic":null,"source_type":"compiled","source_issue":9597,"source_repo":null,"created_at":"2026-07-19T00:00:00.000000+00:00","updated_at":"2026-07-19T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+## Cancelled-at-timeout: continuous progress means capacity, not a hang (#10883)
+
+A CI job CANCELLED by GitHub's own `timeout-minutes` enforcement, with a test step that never reached a terminal conclusion, looks identical whether the run was genuinely wedged (a real `os.killpg` reaching the CI container's own PID 1 via a mocked subprocess `.pid` — the #9983/#10002 class) or simply outgrew its time budget. The discriminator is **progress shape**, not the cancellation itself: pull the job log and check whether pytest's progress dots advanced continuously up to the moment of cancellation (capacity — the lane is just too slow for its budget) versus stalling with no output for an extended stretch before the kill (a genuine wedge). `Coverage (trailing)` hit the capacity case: single-threaded (`-p no:xdist`), 23,011 tests, steady progress to 81% at cancellation, zero terminal stall — the fix was parallelizing the lane under xdist plus `--timeout` per test, not another killpg hunt (PR #10410 had already hardened `is_real_pid` for the prior incident and the cancellations continued unchanged).
+
+`GateHealthLoop.find_suspected_hangs` encodes this distinction structurally: a check hitting the cancelled-at-timeout signature once in the analyzed window files a `suspected_hang` (the killpg/mocked-`.pid` playbook, worth chasing for a single incident); the same check hitting it two-plus times in one window collapses to a single `chronic_timeout` finding instead (fingerprinted on check name alone, no run id, so it dedupes across cycles) — a repeated pattern is a capacity problem worth parallelizing/sharding/re-budgeting, and pointing it at the killpg playbook would misdirect every time.
+
+**Why:** Before #10883, every cancelled-at-timeout run filed a fresh `suspected_hang` issue (fingerprint included run_id), so one chronically over-budget lane fanned out into one killpg-hunt issue per push (#10390, #10391, #10393, #10883) — always the wrong diagnosis for a lane that just needs to run faster.
+
+_Source: #10883 (plan)_
+
+
+```json:entry
+{"id":"01KRCHRONICTIMEOUT10883HANG","title":"Cancelled-at-timeout: continuous progress means capacity, not a hang (#10883)","topic":null,"source_type":"plan","source_issue":10883,"source_repo":null,"created_at":"2026-07-31T00:00:00.000000+00:00","updated_at":"2026-07-31T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

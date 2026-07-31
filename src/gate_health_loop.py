@@ -138,8 +138,15 @@ def find_suspected_hangs(
     terminal conclusion — is the signature a blind retry burns attempt
     budget against instead of fixing (PRs #9983, #10002: a mocked ``.pid``
     fed a real ``os.killpg``, which reached the CI container's own PID 1).
+
+    A check hitting this signature exactly once in the analyzed window is a
+    ``suspected_hang`` — a distinct incident worth the killpg/mocked-``.pid``
+    playbook. The same check hitting it two-plus times in one window is a
+    *different* defect (#10883): the lane is chronically over its time
+    budget, not wedged — that collapses to a single ``chronic_timeout``
+    finding instead of one ``suspected_hang`` per run.
     """
-    findings: list[dict[str, Any]] = []
+    candidates: dict[str, list[dict[str, Any]]] = {}
     for rec in job_records:
         if str(rec.get("conclusion", "")).lower() != "cancelled":
             continue
@@ -155,18 +162,43 @@ def find_suspected_hangs(
         unfinished_step = _find_unfinished_test_step(rec.get("steps") or [])
         if unfinished_step is None:
             continue
-        findings.append(
+        candidates.setdefault(name, []).append(
             {
-                "kind": "suspected_hang",
-                "check": name,
                 "run_id": int(rec.get("run_id", 0) or 0),
                 "pr_number": int(rec.get("pr_number", 0) or 0),
                 "duration_seconds": round(duration),
                 "timeout_minutes": timeout_minutes,
                 "unfinished_step": unfinished_step,
-                "tolerance_seconds": tolerance_seconds,
             }
         )
+
+    findings: list[dict[str, Any]] = []
+    for name, hits in candidates.items():
+        if len(hits) == 1:
+            hit = hits[0]
+            findings.append(
+                {
+                    "kind": "suspected_hang",
+                    "check": name,
+                    "run_id": hit["run_id"],
+                    "pr_number": hit["pr_number"],
+                    "duration_seconds": hit["duration_seconds"],
+                    "timeout_minutes": hit["timeout_minutes"],
+                    "unfinished_step": hit["unfinished_step"],
+                    "tolerance_seconds": tolerance_seconds,
+                }
+            )
+        else:
+            findings.append(
+                {
+                    "kind": "chronic_timeout",
+                    "check": name,
+                    "occurrences": len(hits),
+                    "run_ids": [hit["run_id"] for hit in hits],
+                    "timeout_minutes": hits[-1]["timeout_minutes"],
+                    "tolerance_seconds": tolerance_seconds,
+                }
+            )
     return findings
 
 
@@ -306,12 +338,15 @@ class GateHealthLoop(BaseBackgroundLoop):
     (code checks failing docs-only diffs), missing failure artifacts,
     quarantine markers whose tracking issue is closed, and suspected CI
     hangs — a cancelled-at-timeout job with an unfinished test step
-    (#10010). Findings file as ``hydraflow-find`` issues with the stats
-    table in the body and a consent package for anything human-gated.
-    Deduped by finding fingerprint so a standing defect files once, not
-    weekly (suspected-hang findings are the one exception: each is a
-    distinct incident, fingerprinted per run so a second, unrelated hang
-    on the same check still gets its own issue).
+    (#10010), which further splits into a one-off ``suspected_hang`` versus
+    a ``chronic_timeout`` when the same check repeats the signature within
+    one analyzed window (#10883). Findings file as ``hydraflow-find`` issues
+    with the stats table in the body and a consent package for anything
+    human-gated. Deduped by finding fingerprint so a standing defect files
+    once, not weekly (suspected-hang findings are the one exception: each is
+    a distinct incident, fingerprinted per run so a second, unrelated hang
+    on the same check still gets its own issue — chronic_timeout, like the
+    other structural findings, fingerprints on check name alone).
     """
 
     def __init__(
@@ -610,7 +645,7 @@ def _render_finding(finding: dict[str, Any]) -> tuple[str, str]:
             "```\n"
             "Human-gated: GateHealthLoop will NOT execute this.\n"
         )
-    else:  # suspected_hang
+    elif kind == "suspected_hang":
         pr_number = finding.get("pr_number") or 0
         pr_note = f" (PR #{pr_number})" if pr_number else ""
         tolerance = finding.get("tolerance_seconds", 90)
@@ -665,5 +700,30 @@ def _render_finding(finding: dict[str, Any]) -> tuple[str, str]:
             "attribute) could resolve to a real, sensitive PID (1, or "
             "the test runner's own PID) before it reaches a real "
             "`kill`/`killpg`/`terminate` call.\n"
+        )
+    else:  # chronic_timeout
+        occurrences = finding.get("occurrences", 0)
+        run_ids = finding.get("run_ids") or []
+        tolerance = finding.get("tolerance_seconds", 90)
+        title = f"Gate health: {finding['check']} chronically times out — over budget, not hung"
+        body = (
+            f"## Evidence (GateHealthLoop, automated)\n\n"
+            f"| metric | value |\n|---|---|\n"
+            f"| check | `{finding['check']}` |\n"
+            f"| cancelled-at-timeout occurrences (window) | {occurrences} |\n"
+            f"| example runs | {run_ids[:5]} |\n"
+            f"| configured timeout-minutes | {finding['timeout_minutes']} |\n\n"
+            f"**This is not a hang.** This check was CANCELLED within "
+            f"~{tolerance}s of its own configured timeout in {occurrences} "
+            "separate analyzed runs — a genuine one-off wedge shows up "
+            "once, not repeatedly across the window. The repeated pattern "
+            "is the lane outgrowing its time budget (a capacity problem), "
+            "not a process stuck mid-test.\n\n"
+            "## Recommended next step\n\n"
+            "Do NOT chase the killpg/mocked-`.pid` hypothesis — that "
+            "playbook is for a single `suspected_hang` incident, not a "
+            "chronic pattern. Instead: parallelize or shard the lane, "
+            "profile the slowest tests, or raise its `timeout-minutes` for "
+            "headroom, then confirm it stops cancelling at the boundary.\n"
         )
     return title, body

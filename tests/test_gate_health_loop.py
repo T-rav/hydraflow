@@ -131,6 +131,41 @@ class TestFindSuspectedHangs:
         )
         assert a != b  # two distinct incidents on the same check both file
 
+    def test_same_check_cancelled_at_timeout_twice_yields_one_chronic_timeout(
+        self,
+    ) -> None:
+        # Two DIFFERENT runs of the same check, both cancelled at their
+        # configured timeout in the same analyzed window — a capacity
+        # problem, not two distinct hang incidents.
+        jobs = [
+            _cancelled_job(run_id=555, pr_number=42),
+            _cancelled_job(run_id=777, pr_number=43),
+        ]
+
+        findings = find_suspected_hangs(
+            jobs, timeout_minutes_by_job={"Tests": 30}, tolerance_seconds=90
+        )
+
+        assert len(findings) == 1
+        finding = findings[0]
+        assert finding["kind"] == "chronic_timeout"
+        assert finding["check"] == "Tests"
+        assert finding["occurrences"] == 2
+        assert finding["run_ids"] == [555, 777]
+        assert finding["timeout_minutes"] == 30
+
+    def test_chronic_timeout_fingerprint_excludes_run_id(self) -> None:
+        # Unlike suspected_hang, chronic_timeout is ONE standing defect on a
+        # check — the fingerprint must not fold in run_ids, or every cycle
+        # (whose occurrences are drawn from a sliding window) would refile.
+        a = finding_fingerprint(
+            {"kind": "chronic_timeout", "check": "Tests", "run_ids": [555, 777]}
+        )
+        b = finding_fingerprint(
+            {"kind": "chronic_timeout", "check": "Tests", "run_ids": [888, 999]}
+        )
+        assert a == b
+
 
 # ---------------------------------------------------------------------------
 # Pure engine
@@ -435,6 +470,86 @@ class TestSuspectedHangLoopWiring:
 
         assert result["filed"] == 0
         prs.create_issue.assert_not_awaited()
+
+
+class TestChronicTimeoutLoopWiring:
+    """#10883: a chronically over-budget lane collapses to ONE finding per
+    cycle and dedupes across cycles — it must not fan out one issue per
+    cancelled run, and must not point at the killpg/mocked-``.pid`` playbook
+    (that diagnosis was for #9983/#10002's genuine single-run wedge).
+    """
+
+    def _write_workflow(self, repo_root: Path) -> None:
+        workflows_dir = repo_root / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True)
+        (workflows_dir / "ci.yml").write_text(
+            "jobs:\n  test:\n    name: Tests\n    timeout-minutes: 30\n"
+        )
+
+    def _run_seed(self, run_id: int, pr_number: int, created_at: str) -> dict:
+        return {
+            "id": run_id,
+            "workflow": "CI",
+            "conclusion": "cancelled",
+            "created_at": created_at,
+            "pr_number": pr_number,
+        }
+
+    @pytest.mark.asyncio
+    async def test_two_cancelled_runs_in_one_window_files_one_chronic_issue(
+        self, tmp_path: Path
+    ) -> None:
+        loop, prs = _make_loop(tmp_path)
+        self._write_workflow(Path(loop._config.repo_root))
+        prs.list_workflow_runs.return_value = [
+            self._run_seed(555, 42, "2026-07-19T00:00:00Z"),
+            self._run_seed(777, 43, "2026-07-19T01:00:00Z"),
+        ]
+        prs.get_workflow_run_jobs.side_effect = [
+            [_cancelled_job(run_id=555, pr_number=42)],
+            [_cancelled_job(run_id=777, pr_number=43)],
+        ]
+
+        result = await loop._do_work()
+
+        assert result["filed"] == 1
+        title, body = prs.create_issue.await_args.args[0:2]
+        assert "chronically" in title.lower() or "over budget" in title.lower()
+        assert "suspected CI hang" not in title
+        assert "Linux container" not in body  # not the killpg repro playbook
+        assert "#9983" not in body
+        assert "#10002" not in body
+        assert prs.create_issue.await_args.kwargs["labels"] == ["hydraflow-find"]
+
+    @pytest.mark.asyncio
+    async def test_chronic_timeout_dedupes_across_cycles(self, tmp_path: Path) -> None:
+        loop, prs = _make_loop(tmp_path)
+        self._write_workflow(Path(loop._config.repo_root))
+        prs.list_workflow_runs.return_value = [
+            self._run_seed(555, 42, "2026-07-19T00:00:00Z"),
+            self._run_seed(777, 43, "2026-07-19T01:00:00Z"),
+        ]
+        prs.get_workflow_run_jobs.side_effect = [
+            [_cancelled_job(run_id=555, pr_number=42)],
+            [_cancelled_job(run_id=777, pr_number=43)],
+        ]
+        first = await loop._do_work()
+
+        # Next cycle's window has slid to two DIFFERENT run_ids on the same
+        # standing defect — still one filed issue total, not a second one.
+        prs.list_workflow_runs.return_value = [
+            self._run_seed(888, 44, "2026-07-19T02:00:00Z"),
+            self._run_seed(999, 45, "2026-07-19T03:00:00Z"),
+        ]
+        prs.get_workflow_run_jobs.side_effect = [
+            [_cancelled_job(run_id=888, pr_number=44)],
+            [_cancelled_job(run_id=999, pr_number=45)],
+        ]
+        second = await loop._do_work()
+
+        assert first["filed"] == 1
+        assert second["filed"] == 0
+        assert prs.create_issue.await_count == 1
 
 
 class TestGateHealthPerTickCap:
