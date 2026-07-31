@@ -5,6 +5,7 @@ source_issue: 6323
 source_phase: plan
 created_at: 2026-04-10T04:47:03.630696+00:00
 status: active
+corroborations: 2
 ---
 
 # Use callbacks to decouple isolated components from orchestrator state
