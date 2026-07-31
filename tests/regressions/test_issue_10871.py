@@ -105,9 +105,17 @@ def _references_private_load_audit_module(
     """``ast`` nodes that reference ``prompt_fitness._load_audit_module``
     from outside the module — both binding forms:
 
-    * ``from prompt_fitness import _load_audit_module`` (``ImportFrom``)
-    * ``prompt_fitness._load_audit_module`` (``Attribute`` access, e.g. after
-      ``import prompt_fitness`` or ``import prompt_fitness as pf``)
+    * ``from prompt_fitness import _load_audit_module`` (``ImportFrom``) —
+      matched only when the module is ``prompt_fitness``.
+    * ``<anything>._load_audit_module`` (``Attribute`` access, e.g. after
+      ``import prompt_fitness`` or ``import prompt_fitness as pf``) —
+      matched on attribute name alone, not scoped to a ``prompt_fitness``-
+      derived base. Resolving an arbitrary alias back to its origin module
+      would need name-binding analysis this walk doesn't do; matching by
+      name is deliberately broader so an alias can't slip past, at the cost
+      of also flagging an unrelated object that happens to expose an
+      attribute of the same name. Fails safe: only false positives, no
+      false negatives.
     """
     offenders: list[ast.ImportFrom | ast.Attribute] = []
     for node in ast.walk(tree):
