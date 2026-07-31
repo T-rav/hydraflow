@@ -166,6 +166,22 @@ def set_gh_circuit_breaker_enabled(enabled: bool) -> None:
     logger.info("gh circuit breaker enabled=%s (runtime toggle)", enabled)
 
 
+def reset_gh_circuit_breaker() -> None:
+    """Restore the gh circuit breaker to its initial (unconfigured) state.
+
+    Mirrors :func:`reset_time_source`: returns the module-level breaker state to
+    what it is at import — no breaker installed, disabled. Unlike ``_gh_semaphore``
+    and ``_rate_limit_until`` (reset between tests by ``tests/conftest.py``), the
+    breaker had no supported reset, so a test that tripped it OPEN leaked that
+    state onto every later test on the same xdist worker — those then failed fast
+    on gh/git for reasons unrelated to their own arrangement (#10907). Gives both
+    tests and the breaker's own kill-switch path a supported way back to initial.
+    """
+    global _gh_circuit_breaker, _gh_circuit_breaker_enabled  # noqa: PLW0603
+    _gh_circuit_breaker = None
+    _gh_circuit_breaker_enabled = False
+
+
 def configure_gh_concurrency(limit: int) -> None:
     """Set the global GitHub API concurrency limit.
 
