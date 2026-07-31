@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T04:20:59.144811+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1710
+superseded_by: 1909
 ---
 
 # Provenance union in _flow_verify spans all actives, never narrowed

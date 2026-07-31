@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10875
 source_phase: plan
 created_at: 2026-07-31T03:41:38.628297+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1931
 ---
 
 # Guard MockWorld.close() with _closed to avoid double-shutting the OTel provider

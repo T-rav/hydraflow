@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10868
 source_phase: plan
 created_at: 2026-07-31T03:28:15.424868+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1924
 ---
 
 # ADR enforcement ratchet: _BASELINE - _RESOLVED grandfathers debt

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10875
 source_phase: plan
 created_at: 2026-07-31T03:41:38.628273+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1929
 ---
 
 # tests/conftest.py cannot import mock_world at module scope (TaskFactory cycle)

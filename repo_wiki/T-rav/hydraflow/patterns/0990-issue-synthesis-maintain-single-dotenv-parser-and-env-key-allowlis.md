@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T04:11:10.526629+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0926
+superseded_by: 1057
 ---
 
 # Maintain single dotenv parser and env key allowlist

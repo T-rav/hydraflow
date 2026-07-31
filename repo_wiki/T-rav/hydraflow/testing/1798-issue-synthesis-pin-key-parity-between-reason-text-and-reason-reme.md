@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T04:20:59.132208+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1704
+superseded_by: 1903
 ---
 
 # Pin key-parity between reason-text and reason-remediation maps
