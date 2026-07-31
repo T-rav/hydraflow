@@ -20,6 +20,7 @@ allowance so real spend genuinely stays at or under the budget.
 from __future__ import annotations
 
 from audit.models import MergedChange
+from audit.stratify import classify_blast_radius, stratum_weight
 
 # Chars-per-token proxy for embedded English/code text (~4 chars/token). Coarse
 # but standard; used to convert the diff-window char cap into a token count.
@@ -69,18 +70,28 @@ def estimate_audit_tokens(change: MergedChange) -> int:
 def within_budget(
     selected: list[MergedChange], *, token_budget: int
 ) -> list[MergedChange]:
-    """Return the prefix of *selected* whose cumulative estimate fits *budget*.
+    """Return the changes that fit *token_budget*, highest blast-radius first.
 
-    Order-preserving greedy fill: accumulate ``estimate_audit_tokens`` until the
-    next audit would exceed *token_budget*, then stop. A non-positive budget
-    audits nothing. Because the estimate over-counts, the real spend stays at or
+    Greedy fill ordered by blast-radius class (gauntlet → … → routine, stable
+    within a class so merge order is preserved), accumulating
+    ``estimate_audit_tokens`` until the next audit would exceed *token_budget*,
+    then stopping. Filling by risk means the cap only ever drops the
+    lowest-risk stratum — a deliberately-selected ``gauntlet`` change is never
+    truncated in favour of a lower-risk change that merged earlier (#10920,
+    the #10896 escape reached through the budget stage). A non-positive budget
+    audits nothing. Because the estimate over-counts, real spend stays at or
     under the budget.
     """
     if token_budget <= 0:
         return []
+    ordered = sorted(
+        selected,
+        key=lambda c: stratum_weight(classify_blast_radius(c)),
+        reverse=True,
+    )
     fitted: list[MergedChange] = []
     spent = 0
-    for change in selected:
+    for change in ordered:
         cost = estimate_audit_tokens(change)
         if spent + cost > token_budget:
             break
