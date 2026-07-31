@@ -565,6 +565,24 @@ class MockWorld:
     def honeycomb(self) -> FakeHoneycomb:
         return self._honeycomb
 
+    def close(self) -> None:
+        """Retire fakes that hold process-global state.
+
+        ``FakeHoneycomb`` installs a global OTel ``TracerProvider`` + span
+        processor at construction (#10875); without an explicit shutdown those
+        accumulate across a session. ``FakeHoneycomb.shutdown`` also resets the
+        global provider/``Once`` so the next world starts clean. Idempotent —
+        OTel provider shutdown tolerates repeat calls, so a context-manager
+        exit and a fixture teardown may both fire.
+        """
+        self._honeycomb.shutdown()
+
+    def __enter__(self) -> MockWorld:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
     @property
     def clock(self) -> FakeClock:
         return self._clock
