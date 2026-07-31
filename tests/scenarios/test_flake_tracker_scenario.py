@@ -124,11 +124,16 @@ class TestFlakeTracker:
 
         from github_cache_loop import RC_PROMOTION_WORKFLOW
 
+        # Seed the display name in ``workflow`` and the file the loop queries by
+        # in ``workflow_file`` — FakeGitHub keys list_runs_for_workflow on the
+        # file and projects the display name in list_workflow_runs (#10911).
+        rc_promotion_name = "RC Promotion Scenario"  # rc-promotion-scenario.yml .name
         world = MockWorld(tmp_path)
         for i in range(20):
             world.github.add_workflow_run(
                 i,
-                workflow=RC_PROMOTION_WORKFLOW,
+                workflow=rc_promotion_name,
+                workflow_file=RC_PROMOTION_WORKFLOW,
                 conclusion="success",
                 created_at=f"2026-04-{i + 1:02d}T00:00:00Z",
                 url=f"https://example/run/{i}",

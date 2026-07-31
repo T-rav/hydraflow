@@ -902,6 +902,7 @@ class FakeGitHub:
         run_id: int,
         *,
         workflow: str,
+        workflow_file: str = "",
         conclusion: str,
         created_at: str = "2026-07-01T00:00:00Z",
         pr_number: int = 0,
@@ -914,6 +915,17 @@ class FakeGitHub:
     ) -> None:
         """Seed one workflow run (+jobs/artifacts) for gate-health scenarios.
 
+        ``workflow`` is the run's **display name** (the workflow's ``.name``,
+        e.g. ``"CI"``) — what live GitHub returns in run listings and what
+        :meth:`list_workflow_runs` projects. ``workflow_file`` is the workflow
+        **file name** (e.g. ``"ci.yml"``) — the identifier the real
+        ``PRManager.list_runs_for_workflow`` puts in the REST path, and the key
+        :meth:`list_runs_for_workflow` matches on here. They differ on live
+        GitHub, so seeding a file name in ``workflow`` would pass in MockWorld
+        yet mislead any consumer that correlates blame by display name (#10899,
+        #10911). ``workflow_file`` defaults to ``workflow`` for callers that key
+        by only one identifier.
+
         ``url``/``status``/``run_started_at``/``updated_at`` (#9814) feed
         :meth:`list_runs_for_workflow`; the timestamps default to
         ``created_at`` — mirroring the adapter's ``run_started_at``
@@ -923,6 +935,7 @@ class FakeGitHub:
             {
                 "id": run_id,
                 "workflow": workflow,
+                "workflow_file": workflow_file or workflow,
                 "conclusion": conclusion,
                 "created_at": created_at,
                 "pr_number": pr_number,
@@ -960,10 +973,16 @@ class FakeGitHub:
     async def list_runs_for_workflow(
         self, workflow: str, limit: int = 100
     ) -> list[dict[str, Any]]:
-        """Newest-first runs of ONE workflow file in the port shape (#9814)."""
+        """Newest-first runs of ONE workflow file in the port shape (#9814).
+
+        Keyed on the seeded ``workflow_file`` (the file name, e.g. ``ci.yml``),
+        mirroring the real adapter which passes the file name in the REST path
+        ``actions/workflows/{workflow}/runs`` — NOT the display name that
+        :meth:`list_workflow_runs` returns (#10899).
+        """
         self._maybe_rate_limit()
         matching = sorted(
-            (r for r in self._workflow_runs if r["workflow"] == workflow),
+            (r for r in self._workflow_runs if r["workflow_file"] == workflow),
             key=lambda r: str(r["created_at"]),
             reverse=True,
         )
