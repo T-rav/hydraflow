@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `9387d08` — chore: arch-regen after merging staging *(2026-07-31)*
 - `dff6138` — Merge remote-tracking branch 'origin/staging' into chore/remove-sentry-from-factory *(2026-07-31)*
 - `ad4f838` — Remove Sentry from the factory; observability owned by the SRE agent (ADR-0118) *(2026-07-31)*
 - `26cbece` — Fixes #10939: backfill **Date:** frontmatter on the undated Accepted ADRs (#10953) (#10953) *(2026-07-31)*

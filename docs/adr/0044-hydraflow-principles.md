@@ -281,33 +281,32 @@ audit output that P6 is optional for the repo type and skip the failures.
 
 ### P7. Observability — Sentry, Structured Logging, Repo Wiki
 
-**Rule.** Sentry events are filtered by a `_BUG_TYPES` gatekeeper so
-transient errors never page a human. Logging uses structured levels
-(`warning` for expected transient failures, `error` only for real bugs).
-Knowledge captured from past runs is stored in a per-repo wiki under
-`repo_wiki/<repo_slug>/` and injected into runner prompts.
+**Rule.** Logging uses structured levels (`warning` for expected transient
+failures, `error` only for real bugs). Knowledge captured from past runs is
+stored in a per-repo wiki under `repo_wiki/<repo_slug>/` and injected into
+runner prompts. (The factory's Sentry `_BUG_TYPES` gatekeeper — former checks
+P7.1/P7.2 — was **retired by ADR-0118**: Sentry is removed and error
+observability moves to a dedicated SRE agent targeting New Relic; the audit
+tooling keeps its own optional self-instrumentation, P7.6.)
 
-**Why.** Unfiltered Sentry becomes noise and gets muted. Unstructured logs
-mean incident response starts from zero every time. The repo wiki is how the
-system compounds learnings rather than re-discovering them every session.
+**Why.** Unstructured logs mean incident response starts from zero every time.
+The repo wiki is how the system compounds learnings rather than re-discovering
+them every session.
 
-**How to apply.** Greenfield: define `_BUG_TYPES` the first time you wire
-Sentry; seed `repo_wiki/` with the first post-mortem. Adoption: introduce
-the filter in a dedicated PR so the drop in event volume is visible; migrate
-noisy `logger.error` calls to `logger.warning` in a follow-up.
+**How to apply.** Seed `repo_wiki/` with the first post-mortem; migrate noisy
+`logger.error` calls to `logger.warning` where they signal expected transient
+failures.
 
 | check_id | type | source | what | remediation |
 |---|---|---|---|---|
-| P7.1 | STRUCTURAL | docs/wiki/patterns.md | `_BUG_TYPES` tuple exists where Sentry is initialised | Define the tuple with real-bug exceptions only |
-| P7.2 | BEHAVIORAL | docs/wiki/patterns.md | Sentry `before_send` callback uses `_BUG_TYPES` | Wire the filter in the init call |
 | P7.3 | STRUCTURAL | ADR-0032 | `repo_wiki/` directory exists (or project-equivalent knowledge base) | Create the directory; seed from post-mortems |
 | P7.3a | STRUCTURAL | ADR-0032 | Wiki has the three-layer shape: raw sources, synthesised wiki pages, index/schema | A flat dumping ground of markdown is not a wiki; the compiler/librarian pattern requires all three |
 | P7.3b | BEHAVIORAL | ADR-0032 | Wiki store exposes ingest / query / lint operations (or project equivalents) | Port `RepoWikiStore`; without ingest the wiki stagnates, without lint it accumulates stale entries |
 | P7.3c | BEHAVIORAL | ADR-0032 | Runner prompts inject relevant wiki content before agent invocation | `_inject_repo_wiki` pattern or equivalent; a wiki that is never read has no value |
 | P7.4 | CULTURAL | docs/wiki/patterns.md | No `except: pass` or bare `except:` in `src/` | Audit greps; remediate by logging at `warning` minimum |
 | P7.5 | BEHAVIORAL | docs/wiki/patterns.md | No `logger.error(value)` without a format string (audit greps `logger\.error\(\w+\)$`) | Format strings preserve structure for log aggregation; bare-value error calls flatten to opaque strings |
-| P7.6 | STRUCTURAL | docs/wiki/patterns.md | The audit and init tooling (`scripts/hydraflow_audit/`, `scripts/hydraflow_init/`) route unhandled exceptions through the P7.1/P7.2 Sentry filter | The tooling must follow its own principle; silent audit failures poison the signal the audit is supposed to provide |
-| P7.7 | STRUCTURAL | docs/wiki/patterns.md | Observability is behind a port (`ObservabilityPort` or equivalent) so the Sentry adapter can be swapped for OTLP / structured logs / a sidecar without touching call sites | Preserves future optionality without committing to a second backend today |
+| P7.6 | STRUCTURAL | docs/wiki/patterns.md | The audit and init tooling (`scripts/hydraflow_audit/`, `scripts/hydraflow_init/`) route unhandled exceptions through a `_BUG_TYPES` Sentry filter | The tooling must follow its own principle; silent audit failures poison the signal the audit is supposed to provide |
+| P7.7 | STRUCTURAL | docs/wiki/patterns.md | Observability is behind a port (`ObservabilityPort` or equivalent) so the adapter (now the `NoOpObservabilityAdapter`; see ADR-0118) can be swapped for New Relic / OTLP / structured logs / a sidecar without touching call sites | Preserves future optionality without committing to a backend today |
 
 ### P8. Superpowers / Skills Integration
 
