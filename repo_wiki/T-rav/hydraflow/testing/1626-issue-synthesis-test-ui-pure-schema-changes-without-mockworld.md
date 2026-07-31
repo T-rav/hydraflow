@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T01:04:04.456693+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1544
+superseded_by: 1709
 ---
 
 # Test UI + pure schema changes without MockWorld

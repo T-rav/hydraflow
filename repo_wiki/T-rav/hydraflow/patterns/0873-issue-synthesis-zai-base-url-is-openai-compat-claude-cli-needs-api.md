@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T19:37:32.642580+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0818
+superseded_by: 0931
 ---
 
 # zai_base_url is OpenAI-compat; claude CLI needs /api/anthropic

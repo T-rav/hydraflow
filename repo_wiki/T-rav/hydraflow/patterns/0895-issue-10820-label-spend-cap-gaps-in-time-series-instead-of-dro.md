@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10820
 source_phase: plan
 created_at: 2026-07-31T00:58:39.724668+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Label spend-cap gaps in time series instead of dropping them

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T01:04:04.296388+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1466
+superseded_by: 1631
 ---
 
 # Subprocess CLI stubs log calls to JSONL
