@@ -83,15 +83,23 @@ def _module_name(path: Path, src_root: Path) -> str:
     return ".".join(parts)
 
 
-def _model_class_definitions(src_root: Path) -> dict[str, list[Path]]:
-    """Map each model-class name to every ``src/`` file that defines it."""
-    by_name: dict[str, list[Path]] = {}
-    for path in sorted(src_root.rglob("*.py")):
+def _parse_all(src_root: Path) -> dict[Path, ast.Module]:
+    """Parse every ``src/`` file exactly once — shared by the class-definition
+    scan and the import-index build so neither re-parses the tree."""
+    trees: dict[Path, ast.Module] = {}
+    for path in _all_source_files(src_root):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            trees[path] = ast.parse(path.read_text(encoding="utf-8"))
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
-        for node in ast.walk(tree):
+    return trees
+
+
+def _model_class_definitions(trees: dict[Path, ast.Module]) -> dict[str, list[Path]]:
+    """Map each model-class name to every ``src/`` file that defines it."""
+    by_name: dict[str, list[Path]] = {}
+    for path in sorted(trees):
+        for node in ast.walk(trees[path]):
             if isinstance(node, ast.ClassDef) and _is_model_class(node):
                 by_name.setdefault(node.name, []).append(path)
     return by_name
@@ -115,43 +123,56 @@ def _resolve_relative_module(path: Path, src_root: Path, node: ast.ImportFrom) -
     return f"{base}.{node.module}" if node.module else base
 
 
-def _imports_name_from_module(
-    tree: ast.Module, module: str, name: str, importer_path: Path, src_root: Path
-) -> bool:
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom):
-            continue
-        if not any(alias.name == name for alias in node.names):
-            continue
-        if node.level == 0:
-            if node.module in (module, f"src.{module}"):
-                return True
-        elif _resolve_relative_module(importer_path, src_root, node) == module:
-            return True
-    return False
+def _build_import_index(
+    src_root: Path, trees: dict[Path, ast.Module]
+) -> dict[tuple[str, str], set[Path]]:
+    """Map ``(imported_name, resolved_source_module)`` to every file that
+    imports it, built with a single ``ast.walk`` per file. Precomputing this
+    index avoids re-walking every file's AST once per duplicate definition —
+    an O(duplicates x files) cost that made this check slow enough to eat a
+    large share of the test-duration-ratchet budget."""
+    index: dict[tuple[str, str], set[Path]] = {}
+    for path, tree in trees.items():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.level == 0:
+                module = node.module or ""
+                if module.startswith("src."):
+                    module = module[len("src.") :]
+            else:
+                module = _resolve_relative_module(path, src_root, node)
+            for alias in node.names:
+                index.setdefault((alias.name, module), set()).add(path)
+    return index
 
 
 def _referenced_within_file(tree: ast.Module, name: str) -> bool:
     """True if *name* is used anywhere in *tree* as a real reference (a type
-    annotation, call, base class, etc.) — an ``ast.Name`` load. A class's own
+    annotation, call, base class, etc.) — an ``ast.Name`` load, or a quoted
+    forward-reference string literal (e.g. ``x: "Foo"``), matching the same
+    string-literal escape hatch as the sibling ADR-0023 check. A class's own
     ``ClassDef`` header is not an ``ast.Name`` node, so this never counts a
     definition as a reference to itself."""
-    return any(
-        isinstance(node, ast.Name) and node.id == name for node in ast.walk(tree)
-    )
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == name:
+            return True
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and name in node.value
+        ):
+            return True
+    return False
 
 
 def _dead_duplicate_definitions(src_root: Path) -> list[str]:
     """Return ``module.py::ClassName`` for every duplicate-named model class
     definition that no other file imports and that is never referenced within
     its own defining file — the ADR-0027 Rule 3 dead merge-artifact copy."""
-    by_name = _model_class_definitions(src_root)
-    trees: dict[Path, ast.Module] = {}
-
-    def _tree(path: Path) -> ast.Module:
-        if path not in trees:
-            trees[path] = ast.parse(path.read_text(encoding="utf-8"))
-        return trees[path]
+    trees = _parse_all(src_root)
+    by_name = _model_class_definitions(trees)
+    import_index = _build_import_index(src_root, trees)
 
     offenders: list[str] = []
     for name, paths in sorted(by_name.items()):
@@ -159,16 +180,10 @@ def _dead_duplicate_definitions(src_root: Path) -> list[str]:
             continue
         for defpath in paths:
             module = _module_name(defpath, src_root)
-            imported_elsewhere = any(
-                other != defpath
-                and _imports_name_from_module(
-                    _tree(other), module, name, other, src_root
-                )
-                for other in _all_source_files(src_root)
-            )
-            if imported_elsewhere:
+            importers = import_index.get((name, module), set()) - {defpath}
+            if importers:
                 continue
-            if _referenced_within_file(_tree(defpath), name):
+            if _referenced_within_file(trees[defpath], name):
                 continue
             offenders.append(f"{defpath.relative_to(src_root.parent)}::{name}")
     return offenders
@@ -190,3 +205,90 @@ def test_no_dead_duplicate_model_class_definitions(real_repo_root: Path) -> None
         "definitions are genuinely used, this is a false positive — file a "
         "hydraflow-find issue."
     )
+
+
+def test_dead_duplicate_definition_is_detected_in_synthetic_tree(
+    fixture_src_tree,
+) -> None:
+    """Positive control: a genuinely dead duplicate — one copy orphaned, the
+    other imported and used — must be flagged. Proves the detector can
+    actually fail rather than only ever passing on the live tree."""
+    root = fixture_src_tree(
+        {
+            "src/models.py": """
+                from pydantic import BaseModel
+
+                class Widget(BaseModel):
+                    name: str
+            """,
+            "src/feature.py": """
+                from pydantic import BaseModel
+
+                class Widget(BaseModel):
+                    label: str
+
+                def build() -> Widget:
+                    return Widget(label="x")
+            """,
+        }
+    )
+    assert _dead_duplicate_definitions(root / "src") == ["src/models.py::Widget"]
+
+
+def test_duplicate_definition_both_used_is_not_flagged(fixture_src_tree) -> None:
+    """Negative control: same-named classes that are each independently used
+    (Rule 4's documented-intentional-duplicate case) must not be flagged."""
+    root = fixture_src_tree(
+        {
+            "src/models.py": """
+                from pydantic import BaseModel
+
+                class Widget(BaseModel):
+                    name: str
+
+                def make() -> Widget:
+                    return Widget(name="x")
+            """,
+            "src/feature.py": """
+                from pydantic import BaseModel
+
+                class Widget(BaseModel):
+                    label: str
+
+                def build() -> Widget:
+                    return Widget(label="x")
+            """,
+        }
+    )
+    assert _dead_duplicate_definitions(root / "src") == []
+
+
+def test_duplicate_referenced_only_via_quoted_annotation_is_not_flagged(
+    fixture_src_tree,
+) -> None:
+    """A duplicate referenced only through a quoted forward-reference
+    annotation (``w: "Widget"``) counts as used — not every real reference is
+    an ``ast.Name`` load."""
+    root = fixture_src_tree(
+        {
+            "src/models.py": """
+                from pydantic import BaseModel
+
+                class Widget(BaseModel):
+                    name: str
+
+                def make(w: "Widget") -> None:
+                    pass
+            """,
+            "src/feature.py": """
+                from pydantic import BaseModel
+
+                class Widget(BaseModel):
+                    label: str
+
+                def build() -> Widget:
+                    return Widget(label="x")
+            """,
+        }
+    )
+    assert _dead_duplicate_definitions(root / "src") == []
