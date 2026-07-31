@@ -6,8 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
-- `392c741` — feat(ul): term-proposer batch — 1 drafts *(2026-07-31)*
-- `f5d6727` — feat(prompts): prompts as a measured contract — registry ratchet + fitness function (ADR-0116) (#10856) (#10856) *(2026-07-30)*
+- `d4c7ecd` — Merge origin/main into rc/2026-07-31-1047 (promotion sync) *(2026-07-31)*
+- `c472943` — feat(ul): term-proposer batch — 1 drafts (#10919) (#10919) *(2026-07-31)*
+- `e3757c4` — chore(rc): regenerate arch artifacts for rc/2026-07-31-0053 promotion *(2026-07-31)*
 - `33215fc` — Merge origin/main into rc/2026-07-31-0053 (promotion sync) *(2026-07-31)*
 - `f5d6727` — feat(prompts): prompts as a measured contract — registry ratchet + fitness function (ADR-0116) (#10856) (#10856) *(2026-07-30)*
 - `2b4eaf4` — chore(rc): regenerate arch artifacts for rc/2026-07-30-1058 promotion *(2026-07-30)*
