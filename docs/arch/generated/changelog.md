@@ -8,12 +8,18 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 - `392c741` — feat(ul): term-proposer batch — 1 drafts *(2026-07-31)*
 - `f5d6727` — feat(prompts): prompts as a measured contract — registry ratchet + fitness function (ADR-0116) (#10856) (#10856) *(2026-07-30)*
+- `33215fc` — Merge origin/main into rc/2026-07-31-0053 (promotion sync) *(2026-07-31)*
+- `f5d6727` — feat(prompts): prompts as a measured contract — registry ratchet + fitness function (ADR-0116) (#10856) (#10856) *(2026-07-30)*
+- `2b4eaf4` — chore(rc): regenerate arch artifacts for rc/2026-07-30-1058 promotion *(2026-07-30)*
+- `ed39cc6` — Merge origin/main into rc/2026-07-30-1058 (promotion sync) *(2026-07-30)*
 - `819e0a4` — feat(ul): edge-proposer — 12 new edges across 12 terms (#10815) (#10815) *(2026-07-30)*
 - `9e01094` — fix(arch): deterministic regen so unchanged architecture produces no diff/PR (#10811) (#10811) *(2026-07-28)*
 - `3de3e09` — feat(ul): term-proposer batch — 1 drafts (#10796) (#10796) *(2026-07-28)*
 - `d496213` — fix(health): opt flake_tracker into tight stall-sweep remediation (#10795) (#10800) (#10800) *(2026-07-28)*
 - `e97750d` — feat(autonomy): auto-diagnose audit + escape surfaces before human (ADR-0115) (#10780) (#10780) *(2026-07-27)*
 - `40615e9` — fix(sandbox): renumber s50_disturbance_dampener_idle_poll to s90 (scenario-number collision) (#10774) (#10774) *(2026-07-27)*
+- `bbde918` — chore(rc): regenerate arch artifacts after promotion merge *(2026-07-27)*
+- `480a496` — Merge origin/main into rc/2026-07-27-1534 (promotion sync) *(2026-07-27)*
 - `211694f` — feat(orchestration): formal give-up window → auto-decompose on plan-retry exhaustion (#10735) (#10745) (#10745) *(2026-07-27)*
 - `37e0845` — feat(ops): honest launchd liveness kernel — boot-SHA/branch guard + orphan reap (#10734) (#10743) (#10743) *(2026-07-27)*
 - `308a6df` — fix(operator): registry-seeded stable loop-health count, not a window/tick artifact (#10556) (#10739) (#10739) *(2026-07-27)*
@@ -46,12 +52,17 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `e2625f4` — Fixes #10567: PRPort has no get_pr_labels — PR-level label routing ... (#10584) (#10584) *(2026-07-25)*
 - `7d284d6` — Fixes #10565: Sampled re-audit disagreement: PR #10479 (structural)... (#10576) (#10576) *(2026-07-25)*
 - `1ac9d57` — docs(arch): align functional_areas.yml loop grouping with the UI (#10554) (#10554) *(2026-07-25)*
+- `65c493d` — Merge remote-tracking branch 'origin/main' into HEAD *(2026-07-25)*
 - `58b5cdc` — Fixes #10540, #10533: violation-based ADR citation conformance gate; retire activity-drift (#10547) (#10547) *(2026-07-25)*
 - `306cc57` — Fixes #10515: FakeIssueStore stamps HITL and merged snapshot entrie... (#10528) (#10528) *(2026-07-25)*
 - `585f69e` — Fixes #10509: Work Stream stage timeline: merged issues show HITL f... (#10529) (#10529) *(2026-07-25)*
 - `204d2e1` — feat(ul): term-proposer batch — 1 drafts (#10514) (#10514) *(2026-07-25)*
 - `b9f7109` — chore: remove dead crate subsystem (#10520) (#10520) *(2026-07-25)*
 - `d6bad2e` — feat(signal-control): pure control-theory substrate (Stage 1) (#10502) (#10502) *(2026-07-24)*
+- `acf3848` — fix(adr): single-colon ADR-0049 citations so drift coverage parses (#10481) (#10481) *(2026-07-24)*
+- `a8ae443` — feat(adr): nudge bare shared-infra citations toward :Symbol granularity (#10479) (#10479) *(2026-07-24)*
+- `87a4d86` — fix(gc): guard active auto-agent worktrees from stale-worktree GC (#10476) (#10476) *(2026-07-24)*
+- `625eca3` — Fixes #10457: Fleet-batch ADR-drift triage auto-close (#10474) (#10474) *(2026-07-24)*
 - `055267e` — fix(adr): single-colon ADR-0049 citations so drift coverage parses (#10481) (#10481) *(2026-07-24)*
 - `6c3cb69` — feat(adr): nudge bare shared-infra citations toward :Symbol granularity (#10479) (#10479) *(2026-07-24)*
 - `ee56677` — fix(gc): guard active auto-agent worktrees from stale-worktree GC (#10476) (#10476) *(2026-07-24)*
