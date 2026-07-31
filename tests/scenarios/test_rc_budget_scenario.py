@@ -125,6 +125,10 @@ class TestRCBudgetScenario:
         """
         from github_cache_loop import RC_PROMOTION_WORKFLOW
 
+        # Seed the display name in ``workflow`` and the file the loop queries by
+        # in ``workflow_file`` — FakeGitHub keys list_runs_for_workflow on the
+        # file and projects the display name in list_workflow_runs (#10911).
+        rc_promotion_name = "RC Promotion Scenario"  # rc-promotion-scenario.yml .name
         world = MockWorld(tmp_path)
 
         now = _dt.datetime.now(_dt.UTC)
@@ -133,7 +137,8 @@ class TestRCBudgetScenario:
             completed = started + _dt.timedelta(seconds=300)
             world.github.add_workflow_run(
                 3000 + i,
-                workflow=RC_PROMOTION_WORKFLOW,
+                workflow=rc_promotion_name,
+                workflow_file=RC_PROMOTION_WORKFLOW,
                 conclusion="success",
                 created_at=started.isoformat().replace("+00:00", "Z"),
                 run_started_at=started.isoformat().replace("+00:00", "Z"),
@@ -143,7 +148,8 @@ class TestRCBudgetScenario:
         hang_completed = now + _dt.timedelta(seconds=2715)
         world.github.add_workflow_run(
             4000,
-            workflow=RC_PROMOTION_WORKFLOW,
+            workflow=rc_promotion_name,
+            workflow_file=RC_PROMOTION_WORKFLOW,
             conclusion="cancelled",
             created_at=now.isoformat().replace("+00:00", "Z"),
             run_started_at=now.isoformat().replace("+00:00", "Z"),
