@@ -235,8 +235,9 @@ endif
 endif
 
 coverage: deps
-	@echo "$(BLUE)Running HydraFlow unit tests...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ --cov=src --cov-fail-under=$(TEST_COVERAGE_EFFECTIVE) --cov-report=term-missing --cov-report=xml:coverage.xml -p no:xdist
+	@echo "$(BLUE)Running HydraFlow unit tests with coverage (parallel; xdist-unsafe serial)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) --cov=src --cov-append --cov-fail-under=$(TEST_COVERAGE_EFFECTIVE) --cov-report=term-missing --cov-report=xml:coverage.xml
 	@echo "$(GREEN)All tests passed$(RESET)"
 
 cover: coverage
@@ -332,8 +333,9 @@ test-fast: deps
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -x --tb=short
 
 test-cov: deps
-	@echo "$(BLUE)Running HydraFlow tests with coverage...$(RESET)"
-	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ -v --cov=src --cov-fail-under=70 --cov-report=term-missing --cov-report=html:htmlcov -p no:xdist
+	@echo "$(BLUE)Running HydraFlow tests with coverage (parallel; xdist-unsafe serial)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) -v --cov=src --cov-append --cov-fail-under=70 --cov-report=term-missing --cov-report=html:htmlcov
 	@echo "$(GREEN)All tests passed with coverage$(RESET)"
 
 # CI-speedup Tier 3: run ONLY the tests impacted by this branch's diff vs the

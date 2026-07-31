@@ -344,13 +344,26 @@ jobs:
       - name: Run serial (xdist-unsafe) tests
         run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py
 
-  # Trailing coverage gate (Tier 2a). Coverage is SINGLE-THREADED (xdist + --cov
-  # is finicky) and therefore too slow for the PR merge path, so it runs OFF the
-  # PR critical path — on push to the default/staging branch and on the nightly
-  # schedule only (`if: github.event_name != 'pull_request'`). It STILL fails
-  # red if coverage drops below 70%, so the gate is preserved as a trailing
-  # safety net rather than dropped. The `changes` gating mirrors the `test` job.
+  # Trailing coverage gate (Tier 2a). Runs OFF the PR critical path — on push
+  # to the default/staging branch and on the nightly schedule only
+  # (`if: github.event_name != 'pull_request'`). It STILL fails red if
+  # coverage drops below 70%, so the gate is preserved as a trailing safety
+  # net rather than dropped. The `changes` gating mirrors the `test` job.
   # Deliberately NOT in ci-gate's `needs`: it must not gate the PR merge path.
+  #
+  # #10883: single-threaded (`-p no:xdist`) 23,011 tests routinely blew the
+  # 30-min timeout and got CANCELLED with zero FAILED lines — pytest progress
+  # advanced steadily to 81% at the instant of cancellation (no stall), so
+  # this was capacity exhaustion, not a hang; GateHealthLoop misread it as a
+  # suspected hang and filed a killpg playbook issue per push. Fixed by
+  # mirroring the `test` job's parallel + serial split, verified locally:
+  # pytest-cov 7.0.0 + xdist combines worker coverage data correctly. Leg 1
+  # (parallel) passes --cov-fail-under=0 --cov-report= — partial worker data
+  # must never trip the floor. Leg 2 (serial, terminal) carries --cov-append
+  # plus the real --cov-fail-under=70 and the reports, so it sees every
+  # worker's appended data. --timeout=300 (>=3x the slowest observed local
+  # test, 37.35s) turns a genuine hang into a named FAILED test instead of a
+  # silent cancellation.
   coverage:
     name: Coverage (trailing)
     needs: changes
@@ -358,7 +371,7 @@ jobs:
       github.event_name != 'pull_request' &&
       (needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true')
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
@@ -371,8 +384,16 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: uv sync --all-extras
-      - name: Run tests with coverage (single-threaded)
-        run: PYTHONPATH=src uv run pytest tests/ --cov=src --cov-fail-under=70 --cov-report=term-missing --cov-report=json -p no:xdist
+      - name: Run tests with coverage (fast, parallel)
+        # Ignore list matches the `test` job's parallel leg exactly (guarded
+        # by tests/regressions/test_issue_10883.py) — keep in sync with the
+        # Makefile PYTEST_SERIAL_PATHS.
+        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/test_review_phase_metrics.py --ignore=tests/test_auto_pr_preflight.py --cov=src --cov-append --cov-fail-under=0 --cov-report= -n auto --dist loadscope --reruns 2 --reruns-delay 1 --timeout=300 --durations=25
+      - name: Run serial (xdist-unsafe) tests + regressions with coverage
+        # tests/regressions is excluded from leg 1's ignore list (parity
+        # with the `test` job) so it has to be collected here — the single-
+        # threaded original run implicitly covered it via bare `pytest tests/`.
+        run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py tests/regressions --cov=src --cov-append --cov-fail-under=70 --cov-report=term-missing --cov-report=json --timeout=300 --durations=25
       - name: Upload coverage.json
         if: always()
         uses: actions/upload-artifact@v4

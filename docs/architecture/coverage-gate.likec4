@@ -1,0 +1,134 @@
+// Issue #10883 — "Coverage (trailing) suspected CI hang"
+// Diagnosis: NOT a hang. The single-threaded coverage lane outgrew its
+// 30-minute budget. Topology of the CI test lanes + the loop that files
+// the (mis-labelled) issue.
+
+specification {
+  element system
+  element lane {
+    style { shape: rectangle }
+  }
+  element step
+  element loop
+  element datastore {
+    style { shape: cylinder }
+  }
+  element artifact
+
+  relationship runs
+  relationship reads
+  relationship files
+}
+
+model {
+  ci = system 'CI workflow (.github/workflows/ci.yml)' {
+    description 'Tier-2a gates. `test` is the PR merge gate; `coverage` is the trailing floor gate.'
+
+    testLane = lane 'Tests (merge gate)' {
+      description '''
+        timeout-minutes: 30 — observed ~10 min.
+        Runs on every PR + push.
+      '''
+      warnGate  = step 'Warning gate (targeted)'
+      parallel  = step 'pytest tests/ -n auto --dist loadscope --reruns 2' {
+        description 'IGNORES tests/regressions, test_review_phase_metrics.py, test_auto_pr_preflight.py'
+      }
+      serial    = step 'pytest <xdist-unsafe paths>' {
+        description 'test_review_phase_metrics.py, test_auto_pr_preflight.py'
+      }
+    }
+
+    regressionLane = lane 'Regression Tests' {
+      description 'tests/regressions/ -n auto --dist loadscope --reruns 2. Observed ~80s.'
+    }
+
+    coverageLane = lane 'Coverage (trailing)  <-- DEFECT' {
+      description '''
+        if: github.event_name != pull_request  (push to staging + nightly)
+        timeout-minutes: 30
+        NOT in ci-gate needs — cannot block merge.
+      '''
+      covStep = step 'pytest tests/ --cov=src --cov-fail-under=70 -p no:xdist' {
+        description '''
+          SINGLE-THREADED. Superset of testLane: also collects tests/regressions
+          and the two xdist-unsafe files.
+          Measured: 23,011 tests, 1550.97s (25:50) on the one run that finished.
+          Cancelled runs: steady progress to 81% at the instant of kill — no stall.
+          NO --timeout configured, so a real hang is indistinguishable from slowness.
+        '''
+      }
+      covJson = artifact 'coverage.json / htmlcov' {
+        description 'if: always() — but uploads NOTHING when the step is cancelled.'
+      }
+    }
+
+    ciGate = lane 'CI Gate' {
+      description 'needs: [changes, lint, typecheck, security, arch, test, smoke, scenario, regression, audit, ui-build, scenario-browser-fast] — coverage deliberately absent.'
+    }
+  }
+
+  gateHealth = loop 'GateHealthLoop (src/gate_health_loop.py)' {
+    description 'Weekly read-only auditor of CI gate health.'
+
+    findHangs = step 'find_suspected_hangs()' {
+      description '''
+        cancelled + |duration - timeout*60| <= tolerance + unfinished test step
+        => kind="suspected_hang".
+        Cannot tell a one-off wedge from a chronically over-budget lane.
+      '''
+    }
+    fingerprint = step 'finding_fingerprint()' {
+      description 'suspected_hang folds in run_id => a NEW issue per run. Chronic timeout fans out.'
+    }
+    loadTimeouts = step '_load_workflow_job_timeouts()' {
+      description 'Parses timeout-minutes out of ci.yml — raising the budget auto-updates detection.'
+    }
+  }
+
+  dedup = datastore 'DedupStore  data_root/dedup/gate_health_findings.json' {
+    description 'Permanent seen-set: a fingerprint filed once is never re-filed.'
+  }
+
+  issues = system 'GitHub issues (hydraflow-find)' {
+    description 'Observed fan-out for one standing defect: #10390, #10391, #10393, #10883.'
+  }
+
+  // --- relations ---
+  ci.testLane.warnGate -> ci.testLane.parallel 'then'
+  ci.testLane.parallel -> ci.testLane.serial 'then'
+  gateHealth.loadTimeouts -> ci 'reads timeout-minutes'
+  gateHealth.findHangs -> ci.coverageLane 'observes CANCELLED + unfinished step'
+  gateHealth.findHangs -> gateHealth.fingerprint
+  gateHealth.fingerprint -> dedup 'checks / records'
+  gateHealth.fingerprint -> issues 'files one issue per run_id'
+  ci.coverageLane.covStep -> ci.coverageLane.covJson 'produces (only on completion)'
+  ci.testLane -> ci.ciGate 'gates merge'
+  ci.regressionLane -> ci.ciGate 'gates merge'
+}
+
+views {
+  view index {
+    title 'CI test lanes + gate-health feedback (issue #10883)'
+    include *
+    include ci.*
+    include gateHealth.*
+    autoLayout TopBottom
+  }
+
+  view coverageLaneDetail of ci.coverageLane {
+    title 'Coverage (trailing) — the over-budget lane'
+    include *
+    include ci.testLane, ci.regressionLane
+    autoLayout LeftRight
+  }
+
+  dynamic view chronicTimeoutFanout {
+    title 'How one over-budget lane becomes N issues'
+    ci.coverageLane -> ci.coverageLane 'push to staging: 23k tests, single-threaded'
+    ci.coverageLane -> gateHealth.findHangs 'GH Actions cancels at 30:00 — CANCELLED, test step unfinished'
+    gateHealth.findHangs -> gateHealth.fingerprint 'kind=suspected_hang'
+    gateHealth.fingerprint -> dedup 'key includes run_id => always novel'
+    gateHealth.fingerprint -> issues 'files "suspected CI hang" — misdirects to a killpg hunt'
+    issues -> ci 'PR #10410 hardened is_real_pid; timeouts continued unchanged'
+  }
+}
