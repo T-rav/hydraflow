@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10885
 source_phase: plan
 created_at: 2026-07-31T07:40:02.824282+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Derive .env.sample parity from primary CREDENTIAL_ENV_KEYS entries

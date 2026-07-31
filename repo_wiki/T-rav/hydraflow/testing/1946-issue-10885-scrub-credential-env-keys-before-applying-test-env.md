@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10885
 source_phase: plan
 created_at: 2026-07-31T07:40:02.824265+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2071
 ---
 
 # Scrub CREDENTIAL_ENV_KEYS before applying test_env in conftest

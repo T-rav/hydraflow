@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10883
 source_phase: plan
 created_at: 2026-07-31T07:40:16.907009+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Split parallel and serial pytest legs for coverage accumulation

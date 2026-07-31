@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T08:27:46.956923+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1070
+superseded_by: 1207
 ---
 
 # Liveness kernel resolves git/events from --workspace, not dev checkout

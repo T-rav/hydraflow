@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:59:05.928842+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1750
+superseded_by: 1982
 ---
 
 # ADR source-file citations must be :Symbol-qualified, not bare

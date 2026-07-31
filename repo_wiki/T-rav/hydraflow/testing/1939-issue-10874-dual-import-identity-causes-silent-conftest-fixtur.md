@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10874
 source_phase: plan
 created_at: 2026-07-31T06:49:10.357924+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2064
 ---
 
 # Dual import identity causes silent conftest fixture no-ops

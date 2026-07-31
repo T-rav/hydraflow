@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10878
 source_phase: plan
 created_at: 2026-07-31T07:10:49.839299+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2065
 ---
 
 # setup_branch_protection.py --apply strips undeclared live-required contexts

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10881
 source_phase: plan
 created_at: 2026-07-31T07:22:08.358153+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2067
 ---
 
 # FakeGitHub keys list_runs_for_workflow on display name; PRManager on filename
