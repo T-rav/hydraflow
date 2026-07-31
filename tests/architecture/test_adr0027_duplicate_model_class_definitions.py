@@ -150,8 +150,15 @@ def _build_import_index(
 def _referenced_within_file(tree: ast.Module, name: str) -> bool:
     """True if *name* is used anywhere in *tree* as a real reference (a type
     annotation, call, base class, etc.) — an ``ast.Name`` load, or a quoted
-    forward-reference string literal (e.g. ``x: "Foo"``), matching the same
-    string-literal escape hatch as the sibling ADR-0023 check. A class's own
+    forward-reference string literal that is exactly the class name (e.g.
+    ``x: "Foo"``, or the ``"Foo"`` inside ``Optional["Foo"]``). Unlike the
+    sibling ADR-0023 check (scoped to test-function bodies, where a stray
+    string constant is almost always a ``locals()``/``globals()`` lookup), this
+    check scans whole ``src/`` files, where prose — docstrings, log messages,
+    error text — routinely *mentions* a class name without using it; matching
+    by substring there would silently treat "Deprecated: use Foo instead" as a
+    reference and hide a genuinely dead duplicate. Exact string equality still
+    catches the forward-reference case while excluding prose. A class's own
     ``ClassDef`` header is not an ``ast.Name`` node, so this never counts a
     definition as a reference to itself."""
     for node in ast.walk(tree):
@@ -160,7 +167,7 @@ def _referenced_within_file(tree: ast.Module, name: str) -> bool:
         if (
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
-            and name in node.value
+            and node.value == name
         ):
             return True
     return False
@@ -292,3 +299,35 @@ def test_duplicate_referenced_only_via_quoted_annotation_is_not_flagged(
         }
     )
     assert _dead_duplicate_definitions(root / "src") == []
+
+
+def test_dead_duplicate_mentioned_only_in_own_docstring_is_still_flagged(
+    fixture_src_tree,
+) -> None:
+    """A dead copy's docstring mentioning its own class name (e.g. "Deprecated:
+    use feature.Widget instead") must not count as a reference — only an exact
+    string match (a forward-reference annotation) does. Guards against a
+    substring match silently un-flagging the exact merge-artifact case this
+    check exists to catch."""
+    root = fixture_src_tree(
+        {
+            "src/models.py": '''
+                from pydantic import BaseModel
+
+                class Widget(BaseModel):
+                    """Deprecated shim; superseded by feature.Widget."""
+
+                    name: str
+            ''',
+            "src/feature.py": """
+                from pydantic import BaseModel
+
+                class Widget(BaseModel):
+                    label: str
+
+                def build() -> Widget:
+                    return Widget(label="x")
+            """,
+        }
+    )
+    assert _dead_duplicate_definitions(root / "src") == ["src/models.py::Widget"]
