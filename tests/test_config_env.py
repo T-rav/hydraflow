@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import get_args
 
 import pytest
+from pydantic import ValidationError
 
 # conftest.py already inserts the hydraflow package directory into sys.path
 from config import (
@@ -22,7 +24,9 @@ from config import (
     _ENV_OPT_INT_OVERRIDES,
     _ENV_STR_OVERRIDES,
     HydraFlowConfig,
+    declared_default_config,
     declared_env_keys,
+    env_override_keys,
 )
 from queue_strategy import QueueStrategy
 
@@ -754,6 +758,192 @@ class TestEnvVarEnumOverride:
             state_file=tmp_path / "s.json",
         )
         assert cfg.queue_strategy is QueueStrategy.WEIGHTED_MIX
+
+
+class TestEnvOverrideKeys:
+    """#10859: env_override_keys() — superset of declared_env_keys() that also
+    covers the inline os.environ reads outside the _ENV_*_OVERRIDES tables
+    (repo/git-identity resolution, docker/profile knobs, JSON-shaped
+    overrides). declared_env_keys() alone is not enough to build a hermetic
+    config — it only covers the data-driven tables."""
+
+    def test_returns_a_frozenset(self) -> None:
+        assert isinstance(env_override_keys(), frozenset)
+
+    def test_is_superset_of_declared_env_keys(self) -> None:
+        assert declared_env_keys() <= env_override_keys()
+
+    @pytest.mark.parametrize(
+        "env_key",
+        [
+            "HYDRAFLOW_GITHUB_REPO",
+            "HYDRAFLOW_GIT_USER_NAME",
+            "HYDRAFLOW_GIT_USER_EMAIL",
+            "GIT_AUTHOR_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
+            "HYDRAFLOW_DATA_ROOT",
+            "HYDRAFLOW_HOME",
+            "HYDRAFLOW_DOCKER_ENABLED",
+            "HYDRA_DOCKER_ENABLED",
+            "HYDRAFLOW_LITE_PLAN_LABELS",
+            "HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS",
+            "HYDRAFLOW_WORKTREE_GC_ROOTS",
+            "HYDRAFLOW_DOCKER_MEMORY_LIMIT",
+            "HYDRAFLOW_DOCKER_TMP_SIZE",
+            "HYDRAFLOW_DOCKER_PIDS_LIMIT",
+            "HYDRAFLOW_MANAGED_REPOS",
+        ],
+    )
+    def test_contains_inline_non_table_keys(self, env_key: str) -> None:
+        """The exact keys _resolve_base_paths / _resolve_repo_and_identity /
+        _apply_env_overrides' special-case section read directly via
+        os.environ or _get_env, outside any _ENV_*_OVERRIDES table."""
+        assert env_key in env_override_keys()
+
+
+class TestDeclaredDefaultConfig:
+    """#10859: declared_default_config() builds a HydraFlowConfig reflecting
+    only declared field defaults, independent of the host process's
+    environment and repo_root/.env — ADR-0087's "same input -> same score"
+    applied to the config the prompt audit renders from."""
+
+    def test_ignores_table_driven_env_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_MIN_REVIEW_FINDINGS", "999")
+        cfg = declared_default_config()
+        assert (
+            cfg.min_review_findings
+            == HydraFlowConfig.model_fields["min_review_findings"].default
+        )
+
+    def test_ignores_inline_list_typed_env_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "leaked-user")
+        cfg = declared_default_config()
+        assert cfg.human_steering_authorized_users == []
+
+    def test_ignores_non_prefixed_table_driven_env_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SENTRY_ORG", "leaked-org")
+        cfg = declared_default_config()
+        assert cfg.sentry_org == HydraFlowConfig.model_fields["sentry_org"].default
+
+    def test_ignores_git_identity_env_vars(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_GIT_USER_NAME", "Leaked Name")
+        monkeypatch.setenv("GIT_AUTHOR_NAME", "Also Leaked")
+        cfg = declared_default_config()
+        assert cfg.git_user_name == ""
+
+    def test_scrubs_a_git_prefixed_key_not_individually_listed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Belt-and-braces: tests/architecture/test_config_env_key_coverage.py
+        treats any GIT_-prefixed literal as a safe prefix, not requiring an
+        explicit env_override_keys() entry. That's only sound if
+        declared_default_config() actually scrubs the whole GIT_ prefix —
+        not just the four keys currently hand-listed — so a future GIT_-
+        prefixed env read added anywhere in resolve_defaults's call graph
+        can't pass that architecture ratchet while still leaking through
+        here."""
+        import config as config_module
+
+        monkeypatch.setenv("GIT_SOME_FUTURE_KEY", "leaked")
+        seen: dict[str, bool] = {}
+        original = config_module._resolve_base_paths
+
+        def _spy(cfg: HydraFlowConfig) -> None:
+            seen["present"] = "GIT_SOME_FUTURE_KEY" in os.environ
+            original(cfg)
+
+        monkeypatch.setattr(config_module, "_resolve_base_paths", _spy)
+        declared_default_config()
+        assert seen["present"] is False
+
+    def test_ignores_json_shaped_managed_repos_env_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """HYDRAFLOW_MANAGED_REPOS is read via _get_env(...) with a literal
+        key — the one spot outside the _ENV_*_OVERRIDES tables that reads a
+        JSON-shaped value into a list field, easy to miss when enumerating
+        env_override_keys()."""
+        monkeypatch.setenv("HYDRAFLOW_MANAGED_REPOS", '[{"slug": "leaked/repo"}]')
+        cfg = declared_default_config()
+        assert cfg.managed_repos == []
+
+    def test_ignores_dotenv_file_at_the_auto_detected_repo_root(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The one channel os.environ-scrubbing alone cannot close:
+        ``_dotenv_lookup`` reads ``repo_root/.env`` directly for git
+        identity, bypassing ``os.environ`` entirely. Regression coverage for
+        a caller that doesn't pass an explicit ``repo_root`` — with no
+        override, ``declared_default_config()`` must default to a fresh temp
+        dir rather than let a real ``.env`` next to ``cwd`` leak in."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text("HYDRAFLOW_GIT_USER_NAME=leaked-from-dotenv\n")
+        cfg = declared_default_config()
+        assert cfg.git_user_name == ""
+
+    def test_explicit_repo_root_override_still_wins(self, tmp_path: Path) -> None:
+        """Explicit field overrides take precedence, same as every other
+        HydraFlowConfig field (see the "ignored_when_explicit_value_set"
+        tests above)."""
+        cfg = declared_default_config(repo_root=tmp_path)
+        assert cfg.repo_root == tmp_path.resolve()
+
+    def test_os_environ_restored_after_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_MIN_REVIEW_FINDINGS", "999")
+        before = dict(os.environ)
+        declared_default_config()
+        assert dict(os.environ) == before
+
+    def test_os_environ_restored_even_if_construction_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HYDRAFLOW_MIN_REVIEW_FINDINGS", "999")
+        before = dict(os.environ)
+        with pytest.raises(ValidationError):
+            declared_default_config(batch_size=99999)
+        assert dict(os.environ) == before
+
+    def test_rendered_corpus_fields_identical_with_and_without_env_overrides(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The issue's acceptance criterion, applied directly to
+        declared_default_config(): the set of fields the prompt audit
+        captures (int/bool/str/float/list/dict, mirroring
+        scripts/audit_prompts.py's _real_config_defaults() filter) must be
+        byte-identical with and without a representative HYDRAFLOW_*
+        override set spanning every suppression channel."""
+
+        def _captured(cfg: HydraFlowConfig) -> dict[str, object]:
+            return {
+                name: getattr(cfg, name)
+                for name in type(cfg).model_fields
+                if isinstance(
+                    getattr(cfg, name), int | bool | str | float | list | dict
+                )
+            }
+
+        baseline = _captured(declared_default_config())
+
+        monkeypatch.setenv("HYDRAFLOW_MIN_REVIEW_FINDINGS", "999")
+        monkeypatch.setenv("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "leaked")
+        monkeypatch.setenv("SENTRY_ORG", "leaked-org")
+        monkeypatch.setenv("GIT_AUTHOR_NAME", "Leaked Name")
+        monkeypatch.setenv("HYDRAFLOW_WORKTREE_GC_ROOTS", "/leaked/root")
+        overridden = _captured(declared_default_config())
+
+        assert overridden == baseline
 
 
 class TestDeclaredEnvKeys:
