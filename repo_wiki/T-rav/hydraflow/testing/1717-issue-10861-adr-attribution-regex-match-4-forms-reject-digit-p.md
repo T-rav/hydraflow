@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10861
 source_phase: plan
 created_at: 2026-07-31T01:46:44.758672+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1811
 ---
 
 # ADR attribution regex: match 4 forms, reject digit-prefix false positives

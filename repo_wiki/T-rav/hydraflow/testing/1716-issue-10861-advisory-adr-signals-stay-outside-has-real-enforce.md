@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10861
 source_phase: plan
 created_at: 2026-07-31T01:46:44.758634+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1810
 ---
 
 # Advisory ADR signals stay outside has_real_enforcement

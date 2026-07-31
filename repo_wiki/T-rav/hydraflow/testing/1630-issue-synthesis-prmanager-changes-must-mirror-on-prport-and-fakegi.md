@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T02:43:14.202217+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1547
+superseded_by: 1724
 ---
 
 # PRManager changes must mirror on PRPort and FakeGitHub

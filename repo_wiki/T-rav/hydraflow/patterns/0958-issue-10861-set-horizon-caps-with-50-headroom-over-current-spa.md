@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10861
 source_phase: plan
 created_at: 2026-07-31T01:46:44.758681+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1022
 ---
 
 # Set horizon caps with ~50% headroom over current span
