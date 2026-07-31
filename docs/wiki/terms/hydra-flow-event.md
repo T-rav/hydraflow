@@ -4,7 +4,7 @@ name: "HydraFlowEvent"
 kind: "domain_event"
 bounded_context: "shared-kernel"
 code_anchor: "src/events.py:HydraFlowEvent"
-aliases: ["event", "bus event", "published event"]
+aliases: ["bus event", "published event"]
 related: []
 evidence: []
 superseded_by: null
