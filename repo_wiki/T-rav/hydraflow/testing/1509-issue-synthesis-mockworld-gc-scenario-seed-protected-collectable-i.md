@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T19:46:33.760846+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1421
+superseded_by: 1591
 ---
 
 # MockWorld GC scenario: seed protected + collectable issue

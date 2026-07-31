@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T19:46:33.704352+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1389
+superseded_by: 1559
 ---
 
 # TrustFleetSanityLoop staleness tuning needs 3 test layers
