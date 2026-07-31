@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:54.231070+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1938
+superseded_by: 2192
 ---
 
 # Scope sys.meta_path import blocker to the pytest process

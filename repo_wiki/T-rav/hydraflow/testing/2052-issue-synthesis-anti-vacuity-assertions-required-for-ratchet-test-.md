@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:54.028401+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1925
+superseded_by: 2181
 ---
 
 # Anti-vacuity assertions required for ratchet test suites

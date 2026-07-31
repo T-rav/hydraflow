@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.139684+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1852
+superseded_by: 2109
 ---
 
 # New MockWorldSeed knobs in sandbox_main skip apply_seed changes

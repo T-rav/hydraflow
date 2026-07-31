@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10899
 source_phase: plan
 created_at: 2026-07-31T11:25:57.702234+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1381
 ---
 
 # list_runs_for_workflow keys on file name; list_workflow_runs keys on display name

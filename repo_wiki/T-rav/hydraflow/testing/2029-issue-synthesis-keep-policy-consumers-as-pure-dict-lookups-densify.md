@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.772502+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1902
+superseded_by: 2158
 ---
 
 # Keep policy consumers as pure dict lookups; densify upstream

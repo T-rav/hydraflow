@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.276799+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1865
+superseded_by: 2122
 ---
 
 # Keep src/adr_drift.py pure; inject state via params

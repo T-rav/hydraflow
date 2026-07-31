@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.577792+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1889
+superseded_by: 2145
 ---
 
 # Wiki code citations must be single-backtick path:Symbol spans

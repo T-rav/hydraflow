@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.371002+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1877
+superseded_by: 2133
 ---
 
 # EscapeLedger is append-only: resolutions are new rows
