@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T02:43:14.290646+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1588
+superseded_by: 1765
 ---
 
 # Doc-typo ADR fixes still need parser-consumer regression tests

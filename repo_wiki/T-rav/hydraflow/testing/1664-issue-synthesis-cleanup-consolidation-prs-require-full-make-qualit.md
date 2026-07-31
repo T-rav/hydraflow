@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T02:43:14.275626+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1581
+superseded_by: 1758
 ---
 
 # Cleanup/consolidation PRs require full make quality

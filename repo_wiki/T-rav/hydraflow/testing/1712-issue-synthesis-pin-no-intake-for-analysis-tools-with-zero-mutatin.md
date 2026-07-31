@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T02:43:14.381352+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1629
+superseded_by: 1806
 ---
 
 # Pin no-intake for analysis tools with zero-mutating-call tests

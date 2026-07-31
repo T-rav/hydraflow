@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T02:33:17.970758+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0888
+superseded_by: 1010
 ---
 
 # WikiCompiler forced fold folds unclaimed entries onto unrelated primaries

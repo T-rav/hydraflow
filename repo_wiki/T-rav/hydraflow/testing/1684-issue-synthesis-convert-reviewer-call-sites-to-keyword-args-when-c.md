@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T02:43:14.318845+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1601
+superseded_by: 1778
 ---
 
 # Convert reviewer call sites to keyword args when changing arity
