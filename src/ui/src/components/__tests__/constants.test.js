@@ -383,12 +383,13 @@ describe('BACKGROUND_WORKERS loop-registry coverage (#10556)', () => {
   const workerKeys = new Set(BACKGROUND_WORKERS.map(w => w.key))
   const groupKeys = new Set(WORKER_GROUPS.map(g => g.key))
 
-  it('reference registry lists 64 loops (sentinel — update when loops change)', () => {
+  it('reference registry lists 63 loops (sentinel — update when loops change)', () => {
     // If the backend loop count changes, this red reminds you to reconcile the
     // reference list AND BACKGROUND_WORKERS. See docs/arch/generated/loops.md.
-    expect(LOOP_REGISTRY_WORKER_NAMES).toHaveLength(64)
+    // 64 -> 63: SentryLoop (sentry_ingest) removed by ADR-0118.
+    expect(LOOP_REGISTRY_WORKER_NAMES).toHaveLength(63)
     // No accidental duplicates in the reference list.
-    expect(new Set(LOOP_REGISTRY_WORKER_NAMES).size).toBe(64)
+    expect(new Set(LOOP_REGISTRY_WORKER_NAMES).size).toBe(63)
   })
 
   it('every registered loop has a BACKGROUND_WORKERS entry (nothing falls into Other)', () => {
@@ -420,6 +421,6 @@ describe('BACKGROUND_WORKERS loop-registry coverage (#10556)', () => {
     const vm = toLoops(workers)
     const other = vm.categories.find(c => c.key === 'other')
     expect(other).toBeUndefined()
-    expect(vm.totals.total).toBe(64)
+    expect(vm.totals.total).toBe(63)
   })
 })
