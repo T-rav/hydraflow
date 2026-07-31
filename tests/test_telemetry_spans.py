@@ -10,7 +10,8 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
-from src.telemetry.spans import (
+
+from telemetry.spans import (
     add_hf_context,
     loop_span,
     port_span,
