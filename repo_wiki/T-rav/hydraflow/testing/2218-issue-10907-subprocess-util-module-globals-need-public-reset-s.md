@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10907
 source_phase: plan
 created_at: 2026-07-31T13:13:56.125056+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2360
 ---
 
 # subprocess_util module globals need public reset seams

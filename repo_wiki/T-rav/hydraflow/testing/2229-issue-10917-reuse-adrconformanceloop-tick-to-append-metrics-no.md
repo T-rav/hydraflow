@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10917
 source_phase: plan
 created_at: 2026-07-31T16:16:35.877484+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2369
 ---
 
 # Reuse AdrConformanceLoop tick to append metrics, no new loop

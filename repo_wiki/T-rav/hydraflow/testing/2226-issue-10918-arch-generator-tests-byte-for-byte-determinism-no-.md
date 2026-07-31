@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10918
 source_phase: plan
 created_at: 2026-07-31T15:55:12.930287+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2367
 ---
 
 # Arch generator tests: byte-for-byte determinism, no MockWorld

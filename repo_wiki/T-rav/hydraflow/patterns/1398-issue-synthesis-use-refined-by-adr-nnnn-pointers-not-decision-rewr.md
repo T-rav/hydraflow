@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T16:53:01.912421+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1319
+superseded_by: 1482
 ---
 
 # Use 'Refined by ADR-NNNN' pointers, not decision rewrites

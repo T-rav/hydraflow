@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10918
 source_phase: plan
 created_at: 2026-07-31T15:55:12.930279+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1552
 ---
 
 # ADR authorship defaults to UNKNOWN, never silent HUMAN

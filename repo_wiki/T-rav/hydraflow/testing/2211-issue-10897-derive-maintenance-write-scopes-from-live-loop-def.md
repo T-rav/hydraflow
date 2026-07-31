@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10897
 source_phase: plan
 created_at: 2026-07-31T12:53:03.086146+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2355
 ---
 
 # Derive maintenance write scopes from live loop definitions

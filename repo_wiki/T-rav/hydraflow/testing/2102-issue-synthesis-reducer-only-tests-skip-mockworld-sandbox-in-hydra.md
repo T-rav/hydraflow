@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T14:26:19.208043+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1972
+superseded_by: 2247
 ---
 
 # Reducer-only tests skip MockWorld/sandbox in HydraFlowContext

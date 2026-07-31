@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10871
 source_phase: review
 created_at: 2026-07-31T16:47:39.085961+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10871 closed
 ---
 
 # Verify issue-cited file paths exist via git log --all
