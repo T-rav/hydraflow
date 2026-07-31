@@ -4,9 +4,7 @@
 
 Accepted
 
-## Date
-
-2026-05-04
+**Date:** 2026-05-04
 
 **Enforcement:** enforced
 

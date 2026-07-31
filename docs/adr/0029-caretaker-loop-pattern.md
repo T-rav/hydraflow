@@ -4,6 +4,8 @@
 
 Accepted (CodeGroomingLoop removed in ADR-0065 — the pattern itself remains in use by the other three caretaker loops listed below)
 
+**Date:** 2026-03-28
+
 **Enforcement:** enforced
 
 **Enforced by:** pytest:tests/test_caretaker_loop_wiring.py
