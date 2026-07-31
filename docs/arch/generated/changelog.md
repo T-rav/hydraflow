@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `46ad47f` — Remove Honeycomb/OTel telemetry from the factory (ADR-0118 supersedes ADR-0055) (#10950) (#10950) *(2026-07-31)*
 - `32bedda` — Fixes #10859: Prompt baselines are environment-dependent: HydraFlow... (#10938) (#10938) *(2026-07-31)*
 - `ce75b4f` — Fixes #10883: Gate health: Coverage (trailing) suspected CI hang, n... (#10929) (#10929) *(2026-07-31)*
 - `dba3064` — Fixes #10867: ADR-0027 is the only Accepted ADR classifying MISSING... (#10901) (#10901) *(2026-07-31)*

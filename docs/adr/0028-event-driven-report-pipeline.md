@@ -4,6 +4,8 @@
 
 Accepted
 
+**Date:** 2026-03-28
+
 **Enforcement:** enforced
 
 **Enforced by:** pytest:tests/test_report_event_flow.py
