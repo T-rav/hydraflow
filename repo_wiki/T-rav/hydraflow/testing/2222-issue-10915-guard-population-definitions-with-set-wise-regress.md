@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10915
 source_phase: plan
 created_at: 2026-07-31T15:36:39.647816+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2364
 ---
 
 # Guard population definitions with set-wise regression tests

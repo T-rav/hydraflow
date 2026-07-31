@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T17:04:03.298634+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0126
+superseded_by: 0147
 ---
 
 # Removing src/__init__.py can't close the src.X import alias

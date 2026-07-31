@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10867
 source_phase: review
 created_at: 2026-07-31T10:45:43.194339+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2230
 ---
 
 # Four-lane ADR debt bookkeeping for enforcement ratchet updates

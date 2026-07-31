@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10917
 source_phase: plan
 created_at: 2026-07-31T16:16:35.877465+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2368
 ---
 
 # Classify check kinds from Check.raw, not parse_enforced_by

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10906
 source_phase: plan
 created_at: 2026-07-31T12:53:04.027129+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2357
 ---
 
 # String monkeypatch targets are invisible to AST import guards

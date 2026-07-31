@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10867
 source_phase: review
 created_at: 2026-07-31T10:45:43.194347+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # make arch-regen must reproduce committed docs byte-for-byte

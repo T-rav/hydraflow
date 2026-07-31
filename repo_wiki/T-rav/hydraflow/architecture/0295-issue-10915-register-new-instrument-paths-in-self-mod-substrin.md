@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10915
 source_phase: plan
 created_at: 2026-07-31T15:36:39.647855+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Register new instrument paths in _SELF_MOD_SUBSTRINGS

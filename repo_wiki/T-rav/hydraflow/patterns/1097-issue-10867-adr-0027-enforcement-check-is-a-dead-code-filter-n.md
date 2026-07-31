@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10867
 source_phase: review
 created_at: 2026-07-31T10:45:43.194331+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1471
 ---
 
 # ADR-0027 enforcement check is a dead-code filter, not an allow-list

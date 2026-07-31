@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T14:26:19.413475+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2056
+superseded_by: 2330
 ---
 
 # tests/conftest.py cannot import mock_world at module scope

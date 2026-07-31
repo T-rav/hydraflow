@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T14:26:19.271387+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1999
+superseded_by: 2273
 ---
 
 # Assert classify call-count==0 for dedup-skip regressions

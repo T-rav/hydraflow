@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T16:53:01.960815+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1326
+superseded_by: 1489
 ---
 
 # Strip prose-colliding aliases in validate_draft, don't reject term

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10917
 source_phase: plan
 created_at: 2026-07-31T16:16:35.877453+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Density normalizes by Decision word count, not assertions

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10915
 source_phase: plan
 created_at: 2026-07-31T15:36:39.647869+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2365
 ---
 
 # Every registered series needs a paired counter-metric id (#10840)
