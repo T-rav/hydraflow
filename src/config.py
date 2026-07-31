@@ -636,9 +636,6 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("repo_data_class", "HYDRAFLOW_REPO_DATA_CLASS", "internal"),
     ("regulated_labels", "HYDRAFLOW_REGULATED_LABELS", ""),
     ("dashboard_url", "HYDRAFLOW_DASHBOARD_URL", "http://localhost:5555"),
-    ("otel_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.honeycomb.io"),
-    ("otel_service_name", "OTEL_SERVICE_NAME", "hydraflow"),
-    ("otel_environment", "HF_ENV", "local"),
     ("issue_refinement_model", "HYDRAFLOW_ISSUE_REFINEMENT_MODEL", ""),
     ("skill_prompt_refine_model", "HYDRAFLOW_SKILL_PROMPT_REFINE_MODEL", ""),
     ("intervention_tally_model", "HYDRAFLOW_INTERVENTION_TALLY_MODEL", ""),
@@ -872,7 +869,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_RC_PROMOTION_HEALTH_ENABLED",
         True,
     ),
-    ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
     (
         "shadow_corpus_coverage_pruning_enabled",
         "HYDRAFLOW_SHADOW_CORPUS_COVERAGE_PRUNING_ENABLED",
@@ -3107,24 +3103,6 @@ class HydraFlowConfig(BaseModel):
             "Comma-separated log file paths LogIngestLoop scans. Relative paths "
             "resolve against data_root; absolute paths are used as-is."
         ),
-    )
-
-    # OpenTelemetry / Honeycomb instrumentation
-    otel_enabled: bool = Field(
-        default=False,
-        description="Enable OpenTelemetry tracing export to Honeycomb",
-    )
-    otel_endpoint: str = Field(
-        default="https://api.honeycomb.io",
-        description="OTLP HTTP endpoint for trace export",
-    )
-    otel_service_name: str = Field(
-        default="hydraflow",
-        description="OTel service.name resource attribute",
-    )
-    otel_environment: str = Field(
-        default="local",
-        description="Deployment environment tag (e.g. local, staging, production)",
     )
 
     # Security patch monitoring

@@ -42,7 +42,6 @@ from models import (
 from prep import HYDRAFLOW_LABELS, HYDRAFLOW_LITERAL_LABELS
 from repro_manifest import append_manifest
 from subprocess_util import run_subprocess, run_subprocess_with_retry
-from telemetry.spans import port_span  # noqa: E402
 from traceability import append_req_trailer, extract_req_id
 
 if TYPE_CHECKING:
@@ -281,7 +280,6 @@ class PRManager:
         result = await ensure_labels(self._config)
         logger.info(result.summary())
 
-    @port_span("hf.port.pr.push_branch")
     async def push_branch(
         self, worktree_path: Path, branch: str, *, force: bool = False
     ) -> bool:
@@ -352,7 +350,6 @@ class PRManager:
             )
             return False
 
-    @port_span("hf.port.pr.create_pr")
     async def create_pr(
         self,
         issue: GitHubIssue,
@@ -966,7 +963,6 @@ class PRManager:
             )
             return False
 
-    @port_span("hf.port.pr.update_pr_base")
     async def update_pr_base(self, pr_number: int, *, base: str) -> bool:
         """Retarget a PR's base branch via `gh pr edit --base`.
 
@@ -1165,7 +1161,6 @@ class PRManager:
             )
         return True
 
-    @port_span("hf.port.pr.merge_pr")
     async def merge_pr(self, pr_number: int, *, auto_rebase: bool = False) -> bool:
         """Merge PR immediately via squash merge with branch deletion.
 
@@ -2623,7 +2618,6 @@ class PRManager:
         except (RuntimeError, ValueError):
             return 0
 
-    @port_span("hf.port.pr.ensure_labels_present")
     async def _ensure_labels_present(self, labels: list[str]) -> None:
         """Create any of *labels* the repo doesn't already have.
 
@@ -2670,7 +2664,6 @@ class PRManager:
             except RuntimeError as exc:
                 logger.warning("Could not provision label %r: %s", label, exc)
 
-    @port_span("hf.port.pr.create_issue")
     async def create_issue(
         self,
         title: str,

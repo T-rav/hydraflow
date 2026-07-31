@@ -114,7 +114,7 @@ cadence and files remediation issues on drift.
 | [0052](0052-sandbox-tier-scenarios.md) | Sandbox-tier scenario testing | Accepted |
 | [0053](0053-ubiquitous-language-as-living-artifact.md) | Ubiquitous Language as a Living Artifact | Accepted |
 | [0054](0054-term-auto-proposer-loop.md) | Term Auto-Proposer Loop (Dark-Factory Glossary Growth) | Accepted |
-| [0055](0055-otel-honeycomb-instrumentation.md) | OpenTelemetry Instrumentation as the Telemetry Layer | Accepted |
+| [0055](0055-otel-honeycomb-instrumentation.md) | OpenTelemetry Instrumentation as the Telemetry Layer | Superseded |
 | [0056](0056-adr-touchpoint-gate-to-caretaker-loop.md) | ADR touchpoint enforcement — synchronous gate → asynchronous caretaker loop | Accepted |
 | [0057](0057-term-pruner-loop.md) | Term-Pruner Loop (Dark-Factory Glossary Hygiene) | Accepted |
 | [0058](0058-edge-proposer-loop.md) | Edge-Proposer Loop (Dark-Factory Graph Densification) | Accepted |
@@ -177,6 +177,7 @@ cadence and files remediation issues on drift.
 | [0115](0115-auto-diagnose-before-human-for-audit-and-escape-surfaces.md) | Auto-diagnose before human for audit + escape surfaces | Accepted |
 | [0116](0116-prompts-as-a-measured-contract.md) | Prompts as a measured contract | Accepted |
 | [0117](0117-observed-prompt-coverage.md) | Observed prompt coverage — the denominator is measured, not inferred | Accepted |
+| [0118](0118-observability-belongs-to-the-sre-agent-not-the-loops.md) | Observability belongs to the SRE agent, not the loops | Accepted |
 
 ## Adding a new ADR
 

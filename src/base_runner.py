@@ -29,7 +29,6 @@ from runner_utils import (
     stream_claude_process,
     terminate_processes,
 )
-from telemetry.spans import runner_span  # noqa: E402
 from tracing_context import TracingContext
 from wiki_compiler import parse_adr_draft_suggestion
 
@@ -160,7 +159,6 @@ class BaseRunner:
     _AUTH_RETRY_MAX = 3
     _AUTH_RETRY_BASE_DELAY = 5.0  # seconds
 
-    @runner_span()
     async def _execute(
         self,
         cmd: list[str],

@@ -352,32 +352,3 @@ async def test_mockworld_set_agents_preserves_beads_manager(tmp_path) -> None:
     sentinel = object()
     world.harness.set_agents(sentinel)  # type: ignore[arg-type]
     assert world.harness.implement_phase._beads_manager is beads
-
-
-def test_close_retires_honeycomb_provider(tmp_path) -> None:
-    """MockWorld.close() shuts down FakeHoneycomb's global OTel provider (#10875)."""
-    from opentelemetry import trace
-
-    from tests.scenarios.fakes.mock_world import MockWorld
-
-    world = MockWorld(tmp_path)
-    assert (
-        trace._TRACER_PROVIDER is not None
-    )  # FakeHoneycomb installed one  # noqa: SLF001
-
-    world.close()
-
-    assert trace._TRACER_PROVIDER is None  # noqa: SLF001
-    world.close()  # idempotent — a second retirement must not raise
-
-
-def test_context_manager_retires_on_exit(tmp_path) -> None:
-    """`with MockWorld(...)` retires the honeycomb provider on exit (#10875)."""
-    from opentelemetry import trace
-
-    from tests.scenarios.fakes.mock_world import MockWorld
-
-    with MockWorld(tmp_path):
-        assert trace._TRACER_PROVIDER is not None  # noqa: SLF001
-
-    assert trace._TRACER_PROVIDER is None  # noqa: SLF001

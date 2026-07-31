@@ -308,49 +308,6 @@ def _reset_gh_semaphore():
 
 
 @pytest.fixture(autouse=True)
-def _reset_otel_tracer_provider():
-    """Reset the OTel global tracer-provider state between tests.
-
-    ``trace.set_tracer_provider`` is guarded by a ``Once`` object that
-    prevents re-assignment after the first call.  Tests that install an
-    ``InMemorySpanExporter`` need a fresh provider each run; this fixture
-    resets both the provider reference and the ``Once._done`` flag so that
-    each test starts from a clean slate.
-
-    The reset runs in **setup as well as teardown** so a provider installed
-    outside a test's teardown boundary — at module import, or by a session- or
-    module-scoped fixture in another subtree (e.g. ``tests/regressions``) —
-    cannot leak into the next test and be silently ignored by OTel's ``Once``,
-    swallowing that test's spans (#10862).
-
-    ``_get_tracer`` is imported under its production name ``telemetry.spans``
-    (NOT ``src.telemetry.spans``): ``src`` is on ``sys.path``, so the two are
-    distinct module objects with distinct ``lru_cache``s. Clearing the
-    ``src.``-aliased cache would leave the cache production actually reads
-    untouched — a silent no-op (#10906/#10874).
-
-    This directly mutates private OTel internals — the same coupling
-    trade-off accepted for ``_reset_gh_semaphore``.
-    """
-    from opentelemetry import trace as _trace
-
-    from telemetry.spans import _get_tracer
-
-    def _reset() -> None:
-        _trace._TRACER_PROVIDER = None  # noqa: SLF001
-        _trace._TRACER_PROVIDER_SET_ONCE._done = False  # noqa: SLF001
-        _get_tracer.cache_clear()
-
-    # Setup: clear any provider leaked from module import or a higher-scoped
-    # fixture so this test starts against a fresh provider it can install.
-    _reset()
-    yield
-    # Teardown: undo whatever the test installed and clear our tracer cache
-    # so the next test resolves Tracer instances against its fresh provider.
-    _reset()
-
-
-@pytest.fixture(autouse=True)
 def _restore_phase_utils_memory_seams():
     """Snapshot + restore the ``phase_utils`` memory-suggestion seams per test.
 

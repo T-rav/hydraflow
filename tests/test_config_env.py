@@ -553,53 +553,6 @@ class TestHumanSteeringAuthorizedUsersEnvOverride:
         assert cfg.human_steering_authorized_users == []
 
 
-class TestOtelConfigFields:
-    def test_config_otel_defaults(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # Hermetic: the repo .env sets HF_ENV=dev and HYDRAFLOW_OTEL_ENABLED=true.
-        # Under pytest-xdist, a sibling test that loads .env into os.environ can
-        # leak those into this worker and flip the asserted defaults (the
-        # historical "assert 'dev' == 'local'" flake). Clear the backing env vars
-        # so we assert the true compile-time defaults regardless of leakage.
-        for _var in (
-            "HYDRAFLOW_OTEL_ENABLED",
-            "OTEL_EXPORTER_OTLP_ENDPOINT",
-            "OTEL_SERVICE_NAME",
-            "HF_ENV",
-        ):
-            monkeypatch.delenv(_var, raising=False)
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            workspace_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.otel_enabled is False
-        assert cfg.otel_endpoint == "https://api.honeycomb.io"
-        assert cfg.otel_service_name == "hydraflow"
-        assert cfg.otel_environment == "local"
-
-    def test_config_otel_env_overrides(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("HYDRAFLOW_OTEL_ENABLED", "true")
-        monkeypatch.setenv(
-            "OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.eu1.honeycomb.io"
-        )
-        monkeypatch.setenv("OTEL_SERVICE_NAME", "hydraflow-test")
-        monkeypatch.setenv("HF_ENV", "staging")
-
-        cfg = HydraFlowConfig(
-            repo_root=tmp_path,
-            workspace_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.otel_enabled is True
-        assert cfg.otel_endpoint == "https://api.eu1.honeycomb.io"
-        assert cfg.otel_service_name == "hydraflow-test"
-        assert cfg.otel_environment == "staging"
-
-
 class TestDotenvLoading:
     """Verify python-dotenv is called at server startup."""
 
@@ -1000,7 +953,7 @@ class TestDeclaredEnvKeys:
 
     @pytest.mark.parametrize(
         "env_key",
-        ["SENTRY_ORG", "HF_ENV", "OTEL_SERVICE_NAME", "LOG_INGEST_INTERVAL"],
+        ["SENTRY_ORG", "LOG_INGEST_INTERVAL"],
     )
     def test_contains_known_non_prefixed_keys(self, env_key: str) -> None:
         """The exact keys the issue calls out — SENTRY_ORG and friends."""

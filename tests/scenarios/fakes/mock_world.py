@@ -24,7 +24,6 @@ from mockworld.fakes.fake_docker import FakeDocker
 from mockworld.fakes.fake_fs import FakeFS
 from mockworld.fakes.fake_git import FakeGit
 from mockworld.fakes.fake_github import FakeGitHub
-from mockworld.fakes.fake_honeycomb import FakeHoneycomb
 from mockworld.fakes.fake_http import FakeHTTP
 from mockworld.fakes.fake_llm import FakeLLM
 from mockworld.fakes.fake_sentry import FakeSentry
@@ -248,7 +247,6 @@ class MockWorld:
         self._llm = FakeLLM()
         self._github = FakeGitHub()
         self._sentry = FakeSentry()
-        self._honeycomb = FakeHoneycomb()
         self._workspace = FakeWorkspace(tmp_path / "worktrees")
         self._clock = FakeClock(start=time.time())
         if clock_start is not None:
@@ -562,28 +560,6 @@ class MockWorld:
         return self._sentry
 
     @property
-    def honeycomb(self) -> FakeHoneycomb:
-        return self._honeycomb
-
-    def close(self) -> None:
-        """Retire fakes that hold process-global state.
-
-        ``FakeHoneycomb`` installs a global OTel ``TracerProvider`` + span
-        processor at construction (#10875); without an explicit shutdown those
-        accumulate across a session. ``FakeHoneycomb.shutdown`` also resets the
-        global provider/``Once`` so the next world starts clean. Idempotent —
-        OTel provider shutdown tolerates repeat calls, so a context-manager
-        exit and a fixture teardown may both fire.
-        """
-        self._honeycomb.shutdown()
-
-    def __enter__(self) -> MockWorld:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
-
-    @property
     def clock(self) -> FakeClock:
         return self._clock
 
@@ -747,13 +723,10 @@ class MockWorld:
         Invokes ``loop._do_work()`` directly, ``cycles`` times per loop, so
         each call returns the ``WorkCycleResult`` stats. This skips
         ``loop.run()`` (no sleep/stop_event lifecycle) AND skips
-        ``loop._execute_cycle()`` (no ``@loop_span()`` decoration, no status
-        callback, no event-bus publish). Scenarios that need any of those
-        — particularly OTel ``hf.loop.{name}`` span emission — must call
-        ``loop._execute_cycle()`` directly (see
-        ``tests/scenarios/test_telemetry_e2e.py`` for the pattern).
-        FakeGitHub is wired as the PRPort so loops interact with seeded
-        world state.
+        ``loop._execute_cycle()`` (no status callback, no event-bus publish).
+        Scenarios that need either of those must call ``loop._execute_cycle()``
+        directly. FakeGitHub is wired as the PRPort so loops interact with
+        seeded world state.
 
         Returns a dict mapping loop name → last ``_do_work()`` stats.
         """

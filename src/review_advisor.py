@@ -18,7 +18,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol, cast
 
-from opentelemetry import metrics
 from pydantic import BaseModel, Field
 
 import judge_independence as ji
@@ -50,54 +49,6 @@ def _extract_json_block(payload: str) -> str:
     if m:
         return m.group(1)
     return payload
-
-
-# OTel metric instruments — module-level so the proxy meter delegates to
-# whatever MeterProvider is registered at call time. When no provider is set
-# (default in production prior to T14 dashboard wiring), `.add()` / `.record()`
-# are silently no-op. Tests install an InMemoryMetricReader to read values.
-# Per ADR-0055, OTel is HydraFlow's telemetry layer; this is the metrics
-# counterpart to the existing tracing decorators in src/telemetry/spans.py.
-_meter = metrics.get_meter("hydraflow.review_advisor")
-_calls_total = _meter.create_counter(
-    "review_advisor_calls_total",
-    description="PostVerifyAdvisor invocations, labeled by surface/role/outcome.",
-)
-_call_duration_seconds = _meter.create_histogram(
-    "review_advisor_call_duration_seconds",
-    unit="s",
-    description="PostVerifyAdvisor wall-clock duration per invocation.",
-)
-_post_verify_verdict_total = _meter.create_counter(
-    "review_advisor_post_verify_verdict_total",
-    description=(
-        "PostVerifyAdvisor verdict count, labeled by surface and the "
-        "post-advisory-downgrade verdict (approve/veto)."
-    ),
-)
-_post_verify_degraded_total = _meter.create_counter(
-    "review_advisor_post_verify_degraded_total",
-    description=(
-        "PostVerifyAdvisor degraded-path count (runner error or parse error), "
-        "labeled by surface."
-    ),
-)
-_disagreement_total = _meter.create_counter(
-    "review_advisor_disagreement_total",
-    description=(
-        "Disagreements observed in advisor verdicts, partitioned by "
-        "{surface, role, severity}. Feeds the disagreement-validated KPI "
-        "(spec §6.1)."
-    ),
-)
-_disagreement_validated_total = _meter.create_counter(
-    "review_advisor_disagreement_validated_total",
-    description=(
-        "Disagreements where post-verify confirmed the advisor was right "
-        "and the executor was wrong (originally warned in pre-flight "
-        "or mid-flight)"
-    ),
-)
 
 
 class FocusArea(BaseModel):
@@ -178,11 +129,6 @@ class PostVerifyInput(BaseModel):
     classification_paths: list[str] = Field(default_factory=list)
 
 
-# Signals shorter than this are too generic to validate against — short
-# words like "test gaps" false-positive against any disagreement that
-# contains those words coincidentally (T24.5 closed I5).
-_MIN_SIGNAL_MATCH_LEN = 10
-
 # Per-lens focus preambles prepended to the PostVerifyAdvisor prompt when a
 # lens is set. Promoted to module-level so tests can import the mapping and
 # verify prompt content without instantiating the full advisor.
@@ -191,36 +137,6 @@ _POST_VERIFY_LENS_GUIDANCE: dict[str, str] = {
     "security": "Focus this review pass on SECURITY and RISK: injection, authz/authn, secrets, unsafe deserialization, blast radius.",
     "spec": "Focus this review pass on SPEC ADHERENCE: does the diff do what the issue/spec requires, nothing more, nothing less.",
 }
-
-
-def _validate_disagreements_against_plan(
-    disagreements: list[Disagreement],
-    plan: ReviewPlan | None,
-) -> int:
-    """Return how many post-verify disagreements were predicted by the
-    pre-flight plan's escalation_signals.
-
-    Forward-only substring match: signal must appear within the assessment.
-    Signals shorter than ``_MIN_SIGNAL_MATCH_LEN`` chars are skipped — short
-    generic signals (e.g. "test gaps") would false-positive against any
-    assessment containing those words. The bidirectional pre-T24.5 match
-    also caused symmetric false-positives where ``assessment_lc in sig``
-    matched long signals against unrelated short assessments. Returns 0 if
-    there is no plan or no qualifying signals.
-    """
-    if plan is None or not plan.escalation_signals:
-        return 0
-    qualifying_signals = [
-        s.lower() for s in plan.escalation_signals if len(s) >= _MIN_SIGNAL_MATCH_LEN
-    ]
-    if not qualifying_signals:
-        return 0
-    matched = 0
-    for d in disagreements:
-        assessment_lc = d.advisor_assessment.lower()
-        if any(sig in assessment_lc for sig in qualifying_signals):
-            matched += 1
-    return matched
 
 
 def _env_truthy(value: str | None) -> bool | None:
@@ -664,7 +580,6 @@ class PostVerifyAdvisor:
             self._resolve_independence(inp, classes)
         )
         if hitl_result is not None:
-            self._emit_metrics(start=start, outcome="success", verdict="veto")
             return hitl_result
 
         prompt = self._build_prompt(inp)
@@ -701,16 +616,12 @@ class PostVerifyAdvisor:
                 self._emit_log(
                     prompt=prompt, payload=None, start=start, error="runner-error"
                 )
-                self._emit_metrics(start=start, outcome="error", verdict=None)
                 raise
             reason = f"runner-error: {exc!r}"
             result = self._handle_failure(reason=reason, inp=inp, classes=classes)
             await self._alarm_fail_open(inp, classes, reason=reason, result=result)
             self._emit_log(
                 prompt=prompt, payload=None, start=start, error="runner-error"
-            )
-            self._emit_metrics(
-                start=start, outcome="error", verdict=result.verdict.lower()
             )
             return result
 
@@ -723,9 +634,6 @@ class PostVerifyAdvisor:
             await self._alarm_fail_open(inp, classes, reason=reason, result=result)
             self._emit_log(
                 prompt=prompt, payload=payload, start=start, error="parse-error"
-            )
-            self._emit_metrics(
-                start=start, outcome="parse_error", verdict=result.verdict.lower()
             )
             return result
 
@@ -741,39 +649,7 @@ class PostVerifyAdvisor:
                 disagreements=result.disagreements,
                 suggested_fix_direction=result.suggested_fix_direction,
             )
-        # Emit per-disagreement telemetry (spec §6.1 — feeds the
-        # disagreement-validated KPI). Telemetry never breaks business logic.
-        for d in result.disagreements:
-            try:
-                _disagreement_total.add(
-                    1,
-                    {
-                        "surface": self._cfg.surface,
-                        "role": "post_verify",
-                        "severity": d.severity,
-                    },
-                )
-            except Exception:  # noqa: BLE001 — telemetry never breaks business logic
-                logger.debug("advisor disagreement-counter emit failed", exc_info=True)
-        # T22: emit disagreement_validated_total when pre-flight predicted the issue
-        matched = _validate_disagreements_against_plan(
-            result.disagreements, inp.pre_flight_plan
-        )
-        if matched > 0:
-            try:
-                _disagreement_validated_total.add(
-                    matched,
-                    {"surface": self._cfg.surface, "role": "pre_flight"},
-                )
-            except Exception:  # noqa: BLE001 — telemetry never breaks business logic
-                logger.debug(
-                    "advisor disagreement-validated-counter emit failed",
-                    exc_info=True,
-                )
         self._emit_log(prompt=prompt, payload=payload, start=start, error=None)
-        self._emit_metrics(
-            start=start, outcome="success", verdict=result.verdict.lower()
-        )
         # #10371: record coverage for classed changes — whether this verdict
         # carried an independent family, and whether that judge dissented
         # (disagreement-by-family). Feeds the gauntlet-calibration report.
@@ -967,39 +843,6 @@ class PostVerifyAdvisor:
             # best-effort logging; never block the pipeline
             logger.debug("advisor session log write failed", exc_info=True)
 
-    def _emit_metrics(
-        self,
-        *,
-        start: float,
-        outcome: Literal["success", "error", "parse_error"],
-        verdict: str | None,
-    ) -> None:
-        """Best-effort OTel metrics emission. Never raises.
-
-        - ``calls_total`` and ``call_duration_seconds`` always emit (one
-          datapoint per call).
-        - ``post_verify_verdict_total`` emits when a verdict was resolved
-          (i.e. not the auth/credit reraise path).
-        """
-        try:
-            attrs_call = {
-                "surface": self._cfg.surface,
-                "role": "post_verify",
-                "outcome": outcome,
-            }
-            _calls_total.add(1, attrs_call)
-            _call_duration_seconds.record(
-                time.monotonic() - start,
-                {"surface": self._cfg.surface, "role": "post_verify"},
-            )
-            if verdict is not None:
-                _post_verify_verdict_total.add(
-                    1, {"surface": self._cfg.surface, "verdict": verdict}
-                )
-        except Exception:
-            # Telemetry must never alter business control flow (ADR-0055).
-            logger.debug("advisor metrics emit failed", exc_info=True)
-
     def _handle_failure(
         self,
         *,
@@ -1053,10 +896,6 @@ class PostVerifyAdvisor:
             reason,
             verdict,
         )
-        try:
-            _post_verify_degraded_total.add(1, {"surface": self._cfg.surface})
-        except Exception:
-            logger.debug("advisor degraded-counter emit failed", exc_info=True)
         return PostVerifyResult(
             verdict=verdict,
             reasoning=reasoning,
@@ -1155,7 +994,6 @@ class PreFlightAdvisor:
             )
 
             reraise_on_credit_or_bug(exc)
-            self._emit_metrics(outcome="error")
             self._emit_log(
                 prompt=prompt, payload=None, start=start, error="runner-error"
             )
@@ -1170,7 +1008,6 @@ class PreFlightAdvisor:
             data = json.loads(_extract_json_block(payload))
             plan = ReviewPlan.model_validate(data)
         except Exception as exc:
-            self._emit_metrics(outcome="parse_error")
             self._emit_log(
                 prompt=prompt, payload=payload, start=start, error="parse-error"
             )
@@ -1181,22 +1018,8 @@ class PreFlightAdvisor:
             )
             return None
 
-        self._emit_metrics(outcome="success")
         self._emit_log(prompt=prompt, payload=payload, start=start, error=None)
         return plan
-
-    def _emit_metrics(self, *, outcome: str) -> None:
-        try:
-            _calls_total.add(
-                1,
-                {
-                    "surface": self._cfg.surface,
-                    "role": "pre_flight",
-                    "outcome": outcome,
-                },
-            )
-        except Exception:  # noqa: BLE001 — telemetry never breaks business logic
-            logger.debug("pre_flight advisor metrics emit failed", exc_info=True)
 
     def _emit_log(
         self,

@@ -6,7 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
-- `3dad1c5` — Fixes #10883: parallelize the coverage lane, distinguish chronic timeouts from suspected hangs *(2026-07-31)*
+- `32bedda` — Fixes #10859: Prompt baselines are environment-dependent: HydraFlow... (#10938) (#10938) *(2026-07-31)*
+- `ce75b4f` — Fixes #10883: Gate health: Coverage (trailing) suspected CI hang, n... (#10929) (#10929) *(2026-07-31)*
+- `dba3064` — Fixes #10867: ADR-0027 is the only Accepted ADR classifying MISSING... (#10901) (#10901) *(2026-07-31)*
+- `b322479` — Observed prompt coverage: measure the denominator at the gate (ADR-0117) (#10927) (#10927) *(2026-07-31)*
+- `c472943` — feat(ul): term-proposer batch — 1 drafts (#10919) (#10919) *(2026-07-31)*
 - `f5d6727` — feat(prompts): prompts as a measured contract — registry ratchet + fitness function (ADR-0116) (#10856) (#10856) *(2026-07-30)*
 - `819e0a4` — feat(ul): edge-proposer — 12 new edges across 12 terms (#10815) (#10815) *(2026-07-30)*
 - `9e01094` — fix(arch): deterministic regen so unchanged architecture produces no diff/PR (#10811) (#10811) *(2026-07-28)*
@@ -612,10 +616,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `525f135` — chore(audit): unblock principles audit (P2.9 split-aware + P10.3 baseline) (#8469) (#8469) *(2026-05-02)*
 - `a1ad80f` — chore(wiki): slim json:entry blocks (drop content+valid_from) + tighten compiler doc-voice prompt (#8465) (#8465) *(2026-05-02)*
 - `f2c7d81` — chore(wiki): split architecture topic + scrub bad-title entries + fix ingest title source (#8462) (#8462) *(2026-05-02)*
-- `1ddef37` — fix(wiki): preserve last_lint across rebuild + add wiki-freshness dead-man-switch (#8459) (#8459) *(2026-05-02)*
-- `63e59cc` — chore(cleanup): drop redundant docstrings + comments + section markers (#8458) (#8458) *(2026-05-02)*
-- `4183700` — fix(contracts): break src→tests import — relocate _schema to src/contracts/ (#8457) (#8457) *(2026-05-02)*
-- `14e066b` — fix(subprocess): timeouts on subprocess.run in async loop paths (#8456) (#8456) *(2026-05-02)*
 
 
 <!-- arch:generated -->
