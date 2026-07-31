@@ -34,6 +34,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import ModuleType
 
 _REPO = Path(__file__).resolve().parent.parent
 _SRC = _REPO / "src"
@@ -514,7 +515,7 @@ def baseline_high_severity_share() -> float:
     return highs / total
 
 
-def load_audit_module():
+def load_audit_module() -> ModuleType:
     """Import scripts/audit_prompts.py without requiring it on sys.path."""
     spec = importlib.util.spec_from_file_location("_audit_prompts", _AUDIT)
     if spec is None or spec.loader is None:  # pragma: no cover - defensive
@@ -525,7 +526,7 @@ def load_audit_module():
     return module
 
 
-def _load_audit_module():
+def _load_audit_module() -> ModuleType:
     """Deprecated alias for :func:`load_audit_module`; kept for callers not yet migrated."""
     return load_audit_module()
 
