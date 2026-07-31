@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10870
 source_phase: plan
 created_at: 2026-07-31T06:08:36.407893+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Derive render_prompt test fields via inspect.signature

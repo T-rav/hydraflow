@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T07:00:13.289923+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0083
+superseded_by: 0101
 ---
 
 # JsonlLedger split: AppendOnlyJsonlLedger base vs IdentifiedJsonlLedger

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:49:30.426640+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0965
+superseded_by: 1101
 ---
 
 # ADR-0044 P5 checks require both @register() and an ADR table row
