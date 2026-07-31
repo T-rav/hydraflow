@@ -61,7 +61,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0052 | `src.contract_diff`, `src.contract_recording`, `src.mockworld.sandbox_main` | `pytest:tests/test_mockworld_fakes_conformance.py`, `pytest:tests/test_sandbox_scenario_contract.py` |
 | ADR-0053 | `src.repo_wiki`, `src.repo_wiki_loop` | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
 | ADR-0054 | `src.term_proposer_loop`, `src.ubiquitous_language` | `pytest:tests/test_term_proposer_loop.py`, `pytest:tests/architecture/test_term_proposer_wiring.py` |
-| ADR-0055 | `src.base_background_loop`, `src.base_runner`, `src.config`, `src.events`, `src.exception_classify`, `src.mockworld.fakes.fake_honeycomb`, `src.pr_manager`, `src.server`, `src.telemetry.__init__`, `src.telemetry.otel`, `src.telemetry.slugs`, `src.telemetry.spans`, `src.telemetry.subprocess_bridge`, `src.trace_collector`, `src.workspace` | `pytest:tests/architecture/test_otel_invariants.py`, `pytest:tests/regressions/test_otel_disabled_is_noop.py`, `pytest:tests/scenarios/test_telemetry_e2e.py` |
+| ADR-0055 | `src.base_background_loop`, `src.base_runner`, `src.config`, `src.events`, `src.exception_classify`, `src.mockworld.fakes.fake_honeycomb`, `src.pr_manager`, `src.server`, `src.telemetry.__init__`, `src.telemetry.otel`, `src.telemetry.slugs`, `src.telemetry.spans`, `src.telemetry.subprocess_bridge`, `src.trace_collector`, `src.workspace` | — |
 | ADR-0056 | `src.adr_drift`, `src.adr_touchpoint_auditor_loop`, `src.state._adr_audit` | `pytest:tests/test_adr_touchpoint_auditor_loop.py` |
 | ADR-0057 | `src.term_pruner_loop`, `src.ubiquitous_language` | `pytest:tests/test_term_pruner_loop.py`, `pytest:tests/architecture/test_term_pruner_wiring.py` |
 | ADR-0058 | `src.edge_proposer_loop`, `src.ubiquitous_language` | `pytest:tests/test_edge_proposer_loop.py`, `pytest:tests/architecture/test_edge_proposer_wiring.py` |
@@ -124,6 +124,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0115 | `src.audit.adjudicate`, `src.escape.auto_diagnose`, `src.escape_ledger_loop`, `src.sampled_audit_loop` | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface`, `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human`, `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed`, `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld` |
 | ADR-0116 | `src.prompt_fitness` | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_prompt_fitness.py`, `pytest:tests/test_adr_enforcement_completeness.py`, `pytest:tests/test_prompt_rubric_calibration.py` |
 | ADR-0117 | `src.prompt_gate` | `pytest:tests/test_prompt_observatory.py` |
+| ADR-0118 | — | `pytest:tests/architecture/test_no_otel_imports.py` |
 
 ## Module → ADRs
 
@@ -353,10 +354,6 @@ Non-blocking authoring aid (#10458): each ADR below bare-cites a high-churn shar
 | ADR-0050 | `src/models.py` | `src/models.py:<Symbol>` |
 | ADR-0052 | `src/contract_diff.py` | `src/contract_diff.py:<Symbol>` |
 | ADR-0052 | `src/contract_recording.py` | `src/contract_recording.py:<Symbol>` |
-| ADR-0055 | `src/base_background_loop.py` | `src/base_background_loop.py:<Symbol>` |
-| ADR-0055 | `src/config.py` | `src/config.py:<Symbol>` |
-| ADR-0055 | `src/pr_manager.py` | `src/pr_manager.py:<Symbol>` |
-| ADR-0055 | `src/server.py` | `src/server.py:<Symbol>` |
 | ADR-0059 | `src/review_advisor.py` | `src/review_advisor.py:<Symbol>` |
 | ADR-0059 | `src/review_phase/_phase.py` | `src/review_phase/_phase.py:<Symbol>` |
 | ADR-0064 | `src/models.py` | `src/models.py:<Symbol>` |

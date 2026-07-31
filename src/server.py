@@ -505,11 +505,6 @@ def main() -> None:
 
     config = load_runtime_config()
 
-    # Initialize OTel (no-op if otel_enabled is False or HONEYCOMB_API_KEY is unset)
-    from telemetry.otel import init_otel  # noqa: PLC0415
-
-    init_otel(config)
-
     logging.getLogger("hydraflow.server").info(
         "Starting HydraFlow server (dashboard=%s)", config.dashboard_enabled
     )

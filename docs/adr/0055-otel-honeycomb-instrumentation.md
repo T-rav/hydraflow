@@ -2,22 +2,13 @@
 
 ## Status
 
-Accepted
+Superseded
 
-**Enforcement:** enforced
-
-**Enforced by:**
-pytest:tests/architecture/test_otel_invariants.py
-pytest:tests/regressions/test_otel_disabled_is_noop.py
-pytest:tests/scenarios/test_telemetry_e2e.py
+**Superseded by:** [ADR-0118](0118-observability-belongs-to-the-sre-agent-not-the-loops.md) — OTel/Honeycomb is removed; observability moves to a dedicated SRE agent targeting New Relic, not instrumentation woven into the loops. Phase A never turned on (dormant, free-tier) and Phase B never came.
 
 ## Date
 
 2026-05-06
-
-## Enforced by
-
-`tests/architecture/test_otel_invariants.py`, `tests/regressions/test_otel_disabled_is_noop.py`, `tests/scenarios/test_telemetry_e2e.py`
 
 ## Context
 

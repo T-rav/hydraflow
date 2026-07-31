@@ -31,7 +31,6 @@ graph LR
     src_sentry["src.sentry"]
     src_signal_control["src.signal_control"]
     src_state["src.state"]
-    src_telemetry["src.telemetry"]
     src_vitals["src.vitals"]
     src -- "7" --> src_arch
     src -- "10" --> src_audit
@@ -47,7 +46,6 @@ graph LR
     src -- "18" --> src_preflight
     src -- "1" --> src_review_phase
     src -- "61" --> src_state
-    src -- "7" --> src_telemetry
     src -- "4" --> src_vitals
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
@@ -62,8 +60,7 @@ graph LR
     src_disturbance_detectors -- "5" --> src_disturbance
     src_erosion -- "3" --> src_arch
     src_intervention -- "3" --> src_escape
-    src_mockworld_fakes -- "31" --> src_mockworld
-    src_mockworld_fakes -- "1" --> src_telemetry
+    src_mockworld_fakes -- "30" --> src_mockworld
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
     src_review_phase -- "1" --> src

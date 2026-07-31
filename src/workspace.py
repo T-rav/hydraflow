@@ -19,7 +19,6 @@ from pathlib import Path
 
 from config import Credentials, HydraFlowConfig
 from subprocess_util import run_subprocess
-from telemetry.spans import port_span  # noqa: E402
 
 logger = logging.getLogger("hydraflow.workspace")
 
@@ -454,7 +453,6 @@ class WorkspaceManager:
         )
         return output.strip()
 
-    @port_span("hf.port.workspace.create")
     async def create(self, issue_number: int, branch: str) -> Path:
         """Create a workspace for *issue_number* on *branch*.
 
@@ -679,7 +677,6 @@ class WorkspaceManager:
             "Reset worktree %s to origin/%s", worktree_path, self._config.base_branch()
         )
 
-    @port_span("hf.port.workspace.merge_main")
     async def merge_main(self, worktree_path: Path, branch: str) -> bool:
         """Merge latest main into *branch* inside *worktree_path*.
 

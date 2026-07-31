@@ -55,10 +55,8 @@ entries:
   src/auto_tighten/pr_author.py::noqa:PLC0415: 2
   src/auto_tighten_loop.py::noqa:PLC0415: 1
   src/base_background_loop.py::noqa:BLE001: 2
-  src/base_background_loop.py::noqa:E402: 1
   src/base_background_loop.py::noqa:TCH002: 1
   src/base_runner.py::noqa:BLE001: 1
-  src/base_runner.py::noqa:E402: 1
   "src/base_runner.py::noqa:F401\u2014usedin_inject_adr_index": 1
   src/base_runner.py::noqa:PLC0415: 3
   src/base_runner.py::noqa:TCH004: 1
@@ -129,10 +127,8 @@ entries:
   src/edge_proposer_loop.py::noqa:PLC0415: 1
   src/entry_evidence_loop.py::noqa:SLF001: 1
   src/epic.py::noqa:BLE001: 1
-  src/events.py::noqa:BLE001: 1
   src/events.py::noqa:S101: 1
-  src/exception_classify.py::noqa:BLE001: 1
-  src/exception_classify.py::noqa:PLC0415: 3
+  src/exception_classify.py::noqa:PLC0415: 1
   src/execution.py::noqa:A002: 2
   src/execution.py::noqa:PLW0603: 1
   "src/fake_coverage_auditor_loop.py::noqa:BLE001\u2014auditmustnotcrashtheloop": 1
@@ -177,8 +173,6 @@ entries:
   src/mockworld/fakes/fake_clock.py::noqa:PLC0415: 3
   src/mockworld/fakes/fake_github.py::noqa:PLC0415: 1
   src/mockworld/fakes/fake_github.py::type-ignore[arg-type]: 1
-  src/mockworld/fakes/fake_honeycomb.py::noqa:BLE001: 1
-  src/mockworld/fakes/fake_honeycomb.py::noqa:SLF001: 2
   src/mockworld/fakes/fake_issue_fetcher.py::type-ignore[attr-defined]: 5
   src/mockworld/fakes/fake_issue_store.py::noqa:BLE001: 1
   src/mockworld/fakes/fake_review_insight_store.py::noqa:PLC0415: 1
@@ -215,7 +209,6 @@ entries:
   "src/post_merge_handler.py::noqa:BLE001\u2014neverblockmergepathonwikiI/O": 1
   src/post_merge_handler.py::noqa:PLC0415: 5
   src/pr_manager.py::noqa:BLE001: 1
-  src/pr_manager.py::noqa:E402: 1
   src/pr_manager.py::noqa:PLC0415: 26
   src/pr_manager.py::type-ignore[arg-type]: 1
   src/pr_unsticker.py::noqa:PLC0415: 3
@@ -245,7 +238,6 @@ entries:
   src/research_runner.py::type-ignore[override]: 1
   src/retrospective.py::noqa:PLC0415: 4
   src/retrospective_loop.py::noqa:PLC0415: 2
-  "src/review_advisor.py::noqa:BLE001\u2014telemetryneverbreaksbusinesslogic": 3
   src/review_advisor.py::noqa:PLC0415: 2
   src/review_advisor.py::type-ignore[override]: 1
   src/review_insights.py::noqa:BLE001: 1
@@ -274,7 +266,7 @@ entries:
   src/sentry_loop.py::noqa:PLC0415: 3
   "src/sentry_loop.py::noqa:PLR0911\u2014lineargatechecks,eachwithitsownreturnpath": 1
   "src/sentry_loop.py::noqa:TCH004\u2014usedin__init__signature": 2
-  src/server.py::noqa:PLC0415: 18
+  src/server.py::noqa:PLC0415: 17
   src/server.py::type-ignore[arg-type]: 2
   src/server.py::type-ignore[no-untyped-def]: 1
   src/service_registry.py::noqa:F841: 32
@@ -303,14 +295,12 @@ entries:
   src/subprocess_util.py::noqa:PLW2901: 2
   src/subprocess_util.py::noqa:S101: 1
   src/subprocess_util.py::noqa:S311: 1
-  src/telemetry/otel.py::noqa:PLW0603: 3
-  src/telemetry/spans.py::type-ignore[return-value]: 3
   src/term_proposer_loop.py::noqa:PLC0415: 1
   src/term_proposer_runtime.py::noqa:PLC0415: 3
   src/test_scaffold.py::noqa:BLE001: 1
   src/trace_collector.py::noqa:E402: 2
   "src/trace_collector.py::noqa:E402\u2014intentionallynearhelperstosurviveruffunused-importsweeps": 1
-  src/trace_collector.py::noqa:PLC0415: 3
+  src/trace_collector.py::noqa:PLC0415: 1
   src/trace_rollup.py::noqa:PLC0415: 2
   "src/trace_rollup.py::noqa:PLR0911\u2014early-returnguardsformissing/malformedtracefiles": 1
   src/transcript_summarizer.py::noqa:PLC0415: 1
@@ -340,6 +330,5 @@ entries:
   src/wiki_rot_detector_loop.py::noqa:BLE001: 4
   src/wiki_rot_detector_loop.py::noqa:PLC0415: 3
   src/wiki_supersession_repair.py::noqa:PLC0415: 1
-  src/workspace.py::noqa:E402: 1
   src/workspace.py::noqa:S311: 1
   src/workspace_gc_loop.py::noqa:BLE001: 9
