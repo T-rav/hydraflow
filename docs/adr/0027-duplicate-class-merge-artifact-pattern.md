@@ -41,12 +41,17 @@ have exactly one definition across the entire `src/` tree. If a type is used by
 multiple modules, it belongs in `models.py`. If it is used by a single feature module,
 it belongs in that module only — not also in `models.py`.
 
-### 2. PR review: grep for class name uniqueness
+### 2. PR review: grep for class name uniqueness (retired — see Rule 5)
 
 During code review of any PR that adds or renames a model class, reviewers must grep
 all source files (`src/**/*.py`) for the class name. If the name appears in more than
 one module (excluding imports and type annotations), the duplicate must be resolved
 before merge.
+
+**Retired as of #10867:** Trigger C's calendar deadline fired and the automated
+check (`tests/architecture/test_adr0027_duplicate_model_class_definitions.py`) now
+enforces this on every PR. Per Rule 5, the automated rule replaces this manual step
+entirely — reviewers no longer need to grep for class-name collisions by hand.
 
 ### 3. Conflict resolution strategy
 
@@ -89,6 +94,15 @@ when **any** of the following conditions is met:
 Once any trigger fires, the automated rule replaces Rule 2 entirely — the manual
 grep step is removed from the review checklist.
 
+**Trigger C fired (#10867):** the 2026-06-01 deadline passed before an automated
+check landed. `test_no_dead_duplicate_model_class_definitions` now implements that
+automation — it AST-scans `src/` for model classes duplicated by name and flags a
+definition only when it is a genuinely dead merge-artifact copy (unreferenced
+elsewhere and within its own file), which is Rule 3's concrete symptom rather than
+the full breadth of Rule 1's "exactly one definition" statement. Same-named classes
+that are each independently used (Rule 4's documented-intentional-duplicate case)
+are not flagged, by design.
+
 ### 6. One-time codebase audit
 
 Before this ADR moves to Accepted, a time-boxed audit must be completed:
@@ -108,10 +122,10 @@ Before this ADR moves to Accepted, a time-boxed audit must be completed:
 
 ### Operational impact on HydraFlow workers
 
-- **Review agent** (`src/reviewer.py:ReviewRunner`): Must flag duplicate class
-  names as a review finding. A grep-based check during the review phase catches
-  this pattern until an automated lint rule replaces it (see Rule 5 automation
-  triggers).
+- **Review agent** (`src/reviewer.py:ReviewRunner`): No longer needs to grep for
+  duplicate class names manually — `test_no_dead_duplicate_model_class_definitions`
+  runs on every PR via `make quality` and fails the build on a dead merge-artifact
+  duplicate (Rule 5, Trigger C fired per #10867).
 - **Implementation agent** (`src/agent.py:AgentRunner`): When adding new model
   classes, the agent must search for existing classes with the same name before
   creating a new definition.

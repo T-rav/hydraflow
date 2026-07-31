@@ -10,7 +10,7 @@ specification {
 }
 
 model {
-  adrCorpus = artifact 'docs/adr/*.md' {
+  adr0027Corpus = artifact 'docs/adr/*.md' {
     description 'ADR-0027 flips **Enforcement:** decision-of-record -> enforced + **Enforced by:** pytest:...'
   }
 
@@ -39,11 +39,11 @@ model {
   }
 
   newCheck = test 'tests/architecture/test_adr0027_duplicate_model_class_definitions.py' {
-    description 'AST scan of src/**/*.py for data-model classes (BaseModel | @dataclass | TypedDict) defined in >1 module; Rule-4 structural exclusions (Protocol/ABC/Enum/Exception) + curated justified allow-list'
+    description 'AST scan of src/**/*.py for data-model classes (BaseModel | @dataclass | TypedDict) defined in >1 module; Rule-4 structural exclusions (Protocol/ABC/Enum/Exception) + a semantic dead-code filter (no allow-list) — flags only a definition unreferenced elsewhere and within its own file'
   }
 
   srcTree = artifact 'src/**/*.py' {
-    description '993 classes; 8 cross-module data-model duplicates today'
+    description '993 classes; 6 cross-module data-model duplicate names (12 definitions) today, all exempted by the semantic filter as genuinely used'
   }
 
   sibling = test 'tests/architecture/test_adr0023_test_local_class_instantiation.py' {
@@ -51,15 +51,15 @@ model {
   }
 
   newCheck -> srcTree 'reads'
-  adrCorpus -> newCheck 'Enforced by:'
-  conformance.index -> adrCorpus 'reads'
+  adr0027Corpus -> newCheck 'Enforced by:'
+  conformance.index -> adr0027Corpus 'reads'
   conformance.classify -> conformance.index 'classifies'
   conformance.classify -> newCheck 'resolve_check(pytest node exists)'
   conformance.generator -> conformance.classify 'renders'
   ratchet.ratchetTest -> conformance.classify 'imports'
   ratchet.ratchetTest -> ratchet.baseline 'reads'
   ratchet.ratchetTest -> ratchet.exemptions 'reads'
-  ratchet.ratchetTest -> adrCorpus 'gates'
+  ratchet.ratchetTest -> adr0027Corpus 'gates'
   sibling -> newCheck 'pattern for'
 }
 
@@ -72,7 +72,7 @@ views {
 
   dynamic view classifyFlow {
     title 'How ADR-0027 becomes REAL'
-    conformance.index -> adrCorpus 'parse Enforcement + Enforced by'
+    conformance.index -> adr0027Corpus 'parse Enforcement + Enforced by'
     conformance.classify -> conformance.index 'ADR(enforcement=enforced, checks=[pytest:...])'
     conformance.classify -> newCheck 'resolve_check: node defined?'
     conformance.classify -> ratchet.ratchetTest 'REAL'
