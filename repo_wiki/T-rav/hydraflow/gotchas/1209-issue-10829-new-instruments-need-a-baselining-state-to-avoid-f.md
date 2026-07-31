@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10829
 source_phase: plan
 created_at: 2026-07-31T01:09:02.057439+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # New instruments need a baselining state to avoid false-positive first reports

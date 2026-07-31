@@ -38,8 +38,13 @@ def test_grandfather_entries_resolve_to_real_tests(real_repo_root: Path) -> None
             missing.append(f"{entry} (no such file: {rel_path})")
             continue
         source = test_file.read_text(encoding="utf-8")
-        if f"def {name}(" not in source:
-            missing.append(f"{entry} (no `def {name}(` in {rel_path})")
+        # A parametrized nodeid carries a ``[param-id]`` suffix that is not part
+        # of the function's ``def`` line — strip it for the static lookup so a
+        # grandfathered parametrized case (e.g. the s34 sandbox scenario)
+        # resolves to its real function.
+        func_name = name.split("[", 1)[0]
+        if f"def {func_name}(" not in source:
+            missing.append(f"{entry} (no `def {func_name}(` in {rel_path})")
 
     assert missing == [], (
         "Grandfathered slow tests no longer resolve (rename/delete/typo?). "

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10789
 source_phase: plan
 created_at: 2026-07-31T02:16:58.506539+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1816
 ---
 
 # HydraFlowConfig pydantic extra=ignore silently tolerates stale keys

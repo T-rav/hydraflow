@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10789
 source_phase: plan
 created_at: 2026-07-31T02:16:58.506531+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # make arch-regen stale-artifact gate and hand-maintained yml input

@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10817
 source_phase: plan
 created_at: 2026-07-31T01:28:07.215000+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1020
 ---
 
 # Gauntlet-classified artifacts are not adversarial: DiagramLoop writes gauntlet-calibration.md

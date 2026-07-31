@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T02:43:14.339010+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1610
+superseded_by: 1787
 ---
 
 # Presentational-only Header.jsx changes skip MockWorld layer

@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 10817
 source_phase: plan
 created_at: 2026-07-31T01:28:07.214985+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1019
 ---
 
 # Use startswith on normalized posix paths, not substring `in`, for scope checks
