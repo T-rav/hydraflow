@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T01:04:04.411311+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1522
+superseded_by: 1687
 ---
 
 # Escape ledger two-stage collapse: by id, then by detection_ref

@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 10823
 source_phase: plan
 created_at: 2026-07-31T00:48:51.333082+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0077
 ---
 
 # Don't add a BaseBackgroundLoop to analyze loop interactions

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T01:04:04.460743+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1546
+superseded_by: 1711
 ---
 
 # test_issue_10799.py is spec and gate, never weaken
