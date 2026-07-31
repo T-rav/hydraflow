@@ -1,0 +1,16 @@
+{
+  "builder": "spec_match.build_self_review_prompt",
+  "args": {
+    "issue": {
+      "id": 9812,
+      "title": "Retry transient S3 upload failures",
+      "body": "Intermittent 503s on large uploads.\n\n## Acceptance\n- bounded exponential backoff\n- give up after 5 attempts\n- log at warning",
+      "tags": [
+        "bug"
+      ],
+      "comments": []
+    },
+    "diff_summary": "MODIFIED: src/uploader.py (+22/-3)\nADDED: tests/test_uploader_retry.py (+48)"
+  },
+  "faked_deps": {}
+}

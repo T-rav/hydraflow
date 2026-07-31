@@ -1,0 +1,11 @@
+{
+  "builder": "prompt_refiner.build_refine_prompt",
+  "args": {
+    "skill_name": "diff-sanity"
+  },
+  "faked_deps": {
+    "repo_root": "refine_diff_sanity",
+    "case_dir": "refine_diff_sanity",
+    "failure_transcript": "refine_diff_sanity"
+  }
+}

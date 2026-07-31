@@ -22,7 +22,7 @@ def test_resolve_main_contexts_excludes_staging_only() -> None:
 def test_resolve_staging_contexts() -> None:
     contract = load_gates(CONTRACT)
     ctx = resolve_contexts(contract, "staging")
-    assert ctx == ["Detect Changes", "discover-projects"]
+    assert ctx == ["Detect Changes", "discover-projects", "CI Gate"]
 
 
 def test_render_main_matches_committed_json() -> None:

@@ -127,6 +127,11 @@ _SLOW_TEST_GRANDFATHER = frozenset(
         "tests/test_audit_prompts.py::test_canary_cross_check_passes_when_every_trace_builder_registered",
         "tests/test_audit_prompts.py::test_canary_cross_check_flags_drift_over_threshold",
         "tests/test_orchestrator_integration.py::test_credit_pause_publishes_alerts_and_restores_loops",
+        # s34 is a full diagram-loop no-op sandbox scenario that legitimately
+        # runs right at the ~60s budget (60.1–60.7s), so it flakes the ratchet
+        # every other run and blocks unrelated PRs (#10772, #10811, and all
+        # session PRs). Exempt it; the scenario body is already a fixed no-op.
+        "tests/scenarios/test_sandbox_parity.py::test_sandbox_scenario_runs_in_process[s34_diagram_loop_no_changes]",
     }
 )
 

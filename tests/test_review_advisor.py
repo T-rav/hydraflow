@@ -1709,10 +1709,10 @@ class TestMidFlightSentinelRouting:
         assert MidFlightAdvisor.SENTINEL.startswith("<!--")
         assert MidFlightAdvisor.SENTINEL.endswith("-->")
 
-    def test_format_mid_flight_for_prompt_documents_sentinel(self):
-        from review_advisor import format_mid_flight_for_prompt
+    def test_build_mid_flight_prompt_documents_sentinel(self):
+        from review_advisor import build_mid_flight_prompt
 
-        section = format_mid_flight_for_prompt(SURFACE_ADVISOR_CONFIGS["pr_review"])
+        section = build_mid_flight_prompt(SURFACE_ADVISOR_CONFIGS["pr_review"])
         assert section is not None
         # Executor-facing instruction text must include the sentinel so the
         # in-session Task call wraps it into the prompt.

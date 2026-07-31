@@ -505,7 +505,7 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
             return raw
         return raw[:limit] + f"\n[Comment truncated from {len(raw):,} chars]"
 
-    def _build_tdd_subagent_plan(
+    def _build_tdd_subagent_prompt(
         self,
         plan_comment: str,
         bead_mapping: dict[str, str] | None = None,
@@ -634,7 +634,7 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
             builder.record_history("Implementation plan", raw_plan, plan_comment)
             # Detect whether the plan uses Task Graph format
             if has_task_graph(plan_comment):
-                plan_section = self._build_tdd_subagent_plan(
+                plan_section = self._build_tdd_subagent_prompt(
                     plan_comment, bead_mapping=bead_mapping
                 )
             else:

@@ -6,7 +6,7 @@ import pytest
 
 from prompt_refiner import (
     PatchParseError,
-    assemble_refine_context,
+    build_refine_prompt,
     parse_patch_response,
 )
 from tests.trust.adversarial.corpus_runner import CASES_DIR, discover_cases, is_holdout
@@ -18,7 +18,7 @@ def test_context_contains_builder_source_and_case_material(tmp_path: Path) -> No
     (case / "after").mkdir()
     (case / "README.md").write_text("# some-case\nKeyword: kw-1\n")
     (case / "expected_transcript.txt").write_text("EXPECTED-MARKER\n")
-    ctx = assemble_refine_context(
+    ctx = build_refine_prompt(
         Path.cwd(), case, "diff-sanity", failure_transcript="FAILED-MARKER"
     )
     assert "build_diff_sanity_prompt" in ctx  # builder source embedded
@@ -31,7 +31,7 @@ def test_context_refuses_holdout_case(tmp_path: Path) -> None:
     (case / "after").mkdir()
     (case / "HOLDOUT").write_text("")
     with pytest.raises(ValueError, match="holdout"):
-        assemble_refine_context(Path.cwd(), case, "diff-sanity", failure_transcript="")
+        build_refine_prompt(Path.cwd(), case, "diff-sanity", failure_transcript="")
 
 
 def test_no_holdout_content_reachable_via_context() -> None:
@@ -41,7 +41,7 @@ def test_no_holdout_content_reachable_via_context() -> None:
     assert holdouts, "seed holdout cases missing"
     normal = list(discover_cases(CASES_DIR, include_holdout=False))[:3]
     for case in normal:
-        ctx = assemble_refine_context(
+        ctx = build_refine_prompt(
             Path.cwd(), case, "diff-sanity", failure_transcript="x"
         )
         for trap in holdouts:

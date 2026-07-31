@@ -496,7 +496,7 @@ a final specification for the engineering team:
 - When you reference code feasibility, cite actual files you found
 - When you reference competitors, cite actual features you researched
 
-{MEMORY_SUGGESTION_PROMPT}
+{MEMORY_SUGGESTION_PROMPT.format(context="shaping conversation")}
 """
 
         plugin_skills_section = format_plugin_skills_for_prompt(

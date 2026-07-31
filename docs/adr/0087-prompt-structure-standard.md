@@ -1,9 +1,25 @@
 # ADR-0087: Prompt structure standard (XML tags, 8-criterion rubric, mechanical scoring)
 
-- **Status:** Proposed
-- **Date:** 2026-04-21
+- **Status:** Accepted
+- **Date:** 2026-04-21 (accepted 2026-07-30)
 - **Supersedes:** none (codifies an implicit convention that was never documented)
 - **Superseded by:** none
+- **Related:** [ADR-0116](0116-prompts-as-a-measured-contract.md) — the enforcement vehicle for this standard
+- **Enforcement:** enforced
+- **Binds:** both
+
+**Enforced by:**
+pytest:tests/test_prompt_registry_completeness.py
+pytest:tests/test_audit_prompts.py
+
+> **Accepted 2026-07-30.** This ADR sat at `Proposed` for three months: the
+> rubric was mechanised in `scripts/audit_prompts.py` and the registry was
+> built, but nothing bound them, so the registry drifted to 25 of 65 builders
+> unnoticed and no gate ever objected. A standard that cannot be
+> violated-and-detected is not a standard. ADR-0116 supplies the completeness
+> ratchet, the CI wiring, and the mandatory outcome pairing that make this one
+> binding; this ADR retains ownership of the tag vocabulary and the eight
+> criteria.
 
 ## Context
 

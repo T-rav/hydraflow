@@ -1,0 +1,20 @@
+{
+  "builder": "discover_runner.DiscoverRunner._build_prompt",
+  "args": {
+    "task": {
+      "id": 9812,
+      "title": "Surface sampled-audit escapes as a weekly digest on the Insights tab",
+      "body": "## Problem\n\nUpheld sampled-audit disagreements land in `escape_ledger.jsonl` and nowhere\nelse. Reading them today means SSHing to the host and `jq`-ing a JSONL file, so\nnobody reads them, and the escape rate the loop exists to measure is invisible\nto the people deciding whether the gauntlet is working. On the 2026-07-19 host\nthe ledger has 41 rows, 17 of them `detection_source: sampled-audit`, and none\nof them appear anywhere in the UI.\n\n## Requested\n\n1. Aggregate `EscapeRecord` rows into ISO week buckets (Monday-start, UTC).\n2. Per bucket, report: total escapes, count by `detection_source`, count by\n   blast-radius stratum, and the three highest-stratum PR numbers.\n3. Expose the aggregate at `GET /api/insights/escape-digest?weeks=N`\n   (`weeks` defaults to 8, clamped to 1..26).\n4. Render it on the Insights tab as a table, newest week first, with a\n   sparkline of the weekly totals.\n5. An empty ledger must render an explicit \"no escapes recorded\" state, not an\n   empty table and not a 500.\n\n## Who reads it\n\nWhoever is deciding whether a gauntlet change helped: the person reviewing an\nRC promotion, and the human on the escalation rota when a loop starts filing\nfindings faster than usual.\n",
+      "tags": [
+        "hydraflow-find",
+        "hydraflow-discover",
+        "area:observability",
+        "P2"
+      ],
+      "comments": [],
+      "created_at": "2026-07-19T11:02:00Z"
+    },
+    "guidance": "Keep this to a read-only view for now. I want the escape trend visible to the people arguing about gauntlet changes, not a new alerting surface that pages someone at 2am off a number we do not trust yet. If the aggregation and the UI cannot both land this cycle, land the aggregation and the API and leave the tab alone."
+  },
+  "faked_deps": {}
+}

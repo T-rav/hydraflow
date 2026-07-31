@@ -1,0 +1,21 @@
+{
+  "builder": "sandbox_failure_fixer_loop.SandboxFailureFixerLoop._build_prompt",
+  "args": {
+    "pr": {
+      "number": 9871,
+      "issue_number": 9861,
+      "branch": "agent/issue-9861",
+      "labels": [
+        "sandbox-fail-auto-fix",
+        "hydraflow-review"
+      ]
+    }
+  },
+  "faked_deps": {},
+  "instance_attrs": {
+    "_prs": {
+      "fake": "prs_port",
+      "shape": "settled_red_9871"
+    }
+  }
+}

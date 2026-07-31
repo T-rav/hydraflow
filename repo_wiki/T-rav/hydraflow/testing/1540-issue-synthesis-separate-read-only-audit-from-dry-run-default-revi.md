@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-28T19:46:33.816564+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1453
+superseded_by: 1622
 ---
 
 # Separate read-only audit from dry-run-default revive tool

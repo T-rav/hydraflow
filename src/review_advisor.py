@@ -1364,7 +1364,7 @@ def _max_midflight_consults() -> int:
         return 5
 
 
-def format_mid_flight_for_prompt(
+def build_mid_flight_prompt(
     surface_config: SurfaceAdvisorConfig,
 ) -> str | None:
     """Build the executor-prompt section that documents the consult_advisor

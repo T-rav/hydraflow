@@ -890,8 +890,8 @@ Then a brief summary on the next line starting with "SUMMARY: ".
         # rubric items. Empty string when no plan was produced (kill-switched,
         # composite trigger said "no", or advisor degraded to None).
         from review_advisor import (  # noqa: PLC0415
+            build_mid_flight_prompt,
             build_surface_config,
-            format_mid_flight_for_prompt,
             format_pre_flight_for_prompt,
         )
 
@@ -906,7 +906,7 @@ Then a brief summary on the next line starting with "SUMMARY: ".
         # Returns None when mid-flight is disabled; coerce to "" so the
         # f-string concatenation below stays branch-free.
         mid_flight_section = (
-            format_mid_flight_for_prompt(build_surface_config(surface)) or ""
+            build_mid_flight_prompt(build_surface_config(surface)) or ""
         )
 
         prompt = f"""You are reviewing PR #{pr.number} which implements issue #{issue.id}.

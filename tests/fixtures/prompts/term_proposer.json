@@ -1,0 +1,7 @@
+{
+  "builder": "term_proposer_llm.TermProposerLLM._build_prompt",
+  "args": {},
+  "faked_deps": {
+    "ctx": "term_proposer_audit_sample_ledger"
+  }
+}

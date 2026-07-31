@@ -1,0 +1,4 @@
+VERDICT: concern
+The hunk header @@ -12,6 +12,22 @@ claims 22 lines but the body carries 4.
+The diff is truncated, not empty. Reviewing it as-is would approve a change
+whose remaining 18 lines were never seen.

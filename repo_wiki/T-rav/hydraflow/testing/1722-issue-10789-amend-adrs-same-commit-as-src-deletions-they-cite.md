@@ -1,0 +1,19 @@
+---
+id: 1722
+topic: testing
+source_issue: 10789
+source_phase: plan
+created_at: 2026-07-31T02:16:58.506521+00:00
+status: superseded
+corroborations: 1
+superseded_by: 1815
+---
+
+# Amend ADRs same-commit as src/ deletions they cite
+
+When deleting `src/` files bare-cited by an Accepted/enforced ADR, amend the ADR in the same commit as the deletion.
+
+- `tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations` red-lines mid-branch if `src/adr_drift_resolver_loop.py` is deleted before ADR-0056 decision point 8 is amended.
+- ADR-0055 bare-cites five `src/telemetry/*.py` files; deleting them without a same-commit ADR edit red-lines the Tests lane.
+
+**Why:** The conformance test treats any ADR citation to a non-existent file as a violation; splitting deletion and amendment across commits breaks the branch for any intermediate CI run.

@@ -118,7 +118,11 @@ def test_real_contract_declares_repo_profile():
 def test_real_contract_output_unchanged_by_filtering():
     c = load_gates(CONTRACT)
     assert len(resolve_contexts(c, "main")) == 14
-    assert resolve_contexts(c, "staging") == ["Detect Changes", "discover-projects"]
+    assert resolve_contexts(c, "staging") == [
+        "Detect Changes",
+        "discover-projects",
+        "CI Gate",
+    ]
     assert unsatisfied_dimensions(c, "main") == []
     assert unsatisfied_dimensions(c, "staging") == []
     # code_scanning (CodeQL) still present because this repo has ghas.

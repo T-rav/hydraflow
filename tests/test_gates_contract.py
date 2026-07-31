@@ -23,12 +23,18 @@ def test_contract_main_requires_fourteen_contexts() -> None:
     assert len(main) == 14
 
 
-def test_contract_staging_requires_two_contexts() -> None:
+def test_contract_staging_requires_baseline_plus_ci_gate() -> None:
     contract = load_gates(CONTRACT)
     staging = [
         g for g in contract.gates if "staging" in g.required_on and g.status == "active"
     ]
-    assert {g.name for g in staging} == {"Detect Changes", "discover-projects"}
+    # "CI Gate" is the aggregate ci-gate job that blocks red staging PRs
+    # (incident #10672); it must be declared so a reconcile can't strip it.
+    assert {g.name for g in staging} == {
+        "Detect Changes",
+        "discover-projects",
+        "CI Gate",
+    }
 
 
 def test_branch_envelopes_present() -> None:

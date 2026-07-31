@@ -1,0 +1,20 @@
+{
+  "builder": "acceptance_criteria.AcceptanceCriteriaGenerator._build_precheck_prompt",
+  "args": {
+    "issue": {
+      "number": 4821,
+      "title": "Escalation banner stays visible after the HITL issue is resolved",
+      "body": "## Summary\n\nThe dashboard's red escalation banner keeps reading \"1 issue awaiting human\ninput\" after the underlying HITL issue has been resolved. It only clears on a\nhard page reload, so operators watching the board believe the queue is blocked\nwhen it is not.\n\n## Reproduction\n\n1. Label an open issue `hydraflow-hitl` and wait for `HITLRunner` to post its\n   question comment (about 30s on the sandbox fleet).\n2. Open the run dashboard at `/dashboard`. The escalation banner appears with a\n   link to the issue.\n3. Answer the question in the issue thread and remove the `hydraflow-hitl`\n   label so the issue leaves the escalation set.\n4. Watch the banner for two minutes without reloading.\n\n## Expected\n\nThe banner disappears within one poll interval (5s) of the issue leaving the\nescalation set, and `GET /api/escalations` no longer lists it.\n\n## Observed\n\n`GET /api/escalations` correctly returns `[]` once the label is removed, so the\nAPI side is fine. The front end keeps rendering the last non-empty payload\nbecause `renderEscalations()` early-returns when the list is empty instead of\nclearing the container. Separately, `HITLRunner.reconcile_escalations()` only\never adds to `self._escalations` — resolved issues stay in the in-memory set\nuntil the process restarts, so a fleet restart is currently the only way to get\na correct count from a long-running orchestrator.\n\n## Affected\n\n- `src/hitl_runner.py` — `reconcile_escalations()` never removes entries\n- `web/api.py` — `/api/escalations` returns 204 with no body when the set is\n  empty, which the front end treats as \"no update\"\n- `web/static/js/dashboard.js` — `renderEscalations()` early-return\n- No regression coverage in `tests/test_hitl_runner.py`\n\n## Notes\n\nReported twice in one week by the on-call rotation. Second report included a\nscreenshot of a banner citing issue #4610, which had been closed for six days.\n",
+      "labels": [
+        "bug",
+        "dashboard",
+        "hitl"
+      ],
+      "comments": []
+    },
+    "issue_number": 4821,
+    "pr_number": 4839,
+    "diff_summary": " src/hitl_runner.py               | 38 ++++++++++++++++++++++++++++-----\n web/api.py                       |  6 ++++--\n web/static/js/dashboard.js       | 14 ++++++++++---\n tests/test_hitl_runner.py        | 38 ++++++++++++++++++++++++++++++++++\n tests/test_web_api.py            |  9 +++++++++\n 5 files changed, 92 insertions(+), 13 deletions(-)\n\nKey changes:\n- src/hitl_runner.py: reconcile_escalations() now diffs the live label set in\n  both directions and deletes resolved entries; publishes one\n  ESCALATION_RESOLVED event per poll carrying the sorted removed issue numbers.\n- web/api.py: GET /api/escalations returns JSONResponse([]) with status 200 on\n  an empty set instead of a bare 204.\n- web/static/js/dashboard.js: renderEscalations() clears the list container and\n  hides the banner on an empty payload; toggles aria-live with visibility.\n- tests: two new HITLRunner regression tests (removal + idempotence) and one\n  web API test asserting the 200/empty-array contract."
+  },
+  "faked_deps": {}
+}

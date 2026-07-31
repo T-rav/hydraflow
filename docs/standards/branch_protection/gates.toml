@@ -186,6 +186,25 @@ status = "active"
 workflow = "quality.yml"
 job = "discover-projects"
 
+# The aggregate CI Gate: the ``ci-gate`` job (ci.yml) fans-in the required
+# checks and is what actually blocks a red staging PR from merging (incident
+# #10672 — without it, red CI merged to staging). It was required on the live
+# staging ruleset via operator PUT but never declared here, so a reconcile from
+# the contract would have stripped it and regressed the incident. Declared now
+# so ``make gen-gates`` keeps it.
+[[gate]]
+name = "CI Gate"
+dimension = "ci-aggregate"
+make_target = ""
+tier = "core"
+required_on = ["staging"]
+runs_on = ["staging"]
+languages = ["python"]
+requires_capability = []
+status = "active"
+workflow = "ci.yml"
+job = "ci-gate"
+
 # --- extras (rc/* -> main promotion only) ---
 [[gate]]
 name = "Resolve RC PR"

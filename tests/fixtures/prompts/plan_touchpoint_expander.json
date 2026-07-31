@@ -1,0 +1,8 @@
+{
+  "builder": "plan_touchpoint_expander.PlanTouchpointExpander._build_prompt",
+  "args": {},
+  "faked_deps": {
+    "plan": "escape_digest",
+    "findings": "digest_plan_blocking"
+  }
+}

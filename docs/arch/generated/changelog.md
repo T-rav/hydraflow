@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `33215fc` — Merge origin/main into rc/2026-07-31-0053 (promotion sync) *(2026-07-31)*
+- `f5d6727` — feat(prompts): prompts as a measured contract — registry ratchet + fitness function (ADR-0116) (#10856) (#10856) *(2026-07-30)*
+- `2b4eaf4` — chore(rc): regenerate arch artifacts for rc/2026-07-30-1058 promotion *(2026-07-30)*
 - `ed39cc6` — Merge origin/main into rc/2026-07-30-1058 (promotion sync) *(2026-07-30)*
 - `819e0a4` — feat(ul): edge-proposer — 12 new edges across 12 terms (#10815) (#10815) *(2026-07-30)*
 - `9e01094` — fix(arch): deterministic regen so unchanged architecture produces no diff/PR (#10811) (#10811) *(2026-07-28)*

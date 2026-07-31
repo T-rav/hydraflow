@@ -1,0 +1,7 @@
+{
+  "builder": "review_advisor.PreFlightAdvisor._build_prompt",
+  "args": {},
+  "faked_deps": {
+    "inp": "escape_digest_preflight"
+  }
+}

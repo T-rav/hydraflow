@@ -1,0 +1,13 @@
+{
+  "builder": "research_runner.ResearchRunner._build_prompt",
+  "args": {},
+  "faked_deps": {
+    "task": "bug_9861"
+  },
+  "instance_attrs": {
+    "_wiki_store": {
+      "fake": "repo_wiki_store",
+      "shape": "digest_9861"
+    }
+  }
+}
