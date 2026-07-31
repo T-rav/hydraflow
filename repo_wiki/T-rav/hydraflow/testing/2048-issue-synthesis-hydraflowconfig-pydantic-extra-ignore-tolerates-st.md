@@ -1,0 +1,18 @@
+---
+id: 2048
+topic: testing
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-07-31T12:50:53.994535+00:00
+status: active
+corroborations: 1
+supersedes: 1921
+---
+
+# HydraFlowConfig pydantic extra=ignore tolerates stale keys
+
+Removing a config field from `HydraFlowConfig` is back-compatible: pydantic `extra='ignore'` silently drops unknown keys in persisted settings JSON. Pin this with a stale-key tolerance test.
+
+Example: after excising `memory_auto_approve`, a persisted settings JSON carrying the key degrades silently rather than raising.
+
+**Why:** Operators' persisted configs survive flag removal without manual migration — but only if the tolerance is explicitly tested, not assumed.

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10889
 source_phase: plan
 created_at: 2026-07-31T10:36:59.292261+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2064
 ---
 
 # src.-prefixed imports in tests/conftest.py create duplicate module objects

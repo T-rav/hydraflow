@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:59:06.554200+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1818
+superseded_by: 2050
 ---
 
 # AST-scan resolve_defaults call graph to ratchet env-key coverage

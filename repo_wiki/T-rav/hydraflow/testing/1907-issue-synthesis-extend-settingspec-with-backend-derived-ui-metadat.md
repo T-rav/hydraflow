@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T06:59:06.371697+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1802
+superseded_by: 2034
 ---
 
 # Extend SettingSpec with backend-derived UI metadata

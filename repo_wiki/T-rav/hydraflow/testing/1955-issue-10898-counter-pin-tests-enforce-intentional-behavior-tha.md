@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10898
 source_phase: plan
 created_at: 2026-07-31T11:06:20.726251+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2073
 ---
 
 # Counter-pin tests enforce intentional behavior that looks buggy
