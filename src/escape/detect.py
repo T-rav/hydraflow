@@ -9,8 +9,7 @@ inputs, no git, unit-testable with synthetic data). ``commits_for_range`` and
 
 Detection sources (v1, decided): revert commits, regression-pin commits
 (a new file under ``tests/regressions/``), hotfix commits referencing a prior
-merge, and bug-issue fixes (a ``fix`` commit closing ``#N``). Sentry-sourced
-escapes are attributed in the ``SentryLoop`` flow, not here. Exactly one
+merge, and bug-issue fixes (a ``fix`` commit closing ``#N``). Exactly one
 candidate is emitted per commit — the strongest signal wins by precedence
 (revert > regression-pin > hotfix > bug-issue), so a merged revert / hotfix /
 regression-pin each produce exactly one ledger row.

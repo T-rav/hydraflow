@@ -865,12 +865,13 @@ class ReviewInsightStorePort(Protocol):
 class ObservabilityPort(Protocol):
     """Observability boundary (ADR-0044 P7.7).
 
-    The concrete adapter today is Sentry-backed (see
-    ``src/observability/sentry_adapter.py``); the port exists so a future OTLP,
-    structured-log, or sidecar adapter can slot in without editing call sites.
-    Keep the surface minimal — rich APIs drag every backend into the union.
+    The concrete adapter today is a no-op (see
+    ``src/observability/noop_adapter.py``); the port exists so a future New
+    Relic, OTLP, or structured-log adapter can slot in without editing call
+    sites (ADR-0118). Keep the surface minimal — rich APIs drag every backend
+    into the union.
 
-    Concrete adapter: ``observability.sentry_adapter.SentryObservabilityAdapter``
+    Concrete adapter: ``observability.noop_adapter.NoOpObservabilityAdapter``
     """
 
     def capture_exception(self, exc: BaseException) -> None: ...

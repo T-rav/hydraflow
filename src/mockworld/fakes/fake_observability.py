@@ -1,11 +1,10 @@
-"""Stateful Sentry fake for scenario testing.
+"""Stateful observability fake for scenario testing.
 
 Implements ``ObservabilityPort`` so it can be used wherever the injected port
 is consumed, and scenario tests can assert on what was recorded.
 
-Also keeps legacy ``add_breadcrumb`` / ``set_tag`` methods so that existing
-scenario tests and ``SentryPort`` conformance checks continue to pass during
-the migration period (ADR-0044 P7.7 rollout).
+Also keeps legacy ``add_breadcrumb`` / ``set_tag`` methods so existing scenario
+tests and ``SentryPort`` conformance checks continue to pass.
 """
 
 from __future__ import annotations
@@ -13,15 +12,12 @@ from __future__ import annotations
 from typing import Any
 
 
-class FakeSentry:
+class FakeObservability:
     """Captures observability events for in-process assertion.
 
     Satisfies the ``ObservabilityPort`` protocol — every public method matches
     the port's signature so ``isinstance(fake, ObservabilityPort)`` returns
     True and signature-conformance tests pass.
-
-    Also satisfies the legacy ``SentryPort`` used in scenario tests via the
-    ``add_breadcrumb`` / ``set_tag`` compat shims.
     """
 
     _is_fake_adapter = True
@@ -51,7 +47,7 @@ class FakeSentry:
         return True
 
     # ------------------------------------------------------------------
-    # Legacy SentryPort shims (kept for scenario-test compatibility)
+    # Legacy shims (kept for scenario-test compatibility)
     # ------------------------------------------------------------------
 
     def add_breadcrumb(self, **kwargs: Any) -> None:
@@ -63,10 +59,3 @@ class FakeSentry:
     def set_tag(self, key: str, value: str) -> None:
         """Legacy shim — records as a breadcrumb with type='tag'."""
         self.breadcrumbs.append({"type": "tag", "key": key, "value": value})
-
-
-# ADR-0047: every Port must have a named Fake in mockworld/fakes/.
-# FakeSentry IS the ObservabilityPort fake — this alias makes the
-# relationship explicit so discovery tools and the ports.md coverage
-# matrix can find it by the canonical ADR naming convention.
-FakeObservability = FakeSentry

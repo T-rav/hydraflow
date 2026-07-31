@@ -728,7 +728,6 @@ class ImplementPhase:
                         mode="json",
                         exclude={
                             "gh_token",
-                            "sentry_auth_token",
                             "whatsapp_token",
                             "whatsapp_phone_id",
                             "whatsapp_recipient",

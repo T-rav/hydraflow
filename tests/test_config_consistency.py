@@ -31,7 +31,6 @@ _INTERVAL_BOUNDS_SKIP: set[str] = {
     "workspace_gc_interval",
     "runs_gc_interval",
     "health_monitor_interval",
-    "sentry_poll_interval",
     # Dark-launched; the StagingPromotionLoop is not yet wired (flag-gated).
     "staging_promotion_interval",
     # Retained-but-inert: the memory_sync worker was removed from the UI/control

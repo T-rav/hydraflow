@@ -341,13 +341,6 @@ def _security_patch_loop(tmp_path: Path):
     )
 
 
-def _sentry_loop(tmp_path: Path):
-    from sentry_loop import SentryLoop
-
-    d = _deps(tmp_path, "sentry_loop_enabled")
-    return SentryLoop(config=d.config, prs=MagicMock(), deps=d.loop_deps)
-
-
 def _skill_prompt_eval_loop(tmp_path: Path):
     from skill_prompt_eval_loop import SkillPromptEvalLoop
 
@@ -477,7 +470,6 @@ _LOOP_FACTORIES = [
     ("IssueRefinementLoop", _issue_refinement_loop),
     ("RunsGCLoop", _runs_gc_loop),
     ("SecurityPatchLoop", _security_patch_loop),
-    ("SentryLoop", _sentry_loop),
     ("SkillPromptEvalLoop", _skill_prompt_eval_loop),
     ("StaleIssueGCLoop", _stale_issue_gc_loop),
     ("StaleIssueLoop", _stale_issue_loop),

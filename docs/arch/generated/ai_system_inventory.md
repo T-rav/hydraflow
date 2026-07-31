@@ -50,13 +50,12 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_AC` | `ac_tool` | `ac_model` |
 | `HYDRAFLOW_TRANSCRIPT_SUMMARY` | `transcript_summary_tool` | `transcript_summary_model` |
 | `HYDRAFLOW_WIKI_COMPILATION` | `wiki_compilation_tool` | `wiki_compilation_model` |
-| `HYDRAFLOW_SENTRY` | `sentry_tool` | `sentry_model` |
 | `HYDRAFLOW_ADR_REVIEW` | `adr_review_tool` | `adr_review_model` |
 | `HYDRAFLOW_REPORT_ISSUE` | `report_issue_tool` | `report_issue_model` |
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 | `HYDRAFLOW_ADR_DRIFT_RESOLVER` | `adr_drift_resolver_tool` | `adr_drift_resolver_model` |
 
-## Background loops (64)
+## Background loops (63)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -82,7 +81,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `epic_monitor` | `EpicMonitorLoop` | Operations | — | — | — | Detects stale epics and refreshes progress cache so the dashboard shows accurate sub-issue rollups. |
 | `epic_sweeper` | `EpicSweeperLoop` | Operations | — | — | — | Periodically sweeps open epics and auto-closes those with all sub-issues resolved. |
 | `erosion_metrics` | `ErosionMetricsLoop` | Repo Health | — | — | — | v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B). See #10107, epic #10104. |
-| `escape_ledger` | `EscapeLedgerLoop` | Repo Health | — | — | HITL escalation | Falsification instrument (read-only, Pattern B): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. Never gates or fixes. See #10367. |
+| `escape_ledger` | `EscapeLedgerLoop` | Repo Health | — | — | HITL escalation | Falsification instrument (read-only, Pattern B): records post-merge escapes (revert/hotfix/regression-pin/bug-issue) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. Never gates or fixes. See #10367. |
 | `fail_open_monitor` | `FailOpenMonitorLoop` | Repo Health | `background_model`, `judge_independent_model`, `review_model` | — | — | Watches the judge fail-open ledger; applies a Shewhart control limit to the daily fail-open rate and files a hydraflow-find above-limit (Pattern B). Part of the judge-independence budget + fail-visible dispatch (#10371). |
 | `fake_coverage_auditor` | `FakeCoverageAuditorLoop` | Learning & Insights | — | — | HITL escalation | Flags fake-adapter methods without cassettes and scenario helpers nobody calls. |
 | `fitness_scorecard` | `FitnessScorecardLoop` | Governance & Audit | — | — | — | Computes per-loop fitness scores each tick by combining event history and issue attribution. Persists to fitness.jsonl and regenerates docs/arch/generated/loop-fitness.md. Read-only caretaker per ADR-0029. |
@@ -112,10 +111,9 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `sandbox_failure_fixer` | `SandboxFailureFixerLoop` | Autonomy | `model` | — | HITL escalation | Auto-fixes promotion PRs failing sandbox CI by dispatching the auto-agent |
 | `second_order_vitals` | `SecondOrderVitalsLoop` | Repo Health | — | — | HITL escalation | The capstone residual monitor (read-only, Pattern B): reads the four instrument ledgers, gives each of five families its own Shewhart control limit, and computes the green-while-dying verdict (green/watch/diverging) — adverse drift across ≥3 families sustained over 2 windows while primary health is green. `diverging` files ONE never-batched find + HITL per episode; `watch` is a dashboard state change only. Never gates or fixes. See #10373. |
 | `security_patch` | `SecurityPatchLoop` | Repo Health | — | — | — | Polls Dependabot alerts and files issues for fixable vulnerabilities. |
-| `sentry_ingest` | `SentryLoop` | Intake | `sentry_model` | ✅ | HITL escalation | Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline. |
 | `skill_prompt_eval` | `SkillPromptEvalLoop` | Learning & Insights | `background_model`, `skill_prompt_refine_model` | — | HITL escalation; PR review + merge gate | Weekly adversarial-corpus gate against built-in skills; flags PASS→FAIL regressions. |
 | `staging_bisect` | `StagingBisectLoop` | Release | — | — | HITL escalation; PR review + merge gate | Bisects RC red between last-green and current-red; opens auto-revert PRs and watches the next RC. |
-| `staging_promotion` | `StagingPromotionLoop` | Release | `ac_model`, `adr_review_model`, `background_model`, `corpus_learning_synthesis_model`, `debug_model`, `planner_model`, `report_issue_model`, `review_model`, `sentry_model`, `subskill_model`, `system_model`, `transcript_summary_model`, `triage_model`, `wiki_compilation_model` | — | HITL escalation; PR review + merge gate | Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042. |
+| `staging_promotion` | `StagingPromotionLoop` | Release | `ac_model`, `adr_review_model`, `background_model`, `corpus_learning_synthesis_model`, `debug_model`, `planner_model`, `report_issue_model`, `review_model`, `subskill_model`, `system_model`, `transcript_summary_model`, `triage_model`, `wiki_compilation_model` | — | HITL escalation; PR review + merge gate | Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042. |
 | `stale_issue` | `StaleIssueLoop` | Repo Health | — | — | HITL escalation | Auto-closes stale general issues (excludes HydraFlow lifecycle labels). Per-tag thresholds, configurable. Distinct from Stale Issue GC, which handles HITL escalations. |
 | `stale_issue_gc` | `StaleIssueGCLoop` | Repo Health | — | — | HITL escalation | Auto-closes stale HITL escalation issues — posts a farewell comment, capped at 10/cycle. Distinct from Stale General Issue Cleanup, which excludes HF lifecycle labels. |
 | `term_proposer` | `TermProposerLoop` | Learning & Insights | — | — | HITL escalation | Caretaker that grows the ubiquitous-language glossary by detecting load-bearing classes without terms (S1+S2+S5 signals), drafting them via LLM, and opening auto-merging bot PRs as `confidence: proposed`. See ADR-0054. |

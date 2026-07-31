@@ -195,7 +195,6 @@ _GRANDFATHERED_LOOPS: frozenset[str] = frozenset(
         "RunsGCLoop",
         "SandboxFailureFixerLoop",
         "SecurityPatchLoop",
-        "SentryLoop",
         "SkillPromptEvalLoop",
         "StagingBisectLoop",
         "StagingPromotionLoop",
@@ -226,16 +225,14 @@ _JUSTIFIED_NEW_LOOPS: dict[str, str] = {
     # standalone cross-cutting cadence work with no natural phase/loop host.
     "FailOpenMonitorLoop": "cross-PR fail-open rate control limit; no phase sees it",
     # EscapeLedgerLoop (#10367): a standalone outer-loop falsification
-    # instrument. Considered hosting it on SentryLoop (an existing intake) and
-    # on the triage phase, but rejected — the ledger spans FIVE detection
-    # sources (revert/hotfix/regression-pin/bug-issue git scans + Sentry) and
-    # needs its own base-branch commit cursor + cadence over the whole merge
-    # stream, which no single existing phase/loop observes. Sentry is only one
-    # source and appends to the same ledger via a hook, not a host.
+    # instrument. Considered hosting it on the triage phase, but rejected — the
+    # ledger spans multiple detection sources (revert/hotfix/regression-pin/
+    # bug-issue git scans) and needs its own base-branch commit cursor + cadence
+    # over the whole merge stream, which no single existing phase/loop observes.
     "EscapeLedgerLoop": (
-        "outer-loop falsification instrument spanning 5 detection sources with "
-        "its own merged-commit cursor; SentryLoop/triage host rejected (single "
-        "source / no commit-stream cadence)"
+        "outer-loop falsification instrument spanning multiple detection "
+        "sources with its own merged-commit cursor; triage host rejected "
+        "(no commit-stream cadence)"
     ),
     # InterventionTallyLoop (#10369): the attention-side twin of the escape
     # ledger — a standalone outer-loop instrument that aggregates FOUR human-

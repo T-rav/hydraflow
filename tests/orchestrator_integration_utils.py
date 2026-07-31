@@ -483,7 +483,6 @@ def build_scripted_services(
     services.staging_promotion_loop = FakeBackgroundLoop()
     services.staging_bisect_loop = FakeBackgroundLoop()
     services.stale_issue_loop = FakeBackgroundLoop()
-    services.sentry_loop = FakeBackgroundLoop()
     services.log_ingest_loop = FakeBackgroundLoop()
     services.github_cache_loop = FakeBackgroundLoop()
     services.stale_issue_gc_loop = FakeBackgroundLoop()

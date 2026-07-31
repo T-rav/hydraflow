@@ -569,14 +569,13 @@ class TestAgentPortSignatures:
 
 class TestObservabilityPortSignatures:
     """ObservabilityPort signatures must match both the production adapter
-    (SentryObservabilityAdapter) and the test fake (FakeSentry).
+    (NoOpObservabilityAdapter) and the test fake (FakeObservability).
 
-    ``isinstance(obj, ObservabilityPort)`` (covered in test_sentry_adapter.py)
+    ``isinstance(obj, ObservabilityPort)`` (covered in test_fake_observability.py)
     only checks method *existence*, not parameter names/counts. The port is
-    now load-bearing — injected throughout via service_registry — so a
-    signature drift on either implementation must fail CI (slice 5.2
-    hexagonal-boundaries; sibling of TestAgentPortSignatures /
-    TestPRPortSignatures).
+    load-bearing — injected throughout via service_registry — so a signature
+    drift on either implementation must fail CI (slice 5.2 hexagonal-boundaries;
+    sibling of TestAgentPortSignatures / TestPRPortSignatures).
     """
 
     _SIGNED_METHODS = [
@@ -588,18 +587,18 @@ class TestObservabilityPortSignatures:
     ]
 
     @pytest.mark.parametrize("method", _SIGNED_METHODS)
-    def test_signature_matches_sentry_adapter(self, method: str) -> None:
-        from observability.sentry_adapter import SentryObservabilityAdapter
+    def test_signature_matches_noop_adapter(self, method: str) -> None:
+        from observability.noop_adapter import NoOpObservabilityAdapter
         from ports import ObservabilityPort
 
-        _assert_param_names_match(ObservabilityPort, SentryObservabilityAdapter, method)
+        _assert_param_names_match(ObservabilityPort, NoOpObservabilityAdapter, method)
 
     @pytest.mark.parametrize("method", _SIGNED_METHODS)
-    def test_signature_matches_fake_sentry(self, method: str) -> None:
-        from mockworld.fakes.fake_sentry import FakeSentry
+    def test_signature_matches_fake_observability(self, method: str) -> None:
+        from mockworld.fakes.fake_observability import FakeObservability
         from ports import ObservabilityPort
 
-        _assert_param_names_match(ObservabilityPort, FakeSentry, method)
+        _assert_param_names_match(ObservabilityPort, FakeObservability, method)
 
 
 class TestConformanceRunnerPortConformance:

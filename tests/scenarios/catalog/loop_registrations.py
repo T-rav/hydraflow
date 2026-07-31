@@ -634,12 +634,6 @@ def _build_repo_wiki(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     return RepoWikiLoop(config=config, wiki_store=wiki_store, deps=deps)
 
 
-def _build_sentry_ingest(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    from sentry_loop import SentryLoop  # noqa: PLC0415
-
-    return SentryLoop(config=config, prs=ports["github"], deps=deps)
-
-
 def _build_log_ingest(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from log_ingest_loop import LogIngestLoop  # noqa: PLC0415
 
@@ -2252,7 +2246,6 @@ _BUILDERS: dict[str, Any] = {
     "adr_reviewer": _build_adr_reviewer,
     "github_cache": _build_github_cache,
     "repo_wiki": _build_repo_wiki,
-    "sentry_ingest": _build_sentry_ingest,
     "log_ingest": _build_log_ingest,
     "live_corpus_replay": _build_live_corpus_replay,
     "diagnostic": _build_diagnostic,

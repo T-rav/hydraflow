@@ -1,7 +1,6 @@
 """Regression test for issue #6668.
 
-Bug: ``tests/regressions/test_issue_6376.py`` and
-``tests/regressions/test_issue_6381.py`` import ``httpx`` at module level
+Bug: ``tests/regressions/test_issue_6381.py`` imports ``httpx`` at module level
 (top of file).  The project convention (``docs/wiki/gotchas.md``)
 requires optional dependencies to be imported *inside* test functions, not at
 module level.  Top-level imports run at collection time — if ``httpx`` is
@@ -24,9 +23,9 @@ OPTIONAL_DEPS = {"httpx", "hindsight"}
 
 REGRESSIONS_DIR = Path(__file__).resolve().parent
 
-# The two files called out in issue #6668.
+# The file called out in issue #6668 (test_issue_6376.py was removed when
+# the Sentry.io integration was deleted).
 OFFENDING_FILES = [
-    REGRESSIONS_DIR / "test_issue_6376.py",
     REGRESSIONS_DIR / "test_issue_6381.py",
 ]
 
@@ -54,7 +53,9 @@ def _top_level_optional_imports(filepath: Path) -> list[tuple[int, str]]:
     OFFENDING_FILES,
     ids=[p.name for p in OFFENDING_FILES],
 )
-@pytest.mark.xfail(reason="Regression for issue #6668 — fix not yet landed", strict=False)
+@pytest.mark.xfail(
+    reason="Regression for issue #6668 — fix not yet landed", strict=False
+)
 def test_no_top_level_httpx_import(filepath: Path) -> None:
     """Each regression test file must defer optional-dep imports to inside
     the test functions that use them — never at module level."""

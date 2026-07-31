@@ -39,13 +39,13 @@ graph LR
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
     src -- "16" --> src_erosion
-    src -- "12" --> src_escape
+    src -- "9" --> src_escape
     src -- "4" --> src_flows
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
     src -- "18" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "61" --> src_state
+    src -- "60" --> src_state
     src -- "4" --> src_vitals
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch

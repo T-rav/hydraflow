@@ -551,39 +551,6 @@ class TestL20bGateHealthLoop:
 
 
 # ---------------------------------------------------------------------------
-# L21: sentry — no credentials and project polling paths
-# ---------------------------------------------------------------------------
-
-
-class TestL21SentryLoop:
-    """L21: SentryLoop skips gracefully when credentials are absent."""
-
-    async def test_no_credentials_returns_skipped(self, tmp_path):
-        """Without sentry_auth_token or sentry_org, loop returns skipped stats."""
-        world = MockWorld(tmp_path)
-        world.harness.config.sentry_org = ""
-
-        stats = await world.run_with_loops(["sentry_ingest"], cycles=1)
-
-        result = stats["sentry_ingest"]
-        assert result is not None
-        assert result.get("skipped") is True
-        assert "reason" in result
-
-    async def test_no_sentry_token_returns_skipped(self, tmp_path):
-        """Without sentry_auth_token (even with org set), loop returns skipped."""
-        world = MockWorld(tmp_path)
-        world.harness.config.sentry_org = "my-org"
-
-        # Credentials default to empty strings; sentry_auth_token is empty
-        stats = await world.run_with_loops(["sentry_ingest"], cycles=1)
-
-        result = stats["sentry_ingest"]
-        assert result is not None
-        assert result.get("skipped") is True
-
-
-# ---------------------------------------------------------------------------
 # L22: staging_promotion — disabled and cadence paths
 # ---------------------------------------------------------------------------
 

@@ -41,10 +41,6 @@ class Credentials(BaseModel):
         default="",
         description="GitHub token for gh CLI auth",
     )
-    sentry_auth_token: str = Field(
-        default="",
-        description="Sentry API auth token for reading issues",
-    )
     whatsapp_token: str = Field(
         default="",
         description="WhatsApp Business API access token",
@@ -403,13 +399,9 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("triage_retry_max_attempts", "HYDRAFLOW_TRIAGE_RETRY_MAX_ATTEMPTS", 3),
     ("triage_infra_retry_interval", "HYDRAFLOW_TRIAGE_INFRA_RETRY_INTERVAL", 900),
-    ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
-    ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
-    ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
     ("log_ingest_interval", "LOG_INGEST_INTERVAL", 14400),
     ("log_ingest_warning_min_count", "LOG_INGEST_WARNING_MIN_COUNT", 50),
     ("log_ingest_max_issues_per_run", "LOG_INGEST_MAX_ISSUES_PER_RUN", 3),
-    ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
     (
@@ -621,8 +613,6 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("staging_branch", "HYDRAFLOW_STAGING_BRANCH", "staging"),
     ("rc_branch_prefix", "HYDRAFLOW_RC_BRANCH_PREFIX", "rc/"),
     ("repos_workspace_dir", "HYDRAFLOW_REPOS_WORKSPACE_DIR", "~/.hydra/repos"),
-    ("sentry_org", "SENTRY_ORG", ""),
-    ("sentry_project_filter", "SENTRY_PROJECT_FILTER", ""),
     ("log_ingest_label", "HYDRAFLOW_LOG_INGEST_LABEL", "hydraflow-log-ingest"),
     (
         "log_ingest_benign_patterns",
@@ -963,15 +953,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("state_prune_enabled", "HYDRAFLOW_STATE_PRUNE_ENABLED", True),
     ("security_patch_loop_enabled", "HYDRAFLOW_SECURITY_PATCH_LOOP_ENABLED", True),
-    ("sentry_loop_enabled", "HYDRAFLOW_SENTRY_LOOP_ENABLED", True),
     ("log_ingest_loop_enabled", "HYDRAFLOW_LOG_INGEST_LOOP_ENABLED", True),
-    # Gate the upstream Sentry "resolve" mutation. Default True = current
-    # behavior. Set False to never mutate the operator's Sentry issues.
-    (
-        "sentry_resolve_upstream_enabled",
-        "HYDRAFLOW_SENTRY_RESOLVE_UPSTREAM_ENABLED",
-        True,
-    ),
     (
         "skill_prompt_eval_loop_enabled",
         "HYDRAFLOW_SKILL_PROMPT_EVAL_LOOP_ENABLED",
@@ -1186,7 +1168,6 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
         "transcript_summary_model",
     ),
     ("HYDRAFLOW_WIKI_COMPILATION", "wiki_compilation_tool", "wiki_compilation_model"),
-    ("HYDRAFLOW_SENTRY", "sentry_tool", "sentry_model"),
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
     ("HYDRAFLOW_TERM_PROPOSER", "term_proposer_tool", "term_proposer_model"),
@@ -3008,54 +2989,6 @@ class HydraFlowConfig(BaseModel):
         le=10_000,
         description="Max characters for learned troubleshooting patterns in CI timeout prompts",
     )
-    # Sentry error ingestion
-    sentry_org: str = Field(
-        default="",
-        description="Sentry organization slug",
-    )
-    sentry_project_filter: str = Field(
-        default="",
-        description="Comma-separated Sentry project slugs to poll (empty = all projects)",
-    )
-    sentry_poll_interval: int = Field(
-        default=600,
-        ge=60,
-        le=86400,
-        description="Seconds between Sentry issue polls",
-    )
-    sentry_min_events: int = Field(
-        default=2,
-        ge=1,
-        le=1000,
-        description="Minimum Sentry event count before filing a GitHub issue",
-    )
-    sentry_max_creation_attempts: int = Field(
-        default=3,
-        ge=1,
-        le=10,
-        description="Max times to retry filing a GitHub issue for a Sentry error before parking",
-    )
-    sentry_signal_cooldown_hours: int = Field(
-        default=24,
-        ge=1,
-        le=720,
-        description=(
-            "Per-Sentry-issue cooldown (hours) after a filing attempt before "
-            "the same Sentry issue id may be re-filed. Stops a flapping error "
-            "re-filing every poll."
-        ),
-    )
-    sentry_resolve_upstream_enabled: bool = Field(
-        default=True,
-        description=(
-            "When True (current behavior), mark a Sentry issue 'resolved' "
-            "upstream after we file its GitHub issue, so it leaves the "
-            "unresolved feed (Sentry auto-reopens on recurrence). Set False to "
-            "leave the operator's Sentry issues untouched and rely solely on "
-            "local dedup + cooldown."
-        ),
-    )
-
     # LogIngestLoop — scans HydraFlow's own server log, clusters/dedups
     # ERROR + WARNING lines, and files GitHub issues into the pipeline.
     log_ingest_interval: int = Field(
@@ -3642,14 +3575,6 @@ class HydraFlowConfig(BaseModel):
     report_issue_model: str = Field(
         default="opus",
         description="Model for report-issue worker (codebase research + structured issue creation)",
-    )
-    sentry_tool: Literal["claude", "codex"] = Field(
-        default="claude",
-        description="CLI backend for sentry_loop ingestion worker",
-    )
-    sentry_model: str = Field(
-        default="sonnet",
-        description="Model for sentry_loop ingestion worker (issue triage + filing from Sentry events) — sonnet is sufficient; the task is stack-trace parsing + issue filing, not deep reasoning. Opus was 4-5× the cost for no measurable quality win.",
     )
     adr_drift_resolver_tool: Literal["claude", "codex"] = Field(
         default="claude",
@@ -5541,10 +5466,6 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for SecurityPatchLoop.",
     )
-    sentry_loop_enabled: bool = Field(
-        default=True,
-        description="Deploy-time kill-switch for SentryLoop.",
-    )
     log_ingest_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for LogIngestLoop.",
@@ -6148,7 +6069,6 @@ def build_credentials(config: HydraFlowConfig) -> Credentials:
     )
     return Credentials(
         gh_token=gh_token,
-        sentry_auth_token=os.environ.get("SENTRY_AUTH_TOKEN", ""),
         whatsapp_token=os.environ.get("HYDRAFLOW_WHATSAPP_TOKEN", ""),
         whatsapp_phone_id=os.environ.get("HYDRAFLOW_WHATSAPP_PHONE_ID", ""),
         whatsapp_recipient=os.environ.get("HYDRAFLOW_WHATSAPP_RECIPIENT", ""),
@@ -6197,7 +6117,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "triage_tool",
             "transcript_summary_tool",
             "report_issue_tool",
-            "sentry_tool",
             "adr_review_tool",
         ):
             _apply_if_default(field, config.background_tool)
@@ -6207,7 +6126,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "triage_model",
             "transcript_summary_model",
             "report_issue_model",
-            "sentry_model",
             "adr_review_model",
         ):
             _apply_if_default(field, config.background_model)
@@ -6342,7 +6260,6 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
             config.wiki_compilation_model,
         ),
         ("report_issue", config.report_issue_tool, config.report_issue_model),
-        ("sentry", config.sentry_tool, config.sentry_model),
         ("adr_review", config.adr_review_tool, config.adr_review_model),
         ("term_proposer", config.term_proposer_tool, config.term_proposer_model),
         (
@@ -6641,8 +6558,8 @@ def declared_env_keys() -> frozenset[str]:
     these keys elsewhere. Callers needing a hermetic environment (e.g. the
     test suite's session-scoped isolation fixture) should scrub this whole
     set rather than a ``HYDRAFLOW_``/``HYDRA_`` prefix rule alone, since
-    several overrides (``SENTRY_ORG``, ``OTEL_SERVICE_NAME``, ``HF_ENV``, ...)
-    follow third-party naming conventions instead (#10876).
+    several overrides (``OTEL_SERVICE_NAME``, ``HF_ENV``, ...) follow
+    third-party naming conventions instead (#10876).
     """
     keys: set[str] = set()
     for table in (

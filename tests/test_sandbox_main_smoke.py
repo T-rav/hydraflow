@@ -62,7 +62,6 @@ def test_caretaker_enabled_cb_subset_enables_only_named() -> None:
     assert cb("dependabot_merge") is True
     assert cb("workspace_gc") is True
     assert cb("ci_monitor") is False
-    assert cb("sentry_ingest") is False
 
 
 def test_caretaker_enabled_cb_tolerates_extra_args() -> None:

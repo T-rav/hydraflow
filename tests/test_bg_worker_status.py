@@ -318,7 +318,6 @@ class TestSystemWorkersEndpoint:
             "diagnostic",
             "merge_state_watcher",
             "ci_monitor",
-            "sentry_ingest",
             "staging_promotion",
             "stale_issue",
             "stale_issue_gc",
