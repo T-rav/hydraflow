@@ -7,7 +7,8 @@ Catches accidental coupling between telemetry and business control flow.
 from __future__ import annotations
 
 import pytest
-from src.telemetry.spans import loop_span, port_span, runner_span
+
+from telemetry.spans import loop_span, port_span, runner_span
 
 
 class _FakeRunner:
