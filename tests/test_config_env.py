@@ -10,14 +10,19 @@ import pytest
 
 # conftest.py already inserts the hydraflow package directory into sys.path
 from config import (
+    _DEPRECATED_ENV_ALIASES,
     _ENV_BOOL_OVERRIDES,
+    _ENV_COMBO_OVERRIDES,
     _ENV_ENUM_OVERRIDES,
     _ENV_FLOAT_OVERRIDES,
+    _ENV_FLOAT_RATIO_OVERRIDES,
     _ENV_INT_OVERRIDES,
     _ENV_LITERAL_OVERRIDES,
+    _ENV_OPT_FLOAT_OVERRIDES,
     _ENV_OPT_INT_OVERRIDES,
     _ENV_STR_OVERRIDES,
     HydraFlowConfig,
+    declared_env_keys,
 )
 from queue_strategy import QueueStrategy
 
@@ -749,3 +754,72 @@ class TestEnvVarEnumOverride:
             state_file=tmp_path / "s.json",
         )
         assert cfg.queue_strategy is QueueStrategy.WEIGHTED_MIX
+
+
+class TestDeclaredEnvKeys:
+    """#10876: declared_env_keys() — public, runtime-derived accessor covering
+    every env key any ``_ENV_*_OVERRIDES`` table reads, so conftest's test-
+    isolation sweep never needs a hand-maintained list."""
+
+    @pytest.mark.parametrize(
+        "table",
+        [
+            _ENV_INT_OVERRIDES,
+            _ENV_STR_OVERRIDES,
+            _ENV_FLOAT_OVERRIDES,
+            _ENV_OPT_FLOAT_OVERRIDES,
+            _ENV_OPT_INT_OVERRIDES,
+            _ENV_FLOAT_RATIO_OVERRIDES,
+            _ENV_BOOL_OVERRIDES,
+        ],
+        ids=[
+            "int",
+            "str",
+            "float",
+            "opt_float",
+            "opt_int",
+            "float_ratio",
+            "bool",
+        ],
+    )
+    def test_contains_every_env_key_in_three_tuple_tables(self, table) -> None:
+        declared = declared_env_keys()
+        for _field, env_key, _default in table:
+            assert env_key in declared
+
+    def test_contains_every_env_key_in_literal_overrides(self) -> None:
+        declared = declared_env_keys()
+        for _field, env_key in _ENV_LITERAL_OVERRIDES:
+            assert env_key in declared
+
+    def test_contains_every_env_key_in_enum_overrides(self) -> None:
+        declared = declared_env_keys()
+        for _field, env_key, _enum_cls in _ENV_ENUM_OVERRIDES:
+            assert env_key in declared
+
+    def test_contains_every_env_key_in_combo_overrides(self) -> None:
+        declared = declared_env_keys()
+        for env_key, _tool_field, _model_field in _ENV_COMBO_OVERRIDES:
+            assert env_key in declared
+
+    def test_contains_deprecated_aliases_and_their_canonical_names(self) -> None:
+        declared = declared_env_keys()
+        for old_key, canonical_key in _DEPRECATED_ENV_ALIASES.items():
+            assert old_key in declared
+            assert canonical_key in declared
+
+    @pytest.mark.parametrize(
+        "env_key",
+        ["SENTRY_ORG", "HF_ENV", "OTEL_SERVICE_NAME", "LOG_INGEST_INTERVAL"],
+    )
+    def test_contains_known_non_prefixed_keys(self, env_key: str) -> None:
+        """The exact keys the issue calls out — SENTRY_ORG and friends."""
+        assert env_key in declared_env_keys()
+
+    def test_returns_a_frozenset(self) -> None:
+        assert isinstance(declared_env_keys(), frozenset)
+
+    def test_result_is_immutable(self) -> None:
+        declared = declared_env_keys()
+        with pytest.raises(AttributeError):
+            declared.add("SOME_NEW_KEY")  # frozenset has no .add

@@ -27,9 +27,13 @@ collect_ignore_glob = ["sandbox_scenarios/*"]
 # production Sentry. Neutralise it at import time — before collection — so the
 # guard holds regardless of which test triggers init. `_init_sentry` also
 # honours HYDRAFLOW_SENTRY_DISABLED; the Sentry integration tests opt back in
-# explicitly via `force=True` against a mock SDK.
+# explicitly via `force=True` against a mock SDK. SENTRY_AUTH_TOKEN is popped
+# alongside SENTRY_DSN for the same reason — it's a credential fallback read
+# directly by `build_credentials()`, outside any `_ENV_*_OVERRIDES` table, so
+# `declared_env_keys()` below can't cover it (#10876).
 os.environ["HYDRAFLOW_SENTRY_DISABLED"] = "1"
 os.environ.pop("SENTRY_DSN", None)
+os.environ.pop("SENTRY_AUTH_TOKEN", None)
 
 
 # #10094: committed sandbox seeds under tests/sandbox_scenarios/seeds/ must
@@ -168,6 +172,7 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 sys.path.insert(0, str(_REPO_ROOT))
 
 import subprocess_util  # noqa: E402
+from config import declared_env_keys  # noqa: E402
 from tests.helpers import ConfigFactory  # noqa: E402
 
 if TYPE_CHECKING:
@@ -197,13 +202,17 @@ if TYPE_CHECKING:
 # The fixtures below intentionally mutate global state (os.environ and
 # module-level private variables) to create a hermetic test environment.
 #
-# - ``setup_test_environment`` removes HYDRAFLOW_*/HYDRA_*/GIT_* env vars so
-#   that tests don't accidentally read the host's configuration.  A
-#   ``finally`` block restores original values after all tests in the session
-#   complete.  An abnormal process termination (SIGKILL, segfault) will kill
-#   the pytest process before the ``finally`` runs, but since the environment
-#   is process-local, it cannot affect any other process — this is an
-#   acceptable trade-off.
+# - ``setup_test_environment`` removes every env var ``config.declared_env_keys()``
+#   covers (every key any ``_ENV_*_OVERRIDES`` table reads, prefixed or not —
+#   e.g. ``SENTRY_ORG``, ``HF_ENV``) plus the ``HYDRAFLOW_*``/``HYDRA_*`` prefix
+#   sweep (belt-and-braces: some prefixed keys are read directly, outside the
+#   tables) and a fixed GIT_*/credential-fallback list, so tests don't
+#   accidentally pick up the host's configuration (#10876).  A ``finally``
+#   block restores original values after all tests in the session complete.
+#   An abnormal process termination (SIGKILL, segfault) will kill the pytest
+#   process before the ``finally`` runs, but since the environment is
+#   process-local, it cannot affect any other process — this is an acceptable
+#   trade-off.
 #
 # - ``_reset_gh_semaphore`` clears module-level private state in
 #   subprocess_util to prevent cross-test leakage of semaphore/rate-limit
@@ -215,12 +224,19 @@ if TYPE_CHECKING:
 def setup_test_environment():
     """Set minimal env vars and isolate tests from host configuration.
 
-    Removes all ``HYDRAFLOW_*``, ``HYDRA_*``, and select ``GIT_*`` variables
+    Removes every env var ``config.declared_env_keys()`` covers — every key
+    any ``_ENV_*_OVERRIDES`` table declares, prefixed or not (e.g.
+    ``SENTRY_ORG``, ``HF_ENV``) — union the ``HYDRAFLOW_*``/``HYDRA_*``
+    prefix rule (belt-and-braces: some prefixed keys are read directly,
+    outside the tables) union a fixed ``GIT_*``/credential-fallback list,
     from ``os.environ`` for the duration of the test session, then restores
-    them in a ``finally`` block.  This is intentional global state mutation
-    required for test isolation — see module-level note above.
+    them in a ``finally`` block. This is intentional global state mutation
+    required for test isolation — see module-level note above. Without this,
+    a non-``HYDRAFLOW_``/``HYDRA_``-prefixed override exported on the host or
+    CI runner leaks into every ``HydraFlowConfig`` built during the session
+    (#10876).
 
-    GIT identity vars (``GIT_AUTHOR_*`` / ``GIT_COMMITTER_*``) are popped
+    GIT identity vars (``GIT_AUTHOR_*`` / ``GIT_COMMITTER_*``) are scrubbed
     AND replaced with deterministic test values. CI runners have no global
     git config; without a default identity, any test that exercises the
     "use ambient identity" fallback (e.g. ``open_automated_pr_async`` with
@@ -230,6 +246,11 @@ def setup_test_environment():
     other three keys) at the top of the test. See feedback memory
     ``feedback_ci_no_global_git_config.md`` (PR #8354) and
     ``docs/superpowers/specs/2026-05-07-tier2-enforcement-batch-design.md`` §5.
+
+    ``GITHUB_TOKEN`` is scrubbed too: it's the lowest-priority fallback in
+    ``build_credentials()``'s ``gh_token`` chain, behind the ``GH_TOKEN``
+    seeded below — but a test that deletes ``GH_TOKEN`` to probe that
+    fallback path must not fall through to the host's real token.
     """
     test_env = {
         "HOME": "/tmp/hydraflow-test",
@@ -238,31 +259,30 @@ def setup_test_environment():
         "GIT_AUTHOR_EMAIL": "test@hydraflow.local",
         "GIT_COMMITTER_NAME": "HydraFlow Test",
         "GIT_COMMITTER_EMAIL": "test@hydraflow.local",
+        # Re-seed the kill switch set at conftest import time (module scope,
+        # above): the HYDRAFLOW_* prefix sweep below would otherwise pop it
+        # and never restore it for the session (#10876).
+        "HYDRAFLOW_SENTRY_DISABLED": "1",
     }
-    hydra_keys = {
-        key: os.environ[key]
-        for key in list(os.environ)
-        if key.startswith(("HYDRAFLOW_", "HYDRA_"))
-    }
-    git_keys = {}
-    for key in (
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_AUTHOR_NAME",
-        "GIT_AUTHOR_EMAIL",
-        "GIT_COMMITTER_NAME",
-        "GIT_COMMITTER_EMAIL",
-    ):
-        if key in os.environ:
-            git_keys[key] = os.environ.pop(key)
-    for key in hydra_keys:
-        os.environ.pop(key, None)
+    scrub_keys = (
+        {key for key in os.environ if key.startswith(("HYDRAFLOW_", "HYDRA_"))}
+        | declared_env_keys()
+        | {
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_AUTHOR_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
+            "GITHUB_TOKEN",
+        }
+    )
+    saved_env = {key: os.environ.pop(key) for key in scrub_keys if key in os.environ}
     try:
         with patch.dict(os.environ, test_env, clear=False):
             yield
     finally:
-        os.environ.update(hydra_keys)
-        os.environ.update(git_keys)
+        os.environ.update(saved_env)
 
 
 @pytest.fixture(autouse=True)

@@ -1,0 +1,118 @@
+// Issue #10876 — conftest env isolation misses non-prefixed config env keys
+// Topology of how host environment variables reach HydraFlowConfig during a
+// pytest session, and where the isolation boundary currently leaks.
+
+specification {
+  element system
+  element module
+  element table
+  element fixture
+  element actor
+
+  relationship reads
+  relationship writes
+  relationship derives
+}
+
+model {
+  host = actor 'Host environment' {
+    description 'Developer shell / CI runner / HydraFlow factory runner. May export SENTRY_ORG, HF_ENV, OTEL_*, LOG_INGEST_* (all present in repo .env).'
+  }
+
+  hydraflow = system 'HydraFlow' {
+
+    config = module 'src/config.py' {
+      description 'Declares every env-var override for HydraFlowConfig.'
+
+      intTable   = table '_ENV_INT_OVERRIDES'   { description '224 entries; 7 non-prefixed (SENTRY_*, LOG_INGEST_*)' }
+      strTable   = table '_ENV_STR_OVERRIDES'   { description '27 entries; 5 non-prefixed (SENTRY_ORG, SENTRY_PROJECT_FILTER, OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT, HF_ENV)' }
+      otherTables = table 'other _ENV_*_OVERRIDES' { description 'BOOL / FLOAT / FLOAT_RATIO / OPT_INT / OPT_FLOAT / LITERAL / ENUM / COMBO — all HYDRAFLOW_-prefixed today' }
+      aliases    = table '_DEPRECATED_ENV_ALIASES' { description 'HYDRA_DOCKER_* -> HYDRAFLOW_DOCKER_*, resolved by _get_env fallback' }
+
+      getEnv     = module '_get_env(key)' { description 'os.environ lookup + deprecated-alias fallback' }
+      applyEnv   = module '_apply_env_overrides(config)' { description 'Walks every table, applies env value when the field still equals its declared default' }
+      credentials = module 'build_credentials(config)' { description 'Direct reads: GH_TOKEN, GITHUB_TOKEN, SENTRY_AUTH_TOKEN, HYDRAFLOW_WHATSAPP_* — NOT table-declared' }
+
+      // PLANNED (this issue)
+      declaredKeys = module 'declared_env_keys()  [NEW]' {
+        description 'Public accessor: frozenset of every env key any _ENV_*_OVERRIDES table reads, plus deprecated aliases. Replaces the conftest prefix-rule + hand-list.'
+        style { color green }
+      }
+    }
+
+    cfgObj = module 'HydraFlowConfig' {
+      description 'Frozen pydantic model; sentry_org, otel_environment, log_ingest_interval, ... resolved at construction.'
+    }
+
+    tests = module 'tests/' {
+      conftestModule = fixture 'tests/conftest.py (import time)' {
+        description 'Sets HYDRAFLOW_SENTRY_DISABLED=1; pops SENTRY_DSN.'
+      }
+      setupEnv = fixture 'setup_test_environment (session, autouse)' {
+        description 'Pops HYDRAFLOW_*/HYDRA_* + fixed GIT_* list, applies test_env via patch.dict, restores in finally. LEAK: non-prefixed declared keys survive; ALSO clobbers HYDRAFLOW_SENTRY_DISABLED set at import time.'
+        style { color red }
+      }
+      testCase = module 'any test constructing HydraFlowConfig' {
+        description 'e.g. ConfigFactory, sentry_loop tests, otel tests.'
+      }
+      regression = module 'tests/regressions/test_issue_10876.py [NEW]' {
+        description 'Isolation invariant + drift guard.'
+        style { color green }
+      }
+    }
+  }
+
+  // --- current (leaky) data flow -------------------------------------------
+  host -> setupEnv 'exports SENTRY_ORG / HF_ENV / OTEL_* / LOG_INGEST_*'
+  setupEnv -> setupEnv 'scrubs only HYDRAFLOW_*/HYDRA_*/GIT_*'
+  testCase -> cfgObj 'constructs'
+  cfgObj -> applyEnv 'model_post_init'
+  applyEnv -> intTable 'iterates'
+  applyEnv -> strTable 'iterates'
+  applyEnv -> otherTables 'iterates'
+  applyEnv -> getEnv 'lookup per key'
+  getEnv -> aliases 'deprecated fallback'
+  getEnv -> host 'reads leaked os.environ value'
+  cfgObj -> credentials 'secrets (out of table scope)'
+
+  // --- planned wiring ------------------------------------------------------
+  declaredKeys -> intTable 'derives'
+  declaredKeys -> strTable 'derives'
+  declaredKeys -> otherTables 'derives'
+  declaredKeys -> aliases 'derives'
+  setupEnv -> declaredKeys 'scrub set (public accessor, no private import)'
+  regression -> declaredKeys 'asserts union covers every table'
+  regression -> setupEnv 'asserts no declared key present mid-session'
+  conftestModule -> setupEnv 'HYDRAFLOW_SENTRY_DISABLED must survive via test_env'
+}
+
+views {
+  view index {
+    title 'Env-var flow into HydraFlowConfig under pytest'
+    include *
+    include hydraflow.config.*
+    include hydraflow.tests.*
+    autoLayout TopBottom
+  }
+
+  view leakPath {
+    title 'Leak path: host SENTRY_ORG -> cfg.sentry_org'
+    include host, hydraflow.tests.setupEnv, hydraflow.tests.testCase,
+            hydraflow.cfgObj, hydraflow.config.applyEnv,
+            hydraflow.config.strTable, hydraflow.config.getEnv
+    autoLayout LeftRight
+  }
+
+  dynamic view scrubSequence {
+    title 'Planned: session env scrub derived from declared_env_keys()'
+    hydraflow.tests.conftestModule -> hydraflow.tests.setupEnv 'import: set HYDRAFLOW_SENTRY_DISABLED, pop SENTRY_DSN/SENTRY_AUTH_TOKEN'
+    hydraflow.tests.setupEnv -> hydraflow.config.declaredKeys 'declared_env_keys()'
+    hydraflow.config.declaredKeys -> hydraflow.tests.setupEnv 'frozenset (420 keys incl. 12 non-prefixed)'
+    hydraflow.tests.setupEnv -> hydraflow.tests.setupEnv 'snapshot + pop (prefix rule UNION declared set UNION GIT_*)'
+    hydraflow.tests.setupEnv -> hydraflow.tests.testCase 'patch.dict(test_env) -> yield'
+    hydraflow.tests.testCase -> hydraflow.cfgObj 'HydraFlowConfig(...)'
+    hydraflow.cfgObj -> hydraflow.config.applyEnv 'apply overrides'
+    hydraflow.config.applyEnv -> hydraflow.cfgObj 'sentry_org == "" (declared default)'
+    hydraflow.tests.setupEnv -> hydraflow.tests.setupEnv 'finally: os.environ.update(saved)'
+  }
+}
