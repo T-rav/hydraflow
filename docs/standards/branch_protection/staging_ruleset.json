@@ -42,6 +42,9 @@
           },
           {
             "context": "discover-projects"
+          },
+          {
+            "context": "CI Gate"
           }
         ]
       }
