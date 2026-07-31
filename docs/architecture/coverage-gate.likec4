@@ -2,6 +2,16 @@
 // Diagnosis: NOT a hang. The single-threaded coverage lane outgrew its
 // 30-minute budget. Topology of the CI test lanes + the loop that files
 // the (mis-labelled) issue.
+//
+// This records the INCIDENT (pre-fix) shape: single-threaded coverage lane,
+// no per-test --timeout, and a fingerprint that fans one chronic defect out
+// into N issues. The fix (same PR) parallelizes the lane (leg 1 `-n auto`
+// + `--cov-append`, leg 2 serial+regressions carries the real
+// `--cov-fail-under`), adds `--timeout=300`, raises `timeout-minutes` to 45,
+// and gives `GateHealthLoop` a `chronic_timeout` finding kind (fingerprinted
+// on check name only) so a repeating cancel-at-timeout collapses to one
+// issue instead of fanning out. See docs/wiki/testing.md
+// "Cancelled-at-timeout: continuous progress means capacity, not a hang".
 
 specification {
   element system
@@ -42,19 +52,22 @@ model {
       description 'tests/regressions/ -n auto --dist loadscope --reruns 2. Observed ~80s.'
     }
 
-    coverageLane = lane 'Coverage (trailing)  <-- DEFECT' {
+    coverageLane = lane 'Coverage (trailing)  <-- INCIDENT (pre-fix)' {
       description '''
         if: github.event_name != pull_request  (push to staging + nightly)
-        timeout-minutes: 30
-        NOT in ci-gate needs — cannot block merge.
+        PRE-FIX: timeout-minutes: 30. FIXED: raised to 45 for headroom.
+        NOT in ci-gate needs — cannot block merge (unchanged by the fix).
       '''
-      covStep = step 'pytest tests/ --cov=src --cov-fail-under=70 -p no:xdist' {
+      covStep = step 'PRE-FIX: pytest tests/ --cov=src --cov-fail-under=70 -p no:xdist' {
         description '''
           SINGLE-THREADED. Superset of testLane: also collects tests/regressions
           and the two xdist-unsafe files.
           Measured: 23,011 tests, 1550.97s (25:50) on the one run that finished.
           Cancelled runs: steady progress to 81% at the instant of kill — no stall.
-          NO --timeout configured, so a real hang is indistinguishable from slowness.
+          PRE-FIX: NO --timeout configured, so a real hang is indistinguishable
+          from slowness. FIXED: mirrors testLane's parallel (`-n auto`,
+          `--cov-append`, `--cov-fail-under=0`) + serial (`--cov-append`, real
+          `--cov-fail-under=70`) split, both legs carry `--timeout=300`.
         '''
       }
       covJson = artifact 'coverage.json / htmlcov' {
@@ -73,12 +86,14 @@ model {
     findHangs = step 'find_suspected_hangs()' {
       description '''
         cancelled + |duration - timeout*60| <= tolerance + unfinished test step
-        => kind="suspected_hang".
-        Cannot tell a one-off wedge from a chronically over-budget lane.
+        => candidate, grouped by check name.
+        FIXED (#10883): 1 hit/window => kind="suspected_hang" (the killpg/
+        mocked-`.pid` playbook); 2+ hits on the SAME check in one window =>
+        kind="chronic_timeout" (a capacity problem, not a wedge).
       '''
     }
     fingerprint = step 'finding_fingerprint()' {
-      description 'suspected_hang folds in run_id => a NEW issue per run. Chronic timeout fans out.'
+      description 'suspected_hang folds in run_id => a NEW issue per run (by design, each is a distinct incident). chronic_timeout fingerprints on check name alone, so a repeating pattern dedupes to ONE issue instead of fanning out.'
     }
     loadTimeouts = step '_load_workflow_job_timeouts()' {
       description 'Parses timeout-minutes out of ci.yml — raising the budget auto-updates detection.'
@@ -100,7 +115,7 @@ model {
   gateHealth.findHangs -> ci.coverageLane 'observes CANCELLED + unfinished step'
   gateHealth.findHangs -> gateHealth.fingerprint
   gateHealth.fingerprint -> dedup 'checks / records'
-  gateHealth.fingerprint -> issues 'files one issue per run_id'
+  gateHealth.fingerprint -> issues 'files: one per run_id for suspected_hang, one per check (deduped) for chronic_timeout'
   ci.coverageLane.covStep -> ci.coverageLane.covJson 'produces (only on completion)'
   ci.testLane -> ci.ciGate 'gates merge'
   ci.regressionLane -> ci.ciGate 'gates merge'
@@ -123,12 +138,21 @@ views {
   }
 
   dynamic view chronicTimeoutFanout {
-    title 'How one over-budget lane becomes N issues'
+    title 'PRE-FIX INCIDENT: how one over-budget lane became N issues (#10390/91/93/883)'
     ci.coverageLane -> ci.coverageLane 'push to staging: 23k tests, single-threaded'
     ci.coverageLane -> gateHealth.findHangs 'GH Actions cancels at 30:00 — CANCELLED, test step unfinished'
-    gateHealth.findHangs -> gateHealth.fingerprint 'kind=suspected_hang'
+    gateHealth.findHangs -> gateHealth.fingerprint 'kind=suspected_hang (pre-fix: only kind that existed)'
     gateHealth.fingerprint -> dedup 'key includes run_id => always novel'
     gateHealth.fingerprint -> issues 'files "suspected CI hang" — misdirects to a killpg hunt'
     issues -> ci 'PR #10410 hardened is_real_pid; timeouts continued unchanged'
+  }
+
+  dynamic view chronicTimeoutFixed {
+    title 'FIXED: a repeating cancel-at-timeout collapses to one issue'
+    ci.coverageLane -> ci.coverageLane 'push to staging: parallel + serial split, --timeout=300 per test'
+    ci.coverageLane -> gateHealth.findHangs 'same check cancels-at-timeout 2+ times in the analyzed window'
+    gateHealth.findHangs -> gateHealth.fingerprint 'kind=chronic_timeout (check name only, no run_id)'
+    gateHealth.fingerprint -> dedup 'same key every cycle => filed once, then deduped forever'
+    gateHealth.fingerprint -> issues 'files "chronically times out — over budget, not hung"'
   }
 }

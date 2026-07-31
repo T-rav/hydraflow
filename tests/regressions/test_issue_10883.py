@@ -171,3 +171,18 @@ def test_makefile_coverage_target_both_legs_pass_cov_append() -> None:
 def test_makefile_test_cov_target_both_legs_pass_cov_append() -> None:
     body = _make_target_body("test-cov")
     assert body.count("--cov-append") == 2
+
+
+def test_makefile_coverage_target_erases_stale_data_before_appending() -> None:
+    # --cov-append (added for the two-leg split) disables pytest-cov's
+    # default clean-start-each-session behavior. Without an erase first,
+    # repeated local `make coverage` runs accumulate line-hit data across
+    # invocations — a dropped test's coverage can survive as a false hit
+    # from a prior run, silently inflating the number past the real floor.
+    body = _make_target_body("coverage")
+    assert "coverage erase" in body
+
+
+def test_makefile_test_cov_target_erases_stale_data_before_appending() -> None:
+    body = _make_target_body("test-cov")
+    assert "coverage erase" in body

@@ -549,6 +549,50 @@ class TestL20bGateHealthLoop:
         assert "#10002" in filed[0].body
         assert "Linux container" in filed[0].body
 
+    async def test_chronic_timeout_scenario_files_capacity_issue(self, tmp_path):
+        """#10883: the SAME check cancelled-at-timeout twice in one window
+        is a capacity problem, not two hang incidents — one issue, not two,
+        and it must not point at the killpg/mocked-`.pid` playbook."""
+        world = MockWorld(tmp_path)
+        workflows_dir = tmp_path / "repo" / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True, exist_ok=True)
+        (workflows_dir / "ci.yml").write_text(
+            "jobs:\n  coverage:\n    name: Coverage (trailing)\n    timeout-minutes: 30\n"
+        )
+        for run_id, pr_number, started_at, completed_at in (
+            (555, 42, "2026-07-19T00:00:00Z", "2026-07-19T00:30:05Z"),
+            (777, 43, "2026-07-19T01:00:00Z", "2026-07-19T01:30:05Z"),
+        ):
+            world.github.add_workflow_run(
+                run_id,
+                workflow="CI",
+                conclusion="cancelled",
+                created_at=started_at,
+                pr_number=pr_number,
+                jobs=[
+                    {
+                        "name": "Coverage (trailing)",
+                        "conclusion": "cancelled",
+                        "started_at": started_at,
+                        "completed_at": completed_at,
+                        "steps": [
+                            {"name": "Install dependencies", "conclusion": "success"},
+                            {"name": "Run tests with coverage", "conclusion": None},
+                        ],
+                    }
+                ],
+            )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["filed"] == 1
+        filed = self._issues_titled(world, "chronically")
+        assert len(filed) == 1
+        assert "suspected CI hang" not in filed[0].title
+        assert "#9983" not in filed[0].body
+        assert "#10002" not in filed[0].body
+        assert "Linux container" not in filed[0].body
+
 
 # ---------------------------------------------------------------------------
 # L21: sentry — no credentials and project polling paths

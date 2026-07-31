@@ -236,6 +236,7 @@ endif
 
 coverage: deps
 	@echo "$(BLUE)Running HydraFlow unit tests with coverage (parallel; xdist-unsafe serial)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(UV) coverage erase
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) --cov=src --cov-append --cov-fail-under=$(TEST_COVERAGE_EFFECTIVE) --cov-report=term-missing --cov-report=xml:coverage.xml
 	@echo "$(GREEN)All tests passed$(RESET)"
@@ -334,6 +335,7 @@ test-fast: deps
 
 test-cov: deps
 	@echo "$(BLUE)Running HydraFlow tests with coverage (parallel; xdist-unsafe serial)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(UV) coverage erase
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) --cov=src --cov-append --cov-fail-under=0 --cov-report= $(PYTEST_PARALLEL)
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) -v --cov=src --cov-append --cov-fail-under=70 --cov-report=term-missing --cov-report=html:htmlcov
 	@echo "$(GREEN)All tests passed with coverage$(RESET)"
