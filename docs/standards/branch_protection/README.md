@@ -31,6 +31,7 @@ GitHub itself rather than by convention alone.
 | quality (src/ui) | quality | core | main | staging, rc |
 | Detect Changes | change-detect | core | staging | staging |
 | discover-projects | project-discover | core | staging | staging |
+| CI Gate | ci-aggregate | core | staging | staging |
 | Resolve RC PR | rc-resolve | extra | main | rc |
 | Browser Scenarios | browser-e2e | extra | main | rc |
 | Trust Gate (adversarial corpus, fixture mode) | trust | extra | main | rc |
