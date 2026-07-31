@@ -68,4 +68,9 @@ async def mock_world(tmp_path):
     from tests.scenarios.fakes import MockWorld
 
     world = MockWorld(tmp_path)
-    yield world
+    try:
+        yield world
+    finally:
+        # Retire FakeHoneycomb's global OTel provider so it does not accumulate
+        # across the session (#10875).
+        world.close()
