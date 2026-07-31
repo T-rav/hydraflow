@@ -12,6 +12,7 @@ from ubiquitous_language import (
     TermKind,
     TermStore,
     build_symbol_index,
+    lint_overbroad_aliases,
     lint_paraphrases,
     resolve_anchor,
 )
@@ -90,3 +91,36 @@ def test_paraphrase_lint_runs_against_live_wiki() -> None:
     terms = TermStore(TERMS_DIR).list()
     violations = lint_paraphrases(terms, REPO_ROOT / "docs" / "wiki")
     assert violations == []
+
+
+def test_no_overbroad_aliases_in_live_wiki() -> None:
+    """An alias must be a paraphrase, not a common English word.
+
+    ``TermProposerLoop`` proposed ``"event"`` as an alias for
+    ``HydraFlowEvent`` (#10919). The paraphrase lint then flagged 7
+    pre-existing uses and ``make quality`` went red on staging for everyone —
+    on a test unrelated to whatever they were working on (#10926).
+
+    This is the *earlier* question: not "is this page using a paraphrase" but
+    "is this alias too broad to be one". It fails at proposal time, where the
+    fix is cheap, rather than in the next person's build.
+    """
+    terms = TermStore(TERMS_DIR).list()
+    violations = lint_overbroad_aliases(terms, REPO_ROOT / "docs" / "wiki")
+    assert violations == [], "\n".join(
+        ["Aliases too broad to canonicalise:", *(f"  - {v}" for v in violations)]
+    )
+
+
+def test_overbroad_guard_catches_the_alias_that_broke_the_build() -> None:
+    """Guards the guard: a detector that stops detecting is worse than none.
+
+    Pinned to the exact 2026-07-31 defect — ``"event"``, which appears as
+    ordinary prose in 7 wiki files.
+    """
+    terms = TermStore(TERMS_DIR).list()
+    target = next(t for t in terms if t.name == "HydraFlowEvent")
+    poisoned = [target.model_copy(update={"aliases": [*target.aliases, "event"]})]
+    violations = lint_overbroad_aliases(poisoned, REPO_ROOT / "docs" / "wiki")
+    assert violations, "the over-broad guard no longer detects the bare word 'event'"
+    assert "'event'" in violations[0]

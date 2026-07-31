@@ -397,6 +397,49 @@ def lint_paraphrases(terms: list[Term], wiki_root: Path) -> list[str]:
     return violations
 
 
+# An alias is a paraphrase a writer might reach for INSTEAD of the canonical
+# term. A word that already appears all over the wiki as ordinary prose is not
+# that — it is English, and canonicalising it makes every existing page a
+# violation. TermProposerLoop proposed "event" as an alias for HydraFlowEvent
+# on 2026-07-31 (#10919); the lint then flagged 7 pre-existing uses and
+# `make quality` went red on staging for everyone (#10926).
+#
+# Breadth is measured in FILES rather than occurrences: a real paraphrase
+# clusters in the pages about its subject, while a common word is spread thin
+# across unrelated ones.
+OVERBROAD_ALIAS_MAX_FILES = 3
+
+
+def lint_overbroad_aliases(
+    terms: list[Term], wiki_root: Path, *, max_files: int = OVERBROAD_ALIAS_MAX_FILES
+) -> list[str]:
+    """Aliases so common in existing prose that adopting them breaks the wiki.
+
+    Run this BEFORE accepting a proposed term. It answers a different question
+    from :func:`lint_paraphrases`: not "is this page using a paraphrase" but
+    "is this alias too broad to be one at all".
+    """
+    if not wiki_root.is_dir():
+        return []
+    pages = [
+        (path, path.read_text(encoding="utf-8").lower())
+        for path in sorted(wiki_root.rglob("*.md"))
+        if "terms" not in path.relative_to(wiki_root).parts
+    ]
+    violations: list[str] = []
+    for term in terms:
+        for alias in term.aliases:
+            pattern = re.compile(rf"\b{re.escape(alias.lower())}\b")
+            hits = sum(1 for _, text in pages if pattern.search(text))
+            if hits > max_files:
+                violations.append(
+                    f"{term.name}: alias '{alias}' already appears as prose in "
+                    f"{hits} wiki files (max {max_files}) — too broad to "
+                    "canonicalise; adopting it makes those files violations"
+                )
+    return violations
+
+
 _LOAD_BEARING_SUFFIXES = ("Loop", "Runner", "Port", "Adapter")
 
 
