@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.712807+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1898
+superseded_by: 2154
 ---
 
 # Cadence must flow through _get_default_interval(), not timers

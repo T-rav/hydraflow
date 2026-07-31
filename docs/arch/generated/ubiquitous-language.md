@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_74 terms across 3 bounded contexts._
+_75 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -443,6 +443,18 @@ Pydantic-validated runtime configuration aggregate for the HydraFlow orchestrato
 - Worker concurrency fields default to 1 and are bounded by ge=1, le=10 (max_hitl_workers le=5).
 - batch_size is bounded ge=1, le=50.
 - repo is auto-detected from the git remote when left empty.
+
+## HydraFlowEvent
+
+**Kind:** `domain_event` · **Context:** `shared-kernel` · **Anchor:** `src/events.py:HydraFlowEvent` · **Confidence:** `accepted`
+**Aliases:** `bus event`, `published event`
+
+A single event published on the in-process EventBus. Carries a monotonic id (for frontend dedup), an EventType discriminator, an ISO timestamp, a typed data payload, and optional session/repo context. HydraFlowEvents are fanned out live to subscribers, retained in in-memory history, and persisted to an append-only JSONL log for replay; persisted IDs are advanced past historical maxima so live events never collide with replayed ones.
+
+**Invariants:**
+- Event IDs are monotonic and advanced past the maximum persisted ID after history load, so live events are never silently dropped by frontend dedup.
+- Every HydraFlowEvent carries an EventType discriminator and an ISO-8601 timestamp; data is a plain mapping (TypedDict or model_dump).
+- PIPELINE_SNAPSHOT and other EPHEMERAL_EVENT_TYPES are fanned out live-only — never retained in history nor persisted to disk.
 
 ## IssueFetcherPort
 

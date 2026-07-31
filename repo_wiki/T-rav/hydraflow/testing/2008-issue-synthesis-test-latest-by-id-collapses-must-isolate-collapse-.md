@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.416011+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1881
+superseded_by: 2137
 ---
 
 # test_latest_by_id_collapses must isolate collapse basis

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:41:40.115208+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1230
+superseded_by: 1375
 ---
 
 # Neutralize ambient state for deterministic config: scrub env + temp repo_root

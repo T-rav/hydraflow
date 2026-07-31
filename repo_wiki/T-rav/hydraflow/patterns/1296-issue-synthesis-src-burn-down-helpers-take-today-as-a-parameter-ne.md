@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:41:40.100165+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1225
+superseded_by: 1370
 ---
 
 # src/ burn-down helpers take today as a parameter, never date.today()

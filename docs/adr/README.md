@@ -176,6 +176,7 @@ cadence and files remediation issues on drift.
 | [0114](0114-optional-per-type-eventbus-subscription.md) | Optional per-type EventBus subscription | Accepted |
 | [0115](0115-auto-diagnose-before-human-for-audit-and-escape-surfaces.md) | Auto-diagnose before human for audit + escape surfaces | Accepted |
 | [0116](0116-prompts-as-a-measured-contract.md) | Prompts as a measured contract | Accepted |
+| [0117](0117-observed-prompt-coverage.md) | Observed prompt coverage — the denominator is measured, not inferred | Accepted |
 
 ## Adding a new ADR
 

@@ -6,13 +6,13 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 78
-- **REAL** (real asserting enforcement): 74 (94.9%)
+- **Accepted ADRs:** 79
+- **REAL** (real asserting enforcement): 76 (96.2%)
 - **WEAK** (prose-only or tautological): 3
-- **MISSING** (no `**Enforced by:**`): 1
-- **Unenforced-decision debt** (WEAK + MISSING): **4 / 78 = 5.1%**
+- **MISSING** (no `**Enforced by:**`): 0
+- **Unenforced-decision debt** (WEAK + MISSING): **3 / 79 = 3.8%**
 
-By declared `**Enforcement:**` kind: `enforced` 74 · `manual` 3 · `decision-of-record` 1.
+By declared `**Enforcement:**` kind: `enforced` 76 · `manual` 3 · `decision-of-record` 0.
 
 ## Classification
 
@@ -39,7 +39,7 @@ By declared `**Enforcement:**` kind: `enforced` 74 · `manual` 3 · `decision-of
 | ADR-0023 | REAL | enforced | `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` |
 | ADR-0024 | REAL | enforced | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
 | ADR-0025 | WEAK | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
-| ADR-0027 | MISSING | decision-of-record | — |
+| ADR-0027 | REAL | enforced | `pytest:tests/architecture/test_adr0027_duplicate_model_class_definitions.py::test_no_dead_duplicate_model_class_definitions` |
 | ADR-0028 | REAL | enforced | `pytest:tests/test_report_event_flow.py` |
 | ADR-0029 | REAL | enforced | `pytest:tests/test_caretaker_loop_wiring.py` |
 | ADR-0030 | REAL | enforced | `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` |
@@ -96,13 +96,13 @@ By declared `**Enforcement:**` kind: `enforced` 74 · `manual` 3 · `decision-of
 | ADR-0114 | REAL | enforced | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
 | ADR-0115 | REAL | enforced | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface`, `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human`, `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed`, `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld` |
 | ADR-0116 | REAL | enforced | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_prompt_fitness.py`, `pytest:tests/test_adr_enforcement_completeness.py`, `pytest:tests/test_prompt_rubric_calibration.py` |
+| ADR-0117 | REAL | enforced | `pytest:tests/test_prompt_observatory.py` |
 
 ## Unenforced-decision debt
 
 | ADR | Class | Kind | Pointer |
 |---|---|---|---|
 | ADR-0025 | WEAK | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
-| ADR-0027 | MISSING | decision-of-record | — |
 | ADR-0035 | WEAK | manual | `Code review checklist item (Decision §3) applied during PR review of any change touching toggle-gated logic; see also 'docs/wiki/testing.md'.` |
 | ADR-0051 | WEAK | manual | `'superpowers:subagent-driven-development' workflow (per-task reviews), this ADR (process documentation), 'superpowers:requesting-code-review' (which dispatches the 'code-reviewer' agent) skill (the fresh-eyes reviewer) — a process convention, not a runnable check.` |
 

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.374299+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1878
+superseded_by: 2134
 ---
 
 # Counter-pins must be rewritten, not deleted

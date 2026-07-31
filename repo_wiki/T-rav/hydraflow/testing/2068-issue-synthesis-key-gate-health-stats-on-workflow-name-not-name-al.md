@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:54.279615+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1943
+superseded_by: 2197
 ---
 
 # Key gate-health stats on (workflow, name), not name alone

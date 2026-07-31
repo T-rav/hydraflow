@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:54.276491+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1942
+superseded_by: 2196
 ---
 
 # FakeGitHub keys list_runs_for_workflow on display name

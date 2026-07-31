@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:50:53.961897+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1915
+superseded_by: 2171
 ---
 
 # Advisory ADR signals stay outside has_real_enforcement

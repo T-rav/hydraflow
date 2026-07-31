@@ -59,6 +59,15 @@ jobs:
               # enumeration failure is merely expensive when a filter decides
               # whether to TEST, and fatal when it decides whether to BLOCK.
               - 'scripts/**'
+              # docs/wiki/** belongs here as well as under `arch`. The
+              # ubiquitous-language paraphrase lint
+              # (tests/test_seed_terms.py) runs against the LIVE wiki, so a PR
+              # that only edits docs/wiki/terms/*.md never ran the test that
+              # lints it: TermProposerLoop #10919 merged an alias for the bare
+              # word "event" with its own PR green, and every subsequent
+              # unrelated build went red (#10926). Same rule as scripts/**
+              # above — under-inclusive is merely expensive for a TEST filter.
+              - 'docs/wiki/**'
             arch:
               - 'src/arch/**'
               - 'tests/architecture/**'
@@ -147,7 +156,7 @@ jobs:
           predicate-quantifier: 'every'
           filters: |
             core_python:
-              - '{src/**/*.py,tests/**,pyproject.toml,uv.lock,scripts/**}'
+              - '{src/**/*.py,tests/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**}'
               - '!src/arch/**'
               - '!tests/architecture/**'
               - '!tests/regressions/**'

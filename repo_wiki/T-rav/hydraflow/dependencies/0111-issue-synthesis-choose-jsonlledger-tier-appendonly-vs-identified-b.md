@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T12:51:45.304522+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0101
+superseded_by: 0121
 ---
 
 # Choose JsonlLedger tier: AppendOnly vs Identified by dedup need
