@@ -4,15 +4,13 @@
 
 Accepted
 
+**Date:** 2026-05-07
+
 **Enforcement:** enforced
 
 **Enforced by:**
 pytest:tests/test_term_pruner_loop.py
 pytest:tests/architecture/test_term_pruner_wiring.py
-
-## Date
-
-2026-05-07
 
 ## Enforced by
 

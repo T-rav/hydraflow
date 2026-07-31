@@ -153,7 +153,7 @@ def is_mutating(check: Check, repo_root: Path | None = None) -> bool:
 
 def _module_level_name_defined(tree: ast.Module, wanted: str) -> bool:
     return any(
-        isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
         and n.name == wanted
         for n in tree.body
     )
@@ -165,7 +165,7 @@ def _class_method_defined(
     for cls in tree.body:
         if isinstance(cls, ast.ClassDef) and cls.name == class_name:
             return any(
-                isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+                isinstance(m, ast.FunctionDef | ast.AsyncFunctionDef)
                 and m.name == wanted_method
                 for m in cls.body
             )
@@ -287,11 +287,27 @@ def _make_target_defined(repo_root: Path, target: str) -> bool:
     return bool(pattern.search(makefile.read_text()))
 
 
+def _script_defined(repo_root: Path, target: str) -> bool:
+    """A ``script:`` check resolves when the named script file exists.
+
+    An ADR enforced by a repo script (e.g. ``script:scripts/audit_prompts.py``)
+    is executable enforcement, not prose — resolvable iff the file is present at
+    the repo-relative path. Any trailing arguments after the path (``script:
+    scripts/foo.py --check``) are ignored for the existence check.
+    """
+    if not target:
+        return False
+    path_part = target.split(maxsplit=1)[0]
+    return (repo_root / path_part).is_file()
+
+
 def resolve_check(check: Check, repo_root: Path) -> bool:
     if check.kind == "pytest":
         return _pytest_node_defined(repo_root, check.target)
     if check.kind == "make":
         return _make_target_defined(repo_root, check.target)
+    if check.kind == "script":
+        return _script_defined(repo_root, check.target)
     return False  # prose is unresolvable by design
 
 
@@ -361,7 +377,7 @@ def _node_asserts(node: ast.AST) -> bool:
             return True
         if isinstance(n, ast.Call) and _ASSERT_NAME_RE.match(_callee_name(n)):
             return True
-        if isinstance(n, (ast.With, ast.AsyncWith)):
+        if isinstance(n, ast.With | ast.AsyncWith):
             for item in n.items:
                 ctx = item.context_expr
                 if isinstance(ctx, ast.Call) and _ASSERT_NAME_RE.match(
@@ -405,7 +421,7 @@ def _resolve_pytest_node_ast(repo_root: Path, target: str) -> ast.AST | None:
 def _named_node(tree: ast.Module, wanted: str) -> ast.AST | None:
     for n in tree.body:
         if (
-            isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
             and n.name == wanted
         ):
             return n
@@ -419,7 +435,7 @@ def _class_child_node(
         if isinstance(cls, ast.ClassDef) and cls.name == class_name:
             for m in cls.body:
                 if (
-                    isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    isinstance(m, ast.FunctionDef | ast.AsyncFunctionDef)
                     and m.name == wanted_method
                 ):
                     return m
