@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T08:27:46.896778+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1028
+superseded_by: 1165
 ---
 
 # New PR-query helpers must request isDraft in pr_manager.py

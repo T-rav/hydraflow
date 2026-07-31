@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 10881
 source_phase: plan
 created_at: 2026-07-31T07:22:08.358107+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Skip only on schedule path; PR-path skips satisfy required checks
