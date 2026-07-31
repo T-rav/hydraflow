@@ -140,14 +140,14 @@ Before this ADR moves to Accepted, a time-boxed audit must be completed:
   exceptions.
 - Makes the canonical location of each type unambiguous, reducing confusion for
   contributors navigating the codebase.
-- The review-time grep check is lightweight and requires no new tooling — it can be
-  performed with standard CLI tools or IDE search.
+- **Automated as of #10867:** `test_no_dead_duplicate_model_class_definitions` runs
+  on every PR via `make quality`, so detection no longer depends on reviewer
+  discipline or a manual grep step (Rule 2, retired).
 
 **Negative / Trade-offs**
 
-- Adds a manual review step that relies on reviewer discipline until automation is
-  triggered (see Rule 5). The automation triggers ensure this manual phase has a
-  hard deadline of 2026-06-01 at the latest.
+- Before automation landed, this rule relied on a manual review step (Rule 2) that
+  depended on reviewer discipline — resolved by Trigger C (#10867); see Rule 5.
 - Strictly enforcing single-definition may occasionally force a type into `models.py`
   earlier than desired (when a second consumer appears), creating a small refactoring
   cost.
