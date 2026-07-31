@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -6682,6 +6683,94 @@ def declared_env_keys() -> frozenset[str]:
     keys.update(_DEPRECATED_ENV_ALIASES.keys())
     keys.update(_DEPRECATED_ENV_ALIASES.values())
     return frozenset(keys)
+
+
+def env_override_keys() -> frozenset[str]:
+    """Every env var key ``HydraFlowConfig``'s ``resolve_defaults()`` might
+    read directly via ``os.environ`` — a superset of :func:`declared_env_keys`.
+
+    ``declared_env_keys()`` only covers the data-driven ``_ENV_*_OVERRIDES``
+    tables. Several steps in ``resolve_defaults`` — ``_resolve_base_paths``,
+    ``_resolve_repo_and_identity``, and the special-case list/docker/JSON
+    overrides at the end of ``_apply_env_overrides`` — read ``os.environ``
+    directly for fields the tables don't model (list-typed fields, JSON-shaped
+    overrides, values needing custom bounds validation). Those keys are
+    hand-listed below; ``tests/architecture/test_config_env_key_coverage.py``
+    AST-scans ``config.py`` for every literal env key read via
+    ``os.environ``/``_get_env`` and fails the build if one is added without a
+    matching entry here (or that test's small credentials-only exemption set,
+    for keys ``build_credentials()`` reads that never reach ``HydraFlowConfig``
+    fields) — so this list cannot silently drift out of sync (#10859).
+
+    Callers building a hermetic ``HydraFlowConfig`` (:func:`declared_default_config`)
+    should scrub this whole set — plus, belt-and-braces, any currently-set
+    ``HYDRAFLOW_``/``HYDRA_``-prefixed key, since a key can land in
+    ``config.py`` and still be missed here on review.
+    """
+    return declared_env_keys() | {
+        "HYDRAFLOW_DATA_ROOT",
+        "HYDRAFLOW_HOME",
+        "HYDRAFLOW_GITHUB_REPO",
+        "HYDRAFLOW_GIT_USER_NAME",
+        "HYDRAFLOW_GIT_USER_EMAIL",
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "HYDRAFLOW_DOCKER_ENABLED",
+        "HYDRA_DOCKER_ENABLED",
+        "HYDRAFLOW_LITE_PLAN_LABELS",
+        "HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS",
+        "HYDRAFLOW_WORKTREE_GC_ROOTS",
+        "HYDRAFLOW_DOCKER_MEMORY_LIMIT",
+        "HYDRAFLOW_DOCKER_TMP_SIZE",
+        "HYDRAFLOW_DOCKER_PIDS_LIMIT",
+        "HYDRAFLOW_MANAGED_REPOS",
+    }
+
+
+def declared_default_config(**overrides: Any) -> HydraFlowConfig:
+    """Build a ``HydraFlowConfig`` reflecting only declared field defaults —
+    no process environment, no ``.env`` file.
+
+    ``HydraFlowConfig()``'s ``resolve_defaults`` validator (``mode="after"``)
+    always runs; there is no constructor flag to skip it, so a bare
+    ``HydraFlowConfig()`` is a function of whatever the host process's
+    environment and ``repo_root/.env`` happen to contain. That breaks
+    ADR-0087's "same input -> same score" for any caller that needs a
+    machine-independent snapshot of the declared defaults — e.g. the prompt
+    audit's rendered-corpus baseline (#10859).
+
+    Two channels are neutralised for the duration of construction, both
+    restored (even if construction raises):
+
+    1. ``os.environ`` — every key in :func:`env_override_keys`, plus any
+       currently-set ``HYDRAFLOW_``/``HYDRA_``-prefixed key, is popped.
+    2. ``repo_root/.env`` — ``_dotenv_lookup`` (the git-identity fallback)
+       reads this file directly, bypassing ``os.environ`` entirely, so
+       scrubbing ``os.environ`` alone cannot suppress it. Unless the caller
+       passes an explicit ``repo_root`` override, this defaults to a freshly
+       created, empty temporary directory: no ``.env`` exists there and no
+       git remote is configured, so ``_dotenv_lookup`` and the repo-slug
+       git-remote detection both take their "nothing found" branch without
+       any change to their own logic. An explicit ``repo_root`` override
+       bypasses this, same precedence as every other field here.
+
+    Harness/test-only — not for use on any hot or concurrent path.
+    """
+    scrub_keys = env_override_keys() | {
+        key for key in os.environ if key.startswith(("HYDRAFLOW_", "HYDRA_"))
+    }
+    saved_env = {key: os.environ.pop(key) for key in scrub_keys if key in os.environ}
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="hydraflow-declared-default-"
+        ) as tmp_dir:
+            fields: dict[str, Any] = {"repo_root": Path(tmp_dir)}
+            fields.update(overrides)
+            return HydraFlowConfig(**fields)
+    finally:
+        os.environ.update(saved_env)
 
 
 def _apply_env_overrides(config: HydraFlowConfig) -> None:

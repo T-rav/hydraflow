@@ -1127,9 +1127,9 @@ def render(builder_callable, *, args: dict, faked_deps: dict) -> str:
 def _real_config_defaults() -> dict[str, object]:
     """Field defaults from the real HydraFlowConfig, or {} if unavailable."""
     try:
-        from config import HydraFlowConfig  # noqa: PLC0415
+        from config import declared_default_config  # noqa: PLC0415
 
-        cfg = HydraFlowConfig()
+        cfg = declared_default_config()
     except Exception:  # pragma: no cover - audit must run without a full env
         return {}
     # Captures lists, dicts and floats as well as scalars. An earlier filter of
@@ -1140,6 +1140,12 @@ def _real_config_defaults() -> dict[str, object]:
     # and the audit therefore never scored. Paths are excluded deliberately —
     # they are machine-specific and would interpolate this filesystem into the
     # rendered prompts, breaking the reproducibility the scoring relies on.
+    # ``declared_default_config()`` (not a bare ``HydraFlowConfig()``) for the
+    # same reason: a bare construction applies env-var overrides and reads
+    # ``repo_root/.env``, so PROMPT_BASELINE would silently depend on whatever
+    # ``HYDRAFLOW_*``/``.env`` the machine running the audit happens to have —
+    # ADR-0087's "same input -> same score" broken by the host, not the prompt
+    # (#10859).
     captured: dict[str, object] = {}
     for name in type(cfg).model_fields:  # pydantic v2
         value = getattr(cfg, name, None)
