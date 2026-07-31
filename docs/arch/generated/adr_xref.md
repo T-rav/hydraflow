@@ -33,7 +33,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0023 | — | `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` |
 | ADR-0024 | `src.agent`, `src.implement_phase`, `src.state.__init__` | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
 | ADR-0025 | `src.models`, `src.reviewer` | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
-| ADR-0027 | `src.agent`, `src.reviewer` | — |
+| ADR-0027 | `src.agent`, `src.reviewer` | `pytest:tests/architecture/test_adr0027_duplicate_model_class_definitions.py::test_no_dead_duplicate_model_class_definitions` |
 | ADR-0028 | — | `pytest:tests/test_report_event_flow.py` |
 | ADR-0029 | — | `pytest:tests/test_caretaker_loop_wiring.py` |
 | ADR-0030 | `src.dashboard_routes._routes` | `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` |

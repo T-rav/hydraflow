@@ -196,11 +196,21 @@ def test_exemplar_adrs_classify_real():
         )
 
 
-def test_exemplar_decision_of_record_is_missing():
-    # ADR-0027 (single-definition rule) is decision-of-record with no
-    # Enforced-by. (ADR-0003, the former exemplar, is now Superseded by ADR-0112
-    # — clone-local isolation, #10623 — so it is no longer an Accepted ADR.)
-    assert classify_adr_enforcement(_live()[27], REPO) is EnforcementClass.MISSING
+def test_no_accepted_adr_classifies_missing():
+    # ADR-0027 (single-definition rule), the former MISSING exemplar, was the
+    # only Accepted ADR classifying MISSING (#10867) — decided enforce over
+    # retire and backed with a resolving check (ADR-0003, an earlier exemplar,
+    # is now Superseded by ADR-0112 — clone-local isolation, #10623). The
+    # corpus now carries zero MISSING debt; this pins that outcome so a future
+    # ADR landing without any Enforced-by declaration regresses here instead
+    # of silently drifting back into debt.
+    live = _live()
+    missing = sorted(
+        number
+        for number, adr in live.items()
+        if classify_adr_enforcement(adr, REPO) is EnforcementClass.MISSING
+    )
+    assert not missing, f"Accepted ADRs classifying MISSING (should be none): {missing}"
 
 
 def test_exemplar_manual_is_weak():
