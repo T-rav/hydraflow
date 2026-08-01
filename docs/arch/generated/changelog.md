@@ -6,16 +6,15 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
-- `9387d08` — chore: arch-regen after merging staging *(2026-07-31)*
-- `dff6138` — Merge remote-tracking branch 'origin/staging' into chore/remove-sentry-from-factory *(2026-07-31)*
-- `ad4f838` — Remove Sentry from the factory; observability owned by the SRE agent (ADR-0118) *(2026-07-31)*
+- `0de9226` — Remove Sentry from the factory; observability owned by the SRE agent (ADR-0118) (#10954) (#10954) *(2026-08-01)*
+- `0b0b838` — Merge remote-tracking branch 'origin/main' into rc/2026-07-31-1816 *(2026-07-31)*
 - `26cbece` — Fixes #10939: backfill **Date:** frontmatter on the undated Accepted ADRs (#10953) (#10953) *(2026-07-31)*
 - `46ad47f` — Remove Honeycomb/OTel telemetry from the factory (ADR-0118 supersedes ADR-0055) (#10950) (#10950) *(2026-07-31)*
 - `32bedda` — Fixes #10859: Prompt baselines are environment-dependent: HydraFlow... (#10938) (#10938) *(2026-07-31)*
 - `ce75b4f` — Fixes #10883: Gate health: Coverage (trailing) suspected CI hang, n... (#10929) (#10929) *(2026-07-31)*
 - `dba3064` — Fixes #10867: ADR-0027 is the only Accepted ADR classifying MISSING... (#10901) (#10901) *(2026-07-31)*
 - `b322479` — Observed prompt coverage: measure the denominator at the gate (ADR-0117) (#10927) (#10927) *(2026-07-31)*
-- `c472943` — feat(ul): term-proposer batch — 1 drafts (#10919) (#10919) *(2026-07-31)*
+- `e066cdb` — chore(rc): regenerate arch artifacts for rc/2026-07-31-1047 promotion *(2026-07-31)*
 - `d4c7ecd` — Merge origin/main into rc/2026-07-31-1047 (promotion sync) *(2026-07-31)*
 - `c472943` — feat(ul): term-proposer batch — 1 drafts (#10919) (#10919) *(2026-07-31)*
 - `e3757c4` — chore(rc): regenerate arch artifacts for rc/2026-07-31-0053 promotion *(2026-07-31)*
@@ -632,7 +631,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 - `692dc64` — chore(wiki): backfill all topics with new doc-voice prompt + harden compiler prompt (#8472) (#8472) *(2026-05-02)*
 - `525f135` — chore(audit): unblock principles audit (P2.9 split-aware + P10.3 baseline) (#8469) (#8469) *(2026-05-02)*
-- `a1ad80f` — chore(wiki): slim json:entry blocks (drop content+valid_from) + tighten compiler doc-voice prompt (#8465) (#8465) *(2026-05-02)*
 
 
 <!-- arch:generated -->
