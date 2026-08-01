@@ -1151,6 +1151,7 @@ class HydraFlowOrchestrator:
             event_loop_watchdog.start()
         try:
             self._restore_state()
+            self._rearm_failover_probe_if_active()
             await self._publish_status()
             # Seed the full loop registry onto the bus before any loop ticks so
             # the operator console's loop-health count is accurate + stable from
@@ -1367,6 +1368,11 @@ class HydraFlowOrchestrator:
         if not credit_failover.zai_key_present():
             return False
         if credit_failover.is_active():
+            # Already failed over (possibly engaged by another repo's orchestrator
+            # — the flag is process-global). Ensure THIS orchestrator has a live
+            # switch-back probe too, so it isn't left to whichever instance first
+            # observed the cap. Idempotent when a probe is already running.
+            self._start_failover_probe()
             return True
         now = datetime.now(UTC)
         resume_at = self._compute_resume_time(exc)
@@ -1408,6 +1414,20 @@ class HydraFlowOrchestrator:
         self._failover_probe_task = asyncio.create_task(
             self._run_failover_probe(), name="hydraflow-credit-failover-probe"
         )
+
+    def _rearm_failover_probe_if_active(self) -> None:
+        """Re-arm the switch-back probe on startup when failover is engaged (#10844).
+
+        The failover flag is a process-global that survives an in-process
+        stop/start (and is shared across orchestrators in multi-repo mode). If a
+        prior run left it engaged, the probe must be re-armed here — otherwise a
+        restart while failed over leaves work silently pinned to GLM: every spawn
+        reroutes before it can raise a fresh ``CreditExhaustedError``, so
+        ``_maybe_engage_failover`` (which arms the probe) is never reached again.
+        Idempotent when a probe is already live.
+        """
+        if credit_failover.is_active():
+            self._start_failover_probe()
 
     async def _run_failover_probe(self) -> None:
         """Poll for Claude recovery while failover is active; clear on success."""

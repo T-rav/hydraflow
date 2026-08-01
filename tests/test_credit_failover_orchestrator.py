@@ -107,15 +107,36 @@ async def test_zai_cap_does_not_engage_failover(
 
 
 @pytest.mark.asyncio
-async def test_already_active_returns_true_without_reengaging(
+async def test_already_active_returns_true_and_arms_probe(
     config, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("ZAI_API_KEY", "k")
     orch = HydraFlowOrchestrator(config)
+    orch._start_failover_probe = MagicMock()  # type: ignore[method-assign]
     credit_failover.engage(now=datetime.now(UTC), resume_at=None, cooldown_minutes=15)
     before = credit_failover.status().probe_after
     assert await orch._maybe_engage_failover(_auth_claude_cap()) is True
-    assert credit_failover.status().probe_after == before  # untouched
+    assert credit_failover.status().probe_after == before  # not re-engaged
+    # This orchestrator ensures it has a live probe even when it did not engage.
+    orch._start_failover_probe.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_rearm_probe_on_startup_when_failover_active(config) -> None:
+    """A restart while failed over must re-arm the switch-back probe (#10844)."""
+    orch = HydraFlowOrchestrator(config)
+    orch._start_failover_probe = MagicMock()  # type: ignore[method-assign]
+    credit_failover.engage(now=datetime.now(UTC), resume_at=None, cooldown_minutes=15)
+    orch._rearm_failover_probe_if_active()
+    orch._start_failover_probe.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_rearm_probe_noop_when_not_failed_over(config) -> None:
+    orch = HydraFlowOrchestrator(config)
+    orch._start_failover_probe = MagicMock()  # type: ignore[method-assign]
+    orch._rearm_failover_probe_if_active()
+    orch._start_failover_probe.assert_not_called()
 
 
 # --- switch-back probe ------------------------------------------------------
