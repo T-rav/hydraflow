@@ -6,8 +6,8 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 
 **Fan-out consumers** (each receives every published event):
 
-- `src.dashboard_routes._routes:_serve_merged_ws`
 - `src.dashboard_routes._routes:create_router.websocket_endpoint`
+- `src.dashboard_routes._ws_stream:_serve_merged_ws`
 
 | Event | Publishers | Subscribers |
 |---|---|---|
@@ -35,14 +35,14 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 | **ISSUE_REFINEMENT_UPDATE** | `src.issue_refinement_loop:IssueRefinementLoop._publish_refinement_event` | ★ all (fan-out) |
 | **LOOP_FITNESS_UPDATE** | `src.fitness_scorecard_loop:FitnessScorecardLoop._do_work` | ★ all (fan-out) |
 | **MEMORY_SYNC** ⚠️ | — | — |
-| **MERGE_UPDATE** | `src.pr_manager:PRManager.merge_pr`<br>`src.pr_manager:PRManager.merge_promotion_pr` | ★ all (fan-out) |
+| **MERGE_UPDATE** | `src.pr_manager:PRManager.merge_pr`<br>`src.pr_manager_promotion:PRManagerPromotionMixin.merge_promotion_pr` | ★ all (fan-out) |
 | **METRICS_UPDATE** | `src.metrics_manager:MetricsManager.sync` | ★ all (fan-out) |
 | **ORCHESTRATOR_STATUS** | `src.dashboard_routes._control_routes:register.start_orchestrator`<br>`src.orchestrator:HydraFlowOrchestrator._publish_status` | ★ all (fan-out) |
 | **PHASE_CHANGE** | `src.server:_run_with_dashboard` | ★ all (fan-out) |
 | **PIPELINE_SNAPSHOT** | `src.issue_store:IssueStore._flush_pipeline_snapshot` | ★ all (fan-out) |
 | **PIPELINE_STATS** | `src.orchestrator:HydraFlowOrchestrator.emit_pipeline_stats` | ★ all (fan-out) |
 | **PLANNER_UPDATE** | `src.planner:PlannerRunner._emit_status` | ★ all (fan-out) |
-| **PR_CREATED** | `src.pr_manager:PRManager.create_pr`<br>`src.pr_manager:PRManager.create_promotion_pr` | ★ all (fan-out) |
+| **PR_CREATED** | `src.pr_manager:PRManager.create_pr`<br>`src.pr_manager_promotion:PRManagerPromotionMixin.create_promotion_pr` | ★ all (fan-out) |
 | **QUEUE_UPDATE** | `src.issue_store:IssueStore._publish_queue_update_nowait`<br>`src.issue_store:IssueStore.refresh`<br>`src.mockworld.fakes.fake_issue_store:FakeIssueStore.refresh` | ★ all (fan-out) |
 | **RATCHET_TIGHTENED** | `src.auto_tighten_loop:AutoTightenLoop._emit_tightened`<br>`src.auto_tighten_loop:AutoTightenLoop._emit_unattributed` | ★ all (fan-out) |
 | **REPORT_UPDATE** | `src.report_issue_loop:ReportIssueLoop._emit_report_event` | ★ all (fan-out) |
@@ -58,7 +58,7 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 | **TRIAGE_UPDATE** | `src.triage:TriageRunner._emit_status` | ★ all (fan-out) |
 | **TRIBAL_PROMOTION** ⚠️ | — | — |
 | **VERIFICATION_JUDGE** | `src.verification_judge:VerificationJudge.judge` | ★ all (fan-out) |
-| **VISUAL_GATE** | `src.post_merge_handler:PostMergeHandler._run_visual_gate`<br>`src.review_phase._phase:ReviewPhase._emit_visual_gate_telemetry`<br>`src.review_phase._phase:ReviewPhase.check_visual_gate` | ★ all (fan-out) |
+| **VISUAL_GATE** | `src.post_merge_handler:PostMergeHandler._run_visual_gate`<br>`src.review_phase._visual_gate:VisualGateMixin._emit_visual_gate_telemetry`<br>`src.review_phase._visual_gate:VisualGateMixin.check_visual_gate` | ★ all (fan-out) |
 | **WIKI_SUPERSEDES** ⚠️ | — | — |
 | **WORKER_UPDATE** | `src.agent:AgentRunner._emit_status` | ★ all (fan-out) |
 

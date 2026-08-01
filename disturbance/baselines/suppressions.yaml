@@ -25,7 +25,9 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ -2 staging_bisect_loop.py PLC0415 (#9554/#10028 \u2014 _run_bisect_probe/_run_gh\
   \ migrated onto the shared subprocess_util.run_subprocess_result/run_subprocess\
   \ bounded helper; each dropped a now-redundant local 'import asyncio' re-import\
-  \ that shadowed the module-level import)."
+  \ that shadowed the module-level import). re-snapshot 2026-08: god-file decomposition\
+  \ moved 3 BLE001 suppressions verbatim from dashboard_routes/_routes.py to the extracted\
+  \ dashboard_routes/_ws_stream.py (net-zero move, no new suppressions)."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -93,9 +95,7 @@ entries:
   src/dashboard_routes/_diagnostics_routes.py::noqa:PLC0415: 4
   src/dashboard_routes/_hitl_routes.py::noqa:BLE001: 1
   src/dashboard_routes/_metrics_routes.py::noqa:PLR0915: 1
-  src/dashboard_routes/_routes.py::noqa:BLE001: 4
-  "src/dashboard_routes/_routes.py::noqa:BLE001\u2014adownrepomustnotsinkthemerge": 1
-  "src/dashboard_routes/_routes.py::noqa:BLE001\u2014skipadownrepo,keepthesocket": 1
+  src/dashboard_routes/_routes.py::noqa:BLE001: 3
   src/dashboard_routes/_routes.py::noqa:PLC0415: 3
   src/dashboard_routes/_state_routes.py::noqa:BLE001: 7
   src/dashboard_routes/_state_routes.py::noqa:PLC0415: 3
@@ -109,6 +109,9 @@ entries:
   src/dashboard_routes/_wiki_routes.py::noqa:BLE001: 2
   src/dashboard_routes/_wiki_routes.py::noqa:PLC0415: 2
   "src/dashboard_routes/_wiki_routes.py::noqa:SLF001\u2014read-onlydiagnostics": 1
+  src/dashboard_routes/_ws_stream.py::noqa:BLE001: 1
+  "src/dashboard_routes/_ws_stream.py::noqa:BLE001\u2014adownrepomustnotsinkthemerge": 1
+  "src/dashboard_routes/_ws_stream.py::noqa:BLE001\u2014skipadownrepo,keepthesocket": 1
   src/decomposition_council.py::noqa:PLC0415: 1
   src/diagnostic_loop.py::noqa:PLC0415: 1
   src/diagnostic_loop.py::noqa:PLR0911: 1
@@ -190,10 +193,12 @@ entries:
   src/phase_utils.py::noqa:F401: 1
   src/phase_utils.py::noqa:PLC0415: 6
   "src/phase_utils.py::noqa:PLC0415\u2014deferredtoavoidcircularimport": 1
-  src/plan_phase.py::noqa:BLE001: 9
-  src/plan_phase.py::noqa:PLC0415: 6
-  src/plan_phase.py::noqa:TCH004: 1
+  src/plan_phase.py::noqa:BLE001: 7
+  src/plan_phase.py::noqa:PLC0415: 2
   src/plan_phase.py::type-ignore[union-attr]: 1
+  src/plan_phase_wiki_ingest.py::noqa:BLE001: 2
+  src/plan_phase_wiki_ingest.py::noqa:PLC0415: 4
+  src/plan_phase_wiki_ingest.py::noqa:TCH004: 1
   src/plan_reviewer.py::noqa:ANN001: 1
   src/plan_reviewer.py::noqa:BLE001: 1
   src/plan_touchpoint_expander.py::noqa:BLE001: 1
@@ -205,8 +210,9 @@ entries:
   "src/post_merge_handler.py::noqa:BLE001\u2014neverblockmergepathonwikiI/O": 1
   src/post_merge_handler.py::noqa:PLC0415: 5
   src/pr_manager.py::noqa:BLE001: 1
-  src/pr_manager.py::noqa:PLC0415: 26
+  src/pr_manager.py::noqa:PLC0415: 24
   src/pr_manager.py::type-ignore[arg-type]: 1
+  src/pr_manager_promotion.py::noqa:PLC0415: 2
   src/pr_unsticker.py::noqa:PLC0415: 3
   src/precheck.py::noqa:BLE001: 1
   src/precondition_gate.py::noqa:BLE001: 1
@@ -242,13 +248,14 @@ entries:
   src/review_phase/__init__.py::noqa:E402: 3
   src/review_phase/_common.py::noqa:PLC0415: 1
   src/review_phase/_phase.py::noqa: 1
-  src/review_phase/_phase.py::noqa:ARG002: 2
   src/review_phase/_phase.py::noqa:BLE001: 4
   "src/review_phase/_phase.py::noqa:E402,F401\u2014usedbycallsitesbelow": 1
-  src/review_phase/_phase.py::noqa:PLC0415: 44
+  src/review_phase/_phase.py::noqa:PLC0415: 43
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__+sig": 1
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__signature": 1
   src/review_phase/_phase.py::type-ignore[arg-type]: 2
+  src/review_phase/_visual_gate.py::noqa:ARG002: 2
+  src/review_phase/_visual_gate.py::noqa:PLC0415: 1
   src/reviewer.py::noqa:PLC0415: 3
   src/route_back.py::noqa:BLE001: 8
   src/runner_utils.py::noqa:PLC0415: 7

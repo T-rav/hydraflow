@@ -116,6 +116,20 @@ def test_coverage_debt_is_burned_down_on_schedule() -> None:
     )
 
 
+#: A single burn-down window may not exceed this many days from its origin
+#: (#10861). Without this, ``GRANDFATHERED_DEADLINE`` moves for free — pushing it
+#: a year out keeps every test green and carries the debt indefinitely. A
+#: *legitimate* extension moves the origin forward too (re-declaring the debt at
+#: that date), which keeps the window bounded; a bare deadline push does not.
+_MAX_BURNDOWN_WINDOW_DAYS = 180
+
+
+def _burndown_window_days(deadline: str, origin: str) -> int:
+    from datetime import date  # noqa: PLC0415
+
+    return (date.fromisoformat(deadline) - date.fromisoformat(origin)).days
+
+
 def test_burndown_schedule_is_coherent() -> None:
     """A schedule that cannot be checked is decoration."""
     from datetime import date  # noqa: PLC0415
@@ -131,6 +145,29 @@ def test_burndown_schedule_is_coherent() -> None:
     assert len(GRANDFATHERED) <= origin_count, (
         f"the allowlist ({len(GRANDFATHERED)}) exceeds its burn-down origin "
         f"({origin_count}) — the debt grew, which the ratchet should have caught"
+    )
+    window = _burndown_window_days(GRANDFATHERED_DEADLINE, origin_date)
+    assert window <= _MAX_BURNDOWN_WINDOW_DAYS, (
+        f"the burn-down window is {window} days ({origin_date} → "
+        f"{GRANDFATHERED_DEADLINE}), over the {_MAX_BURNDOWN_WINDOW_DAYS}-day cap "
+        f"(#10861). The deadline cannot be pushed out for free — to carry the "
+        f"debt longer, move GRANDFATHERED_BURNDOWN_ORIGIN forward as well, which "
+        f"re-declares the debt at a new date and keeps the window bounded."
+    )
+
+
+def test_the_window_cap_rejects_a_free_year_long_extension() -> None:
+    # The exact #10861 scenario: pushing the deadline a year past the origin
+    # without moving the origin must exceed the cap, so it can't pass silently.
+    origin_date, _ = GRANDFATHERED_BURNDOWN_ORIGIN
+    from datetime import date  # noqa: PLC0415
+
+    a_year_out = date.fromisoformat(origin_date).replace(
+        year=date.fromisoformat(origin_date).year + 1
+    )
+    assert (
+        _burndown_window_days(a_year_out.isoformat(), origin_date)
+        > _MAX_BURNDOWN_WINDOW_DAYS
     )
 
 

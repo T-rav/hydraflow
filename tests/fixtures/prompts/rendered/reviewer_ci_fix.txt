@@ -18,7 +18,7 @@ FAILED tests/test_upload.py::test_upload_retry - AssertionError: Expected 3 uplo
 
 1. Read the failing CI output above.
 2. Fix the root causes — do NOT skip or disable tests.
-3. Run `make lint` and `make test` to verify locally.
+3. Run `make quality` to verify locally (full suite: lint, types, security, tests — do not use file-targeted subsets).
 4. Commit fixes with message: "ci-fix: <description> (PR #77)"
 5. **Post-commit verification:** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming that every intended file appears in the stat output. If a file is missing, your commit did NOT actually change it — go back and fix it.
 

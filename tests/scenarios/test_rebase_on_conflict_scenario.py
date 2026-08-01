@@ -103,7 +103,7 @@ async def test_promotion_recovers_via_auto_rebase_end_to_end(
             return ""
         return ""
 
-    monkeypatch.setattr("pr_manager.run_subprocess", _scripted_run_subprocess)
+    monkeypatch.setattr("pr_manager_promotion.run_subprocess", _scripted_run_subprocess)
 
     update_calls = 0
 
@@ -147,7 +147,7 @@ async def test_promotion_real_conflict_falls_through_to_failure_path(
             raise RuntimeError("Pull Request is not mergeable: conflict")
         return ""
 
-    monkeypatch.setattr("pr_manager.run_subprocess", _failing_subprocess)
+    monkeypatch.setattr("pr_manager_promotion.run_subprocess", _failing_subprocess)
 
     async def _failing_run_gh(*cmd: str, cwd: Any = None) -> str:
         if "update-branch" in " ".join(cmd):
@@ -189,7 +189,7 @@ async def test_promotion_first_attempt_succeeds_no_recovery_needed(
     async def _ok_subprocess(*cmd: str, **_kw: Any) -> str:
         return ""
 
-    monkeypatch.setattr("pr_manager.run_subprocess", _ok_subprocess)
+    monkeypatch.setattr("pr_manager_promotion.run_subprocess", _ok_subprocess)
     monkeypatch.setattr(prs, "_run_gh", _scripted_run_gh)
 
     result = await loop._handle_open_promotion(7, RC_BRANCH)

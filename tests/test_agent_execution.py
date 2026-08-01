@@ -478,17 +478,6 @@ class TestBuildPrompt:
         assert "## Common Review Feedback" in prompt
 
     @pytest.mark.asyncio
-    async def test_prompt_includes_new_self_check_items(
-        self, config, event_bus: EventBus, agent_task
-    ) -> None:
-        """Prompt should include the new dead-code and failure-path checklist items."""
-        runner = AgentRunner(config, event_bus)
-        prompt, _ = await runner._build_prompt_with_stats(agent_task)
-        assert "New code is reachable" in prompt
-        assert "Tests verify issue requirements" in prompt
-        assert "Failure paths are tested" in prompt
-
-    @pytest.mark.asyncio
     async def test_prompt_works_without_review_data(
         self, config, event_bus: EventBus, agent_task
     ) -> None:
@@ -583,15 +572,15 @@ class TestBuildPrompt:
     async def test_prompt_includes_self_check_checklist(
         self, config, event_bus: EventBus, agent_task
     ) -> None:
-        """Prompt should include the self-check checklist section."""
+        """Prompt should include the self-check section with the recurring CI reds."""
         runner = AgentRunner(config, event_bus)
         prompt, _ = await runner._build_prompt_with_stats(agent_task)
         assert "## Self-Check Before Committing" in prompt
-        assert "Tests cover all new/changed code" in prompt
-        assert "No missing imports" in prompt
-        assert "Type hints are correct" in prompt
-        assert "Edge cases handled" in prompt
-        assert "No leftover debug code" in prompt
+        assert "tests/regressions/" in prompt
+        assert "SANDBOX_SEAMS" in prompt
+        assert "Enforced by:" in prompt
+        assert "# noqa" in prompt
+        assert "fix its patchers" in prompt
 
     @pytest.mark.asyncio
     async def test_self_check_appears_after_instructions(
@@ -742,31 +731,12 @@ class TestBuildPrompt:
         runner = AgentRunner(config, event_bus)
         prompt, _ = await runner._build_prompt_with_stats(agent_task)
         # Commit 33331ca4 switched the implementer to TDD discipline; the
-        # prompt no longer says "Write tests" / "prevent regressions"
-        # literally — instead it documents the RED/GREEN/REFACTOR cycle
-        # and reaffirms tests are mandatory in the rules section.
-        assert "Test-Driven Development" in prompt
+        # #10860 prompt prune compressed the step list to a single
+        # RED/GREEN/REFACTOR directive and kept "Tests are mandatory" in
+        # the rules section.
+        assert "test-first" in prompt
         assert "failing test" in prompt
         assert "Tests are mandatory" in prompt
-
-    @pytest.mark.asyncio
-    async def test_self_check_includes_dead_code_check(
-        self, config, event_bus: EventBus, agent_task
-    ) -> None:
-        """Self-check checklist should verify no dead code is introduced."""
-        runner = AgentRunner(config, event_bus)
-        prompt, _ = await runner._build_prompt_with_stats(agent_task)
-        assert "New code is reachable" in prompt
-        assert "dead code" in prompt
-
-    @pytest.mark.asyncio
-    async def test_self_check_includes_issue_requirements_check(
-        self, config, event_bus: EventBus, agent_task
-    ) -> None:
-        """Self-check checklist should verify tests match issue requirements."""
-        runner = AgentRunner(config, event_bus)
-        prompt, _ = await runner._build_prompt_with_stats(agent_task)
-        assert "Tests verify issue requirements" in prompt
 
     @pytest.mark.asyncio
     async def test_prompt_forbids_already_satisfied(

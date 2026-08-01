@@ -30,6 +30,8 @@ Add retry logic to the upload function.
 Please fix the plan to address ALL of the validation errors above.
 Your plan MUST include ALL of the following sections with these EXACT headers:
 
+- `## Intent` — 1-2 sentences: what outcome this change produces and why (#9955 brief shape)
+- `## Approach` — one short paragraph: the chosen approach and the key decision(s) behind it
 - `## Files to Modify` — list each existing file and what changes are needed (must reference at least one file path)
 - `## New Files` — list new files to create, or state "None" if no new files needed
 - `## File Delta` — structured list of all planned file changes using this exact format:

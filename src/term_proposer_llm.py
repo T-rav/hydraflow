@@ -55,13 +55,7 @@ class DraftContext:
 
 _PROMPT_TEMPLATE = """You are evaluating whether a candidate class belongs in HydraFlow's **ubiquitous language** (UL), and — if so — drafting the Term.
 
-## Context: what UL is, why it matters
-
-This codebase follows Eric Evans' Domain-Driven Design. The **ubiquitous language** is the shared vocabulary that engineers, domain experts, and the code itself use to talk about the system. UL terms are *names that carry domain meaning* — they appear in design discussions, ADRs, code, glossaries, and conversations as the same word with the same precise meaning.
-
-UL is not "every class in `src/`." Most classes are scaffolding: they implement, support, or carry data for the things that matter. Only a small fraction of classes name **load-bearing domain concepts** that the system's purpose hinges on. Those are UL terms; everything else is not.
-
-When the system already has UL terms, they form an *ontology* — a graph of named domain concepts with relationships. Your job is to decide whether the candidate enriches that ontology with a new node, or whether it's scaffolding around existing nodes.
+UL is not "every class in `src/`." Only a small fraction of classes name **load-bearing domain concepts**; the rest are scaffolding that implements, supports, or carries data for the things that matter.
 
 ## Existing ontology (UL terms already in the glossary)
 
@@ -86,8 +80,6 @@ Caller snippets (top importers, grounding for the depends_on edges):
 
 ## Step 1 — Inclusion judgment
 
-Decide whether this candidate belongs in the UL. Apply these criteria, in order:
-
 **Linguistic test:** would engineers use this name **as a noun** in design conversations about HydraFlow?
 - "We need a new `<Name>`" / "The `<Name>` does X" → likely UL
 - "We need to handle `<Name>`" / "`<Name>` happens when X fails" → likely scaffolding (the noun is the thing that throws/contains it, not the thing itself)
@@ -100,9 +92,9 @@ INCLUDE (`"include": true`) — **load-bearing domain concepts**:
 - Policy / Invariant / Bounded Context — rules that gate behavior or shape the system
 
 SKIP (`"include": false`) — **scaffolding**:
-- **Exception / Error types** — operational signals raised by services. The service is UL; the exception is its failure mode, not a separate domain concept. Skip unless the exception itself names a *business rule* (e.g., `InsufficientFunds` in an accounting system might be UL; `AuthenticationError` is not).
-- **Mixin / abstract composition helpers** — `*Mixin` classes exist to compose behavior into other classes; engineers reach for the composed class, not the mixin.
-- **Generic data carriers** — TypedDicts / dataclasses / Pydantic models that exist *only* to type a parameter or return value, with no behavior, no named identity, no engineering conversation. (A Pydantic model that *is* a Domain Event with named meaning is UL; one that's just "the shape of a function arg" is not.)
+- **Exception / Error types** — the raising service is UL; its exception is a failure mode, not a separate concept. Skip unless the exception itself names a *business rule* (e.g., `InsufficientFunds` in an accounting system might be UL; `AuthenticationError` is not).
+- **Mixin / abstract composition helpers** — engineers reach for the composed class, not the mixin.
+- **Generic data carriers** — TypedDicts / dataclasses / Pydantic models that exist *only* to type a parameter or return value, with no behavior or named identity. (A Pydantic model that *is* a Domain Event with named meaning is UL; one that's just "the shape of a function arg" is not.)
 - **Internal utility / helper classes** — wrappers, builders, formatters used inside one module.
 - **Test scaffolding** — fixtures, fakes, mocks.
 - **Framework extension points** without HydraFlow-specific identity (e.g., a generic Protocol that any HTTP client could satisfy).
@@ -111,7 +103,7 @@ SKIP (`"include": false`) — **scaffolding**:
 - "It's a `<noun-phrase-in-domain>`" → INCLUDE
 - "It's how `<other-thing>` represents/handles/carries `<X>`" → SKIP (the *other thing* is the UL term; this candidate is a detail)
 
-**Honest acknowledgment:** when in doubt, prefer SKIP. A glossary cluttered with marginal terms is worse than one missing a few — supersession is cheap when a real concept emerges later.
+When in doubt, prefer SKIP — a glossary cluttered with marginal terms is worse than one missing a few; supersession is cheap when a real concept emerges later.
 
 ## Step 2 — When INCLUDE is true, draft the Term
 

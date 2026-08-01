@@ -926,11 +926,10 @@ Then a brief summary on the next line starting with "SUMMARY: ".
 ## Review Instructions
 
 1. Evaluate four dimensions: **scope**, correctness, completeness, and quality.
-2. **Scope check (mandatory first step):** Compare every changed file against the issue title, description, and the implementation plan (if provided above). Flag any file or change that is unrelated to the stated goal or not in the plan. Unrelated test files, docs, or config changes are scope creep — reject them. Follow CLAUDE.md rules strictly (e.g., never add tests for ADR markdown content).
-2a. **Verify findings against live code (mandatory):** Before reporting any finding, grep or read the relevant live file to confirm the issue is present in the current codebase, not a stale artifact from a prior fix. A finding that does not appear in the live file at the relevant line is not a finding — skip it.
-3. Look for edge cases, missing error handling, security risks, test gaps, and style violations.
-4. You MUST find at least {min_findings} issues across all categories. If you find fewer, re-examine the code more carefully.
-5. If you genuinely find fewer than {min_findings} issues, include THOROUGH_REVIEW_COMPLETE:
+2. **Scope check (mandatory first step):** Flag any file or change unrelated to the issue or missing from the implementation plan (if provided above). Unrelated test, docs, or config changes are scope creep — reject them. Never add tests for ADR markdown content.
+2a. **Verify findings against live code (mandatory):** Grep or read the live file to confirm each finding exists in the current codebase before reporting it — a stale artifact from a prior fix is not a finding.
+3. You MUST find at least {min_findings} issues across all categories. If you find fewer, re-examine the code more carefully.
+4. If you genuinely find fewer than {min_findings} issues, include THOROUGH_REVIEW_COMPLETE:
 ```
 THOROUGH_REVIEW_COMPLETE
 Scope: No issues — <justification>
@@ -939,33 +938,28 @@ Completeness: No issues — <justification>
 Quality: No issues — <justification>
 ```
 {verify_step}
-7. Run project audits on changed code:
-   - Review code quality patterns (SRP, type hints, naming, complexity)
-   - Review test quality (3As structure, factories, edge cases)
+6. Run project audits on changed code:
+   - Code quality (SRP, type hints, naming, complexity) and test quality (3As structure, factories, edge cases)
+   - **Security** — injection, unsafe deserialization, crypto misuse, auth/authz gaps, secret/credential exposure, unsafe `subprocess`/shell
    - **Test-value standards (merge gate)** — request changes for:
-     - Skipped, xfailed, commented-out, or placeholder tests in active coverage; file deferred work in bd instead of keeping green placeholders.
-     - Unit tests that bypass documented factories or world-building helpers when the repo provides them (for HydraFlow, use `ConfigFactory`, `TaskFactory`, `make_pr_manager`, and MockWorld helpers as applicable).
-     - Integration tests that mock behavior-changing collaborators or assert only mock call shape. Integration tests should wire real business logic and mock only external boundaries that cannot run in the test environment.
-     - MockWorld scenarios that replace FakeGitHub/Fake* side effects with raw `AsyncMock`/`MagicMock` call-count assertions instead of asserting state through `world.<fake>`.
-   - **Test coverage audit** — verify:
-     - Tests cover the specific issue requirements, not just helper/utility functions
-     - Failure and error paths have explicit tests, not only happy paths
-     - Every new public function/method is actually called from production code (flag dead code that is tested but never invoked)
-     - New branches/conditions introduced by the PR have corresponding test cases
-   - Check for security issues (injection, crypto, auth)
-   - Flag redundant guard conditions in if/elif chains — hoist the shared guard (e.g., rewrite `if A and B: ... elif A and not B: ...` into `if A: if B: ... else: ...`)
-   - Merge-artifact check: look for duplicate Pydantic Field definitions, duplicate function parameters, or duplicate keyword arguments — these arise when concurrent PRs add the same field and get merged sequentially
-   - **Architectural drift** — boundary-crossing imports and misplaced I/O are the recurring drift pattern that hides in otherwise-clean PRs. Check the diff for:
-     - **Layer jumps:** if the repo has directories named `domain/`, `core/`, `models/`, `entities/`, or `ports/`, files under them should not import from `adapters/`, `adapter/`, `infrastructure/`, `infra/`, `io/`, or `gateways/`. Flag any new import that crosses that boundary inward (outer → inner is fine; inner → outer is drift).
-     - **Misplaced I/O:** flag new direct use of I/O primitives (`subprocess`, `socket`, `httpx`, `requests`, `urllib`, `boto3`, `sqlalchemy`, `pymongo`, `redis`, `kafka`, raw `open()`, file reads/writes) inside files whose path or name suggests "pure" logic — anything under `domain/`, `core/`, `models/`, `entities/`, or files named `*_model.py`, `*_entity.py`, `*_value*.py`, `*_rules.py`. The I/O should live in an adapter, not in a domain or model file.
-     - **God-file creep:** note files in the diff that grew significantly (many new imports, or >~50% line-count increase) and ask whether the file is still doing one thing. A previously-focused file that now orchestrates unrelated concerns is a drift signal.
-     - **Escape hatch:** if the repo has no recognisable layering convention (no `domain/`, `core/`, `adapters/`, or similar signal directories, and no naming pattern in filenames) then **skip this bullet entirely — do not invent violations**. Architectural drift is a finding only when there is a recognisable architecture to drift from.
-   - **HydraFlow principles (ADR-0044)** — check the diff for HydraFlow-specific drift beyond generic layering. Flag any of these as findings:
-     - **MockWorld scenario coverage:** new cross-phase / orchestrator / runner behaviour without a matching release-gating scenario under `tests/scenarios/` using `MockWorld` fakes. Unit tests alone don't cover the loop; a missing scenario is a finding.
-     - **BDD-flavour test naming:** new tests named after the function under test (`test_create_widget`, `test_helper_util`) instead of the behaviour (`test_create_widget_with_duplicate_name_raises_integrity_error`). Flag test names that would rot the minute the function is renamed.
-     - **Port compliance:** new direct use of `subprocess`, `gh`, or `git` CLI, or direct GitHub API calls, in files outside the known adapter layer. HydraFlow routes these through `PRPort`, `IssueStorePort`, and `WorkspacePort`. Suggest routing through the existing Port or extending it.
-     - **One responsibility per file:** large additions to an already-large file that introduce a second concern. Prefer a new file over continuing to grow an existing mega-file.
-     - **Escape hatch:** skip this bullet if the repo isn't HydraFlow and has no `tests/scenarios/`, `ports.py`, or similar HydraFlow-style seams.
+     - Skipped, xfailed, commented-out, or placeholder tests in active coverage — file deferred work in bd instead
+     - Unit tests that bypass documented factories or world-building helpers (for HydraFlow: `ConfigFactory`, `TaskFactory`, `make_pr_manager`, MockWorld helpers)
+     - Integration tests that mock behavior-changing collaborators or assert only mock call shape — wire real business logic; mock only external boundaries that cannot run in the test environment
+     - MockWorld scenarios that replace FakeGitHub/Fake* side effects with raw `AsyncMock`/`MagicMock` call-count assertions instead of asserting state through `world.<fake>`
+   - **Test coverage audit** — tests cover the specific issue requirements (not just helpers); failure/error paths have explicit tests; every new public function is called from production code (flag tested-but-never-invoked dead code); new branches have test cases
+   - Flag redundant guard conditions in if/elif chains — hoist the shared guard
+   - Merge-artifact check: duplicate Pydantic Field definitions, duplicate function parameters, or duplicate keyword arguments (concurrent PRs adding the same field, merged sequentially)
+   - **Architectural drift** — check the diff for:
+     - **Layer jumps:** files under `domain/`, `core/`, `models/`, `entities/`, or `ports/` must not import from `adapters/`, `adapter/`, `infrastructure/`, `infra/`, `io/`, or `gateways/` (outer → inner is fine; inner → outer is drift)
+     - **Misplaced I/O:** new direct use of I/O primitives (`subprocess`, `socket`, `httpx`, `requests`, `urllib`, `boto3`, `sqlalchemy`, `pymongo`, `redis`, `kafka`, raw `open()`, file reads/writes) under `domain/`, `core/`, `models/`, `entities/`, or in files named `*_model.py`, `*_entity.py`, `*_value*.py`, `*_rules.py` — the I/O belongs in an adapter
+     - **God-file creep:** files that grew significantly (many new imports, or >~50% line-count increase) and now orchestrate unrelated concerns
+     - **Escape hatch:** if the repo has no recognisable layering convention (no `domain/`, `core/`, `adapters/`, or similar signal directories or filename patterns), skip this bullet entirely — do not invent violations
+   - **HydraFlow principles (ADR-0044)** — flag as findings:
+     - **MockWorld scenario coverage:** new cross-phase / orchestrator / runner behaviour without a release-gating scenario under `tests/scenarios/` using `MockWorld` fakes — unit tests alone don't cover the loop
+     - **BDD-flavour test naming:** tests named after the function (`test_create_widget`) instead of the behaviour (`test_create_widget_with_duplicate_name_raises_integrity_error`)
+     - **Port compliance:** new direct use of `subprocess`, `gh`, or `git` CLI, or direct GitHub API calls, outside the adapter layer — route through `PRPort`, `IssueStorePort`, or `WorkspacePort`
+     - **One responsibility per file:** large additions that give an already-large file a second concern — prefer a new file
+     - **Escape hatch:** skip this bullet if the repo isn't HydraFlow (no `tests/scenarios/`, `ports.py`, or similar seams)
 {ui_criteria}
 ## If Issues Found
 
@@ -973,8 +967,8 @@ If you find issues that you can fix:
 1. Make the fixes directly.
 {fix_verify}
 3. Commit with message: "review: fix <description> (PR #{pr.number})"
-3a. **Self-review before pushing (mandatory):** Run `git diff HEAD~N..HEAD` (replacing N with the number of commits in this session) and verify: (a) no unintended files changed, (b) no debug code or TODO comments remain, (c) the fix does not introduce a failure mode broader than the issue it resolves.
-4. **Post-commit verification (mandatory for each commit):** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming that every intended file appears in the stat output. If a file is missing from the stat, your commit did NOT actually change that file — go back and fix it before proceeding. This is especially critical for scope-creep removal commits. For factory migrations specifically, grep for the old pattern (e.g., `TaskFactory.create()`) in all test files that were supposed to be reverted.
+3a. **Self-review before pushing (mandatory):** Run `git diff HEAD~N..HEAD` and verify: (a) no unintended files changed, (b) no debug code or TODO comments remain, (c) the fix's failure mode is not broader than the issue it resolves.
+4. **Post-commit verification (mandatory):** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming every intended file appears in the stat output. If a file is missing, your commit did NOT actually change it — go back and fix it. Especially critical for scope-creep removal commits; for factory migrations, grep for the old pattern (e.g., `TaskFactory.create()`) in test files that were supposed to be reverted.
 
 ## Findings Format
 

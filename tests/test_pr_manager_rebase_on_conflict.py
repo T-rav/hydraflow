@@ -242,7 +242,7 @@ async def test_merge_promotion_pr_auto_rebase_recovers_after_conflict(
     async def _ci_passes(*a: Any, **kw: Any) -> tuple[bool, str]:
         return True, "CI passed"
 
-    monkeypatch.setattr("pr_manager.run_subprocess", _flaky_subprocess)
+    monkeypatch.setattr("pr_manager_promotion.run_subprocess", _flaky_subprocess)
     monkeypatch.setattr(pm, "update_pr_branch", _update_ok)
     monkeypatch.setattr(pm, "wait_for_ci", _ci_passes)
 
@@ -268,7 +268,7 @@ async def test_merge_promotion_pr_auto_rebase_off_skips_recovery(
         update_called = True
         return True
 
-    monkeypatch.setattr("pr_manager.run_subprocess", _bad)
+    monkeypatch.setattr("pr_manager_promotion.run_subprocess", _bad)
     monkeypatch.setattr(pm, "update_pr_branch", _update)
 
     ok = await pm.merge_promotion_pr(99)

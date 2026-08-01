@@ -217,12 +217,11 @@ class DecompositionCouncil:
         """
         body = (task.body or "")[:5000]
         max_depth = self._config.max_decomposition_depth
-        return f"""You are the Direction phase of the Decomposition Council for a \
-stalled task. A prior autonomous implementation attempt on this task did not \
-converge. Your job is ONLY to propose a candidate split into an epic + \
-independently implementable child issues -- a separate, independent \
-Validation phase will critique your proposal, so do not pre-judge whether it \
-will be accepted; just produce your strongest candidate.
+        return f"""Propose ONE candidate split of the stalled task below \
+(a prior autonomous implementation attempt did not converge) into an epic + \
+independently implementable child issues. You are the Direction phase of the \
+Decomposition Council; a separate, independent Validation phase will critique \
+your proposal -- do not pre-judge acceptance.
 
 ## Task #{task.id}
 
@@ -235,8 +234,8 @@ will be accepted; just produce your strongest candidate.
 
 {stall_context}
 
-If the section above includes a diff or summary of work already attempted, \
-treat it as evidence of what exists today -- not just narrative.
+Treat any diff or summary of prior work above as evidence of what exists \
+today -- not just narrative.
 
 ## Supporting documentation context
 
@@ -249,27 +248,25 @@ This lineage has already been decomposed {depth} time(s) (max allowed: \
 
 ## Direction Protocol
 
-Silently consider 2-3 candidate slicings of this work from DISTINCT lenses:
+Consider 2-3 candidate slicings from DISTINCT lenses:
 - architectural / layer boundaries
 - isolate-the-failing-part (the piece that actually stalled)
 - vertical, independently-shippable slices
 
-Weigh the tradeoffs of each candidate, then commit to the single strongest \
-one. Propose at least 2 independently implementable children -- each must be \
-able to land as its own reviewable PR, and must NOT be a near-duplicate of \
-another child.
+Commit to the single strongest candidate. Propose at least 2 independently \
+implementable children -- each must be able to land as its own reviewable PR, \
+and must NOT be a near-duplicate of another child.
 
 ## Salvage: land the working slice first
 
-If the "why the task stalled" evidence above shows that PART of the prior \
-attempt is already sound (e.g. a diff-so-far where some files/changes work \
-and only a specific piece caused the stall), you MAY additionally scope ONE \
-of your children as a "salvage" child: a slice that does nothing but land \
-the already-working part, with no risky new work folded in. Mark that child \
-by putting the string "salvage" in its "labels" array. Do this only when \
-there is genuinely sound, landable work to preserve -- do not invent one. \
-Salvage children are always created before the other children, so the safe \
-slice ships first.
+If the stall evidence shows PART of the prior attempt is already sound (e.g. \
+a diff-so-far where only a specific piece caused the stall), you MAY scope \
+ONE child as a "salvage" child: a slice that does nothing but land the \
+already-working part, with no risky new work folded in. Mark that child by \
+putting the string "salvage" in its "labels" array. Do this only when there \
+is genuinely sound, landable work to preserve -- do not invent one. Salvage \
+children are always created before the other children, so the safe slice \
+ships first.
 
 ## Required Output
 
@@ -306,11 +303,11 @@ Return ONLY a JSON object in this exact format (no other text):
             f"{i}. **{child.title}**\n   {child.body}"
             for i, child in enumerate(proposal.children, start=1)
         )
-        return f"""You are the Validation phase of the Decomposition Council for a \
-stalled task. A separate Direction phase (which you do not have access to \
-the reasoning of) proposed the candidate split below. Your job is to \
-ADVERSARIALLY critique it, independently of whatever reasoning produced it -- \
-do not assume it is sound just because it was proposed.
+        return f"""Decide whether the candidate split below is sound: \
+ADVERSARIALLY critique it, independently of whatever reasoning produced it. \
+You are the Validation phase of the Decomposition Council; a separate \
+Direction phase (whose reasoning you cannot see) proposed it -- do not assume \
+it is sound just because it was proposed.
 
 ## Task #{task.id}
 
@@ -352,10 +349,9 @@ REJECT or REVISE (should_decompose=false) the split if:
 
 Otherwise APPROVE (should_decompose=true).
 
-Rate your confidence in the FINAL decision as "high", "medium", or "low". \
-Use "high" only when you are certain -- e.g. clearly duplicative children, \
-or a clearly sound and well-separated split. Use "medium" or "low" when the \
-call is genuinely close.
+Rate your confidence in the FINAL decision as "high", "medium", or "low" -- \
+"high" only when certain (e.g. clearly duplicative children, or a clearly \
+sound, well-separated split), "medium"/"low" when the call is genuinely close.
 
 ## Required Output
 

@@ -6,6 +6,34 @@ Issue body summarized for token efficiency:
 - Intermittent 503s on large file uploads. Expected: retry 3x with exponential backoff. Affected: src/upload.py.
 
 [Body summarized for prompt efficiency]
+## Mid-flight advisor (Opus consult tool)
+
+Consult an Opus advisor when uncertain about a review decision, fix strategy, or whether an issue is real. The advisor is dispatched via the Task tool with subagent_type='hydraflow-review-advisor'. The advisor does NOT see your full conversation history — include enough context in your question. Do NOT use this tool for things you can verify yourself (running tests, reading files, grepping code) — only judgment calls where the right answer requires more than mechanical verification.
+
+Invoke via:
+  Task(
+    subagent_type="hydraflow-review-advisor",
+    model="opus",
+    prompt=<see template below>
+  )
+
+Prompt template (the FIRST line MUST be the sentinel exactly as shown
+— it is how the runner adapter detects this is a mid-flight consult
+and routes it to the correct advisor queue):
+  <!-- HYDRAFLOW_MIDFLIGHT_CONSULT_PROMPT_v1 -->
+  ## Mid-flight consult
+  Issue: <number>          # required so MockWorld can route
+  ### Question
+  <your judgment question>
+  ### Context (summary from executor)
+  <what you've already established>
+  [### Options under consideration
+   - option A
+   - option B]                # optional
+
+  Respond with JSON: {"reasoning":str,"recommendation":str,"confidence":float}
+
+Cap: at most 5 consult calls per review. Past the cap, the tool will return advisor-unavailable; decide on your own.
 
 ## Precheck Context
 
@@ -34,10 +62,10 @@ diff --git a/src/upload.py b/src/upload.py
 ## Review Instructions
 
 1. Evaluate four dimensions: **scope**, correctness, completeness, and quality.
-2. **Scope check (mandatory first step):** Compare every changed file against the issue title, description, and the implementation plan (if provided above). Flag any file or change that is unrelated to the stated goal or not in the plan. Unrelated test files, docs, or config changes are scope creep — reject them. Follow CLAUDE.md rules strictly (e.g., never add tests for ADR markdown content).
-3. Look for edge cases, missing error handling, security risks, test gaps, and style violations.
-4. You MUST find at least 3 issues across all categories. If you find fewer, re-examine the code more carefully.
-5. If you genuinely find fewer than 3 issues, include THOROUGH_REVIEW_COMPLETE:
+2. **Scope check (mandatory first step):** Flag any file or change unrelated to the issue or missing from the implementation plan (if provided above). Unrelated test, docs, or config changes are scope creep — reject them. Never add tests for ADR markdown content.
+2a. **Verify findings against live code (mandatory):** Grep or read the live file to confirm each finding exists in the current codebase before reporting it — a stale artifact from a prior fix is not a finding.
+3. You MUST find at least 3 issues across all categories. If you find fewer, re-examine the code more carefully.
+4. If you genuinely find fewer than 3 issues, include THOROUGH_REVIEW_COMPLETE:
 ```
 THOROUGH_REVIEW_COMPLETE
 Scope: No issues — <justification>
@@ -46,17 +74,28 @@ Completeness: No issues — <justification>
 Quality: No issues — <justification>
 ```
 5. Do NOT run `make lint`, `make test`, or `make quality` — CI will verify these automatically after review.
-7. Run project audits on changed code:
-   - Review code quality patterns (SRP, type hints, naming, complexity)
-   - Review test quality (3As structure, factories, edge cases)
-   - **Test coverage audit** — verify:
-     - Tests cover the specific issue requirements, not just helper/utility functions
-     - Failure and error paths have explicit tests, not only happy paths
-     - Every new public function/method is actually called from production code (flag dead code that is tested but never invoked)
-     - New branches/conditions introduced by the PR have corresponding test cases
-   - Check for security issues (injection, crypto, auth)
-   - Flag redundant guard conditions in if/elif chains — hoist the shared guard (e.g., rewrite `if A and B: ... elif A and not B: ...` into `if A: if B: ... else: ...`)
-   - Merge-artifact check: look for duplicate Pydantic Field definitions, duplicate function parameters, or duplicate keyword arguments — these arise when concurrent PRs add the same field and get merged sequentially
+6. Run project audits on changed code:
+   - Code quality (SRP, type hints, naming, complexity) and test quality (3As structure, factories, edge cases)
+   - **Security** — injection, unsafe deserialization, crypto misuse, auth/authz gaps, secret/credential exposure, unsafe `subprocess`/shell
+   - **Test-value standards (merge gate)** — request changes for:
+     - Skipped, xfailed, commented-out, or placeholder tests in active coverage — file deferred work in bd instead
+     - Unit tests that bypass documented factories or world-building helpers (for HydraFlow: `ConfigFactory`, `TaskFactory`, `make_pr_manager`, MockWorld helpers)
+     - Integration tests that mock behavior-changing collaborators or assert only mock call shape — wire real business logic; mock only external boundaries that cannot run in the test environment
+     - MockWorld scenarios that replace FakeGitHub/Fake* side effects with raw `AsyncMock`/`MagicMock` call-count assertions instead of asserting state through `world.<fake>`
+   - **Test coverage audit** — tests cover the specific issue requirements (not just helpers); failure/error paths have explicit tests; every new public function is called from production code (flag tested-but-never-invoked dead code); new branches have test cases
+   - Flag redundant guard conditions in if/elif chains — hoist the shared guard
+   - Merge-artifact check: duplicate Pydantic Field definitions, duplicate function parameters, or duplicate keyword arguments (concurrent PRs adding the same field, merged sequentially)
+   - **Architectural drift** — check the diff for:
+     - **Layer jumps:** files under `domain/`, `core/`, `models/`, `entities/`, or `ports/` must not import from `adapters/`, `adapter/`, `infrastructure/`, `infra/`, `io/`, or `gateways/` (outer → inner is fine; inner → outer is drift)
+     - **Misplaced I/O:** new direct use of I/O primitives (`subprocess`, `socket`, `httpx`, `requests`, `urllib`, `boto3`, `sqlalchemy`, `pymongo`, `redis`, `kafka`, raw `open()`, file reads/writes) under `domain/`, `core/`, `models/`, `entities/`, or in files named `*_model.py`, `*_entity.py`, `*_value*.py`, `*_rules.py` — the I/O belongs in an adapter
+     - **God-file creep:** files that grew significantly (many new imports, or >~50% line-count increase) and now orchestrate unrelated concerns
+     - **Escape hatch:** if the repo has no recognisable layering convention (no `domain/`, `core/`, `adapters/`, or similar signal directories or filename patterns), skip this bullet entirely — do not invent violations
+   - **HydraFlow principles (ADR-0044)** — flag as findings:
+     - **MockWorld scenario coverage:** new cross-phase / orchestrator / runner behaviour without a release-gating scenario under `tests/scenarios/` using `MockWorld` fakes — unit tests alone don't cover the loop
+     - **BDD-flavour test naming:** tests named after the function (`test_create_widget`) instead of the behaviour (`test_create_widget_with_duplicate_name_raises_integrity_error`)
+     - **Port compliance:** new direct use of `subprocess`, `gh`, or `git` CLI, or direct GitHub API calls, outside the adapter layer — route through `PRPort`, `IssueStorePort`, or `WorkspacePort`
+     - **One responsibility per file:** large additions that give an already-large file a second concern — prefer a new file
+     - **Escape hatch:** skip this bullet if the repo isn't HydraFlow (no `tests/scenarios/`, `ports.py`, or similar seams)
 
 ## If Issues Found
 
@@ -64,7 +103,8 @@ If you find issues that you can fix:
 1. Make the fixes directly.
 2. Do NOT run tests locally — CI will verify after push.
 3. Commit with message: "review: fix <description> (PR #77)"
-4. **Post-commit verification (mandatory for each commit):** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming that every intended file appears in the stat output. If a file is missing from the stat, your commit did NOT actually change that file — go back and fix it before proceeding. This is especially critical for scope-creep removal commits. For factory migrations specifically, grep for the old pattern (e.g., `TaskFactory.create()`) in all test files that were supposed to be reverted.
+3a. **Self-review before pushing (mandatory):** Run `git diff HEAD~N..HEAD` and verify: (a) no unintended files changed, (b) no debug code or TODO comments remain, (c) the fix's failure mode is not broader than the issue it resolves.
+4. **Post-commit verification (mandatory):** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming every intended file appears in the stat output. If a file is missing, your commit did NOT actually change it — go back and fix it. Especially critical for scope-creep removal commits; for factory migrations, grep for the old pattern (e.g., `TaskFactory.create()`) in test files that were supposed to be reverted.
 
 ## Findings Format
 
@@ -87,16 +127,11 @@ SUMMARY: Implementation looks good, tests are comprehensive, all checks pass.
 
 ## Optional: Tribal-Knowledge Suggestion
 
-This review may have surfaced tribal knowledge — the kind of durable,
-hard-won fact a senior engineer would write on a whiteboard for a new hire
-on day one. If — and ONLY if — what you learned meets ALL of these criteria:
-
-  1. Durable: still true a year from now, across releases and refactors.
-  2. Non-obvious: a senior engineer would NOT figure it out by reading the code.
-  3. Load-bearing: ignoring it causes a real failure or wastes real time.
-  4. General: applies to a subsystem or pattern, not a single issue/PR.
-
-…then emit a single block at the end of your response:
+If this review surfaced tribal knowledge that is ALL of durable (true a year
+out), non-obvious (a senior engineer wouldn't get it from the code), load-bearing
+(ignoring it breaks something or wastes real time), and general (a subsystem or
+pattern, not one issue) — and not already obvious from CLAUDE.md or the code —
+emit ONE block at the very end of your response:
 
 MEMORY_SUGGESTION_START
 principle: <the durable rule, one sentence>
@@ -105,15 +140,21 @@ failure_mode: <what concretely breaks if this is ignored>
 scope: <subsystem path, file glob, or "all">
 MEMORY_SUGGESTION_END
 
-STRICT FORMATTING RULES:
-- DO NOT include issue numbers, PR numbers, commit hashes, dates, or other
-  short-lived references in any field. They will rot.
-- DO NOT emit a block for routine observations, refactor notes, code-review
-  nitpicks, or implementation details.
-- DO NOT restate facts that are already obvious from CLAUDE.md or the code.
-- All four fields are required and non-trivial. Blocks missing any field
-  (or with empty/placeholder values) are silently dropped.
+Do not include issue/PR numbers, commit hashes, or dates in any field (they
+rot). All four fields are required and non-trivial or the block is silently
+dropped. Not for routine observations, refactor notes, or code-review nitpicks.
+When in doubt, omit — the bar is "would I tell a new hire this on day one," and
+most review runs should correctly produce no block.
 
-When in doubt, omit the block. The bar is "would I tell a new hire this on
-day one." Most review runs should produce no block at all — that is the
-expected and correct outcome.
+
+## Available Skills
+
+You have Claude Code skills available via the `Skill` tool. **If any skill's description may apply to your current task — even at 1% confidence — you MUST invoke it before proceeding.** Skills encode proven discipline you would otherwise skip.
+
+Priority when multiple apply:
+1. **Process skills first** (debugging, planning) — they shape *how* you work.
+2. **Implementation skills second** (TDD, simplify) — they shape *what* you build.
+
+Do not rationalize past a skill because the task feels simple, because you "remember" the skill, or because invoking it feels like overhead. Invoke it.
+
+- **superpowers:systematic-debugging** — Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes

@@ -64,23 +64,7 @@ class AgentRunner(BaseRunner):
     _SELF_CHECK_CHECKLIST = """
 ## Self-Check Before Committing
 
-Run through this checklist before your final commit:
-
-- [ ] **Tests cover all new/changed code** — every new function, branch, and edge case has a test
-- [ ] **New code is reachable** — every new function/method is actually called from production code; no dead code
-- [ ] **Tests verify issue requirements** — tests validate the specific behavior the issue asks for, not just helper code
-- [ ] **Failure paths are tested** — error cases, rejected inputs, and unhappy paths have explicit tests
-- [ ] **No missing imports** — all new symbols are imported; removed code has imports cleaned up
-- [ ] **Type hints are correct** — function signatures match actual usage; no `Any` where a concrete type exists
-- [ ] **Edge cases handled** — empty inputs, None values, boundary conditions are addressed
-- [ ] **No leftover debug code** — no print(), console.log(), or commented-out code
-- [ ] **Error messages are clear** — exceptions include context (what failed, what was expected)
-- [ ] **Existing tests still pass** — your changes don't break unrelated tests
-- [ ] **Commit message matches changes** — "Fixes #N: <summary>" accurately describes what changed
-
-### Pre-push self-check — avoid these recurring CI reds
-
-These six patterns pass locally but go red in CI. Check each trigger and apply the one-line fix BEFORE your final commit — CI guards them but does not pre-empt them:
+These six patterns pass locally but go red in CI. Check each trigger and apply the one-line fix BEFORE your final commit:
 
 - [ ] **`fix(` commit → `tests/regressions/` delta (P10.6)** — if your commit subject starts with `fix(`, add a test under `tests/regressions/`. For a pure refactor with no behavior change, add a `Skip-Regression:` trailer to the commit. No delta and no trailer → P10.6 WARNs → CI red.
 - [ ] **New subprocess call site → sandbox seam** — if you add a NEW `run_subprocess*` / `stream_claude_process` call site in a `src/*_loop.py` or a runner, declare it in `mockworld.sandbox_main.SANDBOX_SEAMS` (or route it through an injected-fake seam). Otherwise the seam-completeness ratchet goes red.
@@ -803,27 +787,12 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
 ### Description
 {fence_untrusted("issue_body", body)}{plan_section}{review_feedback_section}{prior_failure_section}{comments_section}{guidance_section}{memory_section}{log_section}
 
-## Instructions — Test-Driven Development
+## Instructions
 
-Follow TDD discipline: **tests first, then implementation**.
-
-1. Understand the issue and relevant code paths.
-2. **Plan tests** — list the tests you will write covering zero/empty, one, many,
-   boundary, interface, and exception cases (ZOMBIES heuristic).
-3. **RED** — Write one failing test. Predict the failure, run the test suite, confirm it fails.
-4. **GREEN** — Write the minimal code to make the test pass. No more.
-5. **Simplify** — For each line you added, ask: "Does a failing test require this?"
-   Remove anything not demanded by a test. Re-run tests after each removal.
-6. **Refactor** — Improve expressiveness and clarity while keeping tests green.
-7. Repeat steps 3-6 for each planned test.
-8. Run the available tools at their checkpoints (see below).
-9. Fix any issues found before proceeding.
-10. Commit with: "Fixes #{issue.id}: <concise summary>"
-
-Key rules:
-- Write only one test at a time. See it fail before writing implementation.
-- Run **all** tests every cycle, not just the new one.
-- Never write implementation code that no test requires.
+Work strictly test-first (RED → GREEN → REFACTOR): one failing test at a time,
+minimal code to make it pass, full suite every cycle, no code a test doesn't require.
+Run the available tools at their checkpoints (see below) and fix findings, then
+commit with: "Fixes #{issue.id}: <concise summary>"
 
 {tools_section}
 
@@ -840,24 +809,20 @@ Key rules:
 
 ## Rules
 
-- Follow the project's CLAUDE.md guidelines strictly.
-- NEVER delete or overwrite existing CLAUDE.md content. You may append new sections or
-  modify existing sections, but you must preserve all information already present.
-- Tests are mandatory — follow the TDD process above. Run tests with: `{test_cmd}`
-- Do NOT push to remote. Do NOT create pull requests.
-- Do NOT run `git push` or `gh pr create`.
+- Follow the project's CLAUDE.md guidelines strictly. NEVER delete or overwrite
+  existing CLAUDE.md content — append or extend only; preserve everything present.
+- Tests are mandatory. Run tests with: `{test_cmd}`
+- Do NOT push to remote or create pull requests — never run `git push` or `gh pr create`.
 - Run `make quality-lite` (lint + typecheck + security, no tests) as a sense check.
   CI runs the full test suite — you do not need to run `make quality` or `make test`.
-- ALWAYS commit your work with `git add <file>` and `git commit`.
-  The system runs its own quality gate after you finish — your job is to produce commits.
-- NEVER use interactive git commands (`git add -i`, `git add -p`, `git rebase -i`).
-  There is no TTY — interactive commands will hang. Use `git add <file>` or `git add -A`.
-- NEVER conclude that the issue is "already satisfied" or that no work is needed.
-  The planner already verified this issue requires implementation. Your job is to
-  write the code, not to second-guess the plan. Always produce commits.
-- Do NOT bundle unrelated refactoring with the assigned fix. For example, do not
-  migrate raw model constructors to factories, rename variables, or reformat code
-  in files you are not otherwise changing for the issue. Each concern is a separate PR.
+- ALWAYS commit your work (`git add <file>` + `git commit`) — the system runs its own
+  quality gate after you finish; your job is to produce commits.
+- NEVER use interactive git commands (`git add -i`, `git add -p`, `git rebase -i`) —
+  there is no TTY and they hang.
+- NEVER conclude that the issue is "already satisfied" or that no work is needed —
+  the planner already verified it requires implementation. Always produce commits.
+- Do NOT bundle unrelated refactoring (renames, reformatting, factory migrations in
+  files you are not otherwise changing). Each concern is a separate PR.
 
 {MEMORY_SUGGESTION_PROMPT.format(context="implementation")}"""
         if plugin_skills_section:
