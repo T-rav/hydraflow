@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from branch_protection_audit import UNDECLARED_CONTEXT_MARKER
 from config import HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
 
@@ -35,8 +36,9 @@ def _drift_key(report: AuditReport) -> str:
 
 
 # Marker substring emitted by ``audit_repo`` when live protection requires a
-# context the declarative contract never declared (see branch_protection_audit).
-_UNDECLARED_MARKER = "undeclared legacy branch-protection context(s)"
+# context the declarative contract never declared. Aliased from the auditor's own
+# constant so the loop's remediation branch can never desync from what it emits.
+_UNDECLARED_MARKER = UNDECLARED_CONTEXT_MARKER
 
 _REAPPLY_REMEDIATION = (
     "Reconcile (regenerate from the contract, then re-apply):\n\n"

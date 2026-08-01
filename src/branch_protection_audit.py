@@ -26,6 +26,13 @@ _DEFAULTS_TO_STRIP: dict[str, Any] = {
 }
 _PICK = {"name", "target", "enforcement", "conditions", "rules"}
 
+#: Substring stamped into a drift line when live protection *requires* a context
+#: the declarative contract never declared. Load-bearing: BranchProtectionAuditor
+#: keys its "declare-first, don't --apply" remediation off this exact string
+#: (#10894), so the two must never drift apart — hence a shared constant, not two
+#: hand-typed literals.
+UNDECLARED_CONTEXT_MARKER = "undeclared legacy branch-protection context(s)"
+
 
 def _normalize(node: Any) -> Any:
     """Strip None/empty/defaulted fields so canonical and live render alike."""
@@ -196,7 +203,7 @@ def audit_repo(
         if undeclared:
             ctxs = ", ".join(undeclared)
             drifts.append(
-                f"[{branch}] undeclared legacy branch-protection context(s) "
+                f"[{branch}] {UNDECLARED_CONTEXT_MARKER} "
                 f"required live but not in the declarative contract: {ctxs}"
             )
     return AuditReport(repo=repo, drifts=drifts)
