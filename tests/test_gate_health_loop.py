@@ -189,11 +189,26 @@ class TestTallyJobStats:
         assert stats["Tests"].failures == 1
         assert stats["Lint"].failures == 0
 
-    def test_skipped_and_cancelled_are_not_attempts(self) -> None:
+    def test_skipped_and_cancelled_counted_but_not_attempts(self) -> None:
+        # #10898: skips are counted (so a 0%-pass claim is falsifiable) but are
+        # never attempts, so they can never drive a born-broken finding.
         stats = tally_job_stats(
             [_rec("Sandbox", "skipped"), _rec("Sandbox", "cancelled")]
         )
-        assert "Sandbox" not in stats
+        assert stats["Sandbox"].attempts == 0
+        assert stats["Sandbox"].skipped == 2
+        assert stats["Sandbox"].runs_searched == 2
+
+    def test_born_broken_finding_carries_skip_evidence(self) -> None:
+        # A mostly-dormant gated check: 3 real failures + 20 skips. Flagged, but
+        # the finding must expose the skips so the "0% pass" claim is falsifiable.
+        stats = tally_job_stats(
+            [_rec("Gate", "failure")] * 3 + [_rec("Gate", "skipped")] * 20
+        )
+        finding = find_born_broken(stats, min_attempts=3)[0]
+        assert finding["failures"] == 3
+        assert finding["skipped"] == 20
+        assert finding["runs_searched"] == 23
 
     def test_docs_only_failures_tracked_with_pr(self) -> None:
         stats = tally_job_stats(

@@ -212,10 +212,20 @@ class JobStats:
     last_seen: str = ""
     docs_only_failures: int = 0
     docs_only_prs: list[int] = field(default_factory=list)
+    # Runs the check was searched-but-inconclusive: skipped / cancelled / neutral
+    # / empty. NOT attempts, but evidence the window holds — a gated check that is
+    # mostly dormant contributes many skips and few attempts, and a "0% pass"
+    # claim is only falsifiable if the reader can see them (#10898).
+    skipped: int = 0
 
     @property
     def attempts(self) -> int:
         return self.passes + self.failures
+
+    @property
+    def runs_searched(self) -> int:
+        """Every record seen for this check — attempts + inconclusive skips."""
+        return self.passes + self.failures + self.skipped
 
 
 def tally_job_stats(
@@ -231,13 +241,17 @@ def tally_job_stats(
     for rec in job_records:
         name = str(rec.get("name", "")).strip()
         conclusion = str(rec.get("conclusion", "")).lower()
-        if not name or conclusion in ("", "skipped", "cancelled", "neutral"):
+        if not name:
             continue
         entry = stats.setdefault(name, JobStats())
         created = str(rec.get("created_at", ""))
         if created:
             entry.first_seen = min(entry.first_seen or created, created)
             entry.last_seen = max(entry.last_seen, created)
+        if conclusion in ("", "skipped", "cancelled", "neutral"):
+            # Searched but inconclusive — counted for falsifiability, not an attempt.
+            entry.skipped += 1
+            continue
         if conclusion == "success":
             entry.passes += 1
         else:
@@ -262,6 +276,8 @@ def find_born_broken(
                     "kind": "born_broken",
                     "check": name,
                     "failures": s.failures,
+                    "skipped": s.skipped,
+                    "runs_searched": s.runs_searched,
                     "first_seen": s.first_seen,
                     "last_seen": s.last_seen,
                 }
@@ -583,11 +599,17 @@ def _render_finding(finding: dict[str, Any]) -> tuple[str, str]:
             f"| check | `{finding['check']}` |\n"
             f"| failures in window | {finding['failures']} |\n"
             f"| passes in window | 0 |\n"
+            f"| skipped/inconclusive in window | {finding.get('skipped', 0)} |\n"
+            f"| runs searched | {finding.get('runs_searched', finding['failures'])} |\n"
             f"| first seen | {finding['first_seen']} |\n"
             f"| last seen | {finding['last_seen']} |\n\n"
             "A check that has NEVER passed is an instrument defect until "
             "proven otherwise (the s51 class: green-looking because its own "
-            "PR ran only the fast subset).\n\n"
+            "PR ran only the fast subset). **Read the skip count first:** a "
+            "mostly-dormant gated check (e.g. one that only runs when "
+            "`should_run=true`) can show 0 passes because it rarely runs, not "
+            "because it is broken — the runs-searched vs failures gap is the "
+            "falsifier (#10898).\n\n"
             "## Recommended next step\n\n"
             "Trace when the check last passed on any ref; if never, treat "
             "as born-broken and fix or quarantine WITH a tracking issue.\n"
