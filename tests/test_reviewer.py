@@ -1793,8 +1793,8 @@ async def test_build_review_prompt_includes_test_coverage_audit(
     assert "Test coverage audit" in prompt
     assert "issue requirements" in prompt
     assert "dead code" in prompt
-    assert "Failure and error paths" in prompt
-    assert "New branches/conditions" in prompt
+    assert "failure/error paths" in prompt
+    assert "new branches" in prompt
 
 
 @pytest.mark.asyncio
@@ -1808,7 +1808,7 @@ async def test_build_review_prompt_enforces_test_value_standards(
     assert "Test-value standards" in prompt
     assert "Skipped, xfailed, commented-out, or placeholder tests" in prompt
     assert "world-building helpers" in prompt
-    assert "Integration tests should wire real business logic" in prompt
+    assert "wire real business logic" in prompt
     assert "world.<fake>" in prompt
 
 

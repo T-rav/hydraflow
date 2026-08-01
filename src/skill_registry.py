@@ -276,13 +276,9 @@ def format_tools_for_prompt(tools: list[AgentTool]) -> str:
         return ""
     lines = ["## Available Tools", ""]
     lines.append(
-        "You have these slash commands available. Run them before committing your work:"
+        "Run each of these slash commands before committing; fix anything they report:"
     )
     lines.append("")
     for tool in tools:
         lines.append(f"- `{tool.command}` — {tool.purpose}")
-    lines.append("")
-    lines.append(
-        "Run each tool before committing. If a tool reports issues, fix them before continuing."
-    )
     return "\n".join(lines)

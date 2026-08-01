@@ -423,9 +423,8 @@ class PlannerRunner(BaseRunner):
             )
             pre_mortem_section = (
                 "\n\n## Pre-Mortem\n\n"
-                "Before finalizing your plan, conduct a brief pre-mortem: assume this implementation\n"
-                "failed. What are the top 3 most likely reasons for failure? Add these as risks in the\n"
-                "`## Key Considerations` section."
+                "Assume this implementation failed. Add the top 3 most likely reasons\n"
+                "for failure as risks in the `## Key Considerations` section."
             )
 
         research_section = ""
@@ -474,11 +473,10 @@ class PlannerRunner(BaseRunner):
 Do NOT run any commands that change state (no git commit, no installs).
 
 You MAY write architecture diagram files to `/tmp/hydraflow-diagrams/issue-{issue.id}/`
-using the Write tool. Use LikeC4 (.likec4) format to capture the code topology around
-the change area — C4 structural diagrams (context, container, component) and dynamic
-views for request/data flows. These files will be copied into the implementation
-worktree and attached to the issue comment so the implementer has full architectural
-context.
+using the Write tool. Use LikeC4 (.likec4) format — C4 structural diagrams (context,
+container, component) and dynamic views for request/data flows around the change
+area. These files are copied into the implementation worktree and attached to the
+issue comment for the implementer.
 
 Your job: explore code, map the relevant architecture, and produce a concrete implementation plan.
 
@@ -494,59 +492,51 @@ Use semantic tools first (before grep):
 
 - Search `src/ui/src/components/` to inventory existing components and their patterns
 - Check `src/ui/src/constants.js`, `src/ui/src/types.js`, and `src/ui/src/theme.js` for shared definitions
-- Examine existing component styles for spacing, color palette (theme tokens), and layout approach
-- Note whether existing components handle responsive behavior
+- Match existing component conventions (spacing, theme tokens, layout, responsive handling)
 
 ## Planning Steps
 
-1. Restate the issue in your own words.
-2. Explore relevant code with semantic tools.
-3. Map the code topology — trace call graphs, data flows, and component boundaries.
-   Write LikeC4 diagram files (.likec4) to `/tmp/hydraflow-diagrams/issue-{issue.id}/`
-   capturing the C4 model (specification, model, views) for the change area.
-4. Identify concrete file-level deltas (paths and what changes — not diffs).
-5. Build a Task Graph with dependency-ordered phases at TASK granularity
+1. Explore the relevant code with the semantic tools above; map call graphs,
+   data flows, and component boundaries, and capture the topology as LikeC4
+   diagrams (per above).
+2. Identify concrete file-level deltas (paths and what changes — not diffs).
+3. Build a Task Graph with dependency-ordered phases at TASK granularity
    (full plans only). One phase = one coherent task an implementer executes
    in-context with the actual code open. Do NOT write line-by-line
    instructions or code snippets — the implementer re-derives that detail
-   from the live code, so it costs plan latency twice and goes stale once
-   (upstream drift). A code fragment belongs in a plan only when it is
+   from the live code. A code fragment belongs in a plan only when it is
    itself load-bearing (an exact signature, wire format, or invariant).
-6. Write behavioral test specs for each phase — one line each, observable
-   outcomes, not test code.
-7. For UI work, call out reusable components/shared modules (`constants.js`, `types.js`, `theme.js`).
-8. **Principles (ADR-0044).** Before declaring the plan done, VERIFY the brief against each item — fix by adjusting steps/criteria, not by expanding prose. Missing any of these in the plan is cheaper to fix now than at review:
+4. Write behavioral test specs for each phase — one line each, observable
+   outcomes, not test code. For UI work, call out reusable components/shared
+   modules (`constants.js`, `types.js`, `theme.js`).
+5. **Principles (ADR-0044).** VERIFY the brief against each item — fix by adjusting steps/criteria, not by expanding prose:
    - **MockWorld scenario coverage:** if the change crosses phases or touches orchestrator/runner behaviour, add a release-gating scenario under `tests/scenarios/` that uses `MockWorld` fakes (no real subprocess / GitHub / git). Name the scenario after the behaviour, not the code.
-   - **TDD + behavioral test names:** every phase's **Tests:** entries must describe observable behaviour (given/when/then-style), not function names. "POST /widgets with missing name returns 400" — good. "Test create_widget" — bad.
+   - **TDD + behavioral test names:** every phase's **Tests:** entries must describe observable behaviour, not function names.
    - **Hexagonal Ports:** new GitHub / git / worktree / subprocess calls must go through `PRPort`, `IssueStorePort`, or `WorkspacePort`. If your plan introduces a direct `subprocess.run`, `gh`, or `git` call in a non-adapter file, route it through the existing Port (or extend the Port) instead.
-   - **One responsibility per file:** if you're adding ≥~200 lines to an already-big file, split by responsibility in the plan. Don't bolt unrelated concerns onto a mega-file just because the imports are handy.
-   - **3As tests:** every test in the plan's test specs should map cleanly to Arrange / Act / Assert with one logical assertion per test. List tests in the plan at the behaviour level — the implementer will write each one red-first.
+   - **One responsibility per file:** if you're adding ≥~200 lines to an already-big file, split by responsibility in the plan.
+   - **3As tests:** each test spec should map cleanly to Arrange / Act / Assert with one logical assertion per test.
    - **ADR-0049 kill-switch (new loops/runners only):** a plan adding a new
      `BaseBackgroundLoop` subclass or subprocess-spawning runner MUST include the
      ADR-0049 kill-switch (`HYDRAFLOW_DISABLE_<WORKER>_LOOP` env + in-body
      `enabled_cb` gate); `run_phase_gates` rejects plans that omit it.
-9. **Audit the plan against `docs/wiki/gotchas.md`.** Anything your plan
-   directs (fixtures, imports, logging idioms) must avoid the anti-patterns
-   listed there — note a violation risk as one line under Key Considerations. Specifically check: symbols imported across modules do not start
+6. **Audit the plan against `docs/wiki/gotchas.md`** — note a violation risk
+   as one line under Key Considerations. Specifically check: symbols imported across modules do not start
    with `_`; test helpers do not duplicate ones in `tests/conftest.py` (grep first);
    `logger.error` / `logger.warning` calls pass a literal format string, not a bare
    variable; hardcoded path lists that mirror filesystem or Dockerfile state are
    replaced with runtime scans; loop variables use bare `_` for throwaways, not
-   `_name`. Catching these in the plan is orders of magnitude cheaper than catching
-   them in code review.
+   `_name`.
 
 ## Required Output
 
-Your plan is a SHORT EXECUTION BRIEF: reviewed-and-ready-to-execute, with
-criteria to check — NOT a specification. Lead with intent (1-2 sentences)
-and approach (one short paragraph), keep steps at task granularity, and
-make every acceptance criterion CHECKABLE — something the implement and
-review phases can verify true/false. The required sections for this plan
-scale are listed below.
+Your plan is a SHORT EXECUTION BRIEF — NOT a specification. Lead with
+intent (1-2 sentences) and approach (one short paragraph), keep steps at
+task granularity, and make every acceptance criterion CHECKABLE — something
+the implement and review phases can verify true/false. The required
+sections for this plan scale are listed below.
 
-HARD BUDGET: the entire plan must fit in {max_plan_chars} characters.
-Plans over budget are rejected; detail beyond the budget would be truncated
-before the implementer ever saw it. Spend the budget on decisions and
+HARD BUDGET: the entire plan must fit in {max_plan_chars} characters;
+plans over budget are rejected. Spend the budget on decisions and
 criteria, not restated code.
 
 Output your plan between these exact markers:
@@ -575,10 +565,6 @@ NEW_ISSUES_START
   body: Detailed description of the issue (at least 2-3 sentences). Include what the
     problem is, where in the codebase it occurs, and what the expected behavior should be.
   labels: {find_label}
-- title: Another issue
-  body: Another detailed description with enough context for someone to understand
-    and act on it without additional research.
-  labels: {find_label}
 NEW_ISSUES_END
 
 Only include this section for real findings.
@@ -587,8 +573,8 @@ Use only label `{find_label}`.
 
 ## Already Satisfied
 
-IMPORTANT: This should be used VERY RARELY. Only if the EXACT feature described in the
-issue is ALREADY fully implemented, tested, and working. You must be able to prove it.
+IMPORTANT: use this VERY RARELY — only if the EXACT feature described in the
+issue is ALREADY fully implemented, tested, and working, and you can prove it.
 
 Before marking as already satisfied, verify ALL of the following:
 1. The specific functions/classes requested in the issue ALREADY EXIST (cite exact file:line)
