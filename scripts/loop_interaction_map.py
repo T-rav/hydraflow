@@ -39,6 +39,14 @@ def fetch_churn(repo_root: Path, ref: str, since: datetime) -> list[MergeChurn]:
             str(repo_root),
             "log",
             "--first-parent",
+            # -m: emit numstat for true merge commits too (with --first-parent it
+            #     limits the diff to the first parent) — else --ref main (real RC
+            #     merge commits) silently reports zero churn.
+            "-m",
+            # --no-renames: a rename otherwise emits a garbled "old => new" path
+            #     that fragments the file's churn/coupling history and breaks the
+            #     god-file join. Treat it as delete-old + add-new instead.
+            "--no-renames",
             ref,
             f"--since={since:%Y-%m-%d}",
             "--numstat",

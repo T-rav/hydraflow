@@ -14,15 +14,15 @@ Files where content is repeatedly **added and removed** — a surface two subsys
 | 4 | `src/config.py` | **347** | 3629 | 347 | 128 |
 | 5 | `src/ui/src/components/StreamView.jsx` | **343** | 343 | 595 | 16 |
 | 6 | `tests/test_shape_phase.py` | **338** | 338 | 741 | 4 |
-| 7 | `src/pr_manager.py` | **291** | 1062 | 291 | 36 |
-| 8 | `tests/test_review_phase_core.py` | **276** | 1305 | 276 | 7 |
-| 9 | `src/dashboard_routes/_routes.py` | **275** | 831 | 275 | 19 |
-| 10 | `src/review_advisor.py` | **229** | 340 | 229 | 7 |
-| 11 | `src/skill_prompt_eval_loop.py` | **215** | 984 | 215 | 13 |
-| 12 | `tests/test_dashboard_routes_repo.py` | **215** | 240 | 215 | 3 |
-| 13 | `tests/sandbox_scenarios/scenarios/s51_convergence_oscillation.py` | **212** | 212 | 212 | 4 |
-| 14 | `src/ui/src/operator/OperatorConsole.jsx` | **205** | 506 | 205 | 15 |
-| 15 | `tests/sandbox_scenarios/scenarios/s52_human_steering_directive.py` | **192** | 435 | 192 | 3 |
+| 7 | `tests/test_openrouter_provider.py` | **337** | 337 | 337 | 2 |
+| 8 | `src/pr_manager.py` | **291** | 1062 | 291 | 36 |
+| 9 | `tests/test_review_phase_core.py` | **276** | 1305 | 276 | 7 |
+| 10 | `src/dashboard_routes/_routes.py` | **275** | 831 | 275 | 19 |
+| 11 | `src/review_advisor.py` | **229** | 340 | 229 | 7 |
+| 12 | `src/skill_prompt_eval_loop.py` | **215** | 984 | 215 | 13 |
+| 13 | `tests/test_dashboard_routes_repo.py` | **215** | 240 | 215 | 3 |
+| 14 | `tests/sandbox_scenarios/scenarios/s51_convergence_oscillation.py` | **212** | 212 | 212 | 4 |
+| 15 | `src/ui/src/operator/OperatorConsole.jsx` | **205** | 506 | 205 | 15 |
 
 ## Logical coupling (files that change together)
 

@@ -149,6 +149,11 @@ def fetch_merges(repo_root: Path, ref: str, since: datetime) -> list[MergeRecord
             str(repo_root),
             "log",
             "--first-parent",
+            # -m + --no-renames: without -m, true merge commits (e.g. on --ref
+            # main) list no files; without --no-renames a rename emits a garbled
+            # "old => new" path. Both silently corrupt the file set. (#10823 review)
+            "-m",
+            "--no-renames",
             ref,
             f"--since={since:%Y-%m-%d}",
             "--name-only",

@@ -13,21 +13,20 @@ Read-only diagnostic — generated 2026-08-01 over the trailing **8 weeks**. Ran
 
 ### 1. Self-sourced fraction (weekly) — LOWER BOUND
 > **Measurement caveat (a finding in itself):** origin is inferred from the `hydraflow-find` label, but the factory files most of its churn (wiki, arch-regen, UL, bot-PRs) *unlabelled* and under a human token — so the 'Unclassified' column below is largely self-sourced work this proxy cannot see. The self-fraction here is a **lower bound**; the true value is much higher. Cleanly measuring self-vs-external origin needs the provenance telemetry #10825 calls for — the factory currently cannot measure its own wake.
-- Labelled self-fraction 12% → 1% (slope -0.009/wk) — but see caveat.
+- Labelled self-fraction 12% → 1% (slope -0.011/wk) — but see caveat.
 
 | Week | Self (labelled) | Pipeline | Unclassified | Self % (LB) |
 |---|---|---|---|---|
-| 06-06 | 6 | 18 | 27 | 12% |
-| 06-13 | 1 | 9 | 59 | 1% |
-| 06-20 | 0 | 1 | 22 | 0% |
+| 06-06 | 7 | 21 | 32 | 12% |
+| 06-13 | 0 | 7 | 76 | 0% |
 | 06-27 | 0 | 0 | 7 | 0% |
 | 07-04 | 0 | 0 | 14 | 0% |
-| 07-11 | 0 | 0 | 44 | 0% |
-| 07-18 | 3 | 11 | 290 | 1% |
-| 07-25 | 2 | 18 | 211 | 1% |
+| 07-11 | 0 | 0 | 74 | 0% |
+| 07-18 | 3 | 11 | 270 | 1% |
+| 07-25 | 2 | 18 | 201 | 1% |
 
 ### 2. Rework ratio (merges touching files merged < 14d prior)
-- **85%** (640/754 merges), **excluding** deterministic regen artifacts (`docs/arch/generated/*`, `.meta.json`) — those are rewritten every PR and would otherwise dominate the signal falsely.
+- **85%** (643/756 merges), **excluding** deterministic regen artifacts (`docs/arch/generated/*`, `.meta.json`) — those are rewritten every PR and would otherwise dominate the signal falsely.
 - Hottest re-worked paths:
   - `src/config.py` ×128
   - `src/models.py` ×58
