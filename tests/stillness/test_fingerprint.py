@@ -137,6 +137,21 @@ def test_rework_ignores_overlap_older_than_window() -> None:
     assert r.reworked_merges == 0
 
 
+def test_rework_counts_prior_merge_before_window_start() -> None:
+    # A rework merge just INSIDE the window whose prior touch landed just BEFORE
+    # window_start (within 14d). It must count — the caller supplies the lookback
+    # merges — even though the prior merge is outside the report window.
+    two_weeks = timedelta(weeks=2)
+    window_start = NOW - two_weeks
+    merges = [
+        MergeRecord("prior", window_start - timedelta(days=3), ("src/hot.py",)),
+        MergeRecord("report", window_start + timedelta(days=2), ("src/hot.py",)),
+    ]
+    r = rework_ratio(merges, now=NOW, weeks=2, window_days=14)
+    assert r.total_merges == 1  # only the in-window merge counts toward totals
+    assert r.reworked_merges == 1  # but it sees the pre-window prior touch
+
+
 # --- series 3: verdict flapping ---------------------------------------------
 
 
@@ -148,13 +163,17 @@ def test_flapping_zero_is_fleet_level_evidence() -> None:
 
 def test_flapping_parses_stages_and_probe_window() -> None:
     esc = [_iss(5, 10, ("convergence-oscillation",))]
-    bodies = {5: "Laps completed: 3\nOscillating boundary stages: review, plan"}
+    # Production format from ConvergenceOscillationLoop: backtick-wrapped stages
+    # drawn from CONVERGENCE_BOUNDARY_STAGES = ("triage", "plan").
+    bodies = {
+        5: "**Laps completed:** 3\n\n**Oscillating boundary stages:** `plan`, `triage`"
+    }
     r = verdict_flapping(
         esc, bodies, probe_start=NOW - timedelta(days=20), probe_end=NOW
     )
     assert r.total_escalations == 1
     assert r.fired_in_probe_window is True
-    assert dict(r.per_stage) == {"review": 1, "plan": 1}
+    assert dict(r.per_stage) == {"plan": 1, "triage": 1}  # backticks stripped
     assert r.is_fleet_level_evidence is False
 
 

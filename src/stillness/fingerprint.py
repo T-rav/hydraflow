@@ -225,16 +225,22 @@ def rework_ratio(
             return set(m.changed_paths)
         return {p for p in m.changed_paths if not is_generated_artifact(p)}
 
-    in_window = sorted(
-        (m for m in merges if window_start <= m.merged_at <= now),
-        key=lambda m: m.merged_at,
-    )
+    # Two roles: *report* merges (inside [window_start, now]) are the numerator +
+    # denominator; ALL supplied merges (which the caller fetches with an extra
+    # window_days lookback buffer) are the prior-overlap lookup pool — so a merge
+    # in the first 14d of the report window can still see a genuine prior merge
+    # that landed just BEFORE window_start (else the earliest ~window_days are
+    # structurally undercounted).
+    all_sorted = sorted(merges, key=lambda m: m.merged_at)
+    report_merges = [m for m in all_sorted if window_start <= m.merged_at <= now]
     reworked = 0
     hot: Counter[str] = Counter()
-    for i, m in enumerate(in_window):
+    for m in report_merges:
         prior_cutoff = m.merged_at - timedelta(days=window_days)
         prior_paths: set[str] = set()
-        for earlier in in_window[:i]:
+        for earlier in all_sorted:
+            if earlier.merged_at >= m.merged_at:
+                break
             if earlier.merged_at >= prior_cutoff:
                 prior_paths.update(_paths(earlier))
         overlap = _paths(m) & prior_paths
@@ -242,7 +248,7 @@ def rework_ratio(
             reworked += 1
             hot.update(overlap)
     return ReworkResult(
-        total_merges=len(in_window),
+        total_merges=len(report_merges),
         reworked_merges=reworked,
         hot_paths=hot.most_common(10),
     )
@@ -268,11 +274,16 @@ class FlappingResult:
 
 
 def _parse_stages(body: str) -> list[str]:
+    # ConvergenceOscillationLoop renders stages backtick-wrapped, e.g.
+    # "Oscillating boundary stages: `plan`, `triage`" — strip the backticks so
+    # the keys are the bare stage names (triage/plan), not "`plan`".
     m = _STAGES_RE.search(body or "")
     if not m:
         return []
     raw = m.group(1).splitlines()[0]
-    return [s.strip() for s in re.split(r"[,/]", raw) if s.strip()]
+    return [
+        s.strip().strip("`") for s in re.split(r"[,/]", raw) if s.strip().strip("`")
+    ]
 
 
 def verdict_flapping(
@@ -390,7 +401,6 @@ class FluxCarrier:
     finder: str
     self_issues: int
     share_of_self: float
-    appears_in_oscillation: bool
     is_flat: bool
     loop: LoopInfo | None
 
@@ -402,14 +412,18 @@ def rank_flux_carriers(
     *,
     top_n: int = 3,
 ) -> list[FluxCarrier]:
+    # `flapping` is accepted for signature stability but no longer used to tag
+    # carriers: oscillation escalations are keyed by pipeline STAGE (triage/plan),
+    # a different domain from finder/loop identity (sampled-audit, cost-budget),
+    # so there is no sound join — the old "appears_in_oscillation" column was
+    # structurally always false. The fleet-level escalation count is reported in
+    # its own series instead.
     total_self = sum(f.total for f in finders) or 1
-    osc_stages = {s.lower() for s, _ in flapping.per_stage}
     carriers = [
         FluxCarrier(
             finder=f.finder,
             self_issues=f.total,
             share_of_self=f.total / total_self,
-            appears_in_oscillation=f.finder.lower() in osc_stages,
             is_flat=f.is_flat,
             loop=loops_by_finder.get(f.finder),
         )
@@ -456,14 +470,13 @@ def render_report(fp: Fingerprint) -> str:
     a("## Top flux carriers")
     a("")
     if fp.carriers:
-        a("| # | Finder | Self issues | Share | Flat? | In oscillation? | Loop tick |")
-        a("|---|---|---|---|---|---|---|")
+        a("| # | Finder | Self issues | Share | Flat? | Loop tick |")
+        a("|---|---|---|---|---|---|")
         for i, c in enumerate(fp.carriers, 1):
             tick = f"{c.loop.tick_seconds}s" if c.loop and c.loop.tick_seconds else "—"
             a(
                 f"| {i} | `{c.finder}` | {c.self_issues} | {_pct(c.share_of_self)} "
-                f"| {'yes' if c.is_flat else 'no'} "
-                f"| {'yes' if c.appears_in_oscillation else 'no'} | {tick} |"
+                f"| {'yes' if c.is_flat else 'no'} | {tick} |"
             )
     else:
         a("_No self-sourced work in the window — nothing to rank._")

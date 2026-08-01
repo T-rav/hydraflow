@@ -253,7 +253,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     issues = fetch_issues(args.repo, since, args.limit)
     osc_bodies = fetch_oscillation_bodies(args.repo, since)
-    merges = fetch_merges(repo_root, args.ref, since)
+    # Fetch merges with a 14-day lookback buffer so rework_ratio can see prior
+    # touches that landed just before the report window (see its docstring).
+    merges = fetch_merges(repo_root, args.ref, since - timedelta(days=14))
     loops = parse_loops(repo_root / "docs" / "arch" / "generated" / "loops.md")
     print(
         f"  {len(issues)} issues, {len(merges)} merges, {len(loops)} loops",

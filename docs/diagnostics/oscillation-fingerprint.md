@@ -4,21 +4,21 @@ Read-only diagnostic — generated 2026-08-01 over the trailing **8 weeks**. Ran
 
 ## Top flux carriers
 
-| # | Finder | Self issues | Share | Flat? | In oscillation? | Loop tick |
-|---|---|---|---|---|---|---|
-| 1 | `hydraflow-find` | 11 | 92% | no | no | — |
-| 2 | `staging-rc-dryrun` | 1 | 8% | no | no | — |
+| # | Finder | Self issues | Share | Flat? | Loop tick |
+|---|---|---|---|---|---|
+| 1 | `hydraflow-find` | 11 | 92% | no | — |
+| 2 | `staging-rc-dryrun` | 1 | 8% | no | — |
 
 ## Series
 
 ### 1. Self-sourced fraction (weekly) — LOWER BOUND
 > **Measurement caveat (a finding in itself):** origin is inferred from the `hydraflow-find` label, but the factory files most of its churn (wiki, arch-regen, UL, bot-PRs) *unlabelled* and under a human token — so the 'Unclassified' column below is largely self-sourced work this proxy cannot see. The self-fraction here is a **lower bound**; the true value is much higher. Cleanly measuring self-vs-external origin needs the provenance telemetry #10825 calls for — the factory currently cannot measure its own wake.
-- Labelled self-fraction 12% → 1% (slope -0.010/wk) — but see caveat.
+- Labelled self-fraction 12% → 1% (slope -0.009/wk) — but see caveat.
 
 | Week | Self (labelled) | Pipeline | Unclassified | Self % (LB) |
 |---|---|---|---|---|
-| 06-06 | 6 | 18 | 24 | 12% |
-| 06-13 | 1 | 9 | 62 | 1% |
+| 06-06 | 6 | 18 | 27 | 12% |
+| 06-13 | 1 | 9 | 59 | 1% |
 | 06-20 | 0 | 1 | 22 | 0% |
 | 06-27 | 0 | 0 | 7 | 0% |
 | 07-04 | 0 | 0 | 14 | 0% |
@@ -27,13 +27,13 @@ Read-only diagnostic — generated 2026-08-01 over the trailing **8 weeks**. Ran
 | 07-25 | 2 | 18 | 211 | 1% |
 
 ### 2. Rework ratio (merges touching files merged < 14d prior)
-- **82%** (613/750 merges), **excluding** deterministic regen artifacts (`docs/arch/generated/*`, `.meta.json`) — those are rewritten every PR and would otherwise dominate the signal falsely.
+- **85%** (640/754 merges), **excluding** deterministic regen artifacts (`docs/arch/generated/*`, `.meta.json`) — those are rewritten every PR and would otherwise dominate the signal falsely.
 - Hottest re-worked paths:
-  - `src/config.py` ×127
-  - `src/models.py` ×56
-  - `src/service_registry.py` ×42
-  - `src/orchestrator.py` ×37
-  - `tests/scenarios/catalog/loop_registrations.py` ×35
+  - `src/config.py` ×128
+  - `src/models.py` ×58
+  - `src/service_registry.py` ×43
+  - `src/orchestrator.py` ×38
+  - `tests/scenarios/catalog/loop_registrations.py` ×36
 
 ### 3. Verdict flapping (ConvergenceOscillationLoop escalations)
 - 0 escalation(s) in window.
