@@ -24,17 +24,20 @@ from scripts.audit_prompts import LONG_CONTEXT_THRESHOLD, PROMPT_REGISTRY
 #: Fixtures whose rendered length is ``>= LONG_CONTEXT_THRESHOLD`` today, so
 #: criterion 6 actually scores them. Keep this EXACTLY equal to the current
 #: over-threshold set (the test enforces both directions).
+#:
+#: The agent + reviewer prompts were intentionally shrunk below the threshold by
+#: the #10860 long-prompt prune (PR #10981) — a legitimate token reduction, not a
+#: gate-gaming shrink: criterion 6 was *passing* for all of them (their
+#: PROMPT_BASELINE failing sets are {1} / {1,3,7} — 6 is absent), so the flip to
+#: N/A erases no Fail. Per this test's contract they are removed here to
+#: acknowledge criterion 6 no longer applies. The fixtures below all stayed
+#: >= threshold after the prune and remain protected.
 _LONG_CONTEXT_FIXTURES = frozenset(
     {
-        "agent_build_prompt_first_attempt",
-        "agent_build_prompt_with_prior_failure",
-        "agent_build_prompt_with_review_feedback",
         "decomposition_council_validation",
         "planner_build_prompt_first_attempt",
         "preflight_auto_agent",
         "review_advisor_postverify",
-        "reviewer_build_review",
-        "reviewer_build_review_quality_gate",
         "shape_runner_turn",
     }
 )
