@@ -264,7 +264,7 @@ def catalog_cassette_methods(cassette_dir: Path) -> set[str]:
 # claude is JSONL-stream contract-tested separately, not via this YAML
 # cassette-dir audit). Fakes absent from this map are *not* adapter-surface
 # audited — there is no recordable real-API surface to contract against, so
-# flagging their methods produced pure noise (FakeBeads/FakeSentry/FakeHTTP/
+# flagging their methods produced pure noise (FakeBeads/FakeObservability/FakeHTTP/
 # FakeSubprocessRunner/FakeFS/FakeLLM). They remain eligible for the
 # scenario-driven *test-helper* audit. See ADR-0047 "When to add a new
 # cassette" and the auditor right-sizing in fix/rightsize-fake-coverage-auditor.

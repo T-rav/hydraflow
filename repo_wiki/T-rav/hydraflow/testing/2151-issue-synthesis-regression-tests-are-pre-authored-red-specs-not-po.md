@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T14:26:19.328698+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2022
+superseded_by: 2296
 ---
 
 # Regression tests are pre-authored RED specs, not post-hoc

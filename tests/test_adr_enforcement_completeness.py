@@ -43,14 +43,13 @@ _PROSE_ONLY: dict[str, str] = {
 }
 
 # ADRs with no enforcement declared at all. This is debt. SHRINKS ONLY.
-_MISSING_ENFORCEMENT: dict[str, str] = {
-    "0027": "duplicate class definitions / merge-artifact pattern — landed "
-    "before any gate asserted enforcement was present",
-}
+# Empty since #10867: ADR-0027 (the only entry) was enforced with a resolving
+# check rather than exempted — see docs/adr/0027-duplicate-class-merge-artifact-pattern.md.
+_MISSING_ENFORCEMENT: dict[str, str] = {}
 
 # Pinned so neither allowlist can grow.
 _PROSE_ONLY_MAX = 3
-_MISSING_MAX = 1
+_MISSING_MAX = 0
 
 
 def _accepted_adrs() -> dict[str, str]:

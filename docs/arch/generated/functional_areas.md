@@ -75,7 +75,6 @@ flowchart LR
         intake_ADRReviewerLoop([ADRReviewerLoop])
         intake_LogIngestLoop([LogIngestLoop])
         intake_ReportIssueLoop([ReportIssueLoop])
-        intake_SentryLoop([SentryLoop])
     end
     subgraph autonomy["Autonomy"]
         autonomy_AutoAgentPreflightLoop([AutoAgentPreflightLoop])
@@ -235,7 +234,6 @@ Intake workers that turn external signals into pipeline work — ADR review rout
 - `ADRReviewerLoop` — `src.adr_reviewer_loop`
 - `LogIngestLoop` — `src.log_ingest_loop`
 - `ReportIssueLoop` — `src.report_issue_loop`
-- `SentryLoop` — `src.sentry_loop`
 
 **Related ADRs:** `ADR-0029`, `ADR-0050`
 

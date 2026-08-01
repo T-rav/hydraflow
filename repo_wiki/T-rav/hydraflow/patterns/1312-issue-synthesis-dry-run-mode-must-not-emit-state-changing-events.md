@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T14:16:20.790335+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1238
+superseded_by: 1391
 ---
 
 # Dry-run mode must not emit state-changing events

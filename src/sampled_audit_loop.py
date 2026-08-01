@@ -383,6 +383,22 @@ class SampledAuditLoop(BaseBackgroundLoop):
         budgeted = within_budget(
             selected, token_budget=int(self._config.sampled_audit_token_budget_per_tick)
         )
+        # #10920: within_budget fills gauntlet-class changes first, but a budget
+        # too small to fit even the gauntlet stratum can still drop one. Surface
+        # that rather than dropping the highest-risk change silently.
+        budgeted_ids = {c.id for c in budgeted}
+        dropped_gauntlet = [
+            c
+            for c in selected
+            if c.id not in budgeted_ids and classify_blast_radius(c) == "gauntlet"
+        ]
+        if dropped_gauntlet:
+            logger.warning(
+                "SampledAudit: token budget dropped %d gauntlet-class change(s) "
+                "this tick even after gauntlet-first fill (budget too small): %s",
+                len(dropped_gauntlet),
+                ", ".join(c.id for c in dropped_gauntlet),
+            )
 
         if not self._config.sampled_audit_reaudit_enabled:
             # config_disable sandbox seam: the adversarial re-audit spawn is

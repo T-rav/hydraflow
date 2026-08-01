@@ -82,7 +82,6 @@ MODEL_ROLE_FIELDS: tuple[tuple[str, str | None, str], ...] = (
     ("wiki_compilation", "wiki_compilation_tool", "wiki_compilation_model"),
     ("transcript_summary", "transcript_summary_tool", "transcript_summary_model"),
     ("report_issue", "report_issue_tool", "report_issue_model"),
-    ("sentry", "sentry_tool", "sentry_model"),
     ("adr_review", "adr_review_tool", "adr_review_model"),
     ("corpus_learning_synthesis", None, "corpus_learning_synthesis_model"),
 )

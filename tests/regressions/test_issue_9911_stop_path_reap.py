@@ -5,8 +5,8 @@ idle, yet a full pytest run spawned by a loop cycle was still alive 22
 minutes later (PID 11989, PPID=1, ELAPSED 52:11) — reparented to launchd,
 its result unconsumable. The stop path terminated only the four
 runner-owned ``_active_procs`` sets; acceptance_criteria,
-verification_judge, sentry_loop and report_issue_loop children (the latter
-two owners have no ``terminate()`` at all) were never reaped, and three
+verification_judge and report_issue_loop children (owners that have no
+``terminate()`` at all) were never reaped, and three
 kill sites used plain ``proc.kill()`` which leaks the process GROUP.
 
 Pins:

@@ -79,7 +79,7 @@ def test_builder_key_matches_registry(name: str) -> None:
     """Each catalog key must match a key in bg_loop_registry (or the skip list).
 
     This catches typos where the catalog registers a builder under the wrong
-    name (e.g. ``sentry`` vs the canonical ``sentry_ingest``).
+    name (e.g. ``wiki`` vs the canonical ``repo_wiki``).
     """
     registry_keys = _parse_bg_loop_registry()
     # github_cache is in the catalog for historical reasons but not in the

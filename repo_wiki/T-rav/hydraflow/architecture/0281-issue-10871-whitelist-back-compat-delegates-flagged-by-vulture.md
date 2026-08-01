@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 10871
 source_phase: plan
 created_at: 2026-07-31T06:30:13.825334+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #10871 closed
 ---
 
 # Whitelist back-compat delegates flagged by vulture, do not remove

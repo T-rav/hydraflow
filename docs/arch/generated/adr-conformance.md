@@ -29,7 +29,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0023 | enforced | `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` |
 | ADR-0024 | enforced | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
 | ADR-0025 | manual | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
-| ADR-0027 | decision-of-record | — |
+| ADR-0027 | enforced | `pytest:tests/architecture/test_adr0027_duplicate_model_class_definitions.py::test_no_dead_duplicate_model_class_definitions` |
 | ADR-0028 | enforced | `pytest:tests/test_report_event_flow.py` |
 | ADR-0029 | enforced | `pytest:tests/test_caretaker_loop_wiring.py` |
 | ADR-0030 | enforced | `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` |
@@ -48,7 +48,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0052 | enforced | `pytest:tests/test_mockworld_fakes_conformance.py`, `pytest:tests/test_sandbox_scenario_contract.py` |
 | ADR-0053 | enforced | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
 | ADR-0054 | enforced | `pytest:tests/test_term_proposer_loop.py`, `pytest:tests/architecture/test_term_proposer_wiring.py` |
-| ADR-0055 | enforced | `pytest:tests/architecture/test_otel_invariants.py`, `pytest:tests/regressions/test_otel_disabled_is_noop.py`, `pytest:tests/scenarios/test_telemetry_e2e.py` |
 | ADR-0056 | enforced | `pytest:tests/test_adr_touchpoint_auditor_loop.py` |
 | ADR-0057 | enforced | `pytest:tests/test_term_pruner_loop.py`, `pytest:tests/architecture/test_term_pruner_wiring.py` |
 | ADR-0058 | enforced | `pytest:tests/test_edge_proposer_loop.py`, `pytest:tests/architecture/test_edge_proposer_wiring.py` |
@@ -86,6 +85,8 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0114 | enforced | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` |
 | ADR-0115 | enforced | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface`, `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks`, `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human`, `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed`, `pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld` |
 | ADR-0116 | enforced | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_prompt_fitness.py`, `pytest:tests/test_adr_enforcement_completeness.py`, `pytest:tests/test_prompt_rubric_calibration.py` |
+| ADR-0117 | enforced | `pytest:tests/test_prompt_observatory.py` |
+| ADR-0118 | enforced | `pytest:tests/architecture/test_no_otel_imports.py` |
 
 ## Check → ADRs it protects
 
@@ -97,6 +98,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `make:trust-contracts` | ADR-0047 |
 | `pytest:tests/architecture/test_adr0009_process_per_repo_isolation.py::test_workspace_paths_are_repo_slug_scoped_and_collision_free` | ADR-0009 |
 | `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` | ADR-0023 |
+| `pytest:tests/architecture/test_adr0027_duplicate_model_class_definitions.py::test_no_dead_duplicate_model_class_definitions` | ADR-0027 |
 | `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` | ADR-0030 |
 | `pytest:tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only` | ADR-0042 |
 | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` | ADR-0065 |
@@ -105,7 +107,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
 | `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0089 |
 | `pytest:tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
-| `pytest:tests/architecture/test_otel_invariants.py` | ADR-0055 |
+| `pytest:tests/architecture/test_no_otel_imports.py` | ADR-0118 |
 | `pytest:tests/architecture/test_term_proposer_wiring.py` | ADR-0054 |
 | `pytest:tests/architecture/test_term_pruner_wiring.py` | ADR-0057 |
 | `pytest:tests/regressions/test_canonical_killswitch.py` | ADR-0049 |
@@ -113,7 +115,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface` | ADR-0115 |
 | `pytest:tests/regressions/test_issue_9143_codeql_suppression.py` | ADR-0085 |
 | `pytest:tests/regressions/test_issue_9552.py` | ADR-0106 |
-| `pytest:tests/regressions/test_otel_disabled_is_noop.py` | ADR-0055 |
 | `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human` | ADR-0115 |
 | `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks` | ADR-0115 |
 | `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` | ADR-0094, ADR-0095 |
@@ -124,7 +125,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/scenarios/test_convergence_pipeline_mockworld.py` | ADR-0096 |
 | `pytest:tests/scenarios/test_convergence_review_mockworld.py` | ADR-0094, ADR-0095 |
 | `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` | ADR-0062 |
-| `pytest:tests/scenarios/test_telemetry_e2e.py` | ADR-0055 |
 | `pytest:tests/test_adr_conformance_coverage.py` | ADR-0100 |
 | `pytest:tests/test_adr_enforcement_completeness.py` | ADR-0116 |
 | `pytest:tests/test_adr_pre_validator.py` | ADR-0037 |
@@ -181,6 +181,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_preflight_plugins.py` | ADR-0043 |
 | `pytest:tests/test_preflight_untrusted_fencing.py` | ADR-0092 |
 | `pytest:tests/test_prompt_fitness.py` | ADR-0116 |
+| `pytest:tests/test_prompt_observatory.py` | ADR-0117 |
 | `pytest:tests/test_prompt_registry_completeness.py` | ADR-0087, ADR-0116 |
 | `pytest:tests/test_prompt_rubric_calibration.py` | ADR-0116 |
 | `pytest:tests/test_release.py` | ADR-0011 |

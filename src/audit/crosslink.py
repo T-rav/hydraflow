@@ -7,8 +7,7 @@ share ONE escape count. This REUSES the merged escape-ledger writer + schema
 (``escape.ledger.EscapeLedger`` / ``escape.models.EscapeRecord``); it does NOT
 fork the ledger. ``EscapeRecord.detection_source`` is a plain ``str`` (only the
 mechanical ``EscapeCandidate`` narrows it to a ``Literal``), so the
-``sampled-audit`` source value writes through the existing schema unchanged —
-mirroring how ``SentryLoop`` appends its own ``sentry`` rows to the same ledger.
+``sampled-audit`` source value writes through the existing schema unchanged.
 """
 
 from __future__ import annotations

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T14:26:19.454237+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2072
+superseded_by: 2230
 ---
 
 # Parse both sides at runtime in drift-guard tests

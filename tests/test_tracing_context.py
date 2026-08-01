@@ -29,7 +29,7 @@ class TestSourceToPhase:
         assert source_to_phase("hitl") == "hitl"
 
     def test_unknown_source_passes_through(self):
-        assert source_to_phase("sentry_ingest") == "sentry_ingest"
+        assert source_to_phase("unmapped_source") == "unmapped_source"
         assert source_to_phase("custom_thing") == "custom_thing"
 
 

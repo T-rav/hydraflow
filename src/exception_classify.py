@@ -60,39 +60,22 @@ def capture_if_bug(
 ) -> None:
     """Send to the observability port only if the exception looks like a real bug.
 
-    When *obs* is ``None`` the function falls back to a direct ``sentry_sdk``
-    import for backwards-compatibility with call sites that have not yet been
-    threaded an injected port.
+    When *obs* is ``None`` there is no backend to route to, so the call is a
+    no-op. Call sites that want capture should thread an injected
+    ``ObservabilityPort`` (backed by the no-op adapter until the SRE agent
+    wires a real one, ADR-0118).
     """
-    if obs is not None:
-        if is_likely_bug(exc):
-            obs.capture_exception(exc)
-        else:
-            obs.breadcrumb(
-                "transient_error",
-                str(exc)[:500],
-                level="warning",
-                **context,
-            )
+    if obs is None:
         return
-
-    # Legacy path: direct sentry_sdk import for call sites without an injected port.
-    try:
-        import sentry_sdk  # noqa: PLC0415
-
-        if is_likely_bug(exc):
-            sentry_sdk.capture_exception(exc)
-        else:
-            sentry_sdk.add_breadcrumb(
-                category="transient_error",
-                message=str(exc)[:500],
-                level="warning",
-                data=context,
-            )
-    except Exception:
-        # Never let Sentry errors crash the application, but leave a debug
-        # breadcrumb so operators can tell when Sentry itself is broken.
-        logger.debug("sentry sdk failure suppressed in capture_if_bug", exc_info=True)
+    if is_likely_bug(exc):
+        obs.capture_exception(exc)
+    else:
+        obs.breadcrumb(
+            "transient_error",
+            str(exc)[:500],
+            level="warning",
+            **context,
+        )
 
 
 def reraise_on_credit_or_bug(exc: BaseException) -> None:
@@ -117,16 +100,4 @@ def reraise_on_credit_or_bug(exc: BaseException) -> None:
     if isinstance(exc, AuthenticationError | CreditExhaustedError) or is_likely_bug(
         exc
     ):
-        # Tag active span (best-effort; never block re-raise)
-        try:
-            from opentelemetry import trace  # noqa: PLC0415
-
-            from telemetry.slugs import slug_for  # noqa: PLC0415
-
-            span = trace.get_current_span()
-            if span is not None and span.is_recording():
-                span.set_attribute("error", True)
-                span.set_attribute("exception.slug", slug_for(exc))
-        except Exception:  # noqa: BLE001
-            pass
         raise exc

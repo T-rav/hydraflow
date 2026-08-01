@@ -37,7 +37,7 @@ from mockworld.fakes.fake_github import FakeGitHub
 from mockworld.fakes.fake_http import FakeHTTP
 from mockworld.fakes.fake_issue_fetcher import FakeIssueFetcher
 from mockworld.fakes.fake_issue_store import FakeIssueStore
-from mockworld.fakes.fake_sentry import FakeSentry
+from mockworld.fakes.fake_observability import FakeObservability
 from mockworld.fakes.fake_workspace import FakeWorkspace
 from ports import AgentPort
 from term_proposer_loop import BotPRPort
@@ -66,7 +66,7 @@ _PORT_FAKE_PAIRS: list[tuple[type, type]] = [
     (IssueFetcherPort, FakeIssueFetcher),
     (IssueStorePort, FakeIssueStore),
     (PRPort, FakeGitHub),
-    (SentryPort, FakeSentry),
+    (SentryPort, FakeObservability),
     (WorkspacePort, FakeWorkspace),
 ]
 

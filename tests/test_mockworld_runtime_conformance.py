@@ -20,7 +20,7 @@ from mockworld.fakes.fake_http import FakeHTTP
 from mockworld.fakes.fake_issue_fetcher import FakeIssueFetcher
 from mockworld.fakes.fake_issue_store import FakeIssueStore
 from mockworld.fakes.fake_llm import FakeLLM
-from mockworld.fakes.fake_sentry import FakeSentry
+from mockworld.fakes.fake_observability import FakeObservability
 from mockworld.fakes.fake_workspace import FakeWorkspace
 from tests.scenarios.ports import (
     ClockPort,
@@ -71,7 +71,7 @@ def _fake_workspace() -> FakeWorkspace:
         (_fake_issue_fetcher, IssueFetcherPort),
         (_fake_issue_store, IssueStorePort),
         (FakeLLM, LLMPort),
-        (FakeSentry, SentryPort),
+        (FakeObservability, SentryPort),
         (_fake_workspace, WorkspacePort),
     ],
     ids=[
@@ -84,7 +84,7 @@ def _fake_workspace() -> FakeWorkspace:
         "FakeIssueFetcher-IssueFetcherPort",
         "FakeIssueStore-IssueStorePort",
         "FakeLLM-LLMPort",
-        "FakeSentry-SentryPort",
+        "FakeObservability-SentryPort",
         "FakeWorkspace-WorkspacePort",
     ],
 )

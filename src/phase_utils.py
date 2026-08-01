@@ -25,24 +25,19 @@ T_Result = TypeVar("T_Result")
 
 @contextmanager
 def _sentry_transaction(op: str, name: str) -> Generator[None, None, None]:
-    """Context manager that wraps a block in a Sentry transaction.
+    """Transaction-span placeholder around a pipeline phase block.
 
-    A no-op when ``sentry_sdk`` is not installed.  The transaction uses
-    ``op`` as the operation name and ``name`` as the human-readable label
-    shown in the Sentry UI (e.g. ``"implement:#42"``).
+    Currently a no-op: observability moved to a future SRE agent + New Relic
+    (ADR-0118), and no tracing backend is wired. The ``op`` / ``name`` labels
+    are retained on the signature so a real span can be threaded back in here
+    without touching the phase call sites.
 
     Usage::
 
         with _sentry_transaction("pipeline.implement", f"implement:#{issue.id}"):
             result = await self._run_worker(issue)
     """
-    try:
-        import sentry_sdk  # noqa: PLC0415
-
-        with sentry_sdk.start_transaction(op=op, name=name):
-            yield
-    except ImportError:
-        yield
+    yield
 
 
 async def _fill_pending_slots(

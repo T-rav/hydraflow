@@ -24,10 +24,9 @@ from mockworld.fakes.fake_docker import FakeDocker
 from mockworld.fakes.fake_fs import FakeFS
 from mockworld.fakes.fake_git import FakeGit
 from mockworld.fakes.fake_github import FakeGitHub
-from mockworld.fakes.fake_honeycomb import FakeHoneycomb
 from mockworld.fakes.fake_http import FakeHTTP
 from mockworld.fakes.fake_llm import FakeLLM
-from mockworld.fakes.fake_sentry import FakeSentry
+from mockworld.fakes.fake_observability import FakeObservability
 from mockworld.fakes.fake_workspace import FakeWorkspace
 from tests.conftest import TaskFactory
 from tests.helpers import PipelineHarness, PipelineRunResult
@@ -247,8 +246,7 @@ class MockWorld:
         )
         self._llm = FakeLLM()
         self._github = FakeGitHub()
-        self._sentry = FakeSentry()
-        self._honeycomb = FakeHoneycomb()
+        self._sentry = FakeObservability()
         self._workspace = FakeWorkspace(tmp_path / "worktrees")
         self._clock = FakeClock(start=time.time())
         if clock_start is not None:
@@ -558,12 +556,8 @@ class MockWorld:
         return self._github
 
     @property
-    def sentry(self) -> FakeSentry:
+    def sentry(self) -> FakeObservability:
         return self._sentry
-
-    @property
-    def honeycomb(self) -> FakeHoneycomb:
-        return self._honeycomb
 
     @property
     def clock(self) -> FakeClock:
@@ -729,13 +723,10 @@ class MockWorld:
         Invokes ``loop._do_work()`` directly, ``cycles`` times per loop, so
         each call returns the ``WorkCycleResult`` stats. This skips
         ``loop.run()`` (no sleep/stop_event lifecycle) AND skips
-        ``loop._execute_cycle()`` (no ``@loop_span()`` decoration, no status
-        callback, no event-bus publish). Scenarios that need any of those
-        — particularly OTel ``hf.loop.{name}`` span emission — must call
-        ``loop._execute_cycle()`` directly (see
-        ``tests/scenarios/test_telemetry_e2e.py`` for the pattern).
-        FakeGitHub is wired as the PRPort so loops interact with seeded
-        world state.
+        ``loop._execute_cycle()`` (no status callback, no event-bus publish).
+        Scenarios that need either of those must call ``loop._execute_cycle()``
+        directly. FakeGitHub is wired as the PRPort so loops interact with
+        seeded world state.
 
         Returns a dict mapping loop name → last ``_do_work()`` stats.
         """

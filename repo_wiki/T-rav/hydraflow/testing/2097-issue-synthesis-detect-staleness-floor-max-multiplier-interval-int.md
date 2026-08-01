@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T14:26:19.195815+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1967
+superseded_by: 2242
 ---
 
 # detect_staleness floor: max(multiplier*interval, interval+max_cycle_s)

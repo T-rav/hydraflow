@@ -320,7 +320,7 @@ _bg_worker_defs = [
     (
         "escape_ledger",
         "Escape Ledger",
-        "Falsification instrument (read-only, Pattern B): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. Never gates or fixes. See #10367.",
+        "Falsification instrument (read-only, Pattern B): records post-merge escapes (revert/hotfix/regression-pin/bug-issue) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. Never gates or fixes. See #10367.",
     ),
     (
         "intervention_tally",
@@ -366,11 +366,6 @@ _bg_worker_defs = [
         "security_patch",
         "Security Patch",
         "Polls Dependabot alerts and files issues for fixable vulnerabilities.",
-    ),
-    (
-        "sentry_ingest",
-        "Sentry Ingest",
-        "Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline.",
     ),
     (
         "log_ingest",

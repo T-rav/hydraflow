@@ -29,7 +29,6 @@ from runner_utils import (
     stream_claude_process,
     terminate_processes,
 )
-from telemetry.spans import runner_span  # noqa: E402
 from tracing_context import TracingContext
 from wiki_compiler import parse_adr_draft_suggestion
 
@@ -160,7 +159,6 @@ class BaseRunner:
     _AUTH_RETRY_MAX = 3
     _AUTH_RETRY_BASE_DELAY = 5.0  # seconds
 
-    @runner_span()
     async def _execute(
         self,
         cmd: list[str],
@@ -243,23 +241,6 @@ class BaseRunner:
                 run_id=ctx.run_id,
                 config=self._config,
                 event_bus=self._bus,
-            )
-
-        try:
-            import sentry_sdk as _sentry  # noqa: PLC0415
-        except ImportError:
-            _sentry = None  # Sentry not installed — optional dependency
-        if _sentry is not None:
-            # Programming errors (AttributeError, TypeError, etc.) from the
-            # Sentry SDK must propagate so misconfiguration surfaces loudly.
-            _sentry.set_tag("hydraflow.issue", str(event_data.get("issue", "")))
-            _sentry.set_tag("hydraflow.source", str(event_data.get("source", "")))
-            _sentry.set_context(
-                "hydraflow_runner",
-                {
-                    "model": self._config.model,
-                    "tool": self._config.implementation_tool,
-                },
             )
 
         # Resolve this runner's harness backend once (per-spawn env override +

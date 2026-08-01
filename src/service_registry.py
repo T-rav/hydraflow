@@ -63,7 +63,6 @@ from epic import EpicCompletionChecker, EpicManager
 from epic_monitor_loop import EpicMonitorLoop
 from epic_sweeper_loop import EpicSweeperLoop
 from erosion_metrics_loop import ErosionMetricsLoop
-from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from escape_ledger_loop import EscapeLedgerLoop
 from events import EventBus
 from execution import SubprocessRunner
@@ -99,7 +98,7 @@ from memory_backlog_loop import MemoryBacklogLoop
 from merge_conflict_resolver import MergeConflictResolver
 from merge_state_watcher_loop import MergeStateWatcherLoop
 from models import StatusCallback
-from observability.sentry_adapter import SentryObservabilityAdapter
+from observability.noop_adapter import NoOpObservabilityAdapter
 from plan_phase import PlanPhase
 from plan_reviewer import PlanReviewer
 from plan_touchpoint_expander import PlanTouchpointExpander
@@ -138,7 +137,6 @@ from sampled_audit_loop import SampledAuditLoop
 from sandbox_failure_fixer_loop import SandboxFailureFixerLoop
 from second_order_vitals_loop import SecondOrderVitalsLoop
 from security_patch_loop import SecurityPatchLoop  # noqa: TCH001
-from sentry_loop import SentryLoop  # noqa: TCH001 — used in dataclass field
 from shape_runner import ShapeRunner
 from skill_prompt_eval_loop import SkillPromptEvalLoop
 from staging_bisect_loop import StagingBisectLoop
@@ -330,7 +328,6 @@ class ServiceRegistry:
     staging_promotion_loop: StagingPromotionLoop
     staging_bisect_loop: StagingBisectLoop
     stale_issue_loop: StaleIssueLoop
-    sentry_loop: SentryLoop
     log_ingest_loop: LogIngestLoop
     stale_issue_gc_loop: StaleIssueGCLoop
     gate_health_loop: GateHealthLoop
@@ -681,10 +678,11 @@ def build_services(
     # been extracted via scripts/extract_hindsight_to_wiki.py before merge.
 
     # Observability port — constructed once and injected throughout.
-    # Production path: SentryObservabilityAdapter (no-ops when sentry_sdk
-    # is absent). Sandbox/test path: caller passes FakeSentry.
+    # Production path: NoOpObservabilityAdapter (discards events until the SRE
+    # agent wires a real backend, ADR-0118). Sandbox/test path: caller passes
+    # FakeObservability.
     if observability is None:
-        observability = SentryObservabilityAdapter()
+        observability = NoOpObservabilityAdapter()
 
     # Core runners
     if workspaces is None:
@@ -1351,23 +1349,6 @@ def build_services(
     gh_cache_loop = GitHubCacheLoop(config, gh_cache, deps=loop_deps)  # noqa: F841
     from dedup_store import DedupStore  # noqa: PLC0415
 
-    sentry_dedup = DedupStore(
-        "sentry_filed_ids",
-        config.data_root / "dedup" / "sentry_filed.json",
-    )
-    sentry_loop = SentryLoop(
-        config=config,
-        prs=prs,
-        deps=loop_deps,
-        store=store,
-        runner=subprocess_runner,
-        credentials=credentials,
-        dedup=sentry_dedup,
-        state=state,
-        # Sentry-attributed escapes append a row to the same escape ledger
-        # EscapeLedgerLoop writes (#10367); agent-research / low confidence.
-        escape_ledger=EscapeLedger(config.diagnostics_dir / ESCAPE_LEDGER_FILENAME),
-    )
     log_ingest_dedup = DedupStore(
         "log_ingest_filed_sighashes",
         config.data_root / "dedup" / "log_ingest_filed.json",
@@ -2045,7 +2026,6 @@ def build_services(
         stale_issue_loop=stale_issue_loop,
         github_cache=gh_cache,
         github_cache_loop=gh_cache_loop,
-        sentry_loop=sentry_loop,
         log_ingest_loop=log_ingest_loop,
         stale_issue_gc_loop=stale_issue_gc_loop,
         gate_health_loop=gate_health_loop,

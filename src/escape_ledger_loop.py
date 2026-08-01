@@ -11,9 +11,7 @@ gates cannot check:
    originating merge (mechanical-first; low confidence → HITL surface;
    attribution NEVER blocks), and appends one row per escape to the
    append-only ledger ``<data_root>/diagnostics/escape_ledger.jsonl``
-   (``escape.models.EscapeRecord`` schema). Sentry-sourced escapes are
-   attributed in the ``SentryLoop`` flow, which appends its own rows to the
-   same ledger.
+   (``escape.models.EscapeRecord`` schema).
 2. **Erosion trend surfaces** (v2 of epic #10104). The same merged-commit
    scan feeds a per-tick erosion datapoint (files touched, modules crossed,
    scatter findings, duplication density) into

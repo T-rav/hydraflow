@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_75 terms across 3 bounded contexts._
+_74 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -447,7 +447,7 @@ Pydantic-validated runtime configuration aggregate for the HydraFlow orchestrato
 ## HydraFlowEvent
 
 **Kind:** `domain_event` · **Context:** `shared-kernel` · **Anchor:** `src/events.py:HydraFlowEvent` · **Confidence:** `accepted`
-**Aliases:** `event`, `bus event`, `published event`
+**Aliases:** `bus event`, `published event`
 
 A single event published on the in-process EventBus. Carries a monotonic id (for frontend dedup), an EventType discriminator, an ISO timestamp, a typed data payload, and optional session/repo context. HydraFlowEvents are fanned out live to subscribers, retained in in-memory history, and persisted to an append-only JSONL log for replay; persisted IDs are advanced past historical maxima so live events never collide with replayed ones.
 
@@ -535,12 +535,12 @@ Caretaker loop that periodically scans all open PRs for merge conflicts and auto
 **Kind:** `port` · **Context:** `shared-kernel` · **Anchor:** `src/ports.py:ObservabilityPort` · **Confidence:** `accepted`
 **Aliases:** `observability port`, `sentry port`, `error capture port`
 
-Hexagonal port for the observability boundary (ADR-0044 P7.7). Exposes five methods: `capture_exception`, `capture_message`, `breadcrumb`, `set_measurement`, and `flush`. The production adapter is `SentryObservabilityAdapter` in `src/observability/sentry_adapter.py`, which wraps `sentry_sdk` and silently degrades to a no-op when the SDK is not installed. The port is intentionally minimal — rich APIs drag every backend into the union.
+Hexagonal port for the observability boundary (ADR-0044 P7.7). Exposes five methods: `capture_exception`, `capture_message`, `breadcrumb`, `set_measurement`, and `flush`. Sentry was removed by ADR-0118 (observability moves to a dedicated SRE agent targeting New Relic), so the production adapter is now `NoOpObservabilityAdapter` in `src/observability/noop_adapter.py` — a null object whose methods return silently — and the SRE agent will supply the real adapter for this seam. The port is intentionally minimal — rich APIs drag every backend into the union.
 
 **Invariants:**
 - Pure Protocol — no implementation, no state.
-- The adapter is a no-op when `sentry_sdk` is absent; every method returns silently so callers never need a try/except around port calls.
-- Domain code never imports `sentry_sdk` directly; all observability routes through the injected `ObservabilityPort` so a future OTLP, structured-log, or sidecar adapter can replace Sentry without touching call sites.
+- The production adapter (`NoOpObservabilityAdapter`) is a null object; every method returns silently so callers never need a try/except around port calls.
+- Domain code never imports an observability SDK directly; all observability routes through the injected `ObservabilityPort` so the SRE agent's future adapter (New Relic, OTLP, structured-log, or sidecar) can replace the no-op without touching call sites.
 
 ## Plant
 
@@ -677,18 +677,6 @@ Any component that measures the current state of the Plant and emits a signal a 
 
 **Invariants:**
 - A Sensor observes; it does not mutate the Plant.
-
-## SentryLoop
-
-**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/sentry_loop.py:SentryLoop` · **Confidence:** `accepted`
-**Aliases:** `sentry loop`, `sentry ingestion loop`, `sentry issue poller`
-
-Background loop that polls the Sentry API for unresolved issues across configured projects, deduplicates them against already-filed GitHub issues, and invokes a Claude agent via `/hf.issue` to research the codebase and file a properly triaged GitHub issue — the same flow as dashboard bug reports (ADR-0055). Requires Sentry credentials in config. Sentry captures real code bugs only; transient failures and operational noise are excluded by the loop's dedup and filtering logic.
-
-**Invariants:**
-- Issues are deduplicated before filing; re-ingestion of the same Sentry event does not produce duplicate GitHub issues.
-- Kill-switch is via `enabled_cb("sentry")` (ADR-0049).
-- Sentry errors in the `ERROR+` level range trigger the issue-filing path; `WARNING` and below are skipped.
 
 ## Set-point
 

@@ -287,41 +287,24 @@ def setup_test_environment():
 
 @pytest.fixture(autouse=True)
 def _reset_gh_semaphore():
-    """Reset the global gh semaphore and rate-limit state between tests.
+    """Reset the global gh semaphore, rate-limit, and circuit-breaker state.
 
     This directly mutates module-level private state in ``subprocess_util``
     (``_gh_semaphore`` and ``_rate_limit_until``) to prevent cross-test
     leakage.  See module-level note above regarding the coupling trade-off.
+
+    The circuit breaker is cleared through its public ``reset_gh_circuit_breaker``
+    entrypoint: without it, a test that tripped the breaker OPEN left it OPEN for
+    every later test on the same xdist worker, which then failed fast on
+    unrelated gh/git calls (#10907).
     """
     subprocess_util._gh_semaphore = None
     subprocess_util._rate_limit_until = None
+    subprocess_util.reset_gh_circuit_breaker()
     yield
     subprocess_util._gh_semaphore = None
     subprocess_util._rate_limit_until = None
-
-
-@pytest.fixture(autouse=True)
-def _reset_otel_tracer_provider():
-    """Reset the OTel global tracer-provider state between tests.
-
-    ``trace.set_tracer_provider`` is guarded by a ``Once`` object that
-    prevents re-assignment after the first call.  Tests that install an
-    ``InMemorySpanExporter`` need a fresh provider each run; this fixture
-    resets both the provider reference and the ``Once._done`` flag so that
-    each test starts from a clean slate.
-
-    This directly mutates private OTel internals — the same coupling
-    trade-off accepted for ``_reset_gh_semaphore``.
-    """
-    from opentelemetry import trace as _trace
-    from src.telemetry.spans import _get_tracer
-
-    yield
-    # Teardown: undo whatever the test installed and clear our tracer cache
-    # so the next test resolves Tracer instances against its fresh provider.
-    _trace._TRACER_PROVIDER = None  # noqa: SLF001
-    _trace._TRACER_PROVIDER_SET_ONCE._done = False  # noqa: SLF001
-    _get_tracer.cache_clear()
+    subprocess_util.reset_gh_circuit_breaker()
 
 
 @pytest.fixture(autouse=True)

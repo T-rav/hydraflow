@@ -94,7 +94,7 @@ _MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
 class Check:
     """One executable/resolvable check cited by an ADR's Enforced-by field."""
 
-    kind: Literal["pytest", "make", "prose"]
+    kind: Literal["pytest", "make", "script", "prose"]
     target: str
     raw: str
 
@@ -123,8 +123,9 @@ def parse_enforced_by(block: str) -> tuple[Check, ...]:
     """Parse an Enforced-by block into typed checks. One check per line.
 
     Commas are NOT separators (so `manual` prose with commas stays intact).
-    A line beginning `pytest:` or `make:` is typed; anything else is `prose`
-    (legal only under Enforcement: manual — the coverage ratchet enforces that).
+    A line beginning `pytest:`, `make:`, or `script:` is typed; anything else is
+    `prose` (legal only under Enforcement: manual — the coverage ratchet enforces
+    that).
     """
     checks: list[Check] = []
     for raw_line in block.splitlines():
@@ -138,6 +139,10 @@ def parse_enforced_by(block: str) -> tuple[Check, ...]:
         elif line.startswith("make:"):
             checks.append(
                 Check(kind="make", target=line[len("make:") :].strip(), raw=line)
+            )
+        elif line.startswith("script:"):
+            checks.append(
+                Check(kind="script", target=line[len("script:") :].strip(), raw=line)
             )
         else:
             checks.append(Check(kind="prose", target=line, raw=line))
@@ -168,7 +173,11 @@ def _parse_bulleted_enforced_by(text: str, start: int) -> tuple[Check, ...]:
         if not m:
             break  # a non-bullet line ends the list
         item = m.group(1).strip().rstrip(",").strip()
-        if item.startswith("pytest:") or item.startswith("make:"):
+        if (
+            item.startswith("pytest:")
+            or item.startswith("make:")
+            or item.startswith("script:")
+        ):
             checks.extend(parse_enforced_by(item))
         else:
             break  # a non-check bullet (e.g. `- **Spec:**`) ends the list

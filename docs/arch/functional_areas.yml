@@ -136,7 +136,6 @@ areas:
       - ADRReviewerLoop
       - LogIngestLoop
       - ReportIssueLoop
-      - SentryLoop
     related_adrs: ['0029', '0050']
 
   autonomy:

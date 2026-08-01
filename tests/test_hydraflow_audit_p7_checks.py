@@ -24,43 +24,7 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-# --- Sentry gatekeeper ---------------------------------------------------
-
-
-def test_bug_types_detected_in_server_py(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "server.py",
-        "import sentry_sdk\n\n_BUG_TYPES = (TypeError, KeyError)\n\nsentry_sdk.init(dsn='')\n",
-    )
-    assert _run("P7.1", _ctx(tmp_path)).status is Status.PASS
-
-
-def test_bug_types_absent_fails(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "server.py", "import sentry_sdk\nsentry_sdk.init(dsn='')\n"
-    )
-    assert _run("P7.1", _ctx(tmp_path)).status is Status.FAIL
-
-
-def test_before_send_wired_to_filter(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "server.py",
-        (
-            "import sentry_sdk\n\n"
-            "_BUG_TYPES = (TypeError,)\n\n"
-            "def before_send(e, h): ...\n\n"
-            "sentry_sdk.init(dsn='', before_send=before_send)\n"
-        ),
-    )
-    assert _run("P7.2", _ctx(tmp_path)).status is Status.PASS
-
-
-def test_before_send_missing_fails(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "server.py",
-        "import sentry_sdk\n_BUG_TYPES = (TypeError,)\nsentry_sdk.init(dsn='')\n",
-    )
-    assert _run("P7.2", _ctx(tmp_path)).status is Status.FAIL
+# P7.1 / P7.2 (Sentry gatekeeper) retired by ADR-0118 — see p7_observability.py.
 
 
 # --- Repo wiki -----------------------------------------------------------

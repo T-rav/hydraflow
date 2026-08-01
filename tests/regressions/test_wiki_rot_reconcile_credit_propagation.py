@@ -9,8 +9,7 @@ This test guards the re-raise contract: a billing signal from the port must
 propagate out of reconcile so the supervised loop can pause — it must not be
 folded into the generic "gh list failed" log-and-return path.
 
-Pattern mirrors ``test_sentry_loop_credit_propagation.py`` and
-``test_pr_unsticker_credit_exhaustion.py``.
+Pattern mirrors ``test_pr_unsticker_credit_exhaustion.py``.
 """
 
 from __future__ import annotations

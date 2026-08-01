@@ -29,7 +29,6 @@ from models import (
 )
 from runner_utils import AuthenticationRetryError
 from subprocess_util import AuthenticationError, CreditExhaustedError
-from telemetry.spans import loop_span  # noqa: E402
 
 logger = logging.getLogger("hydraflow.base_background_loop")
 
@@ -137,7 +136,7 @@ class BaseBackgroundLoop(abc.ABC):
 
     @property
     def name(self) -> str:
-        """Loop name used by loop_span() for span naming and hf.loop attribute."""
+        """Loop name used for the hf.loop attribute."""
         return self._worker_name
 
     @abc.abstractmethod
@@ -217,7 +216,6 @@ class BaseBackgroundLoop(abc.ABC):
             return dict(stats)
         return {"value": stats}
 
-    @loop_span()
     async def _execute_cycle(self) -> None:
         """Execute one work cycle with error handling and status reporting.
 

@@ -116,7 +116,6 @@ def test_models_reflect_post_env_post_cascade_resolution(factory_root):
         manifest = build_manifest(HydraFlowConfig(), factory_root=factory_root)
 
     assert manifest["models"]["report_issue"] == {"tool": "claude", "model": "opus"}
-    assert manifest["models"]["sentry"]["model"] == "sonnet"
     assert manifest["models"]["adr_review"]["model"] == "sonnet"
 
 
@@ -201,7 +200,7 @@ def test_config_snapshot_matches_allowlist_exactly(config, factory_root):
     assert set(manifest["config_snapshot"]) == set(CONFIG_SNAPSHOT_ALLOWLIST)
     for field, value in manifest["config_snapshot"].items():
         assert value == getattr(config, field)
-        assert isinstance(value, (bool, int, str)), field
+        assert isinstance(value, bool | int | str), field
 
 
 def test_allowlist_fields_exist_and_carry_no_secrets():

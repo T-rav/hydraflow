@@ -19,7 +19,6 @@ class TestCredentialsModel:
     def test_defaults_are_empty_strings(self) -> None:
         creds = Credentials()
         assert creds.gh_token == ""
-        assert creds.sentry_auth_token == ""
         assert creds.whatsapp_token == ""
         assert creds.whatsapp_phone_id == ""
         assert creds.whatsapp_recipient == ""
@@ -33,10 +32,10 @@ class TestCredentialsModel:
     def test_explicit_values_stored(self) -> None:
         creds = Credentials(
             gh_token="gh-tok",
-            sentry_auth_token="sntryu_x",
+            whatsapp_token="wa-tok",
         )
         assert creds.gh_token == "gh-tok"
-        assert creds.sentry_auth_token == "sntryu_x"
+        assert creds.whatsapp_token == "wa-tok"
 
 
 class TestCredentialsFactory:
@@ -48,9 +47,9 @@ class TestCredentialsFactory:
         assert creds.gh_token == ""
 
     def test_factory_overrides(self) -> None:
-        creds = CredentialsFactory.create(gh_token="tok", sentry_auth_token="s")
+        creds = CredentialsFactory.create(gh_token="tok", whatsapp_token="wa")
         assert creds.gh_token == "tok"
-        assert creds.sentry_auth_token == "s"
+        assert creds.whatsapp_token == "wa"
 
 
 class TestBuildCredentials:
@@ -62,7 +61,6 @@ class TestBuildCredentials:
         "GITHUB_TOKEN": "",
         "HYDRAFLOW_HINDSIGHT_URL": "",
         "HYDRAFLOW_HINDSIGHT_API_KEY": "",
-        "SENTRY_AUTH_TOKEN": "",
         "HYDRAFLOW_WHATSAPP_TOKEN": "",
         "HYDRAFLOW_WHATSAPP_PHONE_ID": "",
         "HYDRAFLOW_WHATSAPP_RECIPIENT": "",
@@ -100,13 +98,6 @@ class TestBuildCredentials:
             creds = build_credentials(config)
         assert creds.gh_token == ""
 
-    def test_reads_sentry_auth_token(self, tmp_path: Path) -> None:
-        config = ConfigFactory.create(repo_root=tmp_path)
-        env = {**self._CLEARED_ENV, "SENTRY_AUTH_TOKEN": "sntryu_abc"}
-        with patch.dict(os.environ, env, clear=False):
-            creds = build_credentials(config)
-        assert creds.sentry_auth_token == "sntryu_abc"
-
     # test_reads_hindsight_fields removed in Phase 3 cutover — Hindsight
     # credentials deleted from the Credentials model.
 
@@ -135,7 +126,6 @@ class TestHydraFlowConfigExcludesCredentials:
         dumped = config.model_dump()
         credential_keys = {
             "gh_token",
-            "sentry_auth_token",
             "whatsapp_token",
             "whatsapp_phone_id",
             "whatsapp_recipient",

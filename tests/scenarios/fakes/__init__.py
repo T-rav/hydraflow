@@ -30,10 +30,10 @@ def __getattr__(name: str):  # noqa: PLR0911
         from mockworld.fakes.fake_workspace import FakeWorkspace
 
         return FakeWorkspace
-    if name == "FakeSentry":
-        from mockworld.fakes.fake_sentry import FakeSentry
+    if name == "FakeObservability":
+        from mockworld.fakes.fake_observability import FakeObservability
 
-        return FakeSentry
+        return FakeObservability
     if name == "FakeClock":
         from mockworld.fakes.fake_clock import FakeClock
 

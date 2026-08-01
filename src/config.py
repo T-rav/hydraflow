@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -39,10 +40,6 @@ class Credentials(BaseModel):
     gh_token: str = Field(
         default="",
         description="GitHub token for gh CLI auth",
-    )
-    sentry_auth_token: str = Field(
-        default="",
-        description="Sentry API auth token for reading issues",
     )
     whatsapp_token: str = Field(
         default="",
@@ -402,13 +399,9 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ),
     ("triage_retry_max_attempts", "HYDRAFLOW_TRIAGE_RETRY_MAX_ATTEMPTS", 3),
     ("triage_infra_retry_interval", "HYDRAFLOW_TRIAGE_INFRA_RETRY_INTERVAL", 900),
-    ("sentry_poll_interval", "SENTRY_POLL_INTERVAL", 600),
-    ("sentry_min_events", "SENTRY_MIN_EVENTS", 2),
-    ("sentry_max_creation_attempts", "SENTRY_MAX_CREATION_ATTEMPTS", 3),
     ("log_ingest_interval", "LOG_INGEST_INTERVAL", 14400),
     ("log_ingest_warning_min_count", "LOG_INGEST_WARNING_MIN_COUNT", 50),
     ("log_ingest_max_issues_per_run", "LOG_INGEST_MAX_ISSUES_PER_RUN", 3),
-    ("sentry_signal_cooldown_hours", "SENTRY_SIGNAL_COOLDOWN_HOURS", 24),
     ("security_patch_interval", "HYDRAFLOW_SECURITY_PATCH_INTERVAL", 3600),
     ("repo_wiki_interval", "HYDRAFLOW_REPO_WIKI_INTERVAL", 3600),
     (
@@ -620,8 +613,6 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("staging_branch", "HYDRAFLOW_STAGING_BRANCH", "staging"),
     ("rc_branch_prefix", "HYDRAFLOW_RC_BRANCH_PREFIX", "rc/"),
     ("repos_workspace_dir", "HYDRAFLOW_REPOS_WORKSPACE_DIR", "~/.hydra/repos"),
-    ("sentry_org", "SENTRY_ORG", ""),
-    ("sentry_project_filter", "SENTRY_PROJECT_FILTER", ""),
     ("log_ingest_label", "HYDRAFLOW_LOG_INGEST_LABEL", "hydraflow-log-ingest"),
     (
         "log_ingest_benign_patterns",
@@ -635,9 +626,6 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("repo_data_class", "HYDRAFLOW_REPO_DATA_CLASS", "internal"),
     ("regulated_labels", "HYDRAFLOW_REGULATED_LABELS", ""),
     ("dashboard_url", "HYDRAFLOW_DASHBOARD_URL", "http://localhost:5555"),
-    ("otel_endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT", "https://api.honeycomb.io"),
-    ("otel_service_name", "OTEL_SERVICE_NAME", "hydraflow"),
-    ("otel_environment", "HF_ENV", "local"),
     ("issue_refinement_model", "HYDRAFLOW_ISSUE_REFINEMENT_MODEL", ""),
     ("skill_prompt_refine_model", "HYDRAFLOW_SKILL_PROMPT_REFINE_MODEL", ""),
     ("intervention_tally_model", "HYDRAFLOW_INTERVENTION_TALLY_MODEL", ""),
@@ -814,6 +802,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("collaborator_check_enabled", "HYDRAFLOW_COLLABORATOR_CHECK_ENABLED", True),
     ("memory_auto_approve", "HYDRAFLOW_MEMORY_AUTO_APPROVE", False),
+    ("prompt_observatory_enabled", "HYDRAFLOW_PROMPT_OBSERVATORY_ENABLED", True),
     ("visual_gate_enabled", "HYDRAFLOW_VISUAL_GATE_ENABLED", False),
     ("visual_gate_bypass", "HYDRAFLOW_VISUAL_GATE_BYPASS", False),
     ("visual_validation_enabled", "HYDRAFLOW_VISUAL_VALIDATION_ENABLED", True),
@@ -870,7 +859,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_RC_PROMOTION_HEALTH_ENABLED",
         True,
     ),
-    ("otel_enabled", "HYDRAFLOW_OTEL_ENABLED", False),
     (
         "shadow_corpus_coverage_pruning_enabled",
         "HYDRAFLOW_SHADOW_CORPUS_COVERAGE_PRUNING_ENABLED",
@@ -965,15 +953,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ),
     ("state_prune_enabled", "HYDRAFLOW_STATE_PRUNE_ENABLED", True),
     ("security_patch_loop_enabled", "HYDRAFLOW_SECURITY_PATCH_LOOP_ENABLED", True),
-    ("sentry_loop_enabled", "HYDRAFLOW_SENTRY_LOOP_ENABLED", True),
     ("log_ingest_loop_enabled", "HYDRAFLOW_LOG_INGEST_LOOP_ENABLED", True),
-    # Gate the upstream Sentry "resolve" mutation. Default True = current
-    # behavior. Set False to never mutate the operator's Sentry issues.
-    (
-        "sentry_resolve_upstream_enabled",
-        "HYDRAFLOW_SENTRY_RESOLVE_UPSTREAM_ENABLED",
-        True,
-    ),
     (
         "skill_prompt_eval_loop_enabled",
         "HYDRAFLOW_SKILL_PROMPT_EVAL_LOOP_ENABLED",
@@ -1188,7 +1168,6 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
         "transcript_summary_model",
     ),
     ("HYDRAFLOW_WIKI_COMPILATION", "wiki_compilation_tool", "wiki_compilation_model"),
-    ("HYDRAFLOW_SENTRY", "sentry_tool", "sentry_model"),
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
     ("HYDRAFLOW_TERM_PROPOSER", "term_proposer_tool", "term_proposer_model"),
@@ -3010,54 +2989,6 @@ class HydraFlowConfig(BaseModel):
         le=10_000,
         description="Max characters for learned troubleshooting patterns in CI timeout prompts",
     )
-    # Sentry error ingestion
-    sentry_org: str = Field(
-        default="",
-        description="Sentry organization slug",
-    )
-    sentry_project_filter: str = Field(
-        default="",
-        description="Comma-separated Sentry project slugs to poll (empty = all projects)",
-    )
-    sentry_poll_interval: int = Field(
-        default=600,
-        ge=60,
-        le=86400,
-        description="Seconds between Sentry issue polls",
-    )
-    sentry_min_events: int = Field(
-        default=2,
-        ge=1,
-        le=1000,
-        description="Minimum Sentry event count before filing a GitHub issue",
-    )
-    sentry_max_creation_attempts: int = Field(
-        default=3,
-        ge=1,
-        le=10,
-        description="Max times to retry filing a GitHub issue for a Sentry error before parking",
-    )
-    sentry_signal_cooldown_hours: int = Field(
-        default=24,
-        ge=1,
-        le=720,
-        description=(
-            "Per-Sentry-issue cooldown (hours) after a filing attempt before "
-            "the same Sentry issue id may be re-filed. Stops a flapping error "
-            "re-filing every poll."
-        ),
-    )
-    sentry_resolve_upstream_enabled: bool = Field(
-        default=True,
-        description=(
-            "When True (current behavior), mark a Sentry issue 'resolved' "
-            "upstream after we file its GitHub issue, so it leaves the "
-            "unresolved feed (Sentry auto-reopens on recurrence). Set False to "
-            "leave the operator's Sentry issues untouched and rely solely on "
-            "local dedup + cooldown."
-        ),
-    )
-
     # LogIngestLoop — scans HydraFlow's own server log, clusters/dedups
     # ERROR + WARNING lines, and files GitHub issues into the pipeline.
     log_ingest_interval: int = Field(
@@ -3105,24 +3036,6 @@ class HydraFlowConfig(BaseModel):
             "Comma-separated log file paths LogIngestLoop scans. Relative paths "
             "resolve against data_root; absolute paths are used as-is."
         ),
-    )
-
-    # OpenTelemetry / Honeycomb instrumentation
-    otel_enabled: bool = Field(
-        default=False,
-        description="Enable OpenTelemetry tracing export to Honeycomb",
-    )
-    otel_endpoint: str = Field(
-        default="https://api.honeycomb.io",
-        description="OTLP HTTP endpoint for trace export",
-    )
-    otel_service_name: str = Field(
-        default="hydraflow",
-        description="OTel service.name resource attribute",
-    )
-    otel_environment: str = Field(
-        default="local",
-        description="Deployment environment tag (e.g. local, staging, production)",
     )
 
     # Security patch monitoring
@@ -3528,6 +3441,14 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Visual gate
+    prompt_observatory_enabled: bool = Field(
+        default=True,
+        description=(
+            "Record prompt SHAPES (structural hashes, never content) at the "
+            "CH-6 gate, so prompt coverage has an observed denominator rather "
+            "than one inferred from builder naming conventions (#10857)"
+        ),
+    )
     visual_gate_enabled: bool = Field(
         default=False,
         description="Require visual validation gate before merge finalization",
@@ -3654,14 +3575,6 @@ class HydraFlowConfig(BaseModel):
     report_issue_model: str = Field(
         default="opus",
         description="Model for report-issue worker (codebase research + structured issue creation)",
-    )
-    sentry_tool: Literal["claude", "codex"] = Field(
-        default="claude",
-        description="CLI backend for sentry_loop ingestion worker",
-    )
-    sentry_model: str = Field(
-        default="sonnet",
-        description="Model for sentry_loop ingestion worker (issue triage + filing from Sentry events) — sonnet is sufficient; the task is stack-trace parsing + issue filing, not deep reasoning. Opus was 4-5× the cost for no measurable quality win.",
     )
     adr_drift_resolver_tool: Literal["claude", "codex"] = Field(
         default="claude",
@@ -5553,10 +5466,6 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for SecurityPatchLoop.",
     )
-    sentry_loop_enabled: bool = Field(
-        default=True,
-        description="Deploy-time kill-switch for SentryLoop.",
-    )
     log_ingest_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for LogIngestLoop.",
@@ -5985,6 +5894,18 @@ class HydraFlowConfig(BaseModel):
         return self.repo_data_root / "metrics" / "prompt_gate" / "gate_audit.jsonl"
 
     @property
+    def prompt_observatory_path(self) -> Path:
+        """Repo-scoped observed-prompt-shape ledger (#10857, #10858).
+
+        JSONL records of prompt SHAPES seen at the CH-6 gate: a structural
+        hash, the source, the tool, and anchor digests — never prompt content,
+        the same discipline as ``prompt_gate_audit_path``. Feeds the observed
+        side of prompt coverage, where the denominator is what the factory
+        actually sent rather than what a naming convention could find.
+        """
+        return self.repo_data_root / "metrics" / "prompt_gate" / "observed_shapes.jsonl"
+
+    @property
     def approval_records_path(self) -> Path:
         """Repo-scoped hash-chained merge-approval evidence stream (CH-2, #9730).
 
@@ -6148,7 +6069,6 @@ def build_credentials(config: HydraFlowConfig) -> Credentials:
     )
     return Credentials(
         gh_token=gh_token,
-        sentry_auth_token=os.environ.get("SENTRY_AUTH_TOKEN", ""),
         whatsapp_token=os.environ.get("HYDRAFLOW_WHATSAPP_TOKEN", ""),
         whatsapp_phone_id=os.environ.get("HYDRAFLOW_WHATSAPP_PHONE_ID", ""),
         whatsapp_recipient=os.environ.get("HYDRAFLOW_WHATSAPP_RECIPIENT", ""),
@@ -6197,7 +6117,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "triage_tool",
             "transcript_summary_tool",
             "report_issue_tool",
-            "sentry_tool",
             "adr_review_tool",
         ):
             _apply_if_default(field, config.background_tool)
@@ -6207,7 +6126,6 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             "triage_model",
             "transcript_summary_model",
             "report_issue_model",
-            "sentry_model",
             "adr_review_model",
         ):
             _apply_if_default(field, config.background_model)
@@ -6342,7 +6260,6 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
             config.wiki_compilation_model,
         ),
         ("report_issue", config.report_issue_tool, config.report_issue_model),
-        ("sentry", config.sentry_tool, config.sentry_model),
         ("adr_review", config.adr_review_tool, config.adr_review_model),
         ("term_proposer", config.term_proposer_tool, config.term_proposer_model),
         (
@@ -6641,8 +6558,8 @@ def declared_env_keys() -> frozenset[str]:
     these keys elsewhere. Callers needing a hermetic environment (e.g. the
     test suite's session-scoped isolation fixture) should scrub this whole
     set rather than a ``HYDRAFLOW_``/``HYDRA_`` prefix rule alone, since
-    several overrides (``SENTRY_ORG``, ``OTEL_SERVICE_NAME``, ``HF_ENV``, ...)
-    follow third-party naming conventions instead (#10876).
+    several overrides (``OTEL_SERVICE_NAME``, ``HF_ENV``, ...) follow
+    third-party naming conventions instead (#10876).
     """
     keys: set[str] = set()
     for table in (
@@ -6661,6 +6578,101 @@ def declared_env_keys() -> frozenset[str]:
     keys.update(_DEPRECATED_ENV_ALIASES.keys())
     keys.update(_DEPRECATED_ENV_ALIASES.values())
     return frozenset(keys)
+
+
+def env_override_keys() -> frozenset[str]:
+    """Every env var key ``HydraFlowConfig``'s ``resolve_defaults()`` might
+    read directly via ``os.environ`` — a superset of :func:`declared_env_keys`.
+
+    ``declared_env_keys()`` only covers the data-driven ``_ENV_*_OVERRIDES``
+    tables. Several steps in ``resolve_defaults`` — ``_resolve_base_paths``,
+    ``_resolve_repo_and_identity``, and the special-case list/docker/JSON
+    overrides at the end of ``_apply_env_overrides`` — read ``os.environ``
+    directly for fields the tables don't model (list-typed fields, JSON-shaped
+    overrides, values needing custom bounds validation). Those keys are
+    hand-listed below; ``tests/architecture/test_config_env_key_coverage.py``
+    BFS-walks the actual ``resolve_defaults`` call graph (not all of
+    ``config.py`` — ``build_credentials()`` reads its own env vars but is
+    never called from ``resolve_defaults``, so it's outside this graph by
+    construction, not via an exemption list) and fails the build if a
+    non-``HYDRAFLOW_``/``HYDRA_``/``GIT_``-prefixed literal is read anywhere
+    in it without a matching entry here — so this list cannot silently drift
+    out of sync (#10859).
+
+    Callers building a hermetic ``HydraFlowConfig`` (:func:`declared_default_config`)
+    should scrub this whole set — plus, belt-and-braces, any currently-set
+    ``HYDRAFLOW_``/``HYDRA_``/``GIT_``-prefixed key, since a key can land in
+    ``config.py`` and still be missed here on review.
+    """
+    return declared_env_keys() | {
+        "HYDRAFLOW_DATA_ROOT",
+        "HYDRAFLOW_HOME",
+        "HYDRAFLOW_GITHUB_REPO",
+        "HYDRAFLOW_GIT_USER_NAME",
+        "HYDRAFLOW_GIT_USER_EMAIL",
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "HYDRAFLOW_DOCKER_ENABLED",
+        "HYDRA_DOCKER_ENABLED",
+        "HYDRAFLOW_LITE_PLAN_LABELS",
+        "HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS",
+        "HYDRAFLOW_WORKTREE_GC_ROOTS",
+        "HYDRAFLOW_DOCKER_MEMORY_LIMIT",
+        "HYDRAFLOW_DOCKER_TMP_SIZE",
+        "HYDRAFLOW_DOCKER_PIDS_LIMIT",
+        "HYDRAFLOW_MANAGED_REPOS",
+    }
+
+
+def declared_default_config(**overrides: Any) -> HydraFlowConfig:
+    """Build a ``HydraFlowConfig`` reflecting only declared field defaults —
+    no process environment, no ``.env`` file.
+
+    ``HydraFlowConfig()``'s ``resolve_defaults`` validator (``mode="after"``)
+    always runs; there is no constructor flag to skip it, so a bare
+    ``HydraFlowConfig()`` is a function of whatever the host process's
+    environment and ``repo_root/.env`` happen to contain. That breaks
+    ADR-0087's "same input -> same score" for any caller that needs a
+    machine-independent snapshot of the declared defaults — e.g. the prompt
+    audit's rendered-corpus baseline (#10859).
+
+    Two channels are neutralised for the duration of construction, both
+    restored (even if construction raises):
+
+    1. ``os.environ`` — every key in :func:`env_override_keys`, plus any
+       currently-set ``HYDRAFLOW_``/``HYDRA_``/``GIT_``-prefixed key, is
+       popped. The prefix set matches exactly what
+       ``tests/architecture/test_config_env_key_coverage.py`` treats as
+       "safe" without an explicit :func:`env_override_keys` entry — if the
+       two ever drift apart, a new prefixed env read could pass that ratchet
+       while still leaking through here.
+    2. ``repo_root/.env`` — ``_dotenv_lookup`` (the git-identity fallback)
+       reads this file directly, bypassing ``os.environ`` entirely, so
+       scrubbing ``os.environ`` alone cannot suppress it. Unless the caller
+       passes an explicit ``repo_root`` override, this defaults to a freshly
+       created, empty temporary directory: no ``.env`` exists there and no
+       git remote is configured, so ``_dotenv_lookup`` and the repo-slug
+       git-remote detection both take their "nothing found" branch without
+       any change to their own logic. An explicit ``repo_root`` override
+       bypasses this, same precedence as every other field here.
+
+    Harness/test-only — not for use on any hot or concurrent path.
+    """
+    scrub_keys = env_override_keys() | {
+        key for key in os.environ if key.startswith(("HYDRAFLOW_", "HYDRA_", "GIT_"))
+    }
+    saved_env = {key: os.environ.pop(key) for key in scrub_keys if key in os.environ}
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="hydraflow-declared-default-"
+        ) as tmp_dir:
+            fields: dict[str, Any] = {"repo_root": Path(tmp_dir)}
+            fields.update(overrides)
+            return HydraFlowConfig(**fields)
+    finally:
+        os.environ.update(saved_env)
 
 
 def _apply_env_overrides(config: HydraFlowConfig) -> None:

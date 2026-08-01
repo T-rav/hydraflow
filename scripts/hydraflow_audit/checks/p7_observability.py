@@ -10,57 +10,10 @@ from ..models import CheckContext, Finding, Status
 from ..registry import register
 from ._helpers import finding
 
-# ---------------------------------------------------------------------------
-# Sentry gatekeeper — P7.1, P7.2.
-# ---------------------------------------------------------------------------
-
-
-_BUG_TYPES_RE = re.compile(r"\b_BUG_TYPES\b")
-
-
-def _find_sentry_module(root: Path) -> Path | None:
-    for candidate in (root / "src" / "server.py", root / "src" / "sentry.py"):
-        if candidate.exists():
-            return candidate
-    src = root / "src"
-    if not src.is_dir():
-        return None
-    for py in src.rglob("*.py"):
-        text = py.read_text(encoding="utf-8", errors="replace")
-        if "sentry_sdk.init" in text:
-            return py
-    return None
-
-
-@register("P7.1")
-def _bug_types_tuple(ctx: CheckContext) -> Finding:
-    path = _find_sentry_module(ctx.root)
-    if path is None:
-        return finding("P7.1", Status.FAIL, "no Sentry init site found under src/")
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if _BUG_TYPES_RE.search(text):
-        return finding("P7.1", Status.PASS, f"_BUG_TYPES in {path.name}")
-    return finding(
-        "P7.1",
-        Status.FAIL,
-        f"{path.name} does not define a _BUG_TYPES gatekeeper tuple",
-    )
-
-
-@register("P7.2")
-def _before_send_uses_filter(ctx: CheckContext) -> Finding:
-    path = _find_sentry_module(ctx.root)
-    if path is None:
-        return finding("P7.2", Status.FAIL, "no Sentry init site found under src/")
-    text = path.read_text(encoding="utf-8", errors="replace")
-    if "before_send" in text and _BUG_TYPES_RE.search(text):
-        return finding("P7.2", Status.PASS)
-    return finding(
-        "P7.2",
-        Status.FAIL,
-        "Sentry init site has no before_send wired to _BUG_TYPES",
-    )
-
+# NOTE: P7.1 / P7.2 (the Sentry `_BUG_TYPES` / `before_send` gatekeeper checks)
+# were retired by ADR-0118 — Sentry is removed and observability moves to a
+# dedicated SRE agent (targeting New Relic), so there is no Sentry init site to
+# gate. When that observability layer lands it will define its own P7 checks.
 
 # ---------------------------------------------------------------------------
 # Repo wiki — P7.3 / P7.3a / P7.3b / P7.3c.

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T14:26:19.418555+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2058
+superseded_by: 2332
 ---
 
 # Guard MockWorld.close() with _closed to avoid double-shutting OTel

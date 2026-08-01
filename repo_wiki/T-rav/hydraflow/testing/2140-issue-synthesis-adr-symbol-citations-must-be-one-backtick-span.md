@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T14:26:19.300957+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2011
+superseded_by: 2285
 ---
 
 # ADR :Symbol citations must be one backtick span

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 10911
 source_phase: plan
 created_at: 2026-07-31T13:18:17.706667+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2363
 ---
 
 # ActivationProposal uses job_index, bypassing FakeGitHub

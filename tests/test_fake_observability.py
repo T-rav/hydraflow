@@ -1,13 +1,12 @@
 """Conformance and behavioral tests for FakeObservability.
 
 ADR-0047 requires every Port defined in ports.py to have a named Fake in
-mockworld/fakes/.  FakeSentry was updated in PR #8834 to satisfy
-ObservabilityPort; FakeObservability is the explicit alias that makes the
-ADR-0047 naming convention discoverable by coverage-matrix tooling.
+mockworld/fakes/.  FakeObservability is the named Fake for ObservabilityPort,
+discoverable by coverage-matrix tooling.
 
 Covers:
 - FakeObservability is ObservabilityPort (Protocol conformance).
-- FakeObservability IS FakeSentry (alias identity).
+- The package export matches the module's canonical class.
 - All five Port methods record the expected state.
 - flush() always returns True (no real I/O in tests).
 """
@@ -19,25 +18,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from mockworld.fakes import FakeObservability, FakeSentry
-from mockworld.fakes.fake_sentry import FakeObservability as FakeObservabilityDirect
+from mockworld.fakes import FakeObservability
+from mockworld.fakes.fake_observability import (
+    FakeObservability as FakeObservabilityDirect,
+)
 from ports import ObservabilityPort
 
 # ---------------------------------------------------------------------------
-# ADR-0047 naming convention — alias identity
+# ADR-0047 naming convention — canonical export
 # ---------------------------------------------------------------------------
 
 
-class TestAliasIdentity:
-    def test_fake_observability_is_fake_sentry_class(self) -> None:
-        assert FakeObservability is FakeSentry
-
-    def test_direct_import_matches_init_export(self) -> None:
+class TestCanonicalExport:
+    def test_init_export_matches_direct_import(self) -> None:
         assert FakeObservability is FakeObservabilityDirect
-
-    def test_instances_share_type(self) -> None:
-        assert isinstance(FakeObservability(), FakeSentry)
-        assert isinstance(FakeSentry(), FakeObservability)
 
 
 # ---------------------------------------------------------------------------
