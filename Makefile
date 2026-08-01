@@ -500,6 +500,9 @@ quality: deps lint-ul
 # the pre-push gate and must stay fast (lint + typecheck + security only, no
 # test suites of any kind). UI drift is still caught by `make quality` locally
 # and by CI's Dashboard Build job on every PR.
+prose-scan: ## Scan authored docs for mechanical prose defects (advisory, non-blocking)
+	@$(UV) python scripts/prose_scan.py
+
 quality-lite: deps
 	@echo "$(BLUE)Running lightweight quality checks...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && ( \
