@@ -6,9 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
-- `9387d08` — chore: arch-regen after merging staging *(2026-07-31)*
-- `dff6138` — Merge remote-tracking branch 'origin/staging' into chore/remove-sentry-from-factory *(2026-07-31)*
-- `ad4f838` — Remove Sentry from the factory; observability owned by the SRE agent (ADR-0118) *(2026-07-31)*
+- `0de9226` — Remove Sentry from the factory; observability owned by the SRE agent (ADR-0118) (#10954) (#10954) *(2026-08-01)*
 - `26cbece` — Fixes #10939: backfill **Date:** frontmatter on the undated Accepted ADRs (#10953) (#10953) *(2026-07-31)*
 - `46ad47f` — Remove Honeycomb/OTel telemetry from the factory (ADR-0118 supersedes ADR-0055) (#10950) (#10950) *(2026-07-31)*
 - `32bedda` — Fixes #10859: Prompt baselines are environment-dependent: HydraFlow... (#10938) (#10938) *(2026-07-31)*
@@ -618,8 +616,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W18
 
 - `692dc64` — chore(wiki): backfill all topics with new doc-voice prompt + harden compiler prompt (#8472) (#8472) *(2026-05-02)*
-- `525f135` — chore(audit): unblock principles audit (P2.9 split-aware + P10.3 baseline) (#8469) (#8469) *(2026-05-02)*
-- `a1ad80f` — chore(wiki): slim json:entry blocks (drop content+valid_from) + tighten compiler doc-voice prompt (#8465) (#8465) *(2026-05-02)*
 
 
 <!-- arch:generated -->

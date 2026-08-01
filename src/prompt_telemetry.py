@@ -504,6 +504,23 @@ def parse_command_tool_model(cmd: list[str]) -> tuple[str, str]:
     return tool, model
 
 
+def rewrite_command_model(cmd: list[str], model: str) -> list[str]:
+    """Return a copy of *cmd* with its ``--model`` value set to *model*.
+
+    The writer counterpart to :func:`parse_command_tool_model`. Credit-failover
+    (#10844) uses it to force a work spawn onto the GLM model when it reroutes
+    the spawn to the zai backend. If ``--model`` is absent it is appended. The
+    input list is never mutated.
+    """
+    out = list(cmd)
+    for i, part in enumerate(out):
+        if part == "--model" and i + 1 < len(out):
+            out[i + 1] = model
+            return out
+    out.extend(("--model", model))
+    return out
+
+
 def _new_counter() -> dict[str, object]:
     """Create a fresh aggregate counter payload."""
     return {

@@ -308,6 +308,23 @@ def _reset_gh_semaphore():
 
 
 @pytest.fixture(autouse=True)
+def _reset_credit_failover():
+    """Clear the credit-failover module singleton between tests (#10844).
+
+    ``credit_failover`` holds process-wide runtime state (whether work spawns are
+    rerouted to GLM). A test that engages failover must not leak that into a later
+    test on the same xdist worker, which would silently reroute its spawns. Cleared
+    through the public ``reset_for_tests`` entrypoint (mirrors the gh circuit
+    breaker reset above; #10889 module-state reset-coverage pattern).
+    """
+    import credit_failover
+
+    credit_failover.reset_for_tests()
+    yield
+    credit_failover.reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _restore_phase_utils_memory_seams():
     """Snapshot + restore the ``phase_utils`` memory-suggestion seams per test.
 

@@ -781,6 +781,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_GIVEUP_WINDOW_ENABLED",
         True,
     ),
+    (
+        "credit_failover_enabled",
+        "HYDRAFLOW_CREDIT_FAILOVER_ENABLED",
+        True,
+    ),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
     ("docker_no_new_privileges", "HYDRAFLOW_DOCKER_NO_NEW_PRIVILEGES", True),
     (
@@ -2702,6 +2707,33 @@ class HydraFlowConfig(BaseModel):
             "Model applied to every maintenance loop when set (e.g. 'glm-5.2'). "
             "Empty keeps each maintenance role's own model. Only touches the "
             "maintenance role-set, never the work loops."
+        ),
+    )
+    # Credit failover (#10844): when a Claude *work* spawn hits an authoritative
+    # Anthropic credit cap, reroute work spawns to the z.ai GLM backend and keep
+    # going instead of pausing. Requires ZAI_API_KEY (no-op without it). Switch
+    # back auto-probes Claude after cooldown / the error's reset time. Never
+    # touches maintenance loops (they dial independently).
+    credit_failover_enabled: bool = Field(
+        default=True,
+        description=(
+            "Reroute work spawns to the GLM backend on an authoritative Claude "
+            "credit cap instead of pausing (#10844). Requires ZAI_API_KEY."
+        ),
+    )
+    credit_failover_model: str = Field(
+        default="glm-5.2",
+        description=(
+            "Model for work spawns while credit-failover is active. Must be a "
+            "glm-* model (the zai-backend requirement)."
+        ),
+    )
+    credit_failover_cooldown_minutes: int = Field(
+        default=15,
+        ge=1,
+        description=(
+            "Minutes before probing Claude to switch back, used only when the "
+            "credit error carries no explicit reset time (#10844)."
         ),
     )
     triage_max_turns: int = Field(
@@ -5724,6 +5756,18 @@ class HydraFlowConfig(BaseModel):
         """Validate Docker size notation (digits followed by b/k/m/g)."""
         if not re.fullmatch(r"\d+[bkmg]", v, re.IGNORECASE):
             msg = f"Invalid Docker size notation '{v}'; expected digits followed by b/k/m/g (e.g., '4g', '512m')"
+            raise ValueError(msg)
+        return v
+
+    @field_validator("credit_failover_model")
+    @classmethod
+    def credit_failover_model_must_be_glm(cls, v: str) -> str:
+        """The failover model runs on the zai backend, which requires glm-* (#10844)."""
+        if not v.startswith("glm"):
+            msg = (
+                f"credit_failover_model must be a glm-* model (got '{v}') — the "
+                "zai harness backend only accepts glm-* models."
+            )
             raise ValueError(msg)
         return v
 

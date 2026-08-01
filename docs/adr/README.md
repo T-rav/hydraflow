@@ -178,6 +178,7 @@ cadence and files remediation issues on drift.
 | [0116](0116-prompts-as-a-measured-contract.md) | Prompts as a measured contract | Accepted |
 | [0117](0117-observed-prompt-coverage.md) | Observed prompt coverage — the denominator is measured, not inferred | Accepted |
 | [0118](0118-observability-belongs-to-the-sre-agent-not-the-loops.md) | Observability belongs to the SRE agent, not the loops | Accepted |
+| [0119](0119-credit-failover-to-glm.md) | Credit failover — reroute work to GLM instead of pausing when Claude credits are exhausted | Accepted |
 
 ## Adding a new ADR
 

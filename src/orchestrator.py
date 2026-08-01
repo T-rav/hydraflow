@@ -10,6 +10,7 @@ from collections.abc import Callable, Coroutine, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
+import credit_failover
 from adr_utils import is_adr_issue_title
 from bg_worker_manager import BGWorkerManager
 from config import HydraFlowConfig
@@ -169,6 +170,9 @@ class HydraFlowOrchestrator:
         self._credit_fp_last: dict[str, datetime] = {}
         self._credit_pause_lock = asyncio.Lock()
         self._credit_resume_event = asyncio.Event()
+        # Credit failover (#10844): the switch-back probe task, live only while
+        # work is rerouted to GLM (credit_failover module holds the routing flag).
+        self._failover_probe_task: asyncio.Task[None] | None = None
         # Session tracking
         self._current_session: SessionLog | None = None
         self._session_issue_results: dict[int, bool] = {}
@@ -536,6 +540,13 @@ class HydraFlowOrchestrator:
             if not task.done():
                 task.cancel()
                 logger.debug("Cancelled loop task %r", name)
+
+        # Cancel the credit-failover switch-back probe if it is running (#10844).
+        if (
+            self._failover_probe_task is not None
+            and not self._failover_probe_task.done()
+        ):
+            self._failover_probe_task.cancel()
 
         # Hindsight HTTP client removed in Phase 3 cutover — no close needed.
 
@@ -1309,7 +1320,16 @@ class HydraFlowOrchestrator:
         would stay permanently dead. Recreating the task via ``_restart_loop``
         — the same path used for any other loop crash — kills the hot loop and
         self-heals the phase. See #9924.
+
+        Credit failover (#10844): an *authoritative* Claude cap short-circuits to
+        engaging GLM failover and restarting the crashed loop NOW — it re-runs
+        routed to GLM (base_runner reroutes while failover is active) instead of
+        pausing the factory. Everything else (prose-only signals, non-Claude
+        caps, no zai key, disabled) falls through to the unchanged pause logic.
         """
+        if await self._maybe_engage_failover(exc):
+            await self._restart_loop(loop_name, exc, tasks, loop_factories)
+            return
         paused = await self._pause_for_credits(exc, loop_name, tasks, loop_factories)
         if not paused:
             # Suppressed false positive: restart with a delay so a loop that
@@ -1325,6 +1345,115 @@ class HydraFlowOrchestrator:
                     float(self._config.credit_fp_suppress_cooldown_seconds), 60.0
                 ),
             )
+
+    async def _maybe_engage_failover(self, exc: CreditExhaustedError) -> bool:
+        """Engage GLM failover for an authoritative Claude credit cap (#10844).
+
+        Returns ``True`` when the caller should restart the crashed loop NOW (it
+        re-runs routed to GLM) instead of pausing. Returns ``False`` — falling
+        through to the unchanged pause/probe logic — for anything that is not a
+        clear Claude cap we can fail over: the feature disabled, a non-Claude
+        (zai/kimi) cap, a prose-only signal that still needs corroboration, or no
+        ``ZAI_API_KEY`` to route to (rerouting would silently fall back to Claude).
+        Idempotent while already failed over: it just re-signals "restart on GLM".
+        """
+        if not self._config.credit_failover_enabled:
+            return False
+        provider = getattr(exc, "provider", PROVIDER_ANTHROPIC) or PROVIDER_ANTHROPIC
+        if provider not in (PROVIDER_ANTHROPIC, "claude"):
+            return False
+        if not getattr(exc, "authoritative", False):
+            return False
+        if not credit_failover.zai_key_present():
+            return False
+        if credit_failover.is_active():
+            return True
+        now = datetime.now(UTC)
+        resume_at = self._compute_resume_time(exc)
+        credit_failover.engage(
+            now=now,
+            resume_at=resume_at if resume_at > now else None,
+            cooldown_minutes=int(self._config.credit_failover_cooldown_minutes),
+        )
+        logger.warning(
+            "Claude credit cap (provider=%s) — engaging GLM failover; work "
+            "reroutes to %s. First Claude switch-back probe at %s.",
+            provider,
+            self._config.credit_failover_model,
+            credit_failover.status().probe_after,
+        )
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.SYSTEM_ALERT,
+                data={
+                    "message": (
+                        "Claude credits exhausted — failing over to GLM "
+                        f"({self._config.credit_failover_model}); work continues."
+                    ),
+                    "provider": provider,
+                    "severity": "warning",
+                },
+            )
+        )
+        self._start_failover_probe()
+        return True
+
+    def _start_failover_probe(self) -> None:
+        """Start the switch-back probe task if one is not already running."""
+        if (
+            self._failover_probe_task is not None
+            and not self._failover_probe_task.done()
+        ):
+            return
+        self._failover_probe_task = asyncio.create_task(
+            self._run_failover_probe(), name="hydraflow-credit-failover-probe"
+        )
+
+    async def _run_failover_probe(self) -> None:
+        """Poll for Claude recovery while failover is active; clear on success."""
+        while credit_failover.is_active() and not self._stop_event.is_set():
+            if await self._probe_claude_for_switchback():
+                return
+            # Poll no faster than a minute; ``_sleep_or_stop`` wakes on shutdown.
+            await self._sleep_or_stop(60.0)
+
+    async def _probe_claude_for_switchback(self) -> bool:
+        """One switch-back attempt. Returns ``True`` when failover was cleared.
+
+        Only probes once the scheduled ``probe_after`` has arrived (the error's
+        reset time, or the cooldown). A successful probe clears failover so work
+        routes back to Claude; the next real Claude spawn is the true arbiter (a
+        probe cannot see a *weekly* cap), and if it re-caps, failover re-engages.
+        A failed probe pushes the next attempt out by a cooldown.
+        """
+        now = datetime.now(UTC)
+        if not credit_failover.probe_due(now):
+            return False
+        base_url, api_key = backend_probe_endpoint(PROVIDER_ANTHROPIC, self._config)
+        available = await probe_credit_availability(
+            PROVIDER_ANTHROPIC, base_url=base_url, api_key=api_key
+        )
+        if available:
+            credit_failover.clear()
+            logger.warning(
+                "Claude credit probe succeeded — clearing GLM failover; work "
+                "returns to Claude."
+            )
+            await self._bus.publish(
+                HydraFlowEvent(
+                    type=EventType.SYSTEM_ALERT,
+                    data={
+                        "message": "Claude credits recovered — switching back from GLM.",
+                        "provider": PROVIDER_ANTHROPIC,
+                        "severity": "info",
+                    },
+                )
+            )
+            return True
+        credit_failover.advance_probe(
+            now=now, cooldown_minutes=int(self._config.credit_failover_cooldown_minutes)
+        )
+        return False
 
     async def _restart_loop(
         self,
