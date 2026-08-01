@@ -9,8 +9,7 @@ from config import HydraFlowConfig
 
 def test_default_values() -> None:
     cfg = HydraFlowConfig()
-    # damper-0a (#10843): fleet anomaly is a slow signal — hourly, not every 10 min.
-    assert cfg.trust_fleet_sanity_interval == 3600
+    assert cfg.trust_fleet_sanity_interval == 600
     assert cfg.loop_anomaly_issues_per_hour == 10
     assert cfg.loop_anomaly_repair_ratio == 2.0
     assert cfg.loop_anomaly_tick_error_ratio == 0.2
@@ -37,10 +36,8 @@ def test_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_interval_bounds() -> None:
     with pytest.raises(ValueError, match="greater than or equal to 60"):
         HydraFlowConfig(trust_fleet_sanity_interval=30)
-    # Ceiling raised to a week (#10843): default sits at 1h with headroom so an
-    # operator can slow the fleet-sanity tick without hitting the old 3600 cap.
-    with pytest.raises(ValueError, match="less than or equal to 604800"):
-        HydraFlowConfig(trust_fleet_sanity_interval=700000)
+    with pytest.raises(ValueError, match="less than or equal to 3600"):
+        HydraFlowConfig(trust_fleet_sanity_interval=86400)
 
 
 def test_tick_error_ratio_bounded_below_one() -> None:

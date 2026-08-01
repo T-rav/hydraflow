@@ -530,7 +530,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_ENTRY_EVIDENCE_MAX_ENTRIES_PER_TICK",
         20,
     ),
-    ("trust_fleet_sanity_interval", "HYDRAFLOW_TRUST_FLEET_SANITY_INTERVAL", 3600),
+    ("trust_fleet_sanity_interval", "HYDRAFLOW_TRUST_FLEET_SANITY_INTERVAL", 600),
     ("label_drift_watcher_interval", "HYDRAFLOW_LABEL_DRIFT_WATCHER_INTERVAL", 600),
     ("loop_anomaly_issues_per_hour", "HYDRAFLOW_LOOP_ANOMALY_ISSUES_PER_HOUR", 10),
     (
@@ -4802,10 +4802,10 @@ class HydraFlowConfig(BaseModel):
 
     # Trust fleet — TrustFleetSanityLoop (spec §12.1)
     trust_fleet_sanity_interval: int = Field(
-        default=3600,
+        default=600,
         ge=60,
-        le=604800,
-        description="Seconds between TrustFleetSanityLoop ticks (default 1h)",
+        le=3600,
+        description="Seconds between TrustFleetSanityLoop ticks (default 10m)",
     )
     loop_anomaly_issues_per_hour: int = Field(
         default=10,
