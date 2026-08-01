@@ -6,14 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
-- `2aac94e` — Merge remote-tracking branch 'origin/staging' into fix/damper-0a-cadence-alignment-10843 *(2026-08-01)*
-- `1115e3b` — fix(damper-0a): exclude trust_fleet_sanity_interval — coupled to liveness *(2026-08-01)*
+- `820c568` — Merge remote-tracking branch 'origin/main' into rc/2026-08-01-1203 *(2026-08-01)*
+- `d90fd04` — Fixes #10843: damper-0a — align slow-signal loop cadence to measurement window (#10969) (#10969) *(2026-08-01)*
 - `2ed1bd1` — docs(adr): ADR-0120 stillness control architecture (Proposed) — #10824/#10827/#10825 (#10968) (#10968) *(2026-08-01)*
 - `630613c` — Fixes #10840 (part): concentration (god-file) sensor — counter-metric to erosion.spread (#10966) (#10966) *(2026-08-01)*
 - `7553e49` — Fixes #10820: oscillation fingerprint — read-only flux-carrier diagnostic (#10965) (#10965) *(2026-08-01)*
 - `40087d1` — Fixes #10844: credit failover — reroute work to GLM instead of pausing (ADR-0119) (#10964) (#10964) *(2026-08-01)*
 - `0de9226` — Remove Sentry from the factory; observability owned by the SRE agent (ADR-0118) (#10954) (#10954) *(2026-08-01)*
-- `0de9226` — Remove Sentry from the factory; observability owned by the SRE agent (ADR-0118) (#10954) (#10954) *(2026-08-01)*
+- `15e1e6d` — chore: arch-regen for RC promotion 2026-08-01-0329 *(2026-07-31)*
 - `17c6240` — chore: arch-regen for RC *(2026-07-31)*
 - `0b0b838` — Merge remote-tracking branch 'origin/main' into rc/2026-07-31-1816 *(2026-07-31)*
 - `26cbece` — Fixes #10939: backfill **Date:** frontmatter on the undated Accepted ADRs (#10953) (#10953) *(2026-07-31)*
@@ -634,10 +634,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `6d7fe13` — feat(telemetry): OTel Honeycomb instrumentation — Phase A (#8473) (#8473) *(2026-05-06)*
 - `43ffe3d` — feat(ul): TermProposerLoop — auto-grow the ubiquitous-language glossary (ADR-0054 / chunk 2 of 5) (#8477) (#8477) *(2026-05-06)*
 - `9ce2397` — feat(ul): ubiquitous language as a living artifact (ADR-0053 slice 1) (#8474) (#8474) *(2026-05-06)*
-
-## 2026-W18
-
-- `692dc64` — chore(wiki): backfill all topics with new doc-voice prompt + harden compiler prompt (#8472) (#8472) *(2026-05-02)*
 
 
 <!-- arch:generated -->
