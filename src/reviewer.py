@@ -940,6 +940,7 @@ Quality: No issues — <justification>
 {verify_step}
 6. Run project audits on changed code:
    - Code quality (SRP, type hints, naming, complexity) and test quality (3As structure, factories, edge cases)
+   - **Security** — injection, unsafe deserialization, crypto misuse, auth/authz gaps, secret/credential exposure, unsafe `subprocess`/shell
    - **Test-value standards (merge gate)** — request changes for:
      - Skipped, xfailed, commented-out, or placeholder tests in active coverage — file deferred work in bd instead
      - Unit tests that bypass documented factories or world-building helpers (for HydraFlow: `ConfigFactory`, `TaskFactory`, `make_pr_manager`, MockWorld helpers)
