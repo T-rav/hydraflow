@@ -126,6 +126,19 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Review",
         "src/reviewer.py:676",
     ),
+    # Same builder as ``reviewer_build_review`` above, but the fixture declares
+    # ``config_overrides`` (``max_ci_fix_attempts=0`` +
+    # ``use_quality_gate_in_review=True``) so the ``elif
+    # self._config.use_quality_gate_in_review`` branch renders. That branch is
+    # dead under the production defaults (``max_ci_fix_attempts`` defaults to 2),
+    # so without a per-fixture override it could never be scored (#10872).
+    AuditTarget(
+        "reviewer_build_review_quality_gate",
+        "reviewer.ReviewRunner._build_review_prompt_with_stats",
+        "tests/fixtures/prompts/reviewer_build_review_quality_gate.json",
+        "Review",
+        "src/reviewer.py:800",
+    ),
     AuditTarget(
         "reviewer_ci_fix",
         "reviewer.ReviewRunner._build_ci_fix_prompt",
@@ -1043,6 +1056,17 @@ class LoadedFixture:
     # scenario's fake into the harness applies it to every builder. Shape:
     # ``{"_prs": {"fake": "prs_port", "shape": "settled_red_9871"}}``.
     instance_attrs: dict = field(default_factory=dict)
+    # Per-field config overrides applied to the ``_MinimalConfig`` handed to the
+    # builder (#10872). Every field otherwise resolves from the real
+    # ``HydraFlowConfig`` default, so a builder whose alternative branch is gated
+    # on a non-default config value can never be rendered — e.g.
+    # ``reviewer._build_review_prompt_with_stats``'s
+    # ``elif self._config.use_quality_gate_in_review`` chain is dead whenever
+    # ``max_ci_fix_attempts > 0`` (the default). A fixture declares the override
+    # (``{"max_ci_fix_attempts": 0, "use_quality_gate_in_review": true}``) so the
+    # otherwise-unreachable branch renders and gets scored. Empty by default, so
+    # a fixture without the key renders exactly as before.
+    config_overrides: dict = field(default_factory=dict)
 
 
 def _coerce_task_dicts(args: dict) -> dict:
@@ -1085,6 +1109,7 @@ def load_fixture(path: str) -> LoadedFixture:
         args=coerced_args,
         faked_deps=data.get("faked_deps", {}),
         instance_attrs=data.get("instance_attrs", {}),
+        config_overrides=data.get("config_overrides", {}),
     )
 
 
@@ -1164,7 +1189,7 @@ class _MinimalConfig:
     """Minimal stand-in for HydraFlowConfig — builders typically read only a
     handful of ``max_*_chars`` fields and booleans. Extend as needed."""
 
-    def __init__(self) -> None:
+    def __init__(self, config_overrides: dict[str, object] | None = None) -> None:
         import tempfile
         from pathlib import Path as _Path
 
@@ -1185,6 +1210,16 @@ class _MinimalConfig:
         # builders that read repo_memory_dir resolve a real path here too.
         self.repo_data_root = self.data_root / self.repo.replace("/", "-")
         self.repo_memory_dir = self.repo_data_root / "memory"
+        # Fixture-declared per-field overrides (#10872). Set as instance
+        # attributes so they win over ``__getattr__``'s fallback to the real
+        # HydraFlowConfig default, letting a fixture exercise a config-gated
+        # branch the production defaults leave dead (e.g.
+        # ``use_quality_gate_in_review``, unreachable while
+        # ``max_ci_fix_attempts > 0``). Applied last so an override can also
+        # replace a deterministic harness field above when a fixture must. With
+        # no overrides this is a no-op and the config resolves exactly as before.
+        for name, value in (config_overrides or {}).items():
+            setattr(self, name, value)
 
     def data_path(self, *parts: object) -> object:
         return self.data_root.joinpath(*[str(p) for p in parts])
@@ -1261,7 +1296,7 @@ def render_target(target: AuditTarget) -> str:
             callable_obj = getattr(cls, method_name)
         else:
             instance = cls.__new__(cls)
-            instance._config = _MinimalConfig()
+            instance._config = _MinimalConfig(config_overrides=fixture.config_overrides)
             instance._hindsight = None
             instance._wiki_store = None
             instance._last_context_stats = {}
