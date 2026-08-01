@@ -821,3 +821,6 @@ sandbox-shell:
 post-merge-smoke:
 	@echo "$(BLUE)Running post-merge full-machine smoke (s82)...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/sandbox_scenario.py run s82_full_machine_rc_promotion
+
+console-conformance:
+	@PYTHONPATH=. $(UV) python scripts/check_console_conformance.py

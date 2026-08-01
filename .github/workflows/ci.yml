@@ -68,6 +68,13 @@ jobs:
               # unrelated build went red (#10926). Same rule as scripts/**
               # above — under-inclusive is merely expensive for a TEST filter.
               - 'docs/wiki/**'
+              # agents/** — the console decision ledger and persona contracts
+              # (ARCH-0001). tests/test_console_conformance.py guards record
+              # shape, chair identity, and numbering against the LIVE tree; a
+              # PR that only adds a decision record would otherwise run no
+              # Python tests and land an unconformant ledger green. Same rule
+              # as docs/wiki/** above.
+              - 'agents/**'
               # prompts/**: the auto-agent Markdown templates are model-bound
               # prompts. tests/test_audit_prompts.py renders one of them
               # (preflight_auto_agent) and prompt_observatory reconciles all of
