@@ -2,7 +2,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-08-01
-- **Related:** [ADR-0095](0095-disturbance-dampener-ratchet.md) (the disturbance dampener — the reference regulator), [ADR-0029](0029-caretaker-loop-pattern.md) (loops are reflexes)
+- **Related:** [ADR-0101](0101-disturbance-dampener.md) (the disturbance dampener — the reference regulator), [ADR-0029](0029-caretaker-loop-pattern.md) (loops are reflexes)
 - **Addresses:** #10824 (setpoint conversion), #10827 (optimization layer), #10825 (innovation-filtered sensing) — the Phase-1 design rulings of the stillness program (#10819)
 
 > **This is a Proposed ADR — a design ruling for decision, not an accepted commitment.** It records the target architecture and, deliberately, what is *real today* versus *unbuilt* for each rung, so the build order is chosen on evidence. Accept, amend, or reject.
@@ -27,7 +27,7 @@ Adopt the process-control **pyramid** as the factory's control architecture, bui
 
 **Grounded (real exemplars + precedents, verified):**
 - **Coverage floor** — setpoint 70% lives in `Makefile:223` (`TEST_COVERAGE_DEFAULT`) + `ci.yml:396` (`--cov-fail-under=70`); *not* a config field (a candidate cleanup: promote it to config so the setpoint is one authoritative value).
-- **Disturbance dampener** (ADR-0095) — the canonical regulator: baseline=setpoint (`disturbance/baseline.py`), new violations=error (`diff()` → `RatchetResult.new`), burn-down=control action (`burndown.select_units` → `DisturbanceDampenerLoop`).
+- **Disturbance dampener** (ADR-0101) — the canonical regulator: baseline=setpoint (`disturbance/baseline.py`), new violations=error (`diff()` → `RatchetResult.new`), burn-down=control action (`burndown.select_units` → `DisturbanceDampenerLoop`).
 - **Already error-driven** (cite as done, not candidates): `FailOpenMonitorLoop` (Shewhart c-chart), `RCBudgetLoop` (1.5×median), `FlakeTrackerLoop`, `ErosionMetricsLoop` (baseline), `SecondOrderVitalsLoop` (per-series Shewhart UCL, `vitals/control.py`), `CostBudgetWatcherLoop` (setpoint→throttle/kill — the closest thing to a real fast regulator today).
 - **True conversion candidates** (a PV with a target, currently pattern-finding): `GateHealthLoop` (PV = per-check pass-rate → regulate to a pass-rate floor), `SampledAuditLoop` (PV = re-review disagreement rate → a statistical escape bound).
 - **Irreducibly exploratory** (stay finding-driven + rate-budget): `MemoryBacklogLoop`, `WikiRotDetectorLoop`, `PrinciplesAuditLoop`, `RetrospectiveLoop`, `ReportIssueLoop`, the ADR-drift loops, etc.
