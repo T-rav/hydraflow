@@ -128,7 +128,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_discover_attempts", "HYDRAFLOW_MAX_DISCOVER_ATTEMPTS", 3),
     ("max_discover_expansions", "HYDRAFLOW_MAX_DISCOVER_EXPANSIONS", 1),
     ("max_shape_attempts", "HYDRAFLOW_MAX_SHAPE_ATTEMPTS", 3),
-    ("max_review_fix_attempts", "HYDRAFLOW_MAX_REVIEW_FIX_ATTEMPTS", 2),
+    ("max_review_fix_attempts", "HYDRAFLOW_MAX_REVIEW_FIX_ATTEMPTS", 3),
     ("min_review_findings", "HYDRAFLOW_MIN_REVIEW_FINDINGS", 3),
     ("max_issue_body_chars", "HYDRAFLOW_MAX_ISSUE_BODY_CHARS", 10_000),
     ("max_review_diff_chars", "HYDRAFLOW_MAX_REVIEW_DIFF_CHARS", 15_000),
@@ -1555,10 +1555,15 @@ class HydraFlowConfig(BaseModel):
         description="Max Shape-proposal evaluator retries before HITL escalation (0 = disabled)",
     )
     max_review_fix_attempts: int = Field(
-        default=2,
+        default=3,
         ge=0,
         le=5,
-        description="Max review fix-and-retry cycles before HITL escalation",
+        description=(
+            "Max review fix-and-retry cycles before HITL escalation. 3 (was 2, "
+            "#10922): a healthy convergence commonly needs a third round after "
+            "two that each fixed real findings, and escalating those to a human "
+            "wastes the self-solve the gate exists to allow."
+        ),
     )
     min_review_findings: int = Field(
         default=3,

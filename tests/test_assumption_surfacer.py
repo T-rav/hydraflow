@@ -2,8 +2,9 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from src.assumption_surfacer import AssumptionSurfacer, SurfacerOutput
-from src.pending_concerns import Concern
+
+from assumption_surfacer import AssumptionSurfacer, SurfacerOutput
+from pending_concerns import Concern
 
 
 class _StubAgent:
@@ -153,7 +154,7 @@ async def test_concerns_set_raised_in_phase_and_stage():
 class TestSurfacerMechanismSpikeCheck:
     def test_system_prompt_escalates_mechanism_assumptions(self):
         """_SYSTEM_PROMPT must instruct HIGH severity for subprocess/OS assumptions."""
-        from src.assumption_surfacer import _SYSTEM_PROMPT
+        from assumption_surfacer import _SYSTEM_PROMPT
 
         lower = _SYSTEM_PROMPT.lower()
         assert "subprocess" in lower or "git" in lower, (
@@ -164,7 +165,7 @@ class TestSurfacerMechanismSpikeCheck:
         )
 
     def test_risk_skeptic_prompt_requires_empirical_validation_for_mechanisms(self):
-        from src.plan_council_prompts import RISK_SKEPTIC_PROMPT
+        from plan_council_prompts import RISK_SKEPTIC_PROMPT
 
         lower = RISK_SKEPTIC_PROMPT.lower()
         assert "empirical" in lower or "spike" in lower or "scratch repo" in lower, (

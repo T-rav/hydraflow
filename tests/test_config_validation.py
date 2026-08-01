@@ -26,7 +26,7 @@ _BOUNDED_INT_FIELDS = [
     ("ci_check_timeout", 30, 3600, 600),
     ("ci_poll_interval", 5, 120, 30),
     ("max_ci_fix_attempts", 0, 5, 2),
-    ("max_review_fix_attempts", 0, 5, 2),
+    ("max_review_fix_attempts", 0, 5, 3),
     ("max_pre_quality_review_attempts", 0, 5, 3),
     ("min_review_findings", 0, 20, 3),
     ("min_plan_words", 20, 2000, 60),

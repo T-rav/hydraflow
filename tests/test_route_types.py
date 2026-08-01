@@ -6,7 +6,7 @@ import ast
 from pathlib import Path
 from typing import Annotated, get_args, get_origin
 
-from src.route_types import RepoSlugParam
+from route_types import RepoSlugParam
 
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 
@@ -92,11 +92,11 @@ class TestRepoAllSentinel:
     """The reserved aggregate sentinel token."""
 
     def test_repo_all_sentinel_value(self) -> None:
-        from src.route_types import REPO_ALL
+        from route_types import REPO_ALL
 
         assert REPO_ALL == "__all__"
 
     def test_repo_all_is_exported(self) -> None:
-        import src.route_types as rt
+        import route_types as rt
 
         assert "REPO_ALL" in rt.__all__

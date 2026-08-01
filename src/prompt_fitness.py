@@ -309,6 +309,7 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "review_advisor_postverify": frozenset({3, 4, 7}),
     "review_advisor_preflight": frozenset({3, 4}),
     "reviewer_build_review": frozenset({1, 3, 7}),
+    "reviewer_build_review_quality_gate": frozenset({1, 3, 7}),
     "reviewer_ci_fix": frozenset({1, 2, 3, 5, 7}),
     "reviewer_precheck": frozenset({2, 3, 5, 8}),
     "reviewer_review_fix": frozenset({3, 4, 5, 7}),

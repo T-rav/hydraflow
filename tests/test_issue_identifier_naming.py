@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 
-from src.plan_phase import PlanPhase
+from plan_phase import PlanPhase
 
 
 class TestParameterNaming:

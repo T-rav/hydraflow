@@ -25,13 +25,13 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
-from src.pending_concerns import (
+
+from pending_concerns import (
     AdversarialState,
     Concern,
     count_design_decision_concerns,
     is_design_decision_concern,
 )
-
 from tests.conftest import PlanResultFactory, TaskFactory
 from tests.helpers import make_plan_phase, supply_once
 

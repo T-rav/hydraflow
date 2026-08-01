@@ -2,8 +2,9 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from src.pending_concerns import Concern
-from src.spec_judge import JudgeResult, SpecJudge
+
+from pending_concerns import Concern
+from spec_judge import JudgeResult, SpecJudge
 
 
 class _StubAgent:
