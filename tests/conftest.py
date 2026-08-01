@@ -173,6 +173,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 import subprocess_util  # noqa: E402
 from config import (  # noqa: E402
+    CREDENTIAL_ENV_KEYS,
     clear_dotenv_inert_roots,
     declared_env_keys,
     mark_default_repo_dotenv_inert,
@@ -270,7 +271,11 @@ def setup_test_environment():
     }
     scrub_keys = (
         {key for key in os.environ if key.startswith(("HYDRAFLOW_", "HYDRA_"))}
-        | declared_env_keys()  # now includes the credential keys (#10885)
+        | declared_env_keys()
+        # The credential surface build_credentials reads (#10885): scrubbed from
+        # the exported registry instead of hand-listing GITHUB_TOKEN. GH_TOKEN is
+        # re-seeded to "test-token" via test_env below.
+        | CREDENTIAL_ENV_KEYS
         | {
             "GIT_DIR",
             "GIT_WORK_TREE",
@@ -278,8 +283,6 @@ def setup_test_environment():
             "GIT_AUTHOR_EMAIL",
             "GIT_COMMITTER_NAME",
             "GIT_COMMITTER_EMAIL",
-            # GH_TOKEN / GITHUB_TOKEN are covered by declared_env_keys() via
-            # CREDENTIAL_ENV_KEYS — no longer hand-listed here (#10885).
         }
     )
     saved_env = {key: os.environ.pop(key) for key in scrub_keys if key in os.environ}

@@ -6659,16 +6659,19 @@ def _get_env(key: str) -> str | None:
 
 def declared_env_keys() -> frozenset[str]:
     """Every env var key any ``_ENV_*_OVERRIDES`` table (or deprecated alias)
-    reads, plus the credential keys :func:`build_credentials` reads directly,
-    regardless of prefix.
+    reads, regardless of prefix.
 
-    Derived at runtime from the override tables and :data:`CREDENTIAL_ENV_KEYS`
-    themselves — never hand-list these keys elsewhere. Callers needing a hermetic
-    environment (e.g. the test suite's session-scoped isolation fixture) should
-    scrub this whole set rather than a ``HYDRAFLOW_``/``HYDRA_`` prefix rule
-    alone, since several overrides (``OTEL_SERVICE_NAME``, ``HF_ENV``, ...) and
-    credential keys (``GH_TOKEN``, ``GITHUB_TOKEN``) follow third-party or
-    unprefixed naming conventions instead (#10876, #10885).
+    Derived at runtime from the override tables themselves — never hand-list
+    these keys elsewhere. Callers needing a hermetic environment (e.g. the
+    test suite's session-scoped isolation fixture) should scrub this whole
+    set rather than a ``HYDRAFLOW_``/``HYDRA_`` prefix rule alone, since
+    several overrides (``OTEL_SERVICE_NAME``, ``HF_ENV``, ...) follow
+    third-party naming conventions instead (#10876). Credential keys are
+    *deliberately excluded* — they are read directly by
+    :func:`build_credentials` (not a table) and are enumerated separately as
+    :data:`CREDENTIAL_ENV_KEYS`, which the isolation fixture scrubs in addition
+    to this set (#10885). Folding them in here would make the #10876 leak guard
+    flag the deliberately-seeded ``GH_TOKEN=test-token``.
     """
     keys: set[str] = set()
     for table in (
@@ -6686,7 +6689,6 @@ def declared_env_keys() -> frozenset[str]:
     keys.update(env_key for env_key, _tool_field, _model_field in _ENV_COMBO_OVERRIDES)
     keys.update(_DEPRECATED_ENV_ALIASES.keys())
     keys.update(_DEPRECATED_ENV_ALIASES.values())
-    keys.update(CREDENTIAL_ENV_KEYS)
     return frozenset(keys)
 
 

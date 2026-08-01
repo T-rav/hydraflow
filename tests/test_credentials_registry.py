@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from config import (
@@ -12,16 +14,29 @@ from config import (
 )
 
 
-def test_credential_env_keys_are_all_declared() -> None:
-    # The whole credential surface must be reachable via declared_env_keys() so
-    # test isolation and .env/doc generators enumerate it instead of hardcoding.
-    assert declared_env_keys() >= CREDENTIAL_ENV_KEYS
+def test_registry_covers_every_key_build_credentials_reads() -> None:
+    # The exported surface must enumerate every key build_credentials reads —
+    # the gh-token priority chain and all five whatsapp keys.
+    assert {"HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} <= CREDENTIAL_ENV_KEYS
+    assert "HYDRAFLOW_WHATSAPP_TOKEN" in CREDENTIAL_ENV_KEYS
 
 
-def test_unprefixed_github_keys_are_declared() -> None:
-    # These used to be hand-listed in conftest's scrub set; the registry now
-    # carries them (#10885).
-    assert {"GH_TOKEN", "GITHUB_TOKEN"} <= declared_env_keys()
+def test_registry_is_separate_from_table_declared_keys() -> None:
+    # Credential keys are read directly (not via an _ENV_*_OVERRIDES table), so
+    # they are deliberately NOT in declared_env_keys() — folding them in would
+    # trip the #10876 leak guard on the seeded GH_TOKEN. They are a distinct,
+    # separately-scrubbed surface (#10885).
+    assert not (CREDENTIAL_ENV_KEYS & declared_env_keys())
+
+
+def test_isolation_fixture_scrubs_the_registry() -> None:
+    # "test isolation reads from the exported structure": every credential key is
+    # absent during the session, except GH_TOKEN which is re-seeded deterministic.
+    for key in CREDENTIAL_ENV_KEYS:
+        if key == "GH_TOKEN":
+            assert os.environ.get(key) == "test-token"
+        else:
+            assert os.environ.get(key) is None
 
 
 def test_gh_token_priority_order_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
