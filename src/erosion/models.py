@@ -108,3 +108,45 @@ class ScatterFinding:
     def is_flagged(self) -> bool:
         """True when at least one symbol met the scatter threshold."""
         return len(self.scattered) > 0
+
+
+@dataclass(frozen=True)
+class GodModule:
+    """One high-fan-in module — a concentration (god-file) reading.
+
+    ``fan_in`` is the count of DISTINCT modules that import this one (its
+    dependents); ``weighted_fan_in`` sums the import-statement weights across
+    those edges. High fan-in is the concentration failure mode — the mirror of
+    ``SpreadFinding``'s shotgun surgery: one module every change must route
+    through, rather than one change spanning many modules.
+    """
+
+    module: str
+    fan_in: int  # distinct dependent modules
+    weighted_fan_in: int  # sum of edge weights (import statements) into the module
+
+
+@dataclass(frozen=True)
+class ConcentrationFinding:
+    """The repo-wide concentration reading — the counter-metric to spread (#10840).
+
+    ``god_modules`` holds only modules whose ``fan_in`` met or exceeded
+    ``threshold`` (sorted by fan_in desc, then name). This is a whole-graph
+    property, not change-scoped: a god-file is defined by how much of the
+    codebase depends on it, so ``compute`` reads the full module graph rather
+    than a change's file list. ``max_fan_in`` is the concentration high-water
+    mark used for the scalar ratchet.
+    """
+
+    god_modules: tuple[GodModule, ...]
+    threshold: int
+    total_modules: int
+
+    @property
+    def max_fan_in(self) -> int:
+        return self.god_modules[0].fan_in if self.god_modules else 0
+
+    @property
+    def is_flagged(self) -> bool:
+        """True when at least one module met the god-file threshold."""
+        return len(self.god_modules) > 0
