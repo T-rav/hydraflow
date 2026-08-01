@@ -4252,7 +4252,7 @@ class HydraFlowConfig(BaseModel):
     retrospective_interval: int = Field(
         default=86400,
         ge=60,
-        le=86400,
+        le=604800,
         description="Poll interval in seconds for retrospective analysis loop",
     )
 
@@ -4804,8 +4804,8 @@ class HydraFlowConfig(BaseModel):
     trust_fleet_sanity_interval: int = Field(
         default=3600,
         ge=60,
-        le=3600,
-        description="Seconds between TrustFleetSanityLoop ticks (default 10m)",
+        le=604800,
+        description="Seconds between TrustFleetSanityLoop ticks (default 1h)",
     )
     loop_anomaly_issues_per_hour: int = Field(
         default=10,
@@ -4994,8 +4994,8 @@ class HydraFlowConfig(BaseModel):
     detector_calibration_interval: int = Field(
         default=86400,
         ge=60,
-        le=86400,
-        description="Seconds between DetectorCalibrationLoop cycles (default 1h).",
+        le=604800,
+        description="Seconds between DetectorCalibrationLoop cycles (default 24h).",
     )
     detector_calibration_max_issues_per_tick: int = Field(
         default=3,
