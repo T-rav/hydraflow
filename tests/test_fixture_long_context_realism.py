@@ -18,8 +18,8 @@ fixture-realism scorecard is the larger follow-up; this closes the gaming vector
 
 from __future__ import annotations
 
-import audit_prompts as audit
-from audit_prompts import LONG_CONTEXT_THRESHOLD, PROMPT_REGISTRY
+from scripts import audit_prompts as audit
+from scripts.audit_prompts import LONG_CONTEXT_THRESHOLD, PROMPT_REGISTRY
 
 #: Fixtures whose rendered length is ``>= LONG_CONTEXT_THRESHOLD`` today, so
 #: criterion 6 actually scores them. Keep this EXACTLY equal to the current
