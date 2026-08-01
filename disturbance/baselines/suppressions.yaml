@@ -193,10 +193,12 @@ entries:
   src/phase_utils.py::noqa:F401: 1
   src/phase_utils.py::noqa:PLC0415: 6
   "src/phase_utils.py::noqa:PLC0415\u2014deferredtoavoidcircularimport": 1
-  src/plan_phase.py::noqa:BLE001: 9
-  src/plan_phase.py::noqa:PLC0415: 6
-  src/plan_phase.py::noqa:TCH004: 1
+  src/plan_phase.py::noqa:BLE001: 7
+  src/plan_phase.py::noqa:PLC0415: 2
   src/plan_phase.py::type-ignore[union-attr]: 1
+  src/plan_phase_wiki_ingest.py::noqa:BLE001: 2
+  src/plan_phase_wiki_ingest.py::noqa:PLC0415: 4
+  src/plan_phase_wiki_ingest.py::noqa:TCH004: 1
   src/plan_reviewer.py::noqa:ANN001: 1
   src/plan_reviewer.py::noqa:BLE001: 1
   src/plan_touchpoint_expander.py::noqa:BLE001: 1
@@ -208,8 +210,9 @@ entries:
   "src/post_merge_handler.py::noqa:BLE001\u2014neverblockmergepathonwikiI/O": 1
   src/post_merge_handler.py::noqa:PLC0415: 5
   src/pr_manager.py::noqa:BLE001: 1
-  src/pr_manager.py::noqa:PLC0415: 26
+  src/pr_manager.py::noqa:PLC0415: 24
   src/pr_manager.py::type-ignore[arg-type]: 1
+  src/pr_manager_promotion.py::noqa:PLC0415: 2
   src/pr_unsticker.py::noqa:PLC0415: 3
   src/precheck.py::noqa:BLE001: 1
   src/precondition_gate.py::noqa:BLE001: 1
@@ -245,13 +248,14 @@ entries:
   src/review_phase/__init__.py::noqa:E402: 3
   src/review_phase/_common.py::noqa:PLC0415: 1
   src/review_phase/_phase.py::noqa: 1
-  src/review_phase/_phase.py::noqa:ARG002: 2
   src/review_phase/_phase.py::noqa:BLE001: 4
   "src/review_phase/_phase.py::noqa:E402,F401\u2014usedbycallsitesbelow": 1
-  src/review_phase/_phase.py::noqa:PLC0415: 44
+  src/review_phase/_phase.py::noqa:PLC0415: 43
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__+sig": 1
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__signature": 1
   src/review_phase/_phase.py::type-ignore[arg-type]: 2
+  src/review_phase/_visual_gate.py::noqa:ARG002: 2
+  src/review_phase/_visual_gate.py::noqa:PLC0415: 1
   src/reviewer.py::noqa:PLC0415: 3
   src/route_back.py::noqa:BLE001: 8
   src/runner_utils.py::noqa:PLC0415: 7

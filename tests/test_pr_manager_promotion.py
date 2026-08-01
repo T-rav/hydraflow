@@ -126,7 +126,7 @@ class TestMergePromotionPr:
             captured["cmd"] = args
             return ""
 
-        monkeypatch.setattr("pr_manager.run_subprocess", fake_run)
+        monkeypatch.setattr("pr_manager_promotion.run_subprocess", fake_run)
         merged = await pm.merge_promotion_pr(77)
         assert merged is True
         cmd = captured["cmd"]
@@ -142,7 +142,7 @@ class TestMergePromotionPr:
         async def fake_run(*_args, **_kwargs):
             raise RuntimeError("merge blocked")
 
-        monkeypatch.setattr("pr_manager.run_subprocess", fake_run)
+        monkeypatch.setattr("pr_manager_promotion.run_subprocess", fake_run)
         assert await pm.merge_promotion_pr(77) is False
 
     async def test_skips_gh_in_dry_run(
@@ -150,7 +150,7 @@ class TestMergePromotionPr:
     ) -> None:
         pm, _, _ = _build(tmp_path, dry_run=True)
         fake_run = AsyncMock()
-        monkeypatch.setattr("pr_manager.run_subprocess", fake_run)
+        monkeypatch.setattr("pr_manager_promotion.run_subprocess", fake_run)
         assert await pm.merge_promotion_pr(77) is True
         assert fake_run.await_count == 0
 
