@@ -6,7 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `3903d7e` — Merge remote-tracking branch 'origin/main' into rc/2026-08-01-1707 *(2026-08-01)*
+- `1be7dbf` — refactor: god-file decomposition sweep — pr_manager, review_phase, plan_phase (#10840) (#10982) (#10982) *(2026-08-01)*
 - `0f0a672` — refactor: extract WebSocket streaming from dashboard _routes god-file (#10978) (#10978) *(2026-08-01)*
+- `cecd424` — chore(rc): regen arch artifacts after main merge (rc/2026-08-01-1203) *(2026-08-01)*
 - `820c568` — Merge remote-tracking branch 'origin/main' into rc/2026-08-01-1203 *(2026-08-01)*
 - `d90fd04` — Fixes #10843: damper-0a — align slow-signal loop cadence to measurement window (#10969) (#10969) *(2026-08-01)*
 - `2ed1bd1` — docs(adr): ADR-0120 stillness control architecture (Proposed) — #10824/#10827/#10825 (#10968) (#10968) *(2026-08-01)*
