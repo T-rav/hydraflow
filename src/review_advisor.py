@@ -925,7 +925,7 @@ class PostVerifyAdvisor:
             sections.append(f"\n## Executor fix\n{inp.executor_fix_diff[:4000]}")
         if inp.pre_flight_plan is not None:
             sections.append(
-                f"\n## Pre-flight plan\n{inp.pre_flight_plan.model_dump_json(indent=2)}"
+                f"\n## Pre-flight plan\n{inp.pre_flight_plan.model_dump_json()}"
             )
         # Second-order failure check for critical-path diffs (refinement §R2)
         _critical_diff = any(
@@ -934,12 +934,10 @@ class PostVerifyAdvisor:
         if _critical_diff:
             sections.append(
                 "\n## Second-order failure check (required for shared-infrastructure diffs)\n"
-                "Before your verdict, answer both questions explicitly:\n"
-                "1. What is the failure mode if THIS fix itself fails (has a bug or "
-                "fails at runtime)?\n"
-                "2. Is that failure mode broader or more severe than the original bug being fixed?\n"
-                "If the answer to (2) is yes, flag it as a blocking disagreement with "
-                "severity='blocking' in your disagreements list."
+                "Answer explicitly before your verdict:\n"
+                "1. What is the failure mode if THIS fix itself fails?\n"
+                "2. Is that failure mode broader or more severe than the original bug?\n"
+                "If yes to (2), record a disagreement with severity='blocking'."
             )
         sections.append(
             "\nRespond with JSON matching the PostVerifyResult schema:\n"

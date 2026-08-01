@@ -37,6 +37,45 @@ def _public_methods(cls: ast.ClassDef) -> list[str]:
     return sorted(out)
 
 
+def _base_names(cls: ast.ClassDef) -> list[str]:
+    """Simple names of *cls*'s base classes (``Name`` or ``Attribute`` bases)."""
+    out: list[str] = []
+    for base in cls.bases:
+        if isinstance(base, ast.Name):
+            out.append(base.id)
+        elif isinstance(base, ast.Attribute):
+            out.append(base.attr)
+    return out
+
+
+def _methods_with_bases(
+    cls: ast.ClassDef, by_name: dict[str, ast.ClassDef]
+) -> set[str]:
+    """Public methods of *cls* plus those inherited from same-scan base classes.
+
+    God-file decomposition splits an adapter across modules (e.g.
+    ``PRManager(PRManagerPromotionMixin)`` with the mixin's methods in
+    ``pr_manager_promotion.py``); without following bases the adapter's method
+    set looks incomplete and the class silently drops off the port map. Bases
+    are resolved by simple name against classes collected in the same scan —
+    still pure AST, no imports. Cycle-safe via a seen set.
+    """
+    seen: set[str] = set()
+    out: set[str] = set()
+    stack = [cls]
+    while stack:
+        cur = stack.pop()
+        if cur.name in seen:
+            continue
+        seen.add(cur.name)
+        out.update(_public_methods(cur))
+        for base_name in _base_names(cur):
+            base_cls = by_name.get(base_name)
+            if base_cls is not None:
+                stack.append(base_cls)
+    return out
+
+
 def _src_module_dotted(path: Path, src_dir: Path) -> str:
     """For src/foo/bar.py with src_dir=/repo/src, return 'src.foo.bar'."""
     rel = path.relative_to(src_dir.parent)
@@ -101,6 +140,12 @@ def extract_ports(*, src_dir: Path, fakes_dir: Path) -> list[PortInfo]:
     src_classes = _collect_classes(src_dir, exclude=fakes_dir)
     fake_classes = _collect_classes(fakes_dir) if fakes_dir.exists() else []
 
+    # Name → ClassDef for base-class resolution (first occurrence wins so the
+    # mapping is deterministic under the sorted rglob walk).
+    src_class_by_name: dict[str, ast.ClassDef] = {}
+    for _apath, acls in src_classes:
+        src_class_by_name.setdefault(acls.name, acls)
+
     ports: list[PortInfo] = []
     for path, cls in src_classes:
         if not cls.name.endswith("Port"):
@@ -124,7 +169,7 @@ def extract_ports(*, src_dir: Path, fakes_dir: Path) -> list[PortInfo]:
                 continue
             if _is_protocol_subclass(acls):
                 continue
-            if not port_methods.issubset(set(_public_methods(acls))):
+            if not port_methods.issubset(_methods_with_bases(acls, src_class_by_name)):
                 continue
             adapters.append(
                 PortAdapterInfo(

@@ -24,7 +24,7 @@ async def test_update_pr_base_calls_gh_pr_edit(monkeypatch: pytest.MonkeyPatch) 
         captured["cmd"] = cmd
         return ""
 
-    monkeypatch.setattr("pr_manager.run_subprocess", _fake_run_subprocess)
+    monkeypatch.setattr("pr_manager_promotion.run_subprocess", _fake_run_subprocess)
 
     ok = await pm.update_pr_base(123, base="staging")
 
@@ -46,7 +46,7 @@ async def test_update_pr_base_returns_false_on_failure(
     async def _failing_subprocess(*_cmd: str, **_kw: Any) -> str:
         raise RuntimeError("gh pr edit failed: not found")
 
-    monkeypatch.setattr("pr_manager.run_subprocess", _failing_subprocess)
+    monkeypatch.setattr("pr_manager_promotion.run_subprocess", _failing_subprocess)
 
     ok = await pm.update_pr_base(123, base="staging")
     assert ok is False
@@ -65,7 +65,7 @@ async def test_update_pr_base_dry_run_returns_true_without_call(
         called = True
         return ""
 
-    monkeypatch.setattr("pr_manager.run_subprocess", _fake_run_subprocess)
+    monkeypatch.setattr("pr_manager_promotion.run_subprocess", _fake_run_subprocess)
 
     ok = await pm.update_pr_base(99, base="staging")
     assert ok is True

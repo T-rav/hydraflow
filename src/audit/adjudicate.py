@@ -67,14 +67,12 @@ def build_adjudication_prompt(sample: AuditSample, diff: str) -> str:
     as uphold it, so a trigger-happy auditor is caught.
     """
     return (
-        "You are adjudicating a disputed code review. An adversarial re-auditor "
-        "re-reviewed an ALREADY-MERGED change and DISAGREED with the original "
-        "gauntlet — it claims the change has a real problem the gauntlet missed. "
-        "Your job is to decide who is right, from the diff itself. Do NOT defer "
-        "to the auditor: uphold its finding only if the diff really does have "
-        "the correctness / safety / spec-fidelity problem it names; refute it if "
-        "the finding is a stylistic nit, a misread, or the change is correct as "
-        "merged.\n\n"
+        "Adjudicate a disputed code review: an adversarial re-auditor "
+        "re-reviewed an ALREADY-MERGED change and claims it has a "
+        "correctness / safety / spec-fidelity problem the original gauntlet "
+        "missed. Decide from the diff itself — do NOT defer to the auditor. "
+        "Uphold the finding only if the diff really has the problem it names; "
+        "refute a stylistic nit, a misread, or a correct-as-merged change.\n\n"
         f"PR: #{sample.pr_number}\n"
         f"Merge SHA: {sample.merge_sha}\n"
         f"Blast-radius class: {sample.blast_radius_class}\n\n"
@@ -83,11 +81,9 @@ def build_adjudication_prompt(sample: AuditSample, diff: str) -> str:
         "Merged diff (truncated):\n"
         f"{diff[:_DIFF_CONTEXT_CHARS]}\n\n"
         'Respond with STRICT JSON: {"verdict": "upheld" | "refuted" | '
-        '"inconclusive", "rationale": "<one paragraph>"}. "upheld" = the '
-        'finding names a real defect; "refuted" = the auditor was wrong; '
-        '"inconclusive" = you genuinely cannot tell from the diff alone (this '
+        '"inconclusive", "rationale": "<one paragraph>"}. "inconclusive" '
         "routes to a human — use it only when upheld and refuted are both "
-        "unsupportable)."
+        "unsupportable."
     )
 
 
