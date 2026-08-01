@@ -13,7 +13,7 @@
       "content_sha": "3b1159c2f55ca04cb825a46d0d7d5d5018e071e25d933f1620a7976a12ed045b"
     },
     "changelog.md": {
-      "content_sha": "ef51871f7406c3f45c120e044b1333deeaf60740cad5515fbce04cb533cb2b75"
+      "content_sha": "585a8da02473e2a15a09cf457808cc35cf16154a06b8854bb4e058b8c6887153"
     },
     "coverage_matrix.md": {
       "content_sha": "7c55e8b6961b2e1292a37552abe92c71e12321b4272590d145cc32e068b03075"
@@ -31,7 +31,7 @@
       "content_sha": "3a9f46c2a2264d70cfa9fc9ad00212cfb2c0fe358af60acc3c7a7f09aa0126de"
     },
     "loops.md": {
-      "content_sha": "f7608b2beefae4086a42b121ca0cbf46ec76c3ab94553275fc2de93155f93215"
+      "content_sha": "58da4a2038b63c9562e37663e03429f12066a2f49b5720127729b4a5cb3b8b05"
     },
     "mockworld.md": {
       "content_sha": "1ffbf5cbae9508b564e75f8faa15dc228686d112493546835ffd93a7c92bca60"
@@ -52,5 +52,5 @@
       "content_sha": "e206bc24741f8ab8797b3bdc97a299ab70df152142c9144d5fdb72255bd42f9c"
     }
   },
-  "content_sha": "831445358df60c154d0c5691e7ef4bbaa49016a4dbab13e995e360ef6a0937f0"
+  "content_sha": "8f1669b3629d7ac34b6212f0fe54841c060759eda02c41ffd00e7ea6a4d35909"
 }
