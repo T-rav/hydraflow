@@ -37,16 +37,11 @@ The CI pipeline failed on this branch.
 
 ## Optional: Tribal-Knowledge Suggestion
 
-This correction may have surfaced tribal knowledge — the kind of durable,
-hard-won fact a senior engineer would write on a whiteboard for a new hire
-on day one. If — and ONLY if — what you learned meets ALL of these criteria:
-
-  1. Durable: still true a year from now, across releases and refactors.
-  2. Non-obvious: a senior engineer would NOT figure it out by reading the code.
-  3. Load-bearing: ignoring it causes a real failure or wastes real time.
-  4. General: applies to a subsystem or pattern, not a single issue/PR.
-
-…then emit a single block at the end of your response:
+If this correction surfaced tribal knowledge that is ALL of durable (true a year
+out), non-obvious (a senior engineer wouldn't get it from the code), load-bearing
+(ignoring it breaks something or wastes real time), and general (a subsystem or
+pattern, not one issue) — and not already obvious from CLAUDE.md or the code —
+emit ONE block at the very end of your response:
 
 MEMORY_SUGGESTION_START
 principle: <the durable rule, one sentence>
@@ -55,15 +50,8 @@ failure_mode: <what concretely breaks if this is ignored>
 scope: <subsystem path, file glob, or "all">
 MEMORY_SUGGESTION_END
 
-STRICT FORMATTING RULES:
-- DO NOT include issue numbers, PR numbers, commit hashes, dates, or other
-  short-lived references in any field. They will rot.
-- DO NOT emit a block for routine observations, refactor notes, code-review
-  nitpicks, or implementation details.
-- DO NOT restate facts that are already obvious from CLAUDE.md or the code.
-- All four fields are required and non-trivial. Blocks missing any field
-  (or with empty/placeholder values) are silently dropped.
-
-When in doubt, omit the block. The bar is "would I tell a new hire this on
-day one." Most correction runs should produce no block at all — that is the
-expected and correct outcome.
+Do not include issue/PR numbers, commit hashes, or dates in any field (they
+rot). All four fields are required and non-trivial or the block is silently
+dropped. Not for routine observations, refactor notes, or code-review nitpicks.
+When in doubt, omit — the bar is "would I tell a new hire this on day one," and
+most correction runs should correctly produce no block.
