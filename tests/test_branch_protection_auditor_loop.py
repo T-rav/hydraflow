@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from branch_protection_audit import AuditReport
-from branch_protection_auditor_loop import BranchProtectionAuditorLoop
+from branch_protection_auditor_loop import BranchProtectionAuditorLoop, _issue_body
 from dedup_store import DedupStore
 from tests.helpers import make_bg_loop_deps
 
@@ -14,6 +14,39 @@ _CLEAN = AuditReport(repo="o/r", drifts=[])
 _DRIFT = AuditReport(
     repo="o/r", drifts=["[main protect] DRIFT: canonical and live differ."]
 )
+# A drift that INCLUDES an undeclared live context (the #10894 hazard): live
+# requires `CI Gate` via the legacy layer, but the contract never declared it.
+_UNDECLARED_DRIFT = AuditReport(
+    repo="o/r",
+    drifts=[
+        "[staging] undeclared legacy branch-protection context(s) required "
+        "live but not in the declarative contract: CI Gate"
+    ],
+)
+
+
+def test_issue_body_for_normal_drift_prescribes_reapply() -> None:
+    body = _issue_body(_DRIFT)
+    # The plain reconcile path is correct when the contract is a superset of live.
+    assert "python scripts/setup_branch_protection.py --apply" in body
+
+
+def test_issue_body_for_undeclared_contexts_does_not_lead_with_bare_apply() -> None:
+    # #10894: when live requires a context the contract never declared, running
+    # `--apply` PUTs the canonical payload verbatim and silently de-requires it
+    # (e.g. the CI Gate umbrella, regressing #10672). The body must prescribe
+    # DECLARING the missing gate first, and warn about the de-require.
+    body = _issue_body(_UNDECLARED_DRIFT)
+    assert "gates.toml" in body
+    assert "ADDING-A-GATE" in body
+    # It must name the endangered context and warn that --apply would remove it.
+    assert "CI Gate" in body
+    lowered = body.lower()
+    assert "de-require" in lowered or "silently remove" in lowered
+    # It must NOT present the bare `--apply` block as the primary remediation.
+    assert (
+        "make gen-gates\npython scripts/setup_branch_protection.py --apply" not in body
+    )
 
 
 def _build(
@@ -65,6 +98,21 @@ async def test_drift_files_one_issue(tmp_path: Path) -> None:
         "hydraflow-branch-protection-drift",
     ]
     assert len(dedup.get()) == 1
+
+
+async def test_undeclared_context_drift_files_declare_first_body(
+    tmp_path: Path,
+) -> None:
+    # #10894: the declare-first guidance must reach the actually-filed issue, not
+    # just _issue_body in isolation.
+    loop, pr, _dedup, _auditor = _build(tmp_path, report=_UNDECLARED_DRIFT)
+    result = await loop._do_work()
+    assert result == {"status": "drift", "issue_created": 4242}
+    _title, body = pr.create_issue.await_args.args[:2]
+    assert "ADDING-A-GATE" in body
+    assert (
+        "make gen-gates\npython scripts/setup_branch_protection.py --apply" not in body
+    )
 
 
 async def test_same_drift_is_deduped(tmp_path: Path) -> None:

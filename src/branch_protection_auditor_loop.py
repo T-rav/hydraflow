@@ -34,21 +34,57 @@ def _drift_key(report: AuditReport) -> str:
     return f"branch_protection_auditor:{report.repo}:{digest[:16]}"
 
 
+# Marker substring emitted by ``audit_repo`` when live protection requires a
+# context the declarative contract never declared (see branch_protection_audit).
+_UNDECLARED_MARKER = "undeclared legacy branch-protection context(s)"
+
+_REAPPLY_REMEDIATION = (
+    "Reconcile (regenerate from the contract, then re-apply):\n\n"
+    "```bash\n"
+    "make gen-gates\n"
+    "python scripts/setup_branch_protection.py --apply\n"
+    "```\n\n"
+    "Then confirm with `python scripts/setup_branch_protection.py --audit`."
+)
+
+# When the drift includes an undeclared live context, the plain ``--apply`` above
+# is UNSAFE: ``_apply_rulesets`` PUTs the canonical payload verbatim, which
+# silently de-requires the live-only context (#10894). Prescribe declaring it in
+# the contract first instead.
+_DECLARE_FIRST_REMEDIATION = (
+    "⚠️ **Do not run `setup_branch_protection.py --apply` as the first step for "
+    "this drift.** The drift above includes an *undeclared legacy branch-"
+    "protection context* — a check live protection currently **requires** but "
+    "the declarative contract never declared. `--apply` PUTs the canonical "
+    "payload verbatim, which would **silently de-require that live context** "
+    "(exactly how the `CI Gate` umbrella was nearly dropped in #10672 — the "
+    "guard that stopped a red PR from poisoning staging HEAD in #10663).\n\n"
+    "Reconcile by **declaring the missing context in the contract first**:\n\n"
+    "1. Add the context to `docs/standards/branch_protection/gates.toml`, "
+    "following `docs/standards/branch_protection/ADDING-A-GATE.md`.\n"
+    "2. `make gen-gates` to regenerate the rulesets from the contract.\n"
+    "3. *Only then* `python scripts/setup_branch_protection.py --apply` — the "
+    "contract is now a superset of live, so the apply **requires** the context "
+    "instead of removing it.\n\n"
+    "If the live context is genuinely obsolete, remove it from live protection "
+    "deliberately rather than letting a contract `--apply` de-require it as a "
+    "side effect.\n\n"
+    "Confirm with `python scripts/setup_branch_protection.py --audit`."
+)
+
+
 def _issue_body(report: AuditReport) -> str:
     drift = "\n".join(report.drifts)
-    return (
+    header = (
         "## Branch-protection ruleset drift\n\n"
         f"Live GitHub branch protection on `{report.repo}` diverges from the "
         "canonical rulesets generated from "
         "`docs/standards/branch_protection/gates.toml` (ADR-0082).\n\n"
         f"```\n{drift}\n```\n\n"
-        "Reconcile (regenerate from the contract, then re-apply):\n\n"
-        "```bash\n"
-        "make gen-gates\n"
-        "python scripts/setup_branch_protection.py --apply\n"
-        "```\n\n"
-        "Then confirm with `python scripts/setup_branch_protection.py --audit`."
     )
+    if any(_UNDECLARED_MARKER in line for line in report.drifts):
+        return header + _DECLARE_FIRST_REMEDIATION
+    return header + _REAPPLY_REMEDIATION
 
 
 class BranchProtectionAuditorLoop(BaseBackgroundLoop):
