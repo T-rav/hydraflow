@@ -6,8 +6,8 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 
 **Fan-out consumers** (each receives every published event):
 
-- `src.dashboard_routes._routes:_serve_merged_ws`
 - `src.dashboard_routes._routes:create_router.websocket_endpoint`
+- `src.dashboard_routes._ws_stream:_serve_merged_ws`
 
 | Event | Publishers | Subscribers |
 |---|---|---|

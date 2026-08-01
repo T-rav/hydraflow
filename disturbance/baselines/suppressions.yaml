@@ -25,7 +25,9 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ -2 staging_bisect_loop.py PLC0415 (#9554/#10028 \u2014 _run_bisect_probe/_run_gh\
   \ migrated onto the shared subprocess_util.run_subprocess_result/run_subprocess\
   \ bounded helper; each dropped a now-redundant local 'import asyncio' re-import\
-  \ that shadowed the module-level import)."
+  \ that shadowed the module-level import). re-snapshot 2026-08: god-file decomposition\
+  \ moved 3 BLE001 suppressions verbatim from dashboard_routes/_routes.py to the extracted\
+  \ dashboard_routes/_ws_stream.py (net-zero move, no new suppressions)."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -93,9 +95,7 @@ entries:
   src/dashboard_routes/_diagnostics_routes.py::noqa:PLC0415: 4
   src/dashboard_routes/_hitl_routes.py::noqa:BLE001: 1
   src/dashboard_routes/_metrics_routes.py::noqa:PLR0915: 1
-  src/dashboard_routes/_routes.py::noqa:BLE001: 4
-  "src/dashboard_routes/_routes.py::noqa:BLE001\u2014adownrepomustnotsinkthemerge": 1
-  "src/dashboard_routes/_routes.py::noqa:BLE001\u2014skipadownrepo,keepthesocket": 1
+  src/dashboard_routes/_routes.py::noqa:BLE001: 3
   src/dashboard_routes/_routes.py::noqa:PLC0415: 3
   src/dashboard_routes/_state_routes.py::noqa:BLE001: 7
   src/dashboard_routes/_state_routes.py::noqa:PLC0415: 3
@@ -109,6 +109,9 @@ entries:
   src/dashboard_routes/_wiki_routes.py::noqa:BLE001: 2
   src/dashboard_routes/_wiki_routes.py::noqa:PLC0415: 2
   "src/dashboard_routes/_wiki_routes.py::noqa:SLF001\u2014read-onlydiagnostics": 1
+  src/dashboard_routes/_ws_stream.py::noqa:BLE001: 1
+  "src/dashboard_routes/_ws_stream.py::noqa:BLE001\u2014adownrepomustnotsinkthemerge": 1
+  "src/dashboard_routes/_ws_stream.py::noqa:BLE001\u2014skipadownrepo,keepthesocket": 1
   src/decomposition_council.py::noqa:PLC0415: 1
   src/diagnostic_loop.py::noqa:PLC0415: 1
   src/diagnostic_loop.py::noqa:PLR0911: 1
