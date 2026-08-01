@@ -2,7 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
-from src.pending_concerns import (
+
+from pending_concerns import (
     AdversarialState,
     Concern,
     ConcernResolution,
@@ -80,6 +81,6 @@ def test_stage_run_records_oscillation_flag():
 
 def test_legacy_state_json_without_adversarial_field_loads_cleanly():
     """Schema evolution: old issues without adversarial_state must still load."""
-    from src.pending_concerns import AdversarialState
+    from pending_concerns import AdversarialState
 
     AdversarialState(phase="discover")

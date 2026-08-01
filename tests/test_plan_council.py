@@ -2,9 +2,9 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from src.pending_concerns import Concern
-from src.plan_council import CouncilTally, PlanCouncil
 
+from pending_concerns import Concern
+from plan_council import CouncilTally, PlanCouncil
 from subprocess_util import AuthenticationError, CreditExhaustedError
 
 

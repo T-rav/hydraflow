@@ -33,9 +33,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.pending_concerns import AdversarialState, Concern
-
 from models import StateData
+from pending_concerns import AdversarialState, Concern
 from state import StateTracker
 from tests.conftest import PlanResultFactory, TaskFactory
 from tests.helpers import make_implement_phase, make_plan_phase, supply_once

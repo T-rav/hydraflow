@@ -1,7 +1,8 @@
 import json
 
 import pytest
-from src.spec_ac_generator import SpecACGenerator
+
+from spec_ac_generator import SpecACGenerator
 
 
 class _StubAgent:

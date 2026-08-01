@@ -22,10 +22,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import pytest
-from src.adversarial_retry_loop import AdversarialRetryLoop
-from src.pending_concerns import Concern
 
+from adversarial_retry_loop import AdversarialRetryLoop
 from events import EventBus, EventType, HydraFlowEvent
+from pending_concerns import Concern
 
 
 @dataclass

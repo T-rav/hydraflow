@@ -15,8 +15,9 @@ from __future__ import annotations
 import json
 
 import pytest
-from src.adversarial_agents import extract_json
-from src.spec_judge import JudgeResult, SpecJudge
+
+from adversarial_agents import extract_json
+from spec_judge import JudgeResult, SpecJudge
 
 
 class _StubAgent:
