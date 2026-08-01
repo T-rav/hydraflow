@@ -129,6 +129,52 @@ _AUTO_FIX_OK_LABEL = "auto-fix-ok"
 _HUMAN_PR_DEDUP_NAMESPACE = "pr_red_repair_human_pointer"
 _PROMPT_TEMPLATE = "pr_red_fix.md"
 
+# Dispatch-prompt payload compression (#10860). ``gh run view --log-failed``
+# stamps EVERY line with a ``job\tstep\tISO-timestamp`` prefix — ~47 chars of
+# repetition per line carrying no repair signal. :func:`_compress_gh_log`
+# strips it, emitting one ``[job / step]`` header per transition instead
+# (section identity stays: ``fetch_ci_failure_logs`` already heads each
+# failed check with ``### <name> (run <id>)``). The tail caps bound
+# pathological payloads: multi-check reds concatenate one full log per
+# failed check, and pytest/make print the actionable failure summary LAST,
+# so the tail is the load-bearing slice; ``get_pr_recent_commit_diffs``
+# orders sections oldest-first, so the diff tail keeps the newest commits —
+# the likeliest culprits for a fresh red.
+_GH_LOG_LINE_RE = re.compile(
+    r"^(?P<job>[^\t\n]+)\t(?P<step>[^\t\n]*)\t"
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ?"
+)
+_DISPATCH_LOG_MAX_CHARS = 20_000
+_DISPATCH_DIFF_MAX_CHARS = 20_000
+
+
+def _compress_gh_log(log_text: str) -> str:
+    """Strip per-line gh log prefixes; one ``[job / step]`` header per run."""
+    out: list[str] = []
+    prev: tuple[str, str] | None = None
+    for line in log_text.splitlines():
+        m = _GH_LOG_LINE_RE.match(line)
+        if m is None:
+            out.append(line)
+            prev = None
+            continue
+        key = (m.group("job"), m.group("step"))
+        if key != prev:
+            out.append(f"[{key[0]} / {key[1]}]")
+            prev = key
+        out.append(line[m.end() :])
+    return "\n".join(out)
+
+
+def _tail_capped(text: str, max_chars: int) -> str:
+    """Keep the last *max_chars* of *text*, with an explicit truncation note."""
+    if len(text) <= max_chars:
+        return text
+    return (
+        f"(truncated: showing the last {max_chars} of {len(text)} chars)\n"
+        + text[-max_chars:]
+    )
+
 
 def is_settled_red(rollup: list[dict[str, Any]]) -> bool:
     """True when *rollup* has settled on red — nothing pending remains.
@@ -762,12 +808,12 @@ class PrRedRepairLoop(BaseBackgroundLoop):
 
         diffs = await self._fetch_recent_diffs(pr.pr)
         ci_failure_log = (
-            log_text.strip()
+            _tail_capped(_compress_gh_log(log_text.strip()), _DISPATCH_LOG_MAX_CHARS)
             if log_text and log_text.strip()
             else "(no CI failure log available)"
         )
         recent_commit_diffs = (
-            diffs.strip()
+            _tail_capped(diffs.strip(), _DISPATCH_DIFF_MAX_CHARS)
             if diffs and diffs.strip()
             else "(no recent commit diffs available)"
         )

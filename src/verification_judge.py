@@ -263,7 +263,7 @@ class VerificationJudge:
 
         criteria_block = "\n".join(f"AC-{i + 1}: {c}" for i, c in enumerate(criteria))
 
-        return f"""You are a verification judge evaluating whether the merged code for issue #{issue_number} meets its acceptance criteria.
+        return f"""You are a verification judge for issue #{issue_number}: evaluate EACH acceptance criterion against the merged diff.
 
 ## Acceptance Criteria
 
@@ -281,17 +281,14 @@ class VerificationJudge:
 
 ## Instructions
 
-Evaluate EACH acceptance criterion against the diff. For each criterion, determine:
-- PASS: The diff clearly satisfies this criterion
-- FAIL: The diff does not satisfy this criterion or there is insufficient evidence
+- PASS: the diff clearly satisfies the criterion
+- FAIL: not satisfied, or insufficient evidence
 
 ## Required Output Format
 
-Output your evaluation between these markers:
-
 CRITERIA_RESULTS_START
-AC-1: PASS — <reasoning about why it passes, citing specific code>
-AC-2: FAIL — <reasoning about why it fails>
+AC-1: PASS — <reasoning, citing specific code>
+AC-2: FAIL — <reasoning>
 CRITERIA_RESULTS_END
 
 SUMMARY: <one-line overall summary>
