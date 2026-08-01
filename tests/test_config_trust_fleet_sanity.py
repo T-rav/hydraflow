@@ -9,7 +9,8 @@ from config import HydraFlowConfig
 
 def test_default_values() -> None:
     cfg = HydraFlowConfig()
-    assert cfg.trust_fleet_sanity_interval == 600
+    # damper-0a (#10843): fleet anomaly is a slow signal — hourly, not every 10 min.
+    assert cfg.trust_fleet_sanity_interval == 3600
     assert cfg.loop_anomaly_issues_per_hour == 10
     assert cfg.loop_anomaly_repair_ratio == 2.0
     assert cfg.loop_anomaly_tick_error_ratio == 0.2
