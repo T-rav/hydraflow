@@ -22,16 +22,24 @@ from __future__ import annotations
 import pathlib
 
 _REPO = pathlib.Path(__file__).resolve().parent.parent.parent
-_AUTO_AGENT = _REPO / "prompts" / "auto_agent"
-_CLAUDE_AGENTS = _REPO / ".claude" / "agents"
+#: (directory, glob) sources of model-bound Markdown prompt templates. Commands
+#: are filtered to ``hf.*.md`` to match ``skill_registry.discover_tools`` — those
+#: are the ones injected into the implementation agent's toolset.
+_TEMPLATE_SOURCES = (
+    (_REPO / "prompts" / "auto_agent", "*.md"),
+    (_REPO / ".claude" / "agents", "*.md"),
+    (_REPO / ".claude" / "commands", "hf.*.md"),
+)
 
-#: Templates a registered fixture already renders + scores. ``_default.md`` and
-#: ``_envelope.md`` are covered by the ``preflight_auto_agent`` builder
-#: (``scripts/audit_prompts.py`` → ``tests/fixtures/prompts/preflight_auto_agent.json``,
-#: registered in PR #10856).
+#: Templates a registered fixture already renders + scores. The
+#: ``preflight_auto_agent`` builder's fixture
+#: (``tests/fixtures/prompts/preflight_auto_agent.json``, registered PR #10856)
+#: sets ``prompt_template: "review-stuck"``, so ``preflight.runner.render_prompt``
+#: renders ``review-stuck.md`` + the inlined ``_envelope.md`` — NOT ``_default.md``
+#: (the fallback branch is never reached when the specialist file exists).
 _MEASURED = frozenset(
     {
-        "prompts/auto_agent/_default.md",
+        "prompts/auto_agent/review-stuck.md",
         "prompts/auto_agent/_envelope.md",
     }
 )
@@ -53,16 +61,31 @@ _GRANDFATHERED = frozenset(
         "prompts/auto_agent/rc-duration-stuck.md",
         "prompts/auto_agent/rc-red-bisect-exhausted.md",
         "prompts/auto_agent/revert-conflict.md",
-        "prompts/auto_agent/review-stuck.md",
         "prompts/auto_agent/sandbox_fix.md",
         "prompts/auto_agent/skill-prompt-stuck.md",
         "prompts/auto_agent/triage-stuck.md",
         "prompts/auto_agent/trust-loop-anomaly.md",
         "prompts/auto_agent/wiki-rot-stuck.md",
+        # _default.md is the fallback template; no fixture currently renders it
+        # (the registered fixture uses a specialist template — see _MEASURED).
+        "prompts/auto_agent/_default.md",
         # .claude/agents contracts (the issue notes the same gap applies)
         ".claude/agents/hf.code-quality-enforcer.md",
         ".claude/agents/hf.test-audit.md",
         ".claude/agents/hydraflow-review-advisor.md",
+        # .claude/commands hf.* — model-bound prompts injected into the impl
+        # agent's toolset (skill_registry.format_tools_for_prompt); some carry
+        # inline sub-agent prompt text dispatched via Task.
+        ".claude/commands/hf.adr.md",
+        ".claude/commands/hf.audit-code.md",
+        ".claude/commands/hf.audit-hooks.md",
+        ".claude/commands/hf.audit-integration-tests.md",
+        ".claude/commands/hf.audit-tests.md",
+        ".claude/commands/hf.diff-sanity.md",
+        ".claude/commands/hf.issue.md",
+        ".claude/commands/hf.memory.md",
+        ".claude/commands/hf.quality-gate.md",
+        ".claude/commands/hf.test-adequacy.md",
     }
 )
 
@@ -72,10 +95,10 @@ _GRANDFATHERED_MAX = len(_GRANDFATHERED)
 def discover_markdown_prompt_templates() -> set[str]:
     """``<repo-relative-path>`` for every Markdown prompt template."""
     found: set[str] = set()
-    for directory in (_AUTO_AGENT, _CLAUDE_AGENTS):
+    for directory, pattern in _TEMPLATE_SOURCES:
         if not directory.is_dir():
             continue
-        for path in sorted(directory.glob("*.md")):
+        for path in sorted(directory.glob(pattern)):
             found.add(path.relative_to(_REPO).as_posix())
     return found
 
