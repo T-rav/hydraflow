@@ -19,7 +19,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **CorpusLearningLoop** | `src.corpus_learning_loop` | 3600 | — | — | — |
 | **CostBudgetWatcherLoop** | `src.cost_budget_watcher_loop` | 300 | `HYDRAFLOW_DISABLE_COST_BUDGET_WATCHER` | — | — |
 | **DependabotMergeLoop** | `src.dependabot_merge_loop` | 3600 | — | SYSTEM_ALERT | — |
-| **DetectorCalibrationLoop** | `src.detector_calibration_loop` | 3600 | — | — | — |
+| **DetectorCalibrationLoop** | `src.detector_calibration_loop` | 86400 | — | — | — |
 | **DiagnosticLoop** | `src.diagnostic_loop` | 30 | — | DIAGNOSTIC_UPDATE | — |
 | **DiagramLoop** | `src.diagram_loop` | 14400 | `HYDRAFLOW_DISABLE_DIAGRAM_LOOP` | — | ADR-0029, ADR-0049 |
 | **DisturbanceDampenerLoop** | `src.disturbance_dampener_loop` | — | — | — | ADR-0095 |
@@ -27,7 +27,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **EntryEvidenceLoop** | `src.entry_evidence_loop` | 86400 | — | — | ADR-0062 |
 | **EpicMonitorLoop** | `src.epic_monitor_loop` | 1800 | — | — | — |
 | **EpicSweeperLoop** | `src.epic_sweeper_loop` | 3600 | — | — | — |
-| **ErosionMetricsLoop** | `src.erosion_metrics_loop` | 14400 | — | — | — |
+| **ErosionMetricsLoop** | `src.erosion_metrics_loop` | 86400 | — | — | — |
 | **EscapeLedgerLoop** | `src.escape_ledger_loop` | 14400 | — | — | — |
 | **FailOpenMonitorLoop** | `src.fail_open_monitor_loop` | 14400 | — | — | — |
 | **FakeCoverageAuditorLoop** | `src.fake_coverage_auditor_loop` | 604800 | — | — | — |
@@ -38,7 +38,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **GitHubCacheLoop** | `src.github_cache_loop` | 300 | — | — | — |
 | **HealthMonitorLoop** | `src.health_monitor_loop` | 600 | — | SYSTEM_ALERT | — |
 | **HumanSteeringLoop** | `src.human_steering_loop` | — | — | — | ADR-0099 |
-| **InterventionTallyLoop** | `src.intervention_tally_loop` | 14400 | — | — | — |
+| **InterventionTallyLoop** | `src.intervention_tally_loop` | 86400 | — | — | — |
 | **IssueRefinementLoop** | `src.issue_refinement_loop` | 86400 | — | ISSUE_REFINEMENT_UPDATE | — |
 | **LabelDriftWatcherLoop** | `src.label_drift_watcher_loop` | 600 | — | — | — |
 | **LiveCorpusReplayLoop** | `src.live_corpus_replay_loop` | 900 | — | — | — |
@@ -52,11 +52,11 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **RCBudgetLoop** | `src.rc_budget_loop` | 14400 | — | — | — |
 | **RepoWikiLoop** | `src.repo_wiki_loop` | 3600 | — | — | — |
 | **ReportIssueLoop** | `src.report_issue_loop` | 30 | — | REPORT_UPDATE | — |
-| **RetrospectiveLoop** | `src.retrospective_loop` | 1800 | — | RETROSPECTIVE_UPDATE | — |
+| **RetrospectiveLoop** | `src.retrospective_loop` | 86400 | — | RETROSPECTIVE_UPDATE | — |
 | **RunsGCLoop** | `src.runs_gc_loop` | 3600 | — | SYSTEM_ALERT | — |
 | **SampledAuditLoop** | `src.sampled_audit_loop` | 14400 | — | — | — |
 | **SandboxFailureFixerLoop** | `src.sandbox_failure_fixer_loop` | 3600 | — | — | ADR-0049 |
-| **SecondOrderVitalsLoop** | `src.second_order_vitals_loop` | 14400 | — | — | — |
+| **SecondOrderVitalsLoop** | `src.second_order_vitals_loop` | 86400 | — | — | — |
 | **SecurityPatchLoop** | `src.security_patch_loop` | 3600 | — | — | — |
 | **SkillPromptEvalLoop** | `src.skill_prompt_eval_loop` | 604800 | — | — | — |
 | **StagingBisectLoop** | `src.staging_bisect_loop` | 600 | — | — | ADR-0042 |

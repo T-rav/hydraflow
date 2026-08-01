@@ -248,7 +248,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_PR_RED_REPAIR_DISPATCH_MAX_ATTEMPTS",
         2,
     ),
-    ("erosion_metrics_interval", "HYDRAFLOW_EROSION_METRICS_INTERVAL", 14400),
+    ("erosion_metrics_interval", "HYDRAFLOW_EROSION_METRICS_INTERVAL", 86400),
     (
         "erosion_metrics_max_issues_per_tick",
         "HYDRAFLOW_EROSION_METRICS_MAX_ISSUES_PER_TICK",
@@ -271,7 +271,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_ESCAPE_LEDGER_ENCODING_AGE_DAYS",
         14,
     ),
-    ("intervention_tally_interval", "HYDRAFLOW_INTERVENTION_TALLY_INTERVAL", 14400),
+    ("intervention_tally_interval", "HYDRAFLOW_INTERVENTION_TALLY_INTERVAL", 86400),
     (
         "intervention_tally_max_classify_per_tick",
         "HYDRAFLOW_INTERVENTION_TALLY_MAX_CLASSIFY_PER_TICK",
@@ -291,7 +291,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     (
         "second_order_vitals_interval",
         "HYDRAFLOW_SECOND_ORDER_VITALS_INTERVAL",
-        14400,
+        86400,
     ),
     (
         "second_order_vitals_window_days",
@@ -420,7 +420,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("repo_wiki_max_batch_age_hours", "HYDRAFLOW_REPO_WIKI_MAX_BATCH_AGE_HOURS", 24),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
-    ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 1800),
+    ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 86400),
     ("principles_audit_interval", "HYDRAFLOW_PRINCIPLES_AUDIT_INTERVAL", 604800),
     (
         "principles_audit_max_issues_per_tick",
@@ -433,7 +433,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_INTERVAL",
         3600,
     ),
-    ("detector_calibration_interval", "HYDRAFLOW_DETECTOR_CALIBRATION_INTERVAL", 3600),
+    ("detector_calibration_interval", "HYDRAFLOW_DETECTOR_CALIBRATION_INTERVAL", 86400),
     (
         "detector_calibration_max_issues_per_tick",
         "HYDRAFLOW_DETECTOR_CALIBRATION_MAX_ISSUES_PER_TICK",
@@ -2128,7 +2128,7 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     erosion_metrics_interval: int = Field(
-        default=14400,
+        default=86400,
         ge=900,
         le=604800,
         description=(
@@ -2215,7 +2215,7 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     intervention_tally_interval: int = Field(
-        default=14400,
+        default=86400,
         ge=900,
         le=604800,
         description=(
@@ -2278,7 +2278,7 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     second_order_vitals_interval: int = Field(
-        default=14400,
+        default=86400,
         ge=900,
         le=604800,
         description=(
@@ -4250,9 +4250,9 @@ class HydraFlowConfig(BaseModel):
         description="Number of recent retrospective entries to scan for patterns",
     )
     retrospective_interval: int = Field(
-        default=1800,
+        default=86400,
         ge=60,
-        le=86400,
+        le=604800,
         description="Poll interval in seconds for retrospective analysis loop",
     )
 
@@ -4992,10 +4992,10 @@ class HydraFlowConfig(BaseModel):
         description="UI kill-switch for DetectorCalibrationLoop (ADR-0049).",
     )
     detector_calibration_interval: int = Field(
-        default=3600,
+        default=86400,
         ge=60,
-        le=86400,
-        description="Seconds between DetectorCalibrationLoop cycles (default 1h).",
+        le=604800,
+        description="Seconds between DetectorCalibrationLoop cycles (default 24h).",
     )
     detector_calibration_max_issues_per_tick: int = Field(
         default=3,
