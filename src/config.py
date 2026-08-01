@@ -6096,33 +6096,47 @@ class HydraFlowConfig(BaseModel):
         return self
 
 
+# The gh_token priority chain, in order (highest priority first). Also the keys
+# _dotenv_lookup falls back on.
+_GH_TOKEN_ENV_KEYS: tuple[str, ...] = ("HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+# 1:1 credential-field → env-key. Read with empty-string defaults.
+_WHATSAPP_ENV_KEYS: dict[str, str] = {
+    "whatsapp_token": "HYDRAFLOW_WHATSAPP_TOKEN",
+    "whatsapp_phone_id": "HYDRAFLOW_WHATSAPP_PHONE_ID",
+    "whatsapp_recipient": "HYDRAFLOW_WHATSAPP_RECIPIENT",
+    "whatsapp_verify_token": "HYDRAFLOW_WHATSAPP_VERIFY_TOKEN",
+    "whatsapp_app_secret": "HYDRAFLOW_WHATSAPP_APP_SECRET",
+}
+#: Every env var :func:`build_credentials` reads, as one enumerable surface so
+#: test isolation and .env/documentation generators don't hand-list the
+#: credential keys (#10885). Folded into :func:`declared_env_keys`.
+CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(_GH_TOKEN_ENV_KEYS) | frozenset(
+    _WHATSAPP_ENV_KEYS.values()
+)
+
+
 def build_credentials(config: HydraFlowConfig) -> Credentials:
     """Build a ``Credentials`` instance from environment variables and .env files.
 
-    Resolution priority for ``gh_token``:
-      1. ``HYDRAFLOW_GH_TOKEN`` env var
-      2. ``GH_TOKEN`` env var
-      3. ``GITHUB_TOKEN`` env var
-      4. ``.env`` file in ``config.repo_root``
-
-    Other credential fields are read from their canonical env vars with
-    empty-string defaults (matching the old ``_ENV_STR_OVERRIDES`` behaviour).
+    Resolution priority for ``gh_token``: each key in :data:`_GH_TOKEN_ENV_KEYS`
+    (``HYDRAFLOW_GH_TOKEN`` → ``GH_TOKEN`` → ``GITHUB_TOKEN``) in ``os.environ``,
+    then the ``.env`` file in ``config.repo_root``. Other credential fields are
+    read from :data:`_WHATSAPP_ENV_KEYS` with empty-string defaults. The full key
+    surface is exported as :data:`CREDENTIAL_ENV_KEYS` (#10885).
     """
-    gh_token = (
-        os.environ.get("HYDRAFLOW_GH_TOKEN", "")
-        or os.environ.get("GH_TOKEN", "")
-        or os.environ.get("GITHUB_TOKEN", "")
-        or _dotenv_lookup(
-            config.repo_root, "HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"
-        )
-    )
+    gh_token = ""
+    for key in _GH_TOKEN_ENV_KEYS:
+        gh_token = os.environ.get(key, "")
+        if gh_token:
+            break
+    if not gh_token:
+        gh_token = _dotenv_lookup(config.repo_root, *_GH_TOKEN_ENV_KEYS)
     return Credentials(
         gh_token=gh_token,
-        whatsapp_token=os.environ.get("HYDRAFLOW_WHATSAPP_TOKEN", ""),
-        whatsapp_phone_id=os.environ.get("HYDRAFLOW_WHATSAPP_PHONE_ID", ""),
-        whatsapp_recipient=os.environ.get("HYDRAFLOW_WHATSAPP_RECIPIENT", ""),
-        whatsapp_verify_token=os.environ.get("HYDRAFLOW_WHATSAPP_VERIFY_TOKEN", ""),
-        whatsapp_app_secret=os.environ.get("HYDRAFLOW_WHATSAPP_APP_SECRET", ""),
+        **{
+            field: os.environ.get(env_key, "")
+            for field, env_key in _WHATSAPP_ENV_KEYS.items()
+        },
     )
 
 
@@ -6542,8 +6556,52 @@ def _resolve_repo_scoped_paths(config: HydraFlowConfig) -> None:
                 )
 
 
+#: Test-isolation seam (#10902): repo roots whose ``.env`` :func:`_dotenv_lookup`
+#: must treat as absent. Production leaves this empty. The pytest session fixture
+#: registers the real checkout root (via :func:`mark_default_repo_dotenv_inert`)
+#: so a default-constructed ``HydraFlowConfig()`` in a test cannot read the
+#: operator's real ``.env`` (which carries a live ``HYDRAFLOW_GH_TOKEN``) even
+#: after ``os.environ`` is scrubbed. An explicit ``repo_root=tmp_path`` — the
+#: dotenv-fallback tests — is a different root and is unaffected.
+_DOTENV_INERT_ROOTS: set[Path] = set()
+
+
+def mark_default_repo_dotenv_inert() -> Path:
+    """Make the default-resolved repo root's ``.env`` inert for _dotenv_lookup.
+
+    Test-only seam (#10902); never called in production. Returns the marked root.
+    Uses the same :func:`_find_repo_root` the default ``repo_root`` resolves
+    through, so the registered path matches ``config.repo_root`` exactly.
+    """
+    root = _find_repo_root()
+    _DOTENV_INERT_ROOTS.add(root)
+    return root
+
+
+def register_dotenv_inert_root(root: Path) -> None:
+    """Mark an explicit ``root``'s ``.env`` inert for _dotenv_lookup (#10902)."""
+    _DOTENV_INERT_ROOTS.add(root.expanduser().resolve())
+
+
+def unregister_dotenv_inert_root(root: Path) -> None:
+    """Undo :func:`register_dotenv_inert_root` for ``root`` (#10902).
+
+    Discards only ``root`` — leaves any other registered roots (e.g. the session
+    fixture's real-checkout registration) intact.
+    """
+    _DOTENV_INERT_ROOTS.discard(root.expanduser().resolve())
+
+
+def clear_dotenv_inert_roots() -> None:
+    """Reset the #10902 inert-root seam (test teardown)."""
+    _DOTENV_INERT_ROOTS.clear()
+
+
 def _dotenv_lookup(repo_root: Path, *keys: str) -> str:
     """Read first matching non-empty value from ``repo_root/.env``."""
+    if _DOTENV_INERT_ROOTS and repo_root.expanduser().resolve() in _DOTENV_INERT_ROOTS:
+        # Test-isolation seam (#10902): the real checkout .env is inert.
+        return ""
     env_file = repo_root / ".env"
     if not env_file.exists():
         return ""
@@ -6608,7 +6666,12 @@ def declared_env_keys() -> frozenset[str]:
     test suite's session-scoped isolation fixture) should scrub this whole
     set rather than a ``HYDRAFLOW_``/``HYDRA_`` prefix rule alone, since
     several overrides (``OTEL_SERVICE_NAME``, ``HF_ENV``, ...) follow
-    third-party naming conventions instead (#10876).
+    third-party naming conventions instead (#10876). Credential keys are
+    *deliberately excluded* — they are read directly by
+    :func:`build_credentials` (not a table) and are enumerated separately as
+    :data:`CREDENTIAL_ENV_KEYS`, which the isolation fixture scrubs in addition
+    to this set (#10885). Folding them in here would make the #10876 leak guard
+    flag the deliberately-seeded ``GH_TOKEN=test-token``.
     """
     keys: set[str] = set()
     for table in (
