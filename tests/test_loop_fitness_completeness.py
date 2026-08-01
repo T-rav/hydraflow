@@ -55,7 +55,6 @@ _GRANDFATHERED: frozenset[str] = frozenset(
         "runs_gc_loop",
         "sandbox_failure_fixer_loop",
         "security_patch_loop",
-        "sentry_loop",
         "skill_prompt_eval_loop",
         "staging_bisect_loop",
         "staging_promotion_loop",

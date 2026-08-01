@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -150,33 +149,27 @@ class TestReraiseOnCreditOrBug:
 
 class TestCaptureIfBug:
     def test_captures_bug_exception(self) -> None:
-        mock_sdk = MagicMock()
-        with patch.dict("sys.modules", {"sentry_sdk": mock_sdk}):
-            exc = TypeError("oops")
-            capture_if_bug(exc)
-            mock_sdk.capture_exception.assert_called_once_with(exc)
+        from mockworld.fakes.fake_observability import FakeObservability
+
+        obs = FakeObservability()
+        exc = TypeError("oops")
+        capture_if_bug(exc, obs)
+        assert obs.events == [{"type": "exception", "error": "oops"}]
 
     def test_adds_breadcrumb_for_transient(self) -> None:
-        mock_sdk = MagicMock()
-        with patch.dict("sys.modules", {"sentry_sdk": mock_sdk}):
-            exc = RuntimeError("transient")
-            capture_if_bug(exc, issue=42)
-            mock_sdk.add_breadcrumb.assert_called_once()
-            call_kwargs = mock_sdk.add_breadcrumb.call_args[1]
-            assert call_kwargs["category"] == "transient_error"
-            assert call_kwargs["data"] == {"issue": 42}
+        from mockworld.fakes.fake_observability import FakeObservability
 
-    def test_noop_when_sentry_not_installed(self) -> None:
-        # Remove sentry_sdk temporarily if present
-        original = sys.modules.get("sentry_sdk")
-        sys.modules["sentry_sdk"] = None  # type: ignore[assignment]
-        try:
-            capture_if_bug(TypeError("oops"))  # should not raise
-        finally:
-            if original is not None:
-                sys.modules["sentry_sdk"] = original
-            else:
-                sys.modules.pop("sentry_sdk", None)
+        obs = FakeObservability()
+        exc = RuntimeError("transient")
+        capture_if_bug(exc, obs, issue=42)
+        assert len(obs.breadcrumbs) == 1
+        bc = obs.breadcrumbs[0]
+        assert bc["category"] == "transient_error"
+        assert bc["issue"] == 42
+
+    def test_noop_when_no_observability_port(self) -> None:
+        # With no ObservabilityPort injected, capture_if_bug is a no-op.
+        capture_if_bug(TypeError("oops"))  # should not raise
 
 
 class TestBackwardCompatibility:

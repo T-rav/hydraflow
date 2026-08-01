@@ -59,7 +59,7 @@ def test_rendered_corpus_is_byte_identical_with_and_without_env_overrides(
     monkeypatch.setenv("HYDRAFLOW_MIN_REVIEW_FINDINGS", "9")
     monkeypatch.setenv("HYDRAFLOW_MAX_REVIEW_DIFF_CHARS", "50000")
     monkeypatch.setenv("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "leaked-user")
-    monkeypatch.setenv("SENTRY_ORG", "leaked-org")
+    monkeypatch.setenv("LOG_INGEST_INTERVAL", "99999")
     monkeypatch.setenv("GIT_AUTHOR_NAME", "Leaked Committer")
     _real_config_defaults.cache_clear()
     overridden = _real_config_defaults()
@@ -87,7 +87,7 @@ def test_full_rendered_prompt_corpus_is_byte_identical_with_and_without_env_over
     monkeypatch.setenv("HYDRAFLOW_MIN_REVIEW_FINDINGS", "9")
     monkeypatch.setenv("HYDRAFLOW_MAX_REVIEW_DIFF_CHARS", "50000")
     monkeypatch.setenv("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "leaked-user")
-    monkeypatch.setenv("SENTRY_ORG", "leaked-org")
+    monkeypatch.setenv("LOG_INGEST_INTERVAL", "99999")
     monkeypatch.setenv("GIT_AUTHOR_NAME", "Leaked Committer")
     _real_config_defaults.cache_clear()
     overridden = {t.name: render_target(t) for t in targets}

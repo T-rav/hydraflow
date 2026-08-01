@@ -30,7 +30,6 @@ def test_explicit_report_issue_combo_survives_background_cascade() -> None:
         assert cfg.report_issue_tool == "claude"
         assert cfg.report_issue_model == "opus"
         # The cascade must still reach roles WITHOUT an explicit combo.
-        assert cfg.sentry_model == "sonnet"
         assert cfg.adr_review_model == "sonnet"
 
 
@@ -54,9 +53,7 @@ def test_explicit_planner_combo_survives_system_cascade() -> None:
 def test_combo_env_fields_registered_as_explicit() -> None:
     """Combo-set fields must land in __pydantic_fields_set__ — that is the
     signal _apply_profile_overrides uses to respect operator choices."""
-    with patch.dict(
-        os.environ, {"HYDRAFLOW_REPORT_ISSUE": "claude:opus"}, clear=False
-    ):
+    with patch.dict(os.environ, {"HYDRAFLOW_REPORT_ISSUE": "claude:opus"}, clear=False):
         cfg = HydraFlowConfig()
         assert "report_issue_tool" in cfg.__pydantic_fields_set__
         assert "report_issue_model" in cfg.__pydantic_fields_set__

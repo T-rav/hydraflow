@@ -223,7 +223,6 @@ class HydraFlowOrchestrator:
             "staging_promotion": svc.staging_promotion_loop,
             "staging_bisect": svc.staging_bisect_loop,
             "stale_issue": svc.stale_issue_loop,
-            "sentry_ingest": svc.sentry_loop,
             "log_ingest": svc.log_ingest_loop,
             "github_cache": svc.github_cache_loop,
             "stale_issue_gc": svc.stale_issue_gc_loop,
@@ -1159,16 +1158,6 @@ class HydraFlowOrchestrator:
             # is enabled.  When pipeline_enabled=False (dashboard mode), the
             # orchestrator only runs background workers — no issue fetching,
             # no repo sanitization, no session.
-            try:
-                import sentry_sdk as _sentry  # noqa: PLC0415
-            except ImportError:
-                pass
-            else:
-                try:
-                    _sentry.set_tag("hydraflow.repo", self._config.repo or "")
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("sentry_sdk.set_tag failed: %s", exc)
-
             session_started = False
             if self._pipeline_enabled:
                 # Concrete-only setup methods — not on Port. See _deferred_pipeline_start.
@@ -1476,7 +1465,6 @@ class HydraFlowOrchestrator:
             ("staging_promotion", self._svc.staging_promotion_loop.run),
             ("staging_bisect", self._svc.staging_bisect_loop.run),
             ("stale_issue", self._svc.stale_issue_loop.run),
-            ("sentry_ingest", self._svc.sentry_loop.run),
             ("log_ingest", self._svc.log_ingest_loop.run),
             ("github_cache", self._svc.github_cache_loop.run),
             ("pipeline_poller", self._pipeline_stats_loop),

@@ -866,7 +866,7 @@ class TestTriageSentryBreadcrumbs:
     async def test_evaluate_adds_breadcrumb_on_success(
         self, runner: TriageRunner, mock_runner: AsyncMock
     ) -> None:
-        from mockworld.fakes.fake_sentry import FakeSentry
+        from mockworld.fakes.fake_observability import FakeObservability
 
         issue = TaskFactory.create(
             id=10,
@@ -876,7 +876,7 @@ class TestTriageSentryBreadcrumbs:
         stdout = _make_llm_verdict(ready=True)
         mock_runner.create_streaming_process = make_streaming_proc(stdout=stdout)
 
-        fake_obs = FakeSentry()
+        fake_obs = FakeObservability()
         runner._obs = fake_obs
         result = await runner.evaluate(issue)
         assert result.ready is True
@@ -891,7 +891,7 @@ class TestTriageSentryBreadcrumbs:
     async def test_parse_failure_adds_breadcrumb(
         self, runner: TriageRunner, mock_runner: AsyncMock
     ) -> None:
-        from mockworld.fakes.fake_sentry import FakeSentry
+        from mockworld.fakes.fake_observability import FakeObservability
 
         issue = TaskFactory.create(
             id=11,
@@ -912,7 +912,7 @@ class TestTriageSentryBreadcrumbs:
         bad_stdout = f"{bad_event}\n{bad_result}"
         mock_runner.create_streaming_process = make_streaming_proc(stdout=bad_stdout)
 
-        fake_obs = FakeSentry()
+        fake_obs = FakeObservability()
         runner._obs = fake_obs
         # Parse failures now raise (#9798 — issue stays queued for retry);
         # the breadcrumb must still land before the raise.

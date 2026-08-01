@@ -31,7 +31,6 @@ class TestServerMain:
             patch("server.setup_logging") as mock_logging,
             patch("server.load_runtime_config", return_value=mock_config),
             patch("server.asyncio.run") as mock_run,
-            patch("server._init_sentry"),
             patch.dict("sys.modules", {"dotenv": MagicMock()}),
             patch.dict("os.environ", {}, clear=False),
         ):
@@ -52,7 +51,6 @@ class TestServerMain:
             patch("server.setup_logging") as mock_logging,
             patch("server.load_runtime_config", return_value=mock_config),
             patch("server.asyncio.run"),
-            patch("server._init_sentry"),
             patch.dict("sys.modules", {"dotenv": MagicMock()}),
             patch.dict("os.environ", {"HYDRAFLOW_VERBOSE_LOGS": "1"}, clear=False),
         ):

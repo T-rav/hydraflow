@@ -47,7 +47,6 @@ class TestRunContext:
             state_file=tmp_path / "s.json",
             gh_token="ghp_SECRET",
             hindsight_api_key="sk-SECRET",
-            sentry_auth_token="sntrys_SECRET",
             whatsapp_token="wa_SECRET",
             whatsapp_phone_id="123456",
             whatsapp_recipient="+27123456789",
@@ -59,7 +58,6 @@ class TestRunContext:
             exclude={
                 "gh_token",
                 "hindsight_api_key",
-                "sentry_auth_token",
                 "whatsapp_token",
                 "whatsapp_phone_id",
                 "whatsapp_recipient",
@@ -68,7 +66,6 @@ class TestRunContext:
         )
         assert "gh_token" not in dumped
         assert "hindsight_api_key" not in dumped
-        assert "sentry_auth_token" not in dumped
         assert "whatsapp_token" not in dumped
         assert "whatsapp_phone_id" not in dumped
         assert "whatsapp_recipient" not in dumped

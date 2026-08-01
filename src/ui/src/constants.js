@@ -226,14 +226,6 @@ export const CI_MONITOR_PRESETS = [
   { label: '6h', seconds: 21600 },
 ]
 
-const SENTRY_INGEST_PRESETS = [
-  { label: '30m', seconds: 1800 },
-  { label: '1h', seconds: 3600 },
-  { label: '2h', seconds: 7200 },
-  { label: '4h', seconds: 14400 },
-  { label: '8h', seconds: 28800 },
-]
-
 /**
  * Per-worker preset overrides. Workers not listed here use INTERVAL_PRESETS.
  */
@@ -245,13 +237,12 @@ export const WORKER_PRESETS = {
   stale_issue: STALE_ISSUE_PRESETS,
   security_patch: SECURITY_PATCH_PRESETS,
   ci_monitor: CI_MONITOR_PRESETS,
-  sentry_ingest: SENTRY_INGEST_PRESETS,
 }
 
 /**
  * Workers whose interval can be edited from the UI.
  */
-export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'sentry_ingest', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health', 'issue_refinement', 'pr_red_repair', 'erosion_metrics', 'fail_open_monitor', 'escape_ledger', 'intervention_tally', 'sampled_audit', 'second_order_vitals', 'adr_drift_resolver'])
+export const EDITABLE_INTERVAL_WORKERS = new Set(['pr_unsticker', 'merge_state_watcher', 'pipeline_poller', 'report_issue', 'workspace_gc', 'adr_reviewer', 'epic_sweeper', 'epic_monitor', 'dependabot_merge', 'staging_promotion', 'staging_bisect', 'stale_issue', 'security_patch', 'ci_monitor', 'log_ingest', 'retrospective', 'principles_audit', 'flake_tracker', 'skill_prompt_eval', 'fake_coverage_auditor', 'adr_touchpoint_auditor', 'adr_conformance', 'auto_tighten', 'memory_backlog', 'rc_budget', 'wiki_rot_detector', 'trust_fleet_sanity', 'contract_refresh', 'corpus_learning', 'live_corpus_replay', 'auto_agent_preflight', 'diagram_loop', 'pricing_refresh', 'cost_budget_watcher', 'label_drift_watcher', 'github_cache', 'runs_gc', 'triage_retry', 'convergence_oscillation', 'gate_health', 'issue_refinement', 'pr_red_repair', 'erosion_metrics', 'fail_open_monitor', 'escape_ledger', 'intervention_tally', 'sampled_audit', 'second_order_vitals', 'adr_drift_resolver'])
 
 /**
  * Preset options for the per-loop watchdog-timeout override (#9503).
@@ -352,7 +343,6 @@ export const BACKGROUND_WORKERS = [
   { key: 'staging_bisect', label: 'Staging Bisect', description: 'Bisects the culprit PR on RC-red, files auto-revert + retry issue, watchdogs the next RC. See ADR-0042 §4.3.', color: theme.red, group: 'release', tags: ['release', 'recovery'] },
   { key: 'health_monitor', label: 'Health Monitor', description: 'Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns.', color: theme.green, system: true, group: 'meta_observability', tags: ['monitoring'] },
   { key: 'stale_issue', label: 'Stale General Issue Cleanup', description: 'Auto-closes stale general issues (excludes HydraFlow lifecycle labels). Per-tag thresholds, configurable. Distinct from Stale Issue GC, which handles HITL escalations.', color: theme.orange, group: 'repo_health', tags: ['hygiene'] },
-  { key: 'sentry_ingest', label: 'Sentry Ingest', description: 'Polls Sentry for unresolved errors and files them as GitHub issues for the pipeline.', color: theme.red, group: 'intake', tags: ['errors'] },
   { key: 'log_ingest', label: 'Log Ingest', description: 'Clusters and dedups recurring errors/warnings in HydraFlow\'s own server log and files them as fix-issues for the pipeline.', color: theme.red, group: 'intake', tags: ['errors'] },
   { key: 'stale_issue_gc', label: 'Stale HITL Issue GC', description: 'Auto-closes stale HITL escalation issues — posts a farewell comment, capped at 10/cycle. Distinct from Stale General Issue Cleanup, which excludes HF lifecycle labels.', color: theme.textMuted, group: 'repo_health', tags: ['hygiene'] },
   { key: 'ci_monitor', label: 'CI Monitor', description: 'Detects failing CI on main and files/auto-closes issues.', color: theme.yellow, group: 'repo_health', tags: ['quality'] },
@@ -399,7 +389,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'pr_red_repair', label: 'PR Red Repair', description: 'Detects settled-red open PRs and bounded-reruns infra-flake CI (cancelled runs, zero-failed-step jobs, failed setup steps, vanished logs). Escalates via rollup issue once the rerun budget is exhausted. Phase 1 of #10027 — real-red auto-agent dispatch is Phase 2.', color: theme.orange, group: 'repo_health', tags: ['recovery', 'quality'] },
   { key: 'erosion_metrics', label: 'Erosion Metrics', description: 'v1: runs the change-spread and concept-scatter sensors over commits merged since the last tick; files above-baseline drift as hydraflow-find issues for human triage (Pattern B — never opens a fix PR). See #10107, epic #10104.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
   { key: 'fail_open_monitor', label: 'Fail-Open Monitor', description: 'Watches the judge fail-open ledger; applies a Shewhart control limit to the daily fail-open rate and files a hydraflow-find above-limit (Pattern B — never opens a fix PR). Part of the judge-independence budget + fail-visible dispatch (#10371).', color: theme.textMuted, system: true, group: 'repo_health', tags: ['quality', 'evidence'] },
-  { key: 'escape_ledger', label: 'Escape Ledger', description: 'Falsification instrument (read-only, Pattern B — never opens a fix PR): records post-merge escapes (revert/hotfix/regression-pin/bug-issue/Sentry) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. See #10367.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
+  { key: 'escape_ledger', label: 'Escape Ledger', description: 'Falsification instrument (read-only, Pattern B — never opens a fix PR): records post-merge escapes (revert/hotfix/regression-pin/bug-issue) to an append-only ledger with mechanical attribution, and renders escapes-per-100-merges + month-over-month erosion trend surfaces. See #10367.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
   { key: 'intervention_tally', label: 'Intervention Tally', description: 'Attention-side telemetry (read-only, Pattern B — never opens a fix PR): senses human touches (steering/HITL/control-route/CLI), classifies them into a fixed taxonomy (mechanical + bounded cheap-LLM for free-text, confidence recorded), and renders interventions-per-100-merges (same denominator as the escape ledger), the per-loop trust table, and loops-per-governor. See #10369.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
   { key: 'sampled_audit', label: 'Sampled Audit', description: 'The silent-escape estimator (read-only, Pattern B — never opens a fix PR): re-audits a governed random sample of merged PRs with a fresh adversarial context, records agree/disagree to audit_samples.jsonl, and renders the disagreement rate + confidence interval as a statistical bound on undetected escapes. Upheld disagreements cross-link into the escape ledger. See #10370.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },
   { key: 'second_order_vitals', label: 'Second-order Vitals', description: 'The capstone residual monitor (read-only, Pattern B — never opens a fix PR): reads the four instrument ledgers, gives each of five families its own Shewhart control limit, and computes the green-while-dying verdict (green/watch/diverging) — adverse drift across ≥3 families sustained over 2 windows while primary health is green. `diverging` files ONE never-batched find + HITL per episode; `watch` is a dashboard state change only. See #10373.', color: theme.textMuted, system: true, group: 'repo_health', tags: ['drift', 'quality'] },

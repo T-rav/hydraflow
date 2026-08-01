@@ -289,7 +289,7 @@ class TestCostRollupCountsEstimatedSpend:
 
 class TestStreamClaudeWithTelemetry:
     """WS-2.2 self-review S4: the streaming wrapper (backing acceptance_criteria,
-    report_issue_loop, sentry_loop, verification_judge) records telemetry on success
+    report_issue_loop, verification_judge) records telemetry on success
     AND failure, with issue/pr derived from event_data."""
 
     @pytest.mark.asyncio
@@ -346,12 +346,12 @@ class TestStreamClaudeWithTelemetry:
                 cwd=tmp_path,
                 active_procs=set(),
                 event_bus=bus,
-                event_data={"source": "sentry_ingest"},
+                event_data={"source": "log_ingest"},
                 logger=MagicMock(),
                 stream_config=StreamConfig(),
             )
         rows = PromptTelemetry(config).load_inferences()
-        match = [r for r in rows if r.get("source") == "sentry_ingest"]
+        match = [r for r in rows if r.get("source") == "log_ingest"]
         assert match, (
             "wrapper must record a row in the finally even when the stream raises"
         )

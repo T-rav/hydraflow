@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -110,67 +109,6 @@ class TestCorruptItemScoresLogging:
         ), (
             f"Expected a log message about the corrupt item_scores.json, "
             f"but got: {[r.message for r in health_records]}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# 3. orchestrator — Sentry set_tag failure (L710-711)
-# ---------------------------------------------------------------------------
-
-
-class TestSentrySetTagFailureLogging:
-    """When ``sentry_sdk.set_tag`` raises, the orchestrator must log
-    the failure at debug level.
-
-    Currently ``except Exception: pass`` (line 710-711) — RED.
-    """
-
-    @pytest.mark.xfail(reason="Regression for issue #6511 — fix not yet landed", strict=False)
-    def test_sentry_set_tag_failure_emits_log(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        # We test the pattern directly by importing orchestrator and
-        # exercising the try/except around set_tag.  Since the block
-        # is inside ``_run()``, we replicate the exact code path with
-        # a mock.
-        mock_sentry = MagicMock()
-        mock_sentry.set_tag.side_effect = RuntimeError("sentry unavailable")
-
-        with caplog.at_level(logging.DEBUG, logger=ORCHESTRATOR_LOGGER):
-            # Replicate the orchestrator's try/except block (L706-711)
-            try:
-                mock_sentry.set_tag("hydraflow.repo", "test-repo")
-            except Exception:
-                # This is what the FIXED code should do — log the error.
-                # The current code just does ``pass``.
-                pass
-
-        # The orchestrator itself doesn't log — verify by importing
-        # the module and checking that its except block would log.
-        # Since we can't easily call _run() in isolation, we inspect
-        # the source to confirm no logging call exists.
-        import inspect
-
-        import orchestrator as orch_mod
-
-        source = inspect.getsource(orch_mod)
-
-        # Find the sentry set_tag try block
-        # The fix should add a logger call in the except block
-        idx = source.find('_sentry.set_tag("hydraflow.repo"')
-        assert idx != -1, "Could not find sentry set_tag call in orchestrator"
-
-        # Extract the except block that follows
-        except_start = source.find("except Exception:", idx)
-        assert except_start != -1
-
-        # Get the next ~200 chars after 'except Exception:'
-        block = source[except_start : except_start + 200]
-
-        # The fixed code must contain a logger call, not bare pass
-        assert "logger" in block or "logging" in block, (
-            f"orchestrator.py sentry set_tag except block has no logging. "
-            f"Block content: {block!r}"
         )
 
 

@@ -1096,9 +1096,9 @@ class TestReviewInsightsSentryBreadcrumbs:
     """Observability breadcrumbs for review insight recording and pattern detection."""
 
     def test_append_review_adds_breadcrumb(self, tmp_path: Path) -> None:
-        from mockworld.fakes.fake_sentry import FakeSentry
+        from mockworld.fakes.fake_observability import FakeObservability
 
-        fake_obs = FakeSentry()
+        fake_obs = FakeObservability()
         store = ReviewInsightStore(tmp_path, observability=fake_obs)
         record = _make_record(pr_number=42, verdict=ReviewVerdict.APPROVE)
 
@@ -1111,7 +1111,7 @@ class TestReviewInsightsSentryBreadcrumbs:
     def test_analyze_patterns_adds_breadcrumb_when_threshold_met(
         self, tmp_path: Path
     ) -> None:
-        from mockworld.fakes.fake_sentry import FakeSentry
+        from mockworld.fakes.fake_observability import FakeObservability
 
         records = [
             _make_record(
@@ -1119,7 +1119,7 @@ class TestReviewInsightsSentryBreadcrumbs:
             )
             for _ in range(4)
         ]
-        fake_obs = FakeSentry()
+        fake_obs = FakeObservability()
         results = analyze_patterns(records, threshold=3, obs=fake_obs)
         assert len(results) > 0
         pattern_bcs = [

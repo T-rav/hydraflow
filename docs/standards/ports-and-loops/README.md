@@ -93,7 +93,6 @@ Rows below capture the canonical standard status. Full coverage detail
 | `RunsGCLoop` | (none) | architecture-async-control.md | Caretaker loop |
 | `SandboxFailureFixerLoop` | [0052, 0063] | dark-factory.md | Caretaker loop |
 | `SecurityPatchLoop` | [0029, 0065] | architecture-async-control.md | Caretaker loop |
-| `SentryLoop` | [0055] | [sentry-loop.md](../../wiki/terms/sentry-loop.md) | Caretaker loop |
 | `SkillPromptEvalLoop` | [0045] | [skill-prompt-eval-loop.md](../../wiki/terms/skill-prompt-eval-loop.md) | Trust fleet |
 | `StagingBisectLoop` | [0045, 0048, 0063] | architecture.md | Trust fleet |
 | `StagingPromotionLoop` | [0042] | patterns.md | Caretaker loop |

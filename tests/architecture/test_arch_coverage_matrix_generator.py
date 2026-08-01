@@ -263,15 +263,6 @@ def _loop_row(matrix_md: str, loop_name: str) -> str:
             ],
         ),
         (
-            "SentryLoop",
-            [
-                "✅ loops.md",
-                "✅ `test_sentry_loop.py`",
-                "✅ in catalog",
-                "✅ `s42_sentry_ingest_no_credentials.py`",
-            ],
-        ),
-        (
             "LiveCorpusReplayLoop",
             [
                 "✅ loops.md",

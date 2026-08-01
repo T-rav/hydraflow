@@ -1,11 +1,11 @@
-"""Tests for FakeWorkspace, FakeSentry, FakeClock."""
+"""Tests for FakeWorkspace, FakeObservability, FakeClock."""
 
 from __future__ import annotations
 
 import pytest
 
 from mockworld.fakes.fake_clock import FakeClock
-from mockworld.fakes.fake_sentry import FakeSentry
+from mockworld.fakes.fake_observability import FakeObservability
 from mockworld.fakes.fake_workspace import FakeWorkspace
 
 pytestmark = pytest.mark.scenario
@@ -25,15 +25,15 @@ class TestFakeWorkspace:
         assert 42 in ws.destroyed
 
 
-class TestFakeSentry:
+class TestFakeObservability:
     def test_capture_breadcrumb(self):
-        sentry = FakeSentry()
+        sentry = FakeObservability()
         sentry.add_breadcrumb(category="test", message="hello")
         assert len(sentry.breadcrumbs) == 1
         assert sentry.breadcrumbs[0]["message"] == "hello"
 
     def test_capture_exception(self):
-        sentry = FakeSentry()
+        sentry = FakeObservability()
         sentry.capture_exception(ValueError("boom"))
         assert len(sentry.events) == 1
 

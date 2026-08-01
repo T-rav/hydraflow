@@ -782,9 +782,12 @@ class TestDeclaredDefaultConfig:
     def test_ignores_non_prefixed_table_driven_env_override(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("SENTRY_ORG", "leaked-org")
+        monkeypatch.setenv("LOG_INGEST_INTERVAL", "99999")
         cfg = declared_default_config()
-        assert cfg.sentry_org == HydraFlowConfig.model_fields["sentry_org"].default
+        assert (
+            cfg.log_ingest_interval
+            == HydraFlowConfig.model_fields["log_ingest_interval"].default
+        )
 
     def test_ignores_git_identity_env_vars(
         self, monkeypatch: pytest.MonkeyPatch
@@ -891,7 +894,7 @@ class TestDeclaredDefaultConfig:
 
         monkeypatch.setenv("HYDRAFLOW_MIN_REVIEW_FINDINGS", "999")
         monkeypatch.setenv("HYDRAFLOW_HUMAN_STEERING_AUTHORIZED_USERS", "leaked")
-        monkeypatch.setenv("SENTRY_ORG", "leaked-org")
+        monkeypatch.setenv("LOG_INGEST_INTERVAL", "99999")
         monkeypatch.setenv("GIT_AUTHOR_NAME", "Leaked Name")
         monkeypatch.setenv("HYDRAFLOW_WORKTREE_GC_ROOTS", "/leaked/root")
         overridden = _captured(declared_default_config())
@@ -953,10 +956,10 @@ class TestDeclaredEnvKeys:
 
     @pytest.mark.parametrize(
         "env_key",
-        ["SENTRY_ORG", "LOG_INGEST_INTERVAL"],
+        ["LOG_INGEST_INTERVAL", "LOG_INGEST_WARNING_MIN_COUNT"],
     )
     def test_contains_known_non_prefixed_keys(self, env_key: str) -> None:
-        """The exact keys the issue calls out — SENTRY_ORG and friends."""
+        """Non-prefixed, third-party-style env override keys must be declared."""
         assert env_key in declared_env_keys()
 
     def test_returns_a_frozenset(self) -> None:

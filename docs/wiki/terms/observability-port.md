@@ -16,10 +16,10 @@ updated_at: "2026-07-26T10:16:32.370693+00:00"
 
 ## Definition
 
-Hexagonal port for the observability boundary (ADR-0044 P7.7). Exposes five methods: `capture_exception`, `capture_message`, `breadcrumb`, `set_measurement`, and `flush`. The production adapter is `SentryObservabilityAdapter` in `src/observability/sentry_adapter.py`, which wraps `sentry_sdk` and silently degrades to a no-op when the SDK is not installed. The port is intentionally minimal — rich APIs drag every backend into the union.
+Hexagonal port for the observability boundary (ADR-0044 P7.7). Exposes five methods: `capture_exception`, `capture_message`, `breadcrumb`, `set_measurement`, and `flush`. Sentry was removed by ADR-0118 (observability moves to a dedicated SRE agent targeting New Relic), so the production adapter is now `NoOpObservabilityAdapter` in `src/observability/noop_adapter.py` — a null object whose methods return silently — and the SRE agent will supply the real adapter for this seam. The port is intentionally minimal — rich APIs drag every backend into the union.
 
 ## Invariants
 
 - Pure Protocol — no implementation, no state.
-- The adapter is a no-op when `sentry_sdk` is absent; every method returns silently so callers never need a try/except around port calls.
-- Domain code never imports `sentry_sdk` directly; all observability routes through the injected `ObservabilityPort` so a future OTLP, structured-log, or sidecar adapter can replace Sentry without touching call sites.
+- The production adapter (`NoOpObservabilityAdapter`) is a null object; every method returns silently so callers never need a try/except around port calls.
+- Domain code never imports an observability SDK directly; all observability routes through the injected `ObservabilityPort` so the SRE agent's future adapter (New Relic, OTLP, structured-log, or sidecar) can replace the no-op without touching call sites.

@@ -243,23 +243,6 @@ class BaseRunner:
                 event_bus=self._bus,
             )
 
-        try:
-            import sentry_sdk as _sentry  # noqa: PLC0415
-        except ImportError:
-            _sentry = None  # Sentry not installed — optional dependency
-        if _sentry is not None:
-            # Programming errors (AttributeError, TypeError, etc.) from the
-            # Sentry SDK must propagate so misconfiguration surfaces loudly.
-            _sentry.set_tag("hydraflow.issue", str(event_data.get("issue", "")))
-            _sentry.set_tag("hydraflow.source", str(event_data.get("source", "")))
-            _sentry.set_context(
-                "hydraflow_runner",
-                {
-                    "model": self._config.model,
-                    "tool": self._config.implementation_tool,
-                },
-            )
-
         # Resolve this runner's harness backend once (per-spawn env override +
         # credit-scoping provider). Default "claude" (native Anthropic) is a
         # no-op; a runner whose role dial is "zai" runs on the GLM harness.

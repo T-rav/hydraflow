@@ -20,9 +20,9 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeIssueFetcher** | `IssueFetcherPort` | — |
 | **FakeIssueStore** | `IssueStorePort` | `tests/scenarios/test_pipeline_snapshot_terminal_status_scenario.py` |
 | **FakeLLM** | `LLMPort` | `tests/scenarios/behaviors/test_quota.py`<br>`tests/scenarios/fakes/test_fake_llm.py`<br>`tests/scenarios/fakes/test_fake_llm_streaming.py`<br>`tests/scenarios/fakes/test_prior_failure_propagation.py`<br>`tests/scenarios/test_fidelity.py` |
+| **FakeObservability** | `ObservabilityPort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
 | **FakeReviewInsightStore** | `ReviewInsightStorePort` | — |
 | **FakeRouteBackCounter** | `RouteBackCounterPort` | — |
-| **FakeSentry** | `SentryPort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
 | **FakeSubprocessRunner** | `SubprocessRunnerPort` | `tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeWikiCompiler** | `WikiCompilerPort` | — |
 | **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
@@ -63,10 +63,10 @@ graph LR
     tests_scenarios_behaviors_test_quota_py([tests/scenarios/behaviors/test_quota.py]) --> FakeLLM
     tests_scenarios_fakes_test_fake_llm_py([tests/scenarios/fakes/test_fake_llm.py]) --> FakeLLM
     tests_scenarios_fakes_test_fake_llm_streaming_py([tests/scenarios/fakes/test_fake_llm_streaming.py]) --> FakeLLM
+    FakeObservability -.-> ObservabilityPort
+    tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeObservability
     FakeReviewInsightStore -.-> ReviewInsightStorePort
     FakeRouteBackCounter -.-> RouteBackCounterPort
-    FakeSentry -.-> SentryPort
-    tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeSentry
     FakeSubprocessRunner -.-> SubprocessRunnerPort
     tests_scenarios_fakes_test_fake_subprocess_runner_py([tests/scenarios/fakes/test_fake_subprocess_runner.py]) --> FakeSubprocessRunner
     FakeWikiCompiler -.-> WikiCompilerPort

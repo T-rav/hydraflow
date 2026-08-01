@@ -872,10 +872,10 @@ class TestRetrospectiveSentryBreadcrumbs:
 
     @pytest.mark.asyncio()
     async def test_record_adds_sentry_breadcrumb(self, config: HydraFlowConfig) -> None:
-        from mockworld.fakes.fake_sentry import FakeSentry
+        from mockworld.fakes.fake_observability import FakeObservability
 
         collector, mock_prs, state = _make_collector(config, diff_names=["src/foo.py"])
-        fake_obs = FakeSentry()
+        fake_obs = FakeObservability()
         collector._obs = fake_obs
         review = ReviewResultFactory.create()
 

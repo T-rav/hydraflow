@@ -26,7 +26,7 @@ from mockworld.fakes.fake_git import FakeGit
 from mockworld.fakes.fake_github import FakeGitHub
 from mockworld.fakes.fake_http import FakeHTTP
 from mockworld.fakes.fake_llm import FakeLLM
-from mockworld.fakes.fake_sentry import FakeSentry
+from mockworld.fakes.fake_observability import FakeObservability
 from mockworld.fakes.fake_workspace import FakeWorkspace
 from tests.conftest import TaskFactory
 from tests.helpers import PipelineHarness, PipelineRunResult
@@ -246,7 +246,7 @@ class MockWorld:
         )
         self._llm = FakeLLM()
         self._github = FakeGitHub()
-        self._sentry = FakeSentry()
+        self._sentry = FakeObservability()
         self._workspace = FakeWorkspace(tmp_path / "worktrees")
         self._clock = FakeClock(start=time.time())
         if clock_start is not None:
@@ -556,7 +556,7 @@ class MockWorld:
         return self._github
 
     @property
-    def sentry(self) -> FakeSentry:
+    def sentry(self) -> FakeObservability:
         return self._sentry
 
     @property

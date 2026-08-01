@@ -753,9 +753,9 @@ class TestHarnessInsightsSentryBreadcrumbs:
     """Observability breadcrumb emitted when a failure is recorded."""
 
     def test_append_failure_adds_breadcrumb(self, tmp_path: Path) -> None:
-        from mockworld.fakes.fake_sentry import FakeSentry
+        from mockworld.fakes.fake_observability import FakeObservability
 
-        fake_obs = FakeSentry()
+        fake_obs = FakeObservability()
         store = HarnessInsightStore(tmp_path, observability=fake_obs)
         record = _make_record(category=FailureCategory.CI_FAILURE, stage="review")
 

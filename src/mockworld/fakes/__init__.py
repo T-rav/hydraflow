@@ -18,9 +18,9 @@ from mockworld.fakes.fake_http import FakeHTTP
 from mockworld.fakes.fake_issue_fetcher import FakeIssueFetcher
 from mockworld.fakes.fake_issue_store import FakeIssueStore
 from mockworld.fakes.fake_llm import FakeLLM
+from mockworld.fakes.fake_observability import FakeObservability
 from mockworld.fakes.fake_review_insight_store import FakeReviewInsightStore
 from mockworld.fakes.fake_route_back_counter import FakeRouteBackCounter
-from mockworld.fakes.fake_sentry import FakeObservability, FakeSentry
 from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
 from mockworld.fakes.fake_wiki_compiler import FakeWikiCompiler
 from mockworld.fakes.fake_workspace import FakeWorkspace
@@ -42,7 +42,6 @@ __all__ = [
     "FakeObservability",
     "FakeReviewInsightStore",
     "FakeRouteBackCounter",
-    "FakeSentry",
     "FakeSubprocessRunner",
     "FakeWikiCompiler",
     "FakeWorkspace",

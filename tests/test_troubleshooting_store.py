@@ -385,11 +385,11 @@ class TestTroubleshootingSentryBreadcrumbs:
     """Observability breadcrumb emitted when a pattern is stored."""
 
     def test_append_pattern_adds_breadcrumb(self, tmp_path: Path) -> None:
-        from mockworld.fakes.fake_sentry import FakeSentry
+        from mockworld.fakes.fake_observability import FakeObservability
 
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
-        fake_obs = FakeSentry()
+        fake_obs = FakeObservability()
         store = TroubleshootingPatternStore(memory_dir, observability=fake_obs)
         pattern = TroubleshootingPattern(
             language="python",

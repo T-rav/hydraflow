@@ -36,7 +36,6 @@ graph LR
     pricingrefreshloop["PricingRefreshLoop<br/><i>loop</i>"]
     prunstickerloop["PRUnstickerLoop<br/><i>loop</i>"]
     rcbudgetloop["RCBudgetLoop<br/><i>loop</i>"]
-    sentryloop["SentryLoop<br/><i>loop</i>"]
     skillpromptevalloop["SkillPromptEvalLoop<br/><i>loop</i>"]
     staleissuegcloop["StaleIssueGCLoop<br/><i>loop</i>"]
     termprunerloop["TermPrunerLoop<br/><i>loop</i>"]
@@ -185,7 +184,6 @@ graph LR
   dedupstore -->|depends_on| rcbudgetloop
   dedupstore -->|depends_on| repowikistore
   dedupstore -->|depends_on| reportissueloop
-  dedupstore -->|depends_on| sentryloop
   dedupstore -->|depends_on| skillpromptevalloop
   dedupstore -->|depends_on| botprport
   dedupstore -->|depends_on| wikirotdetectorloop
@@ -373,17 +371,6 @@ graph LR
   reviewverdict -->|depends_on| dependabotmergeloop
   reviewverdict -->|depends_on| prport
   routebackcounterport -->|depends_on| prport
-  sentryloop -->|depends_on| basebackgroundloop
-  sentryloop -->|depends_on| hydraflowconfig
-  sentryloop -->|depends_on| statetracker
-  sentryloop -->|implements| basebackgroundloop
-  sentryloop -->|depends_on| credentials
-  sentryloop -->|depends_on| controller
-  sentryloop -->|depends_on| governor
-  sentryloop -->|depends_on| subprocessrunner
-  sentryloop -->|depends_on| prmanager
-  sentryloop -->|depends_on| dedupstore
-  sentryloop -->|depends_on| creditexhaustederror
   set_point -->|depends_on| eventbus
   set_point -->|depends_on| hydraflowconfig
   set_point -->|depends_on| task

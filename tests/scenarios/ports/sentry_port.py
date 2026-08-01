@@ -1,7 +1,7 @@
 """SentryPort — observability surface for scenario tests.
 
-Extends the core ``ObservabilityPort`` signatures with legacy sentry_sdk
-surface (``add_breadcrumb``, ``set_tag``) that scenario fakes still expose
+Extends the core ``ObservabilityPort`` signatures with the legacy
+``add_breadcrumb`` / ``set_tag`` surface that scenario fakes still expose
 for backwards-compatibility.
 """
 

@@ -220,7 +220,6 @@ def test_live_every_registry_loop_present(live_rows):
     assert {
         "pr_unsticker",
         "report_issue",
-        "sentry_ingest",
         "fitness_scorecard",
     } <= workers
     assert len(loop_rows) >= 50
@@ -234,7 +233,6 @@ def test_live_pipeline_workers_present(live_rows):
 def test_live_model_role_attribution(live_rows):
     by_worker = {r.worker: r for r in live_rows}
     assert "report_issue_model" in by_worker["report_issue"].model_fields
-    assert "sentry_model" in by_worker["sentry_ingest"].model_fields
     assert "adr_review_model" in by_worker["adr_reviewer"].model_fields
     assert "triage_model" in by_worker["triage"].model_fields
     assert "planner_model" in by_worker["plan"].model_fields
@@ -245,7 +243,6 @@ def test_live_model_role_attribution(live_rows):
 def test_live_long_llm_cycle_flags(live_rows):
     by_worker = {r.worker: r for r in live_rows}
     assert by_worker["report_issue"].long_llm_cycle is True
-    assert by_worker["sentry_ingest"].long_llm_cycle is True
     assert by_worker["disturbance_dampener"].long_llm_cycle is True
     assert by_worker["convergence_oscillation"].long_llm_cycle is False
 

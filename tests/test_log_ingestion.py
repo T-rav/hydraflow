@@ -677,12 +677,12 @@ class TestFileLogPatterns:
     @pytest.mark.asyncio
     async def test_sentry_breadcrumb_called_for_novel_pattern(self) -> None:
         """ObservabilityPort breadcrumb is added when a novel pattern is detected."""
-        from mockworld.fakes.fake_sentry import FakeSentry
+        from mockworld.fakes.fake_observability import FakeObservability
 
         config = _make_config()
         known: dict[str, KnownLogPattern] = {}
         pattern = self._make_pattern()
-        fake_obs = FakeSentry()
+        fake_obs = FakeObservability()
 
         await file_log_patterns([pattern], known, config, fake_obs)
 
@@ -699,7 +699,7 @@ class TestFileLogPatterns:
         capturing it to Sentry previously flooded the project with one ``warning``
         event per escalation tick. Sentry's contract is real code bugs only.
         """
-        from mockworld.fakes.fake_sentry import FakeSentry
+        from mockworld.fakes.fake_observability import FakeObservability
 
         config = _make_config()
         pattern = self._make_pattern(count=15)
@@ -715,7 +715,7 @@ class TestFileLogPatterns:
             )
         }
 
-        fake_obs = FakeSentry()
+        fake_obs = FakeObservability()
         result = await file_log_patterns([pattern], known, config, fake_obs)
 
         assert result.escalated == 1

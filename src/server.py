@@ -6,7 +6,6 @@ import asyncio
 import logging
 import os
 import signal
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -90,109 +89,6 @@ async def _restore_registered_repos(
             logger.info("Restored registered repo %r from store", record.slug)
         except Exception:
             logger.warning("Failed to restore repo %s", record.slug, exc_info=True)
-
-
-def _init_sentry(*, force: bool = False) -> None:
-    """Initialize Sentry SDK if SENTRY_DSN is configured.
-
-    Skips initialisation entirely under the test suite (``pytest``) or when
-    ``HYDRAFLOW_SENTRY_DISABLED=1``. Tests and MockWorld scenarios run with
-    fixture data (issue #42, PR #101, ``boom`` failure sentinels); without this
-    guard that fixture noise initialises the *real* client and ships straight to
-    production Sentry. ``force=True`` bypasses the guard and is used only by the
-    Sentry integration tests to exercise the init machinery against a mock SDK.
-    """
-    dsn = os.environ.get("SENTRY_DSN", "")
-    if not dsn:
-        return
-    if not force and (
-        os.environ.get("HYDRAFLOW_SENTRY_DISABLED") == "1"
-        or os.environ.get("PYTEST_CURRENT_TEST")
-        or "pytest" in sys.modules
-    ):
-        return
-
-    import re  # noqa: PLC0415
-
-    import sentry_sdk  # noqa: PLC0415
-    from sentry_sdk.integrations.fastapi import FastApiIntegration  # noqa: PLC0415
-    from sentry_sdk.integrations.logging import LoggingIntegration  # noqa: PLC0415
-
-    _SENSITIVE_RE = re.compile(
-        r"(ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]{82}|"
-        r"sk-[a-zA-Z0-9]{48}|Bearer\s+[a-zA-Z0-9._-]+)",
-        re.IGNORECASE,
-    )
-
-    def _scrub(obj):
-        if isinstance(obj, str):
-            return _SENSITIVE_RE.sub("[REDACTED]", obj)
-        if isinstance(obj, dict):
-            return {k: _scrub(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [_scrub(v) for v in obj]
-        return obj
-
-    # Exception types that indicate real code bugs (not transient infra errors)
-    _BUG_TYPES = (
-        TypeError,
-        KeyError,
-        AttributeError,
-        ValueError,
-        IndexError,
-        NotImplementedError,
-    )
-
-    def _before_send(event, hint):  # type: ignore[no-untyped-def]
-        """Keep only real code bugs; drop all operational noise; scrub creds.
-
-        Sentry's contract here is "real code bugs only" (the SentryLoop files a
-        GitHub issue per ingested bug). A real bug is an exception whose type is
-        in ``_BUG_TYPES`` — raised unhandled (caught by FastApiIntegration) or
-        logged with ``exc_info`` / ``logger.exception``. Everything else is
-        dropped:
-
-        * transient / infra exceptions (network, auth, Docker, subprocess);
-        * message-only events — plain ``logger.error(...)`` and direct
-          ``capture_message(...)`` from operational code paths (rate-limit
-          back-offs, gh failures, HITL recommendations, log-pattern escalations).
-
-        This stops operational log lines from flooding Sentry as "errors".
-        """
-        exc_info = hint.get("exc_info")
-        if not exc_info:
-            # LoggingIntegration events carry the record; an exception may hang
-            # off it (logger.exception / exc_info=True). Plain logger.error has
-            # none, so such events are message-only and get dropped below.
-            log_record = hint.get("log_record")
-            exc_info = getattr(log_record, "exc_info", None) if log_record else None
-
-        if not exc_info:
-            return None  # Message-only event (logger.error / capture_message) — drop.
-
-        exc_type = exc_info[0]
-        if exc_type is None or not issubclass(exc_type, _BUG_TYPES):
-            return None  # Transient / infra exception — not a code bug, drop.
-
-        # Fingerprint by exception type + module to collapse duplicates.
-        module = getattr(exc_info[1], "__module__", "") or ""
-        event["fingerprint"] = [exc_type.__name__, module]
-        return _scrub(event)
-
-    sentry_sdk.init(
-        dsn=dsn,
-        environment=os.environ.get("HYDRAFLOW_ENV", "development"),
-        traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
-        profiles_sample_rate=float(
-            os.environ.get("SENTRY_PROFILES_SAMPLE_RATE", "0.0")
-        ),
-        integrations=[
-            FastApiIntegration(transaction_style="endpoint"),
-            LoggingIntegration(level=logging.WARNING, event_level=logging.ERROR),
-        ],
-        before_send=_before_send,  # type: ignore[arg-type]
-        before_send_transaction=lambda event, hint: _scrub(event),  # type: ignore[arg-type]
-    )
 
 
 def _detect_submodule_parent(hydraflow_root: Path) -> Path | None:
@@ -489,9 +385,6 @@ def main() -> None:
     from dotenv import load_dotenv  # noqa: PLC0415
 
     load_dotenv()
-
-    # Initialize Sentry (no-op if SENTRY_DSN is empty/unset)
-    _init_sentry()
 
     verbose = os.environ.get("HYDRAFLOW_VERBOSE_LOGS", "").strip() not in {
         "",

@@ -198,12 +198,12 @@ class TestStaleIssueLoopDoWork:
     @pytest.mark.asyncio
     async def test_sentry_breadcrumb_emitted(self, tmp_path: Path) -> None:
         """When an ObservabilityPort is injected, a breadcrumb is recorded."""
-        from mockworld.fakes.fake_sentry import FakeSentry
+        from mockworld.fakes.fake_observability import FakeObservability
 
         old_date = (datetime.now(UTC) - timedelta(days=60)).isoformat()
         issues = [_gh_issue_json(5, updated_at=old_date)]
         loop, prs, state = _make_loop(tmp_path, gh_issues=issues)
-        fake_obs = FakeSentry()
+        fake_obs = FakeObservability()
         loop._obs = fake_obs
 
         await loop._do_work()
