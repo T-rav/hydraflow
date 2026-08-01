@@ -86,8 +86,10 @@ class TestBuildConflictPrompt:
 
     def test_memory_suggestion_uses_conflict_resolution_context(self) -> None:
         prompt = build_conflict_prompt(ISSUE_URL, PR_URL, None, 1)
-        # The {context} substitution appears as "Most conflict resolution runs..."
-        assert "Most conflict resolution runs should produce no block" in prompt
+        # The {context} substitution appears as "most conflict resolution runs..."
+        assert (
+            "most conflict resolution runs should correctly produce no block" in prompt
+        )
 
     def test_truncates_long_error_using_config_max_chars(self, tmp_path: Path) -> None:
         """When config is provided, config.error_output_max_chars is used for truncation."""
@@ -202,5 +204,5 @@ class TestBuildRebuildPrompt:
         prompt = build_rebuild_prompt(
             ISSUE_URL, PR_URL, issue_number=42, pr_diff=PR_DIFF
         )
-        # The {context} substitution appears as "Most rebuild runs..."
-        assert "Most rebuild runs should produce no block" in prompt
+        # The {context} substitution appears as "most rebuild runs..."
+        assert "most rebuild runs should correctly produce no block" in prompt
