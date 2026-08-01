@@ -24,6 +24,7 @@ graph LR
     ReviewInsightStorePort --> ReviewInsightStore
     ReviewInsightStorePort -.-> FakeReviewInsightStore
     RouteBackCounterPort --> RouteBackStateMixin
+    RouteBackCounterPort --> StateTracker
     RouteBackCounterPort -.-> FakeRouteBackCounter
     WorkspacePort --> WorkspaceManager
     WorkspacePort -.-> FakeWorkspace
@@ -102,6 +103,7 @@ graph LR
 - Methods: `decrement_route_back_count`, `get_route_back_count`, `increment_route_back_count`
 - Adapters:
   - `RouteBackStateMixin` (`src.state._route_back`)
+  - `StateTracker` (`src.state.__init__`)
 - Fake: `FakeRouteBackCounter` (`mockworld.fakes.fake_route_back_counter`)
 
 ### WorkspacePort

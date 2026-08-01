@@ -57,7 +57,7 @@ async def test_promotion_recovery_updates_branch_via_merge_not_rebase(
     async def _ci_passes(*_a: Any, **_kw: Any) -> tuple[bool, str]:
         return True, "CI passed"
 
-    monkeypatch.setattr("pr_manager.run_subprocess", _flaky_subprocess)
+    monkeypatch.setattr("pr_manager_promotion.run_subprocess", _flaky_subprocess)
     monkeypatch.setattr(pm, "_run_gh", _capture_gh)
     monkeypatch.setattr(pm, "wait_for_ci", _ci_passes)
 

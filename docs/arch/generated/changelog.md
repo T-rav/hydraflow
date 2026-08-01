@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `0f0a672` — refactor: extract WebSocket streaming from dashboard _routes god-file (#10978) (#10978) *(2026-08-01)*
 - `d90fd04` — Fixes #10843: damper-0a — align slow-signal loop cadence to measurement window (#10969) (#10969) *(2026-08-01)*
 - `2ed1bd1` — docs(adr): ADR-0120 stillness control architecture (Proposed) — #10824/#10827/#10825 (#10968) (#10968) *(2026-08-01)*
 - `630613c` — Fixes #10840 (part): concentration (god-file) sensor — counter-metric to erosion.spread (#10966) (#10966) *(2026-08-01)*
