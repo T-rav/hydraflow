@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `d3b1bc5` — Merge remote-tracking branch 'origin/staging' into feat/concentration-erosion-sensor-10840 *(2026-08-01)*
+- `7553e49` — Fixes #10820: oscillation fingerprint — read-only flux-carrier diagnostic (#10965) (#10965) *(2026-08-01)*
+- `7842c62` — Fixes #10840 (part): concentration (god-file) sensor — the counter-metric to erosion.spread *(2026-08-01)*
 - `40087d1` — Fixes #10844: credit failover — reroute work to GLM instead of pausing (ADR-0119) (#10964) (#10964) *(2026-08-01)*
 - `0de9226` — Remove Sentry from the factory; observability owned by the SRE agent (ADR-0118) (#10954) (#10954) *(2026-08-01)*
 - `26cbece` — Fixes #10939: backfill **Date:** frontmatter on the undated Accepted ADRs (#10953) (#10953) *(2026-07-31)*

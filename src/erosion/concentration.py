@@ -83,6 +83,14 @@ def extract_file_import_graph(src_dir: Path) -> ModuleGraph:
     resolving to a local module are edged (stdlib/third-party are ignored), so
     fan-in on ``B`` counts exactly how many local files depend on it — the
     god-file signal.
+
+    Only absolute imports (``level == 0``) are edged; relative imports
+    (``from . import x``) are skipped. In this codebase they are intra-package
+    aggregator imports (a package ``__init__`` pulling in its own submodules) that
+    do not cross top-level module boundaries, so they do not affect any god-file's
+    fan-in — verified against the live tree. If the import style ever shifts to
+    cross-package relative imports, this would need to resolve ``level``/package
+    context to avoid undercounting.
     """
     files = [
         p
