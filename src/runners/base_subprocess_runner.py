@@ -29,12 +29,18 @@ from pathlib import Path
 from typing import Generic, TypeVar
 
 from config import HydraFlowConfig
+from credit_failover import apply_credit_failover
 from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
 from model_pricing import load_pricing
 from prompt_gate import PromptGateBlockedError, gate_prompt
 from prompt_telemetry import PromptTelemetry
-from runner_utils import AuthenticationRetryError, StreamConfig, stream_claude_process
+from runner_utils import (
+    AuthenticationRetryError,
+    StreamConfig,
+    resolve_harness_env,
+    stream_claude_process,
+)
 
 logger = logging.getLogger("hydraflow.runners.base_subprocess_runner")
 
@@ -186,6 +192,12 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
 
         self._pre_spawn_hook(prompt)
         cmd = self._build_command(prompt, Path(worktree_path))
+        # Credit failover (#10844): these runners always spawn on native Claude
+        # (no provider dial), so without this a Claude cap would crash-loop the
+        # loop instead of failing over. Reroute the spawn to GLM while failover
+        # is active, mirroring base_runner._execute. No-op otherwise.
+        provider, cmd = apply_credit_failover("claude", cmd, self._config)
+        harness_env = resolve_harness_env(provider, self._config)
 
         usage_stats: dict[str, object] = {}
         prompt_hash = hash_prompt(prompt)
@@ -211,6 +223,8 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
                     config=StreamConfig(
                         timeout=timeout_s,
                         usage_stats=usage_stats,
+                        harness_env=harness_env,
+                        provider=provider,
                     ),
                 )
                 last_auth_error = None

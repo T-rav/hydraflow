@@ -17,6 +17,7 @@ from adr_index import (  # noqa: F401 — used in _inject_adr_index
 )
 from agent_cli import build_agent_command
 from config import Credentials, HydraFlowConfig
+from credit_failover import apply_credit_failover
 from events import EventBus
 from execution import get_default_runner
 from models import LoopResult, TranscriptEventData
@@ -247,6 +248,20 @@ class BaseRunner:
         # credit-scoping provider). Default "claude" (native Anthropic) is a
         # no-op; a runner whose role dial is "zai" runs on the GLM harness.
         provider = self._resolve_provider()
+        # Credit failover (#10844): while Claude credits are exhausted, reroute a
+        # would-be Claude work spawn to the GLM backend (rewriting --model to the
+        # failover model) instead of pausing. No-op unless failover is active,
+        # enabled, and ZAI_API_KEY is present. The rerouted cmd flows on to both
+        # the spawn and telemetry, so cost attributes to the GLM model.
+        rerouted, cmd = apply_credit_failover(provider, cmd, self._config)
+        if rerouted != provider:
+            self._log.info(
+                "credit-failover: rerouting %s spawn to %s/%s",
+                provider,
+                rerouted,
+                self._config.credit_failover_model,
+            )
+            provider = rerouted
         harness_env = resolve_harness_env(provider, self._config)
 
         try:
