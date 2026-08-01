@@ -10,8 +10,9 @@ You are fixing review findings on PR #77 (issue #42: Retry transient S3 upload f
 
 1. Read the review feedback above carefully.
 2. Fix every issue identified by the reviewer.
-3. Run `make lint` and `make test` to verify your fixes pass.
+3. Run `make quality` to verify your fixes pass (do not use file-targeted subsets — architecture tests only run under the full suite).
 4. Commit fixes with message: "review-fix: address review feedback (PR #77)"
+4a. **Self-review before pushing:** Run `git diff HEAD~N..HEAD` and confirm: no unintended files changed, no debug code remains, the fix's own failure mode is not worse than the original finding.
 5. **Post-commit verification:** After each commit, run `git diff --stat HEAD~1` and verify your commit by confirming that every intended file appears in the stat output. If a file is missing, your commit did NOT actually change it — go back and fix it.
 6. Do NOT introduce new features or refactor beyond what the review requested.
 

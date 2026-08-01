@@ -9,7 +9,7 @@ The upload handler does not retry on transient S3 503 errors. Each failure kills
 
 **Origin phase:** implement
 
-**CI Logs:**
+**CI Logs (tail):**
 ```
 FAILED tests/test_upload.py::test_upload_retries_on_503
 AssertionError: expected 3 retry attempts, got 0

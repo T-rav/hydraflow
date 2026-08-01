@@ -9,12 +9,14 @@ Intermittent 503s from S3 during upload cause job failures. Expected: retry up t
 
 ## Evaluation Criteria
 
-Evaluate the issue against these four criteria:
+Evaluate the issue against these six criteria:
 
 1. **Clarity**: Is the issue clearly written? Can an engineer understand what needs to happen?
 2. **Specificity**: Does it describe a concrete problem or feature, not a vague wish?
 3. **Actionability**: Is there enough context to start planning? (expected behavior, affected area, reproduction steps for bugs)
 4. **Scope**: Is it a single, bounded unit of work? (not an unstructured epic or multiple unrelated requests)
+5. **Currency**: For findings or bug reports that cite specific files, functions, or code patterns, verify the cited symptom still exists in the current codebase. Use Read or Grep tools to check. If the issue claims X is broken/missing/wrong, confirm X is actually broken/missing/wrong now. Set `already_addressed: true` if the described problem no longer exists.
+6. **Verifiable claim**: If the issue asserts that a specific thing is missing, broken, or not implemented, and that assertion is falsifiable by reading the source code, verify it. If the claim is demonstrably false (e.g., the function described as missing is present), return `ready: false` with `reasons: ["Claim not reproducible: <evidence>"]` and set `claim_verified: false`.
 
 ## Issue Type Classification
 
@@ -44,7 +46,7 @@ for competitive research and direction shaping before planning.
 Return ONLY a JSON object in this exact format, with no other text:
 
 ```json
-{"ready": true, "reasons": [], "issue_type": "feature", "clarity_score": 9, "needs_discovery": false, "enrichment": "## Triage Enrichment\n\n**Interpreted intent:** ...\n**Affected area:** ...\n**Acceptance criteria:**\n- ..."}
+{"ready": true, "reasons": [], "issue_type": "feature", "clarity_score": 9, "needs_discovery": false, "enrichment": "## Triage Enrichment\n\n**Interpreted intent:** ...\n**Affected area:** ...\n**Acceptance criteria:**\n- ...", "already_addressed": false, "claim_verified": null}
 ```
 
 or for vague product ideas needing discovery:
@@ -56,5 +58,24 @@ or for vague product ideas needing discovery:
 or for truly insufficient issues:
 
 ```json
-{"ready": false, "reasons": ["Specific reason why this cannot proceed"], "issue_type": "bug", "clarity_score": 0, "needs_discovery": false, "enrichment": ""}
+{"ready": false, "reasons": ["Specific reason why this cannot proceed"], "issue_type": "bug", "clarity_score": 0, "needs_discovery": false, "enrichment": "", "already_addressed": false, "claim_verified": null}
 ```
+
+or for a claim that is demonstrably false / already implemented (the described problem no longer exists at HEAD):
+
+```json
+{"ready": false, "reasons": ["Claim not reproducible: <evidence>"], "issue_type": "bug", "clarity_score": 5, "needs_discovery": false, "enrichment": "", "already_addressed": true, "claim_verified": false}
+```
+
+
+## Available Skills
+
+You have Claude Code skills available via the `Skill` tool. **If any skill's description may apply to your current task — even at 1% confidence — you MUST invoke it before proceeding.** Skills encode proven discipline you would otherwise skip.
+
+Priority when multiple apply:
+1. **Process skills first** (debugging, planning) — they shape *how* you work.
+2. **Implementation skills second** (TDD, simplify) — they shape *what* you build.
+
+Do not rationalize past a skill because the task feels simple, because you "remember" the skill, or because invoking it feels like overhead. Invoke it.
+
+- **superpowers:systematic-debugging** — Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes
