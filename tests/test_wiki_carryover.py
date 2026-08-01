@@ -17,12 +17,12 @@ import json
 import re
 from datetime import UTC, datetime
 
-from src.pending_concerns import (
+from pending_concerns import (
     AdversarialState,
     Concern,
     ConcernResolution,
 )
-from src.wiki_carryover import build_wiki_entry, detect_shipped_with_known_gaps
+from wiki_carryover import build_wiki_entry, detect_shipped_with_known_gaps
 
 
 def _make_concern(

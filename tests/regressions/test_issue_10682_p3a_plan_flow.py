@@ -41,9 +41,9 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
-from src.pending_concerns import AdversarialState, Concern
 
 from flows import Flow
+from pending_concerns import AdversarialState, Concern
 from tests.conftest import PlanResultFactory, TaskFactory
 from tests.helpers import make_plan_phase, supply_once
 
