@@ -3,9 +3,10 @@ GateHealthLoop, so the factory blindly retried into repeat hangs.
 
 2026-07-19: PRs #9983 and #10002 hung the CI ``Tests`` job — CANCELLED at
 ~the workflow's ``timeout-minutes`` with ZERO FAILED lines. That is not a
-red-check distribution (``tally_job_stats`` explicitly drops ``cancelled``
-conclusions), so nothing in GateHealthLoop (#9974) ever flagged it; the
-factory just retried into the same wedge. Root cause both times: a test
+red-check distribution (``tally_job_stats`` counts ``cancelled`` as a
+non-attempt — zero passes, zero failures — so it never drives born-broken
+or blame findings), so nothing in GateHealthLoop (#9974) ever flagged it;
+the factory just retried into the same wedge. Root cause both times: a test
 mocked a subprocess's ``.pid`` (defaulting to ``1``), and the code under
 test fed that straight into a real ``os.killpg`` — which reached the CI
 container's own PID 1. Diagnosis REQUIRED a Linux container: macOS raises a
@@ -22,6 +23,7 @@ bounded-local/Linux-container repro playbook instead of nothing at all.
 from __future__ import annotations
 
 from gate_health_loop import (
+    find_born_broken,
     find_suspected_hangs,
     finding_fingerprint,
     tally_job_stats,
@@ -43,12 +45,22 @@ _HANGING_TESTS_JOB = {
 }
 
 
-def test_cancelled_at_timeout_job_is_invisible_to_the_distribution_tally() -> None:
-    # Confirms the ORIGINAL bug premise still holds: this job shape
-    # contributes nothing to born-broken/blame-correlation stats. The fix
-    # is an ADDITIONAL classifier, not a change to this exclusion.
+def test_cancelled_at_timeout_job_is_a_non_attempt_in_the_distribution_tally() -> None:
+    # Confirms the ORIGINAL bug premise still holds at the DECISION level: this
+    # job shape drives no born-broken / blame finding. #10898 makes it VISIBLE
+    # as a non-attempt (skipped) so a born-broken finding can report "N skipped
+    # in window" as evidence — but the invariant is unchanged: zero passes,
+    # zero failures ⇒ never a born_broken. Pin the invariant, not the old
+    # incidental empty-dict representation.
     stats = tally_job_stats([_HANGING_TESTS_JOB])
-    assert stats == {}
+    assert set(stats) == {"Tests"}
+    entry = stats["Tests"]
+    assert entry.passes == 0
+    assert entry.failures == 0
+    assert entry.skipped == 1
+    # The real #10010 protection: a cancelled-at-timeout job never looks like a
+    # born-broken check no matter how many times it recurs.
+    assert find_born_broken(stats, min_attempts=2) == []
 
 
 def test_cancelled_at_timeout_with_unfinished_step_is_suspected_hang() -> None:
