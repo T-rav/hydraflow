@@ -130,9 +130,10 @@ def find_suspected_hangs(
 ) -> list[dict[str, Any]]:
     """Cancelled-at-timeout jobs with an unfinished test step (#10010).
 
-    A job cancelled by GitHub's own timeout enforcement is invisible to
-    ``tally_job_stats`` (cancelled is filtered out there) and looks nothing
-    like a normal red: zero FAILED lines, conclusion CANCELLED. That
+    A job cancelled by GitHub's own timeout enforcement is counted as a
+    non-attempt by ``tally_job_stats`` (it lands in ``.skipped``, not
+    ``.passes``/``.failures``) and looks nothing like a normal red: zero
+    FAILED lines, conclusion CANCELLED. That
     combination — duration landing within *tolerance_seconds* of the job's
     configured ``timeout-minutes`` AND a test step that never reached a
     terminal conclusion — is the signature a blind retry burns attempt
