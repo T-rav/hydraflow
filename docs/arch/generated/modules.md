@@ -31,6 +31,7 @@ graph LR
     src_sentry["src.sentry"]
     src_signal_control["src.signal_control"]
     src_state["src.state"]
+    src_stillness["src.stillness"]
     src_vitals["src.vitals"]
     src -- "7" --> src_arch
     src -- "10" --> src_audit

@@ -6,8 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `40087d1` — Fixes #10844: credit failover — reroute work to GLM instead of pausing (ADR-0119) (#10964) (#10964) *(2026-08-01)*
 - `0de9226` — Remove Sentry from the factory; observability owned by the SRE agent (ADR-0118) (#10954) (#10954) *(2026-08-01)*
-- `2793649` — Fixes #10844: credit failover — reroute work to GLM instead of pausing (ADR-0119) *(2026-07-31)*
 - `26cbece` — Fixes #10939: backfill **Date:** frontmatter on the undated Accepted ADRs (#10953) (#10953) *(2026-07-31)*
 - `46ad47f` — Remove Honeycomb/OTel telemetry from the factory (ADR-0118 supersedes ADR-0055) (#10950) (#10950) *(2026-07-31)*
 - `32bedda` — Fixes #10859: Prompt baselines are environment-dependent: HydraFlow... (#10938) (#10938) *(2026-07-31)*
