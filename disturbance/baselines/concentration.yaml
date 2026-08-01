@@ -1,0 +1,13 @@
+comment: "Grandfathered god-files (file-level fan-in >= threshold) \u2014 the concentration\
+  \ counter-metric to erosion.spread (#10840). The gate flags NEW god-files beyond\
+  \ this set. Last moved: initial baseline at sensor introduction (#10840)"
+entries:
+  base_background_loop: 66
+  config: 157
+  dedup_store: 51
+  events: 64
+  exception_classify: 81
+  models: 167
+  ports: 61
+  state: 63
+  subprocess_util: 53
