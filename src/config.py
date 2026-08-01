@@ -248,7 +248,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_PR_RED_REPAIR_DISPATCH_MAX_ATTEMPTS",
         2,
     ),
-    ("erosion_metrics_interval", "HYDRAFLOW_EROSION_METRICS_INTERVAL", 14400),
+    ("erosion_metrics_interval", "HYDRAFLOW_EROSION_METRICS_INTERVAL", 86400),
     (
         "erosion_metrics_max_issues_per_tick",
         "HYDRAFLOW_EROSION_METRICS_MAX_ISSUES_PER_TICK",
@@ -271,7 +271,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_ESCAPE_LEDGER_ENCODING_AGE_DAYS",
         14,
     ),
-    ("intervention_tally_interval", "HYDRAFLOW_INTERVENTION_TALLY_INTERVAL", 14400),
+    ("intervention_tally_interval", "HYDRAFLOW_INTERVENTION_TALLY_INTERVAL", 86400),
     (
         "intervention_tally_max_classify_per_tick",
         "HYDRAFLOW_INTERVENTION_TALLY_MAX_CLASSIFY_PER_TICK",
@@ -291,7 +291,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     (
         "second_order_vitals_interval",
         "HYDRAFLOW_SECOND_ORDER_VITALS_INTERVAL",
-        14400,
+        86400,
     ),
     (
         "second_order_vitals_window_days",
@@ -420,7 +420,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("repo_wiki_max_batch_age_hours", "HYDRAFLOW_REPO_WIKI_MAX_BATCH_AGE_HOURS", 24),
     ("max_repo_wiki_chars", "HYDRAFLOW_MAX_REPO_WIKI_CHARS", 15_000),
     ("diagnostic_interval", "HYDRAFLOW_DIAGNOSTIC_INTERVAL", 30),
-    ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 1800),
+    ("retrospective_interval", "HYDRAFLOW_RETROSPECTIVE_INTERVAL", 86400),
     ("principles_audit_interval", "HYDRAFLOW_PRINCIPLES_AUDIT_INTERVAL", 604800),
     (
         "principles_audit_max_issues_per_tick",
@@ -433,7 +433,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_SANDBOX_FAILURE_FIXER_INTERVAL",
         3600,
     ),
-    ("detector_calibration_interval", "HYDRAFLOW_DETECTOR_CALIBRATION_INTERVAL", 3600),
+    ("detector_calibration_interval", "HYDRAFLOW_DETECTOR_CALIBRATION_INTERVAL", 86400),
     (
         "detector_calibration_max_issues_per_tick",
         "HYDRAFLOW_DETECTOR_CALIBRATION_MAX_ISSUES_PER_TICK",
@@ -779,6 +779,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "giveup_window_enabled",
         "HYDRAFLOW_GIVEUP_WINDOW_ENABLED",
+        True,
+    ),
+    (
+        "credit_failover_enabled",
+        "HYDRAFLOW_CREDIT_FAILOVER_ENABLED",
         True,
     ),
     ("docker_read_only_root", "HYDRAFLOW_DOCKER_READ_ONLY_ROOT", True),
@@ -2123,7 +2128,7 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     erosion_metrics_interval: int = Field(
-        default=14400,
+        default=86400,
         ge=900,
         le=604800,
         description=(
@@ -2210,7 +2215,7 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     intervention_tally_interval: int = Field(
-        default=14400,
+        default=86400,
         ge=900,
         le=604800,
         description=(
@@ -2273,7 +2278,7 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     second_order_vitals_interval: int = Field(
-        default=14400,
+        default=86400,
         ge=900,
         le=604800,
         description=(
@@ -2702,6 +2707,33 @@ class HydraFlowConfig(BaseModel):
             "Model applied to every maintenance loop when set (e.g. 'glm-5.2'). "
             "Empty keeps each maintenance role's own model. Only touches the "
             "maintenance role-set, never the work loops."
+        ),
+    )
+    # Credit failover (#10844): when a Claude *work* spawn hits an authoritative
+    # Anthropic credit cap, reroute work spawns to the z.ai GLM backend and keep
+    # going instead of pausing. Requires ZAI_API_KEY (no-op without it). Switch
+    # back auto-probes Claude after cooldown / the error's reset time. Never
+    # touches maintenance loops (they dial independently).
+    credit_failover_enabled: bool = Field(
+        default=True,
+        description=(
+            "Reroute work spawns to the GLM backend on an authoritative Claude "
+            "credit cap instead of pausing (#10844). Requires ZAI_API_KEY."
+        ),
+    )
+    credit_failover_model: str = Field(
+        default="glm-5.2",
+        description=(
+            "Model for work spawns while credit-failover is active. Must be a "
+            "glm-* model (the zai-backend requirement)."
+        ),
+    )
+    credit_failover_cooldown_minutes: int = Field(
+        default=15,
+        ge=1,
+        description=(
+            "Minutes before probing Claude to switch back, used only when the "
+            "credit error carries no explicit reset time (#10844)."
         ),
     )
     triage_max_turns: int = Field(
@@ -4218,9 +4250,9 @@ class HydraFlowConfig(BaseModel):
         description="Number of recent retrospective entries to scan for patterns",
     )
     retrospective_interval: int = Field(
-        default=1800,
+        default=86400,
         ge=60,
-        le=86400,
+        le=604800,
         description="Poll interval in seconds for retrospective analysis loop",
     )
 
@@ -4960,10 +4992,10 @@ class HydraFlowConfig(BaseModel):
         description="UI kill-switch for DetectorCalibrationLoop (ADR-0049).",
     )
     detector_calibration_interval: int = Field(
-        default=3600,
+        default=86400,
         ge=60,
-        le=86400,
-        description="Seconds between DetectorCalibrationLoop cycles (default 1h).",
+        le=604800,
+        description="Seconds between DetectorCalibrationLoop cycles (default 24h).",
     )
     detector_calibration_max_issues_per_tick: int = Field(
         default=3,
@@ -5727,6 +5759,18 @@ class HydraFlowConfig(BaseModel):
             raise ValueError(msg)
         return v
 
+    @field_validator("credit_failover_model")
+    @classmethod
+    def credit_failover_model_must_be_glm(cls, v: str) -> str:
+        """The failover model runs on the zai backend, which requires glm-* (#10844)."""
+        if not v.startswith("glm"):
+            msg = (
+                f"credit_failover_model must be a glm-* model (got '{v}') — the "
+                "zai harness backend only accepts glm-* models."
+            )
+            raise ValueError(msg)
+        return v
+
     @field_validator("visual_fail_threshold")
     @classmethod
     def visual_fail_above_warn(cls, v: float, info: Any) -> float:
@@ -6052,33 +6096,47 @@ class HydraFlowConfig(BaseModel):
         return self
 
 
+# The gh_token priority chain, in order (highest priority first). Also the keys
+# _dotenv_lookup falls back on.
+_GH_TOKEN_ENV_KEYS: tuple[str, ...] = ("HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+# 1:1 credential-field → env-key. Read with empty-string defaults.
+_WHATSAPP_ENV_KEYS: dict[str, str] = {
+    "whatsapp_token": "HYDRAFLOW_WHATSAPP_TOKEN",
+    "whatsapp_phone_id": "HYDRAFLOW_WHATSAPP_PHONE_ID",
+    "whatsapp_recipient": "HYDRAFLOW_WHATSAPP_RECIPIENT",
+    "whatsapp_verify_token": "HYDRAFLOW_WHATSAPP_VERIFY_TOKEN",
+    "whatsapp_app_secret": "HYDRAFLOW_WHATSAPP_APP_SECRET",
+}
+#: Every env var :func:`build_credentials` reads, as one enumerable surface so
+#: test isolation and .env/documentation generators don't hand-list the
+#: credential keys (#10885). Folded into :func:`declared_env_keys`.
+CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(_GH_TOKEN_ENV_KEYS) | frozenset(
+    _WHATSAPP_ENV_KEYS.values()
+)
+
+
 def build_credentials(config: HydraFlowConfig) -> Credentials:
     """Build a ``Credentials`` instance from environment variables and .env files.
 
-    Resolution priority for ``gh_token``:
-      1. ``HYDRAFLOW_GH_TOKEN`` env var
-      2. ``GH_TOKEN`` env var
-      3. ``GITHUB_TOKEN`` env var
-      4. ``.env`` file in ``config.repo_root``
-
-    Other credential fields are read from their canonical env vars with
-    empty-string defaults (matching the old ``_ENV_STR_OVERRIDES`` behaviour).
+    Resolution priority for ``gh_token``: each key in :data:`_GH_TOKEN_ENV_KEYS`
+    (``HYDRAFLOW_GH_TOKEN`` → ``GH_TOKEN`` → ``GITHUB_TOKEN``) in ``os.environ``,
+    then the ``.env`` file in ``config.repo_root``. Other credential fields are
+    read from :data:`_WHATSAPP_ENV_KEYS` with empty-string defaults. The full key
+    surface is exported as :data:`CREDENTIAL_ENV_KEYS` (#10885).
     """
-    gh_token = (
-        os.environ.get("HYDRAFLOW_GH_TOKEN", "")
-        or os.environ.get("GH_TOKEN", "")
-        or os.environ.get("GITHUB_TOKEN", "")
-        or _dotenv_lookup(
-            config.repo_root, "HYDRAFLOW_GH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"
-        )
-    )
+    gh_token = ""
+    for key in _GH_TOKEN_ENV_KEYS:
+        gh_token = os.environ.get(key, "")
+        if gh_token:
+            break
+    if not gh_token:
+        gh_token = _dotenv_lookup(config.repo_root, *_GH_TOKEN_ENV_KEYS)
     return Credentials(
         gh_token=gh_token,
-        whatsapp_token=os.environ.get("HYDRAFLOW_WHATSAPP_TOKEN", ""),
-        whatsapp_phone_id=os.environ.get("HYDRAFLOW_WHATSAPP_PHONE_ID", ""),
-        whatsapp_recipient=os.environ.get("HYDRAFLOW_WHATSAPP_RECIPIENT", ""),
-        whatsapp_verify_token=os.environ.get("HYDRAFLOW_WHATSAPP_VERIFY_TOKEN", ""),
-        whatsapp_app_secret=os.environ.get("HYDRAFLOW_WHATSAPP_APP_SECRET", ""),
+        **{
+            field: os.environ.get(env_key, "")
+            for field, env_key in _WHATSAPP_ENV_KEYS.items()
+        },
     )
 
 
@@ -6498,8 +6556,52 @@ def _resolve_repo_scoped_paths(config: HydraFlowConfig) -> None:
                 )
 
 
+#: Test-isolation seam (#10902): repo roots whose ``.env`` :func:`_dotenv_lookup`
+#: must treat as absent. Production leaves this empty. The pytest session fixture
+#: registers the real checkout root (via :func:`mark_default_repo_dotenv_inert`)
+#: so a default-constructed ``HydraFlowConfig()`` in a test cannot read the
+#: operator's real ``.env`` (which carries a live ``HYDRAFLOW_GH_TOKEN``) even
+#: after ``os.environ`` is scrubbed. An explicit ``repo_root=tmp_path`` — the
+#: dotenv-fallback tests — is a different root and is unaffected.
+_DOTENV_INERT_ROOTS: set[Path] = set()
+
+
+def mark_default_repo_dotenv_inert() -> Path:
+    """Make the default-resolved repo root's ``.env`` inert for _dotenv_lookup.
+
+    Test-only seam (#10902); never called in production. Returns the marked root.
+    Uses the same :func:`_find_repo_root` the default ``repo_root`` resolves
+    through, so the registered path matches ``config.repo_root`` exactly.
+    """
+    root = _find_repo_root()
+    _DOTENV_INERT_ROOTS.add(root)
+    return root
+
+
+def register_dotenv_inert_root(root: Path) -> None:
+    """Mark an explicit ``root``'s ``.env`` inert for _dotenv_lookup (#10902)."""
+    _DOTENV_INERT_ROOTS.add(root.expanduser().resolve())
+
+
+def unregister_dotenv_inert_root(root: Path) -> None:
+    """Undo :func:`register_dotenv_inert_root` for ``root`` (#10902).
+
+    Discards only ``root`` — leaves any other registered roots (e.g. the session
+    fixture's real-checkout registration) intact.
+    """
+    _DOTENV_INERT_ROOTS.discard(root.expanduser().resolve())
+
+
+def clear_dotenv_inert_roots() -> None:
+    """Reset the #10902 inert-root seam (test teardown)."""
+    _DOTENV_INERT_ROOTS.clear()
+
+
 def _dotenv_lookup(repo_root: Path, *keys: str) -> str:
     """Read first matching non-empty value from ``repo_root/.env``."""
+    if _DOTENV_INERT_ROOTS and repo_root.expanduser().resolve() in _DOTENV_INERT_ROOTS:
+        # Test-isolation seam (#10902): the real checkout .env is inert.
+        return ""
     env_file = repo_root / ".env"
     if not env_file.exists():
         return ""
@@ -6564,7 +6666,12 @@ def declared_env_keys() -> frozenset[str]:
     test suite's session-scoped isolation fixture) should scrub this whole
     set rather than a ``HYDRAFLOW_``/``HYDRA_`` prefix rule alone, since
     several overrides (``OTEL_SERVICE_NAME``, ``HF_ENV``, ...) follow
-    third-party naming conventions instead (#10876).
+    third-party naming conventions instead (#10876). Credential keys are
+    *deliberately excluded* — they are read directly by
+    :func:`build_credentials` (not a table) and are enumerated separately as
+    :data:`CREDENTIAL_ENV_KEYS`, which the isolation fixture scrubs in addition
+    to this set (#10885). Folding them in here would make the #10876 leak guard
+    flag the deliberately-seeded ``GH_TOKEN=test-token``.
     """
     keys: set[str] = set()
     for table in (

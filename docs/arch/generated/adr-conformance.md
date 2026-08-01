@@ -87,6 +87,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0116 | enforced | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_prompt_fitness.py`, `pytest:tests/test_adr_enforcement_completeness.py`, `pytest:tests/test_prompt_rubric_calibration.py` |
 | ADR-0117 | enforced | `pytest:tests/test_prompt_observatory.py` |
 | ADR-0118 | enforced | `pytest:tests/architecture/test_no_otel_imports.py` |
+| ADR-0119 | enforced | `pytest:tests/test_credit_failover.py` |
 
 ## Check → ADRs it protects
 
@@ -145,6 +146,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_config_env.py` | ADR-0103 |
 | `pytest:tests/test_convergence_gate.py` | ADR-0094 |
 | `pytest:tests/test_convergence_ledger.py` | ADR-0094 |
+| `pytest:tests/test_credit_failover.py` | ADR-0119 |
 | `pytest:tests/test_dashboard_routes_repo.py` | ADR-0007, ADR-0008 |
 | `pytest:tests/test_data_migration_d2.py` | ADR-0021 |
 | `pytest:tests/test_edge_proposer_loop.py` | ADR-0058 |

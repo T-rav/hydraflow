@@ -172,7 +172,12 @@ sys.path.insert(0, str(_REPO_ROOT / "src"))
 sys.path.insert(0, str(_REPO_ROOT))
 
 import subprocess_util  # noqa: E402
-from config import declared_env_keys  # noqa: E402
+from config import (  # noqa: E402
+    CREDENTIAL_ENV_KEYS,
+    clear_dotenv_inert_roots,
+    declared_env_keys,
+    mark_default_repo_dotenv_inert,
+)
 from tests.helpers import ConfigFactory  # noqa: E402
 
 if TYPE_CHECKING:
@@ -267,6 +272,10 @@ def setup_test_environment():
     scrub_keys = (
         {key for key in os.environ if key.startswith(("HYDRAFLOW_", "HYDRA_"))}
         | declared_env_keys()
+        # The credential surface build_credentials reads (#10885): scrubbed from
+        # the exported registry instead of hand-listing GITHUB_TOKEN. GH_TOKEN is
+        # re-seeded to "test-token" via test_env below.
+        | CREDENTIAL_ENV_KEYS
         | {
             "GIT_DIR",
             "GIT_WORK_TREE",
@@ -274,15 +283,19 @@ def setup_test_environment():
             "GIT_AUTHOR_EMAIL",
             "GIT_COMMITTER_NAME",
             "GIT_COMMITTER_EMAIL",
-            "GITHUB_TOKEN",
         }
     )
     saved_env = {key: os.environ.pop(key) for key in scrub_keys if key in os.environ}
+    # #10902: even with os.environ scrubbed, a default-constructed HydraFlowConfig()
+    # resolves repo_root to the real checkout and _dotenv_lookup would read the
+    # operator's real .env. Mark that root inert for the session.
+    mark_default_repo_dotenv_inert()
     try:
         with patch.dict(os.environ, test_env, clear=False):
             yield
     finally:
         os.environ.update(saved_env)
+        clear_dotenv_inert_roots()
 
 
 @pytest.fixture(autouse=True)
@@ -305,6 +318,23 @@ def _reset_gh_semaphore():
     subprocess_util._gh_semaphore = None
     subprocess_util._rate_limit_until = None
     subprocess_util.reset_gh_circuit_breaker()
+
+
+@pytest.fixture(autouse=True)
+def _reset_credit_failover():
+    """Clear the credit-failover module singleton between tests (#10844).
+
+    ``credit_failover`` holds process-wide runtime state (whether work spawns are
+    rerouted to GLM). A test that engages failover must not leak that into a later
+    test on the same xdist worker, which would silently reroute its spawns. Cleared
+    through the public ``reset_for_tests`` entrypoint (mirrors the gh circuit
+    breaker reset above; #10889 module-state reset-coverage pattern).
+    """
+    import credit_failover
+
+    credit_failover.reset_for_tests()
+    yield
+    credit_failover.reset_for_tests()
 
 
 @pytest.fixture(autouse=True)

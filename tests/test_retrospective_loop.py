@@ -11,7 +11,9 @@ class TestRetrospectiveIntervalConfig:
         from config import HydraFlowConfig
 
         cfg = HydraFlowConfig()
-        assert cfg.retrospective_interval == 1800
+        # damper-0a (#10843): retrospective measures long-horizon proposal
+        # effectiveness — tick daily, not every 30 min.
+        assert cfg.retrospective_interval == 86400
 
     def test_rejects_below_minimum(self) -> None:
         from config import HydraFlowConfig

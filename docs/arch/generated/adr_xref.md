@@ -125,6 +125,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0116 | `src.prompt_fitness` | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_prompt_fitness.py`, `pytest:tests/test_adr_enforcement_completeness.py`, `pytest:tests/test_prompt_rubric_calibration.py` |
 | ADR-0117 | `src.prompt_gate` | `pytest:tests/test_prompt_observatory.py` |
 | ADR-0118 | — | `pytest:tests/architecture/test_no_otel_imports.py` |
+| ADR-0119 | `src.credit_failover` | `pytest:tests/test_credit_failover.py` |
+| ADR-0120 | — | — |
 
 ## Module → ADRs
 
@@ -166,6 +168,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.convergence_oscillation_loop` | ADR-0098 |
 | `src.convergence_recording` | ADR-0096, ADR-0102 |
 | `src.corpus_learning_loop` | ADR-0045 |
+| `src.credit_failover` | ADR-0119 |
 | `src.dashboard` | ADR-0007, ADR-0008, ADR-0038 |
 | `src.dashboard_routes._atlas_routes` | ADR-0060, ADR-0090 |
 | `src.dashboard_routes._cost_rollups` | ADR-0045 |

@@ -124,6 +124,15 @@ class TestUndeclaredLegacyLayerDrift:
         issue = world.github.issue(issues[0]["number"])
         for ctx in _LEGACY_LAYER_CONTEXTS:
             assert ctx in issue.body
+        # #10894: the REAL audit engine's undeclared-context drift must route to
+        # the declare-first remediation — this pins the auditor's emitted marker
+        # against the loop's branch (a reword of one without the other fails here,
+        # not just in the unit test that hand-copies the marker string).
+        assert "ADDING-A-GATE" in issue.body
+        assert (
+            "make gen-gates\npython scripts/setup_branch_protection.py --apply"
+            not in issue.body
+        )
 
     async def test_no_legacy_layer_files_no_issue(self, tmp_path) -> None:
         world = MockWorld(tmp_path)
