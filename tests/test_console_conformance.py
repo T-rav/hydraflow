@@ -1,4 +1,4 @@
-"""Unit ring for scripts/check_console_conformance.py (ARCH-0001 gate)."""
+"""Unit ring + live-tree check for scripts/check_console_conformance.py (ARCH-0001 gate)."""
 
 from __future__ import annotations
 
@@ -88,3 +88,10 @@ def test_staleness_needle_trips_at_six(tmp_path: Path) -> None:
         (tmp_path / f"agents/console/decisions/arch/{i:04d}-run.md").write_text(run)
     errors = collect_errors(tmp_path, check_git=False)
     assert any("calibration stale" in e for e in errors)
+
+
+def test_repo_ledger_is_conformant() -> None:
+    """The live agents/ tree passes the gate (git immutability checked by the
+    make target locally; skipped here so shallow CI clones cannot false-pass)."""
+    repo_root = Path(__file__).resolve().parent.parent
+    assert collect_errors(repo_root, check_git=False) == []
