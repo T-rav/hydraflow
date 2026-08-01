@@ -1,17 +1,24 @@
 """Audit + ratchet: module-global mutable state must declare test-reset coverage (#10889).
 
 Issue #10874 fixed the *wrong-alias* failure mode; this closes the follow-on gap:
-module-level mutable state (caches, singletons, lock registries) that is written
-at runtime can leak across tests under ``-n auto --dist loadscope`` (non-
-deterministic worker scheduling). Every such global must have a *declared
-disposition* — a reset fixture, a documented reason the leak is harmless, or a
-note that it is tracked debt awaiting a fixture. A new ungoverned global added to
-``src/`` fails this guard until it is classified.
+module-level mutable state (container caches, lock registries, and custom-object
+singletons) that is written at runtime can leak across tests under
+``-n auto --dist loadscope`` (non-deterministic worker scheduling). Every such
+global must have a *declared disposition* — a reset fixture, a documented reason
+the leak is harmless, or a note that it is tracked debt awaiting a fixture. A new
+ungoverned global added to ``src/`` fails this guard until it is classified.
 
-This is the ratchet, not the burn-down: the DEBT entries below are the honest
-current gap (only 4 of 20 have reset coverage today). Adding their reset fixtures
-is follow-up work; this guard makes the inventory durable and stops it growing
-silently.
+Two candidate shapes are scanned: (1) module bindings to a mutable *container*
+(``{}``/``[]``/``set()``/factory) that is runtime-mutated, and (2) module
+bindings to an instance of a locally-defined *non-frozen* class — the idiomatic
+``_X = SomeClass()`` singleton whose attributes/internal state get mutated,
+possibly from another module (so it is flagged by shape, not by proven mutation;
+``@dataclass(frozen=True)`` instances are immutable and excluded).
+
+This is the ratchet, not the burn-down: the ``debt:`` entries below are the
+honest current gap (only 4 of 25 have reset coverage today). Adding their reset
+fixtures is follow-up work; this guard makes the inventory durable and stops it
+growing silently.
 """
 
 from __future__ import annotations
@@ -50,26 +57,24 @@ _MUT_METHODS = {
     "popleft",
 }
 
-# Read-only module-level tables whose only "mutation" is a same-named *local*
-# shadow inside a function — not the module global. Excluded with a reason so the
-# exclusion itself is auditable (a scope-precise detector via ``symtable`` drops
-# real workspace locks as false negatives, which is the worse error for a guard).
-_LOCAL_SHADOW_EXCLUSIONS = {
-    "src/config.py::_ENV_INT_OVERRIDES",  # read-only env-override table; local shadow in a resolver
-}
-
-#: Every runtime-mutated module global → its test-reset disposition. Keyed on
+#: Every detected mutable module global → its test-reset disposition. Keyed on
 #: ``<src-relative-path>::<name>`` (line-number-free so it survives edits).
-#:   reset:<fixture>   — an autouse conftest fixture clears it every test
-#:   harmless:<reason> — cross-test leakage is provably benign
-#:   debt:<note>       — no reset coverage yet; tracked burn-down (#10889)
+#:   reset:<fixture>   — a *function-scoped* autouse conftest fixture clears it every test
+#:   harmless:<reason> — cross-test leakage is provably benign (or state is effectively immutable)
+#:   debt:<note>       — no per-test reset yet; tracked burn-down (#10889)
 _DISPOSITION: dict[str, str] = {
-    # --- covered today (4) ---
+    # --- covered today (3) ---
     "src/subprocess_util.py::_gh_semaphore": "reset:_reset_gh_semaphore",
     "src/subprocess_util.py::_rate_limit_until": "reset:_reset_gh_semaphore",
     "src/subprocess_util.py::_gh_circuit_breaker": "reset:_reset_gh_semaphore (reset_gh_circuit_breaker)",
-    "src/config.py::_DOTENV_INERT_ROOTS": "reset:setup_test_environment (clear_dotenv_inert_roots)",
-    # --- tracked debt: no per-test reset fixture yet (16) ---
+    "src/credit_failover.py::_state": "reset:_reset_credit_failover",
+    # --- harmless (effectively immutable, import-time-only, or caller-paired) ---
+    "src/config.py::_ENV_INT_OVERRIDES": "harmless:import-time-only += (config.py) appending give-up-window overrides; never mutated during a run",
+    "src/config.py::_DOTENV_INERT_ROOTS": "harmless:session-scoped registration of the default repo root; extra register_dotenv_inert_root calls must be unregister-paired by the caller (test_dotenv_inert_under_pytest_10902.py), not reset per-test",
+    "src/events.py::_event_counter": "harmless:monotonic event-id counter; tests never assert absolute IDs (docs/wiki/testing.md), so leak is benign by convention",
+    # --- tracked debt: no per-test reset fixture yet ---
+    "src/knowledge_metrics.py::metrics": "debt:mutable metrics accumulator (increment/reset); has .reset() but no autouse fixture calls it",
+    "src/agent_rate_backoff.py::_BACKOFF": "debt:rate-backoff singleton; no autouse reset, touching tests pair try/finally manually",
     "src/subprocess_util.py::_shadow_sampler": "debt:shadow-corpus sampler; repopulated per call, leak low-risk",
     "src/adr_utils.py::_assigned_adr_numbers": "debt:ADR-number allocator cache; leak could mask a collision test",
     "src/plugin_skill_registry.py::_skill_cache": "debt:skill discovery cache; leak could serve stale skills",
@@ -107,8 +112,34 @@ def _mutable_binding(node: ast.expr | None) -> bool:
     return False
 
 
-def _module_candidates(tree: ast.Module) -> dict[str, int]:
-    out: dict[str, int] = {}
+def _is_frozen_dataclass(cls: ast.ClassDef) -> bool:
+    for dec in cls.decorator_list:
+        if not isinstance(dec, ast.Call):
+            continue
+        func = dec.func
+        name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+        if name != "dataclass":
+            continue
+        for kw in dec.keywords:
+            if (
+                kw.arg == "frozen"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
+            ):
+                return True
+    return False
+
+
+def _module_candidates(tree: ast.Module) -> dict[str, str]:
+    """``name -> kind`` where kind is ``'container'`` or ``'singleton'``.
+
+    container: a mutable container literal/factory (reset-sensitive only if
+      runtime-mutated). singleton: an instance of a locally-defined *non-frozen*
+      class — reset-sensitive by shape (mutation may be cross-module).
+    """
+    classdefs = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
+    frozen = {name for name, cls in classdefs.items() if _is_frozen_dataclass(cls)}
+    out: dict[str, str] = {}
     for node in tree.body:
         pairs: list[tuple[ast.Name, ast.expr | None]] = []
         if isinstance(node, ast.Assign):
@@ -117,7 +148,14 @@ def _module_candidates(tree: ast.Module) -> dict[str, int]:
             pairs = [(node.target, node.value)]
         for target, value in pairs:
             if _mutable_binding(value):
-                out[target.id] = target.lineno
+                out[target.id] = "container"
+            elif (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+                and value.func.id in classdefs
+                and value.func.id not in frozen
+            ):
+                out[target.id] = "singleton"
     return out
 
 
@@ -169,10 +207,10 @@ def discover_mutable_module_state() -> set[str]:
             continue
         mutated = _runtime_mutated_names(tree)
         rel = path.relative_to(_SRC.parent).as_posix()
-        for name in candidates:
-            key = f"{rel}::{name}"
-            if name in mutated and key not in _LOCAL_SHADOW_EXCLUSIONS:
-                found.add(key)
+        for name, kind in candidates.items():
+            # singletons are reset-sensitive by shape; containers only if mutated.
+            if kind == "singleton" or name in mutated:
+                found.add(f"{rel}::{name}")
     return found
 
 
