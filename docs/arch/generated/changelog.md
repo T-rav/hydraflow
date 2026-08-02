@@ -6,14 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
-- `3e1b590` — Merge remote-tracking branch 'origin/staging' into feat/rails-drift-caretaker-loop-10936 *(2026-08-01)*
-- `005d775` — feat(timeline): emit PR diff stats in pr_created/merge_update payloads (#10788) (#10993) (#10993) *(2026-08-01)*
-- `301791d` — fix(rails): wire RailsDriftCaretakerLoop into new-loop CI gates (#10936) (#10936) *(2026-08-01)*
-- `b593e0e` — fix(arch): register RailsDriftCaretakerLoop in functional_areas.yml + regen (#10936) (#10936) *(2026-08-01)*
-- `113c0e6` — Merge remote-tracking branch 'origin/staging' into feat/rails-drift-caretaker-loop-10936 *(2026-08-01)*
-- `160bfbd` — chore(config): remove dead memory_auto_approve knob (#10789) (#10987) (#10987) *(2026-08-01)*
-- `a20b7c1` — feat(rails): rails.yaml manifest + drift-caretaker loop (#10936) (#10936) *(2026-08-01)*
-- `9a0b704` — fix(adr): exclude recorded exemptions from ADR-enforcement debt headline (#10868) (#10989) (#10989) *(2026-08-01)*
+- `0438e9c` — docs(ul): UL scoping ADR + 7 assurance term entries (#10834) (#10834) *(2026-08-01)*
 - `e5791bc` — chore(rc): regen arch artifacts after main merge (rc/2026-08-01-1707) *(2026-08-01)*
 - `3903d7e` — Merge remote-tracking branch 'origin/main' into rc/2026-08-01-1707 *(2026-08-01)*
 - `1be7dbf` — refactor: god-file decomposition sweep — pr_manager, review_phase, plan_phase (#10840) (#10982) (#10982) *(2026-08-01)*

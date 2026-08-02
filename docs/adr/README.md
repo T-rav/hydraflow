@@ -181,6 +181,7 @@ cadence and files remediation issues on drift.
 | [0119](0119-credit-failover-to-glm.md) | Credit failover — reroute work to GLM instead of pausing when Claude credits are exhausted | Accepted |
 | [0120](0120-stillness-control-architecture.md) | The stillness control architecture — setpoint regulators, an optimization layer, and innovation-filtered sensing | Proposed |
 | [0121](0121-rails-manifest-and-drift-caretaker.md) | Rails manifest (rails.yaml) + drift caretaker — template conformance as data | Proposed |
+| [0122](0122-vocabulary-scopes-for-the-three-assurance-disciplines.md) | Vocabulary scopes for the three assurance disciplines | Proposed |
 
 ## Adding a new ADR
 
