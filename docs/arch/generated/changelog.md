@@ -6,12 +6,16 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `08a005a` — Merge remote-tracking branch 'origin/main' into rc/2026-08-02-1257 *(2026-08-02)*
+- `829f486` — feat(supervisor): Fable goal-supervisor loop — Tier-2 liveness (#10733) (#11000) (#11000) *(2026-08-02)*
+- `14a2577` — fix(adr): close two ratchet-integrity gaps — deadline receipts + REAL relatedness (#10861) (#10999) (#10999) *(2026-08-02)*
 - `1c0d194` — feat: bidirectional enforcement — Binds: axis + broadened self-mod class (#10849, #10851) (#10997) (#10997) *(2026-08-02)*
 - `ac8db5e` — docs(ul): UL scoping ADR (0122) + 7 assurance term entries (#10834) (#10995) (#10995) *(2026-08-02)*
 - `1b76da9` — feat(rails): rails.yaml manifest + drift-caretaker loop (#10936) (#10992) (#10992) *(2026-08-01)*
 - `005d775` — feat(timeline): emit PR diff stats in pr_created/merge_update payloads (#10788) (#10993) (#10993) *(2026-08-01)*
 - `160bfbd` — chore(config): remove dead memory_auto_approve knob (#10789) (#10987) (#10987) *(2026-08-01)*
 - `9a0b704` — fix(adr): exclude recorded exemptions from ADR-enforcement debt headline (#10868) (#10989) (#10989) *(2026-08-01)*
+- `e5791bc` — chore(rc): regen arch artifacts after main merge (rc/2026-08-01-1707) *(2026-08-01)*
 - `3903d7e` — Merge remote-tracking branch 'origin/main' into rc/2026-08-01-1707 *(2026-08-01)*
 - `1be7dbf` — refactor: god-file decomposition sweep — pr_manager, review_phase, plan_phase (#10840) (#10982) (#10982) *(2026-08-01)*
 - `0f0a672` — refactor: extract WebSocket streaming from dashboard _routes god-file (#10978) (#10978) *(2026-08-01)*
