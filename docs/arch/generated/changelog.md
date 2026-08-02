@@ -6,6 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `113c0e6` — Merge remote-tracking branch 'origin/staging' into feat/rails-drift-caretaker-loop-10936 *(2026-08-01)*
+- `160bfbd` — chore(config): remove dead memory_auto_approve knob (#10789) (#10987) (#10987) *(2026-08-01)*
+- `a20b7c1` — feat(rails): rails.yaml manifest + drift-caretaker loop (#10936) (#10936) *(2026-08-01)*
+- `9a0b704` — fix(adr): exclude recorded exemptions from ADR-enforcement debt headline (#10868) (#10989) (#10989) *(2026-08-01)*
+- `e5791bc` — chore(rc): regen arch artifacts after main merge (rc/2026-08-01-1707) *(2026-08-01)*
 - `3903d7e` — Merge remote-tracking branch 'origin/main' into rc/2026-08-01-1707 *(2026-08-01)*
 - `1be7dbf` — refactor: god-file decomposition sweep — pr_manager, review_phase, plan_phase (#10840) (#10982) (#10982) *(2026-08-01)*
 - `0f0a672` — refactor: extract WebSocket streaming from dashboard _routes god-file (#10978) (#10978) *(2026-08-01)*

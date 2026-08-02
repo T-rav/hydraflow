@@ -55,7 +55,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 | `HYDRAFLOW_ADR_DRIFT_RESOLVER` | `adr_drift_resolver_tool` | `adr_drift_resolver_model` |
 
-## Background loops (63)
+## Background loops (64)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -102,6 +102,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `pr_unsticker` | `PRUnstickerLoop` | Operations | `background_model` | — | HITL escalation | Requeues stalled HITL PRs by validating requirements and reopening flow. |
 | `pricing_refresh` | `PricingRefreshLoop` | Learning & Insights | — | — | PR review + merge gate | Daily upstream-pricing refresh caretaker — fetches LiteLLM JSON, opens PR on drift; bounds-guarded, always human-reviewed. |
 | `principles_audit` | `PrinciplesAuditLoop` | Governance & Audit | — | — | HITL escalation | Weekly ADR-0044 audit of HydraFlow-self plus managed repos; blocks onboarding on P1–P5 fails. |
+| `rails_drift_caretaker` | `RailsDriftCaretakerLoop` | Governance & Audit | — | — | — | Audits each managed repo's live state against its rails.yaml manifest (declared template layers / coverage floor / domain gate scripts) and files deduped drift issues. See ADR-0121. |
 | `rc_budget` | `RCBudgetLoop` | Repo Health | — | — | HITL escalation | Detects RC wall-clock bloat via rolling-median + spike signals across recent runs. |
 | `repo_wiki` | `RepoWikiLoop` | Learning & Insights | `wiki_compilation_model` | — | HITL escalation; PR review + merge gate | Lints and maintains per-repo knowledge wikis compiled from plan/implement/review cycles. |
 | `report_issue` | `ReportIssueLoop` | Intake | `report_issue_model` | ✅ | HITL escalation | Processes queued bug reports into GitHub issues via the configured agent. |
