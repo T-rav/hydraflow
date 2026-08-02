@@ -44,6 +44,16 @@ export const PIPELINE_POLL_SAFETY_NET_MS = 30_000
 export const COST_POLL_MS = 60_000
 
 /**
+ * Operator supervisor panel (#10733, ADR-0124) REST-poll cadence. The panel
+ * reads `/api/diagnostics/supervisor/thread` (a small append-only JSONL the
+ * Tier-2 goal-supervisor writes only on non-trivial ticks), so it polls on this
+ * slow fixed cadence — one pinned interval, aborted in-flight on unmount. The
+ * supervisor loop itself ticks infrequently, so a fast poll would only re-read
+ * an unchanged thread; 30s keeps the verdict fresh without churn.
+ */
+export const SUPERVISOR_POLL_MS = 30_000
+
+/**
  * WebSocket reconnect backoff (PR5). A flapping socket previously re-ran the
  * heavy onopen fan-out (10+ fetches + history replay) every fixed 2s. We now
  * back off exponentially with full jitter — delay = random(0, min(BASE * 2**n,
