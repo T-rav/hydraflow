@@ -127,6 +127,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0118 | — | `pytest:tests/architecture/test_no_otel_imports.py` |
 | ADR-0119 | `src.credit_failover` | `pytest:tests/test_credit_failover.py` |
 | ADR-0120 | — | — |
+| ADR-0121 | `src.rails_drift_caretaker_loop`, `src.rails_manifest` | — |
 | ADR-0122 | — | — |
 
 ## Module → ADRs
@@ -261,6 +262,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.prompt_fitness` | ADR-0116 |
 | `src.prompt_gate` | ADR-0117 |
 | `src.prompt_template` | ADR-0087 |
+| `src.rails_drift_caretaker_loop` | ADR-0121 |
+| `src.rails_manifest` | ADR-0121 |
 | `src.rc_budget_loop` | ADR-0045 |
 | `src.repo_runtime` | ADR-0006, ADR-0007, ADR-0008, ADR-0009, ADR-0038 |
 | `src.repo_wiki` | ADR-0032, ADR-0053, ADR-0061 |

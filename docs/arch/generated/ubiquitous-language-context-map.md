@@ -35,6 +35,7 @@ graph LR
     mergestatewatcherloop["MergeStateWatcherLoop<br/><i>loop</i>"]
     pricingrefreshloop["PricingRefreshLoop<br/><i>loop</i>"]
     prunstickerloop["PRUnstickerLoop<br/><i>loop</i>"]
+    railsdriftcaretakerloop["RailsDriftCaretakerLoop<br/><i>loop</i>"]
     rcbudgetloop["RCBudgetLoop<br/><i>loop</i>"]
     skillpromptevalloop["SkillPromptEvalLoop<br/><i>loop</i>"]
     staleissuegcloop["StaleIssueGCLoop<br/><i>loop</i>"]

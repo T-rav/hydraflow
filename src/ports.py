@@ -60,6 +60,7 @@ from models import (
     HITLItem,
     LabelDrift,
     LoopResult,
+    PRDiffStats,
     PRInfo,
     PRListItem,
     ReviewVerdict,
@@ -444,6 +445,11 @@ class PRPort(Protocol):
 
     async def get_pr_head_sha(self, pr_number: int) -> str:
         """Fetch the HEAD commit SHA for *pr_number*. Returns empty string on failure."""
+        ...
+
+    async def get_pr_diff_stats(self, pr_number: int) -> PRDiffStats:
+        """Best-effort PR diff stats (commit sha, files-changed, ±lines) for the
+        operator timeline (#10788). Returns an empty dict on failure/dry-run."""
         ...
 
     async def get_pr_mergeable(self, pr_number: int) -> bool | None:

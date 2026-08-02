@@ -192,6 +192,63 @@ def merge_cost_by_model(results: list[list[dict[str, Any]]]) -> list[dict[str, A
     return merged
 
 
+def group_cost_by_model_by_repo(
+    per_repo: list[tuple[str, list[dict[str, Any]]]],
+    *,
+    generated_at: str = "",
+) -> dict[str, Any]:
+    """Group per-repo cost-by-model rows into the operator panel payload (#10785).
+
+    Each input is ``(repo_slug, rows)`` where ``rows`` is one repo's
+    :func:`~dashboard_routes._cost_rollups.build_cost_by_model` output for the
+    rolling-24h window. Returns a single payload carrying BOTH:
+
+    * ``all`` — the cross-repo cost-per-model aggregate, folded through
+      :func:`merge_cost_by_model` so a model spent across several repos sums into
+      one row (no new cost math), plus ``total_cost_usd`` across every model.
+    * ``repos`` — the per-repo breakdown, each entry keeping its own
+      cost-per-model list and a repo total, sorted by spend descending (ties
+      broken alphabetically by slug for deterministic output).
+
+    The window is fixed at 24h (``window_hours``), labelled ``"last 24h"``: this
+    endpoint intentionally exposes only the rolling-24h view, since
+    ``cost_inferences.jsonl`` carries no run/session id for a per-run scope. An
+    empty ``per_repo`` — or repos with no spend in the window — yields zeros,
+    never an error.
+    """
+    all_rows = merge_cost_by_model([rows for _slug, rows in per_repo])
+    # merge_cost_by_model folds the numeric buckets but drops the per-model
+    # unpriced flag; re-derive it from the per-repo rows so the aggregate row can
+    # render "unknown" (never "$0.00") for a model whose spend was unpriced in
+    # ANY repo (#9821). This is a boolean OR / count, not cost math.
+    unpriced: dict[str, int] = defaultdict(int)
+    for _slug, rows in per_repo:
+        for r in rows:
+            unpriced[str(r.get("model"))] += int(r.get("unpriced_calls", 0) or 0)
+    for r in all_rows:
+        n = unpriced.get(str(r.get("model")), 0)
+        r["unpriced_calls"] = n
+        r["cost_unknown"] = n > 0
+    all_total = round(
+        sum(float(r.get("cost_usd", 0.0) or 0.0) for r in all_rows), _USD_PLACES
+    )
+    repos: list[dict[str, Any]] = []
+    for slug, rows in per_repo:
+        repo_total = round(
+            sum(float(r.get("cost_usd", 0.0) or 0.0) for r in rows), _USD_PLACES
+        )
+        repos.append({"repo": slug, "total_cost_usd": repo_total, "by_model": rows})
+    repos.sort(key=lambda r: (-float(r["total_cost_usd"]), str(r["repo"])))
+    return {
+        "generated_at": generated_at,
+        "window_hours": 24,
+        "window_label": "last 24h",
+        "total_cost_usd": all_total,
+        "all": all_rows,
+        "repos": repos,
+    }
+
+
 def merge_per_loop_cost(results: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
     """Fold several :func:`build_per_loop_cost` lists, grouping by loop.
 

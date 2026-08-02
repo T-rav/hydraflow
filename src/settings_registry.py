@@ -171,8 +171,6 @@ SETTINGS: dict[str, SettingSpec] = {
     "branch_gc_stale_days": SettingSpec("Branch GC", live=True, order=0),
     "branch_gc_min_delete_age_days": SettingSpec("Branch GC", live=True, order=1),
     "branch_gc_delete_enabled": SettingSpec("Branch GC", live=True, order=2),
-    # --- Memory ----------------------------------------------------------
-    "memory_auto_approve": SettingSpec("Memory", live=True, order=0),
     # --- Paths -----------------------------------------------------------
     # A workspace path is read when workspaces are created at startup.
     "workspace_base": SettingSpec("Paths", live=False, order=0),
@@ -227,6 +225,49 @@ SETTINGS: dict[str, SettingSpec] = {
 def mutable_field_names() -> set[str]:
     """The set of config fields the control route may mutate."""
     return set(SETTINGS)
+
+
+# --- Workflow sections (operator-legible grouping, #10786) ------------------
+# The settings screen's fine-grained ``group`` is the source of truth for a
+# field's home; the operator console's workflow-config panel wants a COARSER,
+# stage/concern-oriented grouping on top of it. Rather than a UI-side allowlist
+# (which would silently hide a newly registered field), the section is derived
+# HERE from the group, so a new registry entry lands in a section automatically.
+#
+# ``build_settings_schema`` emits the derived section per row as an ADDITIVE
+# ``section`` key; the existing ``group`` key is untouched, so the classic flat
+# ``RuntimeSettingsPanel`` keeps working unchanged.
+OTHER_SECTION = "Other"
+
+GROUP_TO_SECTION: dict[str, str] = {
+    "Work Queue": "Work Queue",
+    "Concurrency": "Workers & Batch",
+    "Scheduling": "Scheduling",
+    "Models": "Model Routing",
+    "Model Routing": "Model Routing",
+    "CI & Quality": "CI & Quality",
+    "Trust Fleet": "CI & Quality",
+    "Prompt Refinement": "CI & Quality",
+    "Issue Refinement": "CI & Quality",
+    "PR Unsticker": "Merge & Release",
+    "Branching & Release": "Merge & Release",
+    "Reliability": "Safety & Reliability",
+    "Autonomy": "Safety & Reliability",
+    "Governance": "Safety & Reliability",
+    "Event-Loop Watchdog": "Safety & Reliability",
+    "Branch GC": "Safety & Reliability",
+    "Paths": "Paths",
+}
+
+
+def section_for_group(group: str) -> str:
+    """Map a settings ``group`` to its coarse workflow ``section``.
+
+    Any group without an explicit mapping falls back to :data:`OTHER_SECTION`,
+    so every registered field is guaranteed to land in some section — a field
+    can never be silently dropped from the workflow-config panel.
+    """
+    return GROUP_TO_SECTION.get(group, OTHER_SECTION)
 
 
 def _unwrap_optional(annotation: Any) -> Any:
@@ -292,6 +333,7 @@ def build_settings_schema(config: HydraFlowConfig) -> list[dict[str, Any]]:
             {
                 "name": name,
                 "group": spec.group,
+                "section": section_for_group(spec.group),
                 "live": spec.live,
                 "type": ui_type,
                 "description": info.description or "",

@@ -51,6 +51,19 @@ def _make_manager(cfg: MagicMock) -> tuple[PRManager, MagicMock]:
     return pm, bus
 
 
+@pytest.fixture(autouse=True)
+def _stub_pr_diff_stats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#10788: merge_pr now enriches MERGE_UPDATE with a best-effort
+    ``gh pr view`` diff-stat read. These tests stub the merge subprocess but
+    not that read; default it to an empty (degraded) read so no real ``gh``
+    subprocess is spawned. The cost-hook assertions here are unaffected."""
+
+    async def _empty(_self: object, _pr_number: int) -> dict[str, object]:
+        return {}
+
+    monkeypatch.setattr("pr_manager.PRManager.get_pr_diff_stats", _empty)
+
+
 async def test_merge_success_invokes_issue_cost_hook_with_aggregated_cost(
     merge_cfg: MagicMock,
     monkeypatch: pytest.MonkeyPatch,

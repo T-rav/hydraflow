@@ -35,9 +35,11 @@ from models import (
     LabelDrift,
     MergeUpdatePayload,
     PRCreatedPayload,
+    PRDiffStats,
     PRInfo,
     PRListItem,
     ReviewVerdict,
+    merge_diff_stats,
 )
 from pr_manager_promotion import PRManagerPromotionMixin
 from prep import HYDRAFLOW_LABELS, HYDRAFLOW_LITERAL_LABELS
@@ -453,17 +455,21 @@ class PRManager(PRManagerPromotionMixin):
                 draft=draft,
             )
 
+            payload = PRCreatedPayload(
+                pr=pr_number,
+                issue=issue.number,
+                branch=branch,
+                draft=draft,
+                url=pr_url,
+                title=title,
+            )
+            # Best-effort diff-stat enrichment for the operator timeline
+            # (#10788). Failure omits the keys — never blocks the event.
+            merge_diff_stats(payload, await self.get_pr_diff_stats(pr_number))
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.PR_CREATED,
-                    data=PRCreatedPayload(
-                        pr=pr_number,
-                        issue=issue.number,
-                        branch=branch,
-                        draft=draft,
-                        url=pr_url,
-                        title=title,
-                    ),
+                    data=payload,
                 )
             )
 
@@ -644,6 +650,10 @@ class PRManager(PRManagerPromotionMixin):
                 payload["title"] = pr_title
             if issue_no is not None:
                 payload["issue"] = issue_no
+            # Best-effort diff-stat enrichment for the operator timeline
+            # (#10788). Fetched post-merge so ``commit_sha`` resolves to the
+            # squash merge commit (``mergeCommit.oid``); failure omits the keys.
+            merge_diff_stats(payload, await self.get_pr_diff_stats(pr_number))
             await self._bus.publish(
                 HydraFlowEvent(
                     type=EventType.MERGE_UPDATE,
@@ -2884,6 +2894,59 @@ class PRManager(PRManagerPromotionMixin):
         if isinstance(data, dict):
             return data.get("headRefOid", "")
         return ""
+
+    async def get_pr_diff_stats(self, pr_number: int) -> PRDiffStats:
+        """Best-effort PR diff stats (commit sha, files-changed, ±lines) for
+        the operator timeline (#10788).
+
+        Runs ``gh pr view <n> --json headRefOid,mergeCommit,additions,``
+        ``deletions,changedFiles`` and returns only the keys GitHub actually
+        reported. On any failure or in dry-run mode it returns an *empty*
+        dict — never raises — so the ``pr_created`` / ``merge_update`` emit
+        sites can merge only present keys and never fabricate zero-valued
+        stats (an absent key is hidden in the UI; ``files_changed: 0`` would
+        render a false "0 files").
+
+        ``commit_sha`` prefers ``mergeCommit.oid`` (populated post-merge) and
+        falls back to ``headRefOid`` (available at creation time), so both the
+        create and merge emit sites get a real sha.
+        """
+        data = await self._gh_json_query(
+            "gh",
+            "pr",
+            "view",
+            str(pr_number),
+            "--repo",
+            self._repo,
+            "--json",
+            "headRefOid,mergeCommit,additions,deletions,changedFiles",
+            dry_run_return={},
+            dry_run_log=f"[dry-run] Would fetch diff stats for PR #{pr_number}",
+            error_log=f"Could not fetch diff stats for PR #{pr_number}",
+        )
+        stats: PRDiffStats = {}
+        if not isinstance(data, dict):
+            return stats
+        merge_commit = data.get("mergeCommit")
+        sha = ""
+        if isinstance(merge_commit, dict):
+            sha = merge_commit.get("oid") or ""
+        if not sha:
+            sha = data.get("headRefOid") or ""
+        if sha:
+            stats["commit_sha"] = sha
+        # ``bool`` is an ``int`` subclass but gh never reports these as bools;
+        # the isinstance guard just rejects null / malformed shapes.
+        changed = data.get("changedFiles")
+        if isinstance(changed, int):
+            stats["files_changed"] = changed
+        additions = data.get("additions")
+        if isinstance(additions, int):
+            stats["additions"] = additions
+        deletions = data.get("deletions")
+        if isinstance(deletions, int):
+            stats["deletions"] = deletions
+        return stats
 
     async def get_pr_reviews(self, pr_number: int) -> list[dict[str, str]]:
         """Fetch reviews for *pr_number* with author info.

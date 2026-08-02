@@ -95,6 +95,7 @@ entries:
   src/dashboard_routes/_diagnostics_routes.py::noqa:PLC0415: 4
   src/dashboard_routes/_hitl_routes.py::noqa:BLE001: 1
   src/dashboard_routes/_metrics_routes.py::noqa:PLR0915: 1
+  src/dashboard_routes/_onboarding_routes.py::noqa:PLC0415: 1
   src/dashboard_routes/_routes.py::noqa:BLE001: 3
   src/dashboard_routes/_routes.py::noqa:PLC0415: 3
   src/dashboard_routes/_state_routes.py::noqa:BLE001: 7
@@ -225,6 +226,9 @@ entries:
   "src/pricing_refresh_loop.py::noqa:PLR0911\u2014lineargatechecks,eachwithitsownreturnpath": 1
   src/pricing_refresh_loop.py::noqa:S101: 1
   src/principles_audit_loop.py::noqa:BLE001: 4
+  src/rails_drift_caretaker_loop.py::noqa:PLC0415: 1
+  src/rails_drift_caretaker_loop.py::noqa:PLR0911: 1
+  src/rails_drift_caretaker_loop.py::noqa:TCH001: 1
   src/rc_budget_loop.py::noqa:PLC0415: 1
   src/rc_budget_loop.py::noqa:TCH001: 2
   src/repo_wiki.py::noqa:BLE001: 3
@@ -266,9 +270,9 @@ entries:
   src/sandbox_failure_fixer_loop.py::noqa:S101: 1
   src/sentry/reverse_lookup.py::noqa:BLE001: 1
   src/server.py::noqa:PLC0415: 13
-  src/service_registry.py::noqa:F841: 32
+  src/service_registry.py::noqa:F841: 33
   src/service_registry.py::noqa:PLC0415: 12
-  src/service_registry.py::noqa:TCH001: 12
+  src/service_registry.py::noqa:TCH001: 13
   "src/service_registry.py::noqa:TCH001\u2014dataclassannotation": 1
   "src/service_registry.py::noqa:TCH001\u2014usedindataclassfield": 1
   src/service_registry.py::type-ignore[arg-type]: 2

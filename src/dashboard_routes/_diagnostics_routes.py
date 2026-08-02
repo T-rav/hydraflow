@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 import dashboard_routes._cost_rollups as _cost_rollups_mod
 from dashboard_routes._cost_merge import (
+    group_cost_by_model_by_repo,
     merge_by_loop,
     merge_cost_by_model,
     merge_per_loop_cost,
@@ -545,6 +546,32 @@ def build_diagnostics_router(
                 for cfg, _slug in _runtimes(repo)
             ]
         )
+
+    @router.get("/cost/by-model-by-repo")
+    def cost_by_model_by_repo(repo: RepoSlugParam = None) -> dict[str, Any]:
+        """Repo + per-repo cost-per-model over a rolling 24h window (#10785).
+
+        The operator console's cost/tokens panel reads this single endpoint:
+        ``all`` is the cross-repo cost-per-model aggregate and ``repos`` is the
+        per-repo breakdown, both over the last 24h (``window_label`` = "last
+        24h"). Reuses the existing per-repo ``build_cost_by_model`` builder and
+        the ``merge_cost_by_model`` fold via ``group_cost_by_model_by_repo`` — no
+        new cost math. The window is fixed at 24h (not ``range``-selectable):
+        per-run / per-issue cost is intentionally out of scope because
+        ``cost_inferences.jsonl`` carries no run/session id.
+        """
+        now = _cost_rollups_mod._utcnow()
+        since = now - timedelta(hours=24)
+        if ctx is None:
+            rows = build_cost_by_model(config, since=since, until=now)
+            return group_cost_by_model_by_repo(
+                [("", rows)], generated_at=now.isoformat()
+            )
+        per_repo = [
+            (slug, build_cost_by_model(cfg, since=since, until=now))
+            for cfg, slug in _runtimes(repo)
+        ]
+        return group_cost_by_model_by_repo(per_repo, generated_at=now.isoformat())
 
     @router.get("/loops/cost")
     def loops_cost(

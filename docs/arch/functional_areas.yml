@@ -85,8 +85,9 @@ areas:
       - GateActivatorLoop
       - LiveCorpusReplayLoop
       - PrinciplesAuditLoop
+      - RailsDriftCaretakerLoop
       - WikiRotDetectorLoop
-    related_adrs: ['0045', '0082', '0100', '0101']
+    related_adrs: ['0045', '0082', '0100', '0101', '0121']
 
   release:
     label: Release

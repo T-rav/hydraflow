@@ -18,6 +18,19 @@ from tests.conftest import SubprocessMockBuilder
 from tests.helpers import ConfigFactory, make_pr_manager
 
 
+@pytest.fixture(autouse=True)
+def _stub_pr_diff_stats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#10788: merge_pr now does a best-effort ``gh pr view`` diff-stat read at
+    the emit site (via ``_run_gh`` → ``run_subprocess_with_retry``). Default it
+    to an empty read so it neither spawns a real ``gh`` nor perturbs the
+    retry-vs-plain-subprocess await counts these tests assert."""
+
+    async def _empty(_self: object, _pr_number: int) -> dict[str, object]:
+        return {}
+
+    monkeypatch.setattr("pr_manager.PRManager.get_pr_diff_stats", _empty)
+
+
 def _assert_search_api_cmd(cmd: tuple[str, ...]) -> None:
     """Assert common structure of a gh API search command."""
     assert "api" in cmd
