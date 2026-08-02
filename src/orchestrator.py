@@ -241,6 +241,7 @@ class HydraFlowOrchestrator:
             "issue_refinement": svc.issue_refinement_loop,
             "ci_monitor": svc.ci_monitor_loop,
             "branch_protection_auditor": svc.branch_protection_auditor_loop,
+            "rails_drift_caretaker": svc.rails_drift_caretaker_loop,
             "gate_activator": svc.gate_activator_loop,
             "security_patch": svc.security_patch_loop,
             "repo_wiki": svc.repo_wiki_loop,
@@ -1622,6 +1623,10 @@ class HydraFlowOrchestrator:
             (
                 "branch_protection_auditor",
                 self._svc.branch_protection_auditor_loop.run,
+            ),
+            (
+                "rails_drift_caretaker",
+                self._svc.rails_drift_caretaker_loop.run,
             ),
             ("gate_activator", self._svc.gate_activator_loop.run),
             ("repo_wiki", self._svc.repo_wiki_loop.run),

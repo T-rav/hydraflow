@@ -1346,6 +1346,43 @@ def _build_branch_protection_auditor(
     )
 
 
+def _build_rails_drift_caretaker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build RailsDriftCaretakerLoop for scenarios (ADR-0121, #10936).
+
+    Tests pre-seed:
+    * ``rails_drift_audit`` → an async auditor returning a
+      ``list[RailsDriftReport]`` (replaces the checkout-observing auditor).
+      Defaults to ``[]`` (no managed repos ⇒ nothing to audit).
+
+    ``dedup`` defaults to a clean-slate MagicMock; override via
+    ``rails_drift_caretaker_dedup``.
+    """
+    from rails_drift_caretaker_loop import (  # noqa: PLC0415
+        RailsDriftCaretakerLoop,
+    )
+
+    dedup = ports.get("rails_drift_caretaker_dedup")
+    if dedup is None:
+        dedup = MagicMock()
+        dedup.get.return_value = set()
+        ports["rails_drift_caretaker_dedup"] = dedup
+
+    auditor = ports.get("rails_drift_audit")
+    if auditor is None:
+        auditor = AsyncMock(return_value=[])
+        ports["rails_drift_audit"] = auditor
+
+    pr_manager = ports.get("pr_manager") or ports["github"]
+
+    return RailsDriftCaretakerLoop(
+        config=config,
+        pr_manager=pr_manager,
+        dedup=dedup,
+        deps=deps,
+        auditor=auditor,
+    )
+
+
 def _build_gate_activator(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build GateActivatorLoop for scenarios (ADR-0082, Slice 4).
 
@@ -2224,6 +2261,7 @@ _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
     "branch_protection_auditor": _build_branch_protection_auditor,
+    "rails_drift_caretaker": _build_rails_drift_caretaker,
     "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,
     "gate_health": _build_gate_health,
