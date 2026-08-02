@@ -67,7 +67,10 @@ function pipelineActiveCount(pipeline) {
 
 const MODES = [
   { key: 'focus', label: 'Focus' },
-  { key: 'all-active', label: 'All active' },
+  // The 'all-active' mode is the redesigned AGENT view (#10944): live/held
+  // workers with an explicit state. The URL key stays 'all-active' (selection
+  // contract); only the operator-facing label reads 'Agents'.
+  { key: 'all-active', label: 'Agents' },
 ]
 
 function makeStyles(t) {
@@ -266,7 +269,15 @@ export function OperatorConsoleView({ socket = {}, now = Date.now() }) {
               {idle ? (
                 <IdleState />
               ) : mode === 'all-active' ? (
-                <ActiveGrid pipeline={pipeline} events={events} now={now} select={select} />
+                <ActiveGrid
+                  pipeline={pipeline}
+                  workers={socket.workers}
+                  events={events}
+                  factory={vitals?.factory}
+                  credits={vitals?.credits}
+                  now={now}
+                  select={select}
+                />
               ) : (
                 <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
               )}
