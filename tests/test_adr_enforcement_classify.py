@@ -17,7 +17,9 @@ from pathlib import Path
 
 from adr_conformance import (
     EnforcementClass,
+    adr_is_unattributed,
     check_is_tautological,
+    check_is_unattributed,
     classify_adr_enforcement,
     has_real_enforcement,
 )
@@ -218,3 +220,91 @@ def test_exemplar_manual_is_weak():
     # manual with a prose workflow pointer, not a runnable check. (ADR-0042, the
     # former exemplar, now carries a real asserting ruleset check — #10623.)
     assert classify_adr_enforcement(_live()[51], REPO) is EnforcementClass.WEAK
+
+
+# --------------------------------------------------------------------------
+# check_is_unattributed / adr_is_unattributed — the relatedness signal (#10861)
+# REAL only means "names a file that exists"; attribution asks whether that file
+# names the ADR. Advisory, mirroring check_is_tautological: never folded into
+# REAL (see test_attribution_never_moves_classification below).
+# --------------------------------------------------------------------------
+
+
+def test_resolving_pytest_that_never_mentions_the_adr_is_unattributed(tmp_path: Path):
+    _write(tmp_path, "tests/t.py", "def test_x():\n    assert True\n")
+    check = _pytest("tests/t.py::test_x")
+    assert check_is_unattributed(check, 116, tmp_path)
+
+
+def test_explicit_and_bare_and_path_forms_each_attribute(tmp_path: Path):
+    check = _pytest("tests/t.py::test_x")
+    for body in (
+        '"""Enforces ADR-0116."""\ndef test_x():\n    assert True\n',
+        '"""See ADR 116 for why."""\ndef test_x():\n    assert True\n',
+        '"""Guards ADR-116."""\ndef test_x():\n    assert True\n',
+        "# ratchet for 0116\ndef test_x():\n    assert True\n",
+        "# see docs/adr/0116-prompts.md\ndef test_x():\n    assert True\n",
+    ):
+        _write(tmp_path, "tests/t.py", body)
+        assert not check_is_unattributed(check, 116, tmp_path), body
+
+
+def test_substring_number_does_not_attribute(tmp_path: Path):
+    # 10116 contains "0116" but must NOT attribute ADR-0116 (no word boundary),
+    # nor must ADR-1163 attribute ADR-116.
+    _write(
+        tmp_path,
+        "tests/t.py",
+        "# unrelated ids 10116 and ADR-1163\ndef test_x():\n    assert True\n",
+    )
+    assert check_is_unattributed(_pytest("tests/t.py::test_x"), 116, tmp_path)
+
+
+def test_make_and_unresolvable_checks_are_never_unattributed(tmp_path: Path):
+    make = Check(kind="make", target="trust-contracts", raw="make:trust-contracts")
+    prose = Check(kind="prose", target="review checklist", raw="review checklist")
+    assert not check_is_unattributed(make, 116, tmp_path)
+    assert not check_is_unattributed(prose, 116, tmp_path)
+    # a pytest target whose file is missing is unresolvable -> never reported
+    assert not check_is_unattributed(_pytest("tests/missing.py::test_x"), 116, tmp_path)
+
+
+def test_adr_pointing_at_an_unrelated_but_real_file_is_unattributed(tmp_path: Path):
+    # The exact #10861 shape: a resolving check that does not relate to the ADR.
+    _write(tmp_path, "tests/test_prompt_fitness.py", "def test_x():\n    assert True\n")
+    adr = _adr(130, "enforced", (_pytest("tests/test_prompt_fitness.py::test_x"),))
+    assert has_real_enforcement(adr, tmp_path)  # still REAL — classification unmoved
+    assert adr_is_unattributed(adr, tmp_path)
+
+
+def test_adr_pointing_at_a_file_that_names_it_is_attributed(tmp_path: Path):
+    _write(
+        tmp_path,
+        "tests/t.py",
+        '"""Enforces ADR-0130."""\ndef test_x():\n    assert True\n',
+    )
+    adr = _adr(130, "enforced", (_pytest("tests/t.py::test_x"),))
+    assert has_real_enforcement(adr, tmp_path)
+    assert not adr_is_unattributed(adr, tmp_path)
+
+
+def test_adr_attributed_if_any_sibling_check_names_it(tmp_path: Path):
+    # Two resolving pytest checks; only one names the ADR. That is enough.
+    _write(tmp_path, "tests/a.py", "def test_x():\n    assert True\n")
+    _write(tmp_path, "tests/b.py", '"""ADR-0130."""\ndef test_y():\n    assert True\n')
+    adr = _adr(
+        130,
+        "enforced",
+        (_pytest("tests/a.py::test_x"), _pytest("tests/b.py::test_y")),
+    )
+    assert not adr_is_unattributed(adr, tmp_path)
+
+
+def test_attribution_never_moves_classification(tmp_path: Path):
+    # The load-bearing invariant of the whole fix: an unattributed ADR is still
+    # REAL. Attribution is advisory and must not touch classify/has_real.
+    _write(tmp_path, "tests/t.py", "def test_x():\n    assert True\n")
+    adr = _adr(130, "enforced", (_pytest("tests/t.py::test_x"),))
+    assert adr_is_unattributed(adr, tmp_path)
+    assert classify_adr_enforcement(adr, tmp_path) is EnforcementClass.REAL
+    assert has_real_enforcement(adr, tmp_path)
