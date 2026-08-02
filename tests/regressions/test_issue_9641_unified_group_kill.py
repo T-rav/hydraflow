@@ -39,7 +39,7 @@ class _FakeProc:
 
 class TestIsRealPid:
     def test_positive_int_is_real(self) -> None:
-        assert is_real_pid(4242)
+        assert is_real_pid(424242)
 
     def test_hazard_pids_are_rejected(self) -> None:
         """0 = own group, negatives = pgid syntax, True passes naive isinstance."""
@@ -52,10 +52,10 @@ class TestIsRealPid:
 
 class TestKillProcessGroup:
     def test_real_pid_group_killed_not_child(self) -> None:
-        proc = _FakeProc(pid=4242)
+        proc = _FakeProc(pid=424242)
         with patch("process_group.os.killpg") as killpg:
             kill_process_group(proc)
-        killpg.assert_called_once_with(4242, signal.SIGKILL)
+        killpg.assert_called_once_with(424242, signal.SIGKILL)
         assert proc.killed is False
 
     def test_mock_pid_takes_child_only_fallback(self) -> None:
@@ -74,7 +74,7 @@ class TestKillProcessGroup:
         assert proc.killed is True
 
     def test_dead_group_suppressed(self) -> None:
-        proc = _FakeProc(pid=4242)
+        proc = _FakeProc(pid=424242)
         with patch("process_group.os.killpg", side_effect=ProcessLookupError):
             kill_process_group(proc)  # must not raise
 
@@ -82,10 +82,10 @@ class TestKillProcessGroup:
         kill_process_group(object())  # no pid, no kill() — never raises
 
     def test_custom_signal_passes_through(self) -> None:
-        proc = _FakeProc(pid=4242)
+        proc = _FakeProc(pid=424242)
         with patch("process_group.os.killpg") as killpg:
             kill_process_group(proc, signal.SIGTERM)
-        killpg.assert_called_once_with(4242, signal.SIGTERM)
+        killpg.assert_called_once_with(424242, signal.SIGTERM)
 
 
 class TestLegacyWrappersDelegate:

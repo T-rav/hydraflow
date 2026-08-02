@@ -40,7 +40,6 @@ import runner_utils
 from orchestrator import HydraFlowOrchestrator
 from runner_utils import reap_all_tracked_processes
 
-
 # `make quality` runs this file's serial job alongside pyright, bandit, the
 # full -n auto suite, and (on the shared dark-factory box) other worktrees'
 # quality gates at once; a real spawn/reap can take far longer than the 5s
@@ -117,14 +116,14 @@ class TestReapAllTrackedProcesses:
         assert not runner_utils._ALL_TRACKED_PROCS
 
     def test_live_children_group_killed_via_killpg(self) -> None:
-        live = _FakeProc(pid=4242, returncode=None)
+        live = _FakeProc(pid=424242, returncode=None)
         runner_utils._ALL_TRACKED_PROCS.add(live)  # type: ignore[arg-type]
 
         with patch("process_group.os.killpg") as killpg:
             reaped = reap_all_tracked_processes()
 
         assert reaped == 1
-        killpg.assert_called_once_with(4242, signal.SIGKILL)
+        killpg.assert_called_once_with(424242, signal.SIGKILL)
         assert live.killed is False  # group kill, not the child-only fallback
 
 
@@ -206,7 +205,6 @@ class TestOrchestratorHooksInvokeReaper:
             await orch._cancel_all_loops_and_runners({"x": task})
 
         reap.assert_called_once()
-
 
 
 class TestRunSimpleChildrenAreStopReapable:
