@@ -26,6 +26,7 @@ from pathlib import Path
 
 from adr_conformance import (
     EnforcementClass,
+    adr_is_unattributed,
     check_is_tautological,
     classify_adr_enforcement,
     resolve_check,
@@ -222,6 +223,36 @@ def _tautological_section(accepted: list[ADR], repo_root: Path) -> str:
     return out
 
 
+def _unattributed_section(accepted: list[ADR], repo_root: Path) -> str:
+    """List REAL ADRs whose enforcing tests never name them (#10861).
+
+    These resolve (the cited file exists) and assert, so they classify REAL —
+    yet the test's text does not reference the ADR number, so "REAL" here means
+    only "names a file that exists", not "names a check that tests this ADR".
+    Advisory, exactly like the tautological section: surfaced so authors can add
+    the ADR number to the enforcing test (or repoint it), and ratcheted
+    shrink-only in ``tests/test_adr_enforcement_completeness.py`` — never a hard
+    downgrade of the ADR's class.
+    """
+    rows = [
+        f"| {_adr_id(a)} | {_checks_span(a.enforced_by)} |"
+        for a in accepted
+        if adr_is_unattributed(a, repo_root)
+    ]
+    out = "\n\n## Unattributed enforcements\n\n"
+    if not rows:
+        return out + "_(none)_"
+    out += (
+        "REAL ADRs whose cited test resolves and asserts, but whose text never "
+        "names the ADR — so the check need not relate to the decision it "
+        "enforces. Add the ADR number (e.g. `ADR-0123`) to the enforcing test, "
+        "or repoint the ADR at one that names it. Advisory: this does NOT change "
+        "the REAL/WEAK/MISSING class above.\n\n"
+    )
+    out += "| ADR | Enforcement |\n|---|---|\n" + "\n".join(rows)
+    return out
+
+
 def render_adr_enforcement(adrs: list[ADR], *, repo_root: Path) -> str:
     accepted = sorted(
         (a for a in adrs if a.status == "Accepted"), key=lambda a: a.number
@@ -237,6 +268,7 @@ def render_adr_enforcement(adrs: list[ADR], *, repo_root: Path) -> str:
         + _classification_table(accepted, by_class, exempted)
         + _debt_section(accepted, by_class, exemptions)
         + _tautological_section(accepted, repo_root)
+        + _unattributed_section(accepted, repo_root)
         + _FOOTER
     )
     return body

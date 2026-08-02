@@ -120,4 +120,57 @@ Allow-listed in `docs/standards/adr_enforcement/exemptions.md` as genuinely proc
 
 _(none)_
 
+## Unattributed enforcements
+
+REAL ADRs whose cited test resolves and asserts, but whose text never names the ADR — so the check need not relate to the decision it enforces. Add the ADR number (e.g. `ADR-0123`) to the enforcing test, or repoint the ADR at one that names it. Advisory: this does NOT change the REAL/WEAK/MISSING class above.
+
+| ADR | Enforcement |
+|---|---|
+| ADR-0002 | `pytest:tests/test_state_machine.py` |
+| ADR-0004 | `pytest:tests/test_agent_cli.py`, `pytest:tests/test_base_runner.py` |
+| ADR-0005 | `pytest:tests/test_implement_phase.py` |
+| ADR-0007 | `pytest:tests/test_dashboard_routes_repo.py` |
+| ADR-0008 | `pytest:tests/test_dashboard_routes_repo.py` |
+| ADR-0010 | `pytest:tests/test_integration_worktree.py` |
+| ADR-0011 | `pytest:tests/test_epic.py`, `pytest:tests/test_release.py` |
+| ADR-0012 | `pytest:tests/test_epic_merge_coordination.py` |
+| ADR-0014 | `pytest:tests/test_state_machine.py` |
+| ADR-0015 | `pytest:tests/test_review_phase_hooks.py` |
+| ADR-0016 | `pytest:tests/test_visual_validation.py` |
+| ADR-0017 | `pytest:tests/test_state_machine.py` |
+| ADR-0018 | `pytest:tests/test_screenshot_scanner.py`, `pytest:tests/test_report_issue_loop.py` |
+| ADR-0019 | `pytest:tests/test_epic_manager.py`, `pytest:tests/test_post_merge_handler.py` |
+| ADR-0022 | `pytest:tests/test_integration_pipeline.py` |
+| ADR-0024 | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
+| ADR-0028 | `pytest:tests/test_report_event_flow.py` |
+| ADR-0029 | `pytest:tests/test_caretaker_loop_wiring.py` |
+| ADR-0032 | `pytest:tests/test_repo_wiki.py`, `pytest:tests/test_repo_wiki_store_git.py`, `pytest:tests/test_repo_wiki_ingest.py`, `pytest:tests/test_wiki_drift_detector.py`, `pytest:tests/test_wiki_drift_symbols.py`, `pytest:tests/test_wiki_semantic_drift.py`, `pytest:tests/test_repo_wiki_temporal.py`, `pytest:tests/test_wiki_corroboration.py` |
+| ADR-0034 | `pytest:tests/test_state_machine.py` |
+| ADR-0037 | `pytest:tests/test_adr_pre_validator.py` |
+| ADR-0041 | `pytest:tests/test_issue_cache.py`, `pytest:tests/test_precondition_gate.py` |
+| ADR-0043 | `pytest:tests/test_preflight_plugins.py`, `pytest:tests/test_phase_skill_filter.py` |
+| ADR-0045 | `pytest:tests/test_trust_fleet_sanity_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_trust_fleet_anomaly_detectors.py` |
+| ADR-0047 | `make:trust-contracts`, `pytest:tests/trust/contracts/test_fake_github_contract.py` |
+| ADR-0050 | `pytest:tests/test_auto_agent_preflight_loop.py`, `pytest:tests/scenarios/test_auto_agent_preflight.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_auto_agent_hitl_intake.py`, `pytest:tests/test_preflight_decision_hitl_widened.py` |
+| ADR-0052 | `pytest:tests/test_mockworld_fakes_conformance.py`, `pytest:tests/test_sandbox_scenario_contract.py` |
+| ADR-0057 | `pytest:tests/test_term_pruner_loop.py`, `pytest:tests/architecture/test_term_pruner_wiring.py` |
+| ADR-0058 | `pytest:tests/test_edge_proposer_loop.py`, `pytest:tests/architecture/test_edge_proposer_wiring.py` |
+| ADR-0060 | `pytest:tests/test_atlas_routes.py` |
+| ADR-0061 | `pytest:tests/test_atlas_routes.py` |
+| ADR-0064 | `pytest:tests/test_adversarial_retry_loop.py` |
+| ADR-0071 | `pytest:tests/test_route_back.py` |
+| ADR-0083 | `pytest:tests/test_sandbox_scenario_contract.py`, `pytest:tests/test_no_screenshot_regression_tests.py` |
+| ADR-0090 | `pytest:tests/test_atlas_routes.py` |
+| ADR-0093 | `pytest:tests/test_loop_fitness_completeness.py` |
+| ADR-0096 | `pytest:tests/scenarios/test_convergence_pipeline_mockworld.py` |
+| ADR-0097 | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
+| ADR-0102 | `pytest:tests/test_review_phase_core.py` |
+| ADR-0104 | `pytest:tests/test_auto_tighten_invariant.py` |
+| ADR-0106 | `pytest:tests/regressions/test_issue_9552.py` |
+| ADR-0109 | `pytest:tests/test_ultra_review.py` |
+| ADR-0110 | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
+| ADR-0111 | `pytest:tests/test_flows.py` |
+| ADR-0117 | `pytest:tests/test_prompt_observatory.py` |
+| ADR-0119 | `pytest:tests/test_credit_failover.py` |
+
 <!-- arch:generated -->

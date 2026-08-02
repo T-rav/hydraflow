@@ -97,6 +97,8 @@ A ratchet stops the gap growing. It does not make it close: an untouched allowli
 
 `GRANDFATHERED_BURNDOWN_ORIGIN` records where the debt started (30 modules on 2026-07-30) so the schedule can be checked rather than asserted, and `test_burndown_schedule_is_coherent` fails if the schedule is set to commit to nothing — a target at or above the origin, or a deadline before it.
 
+"Moves in a commit that states why" had no gate behind it, so the deadline could move for free (#10861). Two guards now hold it. First, a *window cap*: `test_burndown_schedule_is_coherent` fails if `GRANDFATHERED_DEADLINE` is more than `_MAX_BURNDOWN_WINDOW_DAYS` (180) past the origin, so carrying the debt longer forces moving `GRANDFATHERED_BURNDOWN_ORIGIN` forward too — a re-declaration, not a silent push. Second, a *receipt*: the deadline is derived from an append-only `GRANDFATHERED_SCHEDULE_LOG` of `(deadline, receipt)` rows, and `test_deadline_moves_carry_a_receipt` fails unless each move appends a row citing a distinct `#<n>` issue/PR — mirroring ADR-0113's Precedent/Divergence receipt. The window bounds *how far* the deadline reaches; the receipt records *who authorized* the reach.
+
 ### 6. Rubric score pairs with an outcome measure, and this is not optional
 
 **The rubric measures form, not outcome.** XML tags present, request leads, edge cases named — all structural properties of the text, none of which establishes that the prompt produces better work.
