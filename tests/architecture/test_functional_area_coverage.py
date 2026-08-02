@@ -276,6 +276,21 @@ _JUSTIFIED_NEW_LOOPS: dict[str, str] = {
         "(would fuse the independent signals) and no phase sees the joint "
         "residual — its own per-series baselines + never-batched alarm"
     ),
+    # RailsDriftCaretakerLoop (#10936): periodic per-repo template-conformance
+    # audit of each managed repo's rails.yaml manifest. Considered hosting it as
+    # an intake on BranchProtectionAuditorLoop (the sibling per-repo contract-
+    # drift auditor) and as an onboarding-phase step, both rejected: branch
+    # protection audits live GitHub ruleset API state on a 7-day cadence, a
+    # different data source/contract from filesystem template-layer conformance
+    # (fusing them couples two independent contracts), and onboarding is a
+    # one-shot stamp with no recurring cadence to re-check drift. It is genuinely
+    # standalone cross-cutting caretaker cadence work, mirroring the grandfathered
+    # ADR-drift and branch-protection-drift loops it is modeled on (ADR-0121).
+    "RailsDriftCaretakerLoop": (
+        "per-repo rails.yaml template-conformance drift audit on its own cadence; "
+        "BranchProtectionAuditorLoop-intake host rejected (different contract/data "
+        "source) and onboarding-phase host rejected (one-shot, no re-check cadence)"
+    ),
 }
 
 

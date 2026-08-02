@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps  # noqa: TCH001
 from exception_classify import reraise_on_credit_or_bug
+from loop_fitness import Confidence, FitnessContext, FitnessKind, LoopFitness
 from rails_manifest import (
     FINDING_UNKNOWN_LAYER,
     ObservedRails,
@@ -107,6 +108,20 @@ class RailsDriftCaretakerLoop(BaseBackgroundLoop):
 
     def _get_default_interval(self) -> int:
         return self._config.rails_drift_caretaker_interval
+
+    def loop_fitness(self, ctx: FitnessContext) -> LoopFitness:
+        # Like GateActivatorLoop / BranchProtectionAuditorLoop: files ONE
+        # deduped, stable-titled issue per (repo, finding class) and CLOSES IT
+        # ITSELF when the drift resolves. "Closed" reflects the loop's own
+        # housekeeping, not human acceptance — there is no clean per-finding
+        # acceptance signal — so report HOUSEKEEPING rather than counting
+        # self-closures as accepted.
+        return LoopFitness(
+            worker_name=self._worker_name,
+            kind=FitnessKind.HOUSEKEEPING,
+            confidence=Confidence.INSUFFICIENT_DATA,
+            timestamp=ctx.window_end,
+        )
 
     async def _do_work(self) -> dict[str, Any] | None:  # noqa: PLR0911
         if not self._enabled_cb(self._worker_name):

@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `b593e0e` — fix(arch): register RailsDriftCaretakerLoop in functional_areas.yml + regen (#10936) (#10936) *(2026-08-01)*
 - `113c0e6` — Merge remote-tracking branch 'origin/staging' into feat/rails-drift-caretaker-loop-10936 *(2026-08-01)*
 - `160bfbd` — chore(config): remove dead memory_auto_approve knob (#10789) (#10987) (#10987) *(2026-08-01)*
 - `a20b7c1` — feat(rails): rails.yaml manifest + drift-caretaker loop (#10936) (#10936) *(2026-08-01)*
