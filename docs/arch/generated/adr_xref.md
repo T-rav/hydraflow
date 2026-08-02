@@ -127,6 +127,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0118 | — | `pytest:tests/architecture/test_no_otel_imports.py` |
 | ADR-0119 | `src.credit_failover` | `pytest:tests/test_credit_failover.py` |
 | ADR-0120 | — | — |
+| ADR-0122 | — | — |
 
 ## Module → ADRs
 

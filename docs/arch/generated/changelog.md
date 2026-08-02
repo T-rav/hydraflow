@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `e5791bc` — chore(rc): regen arch artifacts after main merge (rc/2026-08-01-1707) *(2026-08-01)*
 - `3903d7e` — Merge remote-tracking branch 'origin/main' into rc/2026-08-01-1707 *(2026-08-01)*
 - `1be7dbf` — refactor: god-file decomposition sweep — pr_manager, review_phase, plan_phase (#10840) (#10982) (#10982) *(2026-08-01)*
 - `0f0a672` — refactor: extract WebSocket streaming from dashboard _routes god-file (#10978) (#10978) *(2026-08-01)*
