@@ -85,7 +85,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke
+.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -118,6 +118,7 @@ help:
 	@echo "  make scaffold       Generate baseline tests and CI configuration (API with offline fallback)"
 	@echo "  make compact        Run manual memory compaction (API with offline fallback)"
 	@echo "  make setup          Install hooks/assets for target repo ($(TARGET_REPO_ROOT))"
+	@echo "  make stamp          Stamp the greenfield invariant kernel into DIR=<path> PKG=<pkg>"
 	@echo "  make install        Install dashboard dependencies"
 	@echo "  make ui             Build React dashboard (src/ui/dist/)"
 	@echo "  make ui-dev         Start React dashboard dev server"
@@ -452,6 +453,26 @@ init:
 	@cd $(HYDRAFLOW_DIR) && $(UV) python -m scripts.hydraflow_init $(or $(DIR),.) \
 		$(if $(OUT),--out $(OUT)) \
 		$(if $(PRINCIPLE),--principle $(PRINCIPLE)) \
+		$(ARGS)
+
+# --------------------------------------------------------------------------
+# Greenfield kernel writer (#10935) — stamp the invariant kernel into a new
+# repo, parameterized by pkg/description/cli_entry/coverage_floor. After
+# stamping, run `make setup TARGET_REPO_ROOT=<DIR>` then `make audit DIR=<DIR>`.
+#   make stamp DIR=../new-repo PKG=game1
+#   make stamp DIR=../new-repo PKG=game1 COVERAGE_FLOOR=85
+#   make stamp DIR=../new-repo PKG=game1 FORCE=1   # re-stamp template-owned files
+# --------------------------------------------------------------------------
+
+stamp:
+	@test -n "$(DIR)" || { echo "Usage: make stamp DIR=<path> PKG=<pkg>" >&2; exit 2; }
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m scripts.hydraflow_stamp $(DIR) \
+		$(if $(PKG),--pkg $(PKG)) \
+		$(if $(NAME),--name $(NAME)) \
+		$(if $(DESC),--description "$(DESC)") \
+		$(if $(CLI_ENTRY),--cli-entry $(CLI_ENTRY)) \
+		$(if $(COVERAGE_FLOOR),--coverage-floor $(COVERAGE_FLOOR)) \
+		$(if $(FORCE),--force) \
 		$(ARGS)
 
 
