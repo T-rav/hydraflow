@@ -109,6 +109,21 @@ _SELF_MOD_SUBSTRINGS: tuple[str, ...] = (
     "src/staging_promotion_loop.py",  # merge/promotion policy
     "src/merge_state_watcher_loop.py",
     "docs/standards/",  # the written policy machinery
+    # #10851: the class was under-inclusive — the 2026-07-30 precondition-gate
+    # config flip wedged the machine (#10846/#10847) yet was not classified as
+    # self-modification. Add the surface that is clearly self-mod AND rarely
+    # touched: judge routing / provider dials — a failover re-dial changes verdict
+    # *provenance* (#10844). Two surfaces are DELIBERATELY not path-matched here to
+    # avoid the over-reach the #10851 counter-metric warns of (a class so broad
+    # every config tweak needs an out-of-family verdict gets routed around):
+    #   - gate *enablement* config (config.py) — caught by the ADR-0123
+    #     `Binds: factory` backstop instead (only the ADR-cited files, not all of
+    #     config.py);
+    #   - instrument thresholds / finding-rate budgets — the specific weakens-a-gate
+    #     files still need picking out from the routine ratchet baselines (e.g.
+    #     suppressions.yaml is a mechanical noqa ledger, not a threshold), open in
+    #     #10851.
+    "src/credit_failover.py",  # #10844 provider re-dial → verdict provenance
 )
 
 # Security-adjacent paths: auth, secrets, prompt-assembly / trust-boundary.
