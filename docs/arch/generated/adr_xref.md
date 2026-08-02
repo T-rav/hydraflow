@@ -129,6 +129,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0120 | — | — |
 | ADR-0121 | `src.rails_drift_caretaker_loop`, `src.rails_manifest` | — |
 | ADR-0122 | — | — |
+| ADR-0123 | — | `'pytest:tests/test_adr_direction_declared.py'` |
 
 ## Module → ADRs
 
