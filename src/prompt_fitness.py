@@ -298,6 +298,7 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "discover_runner": frozenset({1, 3, 4, 7}),
     "disturbance_dampener": frozenset({3, 4, 5}),
     "entry_evidence": frozenset({1, 3, 4, 8}),
+    "goal_supervisor_prompt": frozenset({1, 3, 4, 8}),
     "hitl_build_prompt": frozenset({3, 8}),
     "implement_spec_review": frozenset({3, 4}),
     "intervention_classify": frozenset({3, 4, 7, 8}),

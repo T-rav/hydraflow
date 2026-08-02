@@ -159,9 +159,13 @@ class DefaultSupervisorNudger:
         )
 
 
-def build_supervisor_prompt(snapshot: HealthSnapshot) -> str:
-    """Short Fable prompt: the standing-goal contract + the snapshot JSON."""
-    return _STANDING_GOAL_PROMPT + json.dumps(snapshot.summary(), sort_keys=True)
+def build_supervisor_prompt(snapshot_summary: dict[str, Any]) -> str:
+    """Short Fable prompt: the standing-goal contract + the snapshot summary JSON.
+
+    Takes the plain ``HealthSnapshot.summary()`` dict (not the model) so it is a
+    pure string builder — trivially rendered/scored by the prompt-fitness audit.
+    """
+    return _STANDING_GOAL_PROMPT + json.dumps(snapshot_summary, sort_keys=True)
 
 
 def _incident_line(inc: Incident, suffix: str) -> str:
@@ -309,7 +313,7 @@ class GoalSupervisorLoop(BaseBackgroundLoop):
         runner = self._get_runner()
         if runner is None:
             return SupervisorVerdict(assessment="(no supervisor runner wired)")
-        prompt = build_supervisor_prompt(snapshot)
+        prompt = build_supervisor_prompt(snapshot.summary())
         # run() never raises for ordinary failures (crashed transcript →
         # "(no parseable verdict)"); credit/auth-terminal propagates to _do_work.
         return await runner.run(

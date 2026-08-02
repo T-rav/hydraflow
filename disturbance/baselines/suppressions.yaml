@@ -92,7 +92,7 @@ entries:
   src/dashboard_routes/_control_routes.py::noqa:PLR0914: 1
   src/dashboard_routes/_control_routes.py::noqa:PLR0915: 1
   src/dashboard_routes/_diagnostics_routes.py::noqa:BLE001: 1
-  src/dashboard_routes/_diagnostics_routes.py::noqa:PLC0415: 4
+  src/dashboard_routes/_diagnostics_routes.py::noqa:PLC0415: 5
   src/dashboard_routes/_hitl_routes.py::noqa:BLE001: 1
   src/dashboard_routes/_metrics_routes.py::noqa:PLR0915: 1
   src/dashboard_routes/_onboarding_routes.py::noqa:PLC0415: 1
@@ -273,9 +273,9 @@ entries:
   src/sandbox_failure_fixer_loop.py::noqa:S101: 1
   src/sentry/reverse_lookup.py::noqa:BLE001: 1
   src/server.py::noqa:PLC0415: 13
-  src/service_registry.py::noqa:F841: 33
+  src/service_registry.py::noqa:F841: 34
   src/service_registry.py::noqa:PLC0415: 12
-  src/service_registry.py::noqa:TCH001: 13
+  src/service_registry.py::noqa:TCH001: 14
   "src/service_registry.py::noqa:TCH001\u2014dataclassannotation": 1
   "src/service_registry.py::noqa:TCH001\u2014usedindataclassfield": 1
   src/service_registry.py::type-ignore[arg-type]: 2

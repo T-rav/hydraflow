@@ -1,0 +1,18 @@
+{
+  "builder": "goal_supervisor_loop.build_supervisor_prompt",
+  "args": {
+    "snapshot_summary": {
+      "healthy": false,
+      "stalled_loops": ["diagram_loop"],
+      "error_loops": ["flake_tracker"],
+      "credit_failover_active": true,
+      "credit_probe_overdue": true,
+      "zai_key_present": true,
+      "boot_sha_stale": true,
+      "commits_behind": 12,
+      "event_loop_stalled": false,
+      "vitals_verdict": "watch"
+    }
+  },
+  "faked_deps": {}
+}
