@@ -459,6 +459,106 @@ def check_is_tautological(check: Check, repo_root: Path) -> bool:
     return not _node_asserts(node)
 
 
+def _text_attributes_adr(text: str, adr_number: int) -> bool:
+    """True when *text* names ADR *adr_number* in any of the accepted forms.
+
+    Accepts, case-insensitively:
+
+    - an explicit reference — ``ADR-0116``, ``ADR 116``, ``ADR-116``, ``ADR116``
+      (``ADR``, an optional ``-``/space separator, optional leading zeros);
+    - the zero-padded number as a standalone token — ``0116`` — which also
+      covers the ``docs/adr/0116-*.md`` path form (``/`` and ``-`` are word
+      boundaries).
+
+    Rejects the substring false positive: ``10116`` does NOT attribute ADR-0116
+    (no word boundary before ``0116`` inside it), and ``ADR-1163`` does not
+    attribute ADR-116 (no boundary after ``116``). ``\\b`` on both ends is what
+    keeps the bare-number form from over-matching.
+    """
+    explicit = re.compile(rf"ADR[-\s]?0*{adr_number}\b", re.IGNORECASE)
+    if explicit.search(text):
+        return True
+    padded = f"{adr_number:04d}"
+    return bool(re.search(rf"\b{padded}\b", text))
+
+
+def check_is_unattributed(check: Check, adr_number: int, repo_root: Path) -> bool:
+    """True when a ``pytest:`` check RESOLVES to a real file whose text never
+    names the ADR it is cited to enforce — a check that exists but does not
+    relate to this decision (#10861).
+
+    Conservative and pytest-only, mirroring ``check_is_tautological``: a
+    ``make:``/``script:``/``prose`` check, or a ``pytest:`` target whose file is
+    missing, returns False — attribution is a signal about a *test file's text*,
+    and a Makefile recipe or a bare prose pointer has no ADR-number convention
+    to check. The whole file's text is scanned (not just the cited node), so a
+    reference anywhere in the module — a docstring, a sibling test — attributes
+    it, matching the issue's "somewhere in its text" bar.
+    """
+    if check.kind != "pytest":
+        return False
+    file_part = check.target.partition("::")[0]
+    path = repo_root / file_part
+    if not path.is_file():
+        return False
+    try:
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return not _text_attributes_adr(text, adr_number)
+
+
+def _resolving_pytest_checks(adr: ADR, repo_root: Path) -> list[Check]:
+    """The ADR's ``pytest:`` checks that resolve and do not mutate — the pytest
+    subset that can carry the REAL signal, and the only checks attribution is
+    defined over."""
+    return [
+        chk
+        for chk in adr.enforced_by
+        if chk.kind == "pytest"
+        and not is_mutating(chk, repo_root)
+        and resolve_check(chk, repo_root)
+    ]
+
+
+def adr_is_unattributed(adr: ADR, repo_root: Path) -> bool:
+    """True when *adr* has REAL enforcement carried by ``pytest:`` checks, yet
+    none of those resolving checks names the ADR in its file text (#10861).
+
+    Advisory, exactly like ``check_is_tautological``: this is deliberately NOT
+    consulted by ``has_real_enforcement`` / ``classify_adr_enforcement``, so it
+    never moves an ADR's REAL/WEAK/MISSING class. Measured on the live corpus,
+    ~46 of the REAL ADRs cite a test that never names them; folding attribution
+    into REAL would flip all of them to WEAK and make the published debt report
+    wrong. It is surfaced in the enforcement report and ratcheted against a
+    pinned, shrink-only baseline instead.
+
+    Returns False for an ADR whose REAL enforcement is a ``make:``/``script:``
+    check with no resolving pytest check — attribution is not defined there.
+    """
+    if not has_real_enforcement(adr, repo_root):
+        return False
+    checks = _resolving_pytest_checks(adr, repo_root)
+    if not checks:
+        return False
+    return all(check_is_unattributed(chk, adr.number, repo_root) for chk in checks)
+
+
+def unattributed_adrs(adrs: list[ADR], repo_root: Path) -> list[str]:
+    """Zero-padded ids of the Accepted ADRs flagged unattributed (#10861).
+
+    Sorted, one id per ADR (``"0116"``). Accepted-only, matching the population
+    ``classify_adr_enforcement`` is defined over. Used by the enforcement report
+    and by the shrink-only ratchet in
+    ``tests/test_adr_enforcement_completeness.py``.
+    """
+    return sorted(
+        f"{a.number:04d}"
+        for a in adrs
+        if a.status == "Accepted" and adr_is_unattributed(a, repo_root)
+    )
+
+
 def has_real_enforcement(adr: ADR, repo_root: Path) -> bool:
     """True when *adr* is ``enforced`` and carries at least one resolving,
     non-mutating, non-prose typed check — ADR-0100's ``enforced`` bar.

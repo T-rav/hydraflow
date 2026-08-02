@@ -93,7 +93,18 @@ GRANDFATHERED: frozenset[str] = frozenset({})
 # have fallen to GRANDFATHERED_TARGET. Past that date the test fails until either
 # the backfill lands or the schedule is renegotiated in a commit that says why —
 # which makes coverage debt a dated commitment rather than a note.
-GRANDFATHERED_DEADLINE = "2026-09-30"
+#
+# "A commit that says why" now has a gate behind it (#10861). The deadline is
+# not a bare string that can move for free: every value it has taken is logged
+# here paired with the issue/PR that authorized the move, mirroring ADR-0113's
+# Precedent/Divergence receipt. Moving the deadline means appending a row with a
+# fresh `#<n>` receipt; a bare edit that carries no receipt, or reuses an earlier
+# one, fails test_deadline_moves_carry_a_receipt. GRANDFATHERED_DEADLINE is
+# derived from the last row so every existing importer is untouched. (The window
+# cap in test_burndown_schedule_is_coherent already bounds how *far* a single
+# window may reach; the receipt is the orthogonal "who authorized this" gate.)
+GRANDFATHERED_SCHEDULE_LOG: tuple[tuple[str, str], ...] = (("2026-09-30", "#10856"),)
+GRANDFATHERED_DEADLINE = GRANDFATHERED_SCHEDULE_LOG[-1][0]
 GRANDFATHERED_TARGET = 0
 GRANDFATHERED_BURNDOWN_ORIGIN = ("2026-07-30", 30)
 GRANDFATHERED_MAX = 0

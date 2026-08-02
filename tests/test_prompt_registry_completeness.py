@@ -24,6 +24,7 @@ from prompt_fitness import (
     GRANDFATHERED_BURNDOWN_ORIGIN,
     GRANDFATHERED_DEADLINE,
     GRANDFATHERED_MAX,
+    GRANDFATHERED_SCHEDULE_LOG,
     GRANDFATHERED_TARGET,
     PLACEHOLDER_LEAK_EXEMPT,
     PLACEHOLDER_LEAK_EXEMPT_MAX,
@@ -168,6 +169,52 @@ def test_the_window_cap_rejects_a_free_year_long_extension() -> None:
     assert (
         _burndown_window_days(a_year_out.isoformat(), origin_date)
         > _MAX_BURNDOWN_WINDOW_DAYS
+    )
+
+
+# The window cap bounds how *far* the deadline can reach; the receipt gate below
+# is the orthogonal "who authorized this" half of ADR-0116 §5a's "a commit that
+# says why" (#10861). The deadline is derived from an append-only schedule log
+# pairing every value it has taken with the issue/PR that moved it — so a bare
+# deadline edit that carries no fresh receipt cannot pass silently.
+
+
+def test_deadline_moves_carry_a_receipt() -> None:
+    import re  # noqa: PLC0415
+    from datetime import date  # noqa: PLC0415
+
+    assert GRANDFATHERED_SCHEDULE_LOG, "the schedule log must have at least one row"
+
+    deadlines = [row[0] for row in GRANDFATHERED_SCHEDULE_LOG]
+    receipts = [row[1] for row in GRANDFATHERED_SCHEDULE_LOG]
+
+    # The live deadline is the last row — the derivation must not have drifted.
+    assert deadlines[-1] == GRANDFATHERED_DEADLINE, (
+        f"GRANDFATHERED_DEADLINE ({GRANDFATHERED_DEADLINE}) must equal the last "
+        f"schedule-log deadline ({deadlines[-1]})"
+    )
+
+    # A move means a *new* row with a *new* receipt: duplicate deadlines or a
+    # reused receipt means the deadline was pushed without a fresh authorization.
+    assert len(deadlines) == len(set(deadlines)), (
+        f"duplicate deadline in GRANDFATHERED_SCHEDULE_LOG: {deadlines}"
+    )
+    assert len(receipts) == len(set(receipts)), (
+        f"a deadline move reused a receipt in GRANDFATHERED_SCHEDULE_LOG: "
+        f"{receipts} (#10861). Cite the issue/PR that authorized THIS move."
+    )
+
+    for receipt in receipts:
+        assert re.fullmatch(r"#\d+", receipt), (
+            f"schedule-log receipt {receipt!r} is not an issue/PR reference like "
+            f"#1234 (#10861) — 'a commit that says why' needs a receipt, not prose."
+        )
+
+    # Every logged deadline must be a real date, and they advance in order, so
+    # the log reads as a genuine renegotiation history rather than a scratch pad.
+    parsed = [date.fromisoformat(d) for d in deadlines]
+    assert parsed == sorted(parsed), (
+        f"schedule-log deadlines must be in chronological order: {deadlines}"
     )
 
 

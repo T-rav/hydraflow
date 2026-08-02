@@ -195,6 +195,32 @@ def test_non_exempt_weak_adr_still_counts_as_debt(tmp_path: Path):
     assert "| ADR-0002 | WEAK | — |" in out
 
 
+def _attribution_fixture(tmp_path: Path, *, named: bool) -> list[ADR]:
+    (tmp_path / "tests").mkdir(exist_ok=True)
+    header = '"""Enforces ADR-0007."""\n' if named else ""
+    (tmp_path / "tests" / "e.py").write_text(
+        header + "def test_x():\n    assert True\n"
+    )
+    return [_adr(7, "enforced", (_pytest("tests/e.py::test_x"),))]
+
+
+def test_unattributed_section_lists_the_offender(tmp_path: Path):
+    """A REAL ADR whose test never names it is surfaced in the section (#10861)."""
+    out = render_adr_enforcement(
+        _attribution_fixture(tmp_path, named=False), repo_root=tmp_path
+    )
+    section = out.split("## Unattributed enforcements", 1)[1]
+    assert "| ADR-0007 |" in section
+    assert "tests/e.py::test_x" in section
+
+
+def test_unattributed_section_none_when_all_named(tmp_path: Path):
+    out = render_adr_enforcement(
+        _attribution_fixture(tmp_path, named=True), repo_root=tmp_path
+    )
+    assert "## Unattributed enforcements\n\n_(none)_" in out
+
+
 def test_missing_exemptions_file_degrades_gracefully(tmp_path: Path):
     """With no exemptions.md present the report renders exactly as before —
     full WEAK+MISSING debt, no exemptions, no crash."""

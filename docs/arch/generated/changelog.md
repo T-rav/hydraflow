@@ -6,7 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
-- `2b60b6f` — feat(adr): bidirectional enforcement — Binds: direction axis + enforcement (#10849) (#10849) *(2026-08-02)*
+- `1c0d194` — feat: bidirectional enforcement — Binds: axis + broadened self-mod class (#10849, #10851) (#10997) (#10997) *(2026-08-02)*
 - `ac8db5e` — docs(ul): UL scoping ADR (0122) + 7 assurance term entries (#10834) (#10995) (#10995) *(2026-08-02)*
 - `1b76da9` — feat(rails): rails.yaml manifest + drift-caretaker loop (#10936) (#10992) (#10992) *(2026-08-01)*
 - `005d775` — feat(timeline): emit PR diff stats in pr_created/merge_update payloads (#10788) (#10993) (#10993) *(2026-08-01)*
