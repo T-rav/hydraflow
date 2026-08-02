@@ -19,8 +19,11 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -44,19 +47,52 @@ def load_scenario(name: str):
     return importlib.import_module(f"tests.sandbox_scenarios.scenarios.{name}")
 
 
-def write_seed(name: str) -> Path:
-    """Compute the scenario's seed and write it to SEEDS_DIR."""
-    SEEDS_DIR.mkdir(parents=True, exist_ok=True)
+def write_seed(name: str, seeds_dir: Path | None = None) -> Path:
+    """Compute the scenario's seed and write it into *seeds_dir*.
+
+    *seeds_dir* defaults to the committed ``SEEDS_DIR`` — the path ``cmd_seed``
+    uses to (re)generate the 6 golden seeds. ``cmd_run``/``cmd_run_all`` pass a
+    throwaway temp dir instead (via ``_materialize_run_seed``) so a manual
+    sandbox run of a seedless scenario never leaves an untracked ``<name>.json``
+    in the source tree (#10980). Resolving ``None`` to the *module-level*
+    ``SEEDS_DIR`` at call time (not a default-argument binding) keeps the
+    monkeypatch-``SEEDS_DIR`` seam #10094 relies on working.
+    """
+    target_dir = SEEDS_DIR if seeds_dir is None else seeds_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
     mod = load_scenario(name)
-    out = SEEDS_DIR / f"{mod.NAME}.json"
+    out = target_dir / f"{mod.NAME}.json"
     out.write_text(mod.seed().to_json())
     return out
 
 
-def _compose(*args: str) -> subprocess.CompletedProcess:
+def _materialize_run_seed(name: str) -> Path:
+    """Materialize *name*'s seed + its ``scenario.json`` symlink into a fresh
+    throwaway temp dir and return that dir (#10980).
+
+    ``cmd_run``/``cmd_run_all`` mount THIS dir at ``/seed`` (via the
+    ``SANDBOX_SEED_DIR`` compose bind) instead of the committed golden
+    ``SEEDS_DIR``. 72 of 78 scenarios have no committed golden seed, so writing
+    into ``SEEDS_DIR`` on a manual ``run``/``run-all`` used to drop an untracked
+    ``<name>.json`` (plus a ``scenario.json`` symlink) into the source tree,
+    tripping ``test_seed_dir_is_git_clean`` on the next full-suite run in the
+    same workspace. ``cmd_seed`` stays the only writer of the committed goldens.
+    """
+    seed_dir = Path(tempfile.mkdtemp(prefix="sandbox-seed-"))
+    seed_path = write_seed(name, seeds_dir=seed_dir)
+    # The container always reads /seed/scenario.json; point it at THIS seed.
+    scenario_link = seed_dir / "scenario.json"
+    scenario_link.symlink_to(seed_path.name)
+    return seed_dir
+
+
+def _compose(
+    *args: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE_FILE), *args],
         check=False,
+        env=env,
     )
 
 
@@ -66,9 +102,9 @@ def cmd_seed(name: str) -> int:
     return 0
 
 
-def cmd_down() -> int:
+def cmd_down(env: dict[str, str] | None = None) -> int:
     print("Stopping stack...")
-    _compose("down", "-v")
+    _compose("down", "-v", env=env)
     print("Done.")
     return 0
 
@@ -108,67 +144,69 @@ def _wait_for_healthy(timeout: float = 60.0) -> bool:
 
 def cmd_run(name: str) -> int:
     print(f"[1/5] Computing seed for {name}...")
-    seed_path = write_seed(name)
+    # Materialize the seed (and its scenario.json symlink) into a throwaway
+    # temp dir and mount THAT at /seed, never the committed golden SEEDS_DIR —
+    # otherwise a manual run of a seedless scenario pollutes the source tree
+    # (#10980). SANDBOX_SEED_DIR feeds the parameterized compose bind.
+    seed_dir = _materialize_run_seed(name)
+    env = {**os.environ, "SANDBOX_SEED_DIR": str(seed_dir)}
+    try:
+        print("[2/5] Building images (cached when possible)...")
+        # ``playwright`` must be built explicitly because the MS image ships no
+        # test runner — ``Dockerfile.playwright`` adds pytest at build time so
+        # ``compose run playwright pytest …`` works on the air-gapped network.
+        rc = _compose("build", "hydraflow", "ui", "playwright", env=env).returncode
+        if rc != 0:
+            print(f"BUILD FAILED ({rc})")
+            return 2
 
-    # Make sure the seed file the container reads matches THIS scenario.
-    # The container always reads /seed/scenario.json, so symlink it.
-    target = SEEDS_DIR / "scenario.json"
-    if target.exists() or target.is_symlink():
-        target.unlink()
-    target.symlink_to(seed_path.name)
+        print("[3/5] Starting stack on internal network...")
+        rc = _compose("up", "-d", "hydraflow", "ui", env=env).returncode
+        if rc != 0:
+            print(f"UP FAILED ({rc})")
+            return 2
 
-    print("[2/5] Building images (cached when possible)...")
-    # ``playwright`` must be built explicitly because the MS image ships no
-    # test runner — ``Dockerfile.playwright`` adds pytest at build time so
-    # ``compose run playwright pytest …`` works on the air-gapped network.
-    rc = _compose("build", "hydraflow", "ui", "playwright").returncode
-    if rc != 0:
-        print(f"BUILD FAILED ({rc})")
-        return 2
+        print("[4/5] Waiting for hydraflow /healthz...")
+        if not _wait_for_healthy(60):
+            print("HEALTHCHECK TIMEOUT — collecting logs")
+            _compose("logs", "hydraflow", env=env)
+            cmd_down(env=env)
+            return 2
 
-    print("[3/5] Starting stack on internal network...")
-    rc = _compose("up", "-d", "hydraflow", "ui").returncode
-    if rc != 0:
-        print(f"UP FAILED ({rc})")
-        return 2
+        print("[5/5] Running playwright assertions...")
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        # ``-c tests/sandbox_scenarios/pytest.ini`` makes that file the
+        # rootdir-config so pytest does NOT autoload the project-wide
+        # ``tests/conftest.py`` (which imports pydantic/HydraFlow internals
+        # that the slim playwright image doesn't have). The runner's own
+        # conftest under ``tests/sandbox_scenarios/runner/`` still loads
+        # because it's inside the new rootdir.
+        rc = _compose(
+            "run",
+            "--rm",
+            "-e",
+            f"SCENARIO_NAME={name}",
+            "playwright",
+            "pytest",
+            "-c",
+            "tests/sandbox_scenarios/pytest.ini",
+            f"tests/sandbox_scenarios/runner/test_scenarios.py::test_scenario[{name}]",
+            "-v",
+            "--junitxml=/results/junit.xml",
+            env=env,
+        ).returncode
 
-    print("[4/5] Waiting for hydraflow /healthz...")
-    if not _wait_for_healthy(60):
-        print("HEALTHCHECK TIMEOUT — collecting logs")
-        _compose("logs", "hydraflow")
-        cmd_down()
-        return 2
+        if rc != 0:
+            print(f"FAILED {name}")
+            _compose("logs", "hydraflow", env=env)
+        else:
+            print(f"PASSED {name}")
 
-    print("[5/5] Running playwright assertions...")
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    # ``-c tests/sandbox_scenarios/pytest.ini`` makes that file the
-    # rootdir-config so pytest does NOT autoload the project-wide
-    # ``tests/conftest.py`` (which imports pydantic/HydraFlow internals
-    # that the slim playwright image doesn't have). The runner's own
-    # conftest under ``tests/sandbox_scenarios/runner/`` still loads
-    # because it's inside the new rootdir.
-    rc = _compose(
-        "run",
-        "--rm",
-        "-e",
-        f"SCENARIO_NAME={name}",
-        "playwright",
-        "pytest",
-        "-c",
-        "tests/sandbox_scenarios/pytest.ini",
-        f"tests/sandbox_scenarios/runner/test_scenarios.py::test_scenario[{name}]",
-        "-v",
-        "--junitxml=/results/junit.xml",
-    ).returncode
-
-    if rc != 0:
-        print(f"FAILED {name}")
-        _compose("logs", "hydraflow")
-    else:
-        print(f"PASSED {name}")
-
-    cmd_down()
-    return rc
+        cmd_down(env=env)
+        return rc
+    finally:
+        # The temp seed dir is single-use; never let it linger.
+        shutil.rmtree(seed_dir, ignore_errors=True)
 
 
 def _parse_shard(shard: str | None) -> tuple[int, int] | None:

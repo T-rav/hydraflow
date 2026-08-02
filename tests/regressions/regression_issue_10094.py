@@ -46,6 +46,7 @@ Three guards, so the drift can never silently recur:
 from __future__ import annotations
 
 import importlib
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -140,6 +141,67 @@ def test_write_seed_materialize_round_trip_never_touches_source(
         "write_seed() touched the COMMITTED source seed's mtime even though "
         "SEEDS_DIR was redirected to tmp_path — the exact #10094 leak."
     )
+
+
+def test_cmd_run_materialize_never_pollutes_committed_seeds_dir() -> None:
+    """``cmd_run`` must materialize into a throwaway temp dir, never ``SEEDS_DIR``.
+
+    Sibling of #10094: same root cause (``write_seed`` writing into the
+    committed golden dir), different trigger. 72 of 78 scenarios have no
+    committed golden seed, so a manual ``sandbox_scenario.py run <seedless>``
+    used to drop an untracked ``<name>.json`` (plus a ``scenario.json`` symlink)
+    into ``tests/sandbox_scenarios/seeds/``, tripping
+    ``test_seed_dir_is_git_clean`` on the next full-suite run in that workspace
+    (#10980). Exercises the REAL seed-materialization seam ``cmd_run`` uses
+    against a REAL *seedless* scenario module — the exact class that polluted —
+    then proves the committed dir is entry-for-entry, byte-for-byte, and
+    mtime-for-mtime unchanged. ``cmd_seed`` stays the only writer of the goldens.
+    """
+    from scripts import sandbox_scenario
+
+    # A real scenario with NO committed golden (one of the 72) — the exact case
+    # reported in #10980. If a golden ever gets added for it, pick another.
+    stem = "s75_worker_stall_escalation"
+    assert not (_SEEDS_DIR / f"{stem}.json").exists(), (
+        f"{stem} unexpectedly has a committed golden seed — pick a seedless "
+        "scenario so this guard actually proves the no-pollution property."
+    )
+
+    names_before = {p.name for p in _SEEDS_DIR.iterdir()}
+    files_before = {
+        p.name: (p.read_text(), p.stat().st_mtime_ns)
+        for p in _SEEDS_DIR.iterdir()
+        if p.is_file()
+    }
+
+    seed_dir = sandbox_scenario._materialize_run_seed(stem)
+    try:
+        # Materialization landed in a throwaway temp dir OUTSIDE the golden dir.
+        assert seed_dir != _SEEDS_DIR
+        assert _SEEDS_DIR not in seed_dir.parents
+        seed_file = seed_dir / f"{stem}.json"
+        module = importlib.import_module(
+            f"tests.sandbox_scenarios.scenarios.{stem}"
+        )
+        assert seed_file.read_text() == module.seed().to_json()
+        # The per-run scenario.json symlink lives in the temp dir too, not source.
+        assert (seed_dir / "scenario.json").is_symlink()
+
+        # The committed golden dir is entirely untouched — no stray file added,
+        # no in-place mutation, no mtime bump.
+        assert {p.name for p in _SEEDS_DIR.iterdir()} == names_before, (
+            "_materialize_run_seed added or removed an entry in the committed "
+            "seeds dir — the exact #10980 pollution."
+        )
+        assert {
+            p.name: (p.read_text(), p.stat().st_mtime_ns)
+            for p in _SEEDS_DIR.iterdir()
+            if p.is_file()
+        } == files_before, (
+            "_materialize_run_seed mutated a committed seed in place (#10980)."
+        )
+    finally:
+        shutil.rmtree(seed_dir, ignore_errors=True)
 
 
 def test_seed_dir_is_git_clean() -> None:
