@@ -92,6 +92,7 @@ class EventType(StrEnum):
     RETROSPECTIVE_UPDATE = "retrospective_update"
     LOOP_FITNESS_UPDATE = "loop_fitness_update"
     WIKI_SUPERSEDES = "wiki_supersedes"
+    SUPERVISOR_OBSERVATION = "supervisor_observation"
     TRIBAL_PROMOTION = "tribal_promotion"
     ADR_DRAFT_OPENED = "adr_draft_opened"
     ADR_CONFORMANCE_UPDATE = "adr_conformance_update"

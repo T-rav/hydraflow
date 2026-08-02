@@ -40,7 +40,8 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
 | `GateHealthLoop` | ✅ [0120] | ✅ [dark-factory.md, feedback-workstream-fixes-over-loops.md, testing.md] | ✅ loops.md | ❌ | ✅ `test_gate_health_loop.py` | ✅ in catalog | ❌ |
 | `GitHubCacheLoop` | ✅ [0076] | ✅ [git-hub-cache-loop.md, git-hub-data-cache.md, hitl-item.md] | ✅ loops.md | ✅ README.md | ✅ `test_github_cache_loop.py` | ✅ in catalog | ✅ `s44_github_cache_idle_poll.py` |
-| `HealthMonitorLoop` | ✅ [0045, 0046, 0093, 0106] | ✅ [gotchas.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |
+| `GoalSupervisorLoop` | ✅ [0124] | ✅ [goal-supervisor-loop.md] | ✅ loops.md | ❌ | ✅ `test_goal_supervisor_loop.py` | ✅ in catalog | ❌ |
+| `HealthMonitorLoop` | ✅ [0045, 0046, 0093, 0106, 0124] | ✅ [goal-supervisor-loop.md, gotchas.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |
 | `HumanSteeringLoop` | ✅ [0103] | ✅ [human-steering-loop.md, steering-channel.md, steering-state.md] | ❌ | ❌ | ✅ `test_human_steering_loop.py` | ✅ in catalog | ✅ `s52_human_steering_directive.py` |
 | `InterventionTallyLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_intervention_tally_loop.py` | ✅ in catalog | ✅ `s85_intervention_tally_idle_poll.py` |
 | `IssueRefinementLoop` | ❌ | ❌ | ✅ loops.md | ❌ | ✅ `test_issue_refinement_loop.py` | ✅ in catalog | ✅ `s57_issue_refinement_digest.py` |

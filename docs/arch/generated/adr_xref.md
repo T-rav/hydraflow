@@ -130,6 +130,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0121 | `src.rails_drift_caretaker_loop`, `src.rails_manifest` | — |
 | ADR-0122 | — | — |
 | ADR-0123 | — | `'pytest:tests/test_adr_direction_declared.py'` |
+| ADR-0124 | `src.goal_supervisor_loop`, `src.supervisor_observation` | — |
 
 ## Module → ADRs
 
@@ -213,6 +214,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.gate_activation_check` | ADR-0082 |
 | `src.gate_activator_loop` | ADR-0082 |
 | `src.github_cache_loop` | ADR-0076 |
+| `src.goal_supervisor_loop` | ADR-0124 |
 | `src.harness_insights` | ADR-0099 |
 | `src.health_monitor_loop` | ADR-0045, ADR-0046, ADR-0106, ADR-0108 |
 | `src.hitl_runner` | ADR-0103 |
@@ -308,6 +310,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.state._sandbox_failure_fixer` | ADR-0097 |
 | `src.state._session` | ADR-0014, ADR-0021 |
 | `src.subprocess_util` | ADR-0108, ADR-0110 |
+| `src.supervisor_observation` | ADR-0124 |
 | `src.telemetry.__init__` | ADR-0055 |
 | `src.telemetry.otel` | ADR-0055 |
 | `src.telemetry.slugs` | ADR-0055 |

@@ -336,6 +336,26 @@ def build_diagnostics_router(
                 records.append(obj)
         return latest_verdict_payload(records)
 
+    @router.get("/supervisor/thread")
+    def supervisor_thread(
+        limit: int = Query(50, ge=1, le=500), repo: RepoSlugParam = None
+    ) -> dict[str, Any]:
+        """Recent Tier-2 goal-supervisor observations (ADR-0124).
+
+        Read-only: :class:`GoalSupervisorLoop` appends observations to
+        ``<data_root>/supervisor_thread.jsonl``; this surfaces the most recent
+        ``limit`` (newest last) for the operator console's supervisor panel.
+        Each record is honest by construction — assessment, insights, the
+        nudges taken (pending verification), the escalations (surfaced, not
+        self-done), and the transients deferred. With no thread yet it returns
+        an empty list rather than erroring.
+        """
+        from supervisor_observation import read_thread  # noqa: PLC0415
+
+        cfg = _config_for(repo) if repo is not None else config
+        observations = read_thread(cfg, limit=limit)
+        return {"observations": observations, "count": len(observations)}
+
     @router.get("/tools")
     def tools(
         range: str = Query("7d"),

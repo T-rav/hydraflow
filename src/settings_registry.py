@@ -164,6 +164,11 @@ SETTINGS: dict[str, SettingSpec] = {
     "event_loop_watchdog_hard_restart": SettingSpec(
         "Event-Loop Watchdog", live=True, order=2
     ),
+    # --- Goal Supervisor (Tier-2 liveness, ADR-0124) ----------------------
+    # enabled: deploy-time kill-switch (captured at startup → restart badge).
+    # interval: the cadence is re-read via interval_cb each cycle → live.
+    "goal_supervisor_loop_enabled": SettingSpec("Goal Supervisor", live=False, order=0),
+    "goal_supervisor_interval": SettingSpec("Goal Supervisor", live=True, order=1),
     # --- Branch GC (stale agent-branch reconciler, #10011) ----------------
     # Live: StaleIssueLoop re-reads these each tick, no restart needed.
     # delete_enabled defaults False (report/comment-only) since deletion is

@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_82 terms across 3 bounded contexts._
+_83 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -430,6 +430,23 @@ GitHubDataCache is a repo-scoped, in-memory and disk-persisted cache for GitHub 
 - get_* read methods never hit the network — only poll() and the demand-refresh paths call the GitHub API
 - Demand-refreshed datasets serve a stale snapshot while younger than a multiple (default 3x) of the caller's staleness bound; beyond that, callers get an empty result rather than acting on ancient data
 - The cache is repo-scoped: each RepoRuntime gets its own instance with its own disk file
+
+## GoalSupervisorLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/goal_supervisor_loop.py:GoalSupervisorLoop` · **Confidence:** `accepted`
+**Aliases:** `goal supervisor loop`, `tier-2 goal supervisor`, `goal supervisor`, `mini-me supervisor`
+
+Tier-2 (meta-observability) caretaker loop that formalizes the by-hand "keep the factory alive & healthy" monitor (ADR-0124, #10733). Ticks on a cadence, assembles a read-only `HealthSnapshot` from the existing Tier-1 signals (per-loop heartbeats, credit-failover state, boot-SHA staleness, the event-loop watchdog marker, the second-order vitals verdict), hands it to a Fable agent (`claude-fable-5`) under the standing goal, and records a `SupervisorObservation` (assessment · insights · nudges-taken · escalations · deferred) to the append-only `supervisor_thread.jsonl` + the event bus. Authority is **watch + surface + NUDGE** only — a small reversible allowlist; everything with blast radius is surfaced, never self-done. The load-bearing classify / known-incident / nudge-vs-escalate / give-up-window logic is pure and unit-tested in `supervisor_observation`. Ships default OFF.
+
+**Invariants:**
+- Reuses Tier-1 signals; the snapshot never re-detects and never mutates.
+- Nudge allowlist is small and explicit (`NUDGE_ALLOWLIST`); everything else escalates (surface, never self-do) — mirrors `docs/standards/factory_autonomy`.
+- A nudge carries a one-line root-cause diagnosis; a cause-less action is dropped as noise.
+- Bounded retries then escalate: an incident is nudged ≤ `GIVEUP_CAP` times (give-up window, attempt ledger persisted across ticks), then escalates — never infinite-retry.
+- Verify + re-arm: a nudge is pending until a later tick confirms its condition cleared (`reconcile_ledger`); a still-present incident counts toward the give-up window.
+- Healthy snapshot → no-op without consulting the Fable agent (cost control).
+- Kill-switch is via `enabled_cb("goal_supervisor")` and the `goal_supervisor_loop_enabled` deploy-time gate (ADR-0049).
+- Tier separation: registered standalone (not folded into `HealthMonitorLoop`) so no LLM sits in the deterministic Tier-1 kernel (ADR-0124).
 
 ## Governor
 

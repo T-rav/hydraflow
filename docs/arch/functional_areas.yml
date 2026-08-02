@@ -11,7 +11,7 @@
 # surfaces the UI does not group (Ports, persistence, the harness, the
 # dashboard itself, the orchestration pipeline, discovery engines).
 #
-# Loop membership is validated against the live extractor: 64 loops, 10 Ports.
+# Loop membership is validated against the live extractor: 65 loops, 10 Ports.
 
 areas:
   repo_health:
@@ -107,9 +107,10 @@ areas:
       itself — pipeline-trend health monitoring / auto-tuning and the
       trust-fleet sanity check that keeps the meta-observability layer honest.
     loops:
+      - GoalSupervisorLoop
       - HealthMonitorLoop
       - TrustFleetSanityLoop
-    related_adrs: ['0045', '0056']
+    related_adrs: ['0045', '0056', '0124']
 
   operations:
     label: Operations
