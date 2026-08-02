@@ -99,6 +99,14 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('loops-category-toggle-repo_health')).toBeInTheDocument()
   })
 
+  it('mounts the SupervisorPanel in the vitals slot, empty by default (#10733)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    const vitalsSlot = screen.getByTestId('operator-vitals-slot')
+    expect(vitalsSlot).toContainElement(screen.getByTestId('supervisor-panel'))
+    // Default supervisor VM is empty → the calm empty state renders, no crash.
+    expect(screen.getByTestId('supervisor-empty')).toBeInTheDocument()
+  })
+
   it('mounts the phase timeline in the reclaimed bottom slot (feat/operator-timeline)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     const slot = screen.getByTestId('operator-timeline-slot')
