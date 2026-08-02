@@ -1487,6 +1487,48 @@ export function HydraFlowProvider({ children }) {
     }
   }, [applyRepoParam, state.selectedRepoSlug])
 
+  // Supervisor restart-loop action (#11002). The Tier-2 goal-supervisor is a
+  // HOST-level loop and its thread is polled WITHOUT a repo scope, so this
+  // targets the bare (default-orchestrator) restart endpoint rather than the
+  // repo-scoped one — a restart must act on the same factory the thread observes.
+  // Reversible + allowlisted (ADR-0124 rule 2): recreates a wedged loop's task.
+  const restartLoop = useCallback(async (name) => {
+    try {
+      const resp = await fetch('/api/control/bg-worker/restart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      return resp.ok
+    } catch {
+      return false
+    }
+  }, [])
+
+  // Supervisor ack-escalation action (#11002). Acks EVERY escalation of one
+  // observation (identified by its ts) via the append-only ack endpoint — one
+  // POST per escalation. Bare (host-level) for the same reason as restartLoop:
+  // the ack must land in the data_root the thread is read from. Append-only +
+  // honest (ADR-0124 rule 6): the original observation is never rewritten.
+  const ackEscalations = useCallback(async (ts, escalations) => {
+    const list = Array.isArray(escalations) ? escalations : [escalations]
+    const results = await Promise.all(
+      list.map(async (escalation) => {
+        try {
+          const resp = await fetch('/api/diagnostics/supervisor/ack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ts, escalation }),
+          })
+          return resp.ok
+        } catch {
+          return false
+        }
+      }),
+    )
+    return results.every(Boolean)
+  }, [])
+
   const updateBgWorkerInterval = useCallback(async (name, intervalSeconds) => {
     if (state.selectedRepoSlug === REPO_ALL) return
     // Optimistic local update
@@ -1917,6 +1959,8 @@ export function HydraFlowProvider({ children }) {
     requestChanges,
     toggleBgWorker,
     triggerBgWorker,
+    restartLoop,
+    ackEscalations,
     updateBgWorkerInterval,
     updateBgWorkerWatchdogTimeout,
     dismissSystemAlert: useCallback(() => dispatch({ type: 'CLEAR_SYSTEM_ALERT' }), [dispatch]),

@@ -131,3 +131,49 @@ describe('toSupervisorThread — verdict derivation (from the newest observation
     expect(vm.escalationCount).toBe(0)
   })
 })
+
+describe('toSupervisorThread — escalation acks (honest thread, rule 6)', () => {
+  it('surfaces acked / unacked escalations from the backend acked_escalations JOIN', () => {
+    const vm = toSupervisorThread({
+      observations: [obs({
+        escalations: ['force_push [main]', 'delete_branch — orphan'],
+        acked_escalations: ['force_push [main]'],
+      })],
+    })
+    const o = vm.observations[0]
+    expect(o.ackedEscalations).toEqual(['force_push [main]'])
+    expect(o.unackedEscalations).toEqual(['delete_branch — orphan'])
+    expect(o.hasEscalations).toBe(true) // one still wants a human
+    expect(o.counts.escalations).toBe(2) // count stays the raw bucket size
+  })
+
+  it('drops a FULLY-acked observation out of the verdict / escalationCount', () => {
+    const vm = toSupervisorThread({
+      observations: [obs({
+        escalations: ['force_push [main]'],
+        acked_escalations: ['force_push [main]'],
+        snapshot: { healthy: false },
+      })],
+    })
+    expect(vm.verdict).toBe('degraded') // a handled escalation stops nagging
+    expect(vm.escalationCount).toBe(0)
+    expect(vm.observations[0].hasEscalations).toBe(false)
+  })
+
+  it('still escalates the verdict for a PARTIALLY-acked observation', () => {
+    const vm = toSupervisorThread({
+      observations: [obs({ escalations: ['a', 'b'], acked_escalations: ['a'] })],
+    })
+    expect(vm.verdict).toBe('escalations')
+    expect(vm.escalationCount).toBe(1)
+    expect(vm.verdictLabel).toBe('1 escalation pending')
+  })
+
+  it('ignores a stray ack that names no real escalation of the observation', () => {
+    const vm = toSupervisorThread({
+      observations: [obs({ escalations: ['a'], acked_escalations: ['ghost'] })],
+    })
+    expect(vm.observations[0].ackedEscalations).toEqual([])
+    expect(vm.observations[0].unackedEscalations).toEqual(['a'])
+  })
+})

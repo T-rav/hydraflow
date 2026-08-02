@@ -470,6 +470,75 @@ class TestBgWorkerToggleEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# /api/control/bg-worker/restart endpoint (supervisor restart-loop action)
+# ---------------------------------------------------------------------------
+
+
+class TestBgWorkerRestartEndpoint:
+    def test_restart_route_is_registered(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        paths = {route.path for route in router.routes if hasattr(route, "path")}
+        assert "/api/control/bg-worker/restart" in paths
+
+    @pytest.mark.asyncio
+    async def test_restart_returns_error_without_orchestrator(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+        restart = find_endpoint(router, "/api/control/bg-worker/restart")
+        assert restart is not None
+        response = await restart({"name": "diagram"})
+        assert response.status_code == 400
+        assert json.loads(response.body)["error"] == "no orchestrator"
+
+    @pytest.mark.asyncio
+    async def test_restart_requires_name(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        mock_orch = MagicMock()
+        mock_orch.restart_loop_task = AsyncMock(return_value=True)
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        restart = find_endpoint(router, "/api/control/bg-worker/restart")
+        response = await restart({})
+        assert response.status_code == 400
+        mock_orch.restart_loop_task.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_restart_calls_orchestrator_and_reports_ok(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        mock_orch = MagicMock()
+        mock_orch.restart_loop_task = AsyncMock(return_value=True)
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        restart = find_endpoint(router, "/api/control/bg-worker/restart")
+        response = await restart({"name": "diagram"})
+        data = json.loads(response.body)
+        assert response.status_code == 200
+        assert data == {"status": "ok", "name": "diagram", "restarted": True}
+        mock_orch.restart_loop_task.assert_awaited_once_with("diagram")
+
+    @pytest.mark.asyncio
+    async def test_restart_unknown_loop_is_404(
+        self, config, event_bus, state, tmp_path
+    ) -> None:
+        mock_orch = MagicMock()
+        mock_orch.restart_loop_task = AsyncMock(return_value=False)
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, get_orch=lambda: mock_orch
+        )
+        restart = find_endpoint(router, "/api/control/bg-worker/restart")
+        response = await restart({"name": "nope"})
+        assert response.status_code == 404
+        assert "could not restart" in json.loads(response.body)["error"]
+
+
+# ---------------------------------------------------------------------------
 # /api/control/bg-worker/interval endpoint
 # ---------------------------------------------------------------------------
 

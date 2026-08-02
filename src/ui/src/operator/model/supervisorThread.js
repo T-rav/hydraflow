@@ -30,9 +30,11 @@
  *     insights: [string],
  *     nudges: [string],            // nudges_taken (pending verification)
  *     escalations: [string],       // surfaced, want a human — never self-done
+ *     ackedEscalations: [string],  // escalations a human acked (backend JOIN)
+ *     unackedEscalations: [string],// escalations still wanting a human
  *     deferred: [string],          // transients waited out / re-run
  *     counts: { insights, nudges, escalations, deferred },
- *     hasEscalations: boolean,     // drives the row's distinct styling
+ *     hasEscalations: boolean,     // has UNACKED escalations → distinct styling
  *   }
  *
  * The verdict is derived from the LATEST (newest) observation, per the honest-
@@ -94,6 +96,15 @@ function toObservation(raw, index) {
   const insights = toStringList(o.insights)
   const nudges = toStringList(o.nudges_taken)
   const escalations = toStringList(o.escalations)
+  // acked_escalations is the backend's JOIN of the append-only ack log onto this
+  // observation (rule 6): the subset of `escalations` a human acknowledged. Keep
+  // only acks that name a real escalation, so a stray ack never invents one.
+  const escalationSet = new Set(escalations)
+  const ackedEscalations = toStringList(o.acked_escalations).filter(e => escalationSet.has(e))
+  const ackedSet = new Set(ackedEscalations)
+  // Unacked escalations are what still WANT a human — they drive the red rail
+  // and the top-level verdict. A fully-acked observation stops nagging.
+  const unackedEscalations = escalations.filter(e => !ackedSet.has(e))
   const deferred = toStringList(o.deferred)
   const ts = String(o.ts ?? '')
   return {
@@ -104,6 +115,8 @@ function toObservation(raw, index) {
     insights,
     nudges,
     escalations,
+    ackedEscalations,
+    unackedEscalations,
     deferred,
     counts: {
       insights: insights.length,
@@ -111,7 +124,7 @@ function toObservation(raw, index) {
       escalations: escalations.length,
       deferred: deferred.length,
     },
-    hasEscalations: escalations.length > 0,
+    hasEscalations: unackedEscalations.length > 0,
   }
 }
 
@@ -125,7 +138,10 @@ function rawObservations(raw) {
 /** Derive the glanceable top-level verdict from the newest observation. */
 function deriveVerdict(latest) {
   if (!latest) return { verdict: 'empty', escalationCount: 0, verdictLabel: 'no observations' }
-  const escalationCount = latest.escalations.length
+  // Only UNACKED escalations count toward the verdict: a handled (acked)
+  // escalation stops nagging, so an observation whose escalations are all acked
+  // falls through to the degraded / healthy verdict (rule 6, honest thread).
+  const escalationCount = latest.unackedEscalations.length
   if (escalationCount > 0) {
     return {
       verdict: 'escalations',
