@@ -88,7 +88,11 @@ function makeStyles(t) {
     tab: {
       appearance: 'none',
       background: 'transparent',
-      border: 'none',
+      // Per-side longhands only (no `border` shorthand) so the border
+      // shorthand/longhand guard (#10583) stays green.
+      borderTop: 'none',
+      borderRight: 'none',
+      borderLeft: 'none',
       borderBottom: '2px solid transparent',
       color: t.color.textMuted,
       cursor: 'pointer',
@@ -100,7 +104,9 @@ function makeStyles(t) {
     tabActive: {
       appearance: 'none',
       background: 'transparent',
-      border: 'none',
+      borderTop: 'none',
+      borderRight: 'none',
+      borderLeft: 'none',
       borderBottom: `2px solid ${t.color.accent}`,
       color: t.color.text,
       cursor: 'pointer',
