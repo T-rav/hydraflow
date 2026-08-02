@@ -44,6 +44,9 @@ import { toReleasePromotion } from './model/release'
 import { toSettingsSummary } from './model/settingsSummary'
 import { VitalsCard } from './VitalsCard'
 import { LoopsPanel } from './LoopsPanel'
+import { CostPanel } from './CostPanel'
+import { useCostByRepo } from './useCostByRepo'
+import { EMPTY_COST_VM } from './model/cost'
 import { ReleasePromotionStrip } from './ReleasePromotionStrip'
 import { SettingsSummary } from './SettingsSummary'
 import { SettingsDrawer } from './SettingsDrawer'
@@ -148,7 +151,7 @@ function ModeToggle({ mode, select, styles }) {
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now() }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
@@ -284,6 +287,7 @@ export function OperatorConsoleView({ socket = {}, now = Date.now() }) {
             </div>
             <div data-testid="operator-vitals-slot" style={styles.vitalsSlot}>
               <VitalsCard vitals={vitals} />
+              <CostPanel cost={cost} />
               <LoopsPanel loops={loops} />
               <SettingsSummary summary={settings} onOpenSettings={() => setSettingsOpen(true)} />
             </div>
@@ -306,7 +310,11 @@ export function OperatorConsoleView({ socket = {}, now = Date.now() }) {
  */
 export function OperatorConsole() {
   const socket = useHydraFlowSocket()
-  return <OperatorConsoleView socket={socket} />
+  // Cost feed (#10785): polls the repo + per-repo cost-per-model rollup on its
+  // own pinned cadence (aborted in-flight on unmount), independent of the WS
+  // slice the shell otherwise renders from.
+  const cost = useCostByRepo()
+  return <OperatorConsoleView socket={socket} cost={cost} />
 }
 
 export default OperatorConsole

@@ -35,6 +35,15 @@ export const MAX_EVENTS = 5000
 export const PIPELINE_POLL_SAFETY_NET_MS = 30_000
 
 /**
+ * Operator cost panel (#10785) REST-poll cadence. The cost/tokens panel reads
+ * `/api/diagnostics/cost/by-model-by-repo` (a JSONL-scanning rollup), so it
+ * polls on this slow fixed cadence rather than on every socket frame — one
+ * pinned interval, aborted in-flight on unmount. Kept well above the pipeline
+ * safety-net cadence: cost drifts slowly and the scan is not cheap.
+ */
+export const COST_POLL_MS = 60_000
+
+/**
  * WebSocket reconnect backoff (PR5). A flapping socket previously re-ran the
  * heavy onopen fan-out (10+ fetches + history replay) every fixed 2s. We now
  * back off exponentially with full jitter — delay = random(0, min(BASE * 2**n,
