@@ -811,7 +811,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("collaborator_check_enabled", "HYDRAFLOW_COLLABORATOR_CHECK_ENABLED", True),
-    ("memory_auto_approve", "HYDRAFLOW_MEMORY_AUTO_APPROVE", False),
     ("prompt_observatory_enabled", "HYDRAFLOW_PROMPT_OBSERVATORY_ENABLED", True),
     ("visual_gate_enabled", "HYDRAFLOW_VISUAL_GATE_ENABLED", False),
     ("visual_gate_bypass", "HYDRAFLOW_VISUAL_GATE_BYPASS", False),
@@ -3391,11 +3390,6 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Hindsight + memory_auto_approve knobs removed in Phase 3 cutover.
-
-    memory_auto_approve: bool = Field(
-        default=False,
-        description="When enabled, all memory suggestions bypass HITL and go directly to sync queue",
-    )
 
     memory_prune_stale_items: bool = Field(
         default=True,
