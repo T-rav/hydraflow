@@ -21,6 +21,7 @@ carries. Live pass/fail outcomes still live only in the gitignored
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from adr_conformance import (
@@ -30,6 +31,37 @@ from adr_conformance import (
     resolve_check,
 )
 from adr_index import ADR, Check
+
+# Process-only exemption allow-list. An Accepted ADR listed here classifies
+# WEAK/MISSING for a *justified* reason (no machine-checkable invariant) and is
+# excluded from the outstanding-debt headline — mirroring the merge gate in
+# ``tests/architecture/test_adr_enforcement_ratchet.py`` (which gates on
+# ``_live_debt() - exempted``). This report must read the same allow-list the
+# gate does, or the two drift.
+_EXEMPTIONS_REL = Path("docs") / "standards" / "adr_enforcement" / "exemptions.md"
+
+# One exemption entry line: ``- ADR-NNNN: <non-empty justification>``. Kept
+# byte-for-byte in sync with ``test_adr_enforcement_ratchet._EXEMPTION_RE`` so
+# the report and the gate never disagree on what counts as an exemption. Prose
+# that merely mentions an ADR does not match (must be a bullet + colon +
+# non-empty justification).
+_EXEMPTION_RE = re.compile(r"^-\s+ADR-(\d{4}):\s*(\S.*?)\s*$", re.MULTILINE)
+
+
+def _parse_exemptions(repo_root: Path) -> dict[int, str]:
+    """Return ``{adr_number: justification}`` from the exemptions allow-list.
+
+    Degrades to an empty mapping when the file is absent or unreadable so the
+    report still renders (identical to its pre-exemption output) rather than
+    crashing the whole arch pipeline over a missing standards doc — the same
+    fail-open contract the tmp_path unit fixtures rely on.
+    """
+    try:
+        text = (repo_root / _EXEMPTIONS_REL).read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    return {int(m.group(1)): m.group(2).strip() for m in _EXEMPTION_RE.finditer(text)}
+
 
 _HEADER = "# ADR Enforcement Debt\n\n"
 _PREAMBLE = (
@@ -41,7 +73,11 @@ _PREAMBLE = (
     "*asserting* check. `WEAK` = a `manual` prose pointer, or an `enforced` "
     "ADR whose every resolving check is tautological (green but asserts "
     "nothing). `MISSING` = no `**Enforced by:**` check at all (e.g. a bare "
-    "`decision-of-record`). `WEAK` + `MISSING` are the debt.\n\n"
+    "`decision-of-record`). `WEAK` + `MISSING` are the debt — except where "
+    "the decision is a *justified*, allow-listed process-only exemption "
+    "(`docs/standards/adr_enforcement/exemptions.md`): those are excluded from "
+    "the outstanding-debt headline, matching the merge gate in "
+    "`tests/architecture/test_adr_enforcement_ratchet.py`.\n\n"
 )
 _FOOTER = "\n\n{{ARCH_FOOTER}}\n"
 
@@ -54,16 +90,29 @@ def _checks_span(checks: tuple[Check, ...]) -> str:
     return ", ".join(c.as_code_span() for c in checks) or "—"
 
 
-def _summary(accepted: list[ADR], by_class: dict[int, EnforcementClass]) -> str:
+def _summary(
+    accepted: list[ADR],
+    by_class: dict[int, EnforcementClass],
+    exempted: frozenset[int],
+) -> str:
     total = len(accepted)
     real = sum(1 for a in accepted if by_class[a.number] is EnforcementClass.REAL)
     weak = sum(1 for a in accepted if by_class[a.number] is EnforcementClass.WEAK)
     missing = sum(1 for a in accepted if by_class[a.number] is EnforcementClass.MISSING)
-    debt = weak + missing
+    debt_adrs = [
+        a
+        for a in accepted
+        if by_class[a.number] in (EnforcementClass.WEAK, EnforcementClass.MISSING)
+    ]
+    exempt = sum(1 for a in debt_adrs if a.number in exempted)
+    # The load-bearing metric — the same set the ratchet gates on
+    # (``_live_debt() - exempted``): WEAK/MISSING that is NOT a justified,
+    # allow-listed process-only exemption.
+    outstanding = len(debt_adrs) - exempt
     enforced = sum(1 for a in accepted if a.enforcement == "enforced")
     manual = sum(1 for a in accepted if a.enforcement == "manual")
     dor = sum(1 for a in accepted if a.enforcement == "decision-of-record")
-    pct = f"{100 * debt / total:.1f}%" if total else "0.0%"
+    pct = f"{100 * outstanding / total:.1f}%" if total else "0.0%"
     real_pct = f"{100 * real / total:.1f}%" if total else "0.0%"
     return (
         "## Summary\n\n"
@@ -71,8 +120,9 @@ def _summary(accepted: list[ADR], by_class: dict[int, EnforcementClass]) -> str:
         f"- **REAL** (real asserting enforcement): {real} ({real_pct})\n"
         f"- **WEAK** (prose-only or tautological): {weak}\n"
         f"- **MISSING** (no `**Enforced by:**`): {missing}\n"
-        f"- **Unenforced-decision debt** (WEAK + MISSING): **{debt} / {total} "
-        f"= {pct}**\n\n"
+        f"- **Justified exemptions** (process-only, allow-listed): {exempt}\n"
+        f"- **Outstanding unenforced-decision debt** (non-exempt WEAK + "
+        f"MISSING): **{outstanding} / {total} = {pct}**\n\n"
         "By declared `**Enforcement:**` kind: "
         f"`enforced` {enforced} · `manual` {manual} · "
         f"`decision-of-record` {dor}.\n"
@@ -80,35 +130,64 @@ def _summary(accepted: list[ADR], by_class: dict[int, EnforcementClass]) -> str:
 
 
 def _classification_table(
-    accepted: list[ADR], by_class: dict[int, EnforcementClass]
+    accepted: list[ADR],
+    by_class: dict[int, EnforcementClass],
+    exempted: frozenset[int],
 ) -> str:
     out = (
         "\n## Classification\n\n"
-        "| ADR | Class | Kind | Enforced by |\n|---|---|---|---|\n"
+        "| ADR | Class | Exempt | Kind | Enforced by |\n|---|---|---|---|---|\n"
     )
     out += "\n".join(
-        f"| {_adr_id(a)} | {by_class[a.number].value} | {a.enforcement} | "
+        f"| {_adr_id(a)} | {by_class[a.number].value} | "
+        f"{'exempt' if a.number in exempted else '—'} | {a.enforcement} | "
         f"{_checks_span(a.enforced_by)} |"
         for a in accepted
     )
     return out
 
 
-def _debt_section(accepted: list[ADR], by_class: dict[int, EnforcementClass]) -> str:
+def _debt_section(
+    accepted: list[ADR],
+    by_class: dict[int, EnforcementClass],
+    exemptions: dict[int, str],
+) -> str:
     debt = [
         a
         for a in accepted
         if by_class[a.number] in (EnforcementClass.WEAK, EnforcementClass.MISSING)
     ]
-    out = "\n\n## Unenforced-decision debt\n\n"
-    if not debt:
-        return out + "_(none — every Accepted ADR has a real asserting enforcement)_"
-    out += "| ADR | Class | Kind | Pointer |\n|---|---|---|---|\n"
-    out += "\n".join(
-        f"| {_adr_id(a)} | {by_class[a.number].value} | {a.enforcement} | "
-        f"{_checks_span(a.enforced_by)} |"
-        for a in debt
-    )
+    outstanding = [a for a in debt if a.number not in exemptions]
+    exempt = [a for a in debt if a.number in exemptions]
+
+    out = "\n\n## Unenforced-decision debt\n\n### Outstanding (non-exempt)\n\n"
+    if not outstanding:
+        out += (
+            "_(none — every non-exempt Accepted ADR has a real asserting enforcement)_"
+        )
+    else:
+        out += "| ADR | Class | Kind | Pointer |\n|---|---|---|---|\n"
+        out += "\n".join(
+            f"| {_adr_id(a)} | {by_class[a.number].value} | {a.enforcement} | "
+            f"{_checks_span(a.enforced_by)} |"
+            for a in outstanding
+        )
+
+    out += "\n\n### Justified exemptions (process-only, allow-listed)\n\n"
+    if not exempt:
+        out += "_(none)_"
+    else:
+        out += (
+            "Allow-listed in `docs/standards/adr_enforcement/exemptions.md` as "
+            "genuinely process-only — no machine-checkable invariant — so "
+            "excluded from the outstanding-debt headline above.\n\n"
+            "| ADR | Class | Kind | Justification |\n|---|---|---|---|\n"
+        )
+        out += "\n".join(
+            f"| {_adr_id(a)} | {by_class[a.number].value} | {a.enforcement} | "
+            f"{exemptions[a.number]} |"
+            for a in exempt
+        )
     return out
 
 
@@ -148,13 +227,15 @@ def render_adr_enforcement(adrs: list[ADR], *, repo_root: Path) -> str:
         (a for a in adrs if a.status == "Accepted"), key=lambda a: a.number
     )
     by_class = {a.number: classify_adr_enforcement(a, repo_root) for a in accepted}
+    exemptions = _parse_exemptions(repo_root)
+    exempted = frozenset(exemptions)
 
     body = (
         _HEADER
         + _PREAMBLE
-        + _summary(accepted, by_class)
-        + _classification_table(accepted, by_class)
-        + _debt_section(accepted, by_class)
+        + _summary(accepted, by_class, exempted)
+        + _classification_table(accepted, by_class, exempted)
+        + _debt_section(accepted, by_class, exemptions)
         + _tautological_section(accepted, repo_root)
         + _FOOTER
     )
