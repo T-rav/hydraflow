@@ -378,14 +378,41 @@ def per_prompt_scores() -> dict[str, frozenset[int]]:
 # had done exactly that (``shape_runner``, ``discover_runner``), found by the
 # 2026-07-30 fixture backfill, invisible to all eight rubric criteria.
 #
-# Braces are legitimate inside code: fenced blocks, inline spans, and diff lines
-# all carry f-strings and deliberate ``### P{N}`` templates. Those are stripped
-# before scanning, so the check fires only on a placeholder left in prose.
+# Braces are legitimate inside code: fenced blocks, inline spans, unified-diff
+# hunks, and f-string literals all carry braces (``### P{N}`` templates,
+# ``f"{year}-W{week:02d}"``) that are content rather than leaks. Each is stripped
+# before scanning — crucially, diff stripping is scoped to real hunks, not every
+# ``+``/``-`` line, so a ``{placeholder}`` left on a Markdown bullet still fires
+# (issue #10865).
 # ---------------------------------------------------------------------------
 
 _FENCE_LINE = re.compile(r"^\s*```")
 _INLINE_CODE = re.compile(r"`[^`\n]*`")
-_DIFF_LINE = re.compile(r"^[+-].*$", re.MULTILINE)
+# Enter diff mode only on a real unified-diff header. A Markdown bullet
+# (``- ...`` / ``+ ...``) is NOT a header, so bulleted prose is never mistaken
+# for diff content — that conflation (issue #10865) blanked bulleted lines and
+# let a ``{placeholder}`` hidden inside a bullet escape the leak scan.
+_DIFF_HEADER = re.compile(r"^(?:diff --git |index [0-9a-f]{4,}\.\.|--- |\+\+\+ |@@ )")
+# Body lines of a hunk: context (`` ``), added (``+``), removed (``-``), or the
+# ``\ No newline at end of file`` marker. Only stripped while inside a hunk.
+_DIFF_BODY = re.compile(r"^[ +\-\\]")
+# f-string literals carry braces that are content, not placeholders
+# (``f"{year}-W{week:02d}"`` quoted inside a review-finding bullet). Triple-
+# quoted forms are matched first so ``f"""x{y}"""`` is not read as an empty
+# ``f""`` that leaves ``x{y}`` exposed.
+_FSTRING = re.compile(
+    r"""
+    (?<![A-Za-z0-9_])
+    (?:[fF][rR]?|[rR][fF])
+    (?:
+        \"\"\".*?\"\"\"
+      | '''.*?'''
+      | \"(?:\\.|[^\"\\\n])*\"
+      | '(?:\\.|[^'\\\n])*'
+    )
+    """,
+    re.VERBOSE | re.DOTALL,
+)
 _PLACEHOLDER = re.compile(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})")
 
 
@@ -414,11 +441,41 @@ def _strip_fenced_code(text: str) -> str:
     return "\n".join(out)
 
 
+def _strip_diff_hunks(text: str) -> str:
+    """Blank the body of unified-diff hunks, leaving ordinary prose intact.
+
+    The previous rule (``_DIFF_LINE = r"^[+-].*$"``) blanked *every* line
+    starting with ``+`` or ``-`` before the placeholder scan, which also erased
+    Markdown bullets (``- Use the {context}...``) — so a ``{placeholder}`` left
+    inside a bulleted list escaped the leak gate (issue #10865). Diff content is
+    only stripped when it is genuinely inside a hunk: entered on a real
+    unified-diff header (``diff --git`` / ``index`` / ``--- `` / ``+++ `` /
+    ``@@ ``) and left on the first line that is not diff body.
+
+    Known narrowing: prose that resumes immediately after a hunk with no
+    intervening non-diff line (e.g. a bullet separated only by blank lines)
+    stays in diff mode. Honouring the ``@@`` line counts is out of scope — a
+    sampled-audit diff is rendered truncated, so those counts do not hold.
+    """
+    out: list[str] = []
+    in_hunk = False
+    for line in text.splitlines():
+        if _DIFF_HEADER.match(line):
+            in_hunk = True
+            continue
+        if in_hunk and (not line.strip() or _DIFF_BODY.match(line)):
+            continue
+        in_hunk = False
+        out.append(line)
+    return "\n".join(out)
+
+
 def placeholder_leaks(rendered: str) -> frozenset[str]:
     """Names of ``str.format`` placeholders left unsubstituted in prose."""
     prose = _strip_fenced_code(rendered)
     prose = _INLINE_CODE.sub(" ", prose)
-    prose = _DIFF_LINE.sub(" ", prose)
+    prose = _strip_diff_hunks(prose)
+    prose = _FSTRING.sub(" ", prose)
     return frozenset(m.group(1) for m in _PLACEHOLDER.finditer(prose))
 
 
