@@ -219,6 +219,26 @@ class TestSettingsSchemaEndpoint:
         assert se["live"] is False
 
     @pytest.mark.asyncio
+    async def test_rows_expose_workflow_section(self, _router_no_orch):
+        """#10786 — each schema row carries the coarse workflow ``section``
+        (additive to ``group``) so the operator console can render grouped
+        panels. The group→section map is applied server-side."""
+        router, _state = _router_no_orch
+        handler = find_endpoint(router, "/api/control/settings-schema", method="GET")
+        assert handler is not None
+        rows = json.loads((await handler()).body)["settings"]
+        by_name = {r["name"]: r for r in rows}
+
+        # Every row carries a non-empty section AND keeps its original group.
+        for row in rows:
+            assert row["section"] and isinstance(row["section"], str)
+            assert row["group"] and isinstance(row["group"], str)
+
+        # Group→section map is applied (Concurrency → Workers & Batch).
+        assert by_name["max_workers"]["group"] == "Concurrency"
+        assert by_name["max_workers"]["section"] == "Workers & Batch"
+
+    @pytest.mark.asyncio
     async def test_every_row_is_patchable(self, _router_no_orch):
         """Every field the schema exposes is in the PATCH allowlist — the screen
         can never render a field it can't save."""

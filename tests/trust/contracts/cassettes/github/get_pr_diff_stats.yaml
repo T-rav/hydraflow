@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_diff_stats returns best-effort PR diff stats (#10788) for the
+# operator timeline: commit sha, files-changed and ±lines, read via
+# `gh pr view <n> --json headRefOid,mergeCommit,additions,deletions,changedFiles`.
+# The fake returns a fixed single-file PRDiffStats stub when none is seeded.
+adapter: github
+interaction: get_pr_diff_stats
+recorded_at: '2026-07-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_diff_stats
+  args:
+  - '601'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '{"commit_sha": "abc123", "files_changed": 1, "additions": 1, "deletions":
+    0}
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

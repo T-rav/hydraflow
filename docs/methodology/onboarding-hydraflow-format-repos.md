@@ -96,6 +96,15 @@ Concrete evidence: `diff scripts/setup_branch_protection.py` between the two rep
 
 **Implication for the UI:** this entire kernel is the **payload** the onboarding backend writes to disk after the wizard collects the few substitution variables. The operator never sees these files during onboarding — they appear in the new repo on GitHub after the "Create" button is pressed.
 
+**Stamping it today (CLI, pre-wizard):** the greenfield kernel writer (`make stamp`, issue #10935) writes this exact kernel to a directory directly, so bootstrapping "project 2" is push-button instead of a second hand bootstrap:
+
+```
+make stamp DIR=../new-repo PKG=game1
+make stamp DIR=../new-repo PKG=game1 COVERAGE_FLOOR=85 DESC="A small deterministic game engine."
+```
+
+It reuses the real scaffolders (`src/makefile_scaffold.py`, `src/ci_scaffold.py`), copies all six `docs/standards/**` directories and `AGENTS.md` verbatim from the running HydraFlow checkout, seeds the five RepoWikiLoop topic pages, and is idempotent — re-running never clobbers product-owned files (CLAUDE.md product sections, ADRs, wiki entries, pyproject deps); pass `FORCE=1` to re-stamp only the template-owned plumbing. It then **prints** (does not automate) the residual GitHub-state steps: `gh repo create`, staging branch + default, `setup_branch_protection.py --apply`, label provisioning, and factory registration. Compose it with the lifecycle: after stamping, run `make setup TARGET_REPO_ROOT=<DIR>` to install agent assets and `make audit DIR=<DIR>` to confirm zero STRUCTURAL FAILs. Implementation: `src/onboarding/kernel_writer.py` + `scripts/hydraflow_stamp.py`.
+
 ---
 
 ## Customization knobs (what genuinely varies → wizard inputs)
@@ -554,7 +563,7 @@ Until the UI lands, here is the manual procedure that produced amplifier + harve
 2. Write `Plan 01 (Bootstrap)` task-by-task via `superpowers:writing-plans` skill
    - Use harvestd's Plan 01 as a starting template; remove decimal-purity + UI tasks if not needed
 3. Execute Plan 01 via `superpowers:subagent-driven-development` skill
-   - Tasks 1-13: local scaffolding (pyproject, Makefile, smoke, README, CLAUDE.md, standards copy, ADR, scripts, decimal-purity if any, UI if any, CI workflow, run make quality green)
+   - Tasks 1-13: local scaffolding (pyproject, Makefile, smoke, README, CLAUDE.md, standards copy, ADR, scripts, decimal-purity if any, UI if any, CI workflow, run make quality green). **Shortcut:** `make stamp DIR=<path> PKG=<pkg>` writes this entire invariant kernel in one step (issue #10935); hand-scaffold only the domain-specific deltas on top.
    - Task 14: `gh repo create <name> --private --source=. --remote=origin --push` + `staging` branch
    - Task 15: `setup_branch_protection.py --apply`
    - Task 16: `prep.py --create-labels`

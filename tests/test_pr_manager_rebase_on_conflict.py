@@ -26,6 +26,20 @@ def _make_pr_manager() -> Any:
     return make_pr_manager(config=config, event_bus=AsyncMock())
 
 
+@pytest.fixture(autouse=True)
+def _stub_pr_diff_stats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#10788: the merge / promotion-merge emit sites now do a best-effort
+    ``gh pr view`` diff-stat read on success. These tests stub the merge
+    subprocess but not that read; default it to an empty (degraded) read so a
+    recovered merge does not spawn a real ``gh`` subprocess. The rebase-path
+    assertions here are unaffected."""
+
+    async def _empty(_self: object, _pr_number: int) -> dict[str, object]:
+        return {}
+
+    monkeypatch.setattr("pr_manager.PRManager.get_pr_diff_stats", _empty)
+
+
 # --- update_pr_branch ---------------------------------------------------------
 
 
