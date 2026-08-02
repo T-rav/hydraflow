@@ -41,7 +41,6 @@ _LEGACY_MUTABLE = {
     "pr_unstick_batch_size",
     "unstick_auto_merge",
     "unstick_all_causes",
-    "memory_auto_approve",
     "workspace_base",
     "staging_enabled",
     "staging_branch",
