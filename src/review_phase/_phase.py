@@ -2021,9 +2021,23 @@ class ReviewPhase(VisualGateMixin):
         # outcome-changing behaviours (opt-in until validated). Independence
         # resolution reads the configured cross-family judge model.
         from judge_independence import (
+            factory_bound_source_files,
             independent_judge_model,
             ledger_path_for,
         )
+
+        # ADR-0123 / #10851 mechanical backstop: source files an ADR governs with
+        # `Binds: factory`/`both` are self-modification by declared direction,
+        # catching gate-enablement config the substring enumeration under-includes.
+        # Computed once per ReviewPhase (ADRs are stable within a run).
+        factory_bound_files = getattr(self, "_factory_bound_files_cache", None)
+        if factory_bound_files is None:
+            from adr_index import scan_adr_directory
+
+            factory_bound_files = factory_bound_source_files(
+                scan_adr_directory(self._config.repo_root / "docs" / "adr")
+            )
+            self._factory_bound_files_cache = factory_bound_files
 
         advisor = PostVerifyAdvisor(
             runner=self._post_verify_runner,
@@ -2038,6 +2052,7 @@ class ReviewPhase(VisualGateMixin):
                 self._config.judge_self_mod_fail_closed_enabled
             ),
             independent_model=independent_judge_model(self._config),
+            factory_bound_files=factory_bound_files,
         )
         # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
         # reviews the same issue as the executor, so live operator guidance
