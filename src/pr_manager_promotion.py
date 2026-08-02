@@ -24,7 +24,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from events import EventType, HydraFlowEvent
-from models import MergeUpdatePayload, PRCreatedPayload, PRInfo
+from models import (
+    MergeUpdatePayload,
+    PRCreatedPayload,
+    PRDiffStats,
+    PRInfo,
+    merge_diff_stats,
+)
 from subprocess_util import run_subprocess
 
 if TYPE_CHECKING:
@@ -68,6 +74,10 @@ class PRManagerPromotionMixin:
         poll_interval: int,
         stop_event: asyncio.Event,
     ) -> tuple[bool, str]: ...  # provided by PRManager
+
+    async def get_pr_diff_stats(
+        self, pr_number: int
+    ) -> PRDiffStats: ...  # provided by PRManager
 
     # ------------------------------------------------------------------
     # Promotion / RC lifecycle (moved verbatim from pr_manager.py)
@@ -122,17 +132,20 @@ class PRManagerPromotionMixin:
             )
         pr_number = int(url.rstrip("/").split("/")[-1])
 
+        payload = PRCreatedPayload(
+            pr=pr_number,
+            issue=0,
+            branch=rc_branch,
+            draft=False,
+            url=url,
+            title=title,
+        )
+        # Best-effort diff-stat enrichment for the operator timeline (#10788).
+        merge_diff_stats(payload, await self.get_pr_diff_stats(pr_number))
         await self._bus.publish(
             HydraFlowEvent(
                 type=EventType.PR_CREATED,
-                data=PRCreatedPayload(
-                    pr=pr_number,
-                    issue=0,
-                    branch=rc_branch,
-                    draft=False,
-                    url=url,
-                    title=title,
-                ),
+                data=payload,
             )
         )
 
@@ -656,10 +669,15 @@ class PRManagerPromotionMixin:
                     cwd=self._config.repo_root,
                     gh_token=self._credentials.gh_token,
                 )
+                payload = MergeUpdatePayload(pr=pr_number, status="merged")
+                # Best-effort diff-stat enrichment for the operator timeline
+                # (#10788). Fetched post-merge so ``commit_sha`` resolves to
+                # the merge commit; failure omits the keys.
+                merge_diff_stats(payload, await self.get_pr_diff_stats(pr_number))
                 await self._bus.publish(
                     HydraFlowEvent(
                         type=EventType.MERGE_UPDATE,
-                        data=MergeUpdatePayload(pr=pr_number, status="merged"),
+                        data=payload,
                     )
                 )
                 return True

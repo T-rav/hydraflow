@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from mockworld.fakes._factories import PRInfoFactory
-from models import ClosedStageLabelDrift, LabelDrift
+from models import ClosedStageLabelDrift, LabelDrift, PRDiffStats
 from pr_manager import PRManager
 
 if TYPE_CHECKING:
@@ -154,6 +154,8 @@ class FakeGitHub:
     def __init__(self) -> None:
         self._issues: dict[int, FakeIssue] = {}
         self._pr_diff_names: dict[int, list[str]] = {}
+        # Per-PR seeded diff stats for get_pr_diff_stats (#10788 timeline).
+        self._pr_diff_stats: dict[int, PRDiffStats] = {}
         # #9974: seeded workflow-run history for GateHealthLoop scenarios.
         self._workflow_runs: list[dict[str, Any]] = []
         self._workflow_jobs: dict[int, list[dict[str, Any]]] = {}
@@ -726,6 +728,26 @@ class FakeGitHub:
     async def get_pr_head_sha(self, pr_number: int) -> str:
         self._maybe_rate_limit()
         return "abc123"
+
+    def set_pr_diff_stats(self, pr_number: int, stats: PRDiffStats) -> None:
+        """Seed the diff stats one PR reports (#10788 timeline scenarios)."""
+        self._pr_diff_stats[pr_number] = stats.copy()
+
+    async def get_pr_diff_stats(self, pr_number: int) -> PRDiffStats:
+        """Return seeded diff stats, or a deterministic non-empty default.
+
+        Mirrors :meth:`PRManager.get_pr_diff_stats` (#10788): a snake_case
+        ``PRDiffStats`` the operator timeline can render. Defaults to a small
+        single-file diff so unseeded scenarios still exercise the enriched
+        path rather than the degraded (keys-absent) one.
+        """
+        self._maybe_rate_limit()
+        seeded = self._pr_diff_stats.get(pr_number)
+        if seeded is not None:
+            return seeded.copy()
+        return PRDiffStats(
+            commit_sha="abc123", files_changed=1, additions=1, deletions=0
+        )
 
     def set_pr_diff_names(self, pr_number: int, names: list[str]) -> None:
         """Seed the changed-file list one PR reports (#9974 blame scenarios)."""
