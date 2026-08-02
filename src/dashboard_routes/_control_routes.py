@@ -1137,6 +1137,36 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             return JSONResponse({"error": f"unknown worker '{name}'"}, status_code=404)
         return JSONResponse({"status": "ok", "name": name})
 
+    @router.post("/api/control/bg-worker/restart")
+    async def restart_bg_worker(
+        body: dict[str, Any], repo: RepoSlugParam = None
+    ) -> JSONResponse:
+        """Restart a wedged / silently-stalled background loop task (row's repo).
+
+        Reversible + allowlisted (ADR-0124 rule 2): recreating a dead loop task
+        from its retained factory is the supervisor's ``restart_stalled_loop``
+        nudge exposed as an operator control. It recovers a loop blocked forever
+        on an ``await`` (invisible to the supervisor, which only wakes on task
+        *completion*) without touching git, config, or any billing signal — the
+        low-blast-radius class an operator may self-do rather than escalate.
+        Mirrors :func:`trigger_bg_worker`: validate name → resolve the row's
+        orchestrator → ``await orch.restart_loop_task(name)``. A ``False`` return
+        (unknown loop, or supervision not started / already stopping) is a 404 —
+        nothing was restarted.
+        """
+        name = body.get("name")
+        if not name:
+            return JSONResponse({"error": "name is required"}, status_code=400)
+        orch, rejected = _resolve_orch_for(repo)
+        if rejected is not None:
+            return rejected
+        restarted = await orch.restart_loop_task(name)
+        if not restarted:
+            return JSONResponse(
+                {"error": f"could not restart loop '{name}'"}, status_code=404
+            )
+        return JSONResponse({"status": "ok", "name": name, "restarted": True})
+
     @router.post("/api/control/bg-worker/interval")
     async def set_bg_worker_interval(
         body: dict[str, Any], repo: RepoSlugParam = None

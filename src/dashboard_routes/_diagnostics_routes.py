@@ -356,6 +356,32 @@ def build_diagnostics_router(
         observations = read_thread(cfg, limit=limit)
         return {"observations": observations, "count": len(observations)}
 
+    @router.post("/supervisor/ack")
+    def supervisor_ack(
+        body: dict[str, Any], repo: RepoSlugParam = None
+    ) -> dict[str, Any]:
+        """Acknowledge one Tier-2 goal-supervisor escalation (ADR-0124).
+
+        Append-only + honest (rule 6): records ``(ts, escalation)`` to
+        ``<data_root>/supervisor_acks.jsonl`` WITHOUT rewriting the supervisor's
+        original observation. :func:`supervisor_observation.read_thread` JOINs the
+        ack back so the panel renders the escalation as handled and it stops
+        driving the verdict — a handled escalation stops nagging, but the record
+        of it stays. Scoped to one repo's ``data_root`` (``__all__`` rejected,
+        like the per-issue endpoints).
+        """
+        from supervisor_observation import append_ack  # noqa: PLC0415
+
+        ts = body.get("ts")
+        escalation = body.get("escalation")
+        if not ts or not escalation:
+            raise HTTPException(
+                status_code=400, detail="ts and escalation are required"
+            )
+        cfg = _config_for(repo) if repo is not None else config
+        append_ack(cfg, ts=str(ts), escalation=str(escalation))
+        return {"status": "ok"}
+
     @router.get("/tools")
     def tools(
         range: str = Query("7d"),
