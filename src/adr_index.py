@@ -63,6 +63,10 @@ _STATUS_H2_RE = re.compile(r"^##\s+Status\s*\n+([^\n]+)", re.MULTILINE)
 _CONTEXT_RE = re.compile(r"##\s+Context\s*\n\s*\n(.+?)(?=\n\s*\n|\n##\s|\Z)", re.DOTALL)
 _SUPERSEDED_RE = re.compile(r"Superseded\s+by\s+(ADR-\d{4})", re.IGNORECASE)
 _ENFORCEMENT_RE = re.compile(r"\*\*Enforcement:\*\*\s*(.+?)\s*$", re.MULTILINE)
+# ADR-0123 bidirectional enforcement: **Binds:** work | factory | both — the
+# direction a rule constrains. Parsed like Enforcement; unstated => "unknown"
+# (the defect the ADR forbids at Accepted status).
+_BINDS_RE = re.compile(r"\*\*Binds:\*\*\s*(.+?)\s*$", re.MULTILINE)
 # Capture the Enforced-by block: the field line plus any indented/continued
 # lines until the next blank line, the next **Field:** / ## heading, or the
 # next Markdown bullet (`- **Spec:**`, `- **Plan:**`, etc.). Without the
@@ -189,6 +193,21 @@ def _normalize_enforcement(raw: str) -> str:
     return low if low in _KNOWN_ENFORCEMENT else "unknown"
 
 
+#: The three declared directions a rule can bind (ADR-0123). Anything else —
+#: including an unstated field — normalizes to ``unknown``, the defect.
+_KNOWN_BINDS = frozenset({"work", "factory", "both"})
+
+
+def _normalize_binds(raw: str) -> str:
+    """Normalize a ``**Binds:**`` value to work | factory | both | unknown.
+
+    Takes the first bare token (so a stray ``both — <rationale>`` still reads
+    ``both``); an unrecognized or empty value is ``unknown``."""
+    token = raw.strip().lower().split()[0] if raw.strip() else ""
+    token = token.strip("*`_.,;:")
+    return token if token in _KNOWN_BINDS else "unknown"
+
+
 LIVE_ADR_STATUSES = frozenset({"Accepted", "Proposed"})
 """Statuses that count as "in effect" for citation/drift enforcement.
 
@@ -221,6 +240,12 @@ class ADR:
     """enforced | manual | decision-of-record | unknown (ADR-0100)."""
     enforced_by: tuple[Check, ...] = ()
     """Typed checks parsed from **Enforced by:**; () for decision-of-record."""
+    binds: str = "unknown"
+    """work | factory | both | unknown — the direction the rule constrains
+    (ADR-0123 bidirectional enforcement). ``factory``/``both`` declare the rule
+    binds the governor itself (its loops, gates, instruments, authority path),
+    not only what it builds. Required at Accepted; ``unknown`` (unstated) is the
+    defect the ADR forbids — a downward-only rule passing for a complete one."""
 
     @property
     def is_live(self) -> bool:
@@ -292,6 +317,9 @@ def parse_adr_file(path: Path) -> ADR:
         # sibling-bullet safety the inline path has).
         enforced_by = _parse_bulleted_enforced_by(text, eb_match.end())
 
+    binds_match = _BINDS_RE.search(text)
+    binds = _normalize_binds(binds_match.group(1)) if binds_match else "unknown"
+
     return ADR(
         number=number,
         title=title,
@@ -302,6 +330,7 @@ def parse_adr_file(path: Path) -> ADR:
         source_symbols=source_symbols_frozen,
         enforcement=enforcement,
         enforced_by=enforced_by,
+        binds=binds,
     )
 
 
