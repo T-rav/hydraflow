@@ -213,6 +213,11 @@ _bg_worker_defs = [
         "Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082.",
     ),
     (
+        "rails_drift_caretaker",
+        "Rails Drift Caretaker",
+        "Audits each managed repo's live state against its rails.yaml manifest (declared template layers / coverage floor / domain gate scripts) and files deduped drift issues. See ADR-0121.",
+    ),
+    (
         "ci_monitor",
         "CI Monitor",
         "Detects failing CI on main and files/auto-closes issues.",

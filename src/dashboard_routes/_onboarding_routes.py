@@ -198,6 +198,20 @@ def _write_snapshot(path: Path, snapshot: dict[str, object]) -> None:
     )
 
 
+def _write_rails_manifest(repo_dir: Path, snapshot: dict[str, object]) -> Path:
+    """Write ``<repo_dir>/rails.yaml`` from the standards snapshot (ADR-0121).
+
+    Every stamped/onboarded repo carries a rails manifest so the
+    ``rails_drift_caretaker`` loop can audit template conformance as data
+    (#10936). Derived from the same snapshot as the standards file, so both are
+    written from one source on stamp and on format-upgrade retrofit.
+    """
+    from rails_manifest import manifest_from_snapshot, write_manifest  # noqa: PLC0415
+
+    manifest = manifest_from_snapshot(snapshot)
+    return write_manifest(repo_dir, manifest)
+
+
 async def _run_checked(
     cmd: list[str],
     *,
@@ -314,11 +328,20 @@ async def _open_format_upgrade_pr(
         timeout=30,
     )
     _write_snapshot(snapshot_path, snapshot)
+    rails_path = _write_rails_manifest(repo_dir, snapshot)
     await _run_checked(
         ["git", "add", str(snapshot_path.relative_to(repo_dir))], cwd=repo_dir
     )
     await _run_checked(
-        ["git", "commit", "-m", "Update HydraFlow format standards snapshot"],
+        ["git", "add", str(rails_path.relative_to(repo_dir))], cwd=repo_dir
+    )
+    await _run_checked(
+        [
+            "git",
+            "commit",
+            "-m",
+            "Update HydraFlow format standards snapshot + rails manifest",
+        ],
         cwd=repo_dir,
         timeout=60,
     )
