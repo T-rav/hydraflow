@@ -46,7 +46,8 @@ graph LR
     src -- "1" --> src_observability
     src -- "18" --> src_preflight
     src -- "1" --> src_review_phase
-    src -- "60" --> src_state
+    src -- "1" --> src_runners
+    src -- "61" --> src_state
     src -- "4" --> src_vitals
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch

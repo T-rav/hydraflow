@@ -2857,6 +2857,43 @@ class ReviewUpdatePayload(TypedDict, total=False):
     repo: str
 
 
+class PRDiffStats(TypedDict, total=False):
+    """Best-effort PR diff statistics for operator-timeline enrichment (#10788).
+
+    Populated from a ``gh pr view`` metadata read. Every key is optional: a
+    failed or dry-run read yields an *empty* dict so callers can merge only
+    the keys that were actually reported and never fabricate zero-valued
+    stats (``files_changed: 0`` would render "0 files" in the timeline, an
+    absent key is hidden). Snake_case keys mirror exactly what the frontend
+    ``extractDiff`` reads (``src/ui/src/operator/model/timeline.js``).
+    """
+
+    commit_sha: str
+    files_changed: int
+    additions: int
+    deletions: int
+
+
+def merge_diff_stats(
+    payload: PRCreatedPayload | MergeUpdatePayload, stats: PRDiffStats
+) -> None:
+    """Merge best-effort :class:`PRDiffStats` into a PR event payload in place.
+
+    Copies only the keys ``stats`` actually contains (#10788), so a failed or
+    dry-run read is a no-op that never fabricates zero-valued stats. Shared by
+    both the direct (``create_pr`` / ``merge_pr``) and promotion emit sites,
+    which enrich identically. Literal-key assignment keeps it type-checked.
+    """
+    if "commit_sha" in stats:
+        payload["commit_sha"] = stats["commit_sha"]
+    if "files_changed" in stats:
+        payload["files_changed"] = stats["files_changed"]
+    if "additions" in stats:
+        payload["additions"] = stats["additions"]
+    if "deletions" in stats:
+        payload["deletions"] = stats["deletions"]
+
+
 class PRCreatedPayload(TypedDict, total=False):
     """Payload for ``EventType.PR_CREATED``."""
 
@@ -2867,6 +2904,12 @@ class PRCreatedPayload(TypedDict, total=False):
     url: str
     repo: str
     title: str
+    # Optional diff-stat enrichment (#10788). Present only when a best-effort
+    # ``gh pr view`` read succeeded; omitted entirely otherwise. See PRDiffStats.
+    commit_sha: str
+    files_changed: int
+    additions: int
+    deletions: int
 
 
 class CICheckPayload(TypedDict, total=False):
@@ -3155,6 +3198,14 @@ class MergeUpdatePayload(TypedDict, total=False):
     # review -> merged in real time: the frontend's optimistic getPipelineAction
     # returns null without it, so the move was dead code until WS-RT populated it.
     issue: int
+    # Optional diff-stat enrichment (#10788). Present only when a best-effort
+    # ``gh pr view`` read succeeded; omitted entirely otherwise. On merge,
+    # ``commit_sha`` is the merge commit (``mergeCommit.oid``), not the head
+    # sha. See PRDiffStats.
+    commit_sha: str
+    files_changed: int
+    additions: int
+    deletions: int
 
 
 class TriageUpdatePayload(TypedDict, total=False):

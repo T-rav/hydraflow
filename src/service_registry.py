@@ -76,6 +76,7 @@ from gate_health_loop import GateHealthLoop
 from github_cache_loop import GitHubCacheLoop, GitHubDataCache
 from giveup_self_solve import PlanRetrySelfSolver
 from giveup_window import GiveUpClass, GiveUpTracker, GiveUpWindow, resolve_window
+from goal_supervisor_loop import GoalSupervisorLoop  # noqa: TCH001
 from harness_insights import HarnessInsightStore
 from health_monitor_loop import HealthMonitorLoop
 from hitl_phase import HITLPhase
@@ -119,6 +120,10 @@ from precondition_gate import PreconditionGate
 from preflight.audit import PreflightAuditStore
 from pricing_refresh_loop import PricingRefreshLoop  # noqa: TCH001
 from principles_audit_loop import PrinciplesAuditLoop
+from rails_drift_caretaker_loop import (  # noqa: TCH001
+    RailsDriftCaretakerLoop,
+    build_rails_auditor,
+)
 from rc_budget_loop import RCBudgetLoop
 from repo_wiki import RepoWikiStore
 from repo_wiki_loop import RepoWikiLoop  # noqa: TCH001
@@ -341,6 +346,8 @@ class ServiceRegistry:
     issue_refinement_loop: IssueRefinementLoop
     ci_monitor_loop: CIMonitorLoop
     branch_protection_auditor_loop: BranchProtectionAuditorLoop
+    goal_supervisor_loop: GoalSupervisorLoop
+    rails_drift_caretaker_loop: RailsDriftCaretakerLoop
     gate_activator_loop: GateActivatorLoop
     security_patch_loop: SecurityPatchLoop
     repo_wiki_store: RepoWikiStore
@@ -1681,6 +1688,27 @@ def build_services(
         auditor=_branch_protection_audit,
     )
 
+    # Tier-2 goal supervisor (ADR-0124). ``state`` powers the read-only health
+    # snapshot's per-loop heartbeat reads; ``bg_workers`` (post-registry) powers
+    # the restart nudge and is injected by the orchestrator via set_bg_workers.
+    goal_supervisor_loop = GoalSupervisorLoop(  # noqa: F841
+        config=config,
+        deps=loop_deps,
+        state=state,
+    )
+
+    rails_drift_caretaker_dedup = DedupStore(
+        "rails_drift_caretaker",
+        config.data_root / "dedup" / "rails_drift_caretaker.json",
+    )
+    rails_drift_caretaker_loop = RailsDriftCaretakerLoop(  # noqa: F841
+        config=config,
+        pr_manager=prs,
+        dedup=rails_drift_caretaker_dedup,
+        deps=loop_deps,
+        auditor=build_rails_auditor(config),
+    )
+
     gate_activator_dedup = DedupStore(
         "gate_activator",
         config.data_root / "dedup" / "gate_activator.json",
@@ -2039,6 +2067,8 @@ def build_services(
         issue_refinement_loop=issue_refinement_loop,
         ci_monitor_loop=ci_monitor_loop,
         branch_protection_auditor_loop=branch_protection_auditor_loop,
+        goal_supervisor_loop=goal_supervisor_loop,
+        rails_drift_caretaker_loop=rails_drift_caretaker_loop,
         gate_activator_loop=gate_activator_loop,
         security_patch_loop=security_patch_loop,
         repo_wiki_store=repo_wiki_store,

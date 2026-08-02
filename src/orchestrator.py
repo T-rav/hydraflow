@@ -241,6 +241,8 @@ class HydraFlowOrchestrator:
             "issue_refinement": svc.issue_refinement_loop,
             "ci_monitor": svc.ci_monitor_loop,
             "branch_protection_auditor": svc.branch_protection_auditor_loop,
+            "goal_supervisor": svc.goal_supervisor_loop,
+            "rails_drift_caretaker": svc.rails_drift_caretaker_loop,
             "gate_activator": svc.gate_activator_loop,
             "security_patch": svc.security_patch_loop,
             "repo_wiki": svc.repo_wiki_loop,
@@ -289,6 +291,7 @@ class HydraFlowOrchestrator:
         svc.trust_fleet_sanity_loop.set_bg_workers(self._bg_workers)
         svc.health_monitor_loop.set_bg_workers(self._bg_workers)
         svc.cost_budget_watcher_loop.set_bg_workers(self._bg_workers)
+        svc.goal_supervisor_loop.set_bg_workers(self._bg_workers)
         self._hitl_ctrl = HITLController(svc.hitl_phase, svc.fetcher, config.hitl_label)
         self._state_restorer = StateRestorer(self._state, self._bus, self._bg_workers)
 
@@ -1622,6 +1625,11 @@ class HydraFlowOrchestrator:
             (
                 "branch_protection_auditor",
                 self._svc.branch_protection_auditor_loop.run,
+            ),
+            ("goal_supervisor", self._svc.goal_supervisor_loop.run),
+            (
+                "rails_drift_caretaker",
+                self._svc.rails_drift_caretaker_loop.run,
             ),
             ("gate_activator", self._svc.gate_activator_loop.run),
             ("repo_wiki", self._svc.repo_wiki_loop.run),

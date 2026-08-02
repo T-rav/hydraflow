@@ -2,12 +2,13 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { SettingsDrawer } from '../SettingsDrawer'
 
-// SettingsDrawer (epic #10556 follow-up) slides the full classic System-tab
-// configuration into a modal by REUSING SystemPanel. These tests assert the
-// drawer WIRING (open/closed, close + backdrop affordances, that it mounts
-// SystemPanel and threads the context handlers through) — NOT SystemPanel's
-// internals, so SystemPanel is stubbed and useHydraFlow is mocked to keep the
-// mount lightweight.
+// SettingsDrawer (epic #10556 follow-up; tabbed for #10786) slides the full
+// configuration into a modal. Its body is TABBED: the default Workflow tab
+// renders WorkflowConfigPanel, the System tab REUSES SystemPanel. These tests
+// assert the drawer WIRING (open/closed, tabs, close + backdrop, and that the
+// System tab mounts SystemPanel with the context handlers threaded through) —
+// NOT the panels' internals, so both panels are stubbed and useHydraFlow is
+// mocked to keep the mount lightweight.
 
 const systemPanelProps = vi.fn()
 
@@ -16,6 +17,10 @@ vi.mock('../../components/SystemPanel', () => ({
     systemPanelProps(props)
     return <div data-testid="system-panel-stub" />
   },
+}))
+
+vi.mock('../WorkflowConfigPanel', () => ({
+  WorkflowConfigPanel: () => <div data-testid="workflow-config-panel-stub" />,
 }))
 
 const toggleBgWorker = vi.fn()
@@ -38,19 +43,34 @@ describe('SettingsDrawer', () => {
   it('renders nothing when closed', () => {
     const { container } = render(<SettingsDrawer open={false} onClose={vi.fn()} />)
     expect(screen.queryByTestId('settings-drawer')).toBeNull()
+    expect(screen.queryByTestId('workflow-config-panel-stub')).toBeNull()
     expect(screen.queryByTestId('system-panel-stub')).toBeNull()
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('renders the drawer and reuses SystemPanel when open', () => {
+  it('opens on the Workflow tab by default', () => {
     render(<SettingsDrawer open onClose={vi.fn()} />)
     expect(screen.getByTestId('settings-drawer')).toBeInTheDocument()
+    expect(screen.getByTestId('workflow-config-panel-stub')).toBeInTheDocument()
+    // System panel is not mounted until its tab is selected.
+    expect(screen.queryByTestId('system-panel-stub')).toBeNull()
+  })
+
+  it('switches to the System tab (reusing SystemPanel) and back to Workflow', () => {
+    render(<SettingsDrawer open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByTestId('settings-tab-system'))
     expect(screen.getByTestId('system-panel-stub')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-config-panel-stub')).toBeNull()
+
+    fireEvent.click(screen.getByTestId('settings-tab-workflow'))
+    expect(screen.getByTestId('workflow-config-panel-stub')).toBeInTheDocument()
+    expect(screen.queryByTestId('system-panel-stub')).toBeNull()
   })
 
   it('threads the context worker data + handlers into SystemPanel (reuse, not fork)', () => {
     systemPanelProps.mockClear()
     render(<SettingsDrawer open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByTestId('settings-tab-system'))
     expect(systemPanelProps).toHaveBeenCalled()
     const props = systemPanelProps.mock.calls.at(-1)[0]
     expect(props.backgroundWorkers).toBe(backgroundWorkers)

@@ -52,6 +52,7 @@ flowchart LR
         governance_GateActivatorLoop([GateActivatorLoop])
         governance_LiveCorpusReplayLoop([LiveCorpusReplayLoop])
         governance_PrinciplesAuditLoop([PrinciplesAuditLoop])
+        governance_RailsDriftCaretakerLoop([RailsDriftCaretakerLoop])
         governance_WikiRotDetectorLoop([WikiRotDetectorLoop])
     end
     subgraph release["Release"]
@@ -59,6 +60,7 @@ flowchart LR
         release_StagingPromotionLoop([StagingPromotionLoop])
     end
     subgraph meta_observability["Meta-Observability"]
+        meta_observability_GoalSupervisorLoop([GoalSupervisorLoop])
         meta_observability_HealthMonitorLoop([HealthMonitorLoop])
         meta_observability_TrustFleetSanityLoop([TrustFleetSanityLoop])
     end
@@ -179,9 +181,10 @@ Audit, compliance, and drift workers that hold the factory to its own declared r
 - `GateActivatorLoop` — `src.gate_activator_loop`
 - `LiveCorpusReplayLoop` — `src.live_corpus_replay_loop`
 - `PrinciplesAuditLoop` — `src.principles_audit_loop`
+- `RailsDriftCaretakerLoop` — `src.rails_drift_caretaker_loop`
 - `WikiRotDetectorLoop` — `src.wiki_rot_detector_loop`
 
-**Related ADRs:** `ADR-0045`, `ADR-0082`, `ADR-0100`, `ADR-0101`
+**Related ADRs:** `ADR-0045`, `ADR-0082`, `ADR-0100`, `ADR-0101`, `ADR-0121`
 
 
 ## Release
@@ -202,10 +205,11 @@ Monitoring and observability workers that watch the factory watching itself — 
 
 **Loops**
 
+- `GoalSupervisorLoop` — `src.goal_supervisor_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
 - `TrustFleetSanityLoop` — `src.trust_fleet_sanity_loop`
 
-**Related ADRs:** `ADR-0045`, `ADR-0056`
+**Related ADRs:** `ADR-0045`, `ADR-0056`, `ADR-0124`
 
 
 ## Operations

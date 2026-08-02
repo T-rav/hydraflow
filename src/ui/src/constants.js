@@ -35,6 +35,25 @@ export const MAX_EVENTS = 5000
 export const PIPELINE_POLL_SAFETY_NET_MS = 30_000
 
 /**
+ * Operator cost panel (#10785) REST-poll cadence. The cost/tokens panel reads
+ * `/api/diagnostics/cost/by-model-by-repo` (a JSONL-scanning rollup), so it
+ * polls on this slow fixed cadence rather than on every socket frame — one
+ * pinned interval, aborted in-flight on unmount. Kept well above the pipeline
+ * safety-net cadence: cost drifts slowly and the scan is not cheap.
+ */
+export const COST_POLL_MS = 60_000
+
+/**
+ * Operator supervisor panel (#10733, ADR-0124) REST-poll cadence. The panel
+ * reads `/api/diagnostics/supervisor/thread` (a small append-only JSONL the
+ * Tier-2 goal-supervisor writes only on non-trivial ticks), so it polls on this
+ * slow fixed cadence — one pinned interval, aborted in-flight on unmount. The
+ * supervisor loop itself ticks infrequently, so a fast poll would only re-read
+ * an unchanged thread; 30s keeps the verdict fresh without churn.
+ */
+export const SUPERVISOR_POLL_MS = 30_000
+
+/**
  * WebSocket reconnect backoff (PR5). A flapping socket previously re-ran the
  * heavy onopen fan-out (10+ fetches + history replay) every fixed 2s. We now
  * back off exponentially with full jitter — delay = random(0, min(BASE * 2**n,
@@ -342,11 +361,13 @@ export const BACKGROUND_WORKERS = [
   { key: 'staging_promotion', label: 'Staging Promotion', description: 'Cuts release-candidate snapshots from staging and auto-promotes them to main on green CI. See ADR-0042.', color: theme.accent, group: 'release', tags: ['release'] },
   { key: 'staging_bisect', label: 'Staging Bisect', description: 'Bisects the culprit PR on RC-red, files auto-revert + retry issue, watchdogs the next RC. See ADR-0042 §4.3.', color: theme.red, group: 'release', tags: ['release', 'recovery'] },
   { key: 'health_monitor', label: 'Health Monitor', description: 'Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns.', color: theme.green, system: true, group: 'meta_observability', tags: ['monitoring'] },
+  { key: 'goal_supervisor', label: 'Goal Supervisor', description: "Tier-2 liveness supervisor: reads the read-only factory health snapshot, hands it to a Fable agent under the standing goal 'keep the factory alive & healthy', nudges the reversible / escalates the rest. Default OFF. See ADR-0124.", color: theme.green, system: true, group: 'meta_observability', tags: ['monitoring', 'liveness'] },
   { key: 'stale_issue', label: 'Stale General Issue Cleanup', description: 'Auto-closes stale general issues (excludes HydraFlow lifecycle labels). Per-tag thresholds, configurable. Distinct from Stale Issue GC, which handles HITL escalations.', color: theme.orange, group: 'repo_health', tags: ['hygiene'] },
   { key: 'log_ingest', label: 'Log Ingest', description: 'Clusters and dedups recurring errors/warnings in HydraFlow\'s own server log and files them as fix-issues for the pipeline.', color: theme.red, group: 'intake', tags: ['errors'] },
   { key: 'stale_issue_gc', label: 'Stale HITL Issue GC', description: 'Auto-closes stale HITL escalation issues — posts a farewell comment, capped at 10/cycle. Distinct from Stale General Issue Cleanup, which excludes HF lifecycle labels.', color: theme.textMuted, group: 'repo_health', tags: ['hygiene'] },
   { key: 'ci_monitor', label: 'CI Monitor', description: 'Detects failing CI on main and files/auto-closes issues.', color: theme.yellow, group: 'repo_health', tags: ['quality'] },
   { key: 'branch_protection_auditor', label: 'Branch Protection Auditor', description: 'Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082.', color: theme.purple, system: true, group: 'governance', tags: ['audit', 'drift'] },
+  { key: 'rails_drift_caretaker', label: 'Rails Drift Caretaker', description: "Audits each managed repo's live state against its rails.yaml manifest (declared template layers / coverage floor / domain gate scripts) and files deduped drift issues. See ADR-0121.", color: theme.purple, system: true, group: 'governance', tags: ['audit', 'drift'] },
   { key: 'gate_activator', label: 'Gate Activator', description: 'Proposes activating planned gates in gates.toml once the surface each protects exists (producing job + make target present, profile matches); files a reviewed issue. See ADR-0082.', color: theme.purple, system: true, group: 'governance', tags: ['audit', 'gates'] },
   { key: 'security_patch', label: 'Security Patch', description: 'Polls Dependabot alerts and files issues for fixable vulnerabilities.', color: theme.red, group: 'repo_health', tags: ['security'] },
   { key: 'repo_wiki', label: 'Repo Wiki', description: 'Lints and maintains per-repo knowledge wikis compiled from plan/implement/review cycles.', color: theme.purple, group: 'learning', tags: ['knowledge'] },

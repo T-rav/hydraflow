@@ -44,6 +44,12 @@ import { toReleasePromotion } from './model/release'
 import { toSettingsSummary } from './model/settingsSummary'
 import { VitalsCard } from './VitalsCard'
 import { LoopsPanel } from './LoopsPanel'
+import { CostPanel } from './CostPanel'
+import { useCostByRepo } from './useCostByRepo'
+import { EMPTY_COST_VM } from './model/cost'
+import { SupervisorPanel } from './SupervisorPanel'
+import { useSupervisorThread } from './useSupervisorThread'
+import { EMPTY_SUPERVISOR_VM } from './model/supervisorThread'
 import { ReleasePromotionStrip } from './ReleasePromotionStrip'
 import { SettingsSummary } from './SettingsSummary'
 import { SettingsDrawer } from './SettingsDrawer'
@@ -67,7 +73,10 @@ function pipelineActiveCount(pipeline) {
 
 const MODES = [
   { key: 'focus', label: 'Focus' },
-  { key: 'all-active', label: 'All active' },
+  // The 'all-active' mode is the redesigned AGENT view (#10944): live/held
+  // workers with an explicit state. The URL key stays 'all-active' (selection
+  // contract); only the operator-facing label reads 'Agents'.
+  { key: 'all-active', label: 'Agents' },
 ]
 
 function makeStyles(t) {
@@ -145,7 +154,7 @@ function ModeToggle({ mode, select, styles }) {
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now() }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
@@ -266,13 +275,27 @@ export function OperatorConsoleView({ socket = {}, now = Date.now() }) {
               {idle ? (
                 <IdleState />
               ) : mode === 'all-active' ? (
-                <ActiveGrid pipeline={pipeline} events={events} now={now} select={select} />
+                <ActiveGrid
+                  pipeline={pipeline}
+                  workers={socket.workers}
+                  events={events}
+                  factory={vitals?.factory}
+                  credits={vitals?.credits}
+                  now={now}
+                  select={select}
+                />
               ) : (
                 <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
               )}
             </div>
             <div data-testid="operator-vitals-slot" style={styles.vitalsSlot}>
               <VitalsCard vitals={vitals} />
+              <CostPanel cost={cost} />
+              <SupervisorPanel
+                supervisor={supervisor}
+                onResume={socket.startOrchestrator}
+                onPause={socket.stopOrchestrator}
+              />
               <LoopsPanel loops={loops} />
               <SettingsSummary summary={settings} onOpenSettings={() => setSettingsOpen(true)} />
             </div>
@@ -295,7 +318,15 @@ export function OperatorConsoleView({ socket = {}, now = Date.now() }) {
  */
 export function OperatorConsole() {
   const socket = useHydraFlowSocket()
-  return <OperatorConsoleView socket={socket} />
+  // Cost feed (#10785): polls the repo + per-repo cost-per-model rollup on its
+  // own pinned cadence (aborted in-flight on unmount), independent of the WS
+  // slice the shell otherwise renders from.
+  const cost = useCostByRepo()
+  // Supervisor thread (#10733, ADR-0124): polls the Tier-2 goal-supervisor's
+  // append-only observation thread on its own pinned cadence (aborted in-flight
+  // on unmount), independent of the WS slice the shell otherwise renders from.
+  const supervisor = useSupervisorThread()
+  return <OperatorConsoleView socket={socket} cost={cost} supervisor={supervisor} />
 }
 
 export default OperatorConsole

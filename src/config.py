@@ -184,6 +184,12 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         604800,
     ),
     ("gate_activator_interval", "HYDRAFLOW_GATE_ACTIVATOR_INTERVAL", 604800),
+    ("goal_supervisor_interval", "HYDRAFLOW_GOAL_SUPERVISOR_INTERVAL", 600),
+    (
+        "rails_drift_caretaker_interval",
+        "HYDRAFLOW_RAILS_DRIFT_CARETAKER_INTERVAL",
+        86400,
+    ),
     ("rc_cadence_hours", "HYDRAFLOW_RC_CADENCE_HOURS", 4),
     (
         "rc_consecutive_failure_escalation_threshold",
@@ -806,7 +812,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("collaborator_check_enabled", "HYDRAFLOW_COLLABORATOR_CHECK_ENABLED", True),
-    ("memory_auto_approve", "HYDRAFLOW_MEMORY_AUTO_APPROVE", False),
     ("prompt_observatory_enabled", "HYDRAFLOW_PROMPT_OBSERVATORY_ENABLED", True),
     ("visual_gate_enabled", "HYDRAFLOW_VISUAL_GATE_ENABLED", False),
     ("visual_gate_bypass", "HYDRAFLOW_VISUAL_GATE_BYPASS", False),
@@ -901,6 +906,16 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("gate_activator_loop_enabled", "HYDRAFLOW_GATE_ACTIVATOR_LOOP_ENABLED", True),
+    (
+        "goal_supervisor_loop_enabled",
+        "HYDRAFLOW_GOAL_SUPERVISOR_LOOP_ENABLED",
+        False,  # ADR-0124: Tier-2 goal supervisor ships default OFF.
+    ),
+    (
+        "rails_drift_caretaker_loop_enabled",
+        "HYDRAFLOW_RAILS_DRIFT_CARETAKER_LOOP_ENABLED",
+        False,
+    ),
     ("contract_refresh_loop_enabled", "HYDRAFLOW_CONTRACT_REFRESH_LOOP_ENABLED", True),
     ("corpus_learning_loop_enabled", "HYDRAFLOW_CORPUS_LEARNING_LOOP_ENABLED", True),
     (
@@ -2014,6 +2029,23 @@ class HydraFlowConfig(BaseModel):
             "audits live branch protection against the canonical rulesets (ADR-0082)"
         ),
     )
+    goal_supervisor_interval: int = Field(
+        default=600,
+        ge=60,
+        le=86400,
+        description=(
+            "GoalSupervisorLoop cadence in seconds (default 10m); the Tier-2 "
+            "liveness supervisor that hands the read-only factory health "
+            "snapshot to a Fable agent (ADR-0124)."
+        ),
+    )
+    goal_supervisor_model: str = Field(
+        default="claude-fable-5",
+        description=(
+            "Model for the GoalSupervisorLoop's Fable agent (ADR-0124). A "
+            "claude-* model, spawned with tool=claude."
+        ),
+    )
     gate_activator_interval: int = Field(
         default=604800,
         ge=3600,
@@ -2021,6 +2053,15 @@ class HydraFlowConfig(BaseModel):
         description=(
             "GateActivatorLoop interval in seconds (default 7 days); proposes "
             "activating planned gates whose protected surface now exists (ADR-0082)"
+        ),
+    )
+    rails_drift_caretaker_interval: int = Field(
+        default=86400,
+        ge=3600,
+        le=2592000,
+        description=(
+            "RailsDriftCaretakerLoop interval in seconds (default 1 day); audits "
+            "each managed repo's live state against its rails.yaml manifest (ADR-0121)"
         ),
     )
     collaborator_check_enabled: bool = Field(
@@ -3372,11 +3413,6 @@ class HydraFlowConfig(BaseModel):
     )
 
     # Hindsight + memory_auto_approve knobs removed in Phase 3 cutover.
-
-    memory_auto_approve: bool = Field(
-        default=False,
-        description="When enabled, all memory suggestions bypass HITL and go directly to sync queue",
-    )
 
     memory_prune_stale_items: bool = Field(
         default=True,
@@ -5369,9 +5405,27 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for BranchProtectionAuditorLoop.",
     )
+    goal_supervisor_loop_enabled: bool = Field(
+        default=False,
+        description=(
+            "Deploy-time kill-switch for GoalSupervisorLoop (Tier-2 goal "
+            "supervisor, ADR-0124). Ships default OFF."
+        ),
+    )
     gate_activator_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for GateActivatorLoop.",
+    )
+    rails_drift_caretaker_loop_enabled: bool = Field(
+        default=False,
+        description=(
+            "Deploy-time kill-switch for RailsDriftCaretakerLoop (ADR-0121). "
+            "Defaults OFF: the loop's live-observation layer (rails.yaml manifest "
+            "vs marker-based layer detection) is v1 and the manifest-writer "
+            "retrofit is still rolling out across managed repos; set "
+            "HYDRAFLOW_RAILS_DRIFT_CARETAKER_LOOP_ENABLED=true to enable once "
+            "every managed repo carries a manifest."
+        ),
     )
     contract_refresh_loop_enabled: bool = Field(
         default=True,

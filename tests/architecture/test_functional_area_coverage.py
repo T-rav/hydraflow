@@ -276,6 +276,38 @@ _JUSTIFIED_NEW_LOOPS: dict[str, str] = {
         "(would fuse the independent signals) and no phase sees the joint "
         "residual — its own per-series baselines + never-batched alarm"
     ),
+    # RailsDriftCaretakerLoop (#10936): periodic per-repo template-conformance
+    # audit of each managed repo's rails.yaml manifest. Considered hosting it as
+    # an intake on BranchProtectionAuditorLoop (the sibling per-repo contract-
+    # drift auditor) and as an onboarding-phase step, both rejected: branch
+    # protection audits live GitHub ruleset API state on a 7-day cadence, a
+    # different data source/contract from filesystem template-layer conformance
+    # (fusing them couples two independent contracts), and onboarding is a
+    # one-shot stamp with no recurring cadence to re-check drift. It is genuinely
+    # standalone cross-cutting caretaker cadence work, mirroring the grandfathered
+    # ADR-drift and branch-protection-drift loops it is modeled on (ADR-0121).
+    "RailsDriftCaretakerLoop": (
+        "per-repo rails.yaml template-conformance drift audit on its own cadence; "
+        "BranchProtectionAuditorLoop-intake host rejected (different contract/data "
+        "source) and onboarding-phase host rejected (one-shot, no re-check cadence)"
+    ),
+    # GoalSupervisorLoop (#10733, ADR-0124): the Tier-2 goal supervisor. It is a
+    # cross-cutting cadence over the WHOLE-factory liveness snapshot (every
+    # loop's heartbeat + credit-failover + boot-SHA + watchdog state). Considered
+    # hosting it on HealthMonitorLoop (the sibling meta-observability worker) and
+    # rejected: HealthMonitorLoop is the deterministic Tier-1 *mechanism*
+    # repairer (restart-to-known-good, no LLM), whereas the Tier-2 supervisor is
+    # a goal-driven Fable agent that reads Tier-1's signals and redirects
+    # *mission* — ADR-0124 deliberately separates the two tiers (each tier is a
+    # monitor, not a link). Fusing them would put an LLM in the deterministic
+    # kernel. No pipeline phase observes cross-loop liveness, so it is genuinely
+    # standalone cadence work.
+    "GoalSupervisorLoop": (
+        "Tier-2 goal supervisor over whole-factory liveness on its own cadence; "
+        "HealthMonitorLoop-intake host rejected (Tier-1 deterministic mechanism "
+        "repair vs Tier-2 goal-driven mission redirect — ADR-0124 keeps the tiers "
+        "separate so no LLM sits in the deterministic kernel)"
+    ),
 }
 
 

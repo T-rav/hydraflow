@@ -532,6 +532,7 @@ class PostVerifyAdvisor:
         judge_independence_enabled: bool = False,
         self_mod_fail_closed_enabled: bool = False,
         independent_model: str = "",
+        factory_bound_files: frozenset[str] = frozenset(),
     ) -> None:
         self._runner = runner
         self._cfg = surface_config
@@ -558,6 +559,13 @@ class PostVerifyAdvisor:
         self._judge_independence_enabled = judge_independence_enabled
         self._self_mod_fail_closed_enabled = self_mod_fail_closed_enabled
         self._independent_model = independent_model
+        # ADR-0123 / #10851 mechanical backstop: source files an ADR governs with
+        # `Binds: factory`/`both`. A change to one is self-modification by declared
+        # direction, catching gate-enablement config the substring enumeration
+        # under-includes. Computed once by the caller (which has the repo/ADR dir)
+        # via judge_independence.factory_bound_source_files; empty => enumeration
+        # only (backward-compatible).
+        self._factory_bound_files = factory_bound_files
 
     async def run(self, inp: PostVerifyInput) -> PostVerifyResult:
         start = time.monotonic()
@@ -569,9 +577,14 @@ class PostVerifyAdvisor:
         # header-less ADR body would otherwise classify as "unclassed" and be
         # denied the independent verdict it (as a structural/ADR-touching change)
         # requires.
-        classes = ji.classify_diff(inp.diff)
+        classes = ji.classify_diff(
+            inp.diff, factory_bound_files=self._factory_bound_files
+        )
         if inp.classification_paths:
-            classes = classes | ji.classify_paths(inp.classification_paths)
+            classes = classes | ji.classify_paths(
+                inp.classification_paths,
+                factory_bound_files=self._factory_bound_files,
+            )
         # Independence routing (flagged). Resolves the model this pass dispatches
         # to (an independent family for classed changes when available) and may
         # short-circuit self-modification changes to a HITL escalation when no

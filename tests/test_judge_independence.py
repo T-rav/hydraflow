@@ -77,6 +77,27 @@ def test_classifier_itself_is_self_modification():
     assert ji.is_self_modification(classes) is True
 
 
+def test_10851_broadened_self_mod_covers_provider_dials():
+    """#10851: the class was under-inclusive. Judge routing / provider dials — a
+    failover re-dial changes verdict *provenance* (#10844) — are self-modification.
+    (Kept surgical to avoid the over-reach the #10851 counter-metric warns of:
+    routine ratchet baselines like suppressions.yaml are NOT self-mod.)"""
+    classes = ji.classify_diff(_diff_touching("src/credit_failover.py"))
+    assert ji.is_self_modification(classes) is True, (
+        "credit_failover not classed self-mod"
+    )
+
+
+def test_10851_routine_ratchet_baseline_is_not_over_classed():
+    """Guard against over-reach: bumping the suppressions noqa ledger is a routine
+    mechanical change, not a gate-weakening one, and must NOT trip fail-closed
+    self-mod (else it gets routed around — the #10851 counter-metric)."""
+    classes = ji.classify_diff(
+        _diff_touching("disturbance/baselines/suppressions.yaml")
+    )
+    assert ji.is_self_modification(classes) is False
+
+
 def test_pure_deletion_diff_classified_via_git_header():
     diff = (
         "diff --git a/src/pr_manager.py b/src/pr_manager.py\n"
@@ -376,3 +397,45 @@ def test_calibration_metrics_empty_is_zeroed():
     assert m["pct_independent"] == 0.0
     assert m["fail_open_total"] == 0
     assert m["disagreement_by_family"] == {}
+
+
+# --- ADR-0123 Binds: factory mechanical backstop (#10851) -------------------
+
+
+def _adr(binds: str, files: set[str]):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(binds=binds, source_files=frozenset(files))
+
+
+def test_factory_bound_source_files_collects_factory_and_both_only() -> None:
+    adrs = [
+        _adr("factory", {"src/config.py"}),
+        _adr("both", {"src/gate_x.py"}),
+        _adr("work", {"src/widget.py"}),
+        _adr("unknown", {"src/legacy.py"}),
+    ]
+    assert ji.factory_bound_source_files(adrs) == frozenset(
+        {"src/config.py", "src/gate_x.py"}
+    )
+
+
+def test_backstop_classes_adr_governed_config_as_self_mod() -> None:
+    """A file an ADR governs with Binds: factory is self-mod even though it is
+    NOT in the substring enumeration — the direction axis catches what the
+    enumeration under-includes (the #10846 gate-enablement flip in config.py)."""
+    fb = frozenset({"src/config.py"})
+    diff = _diff_touching("src/config.py")
+    # Without the backstop config.py is unclassed — proves the backstop is why.
+    assert ji.is_self_modification(ji.classify_diff(diff)) is False
+    assert (
+        ji.is_self_modification(ji.classify_diff(diff, factory_bound_files=fb)) is True
+    )
+
+
+def test_backstop_respects_declared_direction() -> None:
+    """A file governed only by a Binds: work ADR contributes nothing — direction
+    is honored, so the backstop does not over-reach."""
+    fb = ji.factory_bound_source_files([_adr("work", {"src/widget.py"})])
+    classes = ji.classify_diff(_diff_touching("src/widget.py"), factory_bound_files=fb)
+    assert ji.is_self_modification(classes) is False

@@ -504,6 +504,13 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "src/onboarding/design_ai.py",
     ),
     AuditTarget(
+        "goal_supervisor_prompt",
+        "goal_supervisor_loop.build_supervisor_prompt",
+        "tests/fixtures/prompts/goal_supervisor_prompt.json",
+        "Adjacent",
+        "src/goal_supervisor_loop.py:162",
+    ),
+    AuditTarget(
         "plan_touchpoint_expander",
         "plan_touchpoint_expander.PlanTouchpointExpander._build_prompt",
         "tests/fixtures/prompts/plan_touchpoint_expander.json",

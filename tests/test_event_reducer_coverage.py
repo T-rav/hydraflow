@@ -51,6 +51,9 @@ SKIP_LIST: set[str] = {
     "system_reroute",
     # Diagnostic events are internal loop state, not dashboard-dispatched
     "diagnostic_update",
+    # Supervisor observations are surfaced via the /api/diagnostics/supervisor/
+    # thread endpoint (ADR-0124), not a dedicated reducer case
+    "supervisor_observation",
     # Retrospective events are consumed server-side (post-merge learning)
     "retrospective_update",
     # Wiki supersedes events are consumed server-side (audit log for temporal

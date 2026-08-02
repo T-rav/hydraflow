@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_74 terms across 3 bounded contexts._
+_83 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -98,6 +98,16 @@ Subprocess runner for the implement phase: launches a `claude -p` process inside
 - Phase name is fixed: _phase_name == 'implement'.
 - The runner commits inside the worktree but never pushes or opens a PR — that work belongs to downstream phases.
 - Self-check checklist is dynamically extended with checklist items from recurring review escalations.
+
+## Authority
+
+**Kind:** `policy` · **Context:** `shared-kernel` · **Anchor:** `src/models.py:HitlEscalation` · **Confidence:** `accepted`
+
+Two distinct notions the word must not conflate (ADR-0122). In the **control register**, authority is *actuation permission* — what a loop may do to the plant this cycle, bounded by the Governor (saturation limits, kill switch, credit holds); a Controller cannot override it. In the **legal/constitutional register**, authority is *jurisdiction* — who holds the decision: who may change what, by what procedure, reviewed by whom, and the escalation boundary where a decision leaves the factory's authority and passes to a human (`models.py:HitlEscalation`, human-signed envelopes). Qualify as "actuation authority" (control) or "decision authority / jurisdiction" (legal); the bare word defaults to the legal sense (jurisdiction).
+
+**Invariants:**
+- Actuation authority (control) is bounded by the Governor and cannot be self-granted by a Controller.
+- Decision authority (legal) transfers to a human only across an explicit escalation boundary.
 
 ## BaseBackgroundLoop
 
@@ -283,6 +293,16 @@ Caretaker loop that backfills `Term.evidence` links by matching wiki entries to 
 - Kill-switch is via `enabled_cb("entry_evidence")` (ADR-0049); no config field.
 - `entry_evidence_max_entries_per_tick` bounds the LLM spend per cycle.
 
+## Erosion
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/erosion_metrics_loop.py:ErosionMetricsLoop` · **Confidence:** `accepted`
+
+Slow drift of a measured quantity away from where it should be — a **control-register** signal (`erosion_metrics_loop.py:ErosionMetricsLoop`, the erosion trends). Two sides must be named separately (ADR-0122). **Plant-side erosion** is decay in the code itself: rising duplication, scatter, god-module concentration — the process variable degrading. **Reference-side erosion** is *setpoint erosion* (#10829): the *target* drifting — a floor quietly lowered, a bound relaxed — so the regulator holds an eroded reference and reports health while the standard slips. Bare "erosion" means plant-side; always write "setpoint erosion" for the reference-side case, because the two have opposite fixes (tighten the plant vs restore the setpoint).
+
+**Invariants:**
+- Bare 'erosion' is plant-side (code); reference-side decay must be written 'setpoint erosion' (#10829).
+- Plant-side and setpoint erosion have opposite remedies — tighten the plant vs restore the setpoint.
+
 ## Error
 
 **Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/harness_insights.py:FailureRecord` · **Confidence:** `accepted`
@@ -377,6 +397,16 @@ Trust-fleet loop that detects persistently flaky tests by parsing JUnit XML from
 - Maximum 3 repair attempts per test before HITL escalation; the dedup key for the `hydraflow-find` issue does not reset until the escalation is resolved.
 - Kill-switch is via `enabled_cb("flake_tracker")` (ADR-0049).
 
+## Gate
+
+**Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/convergence_gate.py:Gate` · **Confidence:** `accepted`
+
+Two things the word collapses (ADR-0122). A **gate (mechanism)** is the runtime component that evaluates a condition and returns a verdict on a transition (`convergence_gate.py:Gate` and its `evaluate`, the convergence gate, precondition gates) — the control/kernel register. A **gate (entrenched rule)** is the standing, hard-to-change rule the mechanism enforces — *gate immutability* in the legal/constitutional register (who may alter the gate, under what allowlist). Bare "gate" means the mechanism; use "gate policy" or "entrenched gate rule" for the rule it enforces. The split matters because changing a gate's *code* is a control act, while changing what a gate is *allowed to permit* is a constitutional one.
+
+**Invariants:**
+- Bare 'gate' is the mechanism; the standing rule it enforces is a 'gate policy' (legal register).
+- Changing gate code is a control act; changing what a gate may permit is a constitutional act under an allowlist.
+
 ## GitHubCacheLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/github_cache_loop.py:GitHubCacheLoop` · **Confidence:** `accepted`
@@ -400,6 +430,23 @@ GitHubDataCache is a repo-scoped, in-memory and disk-persisted cache for GitHub 
 - get_* read methods never hit the network — only poll() and the demand-refresh paths call the GitHub API
 - Demand-refreshed datasets serve a stale snapshot while younger than a multiple (default 3x) of the caller's staleness bound; beyond that, callers get an empty result rather than acting on ancient data
 - The cache is repo-scoped: each RepoRuntime gets its own instance with its own disk file
+
+## GoalSupervisorLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/goal_supervisor_loop.py:GoalSupervisorLoop` · **Confidence:** `accepted`
+**Aliases:** `goal supervisor loop`, `tier-2 goal supervisor`, `goal supervisor`, `mini-me supervisor`
+
+Tier-2 (meta-observability) caretaker loop that formalizes the by-hand "keep the factory alive & healthy" monitor (ADR-0124, #10733). Ticks on a cadence, assembles a read-only `HealthSnapshot` from the existing Tier-1 signals (per-loop heartbeats, credit-failover state, boot-SHA staleness, the event-loop watchdog marker, the second-order vitals verdict), hands it to a Fable agent (`claude-fable-5`) under the standing goal, and records a `SupervisorObservation` (assessment · insights · nudges-taken · escalations · deferred) to the append-only `supervisor_thread.jsonl` + the event bus. Authority is **watch + surface + NUDGE** only — a small reversible allowlist; everything with blast radius is surfaced, never self-done. The load-bearing classify / known-incident / nudge-vs-escalate / give-up-window logic is pure and unit-tested in `supervisor_observation`. Ships default OFF.
+
+**Invariants:**
+- Reuses Tier-1 signals; the snapshot never re-detects and never mutates.
+- Nudge allowlist is small and explicit (`NUDGE_ALLOWLIST`); everything else escalates (surface, never self-do) — mirrors `docs/standards/factory_autonomy`.
+- A nudge carries a one-line root-cause diagnosis; a cause-less action is dropped as noise.
+- Bounded retries then escalate: an incident is nudged ≤ `GIVEUP_CAP` times (give-up window, attempt ledger persisted across ticks), then escalates — never infinite-retry.
+- Verify + re-arm: a nudge is pending until a later tick confirms its condition cleared (`reconcile_ledger`); a still-present incident counts toward the give-up window.
+- Healthy snapshot → no-op without consulting the Fable agent (cost control).
+- Kill-switch is via `enabled_cb("goal_supervisor")` and the `goal_supervisor_loop_enabled` deploy-time gate (ADR-0049).
+- Tier separation: registered standalone (not folded into `HealthMonitorLoop`) so no LLM sits in the deterministic Tier-1 kernel (ADR-0124).
 
 ## Governor
 
@@ -455,6 +502,24 @@ A single event published on the in-process EventBus. Carries a monotonic id (for
 - Event IDs are monotonic and advanced past the maximum persisted ID after history load, so live events are never silently dropped by frontend dedup.
 - Every HydraFlowEvent carries an EventType discriminator and an ISO-8601 timestamp; data is a plain mapping (TypedDict or model_dump).
 - PIPELINE_SNAPSHOT and other EPHEMERAL_EVENT_TYPES are fanned out live-only — never retained in history nor persisted to disk.
+
+## Independence
+
+**Kind:** `policy` · **Context:** `shared-kernel` · **Anchor:** `src/judge_independence.py:IndependenceDisposition` · **Confidence:** `accepted`
+
+Non-correlation of judgment, in two registers that must not be conflated (ADR-0122). In the **evidence/formal register**, independence is *model-family diversity* — a verdict from a model family outside the implementing agent's roster, so author and reviewer are not "siblings" (#10371/#10832, `judge_independence.py:IndependenceDisposition`); it buys decorrelated error, not org-chart separation. In the **legal register**, independence is *institutional* — a reviewer structurally separate from the authoring authority (separation of powers). Qualify as "model-family independence" or "institutional independence"; the bare word in HydraFlow code defaults to model-family independence.
+
+**Invariants:**
+- In HydraFlow code, unqualified 'independence' means model-family independence (decorrelated error), not institutional independence.
+
+## Invariant
+
+**Kind:** `invariant` · **Context:** `shared-kernel` · **Anchor:** `src/arch/integrity.py:IntegrityInvariant` · **Confidence:** `accepted`
+
+A property asserted to hold — but the three assurance disciplines mean three different *strengths* of claim, so the bare word must be qualified (ADR-0122). A **formal invariant** is a *proven* property, established for every interleaving by the kernel proof (#10833). A **control invariant** is a *monitored* series — a signal a regulator holds within bounds and is *observed* (never proven) to stay there. A **legal invariant** is a *rule asserted in prose* — a constraint declared in an ADR or an architecture check (`arch/integrity.py:IntegrityInvariant`) and enforced by convention or CI, not by proof. Because unqualified "invariant" reads as *proven* and thereby overclaims, always name the register: "proven invariant", "monitored invariant", or "asserted invariant".
+
+**Invariants:**
+- 'Invariant' unqualified overclaims (it reads as proven); name the register — proven (formal), monitored (control), or asserted (legal).
 
 ## IssueFetcherPort
 
@@ -598,6 +663,20 @@ Caretaker loop that polls HITL items and delegates to `PRUnsticker` to resolve a
 - Kill-switch is via `enabled_cb("pr_unsticker")` and `config.pr_unsticker_loop_enabled` (ADR-0049).
 - Interval is driven by `config.pr_unstick_interval`.
 
+## RailsDriftCaretakerLoop
+
+**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/rails_drift_caretaker_loop.py:RailsDriftCaretakerLoop` · **Confidence:** `accepted`
+**Aliases:** `rails drift caretaker loop`, `rails drift caretaker`, `rails manifest drift loop`
+
+Caretaker loop (ADR-0121, #10936) that audits each managed repo's live state against its rails manifest (`rails.yaml`) and files deduped `hydraflow-find` drift issues. Mirrors the ADR-drift (ADR-0056) and branch-protection-drift (ADR-0082) caretakers: periodic, contract-diffing, one deduped issue per finding class. Per tick it loads the repo's manifest, observes live state, and computes drift — a missing declared layer, a coverage-floor breach, or a missing declared domain gate script. Unknown/future layer names are reported but never file an issue (tolerated, forward-compat with the Book-3 operator-agent pack). Dedup key is `rails_drift_caretaker:<repo>:<finding_class>`; when a finding class resolves, its open issue is closed and the key cleared so a recurrence re-files.
+
+**Invariants:**
+- One deduped drift issue per (repo, finding class); never one issue per individual failing check.
+- A missing declared layer is drift; an undeclared extra rail is fine; an unknown/future layer name is reported but never fatal.
+- The coverage floor is evaluated only when observed coverage is known (fail-open: no drift on an unmeasured value).
+- Kill-switch is via `enabled_cb("rails_drift_caretaker")` (ADR-0049), then the static `rails_drift_caretaker_loop_enabled` config gate (default OFF).
+- Cadence is config-driven via `rails_drift_caretaker_interval` (default 1 day).
+
 ## RCBudgetLoop
 
 **Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/rc_budget_loop.py:RCBudgetLoop` · **Confidence:** `accepted`
@@ -686,6 +765,16 @@ The desired state an orchestration loop drives toward — an issue reaching its 
 
 **Invariants:**
 - The Set-point is the loop's target, not its current state (that is the Sensor reading).
+
+## Setpoint
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/signal_control/controllers.py:PidController` · **Confidence:** `accepted`
+
+The reference value a regulator drives its process variable toward — the target term in `error = PV - setpoint` that a control loop holds (`signal_control/controllers.py:PidController`, the setpoint regulators of ADR-0120). The bare word is scoped to the **control register** (ADR-0122). Adjacent registers use different words and must not borrow "setpoint": a **written requirement** (an acceptance criterion) is a *specification*, and an **ADR decision** is a *ruling* — neither is a setpoint, because a setpoint is a live, human-signed target a regulator reads each cycle whereas a requirement or ruling is prose. Where a requirement is *operationalized* into a regulator's target (e.g. the 70% coverage floor), that number is the setpoint and the ADR is its authority — name the two separately.
+
+**Invariants:**
+- 'Setpoint' is control-register only: a live, human-signed target a regulator reads each cycle; a requirement or ADR ruling is not a setpoint.
+- When a requirement is operationalized into a target, the number is the setpoint and the ADR is its authority — name them separately.
 
 ## SkillPromptEvalLoop
 
@@ -813,6 +902,15 @@ Cross-repo knowledge store that mirrors the per-repo wiki layout (index.json + t
 - All entries carry source_repo='global'; the store is pinned to a single 'global' slug.
 - Entries are written only by the generalization pass when the same principle is observed in ≥2 per-repo wikis; direct modification from agent code is not a supported use case.
 - On-disk layout, staleness filtering, contradiction marking, and supersession are delegated to the underlying RepoWikiStore so per-repo and tribal formats stay consistent.
+
+## Verdict
+
+**Kind:** `value_object` · **Context:** `shared-kernel` · **Anchor:** `src/convergence_gate.py:JudgeVerdict` · **Confidence:** `accepted`
+
+A closed-set adjudication emitted by a decision mechanism. The bare word is scoped to the **control/kernel register**: a gate's pass/fail outcome (`convergence_gate.py:JudgeVerdict`, `convergence_gate.py:GateDecision`, `models.py:ReviewVerdict`) — the terminal decision the pipeline routes on. Two other registers qualify the word rather than own it: a **formal-methods verdict** (ADR-0122) is a model-checker's result and, on failure, a *counterexample* trace witnessing a violated property (#10833); a **legal-sense verdict** is an adjudication under the ADR corpus — a human-signed ruling on a proposal. Qualify with the register ("gate verdict", "model-checker verdict", "adjudication") whenever the three could be confused; unqualified "verdict" means the gate outcome.
+
+**Invariants:**
+- Unqualified 'verdict' denotes a gate's pass/fail outcome; the formal (counterexample) and legal (adjudication) senses must be qualified.
 
 ## ViolationDetector
 

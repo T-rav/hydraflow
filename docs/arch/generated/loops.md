@@ -36,6 +36,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **GateActivatorLoop** | `src.gate_activator_loop` | 604800 | — | — | ADR-0029, ADR-0049, ADR-0082 |
 | **GateHealthLoop** | `src.gate_health_loop` | 604800 | — | — | — |
 | **GitHubCacheLoop** | `src.github_cache_loop` | 300 | — | — | — |
+| **GoalSupervisorLoop** | `src.goal_supervisor_loop` | 600 | — | SUPERVISOR_OBSERVATION | ADR-0124 |
 | **HealthMonitorLoop** | `src.health_monitor_loop` | 600 | — | SYSTEM_ALERT | — |
 | **HumanSteeringLoop** | `src.human_steering_loop` | — | — | — | ADR-0099 |
 | **InterventionTallyLoop** | `src.intervention_tally_loop` | 86400 | — | — | — |
@@ -50,6 +51,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **PricingRefreshLoop** | `src.pricing_refresh_loop` | 86400 | `HYDRAFLOW_DISABLE_PRICING_REFRESH` | — | — |
 | **PrinciplesAuditLoop** | `src.principles_audit_loop` | 604800 | — | — | ADR-0044 |
 | **RCBudgetLoop** | `src.rc_budget_loop` | 14400 | — | — | — |
+| **RailsDriftCaretakerLoop** | `src.rails_drift_caretaker_loop` | 86400 | — | — | — |
 | **RepoWikiLoop** | `src.repo_wiki_loop` | 3600 | — | — | — |
 | **ReportIssueLoop** | `src.report_issue_loop` | 30 | — | REPORT_UPDATE | — |
 | **RetrospectiveLoop** | `src.retrospective_loop` | 86400 | — | RETROSPECTIVE_UPDATE | — |

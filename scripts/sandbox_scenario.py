@@ -53,6 +53,46 @@ def write_seed(name: str) -> Path:
     return out
 
 
+def _is_committed_seed(seed_path: Path) -> bool:
+    """True if *seed_path* is tracked by git — i.e. a committed golden seed.
+
+    The run-cleanup (``_cleanup_run_seed``) uses this to decide whether the seed
+    it materialized is safe to delete: only the 6 committed goldens are tracked,
+    so an untracked ``<name>.json`` was created by THIS run and can be removed,
+    while a golden must never be deleted (#10980). Git unavailable / not a
+    checkout ⇒ assume committed (``True`` ⇒ do NOT delete): the tree-clean guard
+    doesn't apply outside a checkout, so leaving the file is the safe default.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", str(seed_path)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (FileNotFoundError, OSError):
+        return True  # git binary unavailable — err on the side of NOT deleting
+    return result.returncode == 0
+
+
+def _cleanup_run_seed(seed_path: Path, scenario_link: Path) -> None:
+    """Remove the artifacts a run materialized into the committed SEEDS_DIR.
+
+    ``cmd_run``/``cmd_run_all`` write ``<name>.json`` (the dir the container
+    mounts read-only) plus a transient ``scenario.json`` symlink. 72 of 78
+    scenarios have no committed golden seed, so without this cleanup a manual
+    ``run``/``run-all`` of one leaves an untracked ``<name>.json`` that trips
+    ``test_seed_dir_is_git_clean`` on the next full-suite run in the same
+    workspace (#10980). Always drops the transient symlink; drops the seed only
+    when it is NOT a committed golden, so ``cmd_seed``'s 6 goldens are never
+    deleted. Best-effort — cleanup failure must not mask the run's own rc.
+    """
+    scenario_link.unlink(missing_ok=True)  # transient per-run symlink
+    if not _is_committed_seed(seed_path):
+        seed_path.unlink(missing_ok=True)
+
+
 def _compose(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE_FILE), *args],
@@ -112,63 +152,74 @@ def cmd_run(name: str) -> int:
 
     # Make sure the seed file the container reads matches THIS scenario.
     # The container always reads /seed/scenario.json, so symlink it.
-    target = SEEDS_DIR / "scenario.json"
-    if target.exists() or target.is_symlink():
-        target.unlink()
-    target.symlink_to(seed_path.name)
+    scenario_link = SEEDS_DIR / "scenario.json"
+    if scenario_link.exists() or scenario_link.is_symlink():
+        scenario_link.unlink()
+    scenario_link.symlink_to(seed_path.name)
 
-    print("[2/5] Building images (cached when possible)...")
-    # ``playwright`` must be built explicitly because the MS image ships no
-    # test runner — ``Dockerfile.playwright`` adds pytest at build time so
-    # ``compose run playwright pytest …`` works on the air-gapped network.
-    rc = _compose("build", "hydraflow", "ui", "playwright").returncode
-    if rc != 0:
-        print(f"BUILD FAILED ({rc})")
-        return 2
+    # write_seed materializes into the COMMITTED SEEDS_DIR (the dir the
+    # container mounts read-only — deliberately unchanged so the docker bind
+    # keeps working). 72 of 78 scenarios have no committed golden seed, so a
+    # manual run of one would otherwise leave an untracked <name>.json behind;
+    # the finally below removes anything this run materialized that isn't a
+    # committed golden (#10980).
+    try:
+        print("[2/5] Building images (cached when possible)...")
+        # ``playwright`` must be built explicitly because the MS image ships no
+        # test runner — ``Dockerfile.playwright`` adds pytest at build time so
+        # ``compose run playwright pytest …`` works on the air-gapped network.
+        rc = _compose("build", "hydraflow", "ui", "playwright").returncode
+        if rc != 0:
+            print(f"BUILD FAILED ({rc})")
+            return 2
 
-    print("[3/5] Starting stack on internal network...")
-    rc = _compose("up", "-d", "hydraflow", "ui").returncode
-    if rc != 0:
-        print(f"UP FAILED ({rc})")
-        return 2
+        print("[3/5] Starting stack on internal network...")
+        rc = _compose("up", "-d", "hydraflow", "ui").returncode
+        if rc != 0:
+            print(f"UP FAILED ({rc})")
+            return 2
 
-    print("[4/5] Waiting for hydraflow /healthz...")
-    if not _wait_for_healthy(60):
-        print("HEALTHCHECK TIMEOUT — collecting logs")
-        _compose("logs", "hydraflow")
+        print("[4/5] Waiting for hydraflow /healthz...")
+        if not _wait_for_healthy(60):
+            print("HEALTHCHECK TIMEOUT — collecting logs")
+            _compose("logs", "hydraflow")
+            cmd_down()
+            return 2
+
+        print("[5/5] Running playwright assertions...")
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        # ``-c tests/sandbox_scenarios/pytest.ini`` makes that file the
+        # rootdir-config so pytest does NOT autoload the project-wide
+        # ``tests/conftest.py`` (which imports pydantic/HydraFlow internals
+        # that the slim playwright image doesn't have). The runner's own
+        # conftest under ``tests/sandbox_scenarios/runner/`` still loads
+        # because it's inside the new rootdir.
+        rc = _compose(
+            "run",
+            "--rm",
+            "-e",
+            f"SCENARIO_NAME={name}",
+            "playwright",
+            "pytest",
+            "-c",
+            "tests/sandbox_scenarios/pytest.ini",
+            f"tests/sandbox_scenarios/runner/test_scenarios.py::test_scenario[{name}]",
+            "-v",
+            "--junitxml=/results/junit.xml",
+        ).returncode
+
+        if rc != 0:
+            print(f"FAILED {name}")
+            _compose("logs", "hydraflow")
+        else:
+            print(f"PASSED {name}")
+
         cmd_down()
-        return 2
-
-    print("[5/5] Running playwright assertions...")
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    # ``-c tests/sandbox_scenarios/pytest.ini`` makes that file the
-    # rootdir-config so pytest does NOT autoload the project-wide
-    # ``tests/conftest.py`` (which imports pydantic/HydraFlow internals
-    # that the slim playwright image doesn't have). The runner's own
-    # conftest under ``tests/sandbox_scenarios/runner/`` still loads
-    # because it's inside the new rootdir.
-    rc = _compose(
-        "run",
-        "--rm",
-        "-e",
-        f"SCENARIO_NAME={name}",
-        "playwright",
-        "pytest",
-        "-c",
-        "tests/sandbox_scenarios/pytest.ini",
-        f"tests/sandbox_scenarios/runner/test_scenarios.py::test_scenario[{name}]",
-        "-v",
-        "--junitxml=/results/junit.xml",
-    ).returncode
-
-    if rc != 0:
-        print(f"FAILED {name}")
-        _compose("logs", "hydraflow")
-    else:
-        print(f"PASSED {name}")
-
-    cmd_down()
-    return rc
+        return rc
+    finally:
+        # Never leave an untracked seed / transient symlink in the committed
+        # dir; keeps the tree git-clean for the next full-suite run (#10980).
+        _cleanup_run_seed(seed_path, scenario_link)
 
 
 def _parse_shard(shard: str | None) -> tuple[int, int] | None:

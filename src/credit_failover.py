@@ -98,6 +98,20 @@ def probe_due(now: datetime) -> bool:
     )
 
 
+def rearm_probe(*, now: datetime) -> bool:
+    """Re-arm a stuck switch-back probe so the next tick is eligible immediately.
+
+    A safe, reversible in-memory nudge (ADR-0124): when failover is active it
+    sets ``probe_after`` to *now* so the orchestrator's probe becomes due on its
+    next pass; the probe itself still decides switch-back vs another cooldown.
+    Returns ``True`` when it re-armed an active failover, ``False`` otherwise.
+    """
+    if _state.engaged_at is None:
+        return False
+    _state.probe_after = now
+    return True
+
+
 def clear() -> None:
     """Exit failover: work spawns route back to Claude."""
     _state.engaged_at = None

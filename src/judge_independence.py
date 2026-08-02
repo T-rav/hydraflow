@@ -47,12 +47,26 @@ from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from config import HydraFlowConfig
 
 logger = logging.getLogger("hydraflow.judge_independence")
+
+
+class ADRLike(Protocol):
+    """Structural view of an ``adr_index.ADR`` the backstop needs (kept a
+    Protocol so judge_independence doesn't depend on the ADR-index module).
+
+    Read-only properties (not bare attributes) so a *frozen* dataclass like
+    ``adr_index.ADR`` structurally satisfies it."""
+
+    @property
+    def binds(self) -> str: ...
+
+    @property
+    def source_files(self) -> frozenset[str]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +123,21 @@ _SELF_MOD_SUBSTRINGS: tuple[str, ...] = (
     "src/staging_promotion_loop.py",  # merge/promotion policy
     "src/merge_state_watcher_loop.py",
     "docs/standards/",  # the written policy machinery
+    # #10851: the class was under-inclusive — the 2026-07-30 precondition-gate
+    # config flip wedged the machine (#10846/#10847) yet was not classified as
+    # self-modification. Add the surface that is clearly self-mod AND rarely
+    # touched: judge routing / provider dials — a failover re-dial changes verdict
+    # *provenance* (#10844). Two surfaces are DELIBERATELY not path-matched here to
+    # avoid the over-reach the #10851 counter-metric warns of (a class so broad
+    # every config tweak needs an out-of-family verdict gets routed around):
+    #   - gate *enablement* config (config.py) — caught by the ADR-0123
+    #     `Binds: factory` backstop instead (only the ADR-cited files, not all of
+    #     config.py);
+    #   - instrument thresholds / finding-rate budgets — the specific weakens-a-gate
+    #     files still need picking out from the routine ratchet baselines (e.g.
+    #     suppressions.yaml is a mechanical noqa ledger, not a threshold), open in
+    #     #10851.
+    "src/credit_failover.py",  # #10844 provider re-dial → verdict provenance
 )
 
 # Security-adjacent paths: auth, secrets, prompt-assembly / trust-boundary.
@@ -178,19 +207,31 @@ def _path_matches(path: str, needles: tuple[str, ...]) -> bool:
     return any(n in path for n in needles)
 
 
-def classify_paths(paths: Iterable[str]) -> frozenset[BlastRadiusClass]:
+def classify_paths(
+    paths: Iterable[str],
+    *,
+    factory_bound_files: frozenset[str] = frozenset(),
+) -> frozenset[BlastRadiusClass]:
     """Classify a set of changed paths into blast-radius classes.
 
     A change may fall into multiple classes (e.g. an ADR that also touches a
     gate). Returns an empty set for unclassed (ordinary) changes — those keep
     the ordinary review path untouched (spec non-goal: no change to unclassed).
+
+    ``factory_bound_files`` is the ADR-0123 mechanical backstop for #10851: the
+    set of source files cited by an ADR declaring ``Binds: factory`` / ``both``
+    (see :func:`factory_bound_source_files`). Any changed path in that set is
+    self-modification *regardless of the substring enumeration* — the direction
+    axis catches what the enumeration under-includes (e.g. gate-enablement config
+    an ADR governs, without classing all of ``config.py``). Empty by default, so
+    the pure classifier stays pure; callers compute it from the ADR index once.
     """
     classes: set[BlastRadiusClass] = set()
     for path in paths:
         norm = path.strip()
         if not norm:
             continue
-        if _path_matches(norm, _SELF_MOD_SUBSTRINGS):
+        if _path_matches(norm, _SELF_MOD_SUBSTRINGS) or norm in factory_bound_files:
             classes.add(BlastRadiusClass.SELF_MODIFICATION)
         if _path_matches(norm, _SECURITY_SUBSTRINGS):
             classes.add(BlastRadiusClass.SECURITY)
@@ -201,9 +242,32 @@ def classify_paths(paths: Iterable[str]) -> frozenset[BlastRadiusClass]:
     return frozenset(classes)
 
 
-def classify_diff(diff: str) -> frozenset[BlastRadiusClass]:
+def classify_diff(
+    diff: str,
+    *,
+    factory_bound_files: frozenset[str] = frozenset(),
+) -> frozenset[BlastRadiusClass]:
     """Classify a unified-diff string into blast-radius classes."""
-    return classify_paths(paths_from_diff(diff))
+    return classify_paths(
+        paths_from_diff(diff), factory_bound_files=factory_bound_files
+    )
+
+
+def factory_bound_source_files(adrs: Iterable[ADRLike]) -> frozenset[str]:
+    """Source files an ADR governs with ``Binds: factory`` / ``both`` (ADR-0123).
+
+    A change to one of these is self-modification by declared direction — the
+    mechanical backstop for the (never-exhaustive) ``_SELF_MOD_SUBSTRINGS``
+    enumeration (#10851). Reads ``adr.binds`` + ``adr.source_files`` from the ADR
+    index; precision is the ADR author's citation choice (cite narrowly to avoid
+    classing a whole broad file). ``work``-only and ``unknown`` ADRs contribute
+    nothing.
+    """
+    bound: set[str] = set()
+    for adr in adrs:
+        if adr.binds in ("factory", "both"):
+            bound.update(adr.source_files)
+    return frozenset(bound)
 
 
 def requires_independent_verdict(classes: frozenset[BlastRadiusClass]) -> bool:

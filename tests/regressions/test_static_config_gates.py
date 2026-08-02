@@ -354,6 +354,19 @@ def _skill_prompt_eval_loop(tmp_path: Path):
     )
 
 
+def _rails_drift_caretaker_loop(tmp_path: Path):
+    from rails_drift_caretaker_loop import RailsDriftCaretakerLoop
+
+    d = _deps(tmp_path, "rails_drift_caretaker_loop_enabled")
+    return RailsDriftCaretakerLoop(
+        config=d.config,
+        pr_manager=MagicMock(),
+        dedup=MagicMock(),
+        deps=d.loop_deps,
+        auditor=MagicMock(),
+    )
+
+
 def _gate_health_loop(tmp_path: Path):
     from gate_health_loop import GateHealthLoop
 
@@ -466,6 +479,7 @@ _LOOP_FACTORIES = [
     ("RepoWikiLoop", _repo_wiki_loop),
     ("ReportIssueLoop", _report_issue_loop),
     ("RetrospectiveLoop", _retrospective_loop),
+    ("RailsDriftCaretakerLoop", _rails_drift_caretaker_loop),
     ("GateHealthLoop", _gate_health_loop),
     ("IssueRefinementLoop", _issue_refinement_loop),
     ("RunsGCLoop", _runs_gc_loop),
