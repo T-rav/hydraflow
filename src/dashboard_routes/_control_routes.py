@@ -213,6 +213,11 @@ _bg_worker_defs = [
         "Audits live GitHub branch protection against the canonical rulesets generated from gates.toml; files an issue on drift. See ADR-0082.",
     ),
     (
+        "goal_supervisor",
+        "Goal Supervisor",
+        "Tier-2 liveness supervisor: reads the read-only factory health snapshot, hands it to a Fable agent under the standing goal 'keep the factory alive & healthy', and nudges the reversible / escalates the rest. Default OFF. See ADR-0124.",
+    ),
+    (
         "rails_drift_caretaker",
         "Rails Drift Caretaker",
         "Audits each managed repo's live state against its rails.yaml manifest (declared template layers / coverage floor / domain gate scripts) and files deduped drift issues. See ADR-0121.",

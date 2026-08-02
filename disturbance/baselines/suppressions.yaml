@@ -144,6 +144,9 @@ entries:
   src/gate_activation_check.py::noqa:PLC0415: 3
   src/gate_activator_loop.py::noqa:PLR0911: 1
   src/github_cache_loop.py::noqa:PLC0415: 2
+  src/goal_supervisor_loop.py::noqa:BLE001: 5
+  src/goal_supervisor_loop.py::noqa:PLC0415: 5
+  src/goal_supervisor_runner.py::noqa:BLE001: 1
   src/harness_insights.py::noqa:BLE001: 4
   src/harness_insights.py::noqa:PLC0415: 5
   src/health_monitor_loop.py::noqa:BLE001: 20

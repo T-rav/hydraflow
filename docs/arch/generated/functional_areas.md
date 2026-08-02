@@ -60,6 +60,7 @@ flowchart LR
         release_StagingPromotionLoop([StagingPromotionLoop])
     end
     subgraph meta_observability["Meta-Observability"]
+        meta_observability_GoalSupervisorLoop([GoalSupervisorLoop])
         meta_observability_HealthMonitorLoop([HealthMonitorLoop])
         meta_observability_TrustFleetSanityLoop([TrustFleetSanityLoop])
     end
@@ -204,10 +205,11 @@ Monitoring and observability workers that watch the factory watching itself — 
 
 **Loops**
 
+- `GoalSupervisorLoop` — `src.goal_supervisor_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
 - `TrustFleetSanityLoop` — `src.trust_fleet_sanity_loop`
 
-**Related ADRs:** `ADR-0045`, `ADR-0056`
+**Related ADRs:** `ADR-0045`, `ADR-0056`, `ADR-0124`
 
 
 ## Operations

@@ -1346,6 +1346,39 @@ def _build_branch_protection_auditor(
     )
 
 
+def _build_goal_supervisor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build GoalSupervisorLoop for scenarios (ADR-0124, Tier-2 goal supervisor).
+
+    Tests pre-seed:
+    * ``goal_supervisor_runner`` → a fake Fable runner whose ``run`` returns a
+      ``SupervisorVerdict`` — air-gaps the real subprocess spawn.
+    * ``state`` → per-loop heartbeats for the read-only health snapshot.
+    * ``bg_workers`` → powers the restart nudge (wired via ``set_bg_workers``).
+    * ``goal_supervisor_nudger`` / ``goal_supervisor_now`` → optional overrides.
+    """
+    from goal_supervisor_loop import GoalSupervisorLoop  # noqa: PLC0415
+    from supervisor_observation import SupervisorVerdict  # noqa: PLC0415
+
+    runner = ports.get("goal_supervisor_runner")
+    if runner is None:
+        runner = AsyncMock()
+        runner.run = AsyncMock(return_value=SupervisorVerdict(assessment="stub"))
+        ports["goal_supervisor_runner"] = runner
+
+    loop = GoalSupervisorLoop(
+        config=config,
+        deps=deps,
+        state=ports.get("state"),
+        runner=runner,
+        nudger=ports.get("goal_supervisor_nudger"),
+        now_fn=ports.get("goal_supervisor_now"),
+    )
+    bg_workers = ports.get("bg_workers")
+    if bg_workers is not None:
+        loop.set_bg_workers(bg_workers)
+    return loop
+
+
 def _build_rails_drift_caretaker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build RailsDriftCaretakerLoop for scenarios (ADR-0121, #10936).
 
@@ -2261,6 +2294,7 @@ _BUILDERS: dict[str, Any] = {
     # phase 1
     "ci_monitor": _build_ci_monitor,
     "branch_protection_auditor": _build_branch_protection_auditor,
+    "goal_supervisor": _build_goal_supervisor,
     "rails_drift_caretaker": _build_rails_drift_caretaker,
     "gate_activator": _build_gate_activator,
     "stale_issue_gc": _build_stale_issue_gc,

@@ -497,6 +497,7 @@ def build_scripted_services(
     services.issue_refinement_loop = FakeBackgroundLoop()
     services.ci_monitor_loop = FakeBackgroundLoop()
     services.branch_protection_auditor_loop = FakeBackgroundLoop()
+    services.goal_supervisor_loop = FakeBackgroundLoop()
     services.rails_drift_caretaker_loop = FakeBackgroundLoop()
     services.gate_activator_loop = FakeBackgroundLoop()
     services.security_patch_loop = FakeBackgroundLoop()

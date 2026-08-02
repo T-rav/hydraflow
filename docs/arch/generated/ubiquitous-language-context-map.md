@@ -29,6 +29,7 @@ graph LR
     fitnessscorecardloop["FitnessScorecardLoop<br/><i>loop</i>"]
     flaketrackerloop["FlakeTrackerLoop<br/><i>loop</i>"]
     githubcacheloop["GitHubCacheLoop<br/><i>loop</i>"]
+    goalsupervisorloop["GoalSupervisorLoop<br/><i>loop</i>"]
     hitlitem["HITLItem<br/><i>entity</i>"]
     livecorpusreplayloop["LiveCorpusReplayLoop<br/><i>loop</i>"]
     loopfitness["LoopFitness<br/><i>value_object</i>"]

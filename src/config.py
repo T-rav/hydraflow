@@ -184,6 +184,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         604800,
     ),
     ("gate_activator_interval", "HYDRAFLOW_GATE_ACTIVATOR_INTERVAL", 604800),
+    ("goal_supervisor_interval", "HYDRAFLOW_GOAL_SUPERVISOR_INTERVAL", 600),
     (
         "rails_drift_caretaker_interval",
         "HYDRAFLOW_RAILS_DRIFT_CARETAKER_INTERVAL",
@@ -905,6 +906,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("gate_activator_loop_enabled", "HYDRAFLOW_GATE_ACTIVATOR_LOOP_ENABLED", True),
+    (
+        "goal_supervisor_loop_enabled",
+        "HYDRAFLOW_GOAL_SUPERVISOR_LOOP_ENABLED",
+        False,  # ADR-0124: Tier-2 goal supervisor ships default OFF.
+    ),
     (
         "rails_drift_caretaker_loop_enabled",
         "HYDRAFLOW_RAILS_DRIFT_CARETAKER_LOOP_ENABLED",
@@ -2021,6 +2027,23 @@ class HydraFlowConfig(BaseModel):
         description=(
             "BranchProtectionAuditorLoop interval in seconds (default 7 days); "
             "audits live branch protection against the canonical rulesets (ADR-0082)"
+        ),
+    )
+    goal_supervisor_interval: int = Field(
+        default=600,
+        ge=60,
+        le=86400,
+        description=(
+            "GoalSupervisorLoop cadence in seconds (default 10m); the Tier-2 "
+            "liveness supervisor that hands the read-only factory health "
+            "snapshot to a Fable agent (ADR-0124)."
+        ),
+    )
+    goal_supervisor_model: str = Field(
+        default="claude-fable-5",
+        description=(
+            "Model for the GoalSupervisorLoop's Fable agent (ADR-0124). A "
+            "claude-* model, spawned with tool=claude."
         ),
     )
     gate_activator_interval: int = Field(
@@ -5381,6 +5404,13 @@ class HydraFlowConfig(BaseModel):
     branch_protection_auditor_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for BranchProtectionAuditorLoop.",
+    )
+    goal_supervisor_loop_enabled: bool = Field(
+        default=False,
+        description=(
+            "Deploy-time kill-switch for GoalSupervisorLoop (Tier-2 goal "
+            "supervisor, ADR-0124). Ships default OFF."
+        ),
     )
     gate_activator_loop_enabled: bool = Field(
         default=True,

@@ -55,7 +55,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `HYDRAFLOW_TERM_PROPOSER` | `term_proposer_tool` | `term_proposer_model` |
 | `HYDRAFLOW_ADR_DRIFT_RESOLVER` | `adr_drift_resolver_tool` | `adr_drift_resolver_model` |
 
-## Background loops (64)
+## Background loops (65)
 
 | Worker | Loop class | Area | Model role(s) | Long LLM cycle | Oversight | Purpose |
 |---|---|---|---|---|---|---|
@@ -89,6 +89,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `gate_activator` | `GateActivatorLoop` | Governance & Audit | — | — | — | Proposes activating planned gates in gates.toml once the surface each protects exists (producing job + make target present, profile matches); files a reviewed issue. See ADR-0082. |
 | `gate_health` | `GateHealthLoop` | Repo Health | — | — | — | Weekly read-only CI-gate auditor: pass-rate distributions, blame-correlation, missing failure artifacts, stale quarantines. |
 | `github_cache` | `GitHubCacheLoop` | Operations | — | — | HITL escalation | Single-poller cache for GitHub data; serves all dashboard + loop consumers from one shared snapshot to avoid rate-limit fan-out. |
+| `goal_supervisor` | `GoalSupervisorLoop` | Meta-Observability | `credit_failover_model`, `goal_supervisor_model`, `model` | ✅ | — | Tier-2 liveness supervisor: reads the read-only factory health snapshot, hands it to a Fable agent under the standing goal 'keep the factory alive & healthy', and nudges the reversible / escalates the rest. Default OFF. See ADR-0124. |
 | `health_monitor` | `HealthMonitorLoop` | Meta-Observability | — | — | HITL escalation | Analyzes pipeline trends, auto-tunes parameters, detects knowledge gaps, and ingests log patterns. |
 | `human_steering` | `HumanSteeringLoop` | Autonomy | — | — | — | Senses per-issue GitHub-comment steering directives (/steer, /pause, /resume, /redo, /abort) each tick and writes the steering reference (ADR-0099 #4). |
 | `intervention_tally` | `InterventionTallyLoop` | Repo Health | `background_model`, `intervention_tally_model` | ✅ | HITL escalation | Attention-side telemetry (read-only, Pattern B): senses human touches (steering/HITL/control-route/CLI), classifies them into a fixed taxonomy (mechanical + bounded cheap-LLM for free-text), and renders interventions-per-100-merges (same denominator as the escape ledger), the per-loop trust table, and loops-per-governor. Never gates or fixes. See #10369. |
