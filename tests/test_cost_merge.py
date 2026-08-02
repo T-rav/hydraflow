@@ -8,12 +8,80 @@ loop / model dimensions, with per-issue rows kept distinct by repo.
 from __future__ import annotations
 
 from dashboard_routes._cost_merge import (
+    group_cost_by_model_by_repo,
     merge_by_loop,
     merge_cost_by_model,
     merge_per_loop_cost,
     merge_rolling_24h,
     merge_top_issues,
 )
+
+
+def _model_row(model: str, cost: float, **over: object) -> dict[str, object]:
+    """A cost-by-model row shaped like ``build_cost_by_model`` output."""
+    return {
+        "model": model,
+        "cost_usd": cost,
+        "calls": 1,
+        "unpriced_calls": 0,
+        "cost_unknown": False,
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_plausibility": None,
+        **over,
+    }
+
+
+def test_group_cost_by_model_by_repo_aggregates_all_and_keeps_repos():
+    # org-a spends on sonnet; org-b spends on sonnet + haiku. `all` sums the
+    # shared model across repos; `repos` keeps each repo's own breakdown.
+    per_repo = [
+        ("org-a", [_model_row("sonnet", 1.0)]),
+        (
+            "org-b",
+            [_model_row("sonnet", 2.0), _model_row("haiku", 0.5)],
+        ),
+    ]
+    out = group_cost_by_model_by_repo(
+        per_repo, generated_at="2026-08-01T00:00:00+00:00"
+    )
+
+    assert out["window_hours"] == 24
+    assert out["window_label"] == "last 24h"
+    assert out["generated_at"] == "2026-08-01T00:00:00+00:00"
+
+    all_by_model = {r["model"]: r for r in out["all"]}
+    assert all_by_model["sonnet"]["cost_usd"] == 3.0  # 1.0 (a) + 2.0 (b)
+    assert all_by_model["sonnet"]["calls"] == 2
+    assert "haiku" in all_by_model
+    # Aggregate total sums every model across every repo.
+    assert out["total_cost_usd"] == 3.5
+
+    # Per-repo rows stay distinct, sorted by spend descending (org-b > org-a).
+    assert [r["repo"] for r in out["repos"]] == ["org-b", "org-a"]
+    repos = {r["repo"]: r for r in out["repos"]}
+    assert repos["org-a"]["total_cost_usd"] == 1.0
+    assert repos["org-b"]["total_cost_usd"] == 2.5
+    assert {r["model"] for r in repos["org-b"]["by_model"]} == {"sonnet", "haiku"}
+
+
+def test_group_cost_by_model_by_repo_empty_window_is_zeros_not_error():
+    # Two repos with no spend in the window → zeros everywhere, no exception.
+    out = group_cost_by_model_by_repo([("org-a", []), ("org-b", [])])
+    assert out["all"] == []
+    assert out["total_cost_usd"] == 0.0
+    assert [r["repo"] for r in out["repos"]] == ["org-a", "org-b"]
+    assert all(r["total_cost_usd"] == 0.0 and r["by_model"] == [] for r in out["repos"])
+
+
+def test_group_cost_by_model_by_repo_no_repos_is_empty_zeros():
+    out = group_cost_by_model_by_repo([])
+    assert out["all"] == []
+    assert out["repos"] == []
+    assert out["total_cost_usd"] == 0.0
+    assert out["window_label"] == "last 24h"
 
 
 def test_merge_rolling_24h_sums_totals_and_breakdowns():
