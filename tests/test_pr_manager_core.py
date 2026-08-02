@@ -17,6 +17,22 @@ from pr_manager import PRManager
 from tests.conftest import PRInfoFactory, SubprocessMockBuilder
 from tests.helpers import ConfigFactory, make_pr_manager
 
+
+@pytest.fixture(autouse=True)
+def _stub_pr_diff_stats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#10788: create_pr / merge_pr now do a best-effort ``gh pr view``
+    diff-stat read at the emit site. These tests inspect the create/merge
+    subprocess calls (and some patch above the subprocess layer); default the
+    read to an empty (degraded) result so it adds no trailing subprocess call
+    and spawns no real ``gh``. The emit-site threading itself is covered by
+    ``tests/regressions/test_issue_10788.py``."""
+
+    async def _empty(_self: object, _pr_number: int) -> dict[str, object]:
+        return {}
+
+    monkeypatch.setattr("pr_manager.PRManager.get_pr_diff_stats", _empty)
+
+
 # ---------------------------------------------------------------------------
 # _chunk_body (static method)
 # ---------------------------------------------------------------------------
@@ -1151,7 +1167,12 @@ async def test_create_pr_dry_run_skips_command(dry_config, event_bus, issue):
 def _merge_subprocess_mocks(
     title_json='{"title":"Fix bug","body":""}', merge_stdout=""
 ):
-    """Build a side_effect list for merge_pr: first call fetches title, second merges."""
+    """Build a side_effect list for merge_pr: first call fetches title, second merges.
+
+    The post-merge best-effort diff-stats fetch (#10788) is neutralized by the
+    module-level ``_stub_pr_diff_stats`` autouse fixture, so it never reaches a
+    subprocess here — only the title and merge calls do.
+    """
     title_proc = SubprocessMockBuilder().with_stdout(title_json).build()
     merge_proc = SubprocessMockBuilder().with_stdout(merge_stdout).build()
     calls = iter([title_proc.return_value, merge_proc.return_value])

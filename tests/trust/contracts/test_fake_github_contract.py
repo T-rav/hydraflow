@@ -694,6 +694,18 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         sha = await fake.get_pr_head_sha(pr_number)
         return FakeOutput(exit_code=0, stdout=f"{sha}\n", stderr="")
 
+    if method == "get_pr_diff_stats":
+        import json as _json
+
+        # #10788: best-effort PR diff stats (commit sha, files-changed,
+        # ±lines) for the operator timeline. The fake returns the parsed
+        # PRDiffStats dict; serialize it the same way the diff-name reader
+        # cassette does so the recorded shape is the fake's own output.
+        pr_number = int(args[0])
+        fake.add_pr(number=pr_number, issue_number=1, branch="b")
+        stats = await fake.get_pr_diff_stats(pr_number)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(stats) + "\n", stderr="")
+
     if method == "get_pr_recent_commit_diffs":
         pr_number = int(args[0])
         fake.add_pr(number=pr_number, issue_number=1, branch="b")

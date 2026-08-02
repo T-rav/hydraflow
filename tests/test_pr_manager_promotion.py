@@ -25,6 +25,19 @@ def _build(tmp_path: Path, *, dry_run: bool = False):
     return make_pr_manager(cfg, bus), cfg, bus
 
 
+@pytest.fixture(autouse=True)
+def _stub_pr_diff_stats(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#10788: the promotion create/merge emit sites now do a best-effort
+    ``gh pr view`` diff-stat read. These tests stub the promotion subprocess
+    but not that read; default it to an empty (degraded) read so no real
+    ``gh`` subprocess is spawned. The command assertions here are unaffected."""
+
+    async def _empty(_self: object, _pr_number: int) -> dict[str, object]:
+        return {}
+
+    monkeypatch.setattr("pr_manager.PRManager.get_pr_diff_stats", _empty)
+
+
 class TestCreateRcBranch:
     async def test_creates_ref_at_staging_head(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

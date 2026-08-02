@@ -156,6 +156,7 @@ class TestPRPortMethods:
         "get_pr_commit_messages",
         "get_pr_approvers",
         "get_pr_head_sha",
+        "get_pr_diff_stats",
         "get_pr_mergeable",
         # Conflict / listing methods
         "list_conflicting_prs",
@@ -299,6 +300,7 @@ class TestPRPortSignatures:
         "get_pr_commit_messages",
         "get_pr_approvers",
         "get_pr_head_sha",
+        "get_pr_diff_stats",
         "get_pr_mergeable",
         # Conflict / listing methods
         "list_conflicting_prs",
