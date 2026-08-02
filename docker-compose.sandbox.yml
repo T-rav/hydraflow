@@ -63,11 +63,7 @@ services:
       # to a scripted not-fixable diagnosis, so no real spawn ever happens.
       HYDRAFLOW_DIAGNOSTIC_LOOP_ENABLED: "true"
     volumes:
-      # SANDBOX_SEED_DIR lets the harness mount a throwaway temp seed dir
-      # (scripts/sandbox_scenario.py cmd_run) so a manual run never writes into
-      # the committed golden seeds dir (#10980). Unset → the committed dir, used
-      # by `docker compose up` invoked directly / by cmd_seed's goldens.
-      - ${SANDBOX_SEED_DIR:-./tests/sandbox_scenarios/seeds}:/seed:ro
+      - ./tests/sandbox_scenarios/seeds:/seed:ro
     networks: [sandbox]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:5555/healthz"]

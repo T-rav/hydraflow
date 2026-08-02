@@ -19,11 +19,8 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
-import os
-import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -47,52 +44,59 @@ def load_scenario(name: str):
     return importlib.import_module(f"tests.sandbox_scenarios.scenarios.{name}")
 
 
-def write_seed(name: str, seeds_dir: Path | None = None) -> Path:
-    """Compute the scenario's seed and write it into *seeds_dir*.
-
-    *seeds_dir* defaults to the committed ``SEEDS_DIR`` — the path ``cmd_seed``
-    uses to (re)generate the 6 golden seeds. ``cmd_run``/``cmd_run_all`` pass a
-    throwaway temp dir instead (via ``_materialize_run_seed``) so a manual
-    sandbox run of a seedless scenario never leaves an untracked ``<name>.json``
-    in the source tree (#10980). Resolving ``None`` to the *module-level*
-    ``SEEDS_DIR`` at call time (not a default-argument binding) keeps the
-    monkeypatch-``SEEDS_DIR`` seam #10094 relies on working.
-    """
-    target_dir = SEEDS_DIR if seeds_dir is None else seeds_dir
-    target_dir.mkdir(parents=True, exist_ok=True)
+def write_seed(name: str) -> Path:
+    """Compute the scenario's seed and write it to SEEDS_DIR."""
+    SEEDS_DIR.mkdir(parents=True, exist_ok=True)
     mod = load_scenario(name)
-    out = target_dir / f"{mod.NAME}.json"
+    out = SEEDS_DIR / f"{mod.NAME}.json"
     out.write_text(mod.seed().to_json())
     return out
 
 
-def _materialize_run_seed(name: str) -> Path:
-    """Materialize *name*'s seed + its ``scenario.json`` symlink into a fresh
-    throwaway temp dir and return that dir (#10980).
+def _is_committed_seed(seed_path: Path) -> bool:
+    """True if *seed_path* is tracked by git — i.e. a committed golden seed.
 
-    ``cmd_run``/``cmd_run_all`` mount THIS dir at ``/seed`` (via the
-    ``SANDBOX_SEED_DIR`` compose bind) instead of the committed golden
-    ``SEEDS_DIR``. 72 of 78 scenarios have no committed golden seed, so writing
-    into ``SEEDS_DIR`` on a manual ``run``/``run-all`` used to drop an untracked
-    ``<name>.json`` (plus a ``scenario.json`` symlink) into the source tree,
-    tripping ``test_seed_dir_is_git_clean`` on the next full-suite run in the
-    same workspace. ``cmd_seed`` stays the only writer of the committed goldens.
+    The run-cleanup (``_cleanup_run_seed``) uses this to decide whether the seed
+    it materialized is safe to delete: only the 6 committed goldens are tracked,
+    so an untracked ``<name>.json`` was created by THIS run and can be removed,
+    while a golden must never be deleted (#10980). Git unavailable / not a
+    checkout ⇒ assume committed (``True`` ⇒ do NOT delete): the tree-clean guard
+    doesn't apply outside a checkout, so leaving the file is the safe default.
     """
-    seed_dir = Path(tempfile.mkdtemp(prefix="sandbox-seed-"))
-    seed_path = write_seed(name, seeds_dir=seed_dir)
-    # The container always reads /seed/scenario.json; point it at THIS seed.
-    scenario_link = seed_dir / "scenario.json"
-    scenario_link.symlink_to(seed_path.name)
-    return seed_dir
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", str(seed_path)],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (FileNotFoundError, OSError):
+        return True  # git binary unavailable — err on the side of NOT deleting
+    return result.returncode == 0
 
 
-def _compose(
-    *args: str, env: dict[str, str] | None = None
-) -> subprocess.CompletedProcess:
+def _cleanup_run_seed(seed_path: Path, scenario_link: Path) -> None:
+    """Remove the artifacts a run materialized into the committed SEEDS_DIR.
+
+    ``cmd_run``/``cmd_run_all`` write ``<name>.json`` (the dir the container
+    mounts read-only) plus a transient ``scenario.json`` symlink. 72 of 78
+    scenarios have no committed golden seed, so without this cleanup a manual
+    ``run``/``run-all`` of one leaves an untracked ``<name>.json`` that trips
+    ``test_seed_dir_is_git_clean`` on the next full-suite run in the same
+    workspace (#10980). Always drops the transient symlink; drops the seed only
+    when it is NOT a committed golden, so ``cmd_seed``'s 6 goldens are never
+    deleted. Best-effort — cleanup failure must not mask the run's own rc.
+    """
+    scenario_link.unlink(missing_ok=True)  # transient per-run symlink
+    if not _is_committed_seed(seed_path):
+        seed_path.unlink(missing_ok=True)
+
+
+def _compose(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE_FILE), *args],
         check=False,
-        env=env,
     )
 
 
@@ -102,9 +106,9 @@ def cmd_seed(name: str) -> int:
     return 0
 
 
-def cmd_down(env: dict[str, str] | None = None) -> int:
+def cmd_down() -> int:
     print("Stopping stack...")
-    _compose("down", "-v", env=env)
+    _compose("down", "-v")
     print("Done.")
     return 0
 
@@ -144,24 +148,33 @@ def _wait_for_healthy(timeout: float = 60.0) -> bool:
 
 def cmd_run(name: str) -> int:
     print(f"[1/5] Computing seed for {name}...")
-    # Materialize the seed (and its scenario.json symlink) into a throwaway
-    # temp dir and mount THAT at /seed, never the committed golden SEEDS_DIR —
-    # otherwise a manual run of a seedless scenario pollutes the source tree
-    # (#10980). SANDBOX_SEED_DIR feeds the parameterized compose bind.
-    seed_dir = _materialize_run_seed(name)
-    env = {**os.environ, "SANDBOX_SEED_DIR": str(seed_dir)}
+    seed_path = write_seed(name)
+
+    # Make sure the seed file the container reads matches THIS scenario.
+    # The container always reads /seed/scenario.json, so symlink it.
+    scenario_link = SEEDS_DIR / "scenario.json"
+    if scenario_link.exists() or scenario_link.is_symlink():
+        scenario_link.unlink()
+    scenario_link.symlink_to(seed_path.name)
+
+    # write_seed materializes into the COMMITTED SEEDS_DIR (the dir the
+    # container mounts read-only — deliberately unchanged so the docker bind
+    # keeps working). 72 of 78 scenarios have no committed golden seed, so a
+    # manual run of one would otherwise leave an untracked <name>.json behind;
+    # the finally below removes anything this run materialized that isn't a
+    # committed golden (#10980).
     try:
         print("[2/5] Building images (cached when possible)...")
         # ``playwright`` must be built explicitly because the MS image ships no
         # test runner — ``Dockerfile.playwright`` adds pytest at build time so
         # ``compose run playwright pytest …`` works on the air-gapped network.
-        rc = _compose("build", "hydraflow", "ui", "playwright", env=env).returncode
+        rc = _compose("build", "hydraflow", "ui", "playwright").returncode
         if rc != 0:
             print(f"BUILD FAILED ({rc})")
             return 2
 
         print("[3/5] Starting stack on internal network...")
-        rc = _compose("up", "-d", "hydraflow", "ui", env=env).returncode
+        rc = _compose("up", "-d", "hydraflow", "ui").returncode
         if rc != 0:
             print(f"UP FAILED ({rc})")
             return 2
@@ -169,8 +182,8 @@ def cmd_run(name: str) -> int:
         print("[4/5] Waiting for hydraflow /healthz...")
         if not _wait_for_healthy(60):
             print("HEALTHCHECK TIMEOUT — collecting logs")
-            _compose("logs", "hydraflow", env=env)
-            cmd_down(env=env)
+            _compose("logs", "hydraflow")
+            cmd_down()
             return 2
 
         print("[5/5] Running playwright assertions...")
@@ -193,20 +206,20 @@ def cmd_run(name: str) -> int:
             f"tests/sandbox_scenarios/runner/test_scenarios.py::test_scenario[{name}]",
             "-v",
             "--junitxml=/results/junit.xml",
-            env=env,
         ).returncode
 
         if rc != 0:
             print(f"FAILED {name}")
-            _compose("logs", "hydraflow", env=env)
+            _compose("logs", "hydraflow")
         else:
             print(f"PASSED {name}")
 
-        cmd_down(env=env)
+        cmd_down()
         return rc
     finally:
-        # The temp seed dir is single-use; never let it linger.
-        shutil.rmtree(seed_dir, ignore_errors=True)
+        # Never leave an untracked seed / transient symlink in the committed
+        # dir; keeps the tree git-clean for the next full-suite run (#10980).
+        _cleanup_run_seed(seed_path, scenario_link)
 
 
 def _parse_shard(shard: str | None) -> tuple[int, int] | None:

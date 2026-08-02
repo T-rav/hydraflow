@@ -46,7 +46,6 @@ Three guards, so the drift can never silently recur:
 from __future__ import annotations
 
 import importlib
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -143,65 +142,101 @@ def test_write_seed_materialize_round_trip_never_touches_source(
     )
 
 
-def test_cmd_run_materialize_never_pollutes_committed_seeds_dir() -> None:
-    """``cmd_run`` must materialize into a throwaway temp dir, never ``SEEDS_DIR``.
+def test_cmd_run_seed_materialization_leaves_committed_dir_git_clean() -> None:
+    """A ``cmd_run`` of a seedless scenario must leave ``SEEDS_DIR`` git-clean.
 
-    Sibling of #10094: same root cause (``write_seed`` writing into the
-    committed golden dir), different trigger. 72 of 78 scenarios have no
-    committed golden seed, so a manual ``sandbox_scenario.py run <seedless>``
-    used to drop an untracked ``<name>.json`` (plus a ``scenario.json`` symlink)
-    into ``tests/sandbox_scenarios/seeds/``, tripping
-    ``test_seed_dir_is_git_clean`` on the next full-suite run in that workspace
-    (#10980). Exercises the REAL seed-materialization seam ``cmd_run`` uses
-    against a REAL *seedless* scenario module — the exact class that polluted —
-    then proves the committed dir is entry-for-entry, byte-for-byte, and
-    mtime-for-mtime unchanged. ``cmd_seed`` stays the only writer of the goldens.
+    Sibling of #10094: same writer (``write_seed`` → the committed golden dir,
+    the dir the container mounts read-only), different trigger. 72 of 78
+    scenarios have no committed golden seed, so a manual ``sandbox_scenario.py
+    run <seedless>`` materializes an untracked ``<name>.json`` (plus a
+    ``scenario.json`` symlink) into ``tests/sandbox_scenarios/seeds/``. Left
+    behind, it trips ``test_seed_dir_is_git_clean`` on the next full-suite run in
+    that workspace (#10980). The mount is deliberately UNCHANGED (an earlier
+    temp-dir-bind attempt broke the sandbox e2e in CI); the fix instead has
+    ``cmd_run`` clean up in a ``finally``. Exercises the REAL materialization +
+    ``_cleanup_run_seed`` seam against a REAL seedless scenario and asserts the
+    stray is gone and the committed dir is git-clean afterward.
     """
     from scripts import sandbox_scenario
 
     # A real scenario with NO committed golden (one of the 72) — the exact case
     # reported in #10980. If a golden ever gets added for it, pick another.
     stem = "s75_worker_stall_escalation"
-    assert not (_SEEDS_DIR / f"{stem}.json").exists(), (
+    seed_file = _SEEDS_DIR / f"{stem}.json"
+    scenario_link = _SEEDS_DIR / "scenario.json"
+    assert not seed_file.exists(), (
         f"{stem} unexpectedly has a committed golden seed — pick a seedless "
         "scenario so this guard actually proves the no-pollution property."
     )
 
-    names_before = {p.name for p in _SEEDS_DIR.iterdir()}
-    files_before = {
-        p.name: (p.read_text(), p.stat().st_mtime_ns)
-        for p in _SEEDS_DIR.iterdir()
-        if p.is_file()
-    }
-
-    seed_dir = sandbox_scenario._materialize_run_seed(stem)
     try:
-        # Materialization landed in a throwaway temp dir OUTSIDE the golden dir.
-        assert seed_dir != _SEEDS_DIR
-        assert _SEEDS_DIR not in seed_dir.parents
-        seed_file = seed_dir / f"{stem}.json"
-        module = importlib.import_module(
-            f"tests.sandbox_scenarios.scenarios.{stem}"
-        )
+        # Reproduce cmd_run's non-docker prologue: materialize into the
+        # committed dir (the untracked stray now pollutes it) + symlink it.
+        written = sandbox_scenario.write_seed(stem)
+        assert written == seed_file
+        assert seed_file.exists()
+        module = importlib.import_module(f"tests.sandbox_scenarios.scenarios.{stem}")
         assert seed_file.read_text() == module.seed().to_json()
-        # The per-run scenario.json symlink lives in the temp dir too, not source.
-        assert (seed_dir / "scenario.json").is_symlink()
+        scenario_link.unlink(missing_ok=True)
+        scenario_link.symlink_to(written.name)
 
-        # The committed golden dir is entirely untouched — no stray file added,
-        # no in-place mutation, no mtime bump.
-        assert {p.name for p in _SEEDS_DIR.iterdir()} == names_before, (
-            "_materialize_run_seed added or removed an entry in the committed "
-            "seeds dir — the exact #10980 pollution."
+        # cmd_run's finally cleanup — removes the untracked seed + the symlink.
+        sandbox_scenario._cleanup_run_seed(written, scenario_link)
+
+        assert not seed_file.exists(), (
+            "cleanup left the untracked seed in the committed dir (#10980)."
         )
-        assert {
-            p.name: (p.read_text(), p.stat().st_mtime_ns)
-            for p in _SEEDS_DIR.iterdir()
-            if p.is_file()
-        } == files_before, (
-            "_materialize_run_seed mutated a committed seed in place (#10980)."
+        assert not scenario_link.exists() and not scenario_link.is_symlink()
+
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "tests/sandbox_scenarios/seeds/"],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0
+        dirty = [line for line in result.stdout.splitlines() if line.strip()]
+        assert not dirty, (
+            "SEEDS_DIR not git-clean after a seedless cmd_run + cleanup "
+            "(#10980):\n" + "\n".join(dirty)
         )
     finally:
-        shutil.rmtree(seed_dir, ignore_errors=True)
+        # Guarantee no residue even if an assertion above fired — the stem is
+        # seedless, so the seed is never a committed golden.
+        scenario_link.unlink(missing_ok=True)
+        seed_file.unlink(missing_ok=True)
+
+
+def test_cleanup_run_seed_never_deletes_committed_golden() -> None:
+    """``_cleanup_run_seed`` must NEVER delete one of the 6 committed goldens.
+
+    ``cmd_run``/``cmd_run_all`` also run the 6 scenarios that DO ship a golden
+    seed; the run-cleanup must remove only untracked strays, never a tracked
+    golden (#10980). Simulates a run of a golden scenario and asserts the golden
+    survives byte-for-byte and mtime-for-mtime while the transient symlink is
+    still dropped.
+    """
+    from scripts import sandbox_scenario
+
+    golden = _SEEDS_DIR / "s01_happy_single_issue.json"
+    assert golden.exists(), "expected committed golden seed missing"
+    content_before = golden.read_text()
+    mtime_before = golden.stat().st_mtime_ns
+
+    scenario_link = _SEEDS_DIR / "scenario.json"
+    scenario_link.unlink(missing_ok=True)
+    scenario_link.symlink_to(golden.name)
+    try:
+        sandbox_scenario._cleanup_run_seed(golden, scenario_link)
+        assert golden.exists(), (
+            "_cleanup_run_seed DELETED a committed golden seed (#10980)."
+        )
+        assert golden.read_text() == content_before
+        assert golden.stat().st_mtime_ns == mtime_before
+        assert not scenario_link.exists() and not scenario_link.is_symlink()
+    finally:
+        scenario_link.unlink(missing_ok=True)
 
 
 def test_seed_dir_is_git_clean() -> None:
