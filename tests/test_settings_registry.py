@@ -9,9 +9,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import HydraFlowConfig
 from settings_registry import (
+    GROUP_TO_SECTION,
+    OTHER_SECTION,
     SETTINGS,
     build_settings_schema,
     mutable_field_names,
+    section_for_group,
 )
 
 # The fields that were editable via the old hand-kept _MUTABLE_FIELDS allowlist.
@@ -169,3 +172,65 @@ class TestHeavyMakeTimeoutKnobs:
         assert row["default"] == 2700
         assert row["min"] == 300
         assert row["max"] == 14400
+
+
+class TestWorkflowSection:
+    """#10786 — schema rows carry a server-derived ``section`` (coarse,
+    stage/concern grouping) so the operator console's workflow-config panel can
+    render grouped panels without a UI-side allowlist."""
+
+    def _rows(self) -> list[dict]:
+        return build_settings_schema(HydraFlowConfig())
+
+    def _schema(self) -> dict[str, dict]:
+        return {r["name"]: r for r in self._rows()}
+
+    def test_every_row_carries_a_non_empty_section(self) -> None:
+        rows = self._rows()
+        assert rows, "expected a non-empty schema"
+        for row in rows:
+            assert isinstance(row["section"], str)
+            assert row["section"].strip(), f"{row['name']} has an empty section"
+
+    def test_group_to_section_map_is_applied(self) -> None:
+        schema = self._schema()
+        # Concurrency fields collapse into the coarse Workers & Batch section.
+        assert schema["max_workers"]["section"] == "Workers & Batch"
+        assert schema["batch_size"]["section"] == "Workers & Batch"
+        # Work Queue keeps its own section.
+        assert schema["queue_strategy"]["section"] == "Work Queue"
+        # Model + Model Routing groups both fold into Model Routing.
+        assert schema["model"]["section"] == "Model Routing"
+        assert schema["openrouter_base_url"]["section"] == "Model Routing"
+        # Merge policy lands in Merge & Release.
+        assert schema["merge_policy_enabled"]["section"] == "Safety & Reliability"
+        assert schema["staging_enabled"]["section"] == "Merge & Release"
+        # The reliability/kill-switch toggles fold into Safety & Reliability.
+        assert schema["gh_circuit_breaker_enabled"]["section"] == "Safety & Reliability"
+
+    def test_section_is_derived_from_the_row_group(self) -> None:
+        # The section is a pure function of the group — no per-row surprises.
+        for row in self._rows():
+            assert row["section"] == section_for_group(row["group"])
+
+    def test_section_is_additive_group_key_unchanged(self) -> None:
+        # The classic RuntimeSettingsPanel keys off ``group``; it must be intact.
+        for row in self._rows():
+            assert row["group"] == SETTINGS[row["name"]].group
+
+    def test_every_section_is_a_known_section_or_other(self) -> None:
+        # Totality: no row escapes into an undeclared section.
+        allowed = set(GROUP_TO_SECTION.values()) | {OTHER_SECTION}
+        for row in self._rows():
+            assert row["section"] in allowed
+
+    def test_unmapped_group_falls_back_to_other(self) -> None:
+        # A future group with no explicit mapping is never dropped — it lands in
+        # the Other bucket rather than vanishing from the panel.
+        assert section_for_group("Some Brand New Group") == OTHER_SECTION
+
+    def test_row_ordering_is_unchanged_by_the_additive_section(self) -> None:
+        # Sort key stays (group, order, name); section is metadata only.
+        rows = self._rows()
+        keys = [(r["group"], SETTINGS[r["name"]].order, r["name"]) for r in rows]
+        assert keys == sorted(keys)
