@@ -171,8 +171,6 @@ SETTINGS: dict[str, SettingSpec] = {
     "branch_gc_stale_days": SettingSpec("Branch GC", live=True, order=0),
     "branch_gc_min_delete_age_days": SettingSpec("Branch GC", live=True, order=1),
     "branch_gc_delete_enabled": SettingSpec("Branch GC", live=True, order=2),
-    # --- Memory ----------------------------------------------------------
-    "memory_auto_approve": SettingSpec("Memory", live=True, order=0),
     # --- Paths -----------------------------------------------------------
     # A workspace path is read when workspaces are created at startup.
     "workspace_base": SettingSpec("Paths", live=False, order=0),
