@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `d0abd08` — chore(rc): regen arch artifacts after main merge (rc/2026-08-02-2256) *(2026-08-02)*
 - `ee36e90` — Merge remote-tracking branch 'origin/main' into rc/2026-08-02-2256 *(2026-08-02)*
 - `912a9a0` — feat(stillness): golden-baseline finder calibration — noise-floor engine, first slice (#10821) (#11009) (#11009) *(2026-08-02)*
 - `388e58a` — feat(quality): mutation gauntlet — gate-sensitivity instrument, first slice (#10835) (#11007) (#11007) *(2026-08-02)*
