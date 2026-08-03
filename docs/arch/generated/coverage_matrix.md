@@ -13,7 +13,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `ADRReviewerLoop` | ✅ [0079] | ✅ [adr-council-reviewer.md, adr-reviewer-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ✅ `s25_adr_reviewer_no_proposed_adrs.py` |
 | `AdrConformanceLoop` | ✅ [0100, 0104] | ❌ | ✅ loops.md | ❌ | ✅ `test_adr_conformance_loop.py` | ✅ in catalog | ❌ |
 | `AdrDriftResolverLoop` | ✅ [0056] | ✅ [feedback-backlog-to-loop-reflection.md] | ✅ loops.md | ❌ | ✅ `test_adr_drift_resolver_loop.py` | ✅ in catalog | ❌ |
-| `AdrTouchpointAuditorLoop` | ✅ [0056, 0089, 0099, 0100] | ✅ [adr-index.md, adr-touchpoint-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ✅ `s33_adr_touchpoint_auditor_no_drift.py` |
+| `AdrTouchpointAuditorLoop` | ✅ [0056, 0089, 0099, 0100, 0126] | ✅ [adr-index.md, adr-touchpoint-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ✅ `s33_adr_touchpoint_auditor_no_drift.py` |
 | `AutoAgentPreflightLoop` | ✅ [0050, 0063, 0084] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
 | `AutoTightenLoop` | ✅ [0104] | ❌ | ✅ loops.md | ❌ | ✅ `test_auto_tighten_loop.py` | ✅ in catalog | ❌ |
 | `BranchProtectionAuditorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_branch_protection_auditor_loop.py` | ✅ in catalog | ✅ `s41_branch_protection_auditor_no_drift.py` |
@@ -27,11 +27,11 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `DiagnosticLoop` | ✅ [0050] | ✅ [diagnostic-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagnostic_loop.py` | ✅ in catalog | ✅ `s05_hitl_after_review_exhaustion.py` |
 | `DiagramLoop` | ✅ [0001, 0093] | ✅ [diagram-loop.md, gotchas.md, patterns.md] | ✅ loops.md | ✅ README.md | ✅ `test_diagram_loop.py` | ✅ in catalog | ✅ `s34_diagram_loop_no_changes.py` |
 | `DisturbanceDampenerLoop` | ✅ [0101, 0120] | ✅ [dimension-baseline.md, disturbance-dampener-loop.md] | ❌ | ❌ | ✅ `test_disturbance_dampener_loop.py` | ✅ in catalog | ✅ `s90_disturbance_dampener_idle_poll.py` |
-| `EdgeProposerLoop` | ✅ [0058, 0060, 0062] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md, term-store.md, term.md] | ✅ loops.md | ✅ README.md | ✅ `test_edge_proposer_loop.py` | ✅ in catalog | ✅ `s28_edge_proposer_no_proposals.py` |
-| `EntryEvidenceLoop` | ✅ [0062, 0078] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md, term-store.md, term.md] | ✅ loops.md | ✅ README.md | ✅ `test_entry_evidence_loop.py` | ✅ in catalog | ✅ `s24_entry_evidence_no_terms.py` |
+| `EdgeProposerLoop` | ✅ [0058, 0060, 0062, 0126] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md, term-store.md, term.md] | ✅ loops.md | ✅ README.md | ✅ `test_edge_proposer_loop.py` | ✅ in catalog | ✅ `s28_edge_proposer_no_proposals.py` |
+| `EntryEvidenceLoop` | ✅ [0062, 0078, 0126] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md, term-store.md, term.md] | ✅ loops.md | ✅ README.md | ✅ `test_entry_evidence_loop.py` | ✅ in catalog | ✅ `s24_entry_evidence_no_terms.py` |
 | `EpicMonitorLoop` | ✅ [0080, 0081, 0091] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ✅ `s27_epic_monitor_no_epics.py` |
 | `EpicSweeperLoop` | ✅ [0080, 0081, 0091, 0105] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ✅ `s23_epic_sweeper_no_epics.py` |
-| `ErosionMetricsLoop` | ✅ [0120, 0122] | ✅ [erosion.md] | ✅ loops.md | ❌ | ✅ `test_erosion_metrics_loop.py` | ✅ in catalog | ✅ `s80_erosion_metrics_idle_poll.py` |
+| `ErosionMetricsLoop` | ✅ [0120, 0122, 0126] | ✅ [erosion.md] | ✅ loops.md | ❌ | ✅ `test_erosion_metrics_loop.py` | ✅ in catalog | ✅ `s80_erosion_metrics_idle_poll.py` |
 | `EscapeLedgerLoop` | ✅ [0115] | ❌ | ✅ loops.md | ❌ | ✅ `test_escape_ledger_loop.py` | ✅ in catalog | ✅ `s83_escape_ledger_idle_poll.py` |
 | `FailOpenMonitorLoop` | ✅ [0120] | ❌ | ✅ loops.md | ❌ | ✅ `test_fail_open_monitor_loop.py` | ✅ in catalog | ✅ `s84_fail_open_monitor_idle_poll.py` |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0047, 0056, 0089] | ✅ [fake-coverage-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ✅ `s29_fake_coverage_auditor_clean.py` |
@@ -69,11 +69,11 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `StagingPromotionLoop` | ✅ [0042, 0108] | ✅ [dependencies.md, patterns.md] | ✅ loops.md | ✅ README.md | ✅ `test_staging_promotion_loop.py` | ✅ in catalog | ✅ `s82_full_machine_rc_promotion.py` |
 | `StaleIssueGCLoop` | ✅ [0029, 0072] | ✅ [gotchas.md, stale-issue-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_stale_issue_gc_loop.py` | ✅ in catalog | ✅ `s77_stale_issue_gc_skips_fresh_issue.py` |
 | `StaleIssueLoop` | ✅ [0072] | ✅ [gotchas.md, stale-issue-gc-loop.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_stale_issue_loop.py` | ✅ in catalog | ✅ `s05_hitl_after_review_exhaustion.py` |
-| `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062, 0068] | ✅ [adr-council-reviewer.md, adr-index.md, adr-pre-validator.md, bot-pr-port.md, credentials.md, credit-exhausted-error.md, dedup-store.md, entry-evidence-loop.md, escalation-reconciler.md, event-type.md, git-hub-data-cache.md, hitl-item.md, hydra-flow-event.md, pr-manager.md, review-verdict.md, subprocess-runner.md, task.md, term-pruner-loop.md, term-store.md, term.md, tribal-wiki-store.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_proposer_loop.py` | ✅ in catalog | ❌ |
+| `TermProposerLoop` | ✅ [0054, 0057, 0060, 0061, 0062, 0068, 0126] | ✅ [adr-council-reviewer.md, adr-index.md, adr-pre-validator.md, bot-pr-port.md, credentials.md, credit-exhausted-error.md, dedup-store.md, entry-evidence-loop.md, escalation-reconciler.md, event-type.md, git-hub-data-cache.md, hitl-item.md, hydra-flow-event.md, pr-manager.md, review-verdict.md, subprocess-runner.md, task.md, term-pruner-loop.md, term-store.md, term.md, tribal-wiki-store.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_proposer_loop.py` | ✅ in catalog | ❌ |
 | `TermPrunerLoop` | ✅ [0057, 0060, 0062, 0068] | ✅ [term-pruner-loop.md, term-store.md, term.md] | ✅ loops.md | ✅ README.md | ✅ `test_term_pruner_loop.py` | ✅ in catalog | ❌ |
 | `TriageRetryLoop` | ✅ [0063] | ❌ | ✅ loops.md | ✅ README.md | ✅ `test_triage_retry_loop.py` | ✅ in catalog | ❌ |
 | `TrustFleetSanityLoop` | ✅ [0045, 0046, 0093] | ✅ [testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_trust_fleet_sanity_loop.py` | ✅ in catalog | ✅ `s78_trust_fleet_sanity_tick_error_ratio_breach.py` |
-| `WikiRotDetectorLoop` | ✅ [0045, 0056, 0089, 0099, 0120] | ✅ [wiki-rot-detector-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ✅ `s79_wiki_rot_detector_broken_cite_fires.py` |
+| `WikiRotDetectorLoop` | ✅ [0045, 0056, 0089, 0099, 0120, 0126] | ✅ [wiki-rot-detector-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_wiki_rot_detector_loop.py` | ✅ in catalog | ✅ `s79_wiki_rot_detector_broken_cite_fires.py` |
 | `WorkspaceGCLoop` | ✅ [0069, 0093] | ✅ [patterns.md, workspace-gc-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_workspace_gc_loop.py` | ✅ in catalog | ✅ `s46_workspace_gc_idle_poll.py` |
 ## Section 2: Ports
 
