@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -82,7 +83,12 @@ GATE_COMMANDS: dict[str, list[str]] = {
     "unit-tests": ["make", "test"],
     "scenario": ["make", "scenario"],
     "lint-ul": ["make", "lint-ul"],
+    # Bare ``python`` is not reliably on PATH (nor in a scratch worktree); run
+    # pytest through ``uv run`` like the make targets do, so the gate actually
+    # executes instead of failing to spawn (-> a spurious ERRORED).
     "fake-coverage": [
+        "uv",
+        "run",
         "python",
         "-m",
         "pytest",
@@ -91,6 +97,8 @@ GATE_COMMANDS: dict[str, list[str]] = {
         "tests/test_fake_conformance_runner.py",
     ],
     "adr-conformance": [
+        "uv",
+        "run",
         "python",
         "-m",
         "pytest",
@@ -170,6 +178,9 @@ def subprocess_gate_runner(gate: str, worktree: Path) -> GateOutcome:
     command = GATE_COMMANDS.get(gate)
     if command is None:
         return GateOutcome(exit_code=-1, ran=False, detail=f"unknown gate {gate!r}")
+    # Mirror ``make test``: put ``src`` on the path so the mutated worktree's
+    # modules import, regardless of the caller's environment.
+    gate_env = {**os.environ, "PYTHONPATH": "src"}
     try:
         proc = subprocess.run(
             command,
@@ -177,6 +188,7 @@ def subprocess_gate_runner(gate: str, worktree: Path) -> GateOutcome:
             capture_output=True,
             text=True,
             check=False,
+            env=gate_env,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return GateOutcome(exit_code=-1, ran=False, detail=f"gate spawn failed: {exc}")
