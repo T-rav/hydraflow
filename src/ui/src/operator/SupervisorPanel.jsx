@@ -12,16 +12,22 @@
  *     full detail (health snapshot, insights, nudges taken, escalations,
  *     deferred). An observation carrying escalations is visually distinct (a red
  *     left rail) — those want a human;
- *   - a small set of human action buttons. Resume / Pause are LIVE (wired to the
+ *   - human action buttons. Resume / Pause are global + LIVE (wired to the
  *     existing `/api/control/start` + `/api/control/stop` endpoints via the
  *     socket handlers the console already threads). Restart-loop and Ack-
- *     escalation are DEFERRED: rendered but disabled, with a title explaining the
- *     backend seam is not built yet — never a fabricated call to a missing route.
+ *     escalation are now LIVE too, but CONTEXTUAL rather than global: a Restart
+ *     affordance sits next to each stalled / errored loop chip in a snapshot
+ *     (POST `/api/control/bg-worker/restart` `{name}`), and an Ack button sits in
+ *     each observation's escalations section (POST `/api/diagnostics/supervisor/
+ *     ack` `{ts, escalation}` for each of its escalations). A handled (acked)
+ *     escalation renders visibly struck and drops out of the verdict.
  *
  * Load-bearing contracts the tests pin:
  *   - an empty / failed feed renders a calm empty state, never a crash;
  *   - a row expands on click and re-collapses on a second click;
- *   - escalation rows carry `data-escalation="true"`;
+ *   - escalation rows carry `data-escalation="true"` while any escalation is
+ *     UNACKED; a fully-acked observation is no longer flagged;
+ *   - the contextual Restart POSTs the loop name; Ack POSTs the observation's ts;
  *   - every colour / space value resolves from the token layer via `useTokens()`
  *     — no inline `style={{…}}` literal, no hardcoded hex — so light + dark fall
  *     out of the console's ThemeProvider (inline-style + colour + border ratchets).
@@ -98,8 +104,19 @@ function makeStyles(t) {
       padding: `${t.space.xs}px ${t.space.sm}px ${t.space.sm}px`,
     },
     snapshot: { display: 'flex', flexWrap: 'wrap', gap: t.space.xs },
+    // A degraded-loop chip paired with its contextual restart affordance.
+    loopChip: { display: 'inline-flex', alignItems: 'center', gap: t.space.xxs },
     section: { display: 'flex', flexDirection: 'column', gap: t.space.xxs },
+    // The escalations section's title row carries the per-observation Ack button.
+    sectionHead: { display: 'flex', alignItems: 'center', gap: t.space.sm, flexWrap: 'wrap' },
     listItem: { paddingLeft: t.space.sm, wordBreak: 'break-word' },
+    // A handled (acked) escalation renders visibly struck + dimmed but stays present.
+    ackedItem: {
+      paddingLeft: t.space.sm,
+      wordBreak: 'break-word',
+      textDecoration: 'line-through',
+      opacity: 0.55,
+    },
   }
 }
 
@@ -116,8 +133,14 @@ function CountBadges({ counts, styles }) {
   )
 }
 
-/** The active degradation signals of one snapshot, as subtle chips. */
-function SnapshotSignals({ snapshot, styles }) {
+/**
+ * The active degradation signals of one snapshot, as subtle chips. A stalled /
+ * errored loop renders as a chip paired with a CONTEXTUAL restart affordance —
+ * targeted, next to the loop it acts on (a global "restart which loop?" button
+ * is meaningless). The restart POSTs `{name}` to the restart control endpoint;
+ * it is disabled when no handler is threaded (parity with Resume / Pause).
+ */
+function SnapshotSignals({ snapshot, index, onRestartLoop, styles }) {
   const chips = []
   const healthTone = snapshot.healthy === false ? 'danger' : 'success'
   const healthText = snapshot.healthy === false ? 'unhealthy' : 'healthy'
@@ -127,14 +150,82 @@ function SnapshotSignals({ snapshot, styles }) {
       : snapshot.vitalsVerdict === 'watch' ? 'warning' : 'success'
     chips.push(<Badge key="vitals" tone={vitTone}>{`vitals: ${snapshot.vitalsVerdict}`}</Badge>)
   }
-  if (snapshot.stalledLoops.length > 0) chips.push(<Badge key="stalled" tone="warning">{`stalled: ${snapshot.stalledLoops.join(', ')}`}</Badge>)
-  if (snapshot.errorLoops.length > 0) chips.push(<Badge key="error" tone="danger">{`error: ${snapshot.errorLoops.join(', ')}`}</Badge>)
+  const canRestart = typeof onRestartLoop === 'function'
+  const seenLoops = new Set()
+  const loopChip = (name, tone, label) => {
+    if (seenLoops.has(name)) return
+    seenLoops.add(name)
+    chips.push(
+      <span key={`loop-${name}`} style={styles.loopChip}>
+        <Badge tone={tone}>{`${label}: ${name}`}</Badge>
+        <Button
+          variant="ghost"
+          size="sm"
+          data-testid={`supervisor-obs-${index}-restart-${name}`}
+          disabled={!canRestart}
+          onClick={canRestart ? () => onRestartLoop(name) : undefined}
+          title={`Restart loop '${name}' (POST /api/control/bg-worker/restart)`}
+        >
+          Restart
+        </Button>
+      </span>,
+    )
+  }
+  snapshot.stalledLoops.forEach(name => loopChip(name, 'warning', 'stalled'))
+  snapshot.errorLoops.forEach(name => loopChip(name, 'danger', 'error'))
   if (snapshot.creditFailoverActive) chips.push(<Badge key="failover" tone="warning">credit failover</Badge>)
   if (snapshot.creditProbeOverdue) chips.push(<Badge key="probe" tone="warning">credit probe overdue</Badge>)
   if (snapshot.bootShaStale) chips.push(<Badge key="boot" tone="warning">boot SHA stale</Badge>)
   if (snapshot.eventLoopStalled) chips.push(<Badge key="evloop" tone="danger">event loop stalled</Badge>)
   if (snapshot.commitsBehind > 0) chips.push(<Badge key="behind" tone="warning">{`${snapshot.commitsBehind} behind`}</Badge>)
   return <div style={styles.snapshot} data-testid="supervisor-snapshot">{chips}</div>
+}
+
+/**
+ * The escalations detail for one observation: the surfaced escalations plus a
+ * per-observation Ack button that acknowledges all of them at once. An acked
+ * escalation renders visibly struck + dimmed (handled, but still shown — honest
+ * per rule 6); the Ack button disables once nothing is left unacked. Acking
+ * POSTs `{ts, escalation}` per escalation; the handler is threaded from the
+ * console, disabled when absent (parity with Resume / Pause).
+ */
+function EscalationsSection({ index, obs, onAckEscalations, styles }) {
+  const { escalations, ackedEscalations, unackedEscalations, ts } = obs
+  if (!escalations || escalations.length === 0) return null
+  const ackedSet = new Set(ackedEscalations)
+  const canAck = typeof onAckEscalations === 'function'
+  return (
+    <div style={styles.section} data-testid={`supervisor-obs-${index}-escalations`}>
+      <div style={styles.sectionHead}>
+        <Text size="xs" weight="semibold" tone="muted" uppercase>Escalations (want a human)</Text>
+        <Button
+          variant="ghost"
+          size="sm"
+          data-testid={`supervisor-obs-${index}-ack`}
+          disabled={!canAck || unackedEscalations.length === 0}
+          onClick={canAck ? () => onAckEscalations(ts, unackedEscalations) : undefined}
+          title="Acknowledge this observation's escalations (POST /api/diagnostics/supervisor/ack)"
+        >
+          Ack
+        </Button>
+      </div>
+      {escalations.map((item, i) => {
+        const acked = ackedSet.has(item)
+        return (
+          <Text
+            key={i}
+            size="sm"
+            tone={acked ? 'muted' : 'danger'}
+            style={acked ? styles.ackedItem : styles.listItem}
+            data-testid={`supervisor-obs-${index}-escalation-${i}`}
+            data-acked={acked ? 'true' : 'false'}
+          >
+            {item}
+          </Text>
+        )
+      })}
+    </div>
+  )
 }
 
 /** A titled bucket list inside the expanded detail (nothing renders when empty). */
@@ -151,7 +242,7 @@ function DetailSection({ testid, title, items, tone, styles }) {
 }
 
 /** One observation: collapsed header (click to expand) + mined detail. */
-function ObservationRow({ obs, index, open, onToggle, styles }) {
+function ObservationRow({ obs, index, open, onToggle, onRestartLoop, onAckEscalations, styles }) {
   return (
     <div
       data-testid={`supervisor-obs-${index}`}
@@ -173,10 +264,10 @@ function ObservationRow({ obs, index, open, onToggle, styles }) {
       </button>
       {open && (
         <div style={styles.detail} data-testid={`supervisor-obs-${index}-detail`}>
-          <SnapshotSignals snapshot={obs.snapshot} styles={styles} />
+          <SnapshotSignals snapshot={obs.snapshot} index={index} onRestartLoop={onRestartLoop} styles={styles} />
           <DetailSection testid={`supervisor-obs-${index}-insights`} title="Insights" items={obs.insights} tone="muted" styles={styles} />
           <DetailSection testid={`supervisor-obs-${index}-nudges`} title="Nudges taken (pending)" items={obs.nudges} tone="accent" styles={styles} />
-          <DetailSection testid={`supervisor-obs-${index}-escalations`} title="Escalations (want a human)" items={obs.escalations} tone="danger" styles={styles} />
+          <EscalationsSection index={index} obs={obs} onAckEscalations={onAckEscalations} styles={styles} />
           <DetailSection testid={`supervisor-obs-${index}-deferred`} title="Deferred (transient)" items={obs.deferred} tone="muted" styles={styles} />
         </div>
       )}
@@ -185,9 +276,12 @@ function ObservationRow({ obs, index, open, onToggle, styles }) {
 }
 
 /**
- * Human action buttons. Resume / Pause are live (existing control endpoints);
- * restart-loop + ack-escalation are deferred (disabled, titled) until a backend
- * seam exists — never a fabricated call to a missing route.
+ * Global human action buttons. Resume / Pause are live (existing control
+ * endpoints). The other two supervisor actions are CONTEXTUAL rather than
+ * global — Restart-loop lives next to each degraded loop chip in a snapshot,
+ * and Ack lives in each observation's escalations section — so they are NOT in
+ * this global bar (a global "restart which loop / ack which escalation?" button
+ * is meaningless).
  */
 function ActionButtons({ onResume, onPause, styles }) {
   return (
@@ -212,33 +306,17 @@ function ActionButtons({ onResume, onPause, styles }) {
       >
         Pause
       </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        data-testid="supervisor-action-restart-loop"
-        disabled
-        title="Deferred: restarting a specific loop needs a small backend control endpoint (bg_workers.restart is not exposed as a route yet)."
-      >
-        Restart loop
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        data-testid="supervisor-action-ack"
-        disabled
-        title="Deferred: acknowledging an escalation needs a small backend endpoint to record the ack on the thread."
-      >
-        Ack escalation
-      </Button>
     </div>
   )
 }
 
 /**
  * @param {{ supervisor?: ReturnType<typeof import('./model/supervisorThread').toSupervisorThread>,
- *           onResume?: Function, onPause?: Function }} props
+ *           onResume?: Function, onPause?: Function,
+ *           onRestartLoop?: (name: string) => void,
+ *           onAckEscalations?: (ts: string, escalations: string[]) => void }} props
  */
-export function SupervisorPanel({ supervisor = EMPTY_SUPERVISOR_VM, onResume, onPause }) {
+export function SupervisorPanel({ supervisor = EMPTY_SUPERVISOR_VM, onResume, onPause, onRestartLoop, onAckEscalations }) {
   const t = useTokens()
   const styles = makeStyles(t)
   const [expanded, setExpanded] = useState(() => new Set())
@@ -279,6 +357,8 @@ export function SupervisorPanel({ supervisor = EMPTY_SUPERVISOR_VM, onResume, on
               index={index}
               open={expanded.has(obs.id)}
               onToggle={() => toggle(obs.id)}
+              onRestartLoop={onRestartLoop}
+              onAckEscalations={onAckEscalations}
               styles={styles}
             />
           ))}

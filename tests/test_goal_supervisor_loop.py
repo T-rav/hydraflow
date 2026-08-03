@@ -25,6 +25,7 @@ from supervisor_observation import (
     ProposedAction,
     SupervisorObservation,
     SupervisorVerdict,
+    append_ack,
     append_observation,
     build_health_snapshot,
     classify_action,
@@ -243,6 +244,60 @@ def test_thread_and_ledger_roundtrip(tmp_path: Path) -> None:
 
     save_attempts(config, {"k": 3})
     assert load_attempts(config) == {"k": 3}
+
+
+def test_read_thread_joins_acked_escalations(tmp_path: Path) -> None:
+    """read_thread JOINs the ack log: only (ts, escalation)-matched rows mark."""
+    deps = make_bg_loop_deps(tmp_path)
+    config = deps.config
+    obs = SupervisorObservation(
+        ts="2026-08-02T12:00:00Z",
+        assessment="RC wedged",
+        escalations=["force_push [main]", "delete_branch [orphan]"],
+    )
+    append_observation(config, obs)
+
+    # No acks yet → nothing joined.
+    rows = read_thread(config)
+    assert rows[0]["acked_escalations"] == []
+
+    # Ack ONE of the two escalations; the other stays unacked.
+    append_ack(config, ts="2026-08-02T12:00:00Z", escalation="force_push [main]")
+    rows = read_thread(config)
+    assert rows[0]["acked_escalations"] == ["force_push [main]"]
+    # The original observation is untouched — both escalations still present.
+    assert rows[0]["escalations"] == ["force_push [main]", "delete_branch [orphan]"]
+
+
+def test_append_ack_matches_on_ts_and_escalation(tmp_path: Path) -> None:
+    """An ack keyed to a different ts must NOT bleed onto another observation."""
+    deps = make_bg_loop_deps(tmp_path)
+    config = deps.config
+    append_observation(
+        config,
+        SupervisorObservation(ts="2026-08-02T10:00:00Z", escalations=["force_push"]),
+    )
+    append_observation(
+        config,
+        SupervisorObservation(ts="2026-08-02T11:00:00Z", escalations=["force_push"]),
+    )
+    # Ack only the earlier observation's escalation.
+    append_ack(config, ts="2026-08-02T10:00:00Z", escalation="force_push")
+    rows = read_thread(config)
+    by_ts = {r["ts"]: r for r in rows}
+    assert by_ts["2026-08-02T10:00:00Z"]["acked_escalations"] == ["force_push"]
+    assert by_ts["2026-08-02T11:00:00Z"]["acked_escalations"] == []
+
+
+def test_read_thread_tolerates_missing_acks_file(tmp_path: Path) -> None:
+    """A thread with no acks file joins to empty acked lists, never raises."""
+    deps = make_bg_loop_deps(tmp_path)
+    config = deps.config
+    append_observation(
+        config, SupervisorObservation(ts="2026-08-02T12:00:00Z", escalations=["x"])
+    )
+    rows = read_thread(config)
+    assert rows[0]["acked_escalations"] == []
 
 
 # ---------------------------------------------------------------------------

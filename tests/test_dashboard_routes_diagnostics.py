@@ -222,3 +222,68 @@ class TestDiagnosticsCacheEndpoint:
         assert isinstance(body, list)
         assert len(body) == 1
         assert body[0]["cache_hit_rate"] == pytest.approx(200 / 1200, rel=1e-3)
+
+
+class TestSupervisorAckEndpoint:
+    """POST /api/diagnostics/supervisor/ack — append-only escalation ack."""
+
+    def _write_obs(self, path: Path, obs: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(obs) + "\n")
+
+    def test_ack_requires_ts_and_escalation(self, app: FastAPI) -> None:
+        client = TestClient(app)
+        assert (
+            client.post("/api/diagnostics/supervisor/ack", json={}).status_code == 400
+        )
+        assert (
+            client.post(
+                "/api/diagnostics/supervisor/ack", json={"ts": "2026-08-02T00:00:00Z"}
+            ).status_code
+            == 400
+        )
+        assert (
+            client.post(
+                "/api/diagnostics/supervisor/ack", json={"escalation": "force_push"}
+            ).status_code
+            == 400
+        )
+
+    def test_ack_appends_and_thread_join_marks_it_acked(
+        self, app: FastAPI, tmp_path: Path
+    ) -> None:
+        ts = "2026-08-02T17:31:46Z"
+        thread = tmp_path / "supervisor_thread.jsonl"
+        self._write_obs(
+            thread,
+            {
+                "ts": ts,
+                "snapshot": {"healthy": False},
+                "assessment": "RC wedged",
+                "escalations": [
+                    "force_push [main] — RC wedged",
+                    "delete_branch — orphan",
+                ],
+            },
+        )
+        client = TestClient(app)
+
+        # Before the ack the join reports nothing acknowledged.
+        before = client.get("/api/diagnostics/supervisor/thread").json()
+        assert before["observations"][0]["acked_escalations"] == []
+
+        resp = client.post(
+            "/api/diagnostics/supervisor/ack",
+            json={"ts": ts, "escalation": "force_push [main] — RC wedged"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+        assert (tmp_path / "supervisor_acks.jsonl").exists()
+
+        # After the ack the join surfaces exactly the acked escalation, leaving
+        # the original observation's escalation list intact (honest, rule 6).
+        after = client.get("/api/diagnostics/supervisor/thread").json()
+        obs = after["observations"][0]
+        assert obs["acked_escalations"] == ["force_push [main] — RC wedged"]
+        assert len(obs["escalations"]) == 2

@@ -536,6 +536,11 @@ def supervisor_ledger_path(config: HydraFlowConfig) -> Path:
     return Path(config.data_root) / "supervisor_attempts.json"
 
 
+def supervisor_acks_path(config: HydraFlowConfig) -> Path:
+    """Append-only escalation-ack log location (data_root). See :func:`append_ack`."""
+    return Path(config.data_root) / "supervisor_acks.jsonl"
+
+
 def append_observation(config: HydraFlowConfig, obs: SupervisorObservation) -> None:
     """Append one observation to the thread JSONL (creates parent dirs)."""
     path = supervisor_thread_path(config)
@@ -544,8 +549,69 @@ def append_observation(config: HydraFlowConfig, obs: SupervisorObservation) -> N
         fh.write(obs.model_dump_json() + "\n")
 
 
+def append_ack(config: HydraFlowConfig, *, ts: str, escalation: str) -> None:
+    """Append one escalation-ack row to the acks JSONL (creates parent dirs).
+
+    Append-only + honest (rule 6): an ack NEVER rewrites the supervisor's
+    original observation — it records that a human acknowledged one escalation
+    string of the observation identified by ``ts``. :func:`read_thread` JOINs
+    these rows back, so a handled escalation stops nagging without the
+    supervisor's own record ever changing. Each row is
+    ``{acked_at, ts, escalation}``.
+    """
+    path = supervisor_acks_path(config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "acked_at": datetime.now(UTC).isoformat(),
+        "ts": ts,
+        "escalation": escalation,
+    }
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\n")
+
+
+def _read_acks(config: HydraFlowConfig) -> set[tuple[str, str]]:
+    """Return the set of ``(ts, escalation)`` pairs that carry an ack row.
+
+    Tolerates a missing / partially-written acks file (empty set); corrupt
+    lines are skipped, never raised — mirrors :func:`read_thread`'s
+    tail-tolerance. O(acks).
+    """
+    path = supervisor_acks_path(config)
+    if not path.exists():
+        return set()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    acks: set[tuple[str, str]] = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        ack_ts = obj.get("ts")
+        ack_esc = obj.get("escalation")
+        if isinstance(ack_ts, str) and isinstance(ack_esc, str):
+            acks.add((ack_ts, ack_esc))
+    return acks
+
+
 def read_thread(config: HydraFlowConfig, *, limit: int = 50) -> list[dict[str, Any]]:
     """Return the most recent ``limit`` observation dicts (newest last).
+
+    Each returned observation is JOINed with the append-only ack log
+    (:func:`append_ack`): it gains an ``acked_escalations`` list — the subset of
+    its ``escalations`` that have an ack row matching ``(ts, escalation)``. The
+    join is O(returned + acks) and tolerates a missing acks file (every row's
+    ``acked_escalations`` is then ``[]``). A handled escalation thus stops
+    driving the panel's verdict while the supervisor's original record stays
+    intact (rule 6).
 
     Corrupt lines are skipped, never raised — the panel must render on a
     partially-written tail.
@@ -568,7 +634,20 @@ def read_thread(config: HydraFlowConfig, *, limit: int = 50) -> list[dict[str, A
             continue
         if isinstance(obj, dict):
             rows.append(obj)
-    return rows[-limit:]
+    recent = rows[-limit:]
+    acks = _read_acks(config)
+    for row in recent:
+        escalations = row.get("escalations")
+        row_ts = str(row.get("ts", ""))
+        if isinstance(escalations, list):
+            row["acked_escalations"] = [
+                esc
+                for esc in escalations
+                if isinstance(esc, str) and (row_ts, esc) in acks
+            ]
+        else:
+            row["acked_escalations"] = []
+    return recent
 
 
 def load_attempts(config: HydraFlowConfig) -> dict[str, int]:

@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `bae3c8c` — chore(rc): regen arch artifacts after main merge (rc/2026-08-02-1257) *(2026-08-02)*
 - `08a005a` — Merge remote-tracking branch 'origin/main' into rc/2026-08-02-1257 *(2026-08-02)*
 - `829f486` — feat(supervisor): Fable goal-supervisor loop — Tier-2 liveness (#10733) (#11000) (#11000) *(2026-08-02)*
 - `14a2577` — fix(adr): close two ratchet-integrity gaps — deadline receipts + REAL relatedness (#10861) (#10999) (#10999) *(2026-08-02)*

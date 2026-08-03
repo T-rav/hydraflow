@@ -295,6 +295,8 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                 supervisor={supervisor}
                 onResume={socket.startOrchestrator}
                 onPause={socket.stopOrchestrator}
+                onRestartLoop={socket.restartLoop}
+                onAckEscalations={socket.ackEscalations}
               />
               <LoopsPanel loops={loops} />
               <SettingsSummary summary={settings} onOpenSettings={() => setSettingsOpen(true)} />

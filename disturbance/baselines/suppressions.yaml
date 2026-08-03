@@ -27,7 +27,11 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ bounded helper; each dropped a now-redundant local 'import asyncio' re-import\
   \ that shadowed the module-level import). re-snapshot 2026-08: god-file decomposition\
   \ moved 3 BLE001 suppressions verbatim from dashboard_routes/_routes.py to the extracted\
-  \ dashboard_routes/_ws_stream.py (net-zero move, no new suppressions)."
+  \ dashboard_routes/_ws_stream.py (net-zero move, no new suppressions). re-snapshot\
+  \ 2026-08-02: +1 _diagnostics_routes PLC0415 (5→6) for the supervisor-ack\
+  \ endpoint's lazy import of supervisor_observation.append_ack (#11002) —\
+  \ matches the route module's existing deferred-import convention (the sibling\
+  \ supervisor/thread endpoint lazy-imports read_thread the same way)."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -92,7 +96,7 @@ entries:
   src/dashboard_routes/_control_routes.py::noqa:PLR0914: 1
   src/dashboard_routes/_control_routes.py::noqa:PLR0915: 1
   src/dashboard_routes/_diagnostics_routes.py::noqa:BLE001: 1
-  src/dashboard_routes/_diagnostics_routes.py::noqa:PLC0415: 5
+  src/dashboard_routes/_diagnostics_routes.py::noqa:PLC0415: 6
   src/dashboard_routes/_hitl_routes.py::noqa:BLE001: 1
   src/dashboard_routes/_metrics_routes.py::noqa:PLR0915: 1
   src/dashboard_routes/_onboarding_routes.py::noqa:PLC0415: 1
