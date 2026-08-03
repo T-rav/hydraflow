@@ -184,6 +184,8 @@ cadence and files remediation issues on drift.
 | [0122](0122-vocabulary-scopes-for-the-three-assurance-disciplines.md) | Vocabulary scopes for the three assurance disciplines | Proposed |
 | [0123](0123-bidirectional-enforcement.md) | Bidirectional enforcement — every rule declares which direction it binds | Proposed |
 | [0124](0124-tier-2-goal-supervisor.md) | Tier-2 goal supervisor — a Fable "mini-me" over Tier-1's liveness signals | Proposed |
+| [0125](0125-mutation-gauntlet-gate-sensitivity.md) | Mutation gauntlet — measuring gate sensitivity by injecting known faults | Proposed |
+| [0126](0126-golden-baseline-finder-calibration.md) | Golden-baseline finder calibration — measuring a generative finder's noise floor | Proposed |
 
 ## Adding a new ADR
 
