@@ -845,3 +845,15 @@ post-merge-smoke:
 
 console-conformance:
 	@PYTHONPATH=. $(UV) python scripts/check_console_conformance.py
+
+# --------------------------------------------------------------------------
+# mutation-gauntlet — gate-sensitivity instrument (#10835, ADR-0125). On-demand
+# ONLY: it runs a real gate per curated mutant, so it is deliberately NOT wired
+# into `quality`/CI (too slow for the merge path). A survivor is a finding — a
+# gate blind to a fault it owns — surfaced with a nonzero exit. Filter with
+# --class / --gate / --id; --list plans without running. See the pure-core unit
+# tests + fixture-gate integration cases under tests/mutation/.
+.PHONY: mutation-gauntlet
+mutation-gauntlet: deps
+	@echo "$(BLUE)Running mutation gauntlet (gate-sensitivity)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/mutation_gauntlet.py $(ARGS)

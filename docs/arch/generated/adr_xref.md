@@ -131,6 +131,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0122 | — | — |
 | ADR-0123 | — | `'pytest:tests/test_adr_direction_declared.py'` |
 | ADR-0124 | `src.goal_supervisor_loop`, `src.supervisor_observation` | — |
+| ADR-0125 | `src.mutation_gauntlet` | `'pytest:tests/mutation/test_catalog.py'` |
 
 ## Module → ADRs
 
@@ -238,6 +239,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mockworld.fakes.fake_llm` | ADR-0059 |
 | `src.mockworld.sandbox_main` | ADR-0052, ADR-0108 |
 | `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098, ADR-0099, ADR-0103, ADR-0107, ADR-0108 |
+| `src.mutation_gauntlet` | ADR-0125 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0014, ADR-0044, ADR-0045, ADR-0103, ADR-0106 |
 | `src.pending_concerns` | ADR-0064 |
 | `src.phase_utils` | ADR-0108 |
