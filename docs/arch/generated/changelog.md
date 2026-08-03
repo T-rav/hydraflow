@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W31
 
+- `829f486` — feat(supervisor): Fable goal-supervisor loop — Tier-2 liveness (#10733) (#11000) (#11000) *(2026-08-02)*
+- `14a2577` — fix(adr): close two ratchet-integrity gaps — deadline receipts + REAL relatedness (#10861) (#10999) (#10999) *(2026-08-02)*
 - `1c0d194` — feat: bidirectional enforcement — Binds: axis + broadened self-mod class (#10849, #10851) (#10997) (#10997) *(2026-08-02)*
 - `ac8db5e` — docs(ul): UL scoping ADR (0122) + 7 assurance term entries (#10834) (#10995) (#10995) *(2026-08-02)*
 - `1b76da9` — feat(rails): rails.yaml manifest + drift-caretaker loop (#10936) (#10992) (#10992) *(2026-08-01)*
