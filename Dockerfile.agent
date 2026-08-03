@@ -98,10 +98,15 @@ RUN git clone --depth 1 https://github.com/anthropics/claude-plugins-official.gi
     && git clone --depth 1 https://github.com/8thlight/lightfactory.git /opt/plugins/lightfactory \
     && rm -rf /opt/plugins/*/.git
 
-# Pre-install Python quality tools into a venv
+# Pre-install Python quality tools into a venv.
+# Extras: test + dev + docker (the factory runs `make quality` in worktrees).
+# The `docs` extra (mkdocs + heavy mkdocs-material) is deliberately EXCLUDED —
+# the agent never builds the docs *site* (that is a CI Pages step / `make
+# arch-serve` for local dev); shipping it wasted image budget and chronically
+# pinned this image against the 2 GB cap (#11004).
 COPY pyproject.toml uv.lock ./
 RUN uv venv /opt/hydraflow-venv \
-    && UV_PROJECT_ENVIRONMENT=/opt/hydraflow-venv uv sync --all-extras --no-install-project
+    && UV_PROJECT_ENVIRONMENT=/opt/hydraflow-venv uv sync --extra test --extra dev --extra docker --no-install-project
 
 # ---------------------------------------------------------------------------
 # Stage 3: default-base — full build from scratch (skipped when BASE_IMAGE is set)
