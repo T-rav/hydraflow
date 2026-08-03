@@ -506,7 +506,13 @@ jobs:
             tests/regressions/test_hostrunner_reap_grandchildren.py \
             tests/regressions/test_auto_pr_preflight_gate.py"
           IGNORES=""; for f in $REAP; do IGNORES="$IGNORES --ignore=$f"; done
-          PYTHONPATH=src uv run pytest tests/regressions/ $IGNORES -n auto --dist loadscope --reruns 2 --reruns-delay 1 -q
+          # --forked isolates every test in its own subprocess so a test that
+          # leaks worker state (a global holding another test's tmp path) cannot
+          # poison a later test on the same xdist worker (#11004). --reruns can't
+          # fix this class — a rerun stays on the poisoned worker; only a fresh
+          # process does. The REAP lane below stays un-forked (its subprocess-
+          # group reap assertions are their own isolation regime).
+          PYTHONPATH=src uv run pytest tests/regressions/ $IGNORES -n auto --dist loadscope --forked --reruns 2 --reruns-delay 1 -q
           PYTHONPATH=src uv run pytest $REAP -q
 
   # Linux signal-context smoke lane (#10049, deferred from #10010). Reruns the
