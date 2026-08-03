@@ -132,6 +132,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0123 | — | `'pytest:tests/test_adr_direction_declared.py'` |
 | ADR-0124 | `src.goal_supervisor_loop`, `src.supervisor_observation` | — |
 | ADR-0125 | `src.mutation_gauntlet` | `'pytest:tests/mutation/test_catalog.py'` |
+| ADR-0126 | `src.audit.governance`, `src.detector_calibration_loop`, `src.finder_calibration`, `src.jsonl_ledger`, `src.judge_independence` | `'pytest:tests/test_finder_calibration.py'` |
 
 ## Module → ADRs
 
@@ -155,6 +156,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.arch.generators.event_bus` | ADR-0114 |
 | `src.assumption_surfacer` | ADR-0064 |
 | `src.audit.adjudicate` | ADR-0115 |
+| `src.audit.governance` | ADR-0126 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
 | `src.auto_pr` | ADR-0101 |
 | `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084, ADR-0093, ADR-0099, ADR-0106 |
@@ -183,6 +185,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.dashboard_routes._routes` | ADR-0007, ADR-0008, ADR-0030, ADR-0038 |
 | `src.dashboard_routes._state_routes` | ADR-0007 |
 | `src.data_migration` | ADR-0021 |
+| `src.detector_calibration_loop` | ADR-0126 |
 | `src.discover_completeness` | ADR-0103 |
 | `src.discover_phase` | ADR-0031 |
 | `src.discover_runner` | ADR-0031, ADR-0045, ADR-0063, ADR-0103, ADR-0107 |
@@ -208,6 +211,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.exception_classify` | ADR-0055, ADR-0109 |
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |
+| `src.finder_calibration` | ADR-0126 |
 | `src.fitness_scorecard_loop` | ADR-0093 |
 | `src.flake_tracker_loop` | ADR-0045 |
 | `src.flows.adapters` | ADR-0111 |
@@ -225,6 +229,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_fetcher` | ADR-0019, ADR-0067, ADR-0108 |
 | `src.issue_store` | ADR-0002, ADR-0006, ADR-0022, ADR-0041, ADR-0084, ADR-0099, ADR-0108 |
+| `src.jsonl_ledger` | ADR-0126 |
+| `src.judge_independence` | ADR-0126 |
 | `src.label_drift_watcher_loop` | ADR-0088 |
 | `src.label_transitions` | ADR-0002 |
 | `src.live_corpus_replay_loop` | ADR-0086 |
