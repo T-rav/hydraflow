@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -57,7 +58,48 @@ def _sandbox_seed_mtimes() -> dict[str, int]:
     return {p.name: p.stat().st_mtime_ns for p in _SANDBOX_SEEDS_DIR.glob("*.json")}
 
 
-_sandbox_seed_baseline_mtimes = _sandbox_seed_mtimes()
+# #10094 + #11016: snapshot per TEST (setup -> teardown), not once at import.
+# The old import-time module-global baseline assumed one long-lived process per
+# xdist worker; under `--forked` (#11004) each test forks carrying that stale
+# baseline and its per-fork "absorb" never propagates, so a single harmless
+# re-serialization (identical bytes, new mtime — git stays clean) made EVERY
+# later forked test blame itself. Scope the check to each test's OWN window and
+# only fail on real CONTENT drift (what #10094 cares about — a bare mtime bump
+# git ignores is not a violation).
+_SEED_MTIMES_KEY = pytest.StashKey[dict[str, int]]()
+
+
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    """Snapshot committed-seed mtimes at THIS test's start (see the teardown)."""
+    item.stash[_SEED_MTIMES_KEY] = _sandbox_seed_mtimes()
+
+
+def _content_dirty_seeds(names: list[str]) -> list[str]:
+    """Of *names*, those whose CONTENT actually differs from git (index/HEAD).
+
+    A re-serialization that writes identical bytes bumps mtime but leaves git
+    clean — harmless, NOT a #10094 violation; only real content drift is. On any
+    git failure return ``[]`` (fail-open): the dedicated
+    ``regression_issue_10094.py::test_seed_dir_is_git_clean`` is the authoritative
+    content backstop, so this teardown hook is the by-name locator, not the gate.
+    """
+    if not names:
+        return []
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain", "--", str(_SANDBOX_SEEDS_DIR)],
+            cwd=_SANDBOX_SEEDS_DIR.parent,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    dirty = {
+        line[3:].strip().rsplit("/", 1)[-1] for line in out.splitlines() if line.strip()
+    }
+    return sorted(n for n in names if n in dirty)
 
 
 def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> None:  # noqa: ARG001 — nextitem required by pytest hook signature
@@ -86,26 +128,25 @@ def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> 
             "Use `MagicMock(spec=HydraFlowConfig)` or a real tmp_path-backed config."
         )
 
+    before = item.stash.get(_SEED_MTIMES_KEY, None)
+    if before is None:
+        return
     current_seed_mtimes = _sandbox_seed_mtimes()
-    mutated_seeds = sorted(
-        name
-        for name, mtime in current_seed_mtimes.items()
-        if _sandbox_seed_baseline_mtimes.get(name) != mtime
+    touched = sorted(
+        name for name, mtime in current_seed_mtimes.items() if before.get(name) != mtime
     )
+    # Only a real CONTENT change is a #10094 violation; a bare mtime bump from
+    # re-serializing identical bytes leaves git clean and is harmless (and under
+    # --forked was blaming innocents). Confirm content drift via git first.
+    mutated_seeds = _content_dirty_seeds(touched)
     if mutated_seeds:
-        # Absorb into the baseline so only the offending test is blamed —
-        # tests/regressions/regression_issue_10094.py::test_seed_dir_is_git_clean
-        # still catches the leftover git dirt from the actual content change.
-        _sandbox_seed_baseline_mtimes.update(
-            {name: current_seed_mtimes[name] for name in mutated_seeds}
-        )
         pytest.fail(
             f"Sandbox-seed tree-clean violation: test {item.nodeid} mutated "
             f"committed seed(s) {mutated_seeds} in "
             "tests/sandbox_scenarios/seeds/. Seeds are golden generated "
-            "artifacts — a test/fixture must never re-serialize a "
-            "materialized MockWorldSeed back to the source path; redirect the "
-            "write to tmp_path instead (#10094)."
+            "artifacts — a test/fixture must never re-serialize a materialized "
+            "MockWorldSeed back to the source path with changed content; "
+            "redirect the write to tmp_path instead (#10094)."
         )
 
 
