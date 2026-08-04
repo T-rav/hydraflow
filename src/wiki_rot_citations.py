@@ -618,3 +618,55 @@ def fuzzy_suggest(symbol: str, candidates: list[str]) -> str | None:
     """
     matches = difflib.get_close_matches(symbol, candidates, n=1, cutoff=0.6)
     return matches[0] if matches else None
+
+
+# ---------------------------------------------------------------------------
+# Whole-tree broken-cite count (finder-calibration seam, #10826)
+# ---------------------------------------------------------------------------
+
+
+def _cite_broken_self(cite: Cite, repo_root: Path, corpus: frozenset[str]) -> bool:
+    """Return ``True`` iff *cite* fails to resolve against self-repo source.
+
+    The self-repo resolution the ``WikiRotDetectorLoop`` per-cite pass performs,
+    isolated from its filing / dedup / shipped-claim machinery: fenced hints
+    never fire; a Style-D bare cite resolves by presence in the symbol *corpus*;
+    a ``module:symbol`` cite resolves via AST (:func:`verify_cite_ast`).
+    """
+    if cite.style == "fenced_hint":
+        return False
+    if cite.style == "bare":
+        return not resolve_bare_cite(cite.symbol, corpus)
+    ok, _symbols = verify_cite_ast(repo_root, cite.module_as_path(), cite.symbol)
+    return not ok
+
+
+def count_broken_cites(repo_root: Path, wiki_subdir: str = "docs/wiki") -> int:
+    """Count broken hard code-cites across a repo's own wiki (calibration seam).
+
+    Read-only: walks ``repo_root/<wiki_subdir>/**/*.md`` (skipping ``index.md`` /
+    ``log.md`` like the loop), extracts each entry's hard cites
+    (:func:`extract_cites`) and counts those that do not resolve against the
+    checked-out source. Mirrors the self-repo per-cite pass in
+    :class:`wiki_rot_detector_loop.WikiRotDetectorLoop` — the count IS that
+    finder's flagged output on a tree — WITHOUT the loop's filing, dedup,
+    per-tick-cap, or shipped-claim passes (which are actuation, not detection).
+    The symbol corpus is built once over the tree. Returns ``0`` when the wiki
+    directory is absent; unreadable files are skipped, never raised.
+    """
+    wiki_root = repo_root / wiki_subdir
+    if not wiki_root.is_dir():
+        return 0
+    corpus = build_symbol_corpus(repo_root)
+    broken = 0
+    for md_path in sorted(wiki_root.rglob("*.md")):
+        if md_path.name in {"index.md", "log.md"}:
+            continue
+        try:
+            text = md_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for cite in extract_cites(text):
+            if _cite_broken_self(cite, repo_root, corpus):
+                broken += 1
+    return broken
