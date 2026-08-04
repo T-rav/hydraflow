@@ -43,6 +43,99 @@ the agent pipeline (the structural edge inference IS the work). See ADR-0058.
 """
 
 
+def compute_edge_proposals(
+    repo_root: Path,
+) -> tuple[list[Term], dict[str, list[TermRel]]]:
+    """Deterministically detect new depends_on + implements edges under *repo_root*.
+
+    Pure and READ-ONLY: reads ``docs/wiki/terms`` + ``src/`` under *repo_root*
+    and returns ``(terms, proposals)`` where ``proposals`` maps each term id to
+    the new :class:`TermRel` edges detected for it — ``depends_on`` from the live
+    import graph, ``implements`` from class-inheritance AST. No PR, network, or
+    filesystem writes; no LLM. This is the single detection seam shared by
+    :meth:`EdgeProposerLoop._do_work` (which then opens a bot-PR from the
+    proposals) and the finder-calibration runner (which only needs the count).
+    """
+    terms_root = repo_root / "docs" / "wiki" / "terms"
+    src_root = repo_root / "src"
+
+    store = TermStore(terms_root)
+    terms = store.list()
+    graph = build_import_graph(src_root)
+
+    # Class-name → term (for resolving import target names back to terms)
+    terms_by_class_name: dict[str, Term] = {}
+    for t in terms:
+        class_name = (
+            t.code_anchor.split(":", 1)[1] if ":" in t.code_anchor else t.code_anchor
+        )
+        terms_by_class_name[class_name] = t
+
+    # Existing edges per term: set of (kind, target_id) tuples
+    existing_edges: dict[str, set[tuple[str, str]]] = {
+        t.id: {(r.kind.value, r.target) for r in t.related} for t in terms
+    }
+
+    proposals: dict[str, list[TermRel]] = {}  # term_id -> new edges
+
+    for src_term in terms:
+        # Resolve module path from anchor (e.g., "src/alpha.py:Alpha" -> "src/alpha.py")
+        module_path = src_term.code_anchor.split(":", 1)[0]
+        # depends_on: every imported name that resolves to another term
+        for imported_name in graph.get(module_path, set()):
+            tgt_term = terms_by_class_name.get(imported_name)
+            if tgt_term is None or tgt_term.id == src_term.id:
+                continue
+            edge = ("depends_on", tgt_term.id)
+            if edge in existing_edges[src_term.id]:
+                continue
+            existing_edges[src_term.id].add(edge)
+            proposals.setdefault(src_term.id, []).append(
+                TermRel(kind=TermRelKind.DEPENDS_ON, target=tgt_term.id)
+            )
+        # implements: AST-walk the source's class definition for direct bases
+        try:
+            source_text = (repo_root / module_path).read_text(encoding="utf-8")
+            tree = ast.parse(source_text)
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        class_name = (
+            src_term.code_anchor.split(":", 1)[1]
+            if ":" in src_term.code_anchor
+            else src_term.code_anchor
+        )
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef) or node.name != class_name:
+                continue
+            for base in node.bases:
+                base_name = _ast_name_simple(base)
+                if base_name is None:
+                    continue
+                tgt_term = terms_by_class_name.get(base_name)
+                if tgt_term is None or tgt_term.id == src_term.id:
+                    continue
+                edge = ("implements", tgt_term.id)
+                if edge in existing_edges[src_term.id]:
+                    continue
+                existing_edges[src_term.id].add(edge)
+                proposals.setdefault(src_term.id, []).append(
+                    TermRel(kind=TermRelKind.IMPLEMENTS, target=tgt_term.id)
+                )
+            break  # only the canonical class def matters
+
+    return terms, proposals
+
+
+def count_edge_proposals(repo_root: Path) -> int:
+    """Total deterministically-detected new edges under *repo_root* (calibration seam).
+
+    The flagged-count :class:`EdgeProposerLoop` would propose on this tree, with
+    no PR opened. Read-only wrapper over :func:`compute_edge_proposals`.
+    """
+    _terms, proposals = compute_edge_proposals(repo_root)
+    return sum(len(v) for v in proposals.values())
+
+
 class EdgeProposerLoop(BaseBackgroundLoop):
     """Proposes depends_on + implements edges between existing terms."""
 
@@ -86,76 +179,7 @@ class EdgeProposerLoop(BaseBackgroundLoop):
         if not self._config.edge_proposer_enabled:
             return {"status": "disabled"}
 
-        terms_root = self._repo_root / "docs" / "wiki" / "terms"
-        src_root = self._repo_root / "src"
-
-        store = TermStore(terms_root)
-        terms = store.list()
-        graph = build_import_graph(src_root)
-
-        # Class-name → term (for resolving import target names back to terms)
-        terms_by_class_name: dict[str, Term] = {}
-        for t in terms:
-            class_name = (
-                t.code_anchor.split(":", 1)[1]
-                if ":" in t.code_anchor
-                else t.code_anchor
-            )
-            terms_by_class_name[class_name] = t
-
-        # Existing edges per term: set of (kind, target_id) tuples
-        existing_edges: dict[str, set[tuple[str, str]]] = {
-            t.id: {(r.kind.value, r.target) for r in t.related} for t in terms
-        }
-
-        proposals: dict[str, list[TermRel]] = {}  # term_id -> new edges
-
-        for src_term in terms:
-            # Resolve module path from anchor (e.g., "src/alpha.py:Alpha" -> "src/alpha.py")
-            module_path = src_term.code_anchor.split(":", 1)[0]
-            # depends_on: every imported name that resolves to another term
-            for imported_name in graph.get(module_path, set()):
-                tgt_term = terms_by_class_name.get(imported_name)
-                if tgt_term is None or tgt_term.id == src_term.id:
-                    continue
-                edge = ("depends_on", tgt_term.id)
-                if edge in existing_edges[src_term.id]:
-                    continue
-                existing_edges[src_term.id].add(edge)
-                proposals.setdefault(src_term.id, []).append(
-                    TermRel(kind=TermRelKind.DEPENDS_ON, target=tgt_term.id)
-                )
-            # implements: AST-walk the source's class definition for direct bases
-            try:
-                source_text = (self._repo_root / module_path).read_text(
-                    encoding="utf-8"
-                )
-                tree = ast.parse(source_text)
-            except (OSError, SyntaxError, UnicodeDecodeError):
-                continue
-            class_name = (
-                src_term.code_anchor.split(":", 1)[1]
-                if ":" in src_term.code_anchor
-                else src_term.code_anchor
-            )
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.ClassDef) or node.name != class_name:
-                    continue
-                for base in node.bases:
-                    base_name = _ast_name_simple(base)
-                    if base_name is None:
-                        continue
-                    tgt_term = terms_by_class_name.get(base_name)
-                    if tgt_term is None or tgt_term.id == src_term.id:
-                        continue
-                    edge = ("implements", tgt_term.id)
-                    if edge in existing_edges[src_term.id]:
-                        continue
-                    existing_edges[src_term.id].add(edge)
-                    proposals.setdefault(src_term.id, []).append(
-                        TermRel(kind=TermRelKind.IMPLEMENTS, target=tgt_term.id)
-                    )
-                break  # only the canonical class def matters
+        terms, proposals = compute_edge_proposals(self._repo_root)
 
         if not proposals:
             return {
