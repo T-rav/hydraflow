@@ -4,6 +4,10 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W32
+
+- `cd5d953` — chore(rc): regen arch artifacts after main merge (rc/2026-08-03-1024) *(2026-08-03)*
+
 ## 2026-W31
 
 - `d0abd08` — chore(rc): regen arch artifacts after main merge (rc/2026-08-02-2256) *(2026-08-02)*
