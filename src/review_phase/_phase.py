@@ -2020,6 +2020,7 @@ class ReviewPhase(VisualGateMixin):
         # + dashboard alarm are always live; the two flags gate the merge-
         # outcome-changing behaviours (opt-in until validated). Independence
         # resolution reads the configured cross-family judge model.
+        from judge_calibration import judge_verdict_ledger_path
         from judge_independence import (
             factory_bound_source_files,
             independent_judge_model,
@@ -2053,6 +2054,7 @@ class ReviewPhase(VisualGateMixin):
             ),
             independent_model=independent_judge_model(self._config),
             factory_bound_files=factory_bound_files,
+            judge_verdict_ledger_path=judge_verdict_ledger_path(self._config.data_root),
         )
         # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
         # reviews the same issue as the executor, so live operator guidance
