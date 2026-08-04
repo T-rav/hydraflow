@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W32
 
+- `1f659a1` — Merge remote-tracking branch 'origin/main' into rc/2026-08-04-0816 *(2026-08-04)*
+- `b7c5961` — feat(quality): judge calibration — proper-scoring instrument, first slice (#10836) (#11019) (#11019) *(2026-08-04)*
+- `faca3d5` — chore(rc): regen arch artifacts after main merge (rc/2026-08-03-2246) *(2026-08-03)*
 - `cd5d953` — chore(rc): regen arch artifacts after main merge (rc/2026-08-03-1024) *(2026-08-03)*
 
 ## 2026-W31
