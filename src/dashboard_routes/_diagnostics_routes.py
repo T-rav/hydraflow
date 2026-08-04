@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 import dashboard_routes._cost_rollups as _cost_rollups_mod
 import finder_calibration as fc
+import judge_calibration as jc
 from dashboard_routes._cost_merge import (
     group_cost_by_model_by_repo,
     merge_by_loop,
@@ -40,6 +41,7 @@ from dashboard_routes._cost_rollups import (
     build_top_issues,
 )
 from dashboard_routes._waterfall_builder import build_waterfall
+from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from factory_metrics import (
     aggregate_top_skills,
     aggregate_top_subagents,
@@ -376,6 +378,59 @@ def build_diagnostics_router(
         now = datetime.now(UTC)
         finders = build_faceplates(floors, baselines, live_rates, now)
         return {"finders": finders, "generated_at": now.isoformat()}
+
+    @router.get("/judge-calibration")
+    def judge_calibration_route(repo: RepoSlugParam = None) -> dict[str, Any]:
+        """Per-judge proper-scoring calibration panel (#10836).
+
+        Third instrument in the quality-machinery trilogy (gate sensitivity via
+        the mutation gauntlet, finder noise via finder calibration, judge quality
+        here). Reads the append-only judge-verdict ledger
+        (``<data_root>/calibration/judge_verdicts.jsonl``, populated best-effort
+        at the PostVerifyAdvisor emit site), resolves each verdicted subject's
+        ground-truth outcome from the escape ledger (an attributed escape → bad;
+        escape-free past the grace window → good; too-recent → unresolved and
+        excluded), and scores each judge with the Brier + log proper scores plus
+        the two orthogonal axes the #10836 issue insists on: **calibration**
+        (``calibration_error`` + reliability ``calibration_bins``) and
+        **discrimination** (AUC). Read-only and fail-soft: an escape-ledger read
+        failure degrades to no outcomes (every judge "no data yet"), and an empty
+        verdict ledger yields an empty ``judges`` list — never a 500.
+        """
+        cfg = _config_for(repo) if repo is not None else config
+        verdicts = jc.JudgeCalibrationLedger(
+            jc.judge_verdict_ledger_path(cfg.data_root)
+        ).read_all()
+        now = datetime.now(UTC)
+
+        # Outcomes from the escape ledger. Fail-soft (Pattern B): a read failure
+        # degrades to NO outcomes — every judge resolves to "no data yet" rather
+        # than 500-ing the panel. Critically, a failure must NOT fall through to
+        # an empty escape set: that would resolve every past-grace verdict as
+        # *good* and silently over-credit judges precisely when the bad-outcome
+        # signal is unavailable. Without the escape ledger the ground truth is
+        # genuinely unknown, so nothing resolves.
+        outcomes: list[jc.Outcome] = []
+        try:
+            escape_records = EscapeLedger(
+                cfg.diagnostics_dir / ESCAPE_LEDGER_FILENAME
+            ).read_latest()
+            resolver = jc.EscapeLedgerOutcomeResolver(
+                escape_records, now=now, grace_window=jc.DEFAULT_GRACE_WINDOW
+            )
+            outcomes = resolver.resolve(verdicts)
+        except OSError:
+            logger.warning(
+                "judge-calibration: escape-ledger read failed", exc_info=True
+            )
+
+        scores = jc.score_all(verdicts, outcomes)
+        return {
+            "judges": [s.to_json_dict() for s in scores],
+            "resolved_total": sum(s.n_resolved for s in scores),
+            "grace_window_days": jc.DEFAULT_GRACE_WINDOW.days,
+            "generated_at": now.isoformat(),
+        }
 
     @router.get("/second-order-vitals")
     def second_order_vitals(repo: RepoSlugParam = None) -> dict[str, Any]:
