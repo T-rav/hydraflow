@@ -54,6 +54,7 @@ graph LR
     src_arch_generators -- "14" --> src_arch
     src_audit -- "1" --> src_escape
     src_dashboard_routes -- "2" --> src_audit
+    src_dashboard_routes -- "1" --> src_escape
     src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "2" --> src_state

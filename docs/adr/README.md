@@ -186,6 +186,7 @@ cadence and files remediation issues on drift.
 | [0124](0124-tier-2-goal-supervisor.md) | Tier-2 goal supervisor — a Fable "mini-me" over Tier-1's liveness signals | Proposed |
 | [0125](0125-mutation-gauntlet-gate-sensitivity.md) | Mutation gauntlet — measuring gate sensitivity by injecting known faults | Proposed |
 | [0126](0126-golden-baseline-finder-calibration.md) | Golden-baseline finder calibration — measuring a generative finder's noise floor | Proposed |
+| [0127](0127-judge-calibration.md) | Judge calibration — scoring a judge's verdicts against outcomes with proper scoring rules | Proposed |
 
 ## Adding a new ADR
 

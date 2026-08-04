@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from pydantic import BaseModel, Field
 
+import judge_calibration as jc
 import judge_independence as ji
 from human_steering import fenced_steering_guidance
 
@@ -94,6 +95,11 @@ class PostVerifyResult(BaseModel):
     reasoning: str
     disagreements: list[Disagreement] = Field(default_factory=list)
     suggested_fix_direction: str | None = None
+    # #10836 judge calibration: the advisor's confidence (0.0-1.0) that its own
+    # verdict is correct. Optional + defaulted so older/other payloads that omit
+    # it still validate unchanged; when present it is the proper-scoring signal
+    # the calibration ledger records against eventual outcomes.
+    confidence: float | None = None
 
 
 class PostVerifyInput(BaseModel):
@@ -533,6 +539,7 @@ class PostVerifyAdvisor:
         self_mod_fail_closed_enabled: bool = False,
         independent_model: str = "",
         factory_bound_files: frozenset[str] = frozenset(),
+        judge_verdict_ledger_path: Path | None = None,
     ) -> None:
         self._runner = runner
         self._cfg = surface_config
@@ -566,6 +573,11 @@ class PostVerifyAdvisor:
         # via judge_independence.factory_bound_source_files; empty => enumeration
         # only (backward-compatible).
         self._factory_bound_files = factory_bound_files
+        # #10836 judge calibration: when set, each verdict (the judge's RAW call,
+        # before any advisory downgrade) is best-effort appended to this ledger
+        # for proper-scoring against eventual outcomes. None (tests / disabled) →
+        # no recording. The append is fail-soft and can never affect the verdict.
+        self._judge_verdict_ledger_path = judge_verdict_ledger_path
 
     async def run(self, inp: PostVerifyInput) -> PostVerifyResult:
         start = time.monotonic()
@@ -650,6 +662,12 @@ class PostVerifyAdvisor:
             )
             return result
 
+        # #10836: capture the judge's RAW verdict + confidence BEFORE any
+        # advisory downgrade — calibration scores the judge's true call, not the
+        # policy-adjusted one.
+        raw_verdict = result.verdict
+        raw_confidence = result.confidence
+
         # Advisory authority: downgrade VETO to APPROVE; preserve diagnostic info.
         # T29: an explicit authority_override (computed by callers when the
         # diff modifies advisor's own files) takes precedence over the
@@ -661,6 +679,7 @@ class PostVerifyAdvisor:
                 reasoning=result.reasoning,
                 disagreements=result.disagreements,
                 suggested_fix_direction=result.suggested_fix_direction,
+                confidence=result.confidence,
             )
         self._emit_log(prompt=prompt, payload=payload, start=start, error=None)
         # #10371: record coverage for classed changes — whether this verdict
@@ -673,7 +692,45 @@ class PostVerifyAdvisor:
             judge_family=judge_family,
             result=result,
         )
+        # #10836: best-effort proper-scoring record of the raw verdict. Fail-soft
+        # by construction — never affects the verdict returned above.
+        self._record_calibration_verdict(inp, raw_verdict, raw_confidence)
         return result
+
+    def _record_calibration_verdict(
+        self,
+        inp: PostVerifyInput,
+        verdict: Literal["APPROVE", "VETO"],
+        confidence: float | None,
+    ) -> None:
+        """Best-effort append of this verdict to the judge-calibration ledger.
+
+        No-op unless a ledger path is wired AND the advisor emitted a numeric
+        confidence (we never fabricate one — an absent confidence is honestly
+        skipped). The subject is keyed by PR number so it joins the escape ledger
+        (:func:`judge_calibration.subject_for_pr`), falling back to the issue when
+        no PR is known. ``judge_id`` distinguishes the per-lens judges; the whole
+        call is wrapped fail-soft so a recording error can never reach the review
+        pipeline.
+        """
+        if self._judge_verdict_ledger_path is None or confidence is None:
+            return
+        if self._pr_number is not None:
+            subject_id = jc.subject_for_pr(self._pr_number)
+        elif inp.issue_number is not None:
+            subject_id = jc.subject_for_issue(inp.issue_number)
+        else:
+            return
+        judge_id = f"post_verify:{inp.lens}" if inp.lens else "post_verify"
+        jc.record_verdict(
+            self._judge_verdict_ledger_path,
+            judge_id=judge_id,
+            judge_family="review_advisor",
+            subject_id=subject_id,
+            verdict=jc.Verdict.PASS if verdict == "APPROVE" else jc.Verdict.FAIL,
+            confidence=confidence,
+            recorded_at=datetime.now(UTC),
+        )
 
     def _resolve_independence(
         self,
@@ -957,7 +1014,10 @@ class PostVerifyAdvisor:
             '{"verdict":"APPROVE"|"VETO","reasoning":str,'
             '"disagreements":[{"executor_claim":str,"advisor_assessment":str,'
             '"severity":"blocking"|"concern"}],'
-            '"suggested_fix_direction":str|null}'
+            '"suggested_fix_direction":str|null,'
+            '"confidence":float}\n'
+            "confidence is your probability (0.0-1.0) that THIS verdict is "
+            "correct — a calibrated self-estimate, not a formality."
         )
         prompt = "\n".join(sections)
         if inp.lens:

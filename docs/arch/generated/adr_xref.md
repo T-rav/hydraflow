@@ -133,6 +133,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0124 | `src.goal_supervisor_loop`, `src.supervisor_observation` | — |
 | ADR-0125 | `src.mutation_gauntlet` | `'pytest:tests/mutation/test_catalog.py'` |
 | ADR-0126 | `src.audit.governance`, `src.detector_calibration_loop`, `src.finder_calibration`, `src.jsonl_ledger`, `src.judge_independence` | `'pytest:tests/test_finder_calibration.py'` |
+| ADR-0127 | `src.audit.store`, `src.escape.ledger`, `src.jsonl_ledger`, `src.judge_calibration`, `src.judge_independence`, `src.precheck` | `'pytest:tests/test_judge_calibration.py'` |
 
 ## Module → ADRs
 
@@ -157,6 +158,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.assumption_surfacer` | ADR-0064 |
 | `src.audit.adjudicate` | ADR-0115 |
 | `src.audit.governance` | ADR-0126 |
+| `src.audit.store` | ADR-0127 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
 | `src.auto_pr` | ADR-0101 |
 | `src.base_background_loop` | ADR-0049, ADR-0055, ADR-0084, ADR-0093, ADR-0099, ADR-0106 |
@@ -205,6 +207,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.epic_sweeper_loop` | ADR-0081 |
 | `src.escalation_gate` | ADR-0015 |
 | `src.escape.auto_diagnose` | ADR-0115 |
+| `src.escape.ledger` | ADR-0127 |
 | `src.escape_ledger_loop` | ADR-0115 |
 | `src.event_loop_watchdog` | ADR-0106, ADR-0108 |
 | `src.events` | ADR-0006, ADR-0055, ADR-0064, ADR-0114 |
@@ -229,8 +232,9 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_fetcher` | ADR-0019, ADR-0067, ADR-0108 |
 | `src.issue_store` | ADR-0002, ADR-0006, ADR-0022, ADR-0041, ADR-0084, ADR-0099, ADR-0108 |
-| `src.jsonl_ledger` | ADR-0126 |
-| `src.judge_independence` | ADR-0126 |
+| `src.jsonl_ledger` | ADR-0126, ADR-0127 |
+| `src.judge_calibration` | ADR-0127 |
+| `src.judge_independence` | ADR-0126, ADR-0127 |
 | `src.label_drift_watcher_loop` | ADR-0088 |
 | `src.label_transitions` | ADR-0002 |
 | `src.live_corpus_replay_loop` | ADR-0086 |
@@ -258,6 +262,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.pr_manager` | ADR-0002, ADR-0005, ADR-0011, ADR-0013, ADR-0018, ADR-0045, ADR-0055, ADR-0084, ADR-0088 |
 | `src.pr_unsticker` | ADR-0077 |
 | `src.pr_unsticker_loop` | ADR-0077 |
+| `src.precheck` | ADR-0127 |
 | `src.precondition_gate` | ADR-0041 |
 | `src.preflight.__init__` | ADR-0043 |
 | `src.preflight.agent` | ADR-0050, ADR-0084 |
