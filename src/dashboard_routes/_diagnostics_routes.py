@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 import dashboard_routes._cost_rollups as _cost_rollups_mod
 import finder_calibration as fc
+import judge_calibration as jc
 from dashboard_routes._cost_merge import (
     group_cost_by_model_by_repo,
     merge_by_loop,
@@ -40,6 +41,7 @@ from dashboard_routes._cost_rollups import (
     build_top_issues,
 )
 from dashboard_routes._waterfall_builder import build_waterfall
+from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from factory_metrics import (
     aggregate_top_skills,
     aggregate_top_subagents,
@@ -395,9 +397,6 @@ def build_diagnostics_router(
         failure degrades to no outcomes (every judge "no data yet"), and an empty
         verdict ledger yields an empty ``judges`` list — never a 500.
         """
-        import judge_calibration as jc  # noqa: PLC0415
-        from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger  # noqa: PLC0415
-
         cfg = _config_for(repo) if repo is not None else config
         verdicts = jc.JudgeCalibrationLedger(
             jc.judge_verdict_ledger_path(cfg.data_root)

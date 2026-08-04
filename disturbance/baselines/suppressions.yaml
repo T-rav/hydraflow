@@ -167,6 +167,7 @@ entries:
   src/implement_spec_reviewer.py::noqa:PLC0415: 2
   src/issue_store.py::type-ignore[assignment]: 1
   src/issue_store.py::type-ignore[typeddict-item]: 2
+  "src/judge_calibration.py::noqa:BLE001—fail-soft:observingmustneverbreakreview": 1
   src/label_drift_watcher_loop.py::noqa:TCH001: 2
   "src/live_corpus_replay_loop.py::noqa:BLE001\u2014replaymustcontinueondispatchererror": 1
   src/live_corpus_replay_loop.py::noqa:TCH001: 3
