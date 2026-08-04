@@ -54,6 +54,17 @@ export const COST_POLL_MS = 60_000
 export const SUPERVISOR_POLL_MS = 30_000
 
 /**
+ * Operator finder-faceplate panel (#10826) REST-poll cadence. The panel reads
+ * `/api/diagnostics/finder-faceplates` (a join over the on-demand finder
+ * calibration ledger + a windowed per-loop findings rollup), so it polls on this
+ * slow fixed cadence — one pinned interval, aborted in-flight on unmount. Floors
+ * only move when an operator re-runs calibration and the live-rate window is
+ * coarse, so a fast poll would only re-read an unchanged faceplate; 60s matches
+ * the cost panel's slow-rollup cadence.
+ */
+export const FINDER_FACEPLATE_POLL_MS = 60_000
+
+/**
  * WebSocket reconnect backoff (PR5). A flapping socket previously re-ran the
  * heavy onopen fan-out (10+ fetches + history replay) every fixed 2s. We now
  * back off exponentially with full jitter — delay = random(0, min(BASE * 2**n,

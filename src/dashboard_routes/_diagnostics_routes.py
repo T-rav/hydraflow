@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, HTTPException, Query
 
 import dashboard_routes._cost_rollups as _cost_rollups_mod
+import finder_calibration as fc
 from dashboard_routes._cost_merge import (
     group_cost_by_model_by_repo,
     merge_by_loop,
@@ -47,6 +48,12 @@ from factory_metrics import (
     headline_metrics,
     issues_table,
     load_metrics,
+)
+from finder_faceplate import (
+    FINDER_LOOP_WORKER,
+    BaselineLedger,
+    baseline_ledger_path,
+    build_faceplates,
 )
 from route_types import REPO_ALL, RepoSlugParam
 from vitals.report import latest_verdict_payload
@@ -305,6 +312,70 @@ def build_diagnostics_router(
         ).read_all()
         result["sampled_audit"] = sampled_audit_metrics(samples)
         return result
+
+    @router.get("/finder-faceplates")
+    def finder_faceplates(
+        repo: RepoSlugParam = None, range: str = Query("7d")
+    ) -> dict[str, Any]:
+        """Per-finder loop-faceplate panel (#10826).
+
+        Joins each generative finder's measured noise floor (the #10821
+        :class:`finder_calibration.CalibrationLedger`, populated on-demand by
+        ``scripts/calibrate_finders.py``) with the baseline it was measured
+        against and the finder's LIVE finding-rate, into one faceplate row per
+        finder: ``calibrated`` + (when calibrated) ``floor_mean`` /
+        ``floor_sigma`` / ``threshold`` / ``sample_count`` / ``low_confidence`` /
+        ``last_calibrated`` / ``drift_days`` / ``baseline_stale``, plus
+        ``live_rate`` and a ``status`` (``within_floor`` | ``above_floor`` |
+        ``uncalibrated``) via
+        :func:`finder_calibration.indistinguishable_from_floor`.
+
+        **Live finding-rate source (unit caveat):** the per-loop findings-filed
+        counter from :func:`build_per_loop_cost` (``BACKGROUND_WORKER_STATUS``
+        events), mapped finder→loop via ``FINDER_LOOP_WORKER``, over the
+        requested ``range``. This is a windowed, dedup-gated FILED count, whereas
+        the floor is a per-single-run flagged count — the same "how many did this
+        finder flag recently" quantity but not identically normalized. A finder's
+        loop with no telemetry in the window yields ``live_rate: null`` (never an
+        invented number). Read-only; an empty ledger yields every finder
+        ``calibrated: false`` (pending), never an error.
+        """
+        cfg = _config_for(repo) if repo is not None else config
+        floors = fc.CalibrationLedger(
+            fc.calibration_ledger_path(cfg.data_root)
+        ).latest_by_finder()
+        baselines = BaselineLedger(
+            baseline_ledger_path(cfg.data_root)
+        ).latest_by_finder()
+
+        # Live finding-rate: per-loop findings-filed over the window. Read-only
+        # and fail-soft — a rollup failure yields all-null live rates rather than
+        # a 500 on a diagnostics panel whose primary data is the calibration
+        # ledger. The narrow catch mirrors the cost endpoints' failure surface
+        # (bad range, event-loop, file I/O) without a blanket except.
+        live_rates: dict[str, int | None] = dict.fromkeys(FINDER_LOOP_WORKER)
+        try:
+            window = _parse_range(range)
+            now = datetime.now(UTC)
+            rows = build_per_loop_cost(
+                cfg,
+                since=now - window,
+                until=now,
+                event_bus=_event_bus_for_rollup(cfg),
+            )
+            filed_by_loop = {
+                str(r.get("loop")): int(r.get("issues_filed", 0) or 0) for r in rows
+            }
+            live_rates = {
+                fid: filed_by_loop.get(worker)
+                for fid, worker in FINDER_LOOP_WORKER.items()
+            }
+        except (ValueError, RuntimeError, OSError, KeyError):
+            logger.warning("finder-faceplates: live-rate rollup failed", exc_info=True)
+
+        now = datetime.now(UTC)
+        finders = build_faceplates(floors, baselines, live_rates, now)
+        return {"finders": finders, "generated_at": now.isoformat()}
 
     @router.get("/second-order-vitals")
     def second_order_vitals(repo: RepoSlugParam = None) -> dict[str, Any]:

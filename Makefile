@@ -857,3 +857,17 @@ console-conformance:
 mutation-gauntlet: deps
 	@echo "$(BLUE)Running mutation gauntlet (gate-sensitivity)...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/mutation_gauntlet.py $(ARGS)
+
+# --------------------------------------------------------------------------
+# calibrate-finders — generative-finder noise-floor instrument (#10826, on top
+# of #10821). On-demand ONLY: it materializes a read-only git worktree at a
+# golden-baseline sha and runs each deterministic finder's real detection to
+# measure its false-positive floor, populating the calibration ledger the
+# /api/diagnostics/finder-faceplates panel reads. Deliberately NOT wired into
+# `quality`/CI (real per-sha checkouts, operator-supplied baseline). Use
+# ARGS='--list' to see supported vs deferred finders; ARGS='--baseline-sha <sha>'
+# to calibrate. See tests/test_calibrate_finders.py + tests/test_finder_faceplate.py.
+.PHONY: calibrate-finders
+calibrate-finders: deps
+	@echo "$(BLUE)Calibrating generative-finder noise floors...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/calibrate_finders.py $(ARGS)

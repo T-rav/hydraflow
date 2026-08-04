@@ -50,6 +50,9 @@ import { EMPTY_COST_VM } from './model/cost'
 import { SupervisorPanel } from './SupervisorPanel'
 import { useSupervisorThread } from './useSupervisorThread'
 import { EMPTY_SUPERVISOR_VM } from './model/supervisorThread'
+import { FinderFaceplatePanel } from './FinderFaceplatePanel'
+import { useFinderFaceplates } from './useFinderFaceplates'
+import { EMPTY_FINDER_FACEPLATES_VM } from './model/finderFaceplates'
 import { ReleasePromotionStrip } from './ReleasePromotionStrip'
 import { SettingsSummary } from './SettingsSummary'
 import { SettingsDrawer } from './SettingsDrawer'
@@ -154,7 +157,7 @@ function ModeToggle({ mode, select, styles }) {
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
@@ -298,6 +301,7 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                 onRestartLoop={socket.restartLoop}
                 onAckEscalations={socket.ackEscalations}
               />
+              <FinderFaceplatePanel faceplates={faceplates} />
               <LoopsPanel loops={loops} />
               <SettingsSummary summary={settings} onOpenSettings={() => setSettingsOpen(true)} />
             </div>
@@ -328,7 +332,11 @@ export function OperatorConsole() {
   // append-only observation thread on its own pinned cadence (aborted in-flight
   // on unmount), independent of the WS slice the shell otherwise renders from.
   const supervisor = useSupervisorThread()
-  return <OperatorConsoleView socket={socket} cost={cost} supervisor={supervisor} />
+  // Finder faceplates (#10826): polls the read-only join of each generative
+  // finder's measured noise floor against its live finding-rate on its own pinned
+  // cadence (aborted in-flight on unmount), independent of the WS slice.
+  const faceplates = useFinderFaceplates()
+  return <OperatorConsoleView socket={socket} cost={cost} supervisor={supervisor} faceplates={faceplates} />
 }
 
 export default OperatorConsole
