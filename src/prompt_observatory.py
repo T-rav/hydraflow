@@ -173,7 +173,13 @@ class Observation:
     count: int = 1
 
 
-def observation_record(prompt: str, *, source: str, tool: str) -> dict[str, object]:
+def observation_record(
+    prompt: str,
+    *,
+    source: str,
+    tool: str,
+    issue_number: int | None = None,
+) -> dict[str, object]:
     """The JSONL row for one gated prompt. Content-free by construction.
 
     Only digests are written — never the anchors themselves. Matching works the
@@ -182,6 +188,12 @@ def observation_record(prompt: str, *, source: str, tool: str) -> dict[str, obje
     separate a builder's literal from wrapped payload. A prompt whose skeleton
     is too thin to identify (fewer than three anchors) records its shape and
     count without the token list.
+
+    ``issue_number`` is recorded only when the gate caller knows it (#11027). It
+    is the one field that lets an observed shape — which ``reconcile`` bridges to
+    a registered prompt builder — be joined to that issue's *outcomes* (verdict
+    pass rate, retries, escapes, cost), the prompt-of-record linkage the #10855
+    rubric-vs-outcome pairing needs. Absent when unknown; never invented.
     """
     hashes = token_hashes(prompt)
     record: dict[str, object] = {
@@ -191,12 +203,16 @@ def observation_record(prompt: str, *, source: str, tool: str) -> dict[str, obje
         "anchor_count": len(hashes),
         "prompt_chars": len(prompt),
     }
+    if issue_number is not None:
+        record["issue_number"] = issue_number
     if len(hashes) >= _MIN_ANCHORS:
         record["tokens"] = sorted(hashes)
     return record
 
 
-def observe(prompt: str, *, config, source: str, tool: str) -> None:
+def observe(
+    prompt: str, *, config, source: str, tool: str, issue_number: int | None = None
+) -> None:
     """Append one shape record. Best-effort: NEVER raises, never blocks a send.
 
     This sits on the hot path of every model call, so it is deliberately
@@ -207,7 +223,9 @@ def observe(prompt: str, *, config, source: str, tool: str) -> None:
     try:
         if not getattr(config, "prompt_observatory_enabled", False):
             return
-        record = observation_record(prompt, source=source, tool=tool)
+        record = observation_record(
+            prompt, source=source, tool=tool, issue_number=issue_number
+        )
         record["timestamp"] = datetime.now(UTC).isoformat()
         record["repo"] = getattr(config, "repo", "")
         append_jsonl(config.prompt_observatory_path, dumps(record))
