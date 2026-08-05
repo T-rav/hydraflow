@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W32
 
+- `e666fb0` — feat(arch): checkable-assertion density as an ADR setpoint-erosion series (#10917) (#10917) *(2026-08-04)*
+- `08b8fad` — feat(security): external Claude review Action as an out-of-band assurance anchor (#10986) (#11024) (#11024) *(2026-08-04)*
 - `b7c5961` — feat(quality): judge calibration — proper-scoring instrument, first slice (#10836) (#11019) (#11019) *(2026-08-04)*
 
 ## 2026-W31

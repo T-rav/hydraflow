@@ -42,6 +42,9 @@ from arch.extractors.loops import extract_loops
 from arch.extractors.mockworld import extract_mockworld_map
 from arch.extractors.modules import extract_module_graph
 from arch.extractors.ports import extract_ports
+from arch.generators.adr_assertion_density_report import (
+    render_adr_assertion_density,
+)
 from arch.generators.adr_conformance import render_adr_conformance
 from arch.generators.adr_cross_reference import render_adr_cross_reference
 from arch.generators.adr_enforcement import render_adr_enforcement
@@ -77,6 +80,7 @@ _ARTIFACT_FILES = [
     "ubiquitous-language-context-map.md",
     "adr-conformance.md",
     "adr-enforcement.md",
+    "adr-assertion-density.md",
     "ai_system_inventory.md",
     "traceability_matrix.md",
     "gauntlet-calibration.md",
@@ -177,6 +181,7 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
         "coverage_matrix.md": render_coverage_matrix(loops, ports, repo_root=repo_root),
         "adr-conformance.md": render_adr_conformance(adrs),
         "adr-enforcement.md": render_adr_enforcement(adrs, repo_root=repo_root),
+        "adr-assertion-density.md": render_adr_assertion_density(adrs),
         "ai_system_inventory.md": render_ai_system_inventory(
             loops, repo_root=repo_root
         ),

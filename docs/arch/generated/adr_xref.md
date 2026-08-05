@@ -135,12 +135,14 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0126 | `src.audit.governance`, `src.detector_calibration_loop`, `src.finder_calibration`, `src.jsonl_ledger`, `src.judge_independence` | `'pytest:tests/test_finder_calibration.py'` |
 | ADR-0127 | `src.audit.store`, `src.escape.ledger`, `src.jsonl_ledger`, `src.judge_calibration`, `src.judge_independence`, `src.precheck` | `'pytest:tests/test_judge_calibration.py'` |
 | ADR-0128 | `src.judge_independence` | `'pytest:tests/test_external_security_review_workflow.py'` |
+| ADR-0129 | `src.adr_assertion_density` | `' / '**Binds:**' frontmatter this parses); 'judge_independence.shewhart_c_chart_ucl' (the control-limit helper reused here, one home for the c-chart assumption)` |
 
 ## Module → ADRs
 
 | Module | Cited by |
 |---|---|
 | `src._mock_spec_detector` | ADR-0101 |
+| `src.adr_assertion_density` | ADR-0129 |
 | `src.adr_conformance` | ADR-0100 |
 | `src.adr_conformance_loop` | ADR-0100 |
 | `src.adr_drift` | ADR-0056 |

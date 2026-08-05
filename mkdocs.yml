@@ -89,6 +89,7 @@ nav:
     - ADR Cross-Reference: arch/generated/adr_xref.md
     - ADR Conformance Map: arch/generated/adr-conformance.md
     - ADR Enforcement Debt: arch/generated/adr-enforcement.md
+    - ADR Assertion Density: arch/generated/adr-assertion-density.md
     - MockWorld Map: arch/generated/mockworld.md
     - Coverage Matrix: arch/generated/coverage_matrix.md
     - AI System Inventory: arch/generated/ai_system_inventory.md
