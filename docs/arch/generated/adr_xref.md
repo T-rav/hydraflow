@@ -134,6 +134,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0125 | `src.mutation_gauntlet` | `'pytest:tests/mutation/test_catalog.py'` |
 | ADR-0126 | `src.audit.governance`, `src.detector_calibration_loop`, `src.finder_calibration`, `src.jsonl_ledger`, `src.judge_independence` | `'pytest:tests/test_finder_calibration.py'` |
 | ADR-0127 | `src.audit.store`, `src.escape.ledger`, `src.jsonl_ledger`, `src.judge_calibration`, `src.judge_independence`, `src.precheck` | `'pytest:tests/test_judge_calibration.py'` |
+| ADR-0128 | `src.judge_independence` | `'pytest:tests/test_external_security_review_workflow.py'` |
 
 ## Module → ADRs
 
@@ -234,7 +235,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_store` | ADR-0002, ADR-0006, ADR-0022, ADR-0041, ADR-0084, ADR-0099, ADR-0108 |
 | `src.jsonl_ledger` | ADR-0126, ADR-0127 |
 | `src.judge_calibration` | ADR-0127 |
-| `src.judge_independence` | ADR-0126, ADR-0127 |
+| `src.judge_independence` | ADR-0126, ADR-0127, ADR-0128 |
 | `src.label_drift_watcher_loop` | ADR-0088 |
 | `src.label_transitions` | ADR-0002 |
 | `src.live_corpus_replay_loop` | ADR-0086 |
