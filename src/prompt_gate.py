@@ -273,16 +273,25 @@ def _emit_audit(config: HydraFlowConfig, decision: GateDecision) -> None:
 
 
 def _observe_shape(
-    prompt: str, *, config: HydraFlowConfig, source: str, tool: str
+    prompt: str,
+    *,
+    config: HydraFlowConfig,
+    source: str,
+    tool: str,
+    issue_number: int | None = None,
 ) -> None:
     """Record the prompt's structural shape. Best-effort, never raises.
 
     ``observe`` is itself best-effort; this second guard covers the case where
     the module is present but its import-time state is broken. Measurement must
-    never stop a prompt the gate allowed.
+    never stop a prompt the gate allowed. ``issue_number`` (when the caller knows
+    it) tags the shape so it can later be joined to that issue's outcomes — the
+    prompt-of-record linkage (#11027).
     """
     try:
-        observe(prompt, config=config, source=source, tool=tool)
+        observe(
+            prompt, config=config, source=source, tool=tool, issue_number=issue_number
+        )
     except Exception:  # pragma: no cover - observation is never load-bearing
         logger.debug("prompt shape observation failed", exc_info=True)
 
@@ -308,7 +317,9 @@ def gate_prompt(
     # Record the prompt's SHAPE before any class branching, so the observed
     # denominator covers every gated prompt — not just regulated ones, which
     # is all the audit stream below sees. Never raises; see prompt_observatory.
-    _observe_shape(prompt, config=config, source=source, tool=tool)
+    _observe_shape(
+        prompt, config=config, source=source, tool=tool, issue_number=issue_number
+    )
 
     data_class = effective_data_class(config.repo_data_class, issue_labels)
     if not is_regulated(data_class):
