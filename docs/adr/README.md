@@ -187,6 +187,9 @@ cadence and files remediation issues on drift.
 | [0125](0125-mutation-gauntlet-gate-sensitivity.md) | Mutation gauntlet — measuring gate sensitivity by injecting known faults | Proposed |
 | [0126](0126-golden-baseline-finder-calibration.md) | Golden-baseline finder calibration — measuring a generative finder's noise floor | Proposed |
 | [0127](0127-judge-calibration.md) | Judge calibration — scoring a judge's verdicts against outcomes with proper scoring rules | Proposed |
+| [0128](0128-external-security-review-anchor.md) | External Claude security-review Action as an out-of-band assurance anchor | Proposed |
+| [0129](0129-adr-checkable-assertion-density.md) | Checkable-assertion density as an ADR setpoint-erosion series | Proposed |
+| [0130](0130-prompt-outcome-pairing.md) | Prompt outcome pairing — make the form rubric ungameable before a floor | Proposed |
 
 ## Adding a new ADR
 

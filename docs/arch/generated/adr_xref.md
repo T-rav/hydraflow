@@ -134,12 +134,16 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0125 | `src.mutation_gauntlet` | `'pytest:tests/mutation/test_catalog.py'` |
 | ADR-0126 | `src.audit.governance`, `src.detector_calibration_loop`, `src.finder_calibration`, `src.jsonl_ledger`, `src.judge_independence` | `'pytest:tests/test_finder_calibration.py'` |
 | ADR-0127 | `src.audit.store`, `src.escape.ledger`, `src.jsonl_ledger`, `src.judge_calibration`, `src.judge_independence`, `src.precheck` | `'pytest:tests/test_judge_calibration.py'` |
+| ADR-0128 | `src.judge_independence` | `'pytest:tests/test_external_security_review_workflow.py'` |
+| ADR-0129 | `src.adr_assertion_density` | `' / '**Binds:**' frontmatter this parses); 'judge_independence.shewhart_c_chart_ucl' (the control-limit helper reused here, one home for the c-chart assumption)` |
+| ADR-0130 | `src.escape.ledger`, `src.prompt_outcome_pairing` | `'pytest:tests/test_prompt_outcome_pairing.py'` |
 
 ## Module → ADRs
 
 | Module | Cited by |
 |---|---|
 | `src._mock_spec_detector` | ADR-0101 |
+| `src.adr_assertion_density` | ADR-0129 |
 | `src.adr_conformance` | ADR-0100 |
 | `src.adr_conformance_loop` | ADR-0100 |
 | `src.adr_drift` | ADR-0056 |
@@ -207,7 +211,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.epic_sweeper_loop` | ADR-0081 |
 | `src.escalation_gate` | ADR-0015 |
 | `src.escape.auto_diagnose` | ADR-0115 |
-| `src.escape.ledger` | ADR-0127 |
+| `src.escape.ledger` | ADR-0127, ADR-0130 |
 | `src.escape_ledger_loop` | ADR-0115 |
 | `src.event_loop_watchdog` | ADR-0106, ADR-0108 |
 | `src.events` | ADR-0006, ADR-0055, ADR-0064, ADR-0114 |
@@ -234,7 +238,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_store` | ADR-0002, ADR-0006, ADR-0022, ADR-0041, ADR-0084, ADR-0099, ADR-0108 |
 | `src.jsonl_ledger` | ADR-0126, ADR-0127 |
 | `src.judge_calibration` | ADR-0127 |
-| `src.judge_independence` | ADR-0126, ADR-0127 |
+| `src.judge_independence` | ADR-0126, ADR-0127, ADR-0128 |
 | `src.label_drift_watcher_loop` | ADR-0088 |
 | `src.label_transitions` | ADR-0002 |
 | `src.live_corpus_replay_loop` | ADR-0086 |
@@ -277,6 +281,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.prompt_builder` | ADR-0087 |
 | `src.prompt_fitness` | ADR-0116 |
 | `src.prompt_gate` | ADR-0117 |
+| `src.prompt_outcome_pairing` | ADR-0130 |
 | `src.prompt_template` | ADR-0087 |
 | `src.rails_drift_caretaker_loop` | ADR-0121 |
 | `src.rails_manifest` | ADR-0121 |

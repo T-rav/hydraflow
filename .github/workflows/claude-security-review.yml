@@ -1,0 +1,85 @@
+# External Claude security-review anchor (#10986, ADR-0128).
+#
+# An OUT-OF-BAND, ADVISORY-TO-HUMAN security reviewer that runs OUTSIDE the
+# factory's self-modification boundary. Its value is governance/assurance, not
+# detection — CodeQL + Bandit (Security Scan) already cover external SAST, and
+# the inner review-phase `security` lens (src/review_phase/_phase.py) covers the
+# governed inner loop. The unique property here is independence: a security
+# verdict the graded machinery cannot route around, degrade, or edit (Leveson's
+# independent-controller / safety-constraint layer).
+#
+# Load-bearing invariants (pinned by tests/test_external_security_review_workflow.py):
+#   - ADVISORY, never a gate: the review step is `continue-on-error: true` and
+#     this workflow is NOT a required status check, so the factory can never be
+#     forced to make the anchor pass itself (that would pull it inside the
+#     boundary it exists to sit outside of).
+#   - HUMAN-VISIBLE PRs only: same-repo PRs into `staging`/`main`, excluding the
+#     factory's own governed `auto-merge` PRs (already covered by the inner lens)
+#     and dependabot. Fork PRs are excluded — the action is not hardened against
+#     prompt injection and must only review trusted diffs.
+#   - INERT UNTIL PROVISIONED: with no ANTHROPIC_API_KEY secret the job is a
+#     green no-op. Activation is a deliberate human step (see ADR-0128).
+#
+# Activation (owner action, deliberately not automatable from inside the factory):
+#   1. Add repository secret ANTHROPIC_API_KEY (Claude API + Claude Code enabled).
+#   2. (Recommended) Set repository variable EXTERNAL_SECURITY_REVIEW_MODEL to a
+#      tier DIFFERENT from the inner security lens (which defaults to Opus) so the
+#      external anchor holds model diversity as well as boundary independence.
+
+name: External Security Review
+
+on:
+  pull_request:
+    branches: [staging, main]
+    types: [opened, synchronize, reopened]
+
+# Least privilege at the top; the single job widens only to what it needs.
+permissions: {}
+
+jobs:
+  external-security-review:
+    name: External Security Review (advisory)
+    # Human-visible PRs only: same-repo (non-fork) PRs that are not the factory's
+    # governed auto-merges and not dependabot. Fork PRs are excluded (the action
+    # is not hardened against prompt injection — trusted diffs only).
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]' &&
+      !contains(github.event.pull_request.labels.*.name, 'auto-merge')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write # post advisory findings as inline PR comments
+      contents: read
+    steps:
+      - name: Gate on the external-anchor secret (inert until provisioned)
+        id: guard
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=External security review inert::Set the ANTHROPIC_API_KEY repository secret to activate the out-of-band anchor (ADR-0128)."
+          fi
+
+      - name: Checkout PR head
+        if: steps.guard.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+
+      - name: Claude security review (advisory, out-of-band anchor)
+        if: steps.guard.outputs.enabled == 'true'
+        continue-on-error: true # advisory: never blocks the merge
+        uses: anthropics/claude-code-security-review@main
+        with:
+          claude-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          comment-pr: true
+          # Owner sets EXTERNAL_SECURITY_REVIEW_MODEL to a tier different from the
+          # inner Opus lens to strengthen independence (ADR-0128). Falls back to
+          # the action's own default when unset.
+          claude-model: ${{ vars.EXTERNAL_SECURITY_REVIEW_MODEL || 'claude-opus-4-1-20250805' }}
+          # Focus on source; skip docs/tests to keep the advisory signal on code.
+          exclude-directories: docs,tests
