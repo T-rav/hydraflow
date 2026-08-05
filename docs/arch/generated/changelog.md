@@ -6,10 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W32
 
-- `ee670e1` — feat(quality): prompt outcome pairing — make the form rubric ungameable (#10855) (#10855) *(2026-08-04)*
+- `221807d` — Merge remote-tracking branch 'origin/main' into rc/2026-08-04-2300 *(2026-08-04)*
+- `7dd6799` — feat(quality): prompt outcome pairing — make the form rubric ungameable (#10855) (#11026) (#11026) *(2026-08-04)*
 - `c4cbd45` — feat(arch): checkable-assertion density as an ADR setpoint-erosion series (#10917) (#11025) (#11025) *(2026-08-04)*
 - `08b8fad` — feat(security): external Claude review Action as an out-of-band assurance anchor (#10986) (#11024) (#11024) *(2026-08-04)*
-- `b7c5961` — feat(quality): judge calibration — proper-scoring instrument, first slice (#10836) (#11019) (#11019) *(2026-08-04)*
+- `e4d9293` — chore(rc): regen arch artifacts after main merge (rc/2026-08-04-0816) *(2026-08-04)*
 - `1f659a1` — Merge remote-tracking branch 'origin/main' into rc/2026-08-04-0816 *(2026-08-04)*
 - `b7c5961` — feat(quality): judge calibration — proper-scoring instrument, first slice (#10836) (#11019) (#11019) *(2026-08-04)*
 - `faca3d5` — chore(rc): regen arch artifacts after main merge (rc/2026-08-03-2246) *(2026-08-03)*
@@ -660,8 +661,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `c9c5d35` — chore: arch-regen + lint-fix to unblock CI on #8478 *(2026-05-07)*
 - `775eebe` — feat(adr): AdrTouchpointAuditorLoop replaces deleted touchpoint gate (ADR-0056) *(2026-05-06)*
 - `dd9ce56` — feat(pr): rebase-on-conflict for process-driven merges (#8482) (#8482) *(2026-05-06)*
-- `29f2676` — chore(ci): delete the ADR touchpoint gate (replaced by caretaker loop) *(2026-05-06)*
-- `06c3e70` — feat(staging): activate two-tier branch model + repeatable branch-protection standard (#8479) (#8479) *(2026-05-06)*
 
 
 <!-- arch:generated -->
