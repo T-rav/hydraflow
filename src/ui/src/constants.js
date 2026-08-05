@@ -65,6 +65,17 @@ export const SUPERVISOR_POLL_MS = 30_000
 export const FINDER_FACEPLATE_POLL_MS = 60_000
 
 /**
+ * Operator judge-calibration panel (#10836) REST-poll cadence. The panel reads
+ * `/api/diagnostics/judge-calibration` (a proper-scoring rollup over the
+ * append-only judge-verdict ledger, resolved against the escape ledger), so it
+ * polls on this slow fixed cadence — one pinned interval, aborted in-flight on
+ * unmount. Scores only move as verdicts age past their grace window and outcomes
+ * resolve, so a fast poll would only re-read an unchanged report; 60s matches
+ * the cost / finder-faceplate slow-rollup cadence.
+ */
+export const JUDGE_CALIBRATION_POLL_MS = 60_000
+
+/**
  * WebSocket reconnect backoff (PR5). A flapping socket previously re-ran the
  * heavy onopen fan-out (10+ fetches + history replay) every fixed 2s. We now
  * back off exponentially with full jitter — delay = random(0, min(BASE * 2**n,
