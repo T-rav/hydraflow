@@ -6,7 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W32
 
-- `e666fb0` — feat(arch): checkable-assertion density as an ADR setpoint-erosion series (#10917) (#10917) *(2026-08-04)*
+- `ee670e1` — feat(quality): prompt outcome pairing — make the form rubric ungameable (#10855) (#10855) *(2026-08-04)*
+- `c4cbd45` — feat(arch): checkable-assertion density as an ADR setpoint-erosion series (#10917) (#11025) (#11025) *(2026-08-04)*
 - `08b8fad` — feat(security): external Claude review Action as an out-of-band assurance anchor (#10986) (#11024) (#11024) *(2026-08-04)*
 - `b7c5961` — feat(quality): judge calibration — proper-scoring instrument, first slice (#10836) (#11019) (#11019) *(2026-08-04)*
 
@@ -632,7 +633,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `dd9ce56` — feat(pr): rebase-on-conflict for process-driven merges (#8482) (#8482) *(2026-05-06)*
 - `29f2676` — chore(ci): delete the ADR touchpoint gate (replaced by caretaker loop) *(2026-05-06)*
 - `06c3e70` — feat(staging): activate two-tier branch model + repeatable branch-protection standard (#8479) (#8479) *(2026-05-06)*
-- `6d7fe13` — feat(telemetry): OTel Honeycomb instrumentation — Phase A (#8473) (#8473) *(2026-05-06)*
 
 
 <!-- arch:generated -->

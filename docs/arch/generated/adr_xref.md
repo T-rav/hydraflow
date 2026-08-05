@@ -136,6 +136,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0127 | `src.audit.store`, `src.escape.ledger`, `src.jsonl_ledger`, `src.judge_calibration`, `src.judge_independence`, `src.precheck` | `'pytest:tests/test_judge_calibration.py'` |
 | ADR-0128 | `src.judge_independence` | `'pytest:tests/test_external_security_review_workflow.py'` |
 | ADR-0129 | `src.adr_assertion_density` | `' / '**Binds:**' frontmatter this parses); 'judge_independence.shewhart_c_chart_ucl' (the control-limit helper reused here, one home for the c-chart assumption)` |
+| ADR-0130 | `src.escape.ledger`, `src.prompt_outcome_pairing` | `'pytest:tests/test_prompt_outcome_pairing.py'` |
 
 ## Module → ADRs
 
@@ -210,7 +211,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.epic_sweeper_loop` | ADR-0081 |
 | `src.escalation_gate` | ADR-0015 |
 | `src.escape.auto_diagnose` | ADR-0115 |
-| `src.escape.ledger` | ADR-0127 |
+| `src.escape.ledger` | ADR-0127, ADR-0130 |
 | `src.escape_ledger_loop` | ADR-0115 |
 | `src.event_loop_watchdog` | ADR-0106, ADR-0108 |
 | `src.events` | ADR-0006, ADR-0055, ADR-0064, ADR-0114 |
@@ -280,6 +281,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.prompt_builder` | ADR-0087 |
 | `src.prompt_fitness` | ADR-0116 |
 | `src.prompt_gate` | ADR-0117 |
+| `src.prompt_outcome_pairing` | ADR-0130 |
 | `src.prompt_template` | ADR-0087 |
 | `src.rails_drift_caretaker_loop` | ADR-0121 |
 | `src.rails_manifest` | ADR-0121 |
