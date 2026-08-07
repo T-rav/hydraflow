@@ -137,6 +137,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0128 | `src.judge_independence` | `'pytest:tests/test_external_security_review_workflow.py'` |
 | ADR-0129 | `src.adr_assertion_density` | `' / '**Binds:**' frontmatter this parses); 'judge_independence.shewhart_c_chart_ucl' (the control-limit helper reused here, one home for the c-chart assumption)` |
 | ADR-0130 | `src.escape.ledger`, `src.prompt_outcome_pairing` | `'pytest:tests/test_prompt_outcome_pairing.py'` |
+| ADR-0131 | `src.assumption_surfacer`, `src.spec_intake_gate` | `'pytest:tests/test_spec_intake_gate.py'` |
 
 ## Module → ADRs
 
@@ -159,7 +160,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.arch._models` | ADR-0114 |
 | `src.arch.extractors.events` | ADR-0114 |
 | `src.arch.generators.event_bus` | ADR-0114 |
-| `src.assumption_surfacer` | ADR-0064 |
+| `src.assumption_surfacer` | ADR-0064, ADR-0131 |
 | `src.audit.adjudicate` | ADR-0115 |
 | `src.audit.governance` | ADR-0126 |
 | `src.audit.store` | ADR-0127 |
@@ -315,6 +316,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.skill_prompt_eval_loop` | ADR-0045 |
 | `src.skill_registry` | ADR-0065 |
 | `src.spec_ac_generator` | ADR-0064 |
+| `src.spec_intake_gate` | ADR-0131 |
 | `src.spec_judge` | ADR-0064 |
 | `src.staging_bisect_loop` | ADR-0045, ADR-0048 |
 | `src.stale_issue_gc_loop` | ADR-0072 |
