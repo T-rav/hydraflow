@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W32
 
+- `d56e3ba` — feat(quality): spec intake gate — falsifiability core + verdict schema (#10830) (#11030) (#11030) *(2026-08-06)*
 - `7dd6799` — feat(quality): prompt outcome pairing — make the form rubric ungameable (#10855) (#11026) (#11026) *(2026-08-04)*
 - `c4cbd45` — feat(arch): checkable-assertion density as an ADR setpoint-erosion series (#10917) (#11025) (#11025) *(2026-08-04)*
 - `08b8fad` — feat(security): external Claude review Action as an out-of-band assurance anchor (#10986) (#11024) (#11024) *(2026-08-04)*
@@ -596,8 +597,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `da05260` — chore(arch): regen artifacts post-quality (P2) *(2026-05-09)*
 - `315b5e4` — feat(atlas): graph + ADRs + term provenance + term-loops status (T4-T6) *(2026-05-09)*
 - `f202f81` — docs(adr): ADR-0060 atlas graph view + ADR nodes + term provenance *(2026-05-09)*
-- `8db1004` — feat(caretaker): LabelDriftWatcherLoop — periodic drift reconciliation (#8723) (#8723) *(2026-05-08)*
-- `f018b09` — feat(memory-backlog): auto-mirror feedback memories on Write (closes hydraflow-edn7) (#8721) (#8721) *(2026-05-08)*
 
 
 <!-- arch:generated -->
