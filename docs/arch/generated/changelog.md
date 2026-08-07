@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W32
 
+- `397a8e8` — feat(arch): ADR falsifiability baseline — wire the spec-intake metric live (#10830/#10821) (#11033) (#11033) *(2026-08-06)*
 - `3cac31a` — feat(stillness): settling-window sensing — don't read your own actuation (#10825) (#11032) (#11032) *(2026-08-06)*
 - `d54d190` — feat(stillness): quiet-week decay curve — the acceptance instrument (#10822) (#11031) (#11031) *(2026-08-06)*
 - `d56e3ba` — feat(quality): spec intake gate — falsifiability core + verdict schema (#10830) (#11030) (#11030) *(2026-08-06)*
