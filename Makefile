@@ -871,3 +871,14 @@ mutation-gauntlet: deps
 calibrate-finders: deps
 	@echo "$(BLUE)Calibrating generative-finder noise floors...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/calibrate_finders.py $(ARGS)
+
+# quiet-week — stillness acceptance instrument (#10822). On-demand ONLY: run it
+# after a freeze week to ask whether mutating activity decayed to the sensing
+# floor (healthy) or self-sustained with no external input (hunting). Reads the
+# on-disk events.jsonl over a window and runs stillness.decay.fit_decay. Not
+# wired into `quality`/CI (operator-supplied window). Pass the log + window via
+# ARGS, e.g. ARGS='--event-log .hydraflow/events.jsonl --days 7'.
+.PHONY: quiet-week
+quiet-week: deps
+	@echo "$(BLUE)Running the quiet-week decay experiment...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/quiet_week_experiment.py $(ARGS)

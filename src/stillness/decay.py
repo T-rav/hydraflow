@@ -12,11 +12,13 @@ merges) as a daily series, split by originating signal class:
   the factory is its own disturbance source. That is the formal definition of
   hunting, and it is exactly what a settled control system must not do.
 
-This module is the pure measurement engine: given the daily activity series and
-the floor, it fits the decay and returns a verdict. Loading the series from the
-live event history is the caller's job (a Phase-2 loader). The abort rule — a
-genuine incident ends the experiment, and that is fine — lives with the runner,
-not here: an experiment you cannot abort is a gate you cannot trust.
+This module is the pure measurement engine (``fit_decay``) plus the pure event →
+series adapter (``daily_activity``): given classified mutating events it builds
+the daily series, fits the decay, and returns a verdict. Reading the on-disk
+event log and classifying each event by origin is the runner's job
+(``scripts/quiet_week_experiment.py`` — ``make quiet-week``), as is the abort
+rule (a genuine incident ends the experiment, and that is fine — an experiment
+you cannot abort is a gate you cannot trust).
 """
 
 from __future__ import annotations
@@ -156,3 +158,56 @@ def fit_decay(
         self_sustaining=self_sustaining,
         n_days=n,
     )
+
+
+# --- event → daily-activity adapter (pure; the runner supplies real events) ---
+
+#: The pipeline event types that count as *mutating* activity — opened work,
+#: opened PRs, and merges. Everything else (worker heartbeats, status updates) is
+#: sensing, not actuation, so it never enters the decay series.
+MUTATING_EVENT_TYPES: frozenset[str] = frozenset(
+    {"issue_created", "pr_created", "merge_update"}
+)
+
+
+@dataclass(frozen=True)
+class ActivityEvent:
+    """One mutating pipeline event, already classified by origin.
+
+    ``day_index`` is 0-based within the freeze window; ``external`` is True for
+    genuine user-driven disturbance (a human-filed issue) and False for
+    factory-authored activity. The runner does the classification (from the event
+    payload / labels) so this adapter stays pure and testable.
+    """
+
+    day_index: int
+    event_type: str
+    external: bool
+
+
+def daily_activity(
+    events: Sequence[ActivityEvent], *, days: int
+) -> list[DailyActivity]:
+    """Fold classified mutating events into the per-day series ``fit_decay`` reads.
+
+    Non-mutating event types are dropped; events outside ``[0, days)`` are
+    ignored. Every day in the window gets a row (zero-filled), so a quiet tail
+    reads as decay rather than missing data.
+    """
+    self_counts = [0] * days
+    external_counts = [0] * days
+    for event in events:
+        if event.event_type not in MUTATING_EVENT_TYPES:
+            continue
+        if not 0 <= event.day_index < days:
+            continue
+        if event.external:
+            external_counts[event.day_index] += 1
+        else:
+            self_counts[event.day_index] += 1
+    return [
+        DailyActivity(
+            day_index=i, self_originated=self_counts[i], external=external_counts[i]
+        )
+        for i in range(days)
+    ]
