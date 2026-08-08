@@ -138,6 +138,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0129 | `src.adr_assertion_density` | `' / '**Binds:**' frontmatter this parses); 'judge_independence.shewhart_c_chart_ucl' (the control-limit helper reused here, one home for the c-chart assumption)` |
 | ADR-0130 | `src.escape.ledger`, `src.prompt_outcome_pairing` | `'pytest:tests/test_prompt_outcome_pairing.py'` |
 | ADR-0131 | `src.assumption_surfacer`, `src.spec_intake_gate` | `'pytest:tests/test_spec_intake_gate.py'` |
+| ADR-0132 | — | — |
 
 ## Module → ADRs
 

@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W32
 
+- `fb574bb` — feat(stillness): quiet-week experiment runner — wire the decay engine live (#10822) (#11034) (#11034) *(2026-08-06)*
 - `397a8e8` — feat(arch): ADR falsifiability baseline — wire the spec-intake metric live (#10830/#10821) (#11033) (#11033) *(2026-08-06)*
 - `3cac31a` — feat(stillness): settling-window sensing — don't read your own actuation (#10825) (#11032) (#11032) *(2026-08-06)*
 - `d54d190` — feat(stillness): quiet-week decay curve — the acceptance instrument (#10822) (#11031) (#11031) *(2026-08-06)*
@@ -593,13 +594,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 - `48ffc6b` — feat(loops): EntryEvidenceLoop — autonomous term ↔ wiki-entry backlinks (ADR-0062) *(2026-05-10)*
 - `9cb158f` — Merge origin/staging into feat/advisor-pattern-review *(2026-05-10)*
-- `367d165` — chore(arch): regen artifacts post-quality (P4) *(2026-05-09)*
-- `fe84239` — chore(arch): regen artifacts post-quality (P3) *(2026-05-09)*
-- `9a5df5a` — feat(atlas): entries-as-evidence + Discovered bucket endpoints (T3-T4) *(2026-05-09)*
-- `68c9342` — docs(adr): ADR-0061 atlas entries-as-evidence + Discovered bucket *(2026-05-09)*
-- `da05260` — chore(arch): regen artifacts post-quality (P2) *(2026-05-09)*
-- `315b5e4` — feat(atlas): graph + ADRs + term provenance + term-loops status (T4-T6) *(2026-05-09)*
-- `f202f81` — docs(adr): ADR-0060 atlas graph view + ADR nodes + term provenance *(2026-05-09)*
 
 
 <!-- arch:generated -->
