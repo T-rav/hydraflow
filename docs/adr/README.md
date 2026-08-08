@@ -191,6 +191,7 @@ cadence and files remediation issues on drift.
 | [0129](0129-adr-checkable-assertion-density.md) | Checkable-assertion density as an ADR setpoint-erosion series | Proposed |
 | [0130](0130-prompt-outcome-pairing.md) | Prompt outcome pairing — make the form rubric ungameable before a floor | Proposed |
 | [0131](0131-spec-intake-gate.md) | Spec intake gate — stress-testing prose before it becomes a setpoint | Proposed |
+| [0132](0132-cognitive-process-constitution.md) | The cognitive-process constitution — the harness as a governor of thought | Proposed |
 
 ## Adding a new ADR
 
