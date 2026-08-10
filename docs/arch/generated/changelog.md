@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W32
 
+- `da25b20` — docs(adr): ADR-0132 cognitive-process constitution — reviewed + refined (#11040) (#11042) (#11042) *(2026-08-07)*
 - `fb574bb` — feat(stillness): quiet-week experiment runner — wire the decay engine live (#10822) (#11034) (#11034) *(2026-08-06)*
 - `397a8e8` — feat(arch): ADR falsifiability baseline — wire the spec-intake metric live (#10830/#10821) (#11033) (#11033) *(2026-08-06)*
 - `3cac31a` — feat(stillness): settling-window sensing — don't read your own actuation (#10825) (#11032) (#11032) *(2026-08-06)*
@@ -588,12 +589,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `b3d52be` — docs(audit): factory-phase drift mitigation ADR + report — slice #4 of 5 *(2026-05-12)*
 - `a7db05f` — docs(audit): dark-factory compatibility sweep — slice #3 of 5 *(2026-05-12)*
 - `dcde17f` — docs(audit): coherency drift audit — slice #2 of 5 *(2026-05-12)*
-- `67a16cd` — refactor(review): split review_phase.py into package for file-size discipline (T36, advisor-zpv) *(2026-05-11)*
-
-## 2026-W19
-
-- `48ffc6b` — feat(loops): EntryEvidenceLoop — autonomous term ↔ wiki-entry backlinks (ADR-0062) *(2026-05-10)*
-- `9cb158f` — Merge origin/staging into feat/advisor-pattern-review *(2026-05-10)*
 
 
 <!-- arch:generated -->

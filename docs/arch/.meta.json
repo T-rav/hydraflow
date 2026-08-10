@@ -13,13 +13,13 @@
       "content_sha": "8fa83a40aeded7bab261ef83d7c797d1678f20006583d001076d3b2372bc2ecc"
     },
     "adr_xref.md": {
-      "content_sha": "d695c4b36018fee37ec481f2e489ca911d3da664e93c8985dc7091bda5e03ba4"
+      "content_sha": "4d3b50649bbe16ee8dafe9df70c5341295e1d12c9f10f871e470f0026535211c"
     },
     "ai_system_inventory.md": {
       "content_sha": "16b0b3bc4191f5c84a979a6794c6f99c1368e73060e159c9cc9acedc4b560b23"
     },
     "changelog.md": {
-      "content_sha": "cf289dadd00bf2281004e89b6665e3f293dca210697c7e86fe7f61bb4b42ffaf"
+      "content_sha": "6c0405d0fe937cfc2b1c4191a2dc80de77d5370b7ad742141bb45a23ec32a528"
     },
     "coverage_matrix.md": {
       "content_sha": "b74d666cf36ecdbaa5add72ec7453ab4fb1c533d4cb48ce797fbc3dacfbe5700"
@@ -58,5 +58,5 @@
       "content_sha": "0ff084f7b18c2b79ead31a8fd90887c1645dba481e1995e0d92c64a8f30b9f4a"
     }
   },
-  "content_sha": "9214d10cb22e11f6b2926dbbfd4b97d994ed11d868bc928ddf3fc0cc01963255"
+  "content_sha": "b82f0adecc798babf076d8cb87a9e04516459241a5f37dad9d41a8fa3e127351"
 }

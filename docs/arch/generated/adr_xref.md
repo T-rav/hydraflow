@@ -139,6 +139,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0130 | `src.escape.ledger`, `src.prompt_outcome_pairing` | `'pytest:tests/test_prompt_outcome_pairing.py'` |
 | ADR-0131 | `src.assumption_surfacer`, `src.spec_intake_gate` | `'pytest:tests/test_spec_intake_gate.py'` |
 | ADR-0132 | — | — |
+| ADR-0133 | `src.audit.governance`, `src.finder_calibration`, `src.judge_independence`, `src.vitals.control`, `src.vitals_methodology` | `'pytest:tests/test_vitals_methodology.py'` |
 
 ## Module → ADRs
 
@@ -163,7 +164,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.arch.generators.event_bus` | ADR-0114 |
 | `src.assumption_surfacer` | ADR-0064, ADR-0131 |
 | `src.audit.adjudicate` | ADR-0115 |
-| `src.audit.governance` | ADR-0126 |
+| `src.audit.governance` | ADR-0126, ADR-0133 |
 | `src.audit.store` | ADR-0127 |
 | `src.auto_agent_preflight_loop` | ADR-0050, ADR-0063, ADR-0084 |
 | `src.auto_pr` | ADR-0101 |
@@ -220,7 +221,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.exception_classify` | ADR-0055, ADR-0109 |
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |
-| `src.finder_calibration` | ADR-0126 |
+| `src.finder_calibration` | ADR-0126, ADR-0133 |
 | `src.fitness_scorecard_loop` | ADR-0093 |
 | `src.flake_tracker_loop` | ADR-0045 |
 | `src.flows.adapters` | ADR-0111 |
@@ -240,7 +241,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.issue_store` | ADR-0002, ADR-0006, ADR-0022, ADR-0041, ADR-0084, ADR-0099, ADR-0108 |
 | `src.jsonl_ledger` | ADR-0126, ADR-0127 |
 | `src.judge_calibration` | ADR-0127 |
-| `src.judge_independence` | ADR-0126, ADR-0127, ADR-0128 |
+| `src.judge_independence` | ADR-0126, ADR-0127, ADR-0128, ADR-0133 |
 | `src.label_drift_watcher_loop` | ADR-0088 |
 | `src.label_transitions` | ADR-0002 |
 | `src.live_corpus_replay_loop` | ADR-0086 |
@@ -347,6 +348,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.ultra_review` | ADR-0109 |
 | `src.untrusted_text` | ADR-0092 |
 | `src.visual_validation` | ADR-0015 |
+| `src.vitals.control` | ADR-0133 |
+| `src.vitals_methodology` | ADR-0133 |
 | `src.wiki_carryover` | ADR-0064 |
 | `src.wiki_compiler` | ADR-0032 |
 | `src.wiki_rot_detector_loop` | ADR-0045 |
