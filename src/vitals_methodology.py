@@ -120,7 +120,7 @@ def widened_sigma_multiplier(
     upper-control-limit-only charts).
 
     Worked anchors from #10838 (two_sided=True, Bonferroni, 5% monthly):
-    ``n=1 → 3.02``, ``n=70 → ~3.4``. And the classic group-chart result
+    ``n=1 → 3.0`` (the raw 1.96σ is floored), ``n=70 → ~3.4``. And the group-chart result
     (upper-tail budget = a single 3σ one-sided chart) recovers Mortell &
     Runger's ``n=10 → 3.64`` when called with the matching arguments.
 

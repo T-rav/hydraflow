@@ -58,10 +58,16 @@ class TestWidenedSigmaMultiplier:
         widths = [widened_sigma_multiplier(n) for n in (1, 10, 70, 300)]
         assert widths == sorted(widths)
 
-    def test_widening_depends_on_chart_count_not_tick_cadence(self) -> None:
-        # Cycle-granularity ruling: the multiplier is a function of the registered
-        # instrument count ALONE. Same n → identical L regardless of any cadence.
-        assert widened_sigma_multiplier(70) == widened_sigma_multiplier(70)
+    def test_multiplier_is_the_exact_bonferroni_probit_of_chart_count(self) -> None:
+        # The cycle-granularity ruling means L is a pure function of the
+        # registered chart count — this function has no tick/cadence input at all
+        # (that invariant is enforced at the call site, which evaluates once per
+        # cycle). Pin the EXACT two-sided Bonferroni probit for n=70 against an
+        # independently computed value, so a regression in the formula, the
+        # default method, or the floor is caught — not merely that a pure
+        # function returns the same thing twice.
+        expected = NormalDist(0.0, 1.0).inv_cdf(1.0 - (0.05 / 70) / 2.0)
+        assert widened_sigma_multiplier(70) == pytest.approx(expected, abs=1e-9)
 
     def test_nonpositive_count_degrades_to_classic_three_sigma(self) -> None:
         assert widened_sigma_multiplier(0) == CLASSIC_SHEWHART_SIGMA
@@ -114,12 +120,16 @@ class TestMinimumDetectableEffect:
 
 class TestTimeBetweenEventsChart:
     def test_limits_follow_benneyan_formulas(self) -> None:
+        # Independent numeric anchors for mean=30 (Benneyan 2001 g/t-chart):
+        #   centre = 0.693·30           = 20.79
+        #   UCL    = 30 + 3·√(30²+30)   = 30 + 3·√930 = 121.487704…
+        #   LCL    = max(0, 30 − 91.49) = 0
+        # Hardcoded literals, NOT a re-derivation of the implementation's formula.
         limits = time_between_events_limits(30.0)
-        spread = 3.0 * math.sqrt(30.0 * 30.0 + 30.0)
         assert isinstance(limits, TBEChartLimits)
-        assert limits.centre == pytest.approx(0.693 * 30.0)
-        assert limits.upper == pytest.approx(30.0 + spread)
-        assert limits.lower == pytest.approx(max(0.0, 30.0 - spread))
+        assert limits.centre == pytest.approx(20.79, abs=1e-9)
+        assert limits.upper == pytest.approx(121.487704, abs=1e-4)
+        assert limits.lower == 0.0
 
     def test_lower_limit_is_pinned_at_zero(self) -> None:
         # For any positive mean the 3σ spread exceeds the mean, so LCL floors at 0
