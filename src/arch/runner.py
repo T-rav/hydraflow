@@ -48,6 +48,7 @@ from arch.generators.adr_assertion_density_report import (
 from arch.generators.adr_conformance import render_adr_conformance
 from arch.generators.adr_cross_reference import render_adr_cross_reference
 from arch.generators.adr_enforcement import render_adr_enforcement
+from arch.generators.adr_falsifiability_report import render_adr_falsifiability
 from arch.generators.ai_system_inventory import render_ai_system_inventory
 from arch.generators.changelog import render_changelog
 from arch.generators.coverage_matrix import render_coverage_matrix
@@ -81,6 +82,7 @@ _ARTIFACT_FILES = [
     "adr-conformance.md",
     "adr-enforcement.md",
     "adr-assertion-density.md",
+    "adr-falsifiability.md",
     "ai_system_inventory.md",
     "traceability_matrix.md",
     "gauntlet-calibration.md",
@@ -182,6 +184,7 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
         "adr-conformance.md": render_adr_conformance(adrs),
         "adr-enforcement.md": render_adr_enforcement(adrs, repo_root=repo_root),
         "adr-assertion-density.md": render_adr_assertion_density(adrs),
+        "adr-falsifiability.md": render_adr_falsifiability(adrs, repo_root=repo_root),
         "ai_system_inventory.md": render_ai_system_inventory(
             loops, repo_root=repo_root
         ),

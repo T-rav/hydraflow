@@ -90,6 +90,7 @@ nav:
     - ADR Conformance Map: arch/generated/adr-conformance.md
     - ADR Enforcement Debt: arch/generated/adr-enforcement.md
     - ADR Assertion Density: arch/generated/adr-assertion-density.md
+    - ADR Falsifiability Baseline: arch/generated/adr-falsifiability.md
     - MockWorld Map: arch/generated/mockworld.md
     - Coverage Matrix: arch/generated/coverage_matrix.md
     - AI System Inventory: arch/generated/ai_system_inventory.md
