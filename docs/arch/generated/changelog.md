@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W32
 
+- `7946975` — feat(vitals): multiplicity/MDE/time-between-events methodology (ADR-0133, #10838) (#11046) (#11046) *(2026-08-09)*
 - `da25b20` — docs(adr): ADR-0132 cognitive-process constitution — reviewed + refined (#11040) (#11042) (#11042) *(2026-08-07)*
 - `fb574bb` — feat(stillness): quiet-week experiment runner — wire the decay engine live (#10822) (#11034) (#11034) *(2026-08-06)*
 - `397a8e8` — feat(arch): ADR falsifiability baseline — wire the spec-intake metric live (#10830/#10821) (#11033) (#11033) *(2026-08-06)*

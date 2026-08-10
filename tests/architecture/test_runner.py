@@ -77,6 +77,7 @@ def test_emit_writes_all_artifacts(populated_repo: Path):
         "adr-enforcement.md",
         "adr-assertion-density.md",
         "adr-falsifiability.md",
+        "vitals-methodology.md",
         "ai_system_inventory.md",
         "traceability_matrix.md",
         "gauntlet-calibration.md",

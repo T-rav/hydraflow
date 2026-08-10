@@ -52,6 +52,7 @@ graph LR
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "14" --> src_arch
+    src_arch_generators -- "1" --> src_vitals
     src_audit -- "1" --> src_escape
     src_dashboard_routes -- "2" --> src_audit
     src_dashboard_routes -- "1" --> src_escape
