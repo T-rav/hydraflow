@@ -6,11 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W32
 
+- `4f41033` — Merge remote-tracking branch 'origin/main' into rc/2026-08-09-1545 *(2026-08-09)*
+- `da25b20` — docs(adr): ADR-0132 cognitive-process constitution — reviewed + refined (#11040) (#11042) (#11042) *(2026-08-07)*
 - `fb574bb` — feat(stillness): quiet-week experiment runner — wire the decay engine live (#10822) (#11034) (#11034) *(2026-08-06)*
 - `397a8e8` — feat(arch): ADR falsifiability baseline — wire the spec-intake metric live (#10830/#10821) (#11033) (#11033) *(2026-08-06)*
 - `3cac31a` — feat(stillness): settling-window sensing — don't read your own actuation (#10825) (#11032) (#11032) *(2026-08-06)*
 - `d54d190` — feat(stillness): quiet-week decay curve — the acceptance instrument (#10822) (#11031) (#11031) *(2026-08-06)*
 - `d56e3ba` — feat(quality): spec intake gate — falsifiability core + verdict schema (#10830) (#11030) (#11030) *(2026-08-06)*
+- `9768aa7` — chore(rc): regen arch artifacts after main merge (rc/2026-08-04-2300) *(2026-08-04)*
 - `221807d` — Merge remote-tracking branch 'origin/main' into rc/2026-08-04-2300 *(2026-08-04)*
 - `7dd6799` — feat(quality): prompt outcome pairing — make the form rubric ungameable (#10855) (#11026) (#11026) *(2026-08-04)*
 - `c4cbd45` — feat(arch): checkable-assertion density as an ADR setpoint-erosion series (#10917) (#11025) (#11025) *(2026-08-04)*
@@ -618,54 +621,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `b3d52be` — docs(audit): factory-phase drift mitigation ADR + report — slice #4 of 5 *(2026-05-12)*
 - `a7db05f` — docs(audit): dark-factory compatibility sweep — slice #3 of 5 *(2026-05-12)*
 - `dcde17f` — docs(audit): coherency drift audit — slice #2 of 5 *(2026-05-12)*
-- `67a16cd` — refactor(review): split review_phase.py into package for file-size discipline (T36, advisor-zpv) *(2026-05-11)*
-
-## 2026-W19
-
-- `48ffc6b` — feat(loops): EntryEvidenceLoop — autonomous term ↔ wiki-entry backlinks (ADR-0062) *(2026-05-10)*
-- `9cb158f` — Merge origin/staging into feat/advisor-pattern-review *(2026-05-10)*
-- `367d165` — chore(arch): regen artifacts post-quality (P4) *(2026-05-09)*
-- `fe84239` — chore(arch): regen artifacts post-quality (P3) *(2026-05-09)*
-- `9a5df5a` — feat(atlas): entries-as-evidence + Discovered bucket endpoints (T3-T4) *(2026-05-09)*
-- `68c9342` — docs(adr): ADR-0061 atlas entries-as-evidence + Discovered bucket *(2026-05-09)*
-- `da05260` — chore(arch): regen artifacts post-quality (P2) *(2026-05-09)*
-- `315b5e4` — feat(atlas): graph + ADRs + term provenance + term-loops status (T4-T6) *(2026-05-09)*
-- `f202f81` — docs(adr): ADR-0060 atlas graph view + ADR nodes + term provenance *(2026-05-09)*
-- `8db1004` — feat(caretaker): LabelDriftWatcherLoop — periodic drift reconciliation (#8723) (#8723) *(2026-05-08)*
-- `f018b09` — feat(memory-backlog): auto-mirror feedback memories on Write (closes hydraflow-edn7) (#8721) (#8721) *(2026-05-08)*
-- `f0dc42d` — chore(arch): regen artifacts post-quality (T13) *(2026-05-08)*
-- `1d0390f` — feat(atlas): UI shell + Domain/Articles/Maintenance views + tab rename (T5-T11) *(2026-05-08)*
-- `2533d8f` — docs(memory-backlog): mirror 3 new feedback memories (#8720) (#8720) *(2026-05-08)*
-- `634ba7f` — feat(atlas): /api/atlas/* term + ADR endpoints (T2-T4 + T14-T15) *(2026-05-08)*
-- `169ff25` — docs(adr): ADR-0059 atlas knowledge graph dashboard *(2026-05-08)*
-- `df80b0c` — fix(pr-unsticker): split issue vs PR label targets on HITL release (#8715) (#8715) *(2026-05-08)*
-- `ab7d575` — chore(arch): regenerate curated arch docs for ADR-0059 cross-references (T30.7) *(2026-05-08)*
-- `2953fc7` — docs(wiki): advisor-pattern entries (architecture-async-control + dark-factory) (T32, advisor-h4y) *(2026-05-08)*
-- `7a8b37a` — docs(adr): advisor-pattern self-repairing review (T31, advisor-5o4) *(2026-05-08)*
-- `69d9f4a` — feat: tier-2 enforcement batch (mock spec, ci git, memory backlog loop) (#8714) (#8714) *(2026-05-08)*
-- `6704c08` — fix(implement): don't publish PRs for failed fresh attempts (#8713) (#8713) *(2026-05-08)*
-- `1966bfd` — fix(staging-promotion): trigger CI on rc/* PRs via synthetic commit *(2026-05-07)*
-- `fb1cdb4` — Merge pull request #8491 from T-rav/rc/2026-05-07-0648 *(2026-05-07)*
-- `5bc84da` — feat(ul): wire EdgeProposerLoop into ServiceRegistry + orchestrator *(2026-05-07)*
-- `8962798` — docs(adr): add ADR-0058 edge-proposer loop *(2026-05-07)*
-- `76e91e0` — feat(ul): wire TermPrunerLoop into ServiceRegistry + orchestrator *(2026-05-07)*
-- `882171c` — docs(adr): add ADR-0057 term-pruner loop *(2026-05-07)*
-- `d83d968` — Merge pull request #8681 from T-rav/ul-proposer/08881ea4 *(2026-05-07)*
-- `8407378` — feat(ul): auto-grown terms ship as 'accepted' directly *(2026-05-07)*
-- `8a5d2ad` — chore: dedupe update_pr_branch — reuse PR #8482's existing impl *(2026-05-07)*
-- `1bed223` — chore: register MergeStateWatcherLoop in all loop-hygiene registries *(2026-05-07)*
-- `ac8b047` — feat(caretaker): MergeStateWatcher loop — auto-rebase or HITL-escalate conflicting PRs *(2026-05-07)*
-- `a46fb11` — chore: regen arch artifacts after rebase *(2026-05-07)*
-- `33b642d` — fix(dashboard): surface RepoRuntime startup failures so the play button stops flickering *(2026-05-07)*
-- `ba2f7b8` — feat(ul): term-proposer batch — 1 drafts *(2026-05-07)*
-- `2ffae14` — chore(arch): regenerate arch artifacts after term-proposer-adapters merge *(2026-05-07)*
-- `c45e243` — Merge remote-tracking branch 'origin/feat/term-proposer-adapters' into feat/term-proposer-adapters *(2026-05-07)*
-- `c681459` — feat(pr): caretaker-loops spec + plan + update_pr_base port method (#8489) (#8489) *(2026-05-07)*
-- `cdb1a31` — feat(testing): document HydraFlow test pyramid + add missing layers for #8482 (#8486) (#8486) *(2026-05-07)*
-- `8b62616` — chore: re-regen arch artifacts after rebase onto staging *(2026-05-07)*
-- `c9c5d35` — chore: arch-regen + lint-fix to unblock CI on #8478 *(2026-05-07)*
-- `775eebe` — feat(adr): AdrTouchpointAuditorLoop replaces deleted touchpoint gate (ADR-0056) *(2026-05-06)*
-- `dd9ce56` — feat(pr): rebase-on-conflict for process-driven merges (#8482) (#8482) *(2026-05-06)*
 
 
 <!-- arch:generated -->
