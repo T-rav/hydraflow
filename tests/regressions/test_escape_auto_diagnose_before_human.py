@@ -14,6 +14,7 @@ even though the confirm-or-dismiss move was mechanical. This pins the routing:
 from __future__ import annotations
 
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -70,9 +71,16 @@ def _commit_bug_fix(repo: Path, issue: int, *, mod: str = "crash") -> str:
 
 
 def _low_conf_bug_row(detection_ref: str, issue: int) -> EscapeRecord:
+    # ``detected_at`` MUST be relative to now, not a hardcoded absolute date:
+    # these cases assert the LOW-confidence surface in isolation, which only
+    # holds while the row stays UNDER escape_ledger_encoding_age_days (14d) so
+    # the AGING surface (never auto-diagnosed) does not also fire. A fixed date
+    # silently ages past that threshold as wall-clock advances and adds a
+    # phantom second surface (regression: the row went aging 14d after 2026-07-27).
+    fresh = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     return EscapeRecord(
         id=f"bug-issue:{detection_ref}",
-        detected_at="2026-07-27T00:00:00+00:00",  # fresh → only the LOW surface
+        detected_at=fresh,  # fresh → only the LOW surface (never crosses aging)
         detection_source="bug-issue",
         detection_ref=detection_ref,
         originating_pr=issue,
