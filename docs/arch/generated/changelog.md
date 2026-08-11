@@ -4,9 +4,15 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W33
+
+- `f402c7a` — Merge remote-tracking branch 'origin/main' into rc/2026-08-11-1335 *(2026-08-11)*
+
 ## 2026-W32
 
+- `5e66727` — feat(arch): vitals-methodology surface — wire ADR-0133 live (#10838 follow-up) (#11048) (#11048) *(2026-08-09)*
 - `7946975` — feat(vitals): multiplicity/MDE/time-between-events methodology (ADR-0133, #10838) (#11046) (#11046) *(2026-08-09)*
+- `8771a20` — chore(rc): regen arch artifacts after main merge (rc/2026-08-09-1545) *(2026-08-09)*
 - `4f41033` — Merge remote-tracking branch 'origin/main' into rc/2026-08-09-1545 *(2026-08-09)*
 - `da25b20` — docs(adr): ADR-0132 cognitive-process constitution — reviewed + refined (#11040) (#11042) (#11042) *(2026-08-07)*
 - `fb574bb` — feat(stillness): quiet-week experiment runner — wire the decay engine live (#10822) (#11034) (#11034) *(2026-08-06)*
@@ -605,23 +611,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `0c98560` — merge: reconcile main into staging (33 commits ahead) *(2026-05-16)*
 - `b1eafc5` — fix(staging): wire LiveCorpusReplayLoop + audit fixes — unblock RC promotion (#8939) (#8939) *(2026-05-16)*
 - `ef3b5f5` — chore(arch): regen arch + wiki artifacts from staging tip (#8926) (#8926) *(2026-05-16)*
-- `9bfce88` — docs(wiki): backfill 7 undocumented topics (closes slice 5.0 + 5.3 doc gaps) *(2026-05-12)*
-- `4ba1202` — docs(adr): promote 0031 + 0047 to Accepted (status drift fix from slice 5 audits) *(2026-05-12)*
-- `01ae95c` — fix(bg-loops): YAML resilience + auto-ensure PR labels (#8753) (#8753) *(2026-05-12)*
-- `92601fd` — audit: per-area review — Auto-Agent (slice 5.3) *(2026-05-12)*
-- `1f954c2` — docs(audit): per-area review — Hexagonal Boundaries (slice 5.2 of 5) *(2026-05-12)*
-- `b1b0395` — docs(audit): per-area review — State & Persistence (slice 5.6) *(2026-05-12)*
-- `173d167` — docs(audit): per-area review — Quality Gates (slice 5.4) *(2026-05-12)*
-- `a6c1957` — docs(audit): per-area review — MockWorld test harness (slice 5.7) *(2026-05-12)*
-- `80d4185` — docs(audit): per-area review — Trust Fleet (slice 5.1 of 5) *(2026-05-12)*
-- `9df7abe` — audit(area): per-area review — Goal-Driven Development (slice 5.9) *(2026-05-12)*
-- `6cc295c` — audit: per-area review — Architecture Knowledge (slice 5.5) *(2026-05-12)*
-- `f641882` — audit(orchestration): per-area review slice 5.10 — 2026-05-12 *(2026-05-12)*
-- `dda8313` — docs(audit): per-area review — Dashboard (slice 5.8) *(2026-05-12)*
-- `2b25507` — docs(audit): per-area review — Caretaking (slice 5.0 of 5) *(2026-05-12)*
-- `b3d52be` — docs(audit): factory-phase drift mitigation ADR + report — slice #4 of 5 *(2026-05-12)*
-- `a7db05f` — docs(audit): dark-factory compatibility sweep — slice #3 of 5 *(2026-05-12)*
-- `dcde17f` — docs(audit): coherency drift audit — slice #2 of 5 *(2026-05-12)*
 
 
 <!-- arch:generated -->
