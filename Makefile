@@ -473,6 +473,7 @@ stamp:
 		$(if $(CLI_ENTRY),--cli-entry $(CLI_ENTRY)) \
 		$(if $(COVERAGE_FLOOR),--coverage-floor $(COVERAGE_FLOOR)) \
 		$(if $(FORCE),--force) \
+		$(if $(AGENTS_CONSOLE),--agents-console) \
 		$(ARGS)
 
 
