@@ -882,3 +882,23 @@ calibrate-finders: deps
 quiet-week: deps
 	@echo "$(BLUE)Running the quiet-week decay experiment...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/quiet_week_experiment.py $(ARGS)
+
+# Time-travel guard (#11047): re-run the bomb-prone test subset with the wall
+# clock offset TIME_TRAVEL_DAYS into the future, so fixture time-bombs
+# (absolute dates / frozen anchors vs now()-relative thresholds) detonate here
+# instead of on a future RC. Advisory lane; also run by CI on ci.yml changes.
+TIME_TRAVEL_DAYS ?= 90
+.PHONY: time-travel
+time-travel: deps
+	@echo "$(BLUE)Running time-travel guard (+$(TIME_TRAVEL_DAYS) days)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src \
+		HYDRAFLOW_TIME_TRAVEL_DAYS=$(TIME_TRAVEL_DAYS) $(UV) pytest \
+		tests/regressions/ \
+		tests/test_time_travel_guard.py \
+		tests/test_diagnostics_judge_calibration_route.py \
+		tests/test_escape_ledger_loop.py \
+		tests/test_boot_gap_detector.py \
+		tests/test_diagnostics_cost_rollup_routes.py \
+		tests/test_staleness.py \
+		tests/test_diagnostics_finder_faceplates_route.py \
+		-p no:randomly -q

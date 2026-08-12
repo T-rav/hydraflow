@@ -1134,3 +1134,37 @@ def write_plugin_skill(
         )
     skill_md.write_text(content)
     return skill_md
+
+
+# --- time-travel guard (#11047) ----------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _time_travel() -> Any:
+    """Offset the wall clock when ``HYDRAFLOW_TIME_TRAVEL_DAYS`` is set (#11047).
+
+    The wall-clock time-bomb class: a fixture hardcodes an absolute date (PR
+    #11045) or freezes a ``_NOW`` anchor while the code under test reads the
+    real ``datetime.now()`` (PR #11053), and silently ages past a now()-relative
+    threshold — two RC-blocking detonations in 48 hours. This fixture is the
+    detonator range: ``make time-travel`` re-runs the bomb-prone subset with the
+    clock pushed N days forward, so any fixture whose semantics depend on the
+    absolute date fails in the advisory lane instead of on a future RC.
+
+    Inert unless the env var is set (zero cost in normal runs). ``tick=True``
+    keeps the clock advancing from the offset instant so sleep/timeout logic
+    behaves; freezegun leaves ``time.monotonic`` untouched, so asyncio timing
+    is unaffected. Subprocesses see the real clock — the bombs live in-process,
+    in fixture-vs-``datetime.now()`` comparisons.
+    """
+    days = os.environ.get("HYDRAFLOW_TIME_TRAVEL_DAYS")
+    if not days:
+        yield
+        return
+    from datetime import UTC, datetime, timedelta
+
+    from freezegun import freeze_time
+
+    target = datetime.now(UTC) + timedelta(days=int(days))
+    with freeze_time(target, tick=True):
+        yield
