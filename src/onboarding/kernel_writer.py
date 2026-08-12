@@ -97,6 +97,11 @@ class KernelSpec:
     label_prefix: str = "hydraflow"
     main_branch: str = "main"
     staging_branch: str = "staging"
+    # Optional consoles-of-personas layer (#10949): stamp the agents/ skeleton
+    # (persona contracts + console charter + decisions/ record discipline) per
+    # docs/methodology/consoles-of-personas.md. Off by default — chartering
+    # review chambers is a deliberate project choice, not kernel plumbing.
+    agents_console: bool = False
 
     @property
     def pkg(self) -> str:
@@ -588,7 +593,67 @@ def _plan(spec: KernelSpec, hydraflow_root: Path) -> list[tuple[str, str, Owners
                 continue
             rel = src_file.relative_to(hydraflow_root).as_posix()
             plan.append((rel, src_file.read_text(encoding="utf-8"), Ownership.TEMPLATE))
+    # Optional consoles-of-personas layer (#10949). Skeleton READMEs are
+    # TEMPLATE-owned (re-stampable under force); the personas and decision
+    # records a project accrues alongside them are its own files and are never
+    # part of this plan.
+    if spec.agents_console:
+        plan.extend(_agents_console_files(spec))
     return plan
+
+
+_PERSONAS_METHODOLOGY_REF = "docs/methodology/consoles-of-personas.md"
+
+
+def _agents_console_files(spec: KernelSpec) -> list[tuple[str, str, Ownership]]:
+    """The consoles-of-personas skeleton (#10949): four TEMPLATE-owned READMEs."""
+    agents = (
+        f"# {spec.title} — agents layer (consoles of personas)\n\n"
+        "Chartered review chambers per the HydraFlow methodology: personas as\n"
+        "versioned contracts, chambers with bounded decision rights, ADR-style\n"
+        "decision records, and per-persona calibration. Full pattern:\n"
+        f"HydraFlow `{_PERSONAS_METHODOLOGY_REF}` (reference implementation:\n"
+        "T-rav/harvestd `agents/`).\n\n"
+        "- `personas/` — one contract file per persona.\n"
+        "- `console/` — the general chamber contract + one charter per chamber.\n"
+        "- `console/decisions/` — one numbered record per adjudication.\n"
+    )
+    personas = (
+        "# Persona contracts\n\n"
+        "One file per persona. Each contract carries: identity (what it looks\n"
+        "for, what it deliberately ignores), the exact structured verdict\n"
+        "format, `authority:` frontmatter (decide vs advise — default advise),\n"
+        "`feeds:` frontmatter (which chambers consume it), and kernel\n"
+        "boundaries (what it may never do: no merge authority, no money, no\n"
+        "editing its own contract). A persona whose output cannot be parsed\n"
+        "cannot be calibrated; an uncalibratable persona is noise.\n\n"
+        "**Vote honesty (mandatory):** seats on the same model substrate are\n"
+        "~1.x effective votes, never N. State it wherever seat counts appear.\n"
+    )
+    console = (
+        "# Console — chamber charters\n\n"
+        "One charter per chamber: chair, seats, and a bounded decision right.\n"
+        "House rules (from the general contract):\n\n"
+        "- Seat verdicts BEFORE chair consolidation.\n"
+        "- Disagreement escalates by name; it is never averaged.\n"
+        "- No chamber creates; chambers review, adjudicate, record.\n"
+        "- No chamber holds money or merge authority — verdicts propose,\n"
+        "  the factory's gates and the human floor commit.\n\n"
+        f"Calibration rules live in HydraFlow `{_PERSONAS_METHODOLOGY_REF}`:\n"
+        "finding-survival rate per persona, fatigue budget, drift rule.\n"
+    )
+    decisions = (
+        "# Decision records\n\n"
+        "One numbered, ADR-style file per adjudication. The chair's closing\n"
+        "duty is the commit: **no committed record, no verdict.** This\n"
+        "directory listing IS the index — no hand-maintained tables.\n"
+    )
+    return [
+        ("agents/README.md", agents, Ownership.TEMPLATE),
+        ("agents/personas/README.md", personas, Ownership.TEMPLATE),
+        ("agents/console/README.md", console, Ownership.TEMPLATE),
+        ("agents/console/decisions/README.md", decisions, Ownership.TEMPLATE),
+    ]
 
 
 def stamp_kernel(
