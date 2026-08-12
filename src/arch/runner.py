@@ -64,6 +64,7 @@ from arch.generators.traceability_matrix import (
     collect_trace_commits,
     render_traceability_matrix,
 )
+from arch.generators.vitals_methodology_report import render_vitals_methodology
 from disturbance.detectors.traceability import sync_traceability_baseline
 
 _ARTIFACT_FILES = [
@@ -83,6 +84,7 @@ _ARTIFACT_FILES = [
     "adr-enforcement.md",
     "adr-assertion-density.md",
     "adr-falsifiability.md",
+    "vitals-methodology.md",
     "ai_system_inventory.md",
     "traceability_matrix.md",
     "gauntlet-calibration.md",
@@ -185,6 +187,7 @@ def _compute_artifacts(repo_root: Path) -> dict[str, str]:
         "adr-enforcement.md": render_adr_enforcement(adrs, repo_root=repo_root),
         "adr-assertion-density.md": render_adr_assertion_density(adrs),
         "adr-falsifiability.md": render_adr_falsifiability(adrs, repo_root=repo_root),
+        "vitals-methodology.md": render_vitals_methodology(),
         "ai_system_inventory.md": render_ai_system_inventory(
             loops, repo_root=repo_root
         ),
