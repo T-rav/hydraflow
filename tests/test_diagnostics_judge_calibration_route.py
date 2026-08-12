@@ -28,7 +28,14 @@ from judge_calibration import (  # noqa: E402
     judge_verdict_ledger_path,
 )
 
-_NOW = datetime(2026, 8, 3, 12, 0, 0, tzinfo=UTC)
+# _NOW anchors every fixture timestamp and MUST be wall-clock-relative: the
+# route resolves outcomes against the real ``datetime.now(UTC)``, so a frozen
+# anchor silently ages past the 7-day grace window and flips "too recent →
+# unresolved" fixtures into resolved ones (armed 2026-08-10 when the original
+# ``datetime(2026, 8, 3)`` constant crossed the window; the same time-bomb
+# class as #11045 / find #11047). The engine tests may keep a frozen anchor —
+# they pass ``now=_NOW`` explicitly, so their clock is self-consistent.
+_NOW = datetime.now(UTC)
 
 
 def _config(tmp_path: Path) -> MagicMock:
