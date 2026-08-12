@@ -563,6 +563,39 @@ jobs:
                 tests/regressions/test_hostrunner_reap_grandchildren.py \
                 -q -p no:cacheprovider'
 
+  # Time-travel guard (#11047): re-run the bomb-prone test subset with the
+  # wall clock offset +90 days (freezegun via the HYDRAFLOW_TIME_TRAVEL_DAYS
+  # conftest fixture), so fixture time-bombs — absolute dates or frozen
+  # anchors that age past a now()-relative threshold — detonate at PR time
+  # instead of on a future RC (two RC-blocking detonations in 48h: PRs
+  # #11045, #11053). ADVISORY by design: no gates.toml record and
+  # deliberately NOT in ci-gate's `needs` — per #9922, an advisory lane must
+  # never block RC auto-merge. Keep the pytest file list in sync with the
+  # `time-travel` Makefile target.
+  time-travel:
+    name: Time Travel (advisory)
+    needs: changes
+    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Run bomb-prone subset at +90 days
+        run: |
+          uv sync --extra test --quiet
+          PYTHONPATH=src HYDRAFLOW_TIME_TRAVEL_DAYS=90 uv run pytest \
+            tests/regressions/ \
+            tests/test_time_travel_guard.py \
+            tests/test_diagnostics_judge_calibration_route.py \
+            tests/test_escape_ledger_loop.py \
+            tests/test_boot_gap_detector.py \
+            tests/test_diagnostics_cost_rollup_routes.py \
+            tests/test_staleness.py \
+            tests/test_diagnostics_finder_faceplates_route.py \
+            -p no:randomly -q -p no:cacheprovider
+
   audit:
     name: Principles Audit
     needs: changes
