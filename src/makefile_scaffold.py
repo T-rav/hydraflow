@@ -16,7 +16,10 @@ _PYTHON_TARGETS: dict[str, str] = {
     "lint-check": "\truff check . && ruff format . --check\n",
     "lint-fix": "\t$(MAKE) lint\n",
     "typecheck": "\tpyright\n",
-    "security": "\tbandit -r . --severity-level medium\n",
+    # -x ./.venv: without it bandit recurses into the project venv and fails
+    # on its OWN vendored plugin files — caught by the first real execution of
+    # the python gauge (gauge gauntlet, #11060 slice 2).
+    "security": "\tbandit -r . -x ./.venv --severity-level medium\n",
     "test": "\tpytest tests/ -x -q\n",
 }
 

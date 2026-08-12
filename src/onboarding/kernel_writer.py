@@ -479,7 +479,7 @@ def _repo_slug(explicit: str | None) -> str:
     for prefix in ("https://github.com/", "git@github.com:"):
         if url.startswith(prefix):
             slug = url[len(prefix) :]
-            return slug[:-4] if slug.endswith(".git") else slug
+            return slug.removesuffix(".git")
     raise SystemExit(f"could not derive owner/name from remote: {{url}}")
 
 

@@ -924,3 +924,12 @@ mode-mismatch: deps
 kernel-staleness:
 	@test -n "$(DIR)" || { echo "Usage: make kernel-staleness DIR=<stamped-repo>" >&2; exit 2; }
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m scripts.kernel_staleness $(DIR)
+
+# Gauge gauntlet (#11060 slice 2): execute the scaffold rails FOR REAL per
+# gauge (fixture repo in tmp → lay rails → run quality commands); everything
+# not requested reports UNEXERCISED by name. Advisory CI lane runs python,javascript.
+.PHONY: gauge-gauntlet
+gauge-gauntlet: deps
+	@echo "$(BLUE)Running gauge gauntlet...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m scripts.gauge_gauntlet \
+		--gauges $(or $(GAUGES),python) $(ARGS)
