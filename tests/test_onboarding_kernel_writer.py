@@ -198,3 +198,46 @@ def test_invalid_package_name_raises(tmp_path) -> None:
 def test_ownership_enum_tags_are_stable() -> None:
     assert Ownership.TEMPLATE.value == "template"
     assert Ownership.PRODUCT.value == "product"
+
+
+def test_agents_console_layer_absent_by_default(tmp_path) -> None:
+    # Chartering review chambers is a project choice, not kernel plumbing
+    # (#10949): the default stamp writes no agents/ files.
+    result = stamp_kernel(_spec(), tmp_path / "repo")
+    assert not any(path.startswith("agents/") for path in result.paths())
+    assert not (tmp_path / "repo" / "agents").exists()
+
+
+def test_agents_console_layer_stamps_the_four_skeleton_readmes(tmp_path) -> None:
+    result = stamp_kernel(_spec(agents_console=True), tmp_path / "repo")
+    expected = {
+        "agents/README.md",
+        "agents/personas/README.md",
+        "agents/console/README.md",
+        "agents/console/decisions/README.md",
+    }
+    assert expected <= result.paths()
+    personas = (tmp_path / "repo" / "agents" / "personas" / "README.md").read_text()
+    # Vote-counting honesty is mandatory wherever panels are described.
+    assert "1.x effective votes" in personas
+    console = (tmp_path / "repo" / "agents" / "console" / "README.md").read_text()
+    assert "never averaged" in console
+    decisions = (
+        tmp_path / "repo" / "agents" / "console" / "decisions" / "README.md"
+    ).read_text()
+    assert "no verdict" in decisions
+    # The skeleton points at the methodology doc, not a copy of it.
+    root_readme = (tmp_path / "repo" / "agents" / "README.md").read_text()
+    assert "consoles-of-personas.md" in root_readme
+
+
+def test_agents_console_skeleton_is_template_owned_and_restampable(tmp_path) -> None:
+    target = tmp_path / "repo"
+    stamp_kernel(_spec(agents_console=True), target)
+    marker = target / "agents" / "personas" / "README.md"
+    marker.write_text("locally edited\n")
+    # Plain re-stamp never clobbers; force re-stamps TEMPLATE-owned skeletons.
+    stamp_kernel(_spec(agents_console=True), target)
+    assert marker.read_text() == "locally edited\n"
+    stamp_kernel(_spec(agents_console=True), target, force=True)
+    assert "Persona contracts" in marker.read_text()

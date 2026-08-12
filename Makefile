@@ -473,6 +473,7 @@ stamp:
 		$(if $(CLI_ENTRY),--cli-entry $(CLI_ENTRY)) \
 		$(if $(COVERAGE_FLOOR),--coverage-floor $(COVERAGE_FLOOR)) \
 		$(if $(FORCE),--force) \
+		$(if $(AGENTS_CONSOLE),--agents-console) \
 		$(ARGS)
 
 
@@ -902,3 +903,15 @@ time-travel: deps
 		tests/test_staleness.py \
 		tests/test_diagnostics_finder_faceplates_route.py \
 		-p no:randomly -q
+
+# Mode-mismatch rung-0 report (#11055, five-modes roadmap): retro-classify
+# terminal issues from existing exhaust — was the fixed pipeline the right
+# DAG? On-demand (quiet-week pattern). The wrong-DAG rate gates rung 1.
+.PHONY: mode-mismatch
+mode-mismatch: deps
+	@echo "$(BLUE)Running mode-mismatch rung-0 report...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && gh issue list --state all --limit 500 \
+		--json number,state,stateReason > /tmp/hf_issue_states.json && \
+		PYTHONPATH=src $(UV) python scripts/mode_mismatch_report.py \
+		--event-log $${HYDRAFLOW_EVENT_LOG:-.hydraflow/events.jsonl} \
+		--issues-json /tmp/hf_issue_states.json $(ARGS)

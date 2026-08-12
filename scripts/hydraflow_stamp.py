@@ -68,6 +68,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Re-stamp template-owned files (product-owned files stay protected).",
     )
+    parser.add_argument(
+        "--agents-console",
+        action="store_true",
+        help=(
+            "Also stamp the consoles-of-personas skeleton (#10949): agents/ "
+            "personas + console charter + decisions/ record discipline."
+        ),
+    )
     args = parser.parse_args(argv)
 
     target = Path(args.target).expanduser()
@@ -79,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         coverage_floor=args.coverage_floor,
         safety_guards=tuple(args.safety_guards),
         label_prefix=args.label_prefix,
+        agents_console=args.agents_console,
     )
 
     try:
