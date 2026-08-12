@@ -47,6 +47,12 @@ test = [
     "httpx>=0.27.0",
     "hypothesis>=6.100.0",
     "markdown>=3.0",
+    # Time-travel guard (#11047): re-run bomb-prone tests with the wall clock
+    # offset days into the future so fixture time-bombs (absolute dates or
+    # frozen anchors that age past a now()-relative threshold) detonate in the
+    # advisory lane before real time detonates them on an RC. Two RC-blocking
+    # detonations in 48h motivated this (PRs #11045, #11053).
+    "freezegun>=1.5.0",
 ]
 dev = [
     "ruff==0.15.0",
