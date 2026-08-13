@@ -32,8 +32,17 @@ from scripts.audit_prompts import LONG_CONTEXT_THRESHOLD, PROMPT_REGISTRY
 #: N/A erases no Fail. Per this test's contract they are removed here to
 #: acknowledge criterion 6 no longer applies. The fixtures below all stayed
 #: >= threshold after the prune and remain protected.
+#: ``agent_build_prompt_with_prior_failure`` joined when the render became
+#: host-hermetic: the ``## Available Skills`` section (deterministic
+#: ``_AUDIT_PLUGIN_SKILLS`` since the host-independence fix — see
+#: tests/regressions/test_audit_render_host_independent.py) now renders on
+#: every host, and the #11065 self-check checklist growth put this fixture at
+#: 10,231 chars. Previously CI rendered it at 8,808 (no plugin cache on the
+#: runner) while developer machines rendered 10,231 — the pin test literally
+#: disagreed with itself across hosts.
 _LONG_CONTEXT_FIXTURES = frozenset(
     {
+        "agent_build_prompt_with_prior_failure",
         "decomposition_council_validation",
         "planner_build_prompt_first_attempt",
         "preflight_auto_agent",
