@@ -594,3 +594,166 @@ class TestGateHealthPerTickCap:
             if "over per-tick filing cap" in c.args[0]
         ]
         assert len(summaries) == 1
+
+
+def _write_signed_setpoint(repo_root: Path, value: float = 0.90) -> None:
+    control = repo_root / "control"
+    control.mkdir(parents=True, exist_ok=True)
+    (control / "setpoints.yaml").write_text(
+        "gate_health:\n"
+        "  pv: fleet pass rate\n"
+        "  units: fraction\n"
+        f"  value: {value}\n"
+        "  band: 0.05\n"
+        "  direction: above\n"
+        "  signed_by: travis\n"
+        "  signed_date: '2026-08-13'\n"
+    )
+
+
+def _runs_with_pass_rate(prs, *, passes: int, failures: int) -> None:
+    """One run whose jobs give the requested fleet pass/fail split."""
+    prs.list_workflow_runs.return_value = [
+        {
+            "id": 1,
+            "workflow": "CI",
+            "conclusion": "failure",
+            "created_at": "2026-07-01",
+            "pr_number": 0,
+        }
+    ]
+    prs.get_workflow_run_jobs.return_value = [
+        # Distinct passing checks, plus one check failing repeatedly so
+        # find_born_broken has something to fire on when acting.
+        *({"name": f"ok-{i}", "conclusion": "success"} for i in range(passes)),
+        *({"name": "broken", "conclusion": "failure"} for _ in range(failures)),
+    ]
+
+
+class TestSetpointRegulation:
+    """#10824: a SIGNED in-band setpoint quiesces the pass-rate finders."""
+
+    @pytest.mark.asyncio
+    async def test_unsigned_setpoint_keeps_legacy_behavior(
+        self, tmp_path: Path
+    ) -> None:
+        loop, prs = _make_loop(tmp_path)
+        control = loop._config.repo_root / "control"
+        control.mkdir(parents=True, exist_ok=True)
+        (control / "setpoints.yaml").write_text(
+            "gate_health:\n  value: 0.9\n  band: 0.05\n  signed_by: null\n"
+        )
+        _runs_with_pass_rate(prs, passes=0, failures=3)
+
+        result = await loop._do_work()
+
+        assert result["setpoint_active"] is False
+        assert result["quiescent"] is False
+        assert result["filed"] == 1  # born_broken files exactly as today
+
+    @pytest.mark.asyncio
+    async def test_in_band_quiesces_pass_rate_finders(self, tmp_path: Path) -> None:
+        loop, prs = _make_loop(tmp_path)
+        _write_signed_setpoint(loop._config.repo_root)
+        # 97% fleet pass rate, but one born-broken check exists.
+        _runs_with_pass_rate(prs, passes=97, failures=3)
+
+        result = await loop._do_work()
+
+        assert result["setpoint_active"] is True
+        assert result["quiescent"] is True
+        assert result["filed"] == 0  # error ~0 → no action is correct output
+        assert result["pv_pass_rate"] == 0.97
+
+    @pytest.mark.asyncio
+    async def test_out_of_band_acts(self, tmp_path: Path) -> None:
+        loop, prs = _make_loop(tmp_path)
+        _write_signed_setpoint(loop._config.repo_root)
+        # 50% pass rate — well below 0.90 − 0.05.
+        _runs_with_pass_rate(prs, passes=3, failures=3)
+
+        result = await loop._do_work()
+
+        assert result["setpoint_active"] is True
+        assert result["quiescent"] is False
+        assert result["filed"] == 1  # born_broken fires
+
+    @pytest.mark.asyncio
+    async def test_structural_finders_file_even_when_quiescent(
+        self, tmp_path: Path
+    ) -> None:
+        loop, prs = _make_loop(tmp_path)
+        _write_signed_setpoint(loop._config.repo_root)
+        # Healthy pass rate, but a failed artifact-expecting workflow with
+        # zero artifacts — a structural defect, not a pass-rate one.
+        prs.list_workflow_runs.return_value = [
+            {
+                "id": 1,
+                "workflow": "CI",
+                "conclusion": "success",
+                "created_at": "2026-07-01",
+                "pr_number": 0,
+            },
+            {
+                "id": 2,
+                "workflow": "Sandbox Tests",
+                "conclusion": "failure",
+                "created_at": "2026-07-02",
+                "pr_number": 0,
+            },
+        ]
+        prs.get_workflow_run_jobs.return_value = [
+            {"name": "ok", "conclusion": "success"}
+        ]
+        prs.count_workflow_run_artifacts.return_value = 0
+
+        result = await loop._do_work()
+
+        assert result["quiescent"] is True
+        assert result["filed"] == 1  # missing_artifacts still files
+
+    @pytest.mark.asyncio
+    async def test_hysteresis_holds_quiescence_inside_band(
+        self, tmp_path: Path
+    ) -> None:
+        loop, prs = _make_loop(tmp_path)
+        _write_signed_setpoint(loop._config.repo_root)
+
+        _runs_with_pass_rate(prs, passes=95, failures=5)  # 0.95 → quiesce
+        first = await loop._do_work()
+        _runs_with_pass_rate(prs, passes=88, failures=12)  # 0.88: in band
+        second = await loop._do_work()
+        _runs_with_pass_rate(prs, passes=80, failures=20)  # 0.80: out of band
+        third = await loop._do_work()
+        _runs_with_pass_rate(prs, passes=88, failures=12)  # 0.88 again: acting
+        fourth = await loop._do_work()
+
+        assert first["quiescent"] is True
+        assert second["quiescent"] is True  # Schmitt hold
+        assert third["quiescent"] is False
+        assert fourth["quiescent"] is False  # re-entry needs the setpoint itself
+
+    @pytest.mark.asyncio
+    async def test_docs_only_failures_excluded_from_pv(self, tmp_path: Path) -> None:
+        loop, prs = _make_loop(tmp_path)
+        _write_signed_setpoint(loop._config.repo_root)
+        # 10 failures, all on a docs-only PR diff: PV must read 1.0.
+        prs.get_pr_diff_names.return_value = ["docs/wiki/index.md"]
+        prs.list_workflow_runs.return_value = [
+            {
+                "id": 1,
+                "workflow": "CI",
+                "conclusion": "failure",
+                "created_at": "2026-07-01",
+                "pr_number": 7,
+            }
+        ]
+        prs.get_workflow_run_jobs.return_value = [
+            *({"name": "Lint", "conclusion": "failure"} for _ in range(10)),
+            {"name": "ok", "conclusion": "success"},
+        ]
+
+        result = await loop._do_work()
+
+        assert result["pv_pass_rate"] == 1.0
+        assert result["quiescent"] is True

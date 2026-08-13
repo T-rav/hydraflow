@@ -126,7 +126,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0117 | `src.prompt_gate` | `pytest:tests/test_prompt_observatory.py` |
 | ADR-0118 | — | `pytest:tests/architecture/test_no_otel_imports.py` |
 | ADR-0119 | `src.credit_failover` | `pytest:tests/test_credit_failover.py` |
-| ADR-0120 | — | — |
+| ADR-0120 | `src.control_register` | — |
 | ADR-0121 | `src.rails_drift_caretaker_loop`, `src.rails_manifest` | — |
 | ADR-0122 | — | — |
 | ADR-0123 | — | `'pytest:tests/test_adr_direction_declared.py'` |
@@ -180,6 +180,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.contract_recording` | ADR-0047, ADR-0052 |
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
 | `src.contracts.shadow` | ADR-0086 |
+| `src.control_register` | ADR-0120 |
 | `src.convergence_gate` | ADR-0094, ADR-0095 |
 | `src.convergence_oscillation_loop` | ADR-0098 |
 | `src.convergence_recording` | ADR-0096, ADR-0102 |

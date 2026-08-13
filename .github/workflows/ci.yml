@@ -68,6 +68,11 @@ jobs:
               # unrelated build went red (#10926). Same rule as scripts/**
               # above — under-inclusive is merely expensive for a TEST filter.
               - 'docs/wiki/**'
+              # control/** holds the fleet register + human-signed setpoints
+              # (#10824). The PR that SIGNS a setpoint edits only YAML here —
+              # and flips a live regulator from inert to acting — so it must
+              # run the loader/regulator/parity tests that read these files.
+              - 'control/**'
               # agents/** — the console decision ledger and persona contracts
               # (ARCH-0001). tests/test_console_conformance.py guards record
               # shape, chair identity, and numbering against the LIVE tree; a

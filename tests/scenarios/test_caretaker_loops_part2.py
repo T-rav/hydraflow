@@ -512,6 +512,80 @@ class TestL20bGateHealthLoop:
         assert stats["gate_health"]["findings"] == 0
         assert len(world.github._issues) == before
 
+    async def test_signed_setpoint_in_band_quiesces_pass_rate_findings(self, tmp_path):
+        """#10824: signed in-band setpoint → born-broken stays unfiled;
+        no action is the correct output at error ~0."""
+        world = MockWorld(tmp_path)
+        control = tmp_path / "repo" / "control"
+        control.mkdir(parents=True, exist_ok=True)
+        (control / "setpoints.yaml").write_text(
+            "gate_health:\n"
+            "  pv: fleet pass rate\n"
+            "  units: fraction\n"
+            "  value: 0.90\n"
+            "  band: 0.05\n"
+            "  direction: above\n"
+            "  signed_by: travis\n"
+            "  signed_date: '2026-08-13'\n"
+        )
+        # One born-broken check inside an otherwise very healthy fleet
+        # (57 passes / 3 failures = 95% > setpoint).
+        for i in (1, 2, 3):
+            world.github.add_workflow_run(
+                i,
+                workflow="CI",
+                conclusion="failure",
+                created_at=f"2026-07-0{i}T00:00:00Z",
+                jobs=[
+                    {"name": "Sandbox (rc/* full suite)", "conclusion": "failure"},
+                    *(
+                        {"name": f"Check-{j}", "conclusion": "success"}
+                        for j in range(19)
+                    ),
+                ],
+                artifact_count=1,
+            )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["setpoint_active"] is True
+        assert stats["gate_health"]["quiescent"] is True
+        assert stats["gate_health"]["filed"] == 0
+        assert not self._issues_titled(world, "0% pass rate")
+
+    async def test_unsigned_setpoint_scenario_keeps_finding_driven_behavior(
+        self, tmp_path
+    ):
+        """#10824 envelope discipline: a machine-proposed but UNSIGNED
+        setpoint changes nothing — the loop still files."""
+        world = MockWorld(tmp_path)
+        control = tmp_path / "repo" / "control"
+        control.mkdir(parents=True, exist_ok=True)
+        (control / "setpoints.yaml").write_text(
+            "gate_health:\n  value: 0.90\n  band: 0.05\n  signed_by: null\n"
+        )
+        for i in (1, 2, 3):
+            world.github.add_workflow_run(
+                i,
+                workflow="CI",
+                conclusion="failure",
+                created_at=f"2026-07-0{i}T00:00:00Z",
+                jobs=[
+                    {"name": "Sandbox (rc/* full suite)", "conclusion": "failure"},
+                    *(
+                        {"name": f"Check-{j}", "conclusion": "success"}
+                        for j in range(19)
+                    ),
+                ],
+                artifact_count=1,
+            )
+
+        stats = await world.run_with_loops(["gate_health"], cycles=1)
+
+        assert stats["gate_health"]["setpoint_active"] is False
+        assert stats["gate_health"]["filed"] == 1
+        assert self._issues_titled(world, "0% pass rate")
+
     async def test_suspected_hang_scenario_files_playbook_issue(self, tmp_path):
         """#10010: cancelled-at-timeout job -> suspected-hang, not a retry."""
         world = MockWorld(tmp_path)

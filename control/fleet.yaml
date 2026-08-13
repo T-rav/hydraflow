@@ -1,0 +1,199 @@
+# Fleet control-classification register (#10824, ADR-0120 Ruling 1 made
+# machine-readable). One entry per worker_name in the orchestrator's
+# bg_loop_registry — guard-tested for exact key parity in both directions
+# (tests/test_fleet_register_parity.py).
+#
+# class:
+#   error_driven   — already regulates against a baseline/budget; has a zero
+#   convertible    — finding-driven today, but a plant PV exists (#10824 queue)
+#   exploratory    — novelty has no setpoint; meta-setpoints (rate budgets) only
+#   infrastructure — plumbing/actuator, not a sensor; regulation does not apply
+#
+# finder_id joins a loop to its calibrated noise floor (#10821) for the
+# innovation-sensing R (#10825 rung 3). Classifications marked "judgment" in
+# notes were not enumerated by ADR-0120 prose — adjust by one-line review.
+
+# --- ADR-0120-named: already error-driven ---
+fail_open_monitor:
+  class: error_driven
+  pv: "fail-open gate count (setpoint 0)"
+rc_budget:
+  class: error_driven
+  pv: "RC spend vs budget"
+flake_tracker:
+  class: error_driven
+  pv: "flake recurrence vs quarantine baseline"
+erosion_metrics:
+  class: error_driven
+  pv: "erosion spread/scatter vs baseline"
+  finder_id: erosion_metrics
+second_order_vitals:
+  class: error_driven
+  pv: "instrument-health Shewhart charts"
+cost_budget_watcher:
+  class: error_driven
+  pv: "cost vs per-loop budget"
+
+# --- exemplar regulators (baseline = setpoint, violations = error) ---
+disturbance_dampener:
+  class: error_driven
+  pv: "new violations vs versioned baseline (ratchet diff)"
+auto_tighten:
+  class: error_driven
+  pv: "ratchet slack vs current floor"
+staging_promotion:
+  class: error_driven
+  pv: "staging ahead_by (setpoint 0 via RC cadence)"
+
+# --- ADR-0120-named: true conversion candidates (#10824 queue) ---
+gate_health:
+  class: convertible
+  pv: "fleet check pass rate over the run window (docs-only failures excluded)"
+sampled_audit:
+  class: convertible
+  pv: "re-review disagreement rate"
+
+# --- comparator-against-a-standard: error-driven (judgment) ---
+branch_protection_auditor:
+  class: error_driven
+  pv: "live rulesets vs docs/standards/branch_protection"
+  notes: "judgment: compares against versioned standard"
+label_drift_watcher:
+  class: error_driven
+  pv: "live labels vs expected label set"
+  notes: "judgment"
+fake_coverage_auditor:
+  class: error_driven
+  pv: "fake coverage vs cassette corpus"
+  notes: "judgment"
+rails_drift_caretaker:
+  class: error_driven
+  pv: "workflow files vs rails prescription"
+  notes: "judgment"
+trust_fleet_sanity:
+  class: error_driven
+  pv: "trust-fleet invariants hold"
+  notes: "judgment; interval is dual-purpose liveness — do not retune here"
+detector_calibration:
+  class: error_driven
+  pv: "detector thresholds vs calibrated floors"
+  notes: "judgment"
+convergence_oscillation:
+  class: error_driven
+  pv: "oscillation fingerprint (setpoint: none observed)"
+  notes: "judgment"
+health_monitor:
+  class: error_driven
+  pv: "loop liveness invariants (Tier-1 kernel)"
+  notes: "judgment"
+goal_supervisor:
+  class: error_driven
+  pv: "fleet health invariants (ADR-0124 health-only)"
+  notes: "judgment"
+
+# --- ADR-0120-named + generative: irreducibly exploratory ---
+memory_backlog:
+  class: exploratory
+wiki_rot_detector:
+  class: exploratory
+  finder_id: wiki_rot
+principles_audit:
+  class: exploratory
+  notes: "principle-setpoint extension tracked in #10824 comment thread"
+retrospective:
+  class: exploratory
+report_issue:
+  class: exploratory
+adr_reviewer:
+  class: exploratory
+adr_drift_resolver:
+  class: exploratory
+  finder_id: adr_drift
+adr_touchpoint_auditor:
+  class: exploratory
+adr_conformance:
+  class: exploratory
+term_proposer:
+  class: exploratory
+  finder_id: term_proposer
+term_pruner:
+  class: exploratory
+edge_proposer:
+  class: exploratory
+  finder_id: edge_proposer
+entry_evidence:
+  class: exploratory
+  finder_id: entry_evidence
+issue_refinement:
+  class: exploratory
+  notes: "judgment: generative refinement"
+corpus_learning:
+  class: exploratory
+  notes: "judgment: feeder"
+human_steering:
+  class: exploratory
+  notes: "judgment: feeder"
+
+# --- plumbing / actuators: infrastructure ---
+pr_unsticker:
+  class: infrastructure
+merge_state_watcher:
+  class: infrastructure
+epic_monitor:
+  class: infrastructure
+epic_sweeper:
+  class: infrastructure
+workspace_gc:
+  class: infrastructure
+runs_gc:
+  class: infrastructure
+dependabot_merge:
+  class: infrastructure
+staging_bisect:
+  class: infrastructure
+stale_issue:
+  class: infrastructure
+log_ingest:
+  class: infrastructure
+github_cache:
+  class: infrastructure
+stale_issue_gc:
+  class: infrastructure
+pr_red_repair:
+  class: infrastructure
+ci_monitor:
+  class: infrastructure
+gate_activator:
+  class: infrastructure
+security_patch:
+  class: infrastructure
+repo_wiki:
+  class: infrastructure
+diagnostic:
+  class: infrastructure
+diagram_loop:
+  class: infrastructure
+pricing_refresh:
+  class: infrastructure
+  notes: "human-gated refresher"
+live_corpus_replay:
+  class: infrastructure
+triage_retry:
+  class: infrastructure
+sandbox_failure_fixer:
+  class: infrastructure
+auto_agent_preflight:
+  class: infrastructure
+contract_refresh:
+  class: infrastructure
+escape_ledger:
+  class: infrastructure
+  notes: "ledger-keeper; ground truth for judge calibration"
+intervention_tally:
+  class: infrastructure
+fitness_scorecard:
+  class: infrastructure
+  notes: "judgment: reporting surface"
+skill_prompt_eval:
+  class: infrastructure
+  notes: "judgment: eval runner"
