@@ -6,8 +6,12 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `964ea47` — Merge remote-tracking branch 'origin/main' into rc/2026-08-12-2120 *(2026-08-12)*
+- `2187acb` — feat(process): encode session lessons — supervisor classify rules, self-check, gotchas (#11065) (#11065) *(2026-08-12)*
+- `ef89f0c` — chore(rc): regen arch artifacts after main merge (rc/2026-08-12-1844) *(2026-08-12)*
 - `47762f0` — chore(rc): regen arch artifacts after main merge (rc/2026-08-12-1558) *(2026-08-12)*
 - `3f4c1bd` — chore(rc): regen arch artifacts after main merge (rc/2026-08-12-0139) *(2026-08-12)*
+- `a6ecc95` — feat(quality): time-travel guard — detonate fixture time-bombs before real time does (#11054) (#11054) *(2026-08-11)*
 - `a55de0a` — chore(rc): regen arch artifacts after main merge (rc/2026-08-11-1335) *(2026-08-11)*
 - `f402c7a` — Merge remote-tracking branch 'origin/main' into rc/2026-08-11-1335 *(2026-08-11)*
 

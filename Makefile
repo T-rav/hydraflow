@@ -945,3 +945,13 @@ builder-outcomes: deps
 		PYTHONPATH=src $(UV) python -m scripts.builder_outcome_report \
 		--observatory $${HYDRAFLOW_OBSERVATORY:-.hydraflow/prompt_observatory.jsonl} \
 		--issues-json /tmp/hf_issue_states.json $(ARGS)
+
+# Adopt flow (#11060 slice 3): READ-ONLY audit of an existing repo against the
+# building code — per prescribed file: NEW / IDENTICAL / DIFFERS(template,
+# FORCE would overwrite) / DIFFERS(product, never touched). Exit 0 safe /
+# 1 review needed. Never stamps; next steps are printed, not automated.
+.PHONY: adopt
+adopt:
+	@test -n "$(DIR)" || { echo "Usage: make adopt DIR=<existing-repo> [PKG=<pkg>]" >&2; exit 2; }
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m scripts.hydraflow_adopt $(DIR) \
+		$(if $(PKG),--pkg $(PKG)) $(if $(NAME),--name $(NAME)) $(ARGS)
