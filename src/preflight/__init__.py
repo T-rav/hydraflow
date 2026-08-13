@@ -243,12 +243,12 @@ def _check_plugins(  # noqa: PLR0911 — linear gate checks, each with its own r
     - Everything present → PASS.
     """
     from plugin_skill_registry import (
-        DEFAULT_CACHE_ROOT,  # noqa: PLC0415
+        default_cache_root,  # noqa: PLC0415
         discover_plugin_skills,  # noqa: PLC0415
         parse_plugin_spec,  # noqa: PLC0415
     )
 
-    root = cache_root or DEFAULT_CACHE_ROOT
+    root = cache_root or default_cache_root()
     langs = detected_languages or set()
 
     if root.exists() and not root.is_dir():

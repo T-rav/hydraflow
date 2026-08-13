@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from config import HydraFlowConfig
-from plugin_skill_registry import DEFAULT_CACHE_ROOT, parse_plugin_spec
+from plugin_skill_registry import default_cache_root, parse_plugin_spec
 from preflight import install_plugin, plugin_exists
 
 logger = logging.getLogger("hydraflow.install_plugins_cli")
@@ -25,7 +25,7 @@ def run(config: HydraFlowConfig, *, cache_root: Path | None = None) -> int:
     fail; returns 1 if any Tier-1 (``required_plugins``) plugin fails.
     Mirrors preflight's Tier-1 FAIL / Tier-2 WARN distinction.
     """
-    root = cache_root or DEFAULT_CACHE_ROOT
+    root = cache_root or default_cache_root()
 
     tier2_entries: list[str] = []
     for plugins in config.language_plugins.values():
