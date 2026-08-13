@@ -933,3 +933,15 @@ gauge-gauntlet: deps
 	@echo "$(BLUE)Running gauge gauntlet...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m scripts.gauge_gauntlet \
 		--gauges $(or $(GAUGES),python) $(ARGS)
+
+# Builder→outcome report (#11027 mechanism B / #10855): join gated-prompt
+# shapes (observatory, issue-keyed) through the reconciler to registered
+# builders, pair with issue outcomes, and render the outcome_paired verdict.
+.PHONY: builder-outcomes
+builder-outcomes: deps
+	@echo "$(BLUE)Running builder→outcome report...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && gh issue list --state all --limit 500 \
+		--json number,state,stateReason > /tmp/hf_issue_states.json && \
+		PYTHONPATH=src $(UV) python -m scripts.builder_outcome_report \
+		--observatory $${HYDRAFLOW_OBSERVATORY:-.hydraflow/prompt_observatory.jsonl} \
+		--issues-json /tmp/hf_issue_states.json $(ARGS)
