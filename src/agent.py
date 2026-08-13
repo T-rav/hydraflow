@@ -72,6 +72,7 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
 - [ ] **Extracting code → do NOT relocate a `# noqa`** — moving code to a new file moves its suppression to a new file-signature, which the disturbance ratchet reads as a NEW violation (it only ever shrinks). Instead narrow the `except` to concrete types, or hoist the import to module top, so no suppression is needed. Never bump the baseline.
 - [ ] **Moving a cited file → update its ADR `Enforced by:` citation** — if you relocate a file named in an ADR `Enforced by:` citation (grep the ADRs for the old path), update that citation in the same commit, or ADR-conformance goes red.
 - [ ] **Relocating a symbol → fix its patchers** — before moving a module-level symbol out of its module, grep tests/scenarios for `patch("oldmodule.symbol")` and repoint them, or the patched test errors at collection.
+- [ ] **Date in a test fixture → make it now-relative** — a hardcoded date (or a frozen `_NOW = datetime(...)` anchor) that must sit on one side of a `now()`-relative threshold silently detonates when real time crosses it (two RC-blocking cases in 48h: #11045, #11053). Use `datetime.now(UTC) - timedelta(...)`. A frozen anchor is safe ONLY when the code under test takes `now=` as an explicit parameter. Sweep: `make time-travel`.
 """
 
     @staticmethod
