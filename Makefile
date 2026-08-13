@@ -955,3 +955,13 @@ adopt:
 	@test -n "$(DIR)" || { echo "Usage: make adopt DIR=<existing-repo> [PKG=<pkg>]" >&2; exit 2; }
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m scripts.hydraflow_adopt $(DIR) \
 		$(if $(PKG),--pkg $(PKG)) $(if $(NAME),--name $(NAME)) $(ARGS)
+
+# Building-code updater (#11060 slice 4): turn a stale stamped child into a
+# reviewable update branch (template-owned re-stamp; product files never
+# touched; PR command printed, not automated). Exit 0 current / 1 branch
+# ready / 2 no lock, dirty tree, or git failure. On-demand by ruling — the
+# caretaker-loop automation is slice-5 engagement-gated.
+.PHONY: building-code-update
+building-code-update:
+	@test -n "$(DIR)" || { echo "Usage: make building-code-update DIR=<stamped-child>" >&2; exit 2; }
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m scripts.building_code_update $(DIR) $(ARGS)
