@@ -36,6 +36,11 @@ from pathlib import Path
 
 from ci_scaffold import generate_workflow
 from makefile_scaffold import generate_makefile
+from onboarding.kernel_lock import (
+    KERNEL_LOCK_FILENAME,
+    build_lock,
+    dump_lock,
+)
 
 METHODOLOGY_REF = "docs/methodology/onboarding-hydraflow-format-repos.md"
 
@@ -474,7 +479,7 @@ def _repo_slug(explicit: str | None) -> str:
     for prefix in ("https://github.com/", "git@github.com:"):
         if url.startswith(prefix):
             slug = url[len(prefix) :]
-            return slug[:-4] if slug.endswith(".git") else slug
+            return slug.removesuffix(".git")
     raise SystemExit(f"could not derive owner/name from remote: {{url}}")
 
 
@@ -674,7 +679,8 @@ def stamp_kernel(
     root.mkdir(parents=True, exist_ok=True)
 
     result = StampResult(root=root)
-    for rel, content, ownership in _plan(spec, hf_root):
+    plan = _plan(spec, hf_root)
+    for rel, content, ownership in plan:
         dest = root / rel
         if dest.exists():
             if force and ownership is Ownership.TEMPLATE:
@@ -689,8 +695,88 @@ def stamp_kernel(
         dest.write_text(content, encoding="utf-8")
         result.files.append(StampedFile(rel, ownership, "written"))
 
+    # Kernel lock (#11060 slice 1): the child's committed record of WHICH
+    # building code stamped it — version + spec + per-file prescribed-content
+    # hashes. Written when absent and refreshed whenever its content would
+    # differ (a changed prescription, or a diverged/vandalized lock); a
+    # byte-identical re-stamp writes nothing, preserving the idempotency
+    # contract. This is what lets `make kernel-staleness` distinguish
+    # KERNEL_UPDATED from LOCALLY_MODIFIED later.
+    lock_content = dump_lock(build_lock(spec_fields=_spec_fields(spec), plan=plan))
+    lock_dest = root / KERNEL_LOCK_FILENAME
+    if not lock_dest.exists():
+        lock_dest.write_text(lock_content, encoding="utf-8")
+        lock_action = "written"
+    elif lock_dest.read_text(encoding="utf-8", errors="replace") != lock_content:
+        lock_dest.write_text(lock_content, encoding="utf-8")
+        lock_action = "rewritten"
+    else:
+        lock_action = "skipped"
+    result.files.append(
+        StampedFile(KERNEL_LOCK_FILENAME, Ownership.TEMPLATE, lock_action)
+    )
+
     result.residual_steps = residual_manual_steps(spec, root)
     return result
+
+
+def _spec_fields(spec: KernelSpec) -> dict[str, object]:
+    """The spec as lock-serializable fields (enough to recompute the plan)."""
+    return {
+        "name": spec.name,
+        "package_name": spec.package_name,
+        "description": spec.description,
+        "cli_entry": spec.cli_entry,
+        "coverage_floor": spec.coverage_floor,
+        "safety_guards": list(spec.safety_guards),
+        "label_prefix": spec.label_prefix,
+        "main_branch": spec.main_branch,
+        "staging_branch": spec.staging_branch,
+        "agents_console": spec.agents_console,
+    }
+
+
+def spec_from_lock(lock: dict[str, object]) -> KernelSpec:
+    """Rebuild the stamping spec from a child's lock (the staleness read path)."""
+    fields_raw = lock.get("spec")
+    fields: dict[str, object] = dict(fields_raw) if isinstance(fields_raw, dict) else {}
+    return KernelSpec(
+        name=str(fields.get("name", "unknown")),
+        package_name=(
+            str(fields["package_name"])
+            if fields.get("package_name") is not None
+            else None
+        ),
+        description=str(fields.get("description", "A HydraFlow-format repository.")),
+        cli_entry=(
+            str(fields["cli_entry"]) if fields.get("cli_entry") is not None else None
+        ),
+        coverage_floor=(
+            raw_floor
+            if isinstance(raw_floor := fields.get("coverage_floor", 80), int)
+            else 80
+        ),
+        safety_guards=(
+            tuple(str(guard) for guard in raw_guards)
+            if isinstance(raw_guards := fields.get("safety_guards"), list)
+            else ()
+        ),
+        label_prefix=str(fields.get("label_prefix", "hydraflow")),
+        main_branch=str(fields.get("main_branch", "main")),
+        staging_branch=str(fields.get("staging_branch", "staging")),
+        agents_console=bool(fields.get("agents_console", False)),
+    )
+
+
+def prescription(
+    spec: KernelSpec, hydraflow_root: Path | None = None
+) -> list[tuple[str, str, Ownership]]:
+    """The kernel's current prescribed file set for *spec* (public plan access).
+
+    The staleness CLI compares a child's lock against this — the one honest
+    source of "what would the building code stamp today."
+    """
+    return _plan(spec, (hydraflow_root or _hydraflow_root()).resolve())
 
 
 def residual_manual_steps(spec: KernelSpec, root: Path) -> list[str]:

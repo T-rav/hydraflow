@@ -915,3 +915,33 @@ mode-mismatch: deps
 		PYTHONPATH=src $(UV) python scripts/mode_mismatch_report.py \
 		--event-log $${HYDRAFLOW_EVENT_LOG:-.hydraflow/events.jsonl} \
 		--issues-json /tmp/hf_issue_states.json $(ARGS)
+
+# Kernel staleness (#11060 slice 1): is a stamped child current with the
+# building code? Reads the child's hydraflow-kernel.lock, recomputes the
+# current prescription, classifies KERNEL_UPDATED / LOCALLY_MODIFIED / MISSING.
+# Exit 0 current · 1 stale · 2 no lock (pre-#11060 stamp).
+.PHONY: kernel-staleness
+kernel-staleness:
+	@test -n "$(DIR)" || { echo "Usage: make kernel-staleness DIR=<stamped-repo>" >&2; exit 2; }
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m scripts.kernel_staleness $(DIR)
+
+# Gauge gauntlet (#11060 slice 2): execute the scaffold rails FOR REAL per
+# gauge (fixture repo in tmp → lay rails → run quality commands); everything
+# not requested reports UNEXERCISED by name. Advisory CI lane runs python,javascript.
+.PHONY: gauge-gauntlet
+gauge-gauntlet: deps
+	@echo "$(BLUE)Running gauge gauntlet...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m scripts.gauge_gauntlet \
+		--gauges $(or $(GAUGES),python) $(ARGS)
+
+# Builder→outcome report (#11027 mechanism B / #10855): join gated-prompt
+# shapes (observatory, issue-keyed) through the reconciler to registered
+# builders, pair with issue outcomes, and render the outcome_paired verdict.
+.PHONY: builder-outcomes
+builder-outcomes: deps
+	@echo "$(BLUE)Running builder→outcome report...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && gh issue list --state all --limit 500 \
+		--json number,state,stateReason > /tmp/hf_issue_states.json && \
+		PYTHONPATH=src $(UV) python -m scripts.builder_outcome_report \
+		--observatory $${HYDRAFLOW_OBSERVATORY:-.hydraflow/prompt_observatory.jsonl} \
+		--issues-json /tmp/hf_issue_states.json $(ARGS)

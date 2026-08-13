@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import pytest
 
+from onboarding.kernel_lock import (
+    BUILDING_CODE_VERSION,
+    FileFreshness,
+    compare,
+    load_lock,
+)
 from onboarding.kernel_writer import (
     STANDARDS_DIRS,
     WIKI_TOPICS,
     KernelSpec,
     KernelWriterError,
     Ownership,
+    prescription,
+    spec_from_lock,
     stamp_kernel,
 )
 
@@ -241,3 +249,97 @@ def test_agents_console_skeleton_is_template_owned_and_restampable(tmp_path) -> 
     assert marker.read_text() == "locally edited\n"
     stamp_kernel(_spec(agents_console=True), target, force=True)
     assert "Persona contracts" in marker.read_text()
+
+
+def test_stamp_writes_committed_kernel_lock(tmp_path) -> None:
+    # #11060 slice 1: the lock is the child's committed provenance record —
+    # repo ROOT, not .hydraflow/ (which children gitignore).
+    result = stamp_kernel(_spec(), tmp_path / "repo")
+    lock_path = tmp_path / "repo" / "hydraflow-kernel.lock"
+    assert lock_path.is_file()
+    assert "hydraflow-kernel.lock" in result.paths()
+    lock = load_lock(tmp_path / "repo")
+    assert lock is not None
+    assert lock["building_code_version"] == BUILDING_CODE_VERSION
+    # The spec round-trips, so staleness can recompute the prescription.
+    spec = spec_from_lock(lock)
+    assert spec.pkg == _spec().pkg
+    assert spec.coverage_floor == _spec().coverage_floor
+    # Every planned file is hashed.
+    files = lock["files"]
+    assert "Makefile" in files and "sha256" in files["Makefile"]
+
+
+def test_fresh_stamp_reports_fully_current(tmp_path) -> None:
+    stamp_kernel(_spec(), tmp_path / "repo")
+    lock = load_lock(tmp_path / "repo")
+    assert lock is not None
+    report = compare(
+        lock,
+        current_plan=prescription(spec_from_lock(lock)),
+        child_root=tmp_path / "repo",
+    )
+    assert not report.version_stale
+    assert report.stale_files == []
+    assert report.modified_files == []
+    assert all(state is FileFreshness.CURRENT for state in report.files.values())
+
+
+def test_local_edit_reports_locally_modified(tmp_path) -> None:
+    stamp_kernel(_spec(), tmp_path / "repo")
+    (tmp_path / "repo" / "Makefile").write_text("# vandalized\n")
+    lock = load_lock(tmp_path / "repo")
+    assert lock is not None
+    report = compare(
+        lock,
+        current_plan=prescription(spec_from_lock(lock)),
+        child_root=tmp_path / "repo",
+    )
+    assert "Makefile" in report.modified_files
+
+
+def test_deleted_file_reports_missing(tmp_path) -> None:
+    stamp_kernel(_spec(), tmp_path / "repo")
+    (tmp_path / "repo" / "Makefile").unlink()
+    lock = load_lock(tmp_path / "repo")
+    assert lock is not None
+    report = compare(
+        lock,
+        current_plan=prescription(spec_from_lock(lock)),
+        child_root=tmp_path / "repo",
+    )
+    assert report.files["Makefile"] is FileFreshness.MISSING
+
+
+def test_kernel_update_beats_local_modification(tmp_path) -> None:
+    # Simulate the building code moving on: the locked hash no longer matches
+    # the CURRENT prescription. Even if the child also edited the file, the
+    # verdict is KERNEL_UPDATED — the update path owns that merge conversation.
+    stamp_kernel(_spec(), tmp_path / "repo")
+    lock = load_lock(tmp_path / "repo")
+    assert lock is not None
+    lock["files"]["Makefile"]["sha256"] = "0" * 64  # pretend an old prescription
+    (tmp_path / "repo" / "Makefile").write_text("# also locally edited\n")
+    report = compare(
+        lock,
+        current_plan=prescription(spec_from_lock(lock)),
+        child_root=tmp_path / "repo",
+    )
+    assert report.files["Makefile"] is FileFreshness.KERNEL_UPDATED
+    assert "Makefile" in report.stale_files
+    assert "Makefile" not in report.modified_files
+
+
+def test_lock_restores_when_diverged_but_skips_when_identical(tmp_path) -> None:
+    # A vandalized/diverged lock self-heals on re-stamp (no force needed);
+    # a byte-identical re-stamp writes nothing (idempotency contract holds).
+    stamp_kernel(_spec(), tmp_path / "repo")
+    lock_path = tmp_path / "repo" / "hydraflow-kernel.lock"
+    lock_path.write_text("{}\n")
+    result = stamp_kernel(_spec(), tmp_path / "repo")  # no force
+    actions = {f.path: f.action for f in result.files}
+    assert actions["hydraflow-kernel.lock"] == "rewritten"
+    third = stamp_kernel(_spec(), tmp_path / "repo")
+    assert {f.action for f in third.files} <= {"protected", "skipped"}
+    assert load_lock(tmp_path / "repo") is not None
+    assert load_lock(tmp_path / "repo") != {}

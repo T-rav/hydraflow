@@ -600,6 +600,34 @@ jobs:
             tests/test_diagnostics_finder_faceplates_route.py \
             -p no:randomly -q -p no:cacheprovider
 
+  # Gauge gauntlet (#11060 slice 2): execute the scaffold rails FOR REAL —
+  # fixture repo per gauge, lay the real scaffolds, run the quality commands a
+  # stamped child would run. Kills the dead-strings failure mode the Phase-0
+  # audit found (8 of 9 gauges had never executed). python + javascript run;
+  # the rest report UNEXERCISED by name (no silent caps). ADVISORY by design:
+  # no gates.toml record and deliberately NOT in ci-gate's `needs` — per
+  # #9922, an advisory lane must never block RC auto-merge. Keep the gauge
+  # list in sync with the `gauge-gauntlet` Makefile target's default docs.
+  gauge-gauntlet:
+    name: Gauge Gauntlet (advisory)
+    needs: changes
+    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Execute python + javascript gauges
+        run: |
+          uv sync --extra test --quiet
+          PYTHONPATH=src uv run python -m scripts.gauge_gauntlet \
+            --gauges python,javascript
+
   audit:
     name: Principles Audit
     needs: changes
