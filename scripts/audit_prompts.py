@@ -13,6 +13,7 @@ import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from unittest import mock
 
 # Allow direct invocation (`python scripts/audit_prompts.py`) from the repo root:
 # render() imports `tests.fixtures.prompts.fakes`, which requires the project
@@ -1287,6 +1288,83 @@ def _resolve_owner(qualname: str) -> tuple[object, list[str]]:
     raise ImportError(f"no importable module prefix in {qualname!r}")
 
 
+def _audit_plugin_skills() -> list:
+    """Checked-in stand-in for the host's installed plugin skills.
+
+    Builders call ``discover_plugin_skills``, which scans the operator's real
+    ``~/.claude/plugins/cache`` — host state, not repo state. Rendering against
+    it broke ADR-0087's "same input → same score" contract: CI runners (no
+    cache) rendered agent prompts without the ``## Available Skills`` section
+    while developer machines rendered ~1.4k extra chars of live skill
+    descriptions, so criterion-6 length classification disagreed between CI
+    and local full-suite runs (see tests/regressions/
+    test_audit_render_host_independent.py).
+
+    This is the production skill set recorded once (2026-08-13) and frozen,
+    cassette-style: exactly the skills that match the ``phase_skills``
+    whitelists when the default plugins are installed. Update deliberately —
+    a change here shifts rendered lengths and criterion-6 membership.
+    """
+    from plugin_skill_registry import PluginSkill  # noqa: PLC0415
+
+    return [
+        PluginSkill(
+            plugin="frontend-design",
+            name="frontend-design",
+            description=(
+                "Create distinctive, production-grade frontend interfaces with "
+                "high design quality. Use this skill when the user asks to build "
+                "web components, pages, or applications. Generates creative, "
+                "polished code that avoids generic AI aesthetics."
+            ),
+        ),
+        PluginSkill(
+            plugin="superpowers",
+            name="systematic-debugging",
+            description=(
+                "Use when encountering any bug, test failure, or unexpected "
+                "behavior, before proposing fixes"
+            ),
+        ),
+        PluginSkill(
+            plugin="superpowers",
+            name="test-driven-development",
+            description=(
+                "Use when implementing any feature or bugfix, before writing "
+                "implementation code"
+            ),
+        ),
+        PluginSkill(
+            plugin="superpowers",
+            name="verification-before-completion",
+            description=(
+                "Use when about to claim work is complete, fixed, or passing, "
+                "before committing or creating PRs - requires running "
+                "verification commands and confirming output before making any "
+                "success claims; evidence before assertions always"
+            ),
+        ),
+        PluginSkill(
+            plugin="superpowers",
+            name="writing-plans",
+            description=(
+                "Use when you have a spec or requirements for a multi-step "
+                "task, before touching code"
+            ),
+        ),
+    ]
+
+
+def _fake_discover_plugin_skills(plugins, cache_root=None) -> list:
+    """Deterministic ``discover_plugin_skills`` for audit renders.
+
+    Mirrors the real allowlist semantics (only skills from named plugins) but
+    never touches the filesystem.
+    """
+    allowed = set(plugins)
+    return [s for s in _audit_plugin_skills() if s.plugin in allowed]
+
+
 def render_target(target: AuditTarget) -> str:
     """Resolve qualname, load fixture, call the builder, return rendered text."""
     from tests.fixtures.prompts.fakes import get_fake  # noqa: PLC0415
@@ -1325,6 +1403,17 @@ def render_target(target: AuditTarget) -> str:
             callable_obj = getattr(instance, method_name)
     else:
         raise ValueError(f"unsupported qualname depth: {target.builder_qualname!r}")
+
+    # Builders import discover_plugin_skills into their own namespace, so the
+    # host-independence seam patches the *builder module's* binding for the
+    # duration of the render (faked_deps only covers builder arguments).
+    if hasattr(module, "discover_plugin_skills"):
+        with mock.patch.object(
+            module, "discover_plugin_skills", _fake_discover_plugin_skills
+        ):
+            return render(
+                callable_obj, args=fixture.args, faked_deps=fixture.faked_deps
+            )
     return render(callable_obj, args=fixture.args, faked_deps=fixture.faked_deps)
 
 

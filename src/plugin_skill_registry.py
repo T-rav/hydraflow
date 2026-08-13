@@ -17,7 +17,20 @@ from pathlib import Path
 
 logger = logging.getLogger("hydraflow.plugin_skill_registry")
 
-DEFAULT_CACHE_ROOT = Path.home() / ".claude" / "plugins" / "cache"
+
+def default_cache_root() -> Path:
+    """The plugin cache under the *current* home directory.
+
+    A function, not a module constant: ``Path.home()`` must resolve at call
+    time so the test session's ``HOME=/tmp/hydraflow-test`` redirect applies
+    regardless of when this module was imported. As a constant, a module
+    imported at collection time (before the session env fixture) captured the
+    operator's real home, and full-suite runs silently scanned the real
+    ``~/.claude/plugins/cache`` while isolated runs saw an empty root — the
+    import-order race behind the criterion-6 pin-test divergence.
+    """
+    return Path.home() / ".claude" / "plugins" / "cache"
+
 
 # Meta-skills that route to other skills — excluded from factory prompts
 # because the factory advertises skills directly.
@@ -77,7 +90,7 @@ def discover_plugin_skills(
     frontmatter are skipped with a warning. The ``using-superpowers``
     meta-skill is always excluded.
     """
-    root = cache_root or DEFAULT_CACHE_ROOT
+    root = cache_root or default_cache_root()
     key = (frozenset(plugins), root)
     cached = _skill_cache.get(key)
     if cached is not None:
