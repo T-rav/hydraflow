@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `874be8f` — Merge remote-tracking branch 'origin/main' into rc/2026-08-13-2315 *(2026-08-13)*
+- `f4ab7e7` — fix(audit): host-hermetic prompt renders — call-time cache root + frozen plugin-skill set (#11069) (#11069) *(2026-08-13)*
+- `c5eb54a` — chore(rc): regen arch artifacts after main merge (rc/2026-08-12-2120) *(2026-08-12)*
 - `964ea47` — Merge remote-tracking branch 'origin/main' into rc/2026-08-12-2120 *(2026-08-12)*
 - `2187acb` — feat(process): encode session lessons — supervisor classify rules, self-check, gotchas (#11065) (#11065) *(2026-08-12)*
 - `ef89f0c` — chore(rc): regen arch artifacts after main merge (rc/2026-08-12-1844) *(2026-08-12)*
