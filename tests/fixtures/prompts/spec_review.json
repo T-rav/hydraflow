@@ -1,0 +1,8 @@
+{
+  "builder": "spec_reviewer.build_spec_review_prompt",
+  "args": {
+    "document": "# Retry budget spec\n\nThe upload loop MUST retry at most 3 times with exponential backoff. Failures after the third attempt SHALL raise `UploadFailed` and file exactly 1 `hydraflow-find` issue via `src/upload.py`.\n\nThe reviewer should generally use appropriate judgment where possible. The system will be robust and clean.\n\nAll retries write to the escape ledger, which never records duplicates. The optimizer edits `src/upload.py` directly when the retry budget is exceeded.",
+    "subject_id": "spec:retry-budget"
+  },
+  "faked_deps": {}
+}

@@ -178,6 +178,13 @@ PROMPT_REGISTRY: list[AuditTarget] = [
     ),
     # Adjacent
     AuditTarget(
+        "spec_review",
+        "spec_reviewer.build_spec_review_prompt",
+        "tests/fixtures/prompts/spec_review.json",
+        "Adjacent",
+        "src/spec_reviewer.py:64",
+    ),
+    AuditTarget(
         "diff_sanity",
         "diff_sanity.build_diff_sanity_prompt",
         "tests/fixtures/prompts/diff_sanity.json",
