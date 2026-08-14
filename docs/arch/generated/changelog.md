@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `8194a7f` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-2140) *(2026-08-13)*
 - `88a162b` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-2050) *(2026-08-13)*
 - `cf0b0b1` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-1920) *(2026-08-13)*
 - `26f96e9` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-1801) *(2026-08-13)*
