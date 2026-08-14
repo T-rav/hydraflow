@@ -20,3 +20,19 @@ gate_health:
   signed_by: null
   signed_date: null
   authority: "ADR-0120 Ruling 1; #10824"
+
+sampled_audit:
+  pv: "pooled re-review disagreement rate over the governance window"
+  units: fraction
+  # Proposed 2026-08-13: the value IS audit.governance.TARGET_DISAGREEMENT_RATE
+  # (0.05, planning-picked v1) — signing promotes that constant to a
+  # human-signed number and the Shewhart governor reads it as its p-chart
+  # anchor. The control action is the governed SAMPLE RATE (widen/narrow),
+  # never suppression of disagreement filings — each filing is an audit
+  # record feeding adjudication. UNSIGNED — inert until reviewed and signed.
+  value: 0.05
+  band: 0.02
+  direction: below
+  signed_by: null
+  signed_date: null
+  authority: "ADR-0120 Ruling 1; #10824; audit.governance TARGET_DISAGREEMENT_RATE"
