@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "currency": "USD",
-  "updated_at": "2026-07-25",
+  "updated_at": "2026-08-14",
   "source": "https://docs.anthropic.com/en/docs/about-claude/models",
   "models": {
     "claude-haiku-4-5-20251001": {
@@ -249,6 +249,22 @@
       "output_cost_per_million": 25.0,
       "cache_write_cost_per_million": 6.25,
       "cache_read_cost_per_million": 0.5
+    },
+    "claude-mythos-5": {
+      "provider": "anthropic",
+      "aliases": [],
+      "input_cost_per_million": 10.0,
+      "output_cost_per_million": 50.0,
+      "cache_write_cost_per_million": 12.5,
+      "cache_read_cost_per_million": 1.0
+    },
+    "claude-mythos-preview": {
+      "provider": "anthropic",
+      "aliases": [],
+      "input_cost_per_million": 10.0,
+      "output_cost_per_million": 50.0,
+      "cache_write_cost_per_million": 12.5,
+      "cache_read_cost_per_million": 1.0
     }
   }
 }
