@@ -3,17 +3,17 @@
 // #11110 wired that command as a STEP of the `audit` job. The step exists; the
 // job never fires for the change class it guards.
 //
-// AS-IS: `audit` is gated on core_python || ci. core_python's brace-glob is
+// WAS: `audit` was gated on core_python || ci. core_python's brace-glob is
 //   {src/**/*.py,tests/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,prompts/**,control/**}
 // and has NO agents/** entry. The ledger lives at agents/console/decisions/**.
 // Only the separate `python` output lists agents/** — and `python` gates only
 // lint/typecheck/security, none of which execute pytest or the make target.
-// Net: a PR that rewrites a merged decision record runs ZERO ledger checks.
+// Net: a PR that rewrote a merged decision record ran ZERO ledger checks.
 //
-// TO-BE: a dedicated `console_ledger` filter (agents/**) OR'd into the `audit`
-// job's if:. `make console-conformance` runs all six ARCH-0001 checks (shape,
-// numbering, personas, chairs, staleness, git immutability) on the full clone
-// the audit job already takes, so one gate closes both halves.
+// LANDED: a dedicated `console_ledger` filter (agents/**) OR'd into the
+// `audit` job's if:. `make console-conformance` runs all six ARCH-0001 checks
+// (shape, numbering, personas, chairs, staleness, git immutability) on the
+// full clone the audit job already takes, so one gate closes both halves.
 
 specification {
   element workflow
@@ -47,8 +47,8 @@ model {
         outArch = output 'arch' {
           description 'src/arch/**, tests/architecture/**, docs/arch/**, docs/adr/**, Makefile'
         }
-        // TO-BE (#11164): the surgical addition.
-        outConsole = output 'console_ledger  [ADD #11164]' {
+        // LANDED (#11164): the surgical addition.
+        outConsole = output 'console_ledger  [ADDED #11164]' {
           description "agents/** — the ARCH-0001 ledger + persona contracts"
         }
       }
@@ -72,7 +72,7 @@ model {
     }
 
     audit = job 'audit (Principles Audit)' {
-      description 'if: core_python || ci   <-- the gap; checkout fetch-depth: 0'
+      description 'if: core_python || ci || console_ledger  [#11164]; checkout fetch-depth: 0'
       sAudit = step 'make audit'
       sConf = step 'make console-conformance  [#11110]' {
         description 'scripts/check_console_conformance.py — all six checks incl. git-history immutability'
@@ -84,7 +84,7 @@ model {
     }
   }
 
-  // ---- AS-IS wiring ----
+  // ---- pre-existing wiring ----
   ledger -> outPython 'matches agents/**' {
     title 'covered'
   }
@@ -99,9 +99,9 @@ model {
   sConf -> ledger 'reads (only if the job runs)'
   tConformance -> ledger 'reads with check_git=False'
 
-  // ---- TO-BE wiring (#11164) ----
-  ledger -> outConsole 'matches agents/**  [TO-BE]'
-  outConsole -> audit 'gates  [TO-BE: OR into the if:]'
+  // ---- LANDED wiring (#11164) ----
+  ledger -> outConsole 'matches agents/**  [LANDED]'
+  outConsole -> audit 'gates  [LANDED: ORed into the if:]'
 }
 
 views {
@@ -117,7 +117,7 @@ views {
   }
 
   dynamic view ledgerOnlyPr {
-    title 'Ledger-only PR today: every ARCH-0001 check is unreachable'
+    title 'Ledger-only PR before #11164: every ARCH-0001 check was unreachable'
     ledger -> outPython 'agents/console/decisions/0001-*.md changed -> python=true'
     outPython -> lint 'lint/typecheck/security run (no ledger check)'
     ledger -> outCore 'core_python=false (no agents/** entry)'
