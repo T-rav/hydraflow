@@ -405,6 +405,11 @@ jobs:
         # tests/regressions is excluded from leg 1's ignore list (parity
         # with the `test` job) so it has to be collected here — the single-
         # threaded original run implicitly covered it via bare `pytest tests/`.
+        # #11103: running the WHOLE regressions dir serially is a deliberate
+        # SUPERSET of the Makefile's fine-grained PYTEST_SERIAL_PATHS split —
+        # coarser is safe (merely slower) and this lane is off the PR critical
+        # path. The superset relation is pinned by tests/regressions/
+        # test_issue_10883.py::test_coverage_serial_leg_covers_every_makefile_serial_path.
         run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py tests/regressions --cov=src --cov-append --cov-fail-under=70 --cov-report=term-missing --cov-report=json --timeout=300 --durations=25
       - name: Upload coverage.json
         if: always()
@@ -678,6 +683,16 @@ jobs:
           # is NA there and only the telemetry history scan runs (#9902).
           HYDRAFLOW_AUDIT_PR_BASE: ${{ github.base_ref }}
         run: make audit
+      - name: Console conformance (ledger immutability)
+        # #11110 (sampled-audit upheld): ARCH-0001 declares ledger
+        # immutability `Enforced by: make console-conformance`, but nothing
+        # in CI ever ran it — the git-history check (#6) needs a full clone,
+        # which THIS job uniquely already has (fetch-depth: 0 above). The
+        # unit test (tests/test_console_conformance.py) covers the
+        # shape/numbering/staleness checks with check_git=False; this step
+        # closes the immutability half so a merged decision record cannot be
+        # silently rewritten green.
+        run: make console-conformance
 
   ui-build:
     name: Dashboard Build

@@ -171,3 +171,41 @@ def test_makefile_coverage_target_both_legs_pass_cov_append() -> None:
 def test_makefile_test_cov_target_both_legs_pass_cov_append() -> None:
     body = _make_target_body("test-cov")
     assert body.count("--cov-append") == 2
+
+
+def _makefile_serial_paths() -> set[str]:
+    """Expand `PYTEST_SERIAL_PATHS ?= <files> $(REAP_TESTS)` to literal paths."""
+    text = _makefile_text()
+    reap = re.search(r"REAP_TESTS\s*:=\s*(.*?)(?<!\\)\n", text, re.S)
+    assert reap, "Could not locate `REAP_TESTS :=` in the Makefile"
+    serial = re.search(r"PYTEST_SERIAL_PATHS\s*\?=\s*(.*?)(?<!\\)\n", text, re.S)
+    assert serial, "Could not locate `PYTEST_SERIAL_PATHS ?=` in the Makefile"
+    expanded = serial.group(1).replace("$(REAP_TESTS)", reap.group(1))
+    return {tok for tok in expanded.replace("\\", " ").split() if tok}
+
+
+def test_coverage_serial_leg_covers_every_makefile_serial_path() -> None:
+    """#11103 (sampled-audit upheld): the CI coverage job's serial leg runs
+    the WHOLE ``tests/regressions/`` directory — a deliberate SUPERSET of the
+    Makefile's fine-grained ``PYTEST_SERIAL_PATHS`` split. Whole-dir-serial
+    is safe (merely slower) and this lane sits off the PR critical path, so
+    the coarser shape is the encoded exception, not drift. What must never
+    happen silently: a path the Makefile serializes that this leg does not
+    execute at all. Pin the superset relation so the three definitions of
+    "xdist-unsafe" (test job, coverage job, Makefile) cannot diverge in the
+    direction that loses coverage."""
+    serial_leg = next(
+        run for run in _pytest_run_lines("coverage") if "-n auto" not in run
+    )
+    leg_paths = {tok for tok in serial_leg.split() if tok.startswith("tests/")}
+    assert leg_paths, f"no positional test paths found in serial leg: {serial_leg!r}"
+
+    for path in _makefile_serial_paths():
+        covered = path in leg_paths or any(
+            path.startswith(d.rstrip("/") + "/") for d in leg_paths
+        )
+        assert covered, (
+            f"Makefile PYTEST_SERIAL_PATHS entry {path!r} is not executed by "
+            f"the CI coverage job's serial leg ({sorted(leg_paths)}) — its "
+            f"coverage would silently vanish from the trailing floor gate"
+        )

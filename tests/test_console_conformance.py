@@ -95,3 +95,34 @@ def test_repo_ledger_is_conformant() -> None:
     make target locally; skipped here so shallow CI clones cannot false-pass)."""
     repo_root = Path(__file__).resolve().parent.parent
     assert collect_errors(repo_root, check_git=False) == []
+
+
+def test_ci_audit_job_runs_console_conformance() -> None:
+    """#11110 (sampled-audit upheld): ARCH-0001 markets ledger immutability
+    as `Enforced by: make console-conformance`, but no CI job invoked it —
+    the git-history check needs a full clone, so `test_repo_ledger_is_
+    conformant` above deliberately passes check_git=False. The enforcement
+    lives as a step in the audit job (the one job with fetch-depth: 0);
+    pin it so the claim can never silently go false again."""
+    import yaml
+
+    repo_root = Path(__file__).resolve().parent.parent
+    ci = yaml.safe_load(
+        (repo_root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    audit_steps = ci["jobs"]["audit"]["steps"]
+    conformance_runs = [
+        step
+        for step in audit_steps
+        if "make console-conformance" in str(step.get("run", ""))
+    ]
+    assert conformance_runs, (
+        "the audit job must run `make console-conformance` — it is the only "
+        "job with a full-history clone, and without it the ledger's "
+        "immutability guarantee is enforced nowhere (#11110)"
+    )
+    checkout = next(s for s in audit_steps if "checkout" in str(s.get("uses", "")))
+    assert checkout.get("with", {}).get("fetch-depth") == 0, (
+        "audit job checkout must keep fetch-depth: 0 — the immutability "
+        "check reads real git history and false-passes on a shallow clone"
+    )
