@@ -541,6 +541,68 @@ class TestAutoDiagnoseReasonNeutral:
 
         assert residue == [(record, SURFACE_REASON_AGING)]
 
+    async def test_record_eligible_under_both_reasons_is_diagnosed_once(
+        self, tmp_path: Path
+    ) -> None:
+        # A row can be eligible under BOTH SURFACE_REASON_LOW_CONFIDENCE and
+        # SURFACE_REASON_AGING in the same tick's `to_file` (#11161 widened
+        # `_auto_diagnose` to run for both — previously only low-confidence
+        # ever reached this loop, so a record could never appear twice here).
+        # Drives the REAL `EscapeAutoDiagnoser` (not `_FakeDiagnoser`, which
+        # doesn't persist anything) to prove the second pass short-circuits
+        # via `verdict_for` rather than writing a second ledger resolution.
+        from escape.auto_diagnose import EscapeDiagnosisLedger
+
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        reg = repo / "tests" / "regressions"
+        reg.mkdir(parents=True)
+        (reg / "test_bug_654.py").write_text(
+            "# regression pin for #654\ndef test_bug(): pass\n"
+        )
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "test: pin regression for #654")
+        (repo / "src" / "crash3.py").write_text("def crash3():\n    return 1\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "fix: resolve crash (fixes #654)")
+        fix_sha = _head(repo)
+
+        loop = _build_loop_direct(tmp_path, repo, github)
+        record = EscapeRecord(
+            id=f"bug-issue:{fix_sha}",
+            detected_at=datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
+            detection_source="bug-issue",
+            detection_ref=fix_sha,
+            originating_pr=654,
+            originating_merge_sha="",
+            merged_at="",
+            time_to_detection_hours=None,
+            attribution_method="fixes-chain",
+            attribution_confidence="low",
+            encoded_as="none-yet",
+            notes="",
+        )
+        EscapeLedger(loop._ledger_path).append(record)
+
+        residue = await loop._auto_diagnose(
+            [
+                (record, SURFACE_REASON_LOW_CONFIDENCE),
+                (record, SURFACE_REASON_AGING),
+            ]
+        )
+
+        assert residue == [], (
+            "a record resolved under one reason must not surface under the other"
+        )
+        diagnosis_rows = EscapeDiagnosisLedger(loop._diagnoses_path).read_all()
+        assert len(diagnosis_rows) == 1, (
+            "the second pass must short-circuit on the recorded verdict, "
+            "not re-run the diagnoser and write a second sidecar row"
+        )
+        resolved = EscapeLedger(loop._ledger_path).read_latest_index()[record.id]
+        assert resolved.attribution_confidence == "high"
+        assert resolved.encoded_as == "regression-test"
+
 
 # ---------------------------------------------------------------------------
 # Surfaced-issue link store (#10577): record the filed issue number
@@ -995,6 +1057,72 @@ class TestDiagnoseOpenLinks:
 
         assert closed == 1, "widening the reason filter alone cannot retire this"
         assert github._issues[link.issue_number].state == "closed"
+
+    async def test_resolved_verdict_closes_both_reason_links_for_the_same_escape(
+        self, tmp_path: Path
+    ) -> None:
+        # The scenario docs/architecture/aging_auto_diagnose.likec4 documents as
+        # this fix's payoff: an escape surfaced under BOTH reasons (a
+        # low-confidence HITL issue AND a separate aging HITL issue — the live
+        # #10724 / #11161 pair) is diagnosed once by `_diagnose_open_links`
+        # (deduped by escape id) and BOTH stranded links close on the same
+        # reconcile pass, not just the one that happened to trigger it.
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        reg = repo / "tests" / "regressions"
+        reg.mkdir(parents=True)
+        (reg / "test_bug_987.py").write_text(
+            "# regression pin for #987\ndef test_bug(): pass\n"
+        )
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "test: pin regression for #987")
+        (repo / "src" / "crash4.py").write_text("def crash4():\n    return 1\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "fix: resolve crash (fixes #987)")
+        fix_sha = _head(repo)
+
+        # First tick: auto-diagnose OFF — the row is both low-confidence AND
+        # aged past the threshold, so BOTH reasons file separately.
+        loop = _build_loop_direct(tmp_path, repo, github)
+        object.__setattr__(loop._config, "escape_ledger_auto_diagnose_enabled", False)
+        ledger = EscapeLedger(loop._ledger_path)
+        old = datetime(2026, 1, 1, tzinfo=UTC).isoformat()
+        ledger.append(
+            EscapeRecord(
+                id=f"bug-issue:{fix_sha}",
+                detected_at=old,
+                detection_source="bug-issue",
+                detection_ref=fix_sha,
+                originating_pr=987,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="fixes-chain",
+                attribution_confidence="low",
+                encoded_as="none-yet",
+                notes="",
+            )
+        )
+        filed, _capped = await loop._surface_findings()
+        assert filed == 2
+        links = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert {link.reason for link in links} == {
+            SURFACE_REASON_LOW_CONFIDENCE,
+            SURFACE_REASON_AGING,
+        }
+
+        # Second tick: auto-diagnose ON — one diagnose call resolves the
+        # escape; both stranded links must close together.
+        loop2 = _build_loop_direct(tmp_path, repo, github)
+
+        closed = await loop2._reconcile_surfaced_issues()
+
+        assert closed == 2, (
+            "both reason-scoped links for the resolved escape must close together"
+        )
+        assert all(
+            github._issues[link.issue_number].state == "closed" for link in links
+        )
 
 
 # ---------------------------------------------------------------------------
