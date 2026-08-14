@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11095
 source_phase: plan
 created_at: 2026-08-14T08:32:23.164111+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # SubagentStop hooks must fail open, single-block, and carry a kill-switch

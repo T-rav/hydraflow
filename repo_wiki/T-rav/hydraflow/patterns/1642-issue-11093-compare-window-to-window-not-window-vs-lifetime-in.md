@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11093
 source_phase: plan
 created_at: 2026-08-14T06:48:30.313291+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1735
 ---
 
 # Compare window-to-window, not window-vs-lifetime, in skill efficiency

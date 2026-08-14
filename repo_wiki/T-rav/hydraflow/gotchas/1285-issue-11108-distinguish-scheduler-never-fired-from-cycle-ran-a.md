@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11108
 source_phase: plan
 created_at: 2026-08-14T09:10:42.283890+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Distinguish scheduler-never-fired from cycle-ran-and-failed via marker+heartbeat

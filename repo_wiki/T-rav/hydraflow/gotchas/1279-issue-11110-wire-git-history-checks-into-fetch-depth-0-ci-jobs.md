@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11110
 source_phase: plan
 created_at: 2026-08-14T08:05:02.917601+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Wire git-history checks into fetch-depth:0 CI jobs only
