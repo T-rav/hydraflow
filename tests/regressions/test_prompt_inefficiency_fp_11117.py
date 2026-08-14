@@ -80,6 +80,27 @@ def test_zero_usage_estimated_cost_does_not_inflate_the_rate() -> None:
     assert abs(row.trend_vs_baseline) < INEFFICIENCY_THRESHOLD
 
 
+def test_blind_spot_flag_needs_the_evidence_floor() -> None:
+    """#11167 (sampled-audit upheld on #11152): zero_usage_window fired off
+    a single unavailable call — the alert path skipped the floor the
+    regression path enforces. Both sides of the sensor share it now."""
+    single = compute_skill_efficiency(
+        {"term_proposer": _totals(0, 101, anomalies=101)},
+        baseline={"term_proposer": _totals(0, 100, anomalies=100)},
+    )[0]
+    assert single.zero_usage_window is False
+
+    floor_sized = compute_skill_efficiency(
+        {
+            "term_proposer": _totals(
+                0, 100 + MIN_WINDOW_CALLS, anomalies=100 + MIN_WINDOW_CALLS
+            )
+        },
+        baseline={"term_proposer": _totals(0, 100, anomalies=100)},
+    )[0]
+    assert floor_sized.zero_usage_window is True
+
+
 def test_under_sampled_window_never_trends() -> None:
     """A sub-floor window with a genuine 100x per-call spike still yields no
     trend — 1-3 calls cannot distinguish variance from regression."""

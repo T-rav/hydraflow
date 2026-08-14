@@ -184,6 +184,23 @@ def test_claude_md_review_rule_cross_sentence_mention_fails(tmp_path: Path) -> N
     assert _run("P8.7", _ctx(tmp_path)).status is Status.FAIL
 
 
+def test_claude_md_review_substring_words_do_not_pass(tmp_path: Path) -> None:
+    """#11166 (re-audit find): 'preview'/'interview' contain the substring
+    'review' — an unanchored regex passed CLAUDE.md text that says nothing
+    about running a code review."""
+    _write(
+        tmp_path / "CLAUDE.md",
+        "Preview environments are generated for every PR automatically.\n",
+    )
+    assert _run("P8.7", _ctx(tmp_path)).status is Status.FAIL
+
+    _write(
+        tmp_path / "CLAUDE.md",
+        "Interview every PR author before merge for context.\n",
+    )
+    assert _run("P8.7", _ctx(tmp_path)).status is Status.FAIL
+
+
 def test_claude_md_only_substantial_features_review_fails(tmp_path: Path) -> None:
     _write(
         tmp_path / "CLAUDE.md",
