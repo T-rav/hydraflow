@@ -8,19 +8,29 @@
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.block-destructive-git.sh",
             "timeout": 10,
-            "statusMessage": "Checking for destructive git commands..."
+            "statusMessage": "Checking for destructive git commands...",
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.scan-secrets-before-commit.sh",
             "timeout": 30,
-            "statusMessage": "Scanning for secrets in staged files..."
+            "statusMessage": "Scanning for secrets in staged files...",
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.validate-tests-before-commit.sh",
             "timeout": 120,
-            "statusMessage": "Validating lint + tests before commit..."
+            "statusMessage": "Validating lint + tests before commit...",
+            "_hydraflow": true
+          },
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.validate-functional-areas.sh",
+            "timeout": 30,
+            "statusMessage": "Validating functional-areas schema...",
+            "_hydraflow": true
           }
         ]
       },
@@ -31,25 +41,29 @@
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.enforce-plan-and-explore.sh",
             "timeout": 10,
-            "statusMessage": "Checking for exploration and planning..."
+            "statusMessage": "Checking for exploration and planning...",
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.check-test-counterpart.sh",
             "timeout": 10,
-            "statusMessage": "Checking for test counterpart..."
+            "statusMessage": "Checking for test counterpart...",
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.enforce-migrations.sh",
             "timeout": 10,
-            "statusMessage": "Checking for direct DB schema changes..."
+            "statusMessage": "Checking for direct DB schema changes...",
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.check-cross-service-impact.sh",
             "timeout": 15,
-            "statusMessage": "Checking cross-service impact for shared/ changes..."
+            "statusMessage": "Checking cross-service impact for shared/ changes...",
+            "_hydraflow": true
           }
         ]
       },
@@ -60,25 +74,29 @@
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.enforce-plan-and-explore.sh",
             "timeout": 10,
-            "statusMessage": "Checking for exploration and planning..."
+            "statusMessage": "Checking for exploration and planning...",
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.check-test-counterpart.sh",
             "timeout": 10,
-            "statusMessage": "Checking for test counterpart..."
+            "statusMessage": "Checking for test counterpart...",
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.enforce-migrations.sh",
             "timeout": 10,
-            "statusMessage": "Checking for direct DB schema changes..."
+            "statusMessage": "Checking for direct DB schema changes...",
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.check-cross-service-impact.sh",
             "timeout": 15,
-            "statusMessage": "Checking cross-service impact for shared/ changes..."
+            "statusMessage": "Checking cross-service impact for shared/ changes...",
+            "_hydraflow": true
           }
         ]
       }
@@ -90,7 +108,8 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.track-exploration.sh",
-            "timeout": 5
+            "timeout": 5,
+            "_hydraflow": true
           }
         ]
       },
@@ -100,7 +119,8 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.track-exploration.sh",
-            "timeout": 5
+            "timeout": 5,
+            "_hydraflow": true
           }
         ]
       },
@@ -110,7 +130,8 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.track-exploration.sh",
-            "timeout": 5
+            "timeout": 5,
+            "_hydraflow": true
           }
         ]
       },
@@ -120,7 +141,8 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.track-exploration.sh",
-            "timeout": 5
+            "timeout": 5,
+            "_hydraflow": true
           }
         ]
       },
@@ -130,7 +152,8 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.track-planning.sh",
-            "timeout": 5
+            "timeout": 5,
+            "_hydraflow": true
           }
         ]
       },
@@ -140,24 +163,28 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.warn-new-file-creation.sh",
-            "timeout": 10
+            "timeout": 10,
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.track-code-changes.sh",
-            "timeout": 5
+            "timeout": 5,
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.auto-lint-after-edit.sh",
             "timeout": 15,
-            "statusMessage": "Auto-fixing lint issues..."
+            "statusMessage": "Auto-fixing lint issues...",
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.mirror-feedback-memory.sh",
             "timeout": 15,
-            "statusMessage": "Mirroring feedback memory to in-repo backlog..."
+            "statusMessage": "Mirroring feedback memory to in-repo backlog...",
+            "_hydraflow": true
           }
         ]
       },
@@ -167,13 +194,15 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.track-code-changes.sh",
-            "timeout": 5
+            "timeout": 5,
+            "_hydraflow": true
           },
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.auto-lint-after-edit.sh",
             "timeout": 15,
-            "statusMessage": "Auto-fixing lint issues..."
+            "statusMessage": "Auto-fixing lint issues...",
+            "_hydraflow": true
           }
         ]
       }
@@ -185,7 +214,8 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/hf.cleanup-code-change-marker.sh",
-            "timeout": 5
+            "timeout": 5,
+            "_hydraflow": true
           }
         ]
       }
