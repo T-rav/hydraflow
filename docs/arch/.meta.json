@@ -19,7 +19,7 @@
       "content_sha": "16b0b3bc4191f5c84a979a6794c6f99c1368e73060e159c9cc9acedc4b560b23"
     },
     "changelog.md": {
-      "content_sha": "8e25b75a8950f6aad5c046ebb14415f41ee8750c6f05d5a43a7b2b9cb7a110c2"
+      "content_sha": "c2cba8aa5ebff8f6f98c53fa104144f8263e7d986466f4a36c4fde80c69ebd89"
     },
     "coverage_matrix.md": {
       "content_sha": "b74d666cf36ecdbaa5add72ec7453ab4fb1c533d4cb48ce797fbc3dacfbe5700"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "6c2f57ce85b0834718580e3e49c2c8f362cf1862ecc7ff89bbc3b981ddbe3587"
+  "content_sha": "14f29387f37003a2960c60fbe405aad1295563d654c6bb53fd3132b52108e64c"
 }
