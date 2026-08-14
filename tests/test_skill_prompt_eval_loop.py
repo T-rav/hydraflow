@@ -275,6 +275,144 @@ def test_inefficiency_title_round_trips_through_subject_parser() -> None:
     assert _inefficiency_subject("Some operator-created issue title") is None
 
 
+async def test_inefficiency_body_carries_falsifying_evidence(loop_env) -> None:
+    """#11118/#11115: a filing must carry the numbers that would falsify it
+    (window size, baseline rate, history-ledger pointer) and cite real
+    provenance — not the phantom 'Spec §5c'."""
+    from prompt_efficiency import SkillEfficiencyRow
+
+    cfg, state, pr, dedup = loop_env
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    row = SkillEfficiencyRow(
+        source="base_runner",
+        calls=120,
+        est_cost_usd=3.6,
+        anomalies=7,
+        cost_per_call=0.03,
+        trend_vs_baseline=0.42,
+        window_calls=15,
+        base_cost_per_call=0.02,
+    )
+    await loop._file_inefficiency_issue(row)
+    body = pr.create_issue.await_args.args[1]
+    assert "§5c" not in body
+    assert "| window calls (usage-bearing) | 15 |" in body
+    assert "| baseline cost-per-call | $0.0200 |" in body
+    assert str(cfg.prompt_efficiency_history_path) in body
+    assert "To falsify" in body
+
+
+async def test_zero_usage_alert_files_and_dedups(loop_env) -> None:
+    """#11117: an all-zero-usage window files a blind-spot alert once; the
+    dedup key blocks a re-file until the reconciler clears it."""
+    from prompt_efficiency import SkillEfficiencyRow
+    from skill_prompt_eval_loop import _ZERO_USAGE_KEY_PREFIX, _zero_usage_title
+
+    cfg, state, pr, dedup = loop_env
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    row = SkillEfficiencyRow(
+        source="term_proposer",
+        calls=600,
+        est_cost_usd=0.0,
+        anomalies=563,
+        cost_per_call=0.0,
+        trend_vs_baseline=None,
+        window_calls=0,
+        zero_usage_window=True,
+    )
+    await loop._file_zero_usage_alert(row)
+    pr.create_issue.assert_awaited_once()
+    title = pr.create_issue.await_args.args[0]
+    assert title == _zero_usage_title("term_proposer")
+
+    dedup.get.return_value = {f"{_ZERO_USAGE_KEY_PREFIX}:term_proposer"}
+    pr.create_issue.reset_mock()
+    await loop._file_zero_usage_alert(row)
+    pr.create_issue.assert_not_awaited()
+
+
+def test_zero_usage_and_inefficiency_title_parsers_are_disjoint() -> None:
+    """Both reconcilers share the `prompt-inefficiency` label — safe only
+    while each title parser returns None for the other's titles."""
+    from skill_prompt_eval_loop import (
+        _inefficiency_subject,
+        _inefficiency_title,
+        _zero_usage_subject,
+        _zero_usage_title,
+    )
+
+    assert _zero_usage_subject(_zero_usage_title("term_proposer")) == "term_proposer"
+    assert _zero_usage_subject(_inefficiency_title("term_proposer")) is None
+    assert _inefficiency_subject(_zero_usage_title("term_proposer")) is None
+
+
+async def test_consume_telemetry_appends_baseline_history(
+    loop_env, monkeypatch
+) -> None:
+    """#11116: every tick's snapshot lands in the history ledger BEFORE the
+    state baseline is destructively overwritten."""
+    import json as _json
+
+    cfg, state, pr, dedup = loop_env
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    totals = {"base_runner": {"inference_calls": 10, "estimated_cost_microusd": 500}}
+    monkeypatch.setattr(loop._telemetry, "get_source_totals", lambda: totals)
+    state.get_prompt_efficiency_baseline.return_value = {}
+
+    await loop._consume_efficiency_telemetry([])
+    await loop._consume_efficiency_telemetry([])
+
+    lines = cfg.prompt_efficiency_history_path.read_text().splitlines()
+    assert len(lines) == 2
+    entry = _json.loads(lines[0])
+    assert entry["totals_by_source"] == totals
+    assert entry["recorded_at"]
+    state.set_prompt_efficiency_baseline.assert_called_with(totals)
+
+
+async def test_consume_telemetry_files_zero_usage_alert(loop_env, monkeypatch) -> None:
+    """#11117 end-to-end through `_consume_efficiency_telemetry`: a window
+    of raw calls that are ALL zero-usage files the blind-spot alert and no
+    inefficiency issue."""
+    from skill_prompt_eval_loop import _zero_usage_title
+
+    cfg, state, pr, dedup = loop_env
+    stop = asyncio.Event()
+    loop = SkillPromptEvalLoop(
+        config=cfg, state=state, pr_manager=pr, dedup=dedup, deps=_deps(stop)
+    )
+    baseline = {
+        "term_proposer": {
+            "inference_calls": 100,
+            "estimated_cost_microusd": 0,
+            "usage_unavailable_calls": 100,
+        }
+    }
+    totals = {
+        "term_proposer": {
+            "inference_calls": 150,
+            "estimated_cost_microusd": 0,
+            "usage_unavailable_calls": 150,
+        }
+    }
+    monkeypatch.setattr(loop._telemetry, "get_source_totals", lambda: totals)
+    state.get_prompt_efficiency_baseline.return_value = baseline
+
+    await loop._consume_efficiency_telemetry([])
+
+    pr.create_issue.assert_awaited_once()
+    assert pr.create_issue.await_args.args[0] == _zero_usage_title("term_proposer")
+
+
 _STALE_ESCALATION = {
     "number": 9618,
     "title": "HITL: skill prompt drift case_shrink_001 unresolved after 3",
