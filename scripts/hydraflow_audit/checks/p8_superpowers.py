@@ -136,13 +136,25 @@ def _trace_collector(ctx: CheckContext) -> Finding:
     )
 
 
+# Paraphrase-tolerant like sibling P10.1 (two-signal regex), not a literal
+# phrase probe: "review" and an every/each-PR cadence marker must co-occur
+# inside one sentence, in either order. A reworded but compliant rule still
+# passes; the substantial-features-only review-iteration rule (no per-PR
+# cadence marker) still fails.
+_P87_REVIEW_EVERY_PR_RE = re.compile(
+    r"review[^.\n]{0,80}\b(?:every|each)\s+pr\b"
+    r"|\b(?:every|each)\s+pr\b[^.\n]{0,80}review",
+    re.IGNORECASE,
+)
+
+
 @register("P8.7")
 def _claude_md_requires_review_every_pr(ctx: CheckContext) -> Finding:
     claude = ctx.root / "CLAUDE.md"
     if not claude.exists():
         return finding("P8.7", Status.FAIL, "CLAUDE.md missing")
-    text = claude.read_text(encoding="utf-8", errors="replace").lower()
-    if "code review after every pr" in text:
+    text = claude.read_text(encoding="utf-8", errors="replace")
+    if _P87_REVIEW_EVERY_PR_RE.search(text):
         return finding("P8.7", Status.PASS)
     return finding(
         "P8.7",

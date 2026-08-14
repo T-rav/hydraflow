@@ -162,6 +162,28 @@ def test_claude_md_requires_review_every_pr_case_insensitive(tmp_path: Path) -> 
     assert _run("P8.7", _ctx(tmp_path)).status is Status.PASS
 
 
+def test_claude_md_review_rule_paraphrase_passes(tmp_path: Path) -> None:
+    """#11153 review: the check must tolerate rewording (sibling P10.1
+    convention) — cadence marker + review co-occurring in one sentence, in
+    either order, not one literal phrase."""
+    _write(
+        tmp_path / "CLAUDE.md",
+        "After every PR you create, run a fresh-eyes code review before "
+        "enabling auto-merge.\n",
+    )
+    assert _run("P8.7", _ctx(tmp_path)).status is Status.PASS
+
+
+def test_claude_md_review_rule_cross_sentence_mention_fails(tmp_path: Path) -> None:
+    """'review' in one sentence and 'every PR' in another must not pass —
+    the co-occurrence window stops at sentence bounds."""
+    _write(
+        tmp_path / "CLAUDE.md",
+        "We value code review. CI runs on every PR automatically.\n",
+    )
+    assert _run("P8.7", _ctx(tmp_path)).status is Status.FAIL
+
+
 def test_claude_md_only_substantial_features_review_fails(tmp_path: Path) -> None:
     _write(
         tmp_path / "CLAUDE.md",
