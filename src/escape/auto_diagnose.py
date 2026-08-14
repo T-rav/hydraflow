@@ -283,43 +283,84 @@ class EscapeDiagnosisRecord:
         )
 
 
+#: Verdicts that permanently retire an escape from every human/aging
+#: surface. INCONCLUSIVE is deliberately excluded — it is the fail-safe
+#: default and must keep the row eligible for re-diagnosis and surfacing.
+_TERMINAL_DIAGNOSES: frozenset[EscapeDiagnosis] = frozenset(
+    {EscapeDiagnosis.RESOLVED_ENCODED, EscapeDiagnosis.DISMISSED}
+)
+
+
 class EscapeDiagnosisLedger(IdentifiedJsonlLedger[EscapeDiagnosisRecord]):
     """Append-only reader/writer over the escape auto-diagnose sidecar."""
 
     def __init__(self, path: Path) -> None:
         super().__init__(path, EscapeDiagnosisRecord, logger=logger)
 
+    def _latest_verdicts(self) -> dict[str, tuple[EscapeDiagnosis, str] | None]:
+        """escape_id → latest parsed ``(verdict, reason)``, last row wins.
+
+        A row whose ``diagnosis`` string doesn't parse into the current
+        ``EscapeDiagnosis`` enum (a future enum value written by a newer
+        build, or corruption) maps to ``None`` — "undiagnosed, re-diagnose
+        rather than guess" (#11111). Every public reader below derives from
+        this ONE map so the views can never diverge again: ``terminal_ids()``
+        used to trust bare row presence (``existing_ids()``) while
+        ``verdict_for()`` validated the diagnosis field, so an unparseable
+        row counted as terminal for selection but undiagnosed for the
+        verdict lookup — silently and permanently hiding the escape from
+        every human/aging surface even though the documented recovery path
+        ("map to None, caller re-diagnoses") was never dead (#11163).
+        """
+        out: dict[str, tuple[EscapeDiagnosis, str] | None] = {}
+        for row in self.read_all():
+            try:
+                out[row.escape_id] = (EscapeDiagnosis(row.diagnosis), row.reason)
+            except ValueError:
+                out[row.escape_id] = None
+        return out
+
     def terminal_ids(self) -> set[str]:
-        """Escape ids that already carry a terminal (resolved/dismissed) verdict."""
-        return set(self.existing_ids())
+        """Escape ids whose latest sidecar row is a terminal verdict.
+
+        Excludes ids whose latest row is unparseable or INCONCLUSIVE — those
+        stay eligible for re-diagnosis and human/aging surfacing.
+        """
+        return {
+            escape_id
+            for escape_id, verdict in self._latest_verdicts().items()
+            if verdict is not None and verdict[0] in _TERMINAL_DIAGNOSES
+        }
+
+    def unreadable_ids(self) -> set[str]:
+        """Escape ids whose latest sidecar row didn't parse (#11163).
+
+        Callers surface this as a loud aggregate warning — an unparseable
+        row must never be a silent, permanent loss of visibility; the id
+        stays out of ``terminal_ids()`` so it is re-diagnosed instead.
+        """
+        return {
+            escape_id
+            for escape_id, verdict in self._latest_verdicts().items()
+            if verdict is None
+        }
 
     def verdict_for(self, escape_id: str) -> tuple[EscapeDiagnosis, str] | None:
         """The recorded terminal (verdict, reason) for *escape_id*, last row
-        wins; ``None`` when the id has no terminal sidecar row. Unknown
-        diagnosis strings (a future enum value read by an old build) map to
-        ``None`` — the caller treats the row as undiagnosed rather than
+        wins; ``None`` when the id has no sidecar row or its latest row is
+        unparseable — the caller treats the row as undiagnosed rather than
         guessing (#11111)."""
-        found: tuple[EscapeDiagnosis, str] | None = None
-        for row in self.read_all():
-            if row.escape_id != escape_id:
-                continue
-            try:
-                found = (EscapeDiagnosis(row.diagnosis), row.reason)
-            except ValueError:
-                found = None
-        return found
+        return self._latest_verdicts().get(escape_id)
 
     def dismissal_reasons(self) -> dict[str, str]:
         """escape_id → recorded reason for every DISMISSED verdict (last row
         wins). The reconcile pass uses this to close stranded HITL issues
         with the dismissal explanation (#11148)."""
-        out: dict[str, str] = {}
-        for row in self.read_all():
-            if row.diagnosis == EscapeDiagnosis.DISMISSED.value:
-                out[row.escape_id] = row.reason
-            elif row.escape_id in out:
-                out.pop(row.escape_id)
-        return out
+        return {
+            escape_id: verdict[1]
+            for escape_id, verdict in self._latest_verdicts().items()
+            if verdict is not None and verdict[0] is EscapeDiagnosis.DISMISSED
+        }
 
     def append_diagnosis(
         self, escape_id: str, diagnosis: EscapeDiagnosis, reason: str
