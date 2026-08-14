@@ -916,6 +916,16 @@ mode-mismatch: deps
 		--event-log $${HYDRAFLOW_EVENT_LOG:-.hydraflow/events.jsonl} \
 		--issues-json /tmp/hf_issue_states.json $(ARGS)
 
+# Spec intake review (#10830 phase 2): stress-test prose BEFORE it becomes a
+# setpoint. Deterministic falsifiability always; add ARGS="--live" for the
+# adversarial model read (three contradiction checks + assumptions). Advisory:
+# records + surfaces, never blocks.
+.PHONY: spec-intake
+spec-intake: deps
+	@test -n "$(DOC)" || { echo "Usage: make spec-intake DOC=<spec.md> [ARGS=\"--live\"]" >&2; exit 2; }
+	@echo "$(BLUE)Running spec-intake review on $(DOC)...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/spec_intake_review.py $(DOC) $(ARGS)
+
 # Kernel staleness (#11060 slice 1): is a stamped child current with the
 # building code? Reads the child's hydraflow-kernel.lock, recomputes the
 # current prescription, classifies KERNEL_UPDATED / LOCALLY_MODIFIED / MISSING.
