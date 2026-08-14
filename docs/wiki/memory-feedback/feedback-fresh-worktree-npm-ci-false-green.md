@@ -2,9 +2,9 @@
 source: feedback_fresh_worktree_npm_ci_false_green.md
 name: feedback_fresh_worktree_npm_ci_false_green
 description: A fresh git worktree has no src/ui/node_modules, so `make quality` SILENTLY SKIPS the UI/vitest stage ([ui-tests SKIPPED]) and reports green — a FALSE green that hides broken UI. Always `npm ci` (or `npm install`) in src/ui before make quality in a new worktree doing UI work.
-status: pending
-issue: null
-promoted_in: null
+status: promoted
+issue: 11090
+promoted_in: '#11090'
 wontfix_reason: null
 created: '2026-07-26'
 ---

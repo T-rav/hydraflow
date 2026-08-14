@@ -11,8 +11,10 @@ symptom backstop; this pin guards the prevention:
   entry point CI uses (``run-vitest.cjs`` — not raw ``npx vitest``, which
   skips the wrapper's jsdom patch and encoding shim);
 - node is an optional local tool, so the stage must degrade loudly-but-green
-  when node or an installed ``src/ui/node_modules`` is missing (skip with a
-  visible warning, never fail quality on a node-less machine);
+  when node or an installed ``src/ui/node_modules`` is missing AND src/ui is
+  untouched (skip with a visible warning). Since #11090 the skip is
+  conditional: a node-less machine whose checkout CHANGED src/ui fails loud
+  instead — see tests/regressions/test_ui_skip_false_green_11090.py;
 - the gating command must not be piped to ``tail`` — pipes mask the exit code
   (the known ``make | tail`` footgun);
 - ``quality-lite`` (the pre-push gate) deliberately stays vitest-free so
