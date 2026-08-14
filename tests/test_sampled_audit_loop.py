@@ -13,7 +13,7 @@ import inspect
 import subprocess
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -501,3 +501,121 @@ class TestCreditReraise:
         )
         with pytest.raises(CreditExhaustedError):
             await loop._do_work()
+
+
+def _select_all(changes, *, base_rate, rng):
+    """Deterministic select_sample stand-in — the loop's per-tick rng is
+    content-seeded, so a fractional-rate draw is repo-hash roulette."""
+    _ = base_rate, rng
+    return list(changes)
+
+
+def _write_setpoint(repo: Path, *, value: float, signed: bool) -> None:
+    control = repo / "control"
+    control.mkdir(parents=True, exist_ok=True)
+    signer = "signed_by: travis" if signed else "signed_by: null"
+    control.joinpath("setpoints.yaml").write_text(
+        "sampled_audit:\n"
+        "  pv: pooled re-review disagreement rate\n"
+        "  units: fraction\n"
+        f"  value: {value}\n"
+        "  band: 0.05\n"
+        "  direction: below\n"
+        f"  {signer}\n"
+    )
+
+
+class TestSetpointRegulation:
+    """#10824: a SIGNED setpoint becomes the governor's p-chart target and
+    surfaces the regulator verdict; filings are NEVER gated (each is an
+    audit record feeding adjudication — the control action is the rate)."""
+
+    async def test_unsigned_setpoint_keeps_legacy_target_and_reports_inactive(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        base, _ = _seed_merged_pr(repo)
+        _write_setpoint(repo, value=0.9, signed=False)
+        # Pooled window of 5 clean samples: this DISAGREE tick's latest_p=1.0
+        # clears the default target's UCL → the governor WIDENS (0.10 → 0.15).
+        # Selection forced deterministic (the loop's per-tick rng is content-
+        # seeded, so a 10% draw is otherwise repo-hash roulette).
+        state = _make_state(initial_sha=base, rate=0.10)
+        state._store["history"] = [{"sampled": 5, "disagreements": 0}]
+        loop = _make_loop(tmp_path, repo, auditor=_FakeAuditor(_DISAGREE), state=state)
+
+        with patch("sampled_audit_loop.select_sample", side_effect=_select_all):
+            result = await loop._do_work()
+
+        assert result["setpoint_active"] is False
+        assert result["quiescent"] is False
+        assert state._store["rate"] == pytest.approx(0.15)
+
+    async def test_signed_setpoint_becomes_governor_target(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        base, _ = _seed_merged_pr(repo)
+        # Same seeded window + DISAGREE tick as above, but a SIGNED 0.9 target:
+        # latest_p=1.0 no longer clears the (much higher) UCL and is above the
+        # target, so the governor HOLDS — the signed number changed behavior.
+        _write_setpoint(repo, value=0.9, signed=True)
+        state = _make_state(initial_sha=base, rate=0.10)
+        state._store["history"] = [{"sampled": 5, "disagreements": 0}]
+        loop = _make_loop(tmp_path, repo, auditor=_FakeAuditor(_DISAGREE), state=state)
+
+        with patch("sampled_audit_loop.select_sample", side_effect=_select_all):
+            result = await loop._do_work()
+
+        assert result["setpoint_active"] is True
+        assert state._store["rate"] == pytest.approx(0.10)  # held, not widened
+        # Pooled PV = 1 disagreement / 6 samples ≈ 0.167 ≤ 0.9 → quiescent.
+        assert result["pv_disagreement_rate"] == pytest.approx(0.1667, abs=1e-3)
+        assert result["quiescent"] is True
+
+    async def test_disagreement_filing_never_gated_by_quiescence(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        base, _ = _seed_merged_pr(repo)
+        # Signed, generous target + a mostly-clean pooled window → quiescent;
+        # the disagreement STILL files (audit record, not a rate phenomenon).
+        _write_setpoint(repo, value=0.9, signed=True)
+        state = _make_state(initial_sha=base, rate=1.0)
+        state._store["history"] = [{"sampled": 9, "disagreements": 0}]
+        prs = _make_prs()
+        loop = _make_loop(
+            tmp_path,
+            repo,
+            auditor=_FakeAuditor(_DISAGREE),
+            state=state,
+            prs=prs,
+            sampled_audit_auto_adjudicate_enabled=False,
+        )
+
+        result = await loop._do_work()
+
+        assert result["quiescent"] is True  # PV 1/10 = 0.1 <= 0.9
+        assert result["filed"] == 1
+        prs.create_issue.assert_awaited()
+
+    async def test_out_of_band_pv_reports_acting(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        base, _ = _seed_merged_pr(repo)
+        # Tight signed target (0.05 band 0.05): a 1/1 disagreement window has
+        # PV=0.5 far above value+band → acting, not quiescent.
+        control = repo / "control"
+        control.mkdir(parents=True, exist_ok=True)
+        control.joinpath("setpoints.yaml").write_text(
+            "sampled_audit:\n  value: 0.05\n  band: 0.05\n  direction: below\n"
+            "  signed_by: travis\n"
+        )
+        state = _make_state(initial_sha=base, rate=1.0)
+        state._store["history"] = [{"sampled": 1, "disagreements": 1}]
+        loop = _make_loop(tmp_path, repo, auditor=_FakeAuditor(_DISAGREE), state=state)
+
+        result = await loop._do_work()
+
+        assert result["setpoint_active"] is True
+        assert result["quiescent"] is False
+        assert result["pv_disagreement_rate"] > 0.05
