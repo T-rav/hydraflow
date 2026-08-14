@@ -3827,7 +3827,11 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     worker_stall_tight_loops: list[str] = Field(
-        default_factory=lambda: ["staging_bisect", "flake_tracker"],
+        default_factory=lambda: [
+            "staging_bisect",
+            "flake_tracker",
+            "skill_prompt_eval",
+        ],
         description=(
             "HealthMonitorLoop generic stall sweep (#10241): loops that opt "
             "into worker_stall_tight_multiplier instead of the blanket "
@@ -3838,9 +3842,12 @@ class HydraFlowConfig(BaseModel):
             "cycle_timeout has the same shape, just wider: flake_tracker "
             "(14400s poll, 7200s watchdog) has a blanket threshold of 50400s "
             "vs a 28800s trust alert, a ~6h window with an open anomaly issue "
-            "and no attempted remediation (#10795). Names here fire the "
-            "auto-restart closer to that alert window while keeping the "
-            "no-false-restart floor (see worker_stall_tight_multiplier)."
+            "and no attempted remediation (#10795); skill_prompt_eval's "
+            "weekly poll (604800s, 7200s watchdog) widens that to a full "
+            "extra week — blanket threshold 1821600s vs a 1209600s trust "
+            "alert (#11091). Names here fire the auto-restart closer to "
+            "that alert window while keeping the no-false-restart floor "
+            "(see worker_stall_tight_multiplier)."
         ),
     )
     worker_stall_tight_multiplier: int = Field(
