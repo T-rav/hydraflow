@@ -437,6 +437,16 @@ class PromptTelemetry:
             target["estimated_cost_microusd"] = _as_int(
                 target.get("estimated_cost_microusd", 0)
             ) + round(float(record_cost) * 1_000_000)
+            # #11117 (review find): a small-prompt zero-usage call can still
+            # carry char-ESTIMATED cost. `prompt_efficiency` excludes such
+            # calls from its rate denominators, so their cost must be
+            # subtractable from the numerator too or window rates inflate —
+            # the mirror image of the deflation bug. Same-population math
+            # needs this parallel accumulator.
+            if record.get("usage_status") == "unavailable":
+                target["unavailable_est_cost_microusd"] = _as_int(
+                    target.get("unavailable_est_cost_microusd", 0)
+                ) + round(float(record_cost) * 1_000_000)
         target["last_updated"] = str(record.get("timestamp", ""))
 
     def get_pr_totals(self, pr_number: int) -> dict[str, int] | None:

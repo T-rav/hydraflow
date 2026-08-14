@@ -189,6 +189,26 @@ def test_zero_usage_calls_excluded_from_denominators() -> None:
     assert abs(row.trend_vs_baseline) < INEFFICIENCY_THRESHOLD
 
 
+def test_estimated_cost_of_zero_usage_calls_excluded_from_numerator() -> None:
+    """Review find on #11117: small-prompt zero-usage calls still record
+    char-ESTIMATED cost. Excluding them from the denominator but not the
+    numerator would INFLATE the window rate — the mirror image of the
+    deflation FP. `unavailable_est_cost_microusd` keeps the numerator on
+    the same population."""
+    baseline = {"diff-sanity": _totals(1_000_000, 100)}  # $0.01/call, all real
+    # Window: +5 real calls at $0.01 ($0.05) plus 20 zero-usage calls that
+    # each picked up $0.002 char-estimated cost ($0.04). A full-cost
+    # numerator would read 0.09/5 = $0.018/call — a fake +80% trend.
+    current_totals = _totals(1_090_000, 125, anomalies=20)
+    current_totals["unavailable_est_cost_microusd"] = 40_000
+    row = compute_skill_efficiency({"diff-sanity": current_totals}, baseline=baseline)[
+        0
+    ]
+    assert row.window_calls == 5
+    assert row.cost_per_call == pytest.approx(0.01)
+    assert row.trend_vs_baseline == pytest.approx(0.0, abs=1e-9)
+
+
 def test_all_zero_usage_window_sets_flag_not_rate() -> None:
     """#11117: raw window activity whose every call is zero-usage is a
     telemetry blind spot, not a measurable rate."""

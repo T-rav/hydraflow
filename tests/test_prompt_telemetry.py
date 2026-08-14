@@ -211,6 +211,38 @@ class TestPromptTelemetry:
         assert rollup["prs"]["203"]["usage_unavailable_calls"] == 0
         assert rollup["prs"]["203"]["actual_usage_calls"] == 1
 
+    def test_accumulator_mirrors_unavailable_cost(self):
+        """#11152 review find: cost recorded by usage-unavailable calls needs
+        its own accumulator so `prompt_efficiency` can subtract it from rate
+        numerators (same-population math)."""
+        from prompt_telemetry import PromptTelemetry
+
+        target: dict[str, object] = {}
+        PromptTelemetry._accumulate_counter(
+            target,
+            {
+                "usage_status": "unavailable",
+                "token_source": "estimated",
+                "estimated_cost_usd": 0.002,
+                "timestamp": "t1",
+            },
+        )
+        assert target["estimated_cost_microusd"] == 2000
+        assert target["unavailable_est_cost_microusd"] == 2000
+
+        PromptTelemetry._accumulate_counter(
+            target,
+            {
+                "usage_status": "available",
+                "token_source": "actual",
+                "estimated_cost_usd": 0.01,
+                "timestamp": "t2",
+            },
+        )
+        assert target["estimated_cost_microusd"] == 12000
+        # Usage-bearing cost never lands in the unavailable accumulator.
+        assert target["unavailable_est_cost_microusd"] == 2000
+
     def test_record_marks_usage_unavailable_when_backend_reports_none(self, telemetry):
         telemetry.record(
             source="triage",

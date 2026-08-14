@@ -101,6 +101,8 @@ def _accumulate(target: dict[str, object], record: dict[str, object]) -> None:
         "context_chars_saved",
         "cache_hits",
         "cache_misses",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
         "pruned_chars_total",
     ):
         target[key] = _as_int(target.get(key, 0)) + _as_int(record.get(key, 0))
@@ -116,6 +118,13 @@ def _accumulate(target: dict[str, object], record: dict[str, object]) -> None:
             _as_float(target.get("estimated_cost_usd", 0.0)) + float(record_cost),
             6,
         )
+        target["estimated_cost_microusd"] = _as_int(
+            target.get("estimated_cost_microusd", 0)
+        ) + round(float(record_cost) * 1_000_000)
+        if record.get("usage_status") == "unavailable":
+            target["unavailable_est_cost_microusd"] = _as_int(
+                target.get("unavailable_est_cost_microusd", 0)
+            ) + round(float(record_cost) * 1_000_000)
     target["last_updated"] = str(record.get("timestamp", ""))
 
 

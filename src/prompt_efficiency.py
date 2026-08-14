@@ -88,6 +88,22 @@ def _effective_calls(totals: dict[str, int]) -> int:
     return max(0, calls - zero_usage)
 
 
+def _effective_cost_usd(totals: dict[str, int]) -> float:
+    """Cost attributable to usage-bearing calls (#11117 same-population rule).
+
+    Zero-usage calls are excluded from every rate DENOMINATOR, so the
+    char-estimated cost some of them still record (small-prompt successes
+    below the anomaly threshold) must come out of the NUMERATOR too —
+    otherwise window rates inflate: the mirror image of the deflation bug.
+    ``unavailable_est_cost_microusd`` is the parallel accumulator
+    `PromptTelemetry._accumulate_counter` keeps for exactly this
+    subtraction; clamped at zero for pre-migration snapshots.
+    """
+    total = int(totals.get("estimated_cost_microusd", 0))
+    unavailable = int(totals.get("unavailable_est_cost_microusd", 0))
+    return max(0, total - unavailable) / 1_000_000
+
+
 def compute_skill_efficiency(
     totals_by_source: dict[str, dict[str, int]],
     baseline: dict[str, dict[str, int]] | None,
@@ -111,7 +127,12 @@ def compute_skill_efficiency(
       calls — `_effective_calls`, i.e. raw calls minus
       ``usage_unavailable_calls`` (#11117): a zero-usage call records cost 0
       while still counting as a call, deflating any rate it participates in.
-      The raw call count stays on the row (``calls``) for honesty.
+      The raw call count stays on the row (``calls``) for honesty. The
+      NUMERATOR mirrors the same population: cost recorded BY zero-usage
+      calls (``unavailable_est_cost_microusd`` — small-prompt successes get
+      char-estimated cost despite unavailable usage) is subtracted before
+      any rate is formed, so numerator and denominator always count the
+      same calls.
     - Window cost-per-call = ``delta_cost / delta_effective_calls`` when
       there was raw window activity AND the effective window is at least
       ``min_window_calls`` (#11133/#11140 — a 1-3 call window is variance,
@@ -145,9 +166,10 @@ def compute_skill_efficiency(
     for source, totals in totals_by_source.items():
         cum_cost_usd, cum_calls = _cost_and_calls(totals)
         cum_effective = _effective_calls(totals)
+        cum_effective_cost = _effective_cost_usd(totals)
         anomalies = int(totals.get("usage_unavailable_calls", 0))
         cumulative_cost_per_call = (
-            cum_cost_usd / cum_effective if cum_effective else 0.0
+            cum_effective_cost / cum_effective if cum_effective else 0.0
         )
 
         window_cost_per_call: float | None = None
@@ -156,16 +178,17 @@ def compute_skill_efficiency(
         zero_usage_window = False
         base_totals = baseline_map.get(source)
         if isinstance(base_totals, dict):
-            base_cost_usd, base_raw_calls = _cost_and_calls(base_totals)
+            _, base_raw_calls = _cost_and_calls(base_totals)
             base_effective = _effective_calls(base_totals)
+            base_effective_cost = _effective_cost_usd(base_totals)
             base_cost_per_call = (
-                base_cost_usd / base_effective if base_effective else None
+                base_effective_cost / base_effective if base_effective else None
             )
             if cum_calls - base_raw_calls > 0:
                 window_calls = max(cum_effective - base_effective, 0)
                 zero_usage_window = window_calls == 0
                 if window_calls >= min_window_calls:
-                    delta_cost = cum_cost_usd - base_cost_usd
+                    delta_cost = cum_effective_cost - base_effective_cost
                     window_cost_per_call = delta_cost / window_calls
 
         trend: float | None = None

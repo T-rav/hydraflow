@@ -67,6 +67,19 @@ def test_all_zero_usage_window_is_flagged_not_measured() -> None:
     assert row.cost_per_call == 0.0
 
 
+def test_zero_usage_estimated_cost_does_not_inflate_the_rate() -> None:
+    """The inflation mirror of the deflation FP (found in #11152 review):
+    zero-usage calls excluded from the denominator may still carry
+    char-estimated cost — that cost must leave the numerator too, or a
+    clean source reads as a regression in the opposite direction."""
+    baseline = {"diff-sanity": _totals(1_000_000, 100)}
+    current = _totals(1_090_000, 125, anomalies=20)
+    current["unavailable_est_cost_microusd"] = 40_000
+    row = compute_skill_efficiency({"diff-sanity": current}, baseline=baseline)[0]
+    assert row.trend_vs_baseline is not None
+    assert abs(row.trend_vs_baseline) < INEFFICIENCY_THRESHOLD
+
+
 def test_under_sampled_window_never_trends() -> None:
     """A sub-floor window with a genuine 100x per-call spike still yields no
     trend — 1-3 calls cannot distinguish variance from regression."""
