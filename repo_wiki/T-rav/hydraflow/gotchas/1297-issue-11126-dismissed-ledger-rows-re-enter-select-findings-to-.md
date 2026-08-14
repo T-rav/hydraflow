@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11126
 source_phase: plan
 created_at: 2026-08-14T11:53:15.166005+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # DISMISSED ledger rows re-enter select_findings_to_surface each tick

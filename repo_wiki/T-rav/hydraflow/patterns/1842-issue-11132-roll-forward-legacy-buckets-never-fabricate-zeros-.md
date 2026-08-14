@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11132
 source_phase: plan
 created_at: 2026-08-14T12:40:51.197489+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1939
 ---
 
 # Roll forward legacy buckets — never fabricate zeros for missing keys

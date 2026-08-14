@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11125
 source_phase: plan
 created_at: 2026-08-14T11:39:37.484084+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Hook test discovery must glob, never hardcode script names

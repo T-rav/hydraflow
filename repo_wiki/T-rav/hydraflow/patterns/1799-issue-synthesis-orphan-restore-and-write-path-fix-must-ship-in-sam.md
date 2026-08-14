@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T12:50:04.076203+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1703
+superseded_by: 1897
 ---
 
 # Orphan restore and write-path fix must ship in same PR

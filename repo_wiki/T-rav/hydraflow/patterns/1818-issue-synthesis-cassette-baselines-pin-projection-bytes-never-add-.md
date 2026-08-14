@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T12:50:04.180402+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1722
+superseded_by: 1916
 ---
 
 # Cassette baselines pin projection bytes; never add keys (ADR-0047)
