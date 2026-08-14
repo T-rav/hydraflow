@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11118
 source_phase: plan
 created_at: 2026-08-14T10:22:06.549576+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Prefer JSONL replay over new accumulator for retroactive evidence

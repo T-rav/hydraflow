@@ -10,6 +10,7 @@ issue-surfacing except.
 from __future__ import annotations
 
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -781,3 +782,78 @@ def test_loop_fitness_is_housekeeping(tmp_path: Path) -> None:
     fitness = loop.loop_fitness(FitnessContext(window_start=now, window_end=now))
     assert fitness.kind == FitnessKind.HOUSEKEEPING
     assert fitness.worker_name == "escape_ledger"
+
+
+class TestTerminalVerdictQuiescence:
+    """#11137/#11144/#11148: a terminal auto-diagnose verdict fully quiesces
+    every surface — selection, budget, and stranded HITL links."""
+
+    _NOW = datetime(2026, 8, 14, tzinfo=UTC)
+
+    def test_terminal_ids_excluded_from_selection_all_reasons(self) -> None:
+        # One dismissed row eligible under BOTH reasons + one genuine row.
+        dismissed = _record("bug-issue:dead", confidence="low")
+        genuine = _record("bug-issue:live", confidence="low")
+        to_file, capped = select_findings_to_surface(
+            [dismissed, genuine],
+            now=self._NOW,
+            aging_threshold_hours=0.0,  # everything aging-eligible too
+            already_surfaced=set(),
+            max_per_tick=10,
+            terminal_ids={"bug-issue:dead"},
+        )
+        ids = {r.id for r, _ in to_file}
+        assert ids == {"bug-issue:live"}
+        assert capped is False
+
+    def test_terminal_rows_do_not_occupy_cap_slots(self) -> None:
+        # #11137 starvation: with cap=1, a dismissed row must not shadow the
+        # genuine finding.
+        dismissed = _record("bug-issue:dead", confidence="low")
+        genuine = _record("bug-issue:live", confidence="low")
+        to_file, _ = select_findings_to_surface(
+            [dismissed, genuine],
+            now=self._NOW,
+            aging_threshold_hours=0.0,
+            already_surfaced=set(),
+            max_per_tick=1,
+            terminal_ids={"bug-issue:dead"},
+        )
+        assert [(r.id, _reason) for r, _reason in to_file][0][0] == "bug-issue:live"
+
+    def test_dismissal_answers_stranded_links(self) -> None:
+        # #11148: BOTH surfacing reasons for a dismissed escape are answered,
+        # even though the ledger row itself is untouched (low + none-yet).
+        low = SurfacedIssue(
+            fingerprint=surfacing_fingerprint(
+                "bug-issue:a", SURFACE_REASON_LOW_CONFIDENCE
+            ),
+            escape_id="bug-issue:a",
+            reason=SURFACE_REASON_LOW_CONFIDENCE,
+            issue_number=1,
+            filed_at="",
+        )
+        aging = SurfacedIssue(
+            fingerprint=surfacing_fingerprint("bug-issue:a", SURFACE_REASON_AGING),
+            escape_id="bug-issue:a",
+            reason=SURFACE_REASON_AGING,
+            issue_number=2,
+            filed_at="",
+        )
+        rec = _record("bug-issue:a", confidence="low", encoded_as="none-yet")
+        answered = answered_surfacings(
+            [low, aging], {rec.id: rec}, {"bug-issue:a": "docs-only commit"}
+        )
+        assert answered == [low, aging]
+
+    def test_no_dismissals_preserves_legacy_behavior(self) -> None:
+        link = SurfacedIssue(
+            fingerprint=surfacing_fingerprint("bug-issue:a", SURFACE_REASON_AGING),
+            escape_id="bug-issue:a",
+            reason=SURFACE_REASON_AGING,
+            issue_number=1,
+            filed_at="",
+        )
+        rec = _record("bug-issue:a", encoded_as="none-yet")
+        assert answered_surfacings([link], {rec.id: rec}, {}) == []
+        assert answered_surfacings([link], {rec.id: rec}) == []

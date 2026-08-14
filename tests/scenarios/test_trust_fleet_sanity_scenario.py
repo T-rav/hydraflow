@@ -117,10 +117,15 @@ class TestTrustFleetSanityScenario:
             world,
             trust_fleet_sanity_state=state,
             trust_fleet_sanity_bg_workers=bg_workers,
+            # #11119: boot grace shields persisted heartbeats on a fresh
+            # boot; backdate boot past the threshold so a REAL post-boot
+            # stall is what's under test. Filing then needs the breach to
+            # survive two consecutive ticks (confirm-before-escalate).
+            trust_fleet_sanity_boot_time=now - _dt.timedelta(days=29),
             event_bus=EventBus(),
         )
 
-        stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=1)
+        stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=2)
 
         assert stats["trust_fleet_sanity"]["status"] == "ok", stats
         assert stats["trust_fleet_sanity"].get("filed", 0) >= 1, stats
@@ -129,6 +134,44 @@ class TestTrustFleetSanityScenario:
         labels = issue.labels
         assert "hitl-escalation" in labels
         assert "trust-loop-anomaly" in labels
+
+    async def test_cold_boot_old_heartbeats_do_not_escalate(self, tmp_path) -> None:
+        """#11119 idle-test regression: heartbeats aged by DOWNTIME (fresh
+        boot, whole fleet 'stale' on persisted clocks) must file nothing."""
+        world = MockWorld(tmp_path)
+
+        now = _dt.datetime.now(_dt.UTC)
+        heartbeats = _healthy_heartbeats(now)
+        heartbeats["flake_tracker"] = {
+            "status": "ok",
+            "last_run": (now - _dt.timedelta(days=30)).isoformat(),
+            "details": {},
+        }
+
+        state = MagicMock()
+        state.get_worker_heartbeats.return_value = heartbeats
+        state.get_trust_fleet_sanity_attempts.return_value = 0
+        state.inc_trust_fleet_sanity_attempts.return_value = 1
+        state.get_trust_fleet_sanity_last_seen_counts.return_value = {}
+
+        bg_workers = MagicMock()
+        bg_workers.worker_enabled = dict.fromkeys(heartbeats, True)
+        bg_workers.get_interval = MagicMock(return_value=14400)
+
+        _seed_ports(
+            world,
+            trust_fleet_sanity_state=state,
+            trust_fleet_sanity_bg_workers=bg_workers,
+            # Default boot_time (None → construction time = now): the fleet
+            # just booted, so the 30-day-old heartbeat is downtime, not stall.
+            event_bus=EventBus(),
+        )
+
+        stats = await world.run_with_loops(["trust_fleet_sanity"], cycles=2)
+
+        assert stats["trust_fleet_sanity"]["status"] == "ok", stats
+        assert stats["trust_fleet_sanity"].get("filed", 0) == 0, stats
+        assert not world.github._issues
 
 
 # ---------------------------------------------------------------------------

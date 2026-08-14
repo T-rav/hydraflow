@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11121
 source_phase: plan
 created_at: 2026-08-14T10:59:17.950981+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Route env floats to plain table, not _ENV_FLOAT_RATIO_OVERRIDES
