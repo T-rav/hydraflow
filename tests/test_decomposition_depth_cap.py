@@ -351,3 +351,52 @@ class TestMaybeDecomposeIntakeGuard:
 
         assert decomposed is True
         triage.run_decomposition.assert_called_once()
+
+
+class TestEscalationClassGuard:
+    """#11119: anomaly escalations are signals, not projects — never
+    auto-decomposed. The 2026-08-14 idle test showed a cold-boot staleness
+    observation grown into an epic + 3 children before it self-cleared."""
+
+    @pytest.mark.asyncio
+    async def test_trust_loop_anomaly_never_decomposes(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            state_file=tmp_path / "state.json",
+            epic_decompose_complexity_threshold=8,
+        )
+        mgr = AsyncMock()
+        guard = TestMaybeDecomposeIntakeGuard()
+        phase, _state, prs, triage = guard._make_phase(config, epic_manager=mgr)
+
+        task = TaskFactory.create(id=11, tags=["ready", "trust-loop-anomaly"])
+        result = TriageResultFactory.create(
+            issue_number=11, ready=True, complexity_score=9
+        )
+
+        decomposed = await phase._maybe_decompose(task, result)
+
+        assert decomposed is False
+        triage.run_decomposition.assert_not_called()
+        prs.create_issue.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_hitl_escalation_never_decomposes(self, tmp_path: Path) -> None:
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            state_file=tmp_path / "state.json",
+            epic_decompose_complexity_threshold=8,
+        )
+        mgr = AsyncMock()
+        guard = TestMaybeDecomposeIntakeGuard()
+        phase, _state, prs, triage = guard._make_phase(config, epic_manager=mgr)
+
+        task = TaskFactory.create(id=12, tags=["hitl-escalation"])
+        result = TriageResultFactory.create(
+            issue_number=12, ready=True, complexity_score=9
+        )
+
+        decomposed = await phase._maybe_decompose(task, result)
+
+        assert decomposed is False
+        triage.run_decomposition.assert_not_called()

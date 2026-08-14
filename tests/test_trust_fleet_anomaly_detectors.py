@@ -303,3 +303,60 @@ def test_hitl_composition_mixed_counts_only_low_severity() -> None:
     assert details["total"] == 5
     assert details["fraction"] == pytest.approx(0.6)
     assert details["issues"] == [1, 2, 3]
+
+
+class TestBootGrace:
+    """#11119: staleness measured from max(last_run, boot_time) — heartbeats
+    persist across downtime and must not age the fleet while it is off."""
+
+    _KW = {
+        "interval_s": 3600,
+        "multiplier": 3.0,
+        "is_enabled": True,
+    }
+
+    def test_old_heartbeat_within_boot_grace_is_not_stale(self) -> None:
+        boot = datetime(2026, 8, 14, 5, 30, tzinfo=UTC)
+        breached, details = detect_staleness(
+            "rc_budget",
+            last_run_iso="2026-08-12T00:00:00+00:00",  # 2 days before boot
+            now=boot + timedelta(minutes=10),
+            boot_time=boot,
+            **self._KW,
+        )
+        assert breached is False
+        assert details["status"] == "boot_grace"
+
+    def test_still_silent_past_threshold_after_boot_is_stale(self) -> None:
+        boot = datetime(2026, 8, 14, 5, 30, tzinfo=UTC)
+        breached, details = detect_staleness(
+            "rc_budget",
+            last_run_iso="2026-08-12T00:00:00+00:00",
+            now=boot + timedelta(hours=4),  # > 3 * 1h threshold past boot
+            boot_time=boot,
+            **self._KW,
+        )
+        assert breached is True
+        assert "status" not in details
+
+    def test_fresh_heartbeat_after_boot_uses_heartbeat(self) -> None:
+        boot = datetime(2026, 8, 14, 5, 30, tzinfo=UTC)
+        # Ticked after boot, then went silent past the threshold → stale on
+        # the heartbeat clock, boot grace does not shield a post-boot stall.
+        breached, _ = detect_staleness(
+            "rc_budget",
+            last_run_iso="2026-08-14T06:00:00+00:00",
+            now=datetime(2026, 8, 14, 10, 0, tzinfo=UTC),
+            boot_time=boot,
+            **self._KW,
+        )
+        assert breached is True
+
+    def test_no_boot_time_preserves_legacy_behavior(self) -> None:
+        breached, _ = detect_staleness(
+            "rc_budget",
+            last_run_iso="2026-08-12T00:00:00+00:00",
+            now=datetime(2026, 8, 14, 5, 40, tzinfo=UTC),
+            **self._KW,
+        )
+        assert breached is True
