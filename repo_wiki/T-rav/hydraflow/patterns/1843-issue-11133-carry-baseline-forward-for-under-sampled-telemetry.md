@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11133
 source_phase: plan
 created_at: 2026-08-14T12:41:23.460357+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1940
 ---
 
 # Carry baseline forward for under-sampled telemetry sources

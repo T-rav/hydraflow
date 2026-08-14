@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11128
 source_phase: plan
 created_at: 2026-08-14T12:04:30.040476+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # regression_hits is a word-boundary grep — do not widen it

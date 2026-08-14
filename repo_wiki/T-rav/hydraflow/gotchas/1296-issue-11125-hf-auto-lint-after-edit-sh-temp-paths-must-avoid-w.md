@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11125
 source_phase: plan
 created_at: 2026-08-14T11:39:37.484096+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # hf.auto-lint-after-edit.sh temp paths must avoid /worktrees/ shape

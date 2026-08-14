@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T12:50:04.080474+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1704
+superseded_by: 1898
 ---
 
 # No-op synthesis guard must partition per-entry with multiset matching

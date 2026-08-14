@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11132
 source_phase: plan
 created_at: 2026-08-14T12:40:51.197450+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1938
 ---
 
 # Counter shape has two writers — change _new_counter and _accumulate together
