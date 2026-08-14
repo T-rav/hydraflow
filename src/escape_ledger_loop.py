@@ -521,10 +521,11 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
             max_per_tick=max_issues,
             terminal_ids=terminal,
         )
-        # ADR-0115: before filing a LOW-CONFIDENCE finding for a human, run the
-        # machine auto-diagnose pass. A row it resolves (real+regression-encoded)
-        # or dismisses (clear false positive) is dropped from the file list — the
-        # human sees only the genuinely INCONCLUSIVE residue.
+        # ADR-0115: before filing a LOW-CONFIDENCE or AGING finding for a human,
+        # run the machine auto-diagnose pass. A row it resolves
+        # (real+regression-encoded) or dismisses (clear false positive) is
+        # dropped from the file list — the human sees only the genuinely
+        # INCONCLUSIVE residue.
         to_file = await self._auto_diagnose(to_file)
         surfaces = SurfacedIssueLedger(self._surfaces_path)
         filed = 0
@@ -585,22 +586,22 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
     async def _auto_diagnose(
         self, to_file: list[tuple[EscapeRecord, str]]
     ) -> list[tuple[EscapeRecord, str]]:
-        """Filter *to_file*: machine-resolve/dismiss low-confidence findings.
+        """Filter *to_file*: machine-resolve/dismiss findings before filing.
 
-        Only ``SURFACE_REASON_LOW_CONFIDENCE`` findings are diagnosed (the aging
-        surface asks for an encoding, a different human decision). A finding the
-        diagnoser resolves or dismisses is dropped; the human sees only the
-        INCONCLUSIVE residue. Disabled by config → unchanged. A diagnose failure
-        keeps the finding for the human (fail-safe).
+        Every surfacing reason (``SURFACE_REASON_LOW_CONFIDENCE`` AND
+        ``SURFACE_REASON_AGING``) is diagnosed the same way — a reason
+        pre-filter would strand a surface that could self-answer (#11161: an
+        aging row whose encoding was already on disk, but the aging reason
+        skipped the diagnoser entirely). A finding the diagnoser resolves or
+        dismisses is dropped; the human sees only the INCONCLUSIVE residue.
+        Disabled by config → unchanged. A diagnose failure keeps the finding
+        for the human (fail-safe).
         """
         if not self._config.escape_ledger_auto_diagnose_enabled:
             return to_file
         diagnoser = self._get_auto_diagnoser()
         residue: list[tuple[EscapeRecord, str]] = []
         for record, reason in to_file:
-            if reason != SURFACE_REASON_LOW_CONFIDENCE:
-                residue.append((record, reason))
-                continue
             try:
                 verdict = await diagnoser.diagnose(record)
             except Exception as exc:
@@ -616,6 +617,44 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
             if verdict is EscapeDiagnosis.INCONCLUSIVE:
                 residue.append((record, reason))
         return residue
+
+    async def _diagnose_open_links(self, open_links: list[SurfacedIssue]) -> None:
+        """Run auto-diagnose over the escape behind every OPEN surfaced link.
+
+        Independent of the ``select_findings_to_surface`` surfacing budget —
+        an escape whose reason-scoped fingerprint is already spent (it has an
+        open HITL issue) never reaches ``_surface_findings``'s
+        ``_auto_diagnose`` call again, so without this pass a resolution or
+        dismissal could never retire an issue filed before the diagnoser
+        existed, or before it covered that issue's reason (#11161). A row
+        already carrying a terminal sidecar verdict, or repeated across
+        multiple open links for the same escape id, is diagnosed at most once.
+        A diagnose failure is logged and swallowed — the link simply stays
+        open for a later retry, same fail-safe contract as ``_auto_diagnose``.
+        """
+        if not self._config.escape_ledger_auto_diagnose_enabled:
+            return
+        diagnoser = self._get_auto_diagnoser()
+        terminal = EscapeDiagnosisLedger(self._diagnoses_path).terminal_ids()
+        latest = EscapeLedger(self._ledger_path).read_latest_index()
+        diagnosed: set[str] = set()
+        for link in open_links:
+            if link.escape_id in terminal or link.escape_id in diagnosed:
+                continue
+            diagnosed.add(link.escape_id)
+            record = latest.get(link.escape_id)
+            if record is None:
+                continue
+            try:
+                await diagnoser.diagnose(record)
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "EscapeLedger: auto-diagnose failed while reconciling "
+                    "open surface for %s (leaving open for retry)",
+                    link.escape_id,
+                    exc_info=True,
+                )
 
     def _get_auto_diagnoser(self) -> EscapeAutoDiagnoser:
         """Return the injected diagnoser, or lazily build one (production path)."""
@@ -643,11 +682,23 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         A failed ``close_issue`` (returns ``False`` or raises a non-credit
         error) leaves the link OPEN for a later retry rather than marking it
         closed; ``CreditExhaustedError`` propagates via ``reraise_on_credit_or_bug``.
+
+        Diagnoses every OPEN link's escape FIRST (``_diagnose_open_links``):
+        ``select_findings_to_surface`` drops a (record, reason) pair once its
+        reason-scoped fingerprint is spent, so ``_surface_findings``'s
+        ``_auto_diagnose`` call never re-diagnoses an escape that is already
+        surfaced — including one surfaced before auto-diagnose covered its
+        reason at all (#11161: escape `9196f7403620`'s AGING issue was filed
+        under the pre-#11161 code, so widening ``_auto_diagnose``'s reason
+        filter alone cannot retire it). Diagnosing here, before the reads
+        below, lets a resolution/dismissal recorded on THIS call be answered
+        on the SAME tick.
         """
         surfaces = SurfacedIssueLedger(self._surfaces_path)
         open_links = surfaces.open_links()
         if not open_links:
             return 0
+        await self._diagnose_open_links(open_links)
         # read_latest_index (NOT `{r.id: r for r in read_latest()}`): read_latest
         # collapses by detection_ref and drops the ids of folded-away siblings, so
         # a link filed under a low-confidence id later superseded by a stronger

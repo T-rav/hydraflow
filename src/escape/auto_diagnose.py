@@ -1,13 +1,14 @@
-"""Machine auto-diagnose for LOW-CONFIDENCE escape-ledger surfaces (ADR-0115).
+"""Machine auto-diagnose for escape-ledger HITL surfaces (ADR-0115).
 
-Before ``EscapeLedgerLoop`` files a ``SURFACE_REASON_LOW_CONFIDENCE`` finding for
-a human, this module runs the move a human used to run by hand (the manual
-resolution of #10748 / #10749): trace the escape's ``detection_ref`` commit back
-to the bug it fixed, check whether that bug is ALREADY regression-encoded, and
+Before ``EscapeLedgerLoop`` files a ``SURFACE_REASON_LOW_CONFIDENCE`` or
+``SURFACE_REASON_AGING`` finding for a human, this module runs the move a human
+used to run by hand (the manual resolution of #10748 / #10749): trace the
+escape's ``detection_ref`` commit back to the bug it fixed, check whether that
+bug is ALREADY regression-encoded, and
 
 * **real + regression-encoded** → auto-record the ledger resolution at ``high``
   confidence with ``encoded_as = regression-test`` (``escape.resolve``), so the
-  low-confidence surface self-answers and no human is bothered;
+  surface self-answers and no human is bothered;
 * **clear false positive** (the referenced issue is plainly not a bug) →
   auto-dismiss with a recorded reason, so the surface is not filed;
 * **inconclusive** → fall through to the human surface UNCHANGED.
@@ -23,9 +24,9 @@ never auto-closed — it reaches a human exactly as before.
 Terminal verdicts (resolved / dismissed) are recorded in an append-only sidecar
 ``<data_root>/diagnostics/escape_diagnoses.jsonl`` — both the "recorded reason"
 audit trail the dismissal path requires and the idempotency guard that stops a
-row being re-diagnosed every tick (a resolved row already leaves the
-low-confidence set once its ledger confidence is bumped; a dismissed row does
-not mutate the ledger, so the sidecar is what keeps it from re-firing).
+row being re-diagnosed every tick (a resolved row already leaves the eligible
+set once its ledger confidence is bumped and it is encoded; a dismissed row
+does not mutate the ledger, so the sidecar is what keeps it from re-firing).
 """
 
 from __future__ import annotations
@@ -92,7 +93,7 @@ _NON_BUG_LABELS: frozenset[str] = frozenset(
 
 
 class EscapeDiagnosis(StrEnum):
-    """The verdict of a machine auto-diagnose pass over one low-confidence row."""
+    """The verdict of a machine auto-diagnose pass over one escape row."""
 
     # Real bug, already regression-encoded → ledger resolution auto-recorded
     # (high confidence, encoded-as regression-test). Surface self-answers.
@@ -334,7 +335,7 @@ class EscapeDiagnosisLedger(IdentifiedJsonlLedger[EscapeDiagnosisRecord]):
 
 
 class EscapeAutoDiagnoser:
-    """Runs the mechanical auto-diagnose pass for one low-confidence escape.
+    """Runs the mechanical auto-diagnose pass for one surfacing-eligible escape.
 
     Owns the git/GitHub reads and the resolve/dismiss actions; the pure verdict
     is delegated to :func:`classify_diagnosis`. Injected into ``EscapeLedgerLoop``
@@ -356,7 +357,7 @@ class EscapeAutoDiagnoser:
         self._diagnoses = EscapeDiagnosisLedger(diagnoses_path)
 
     async def diagnose(self, record: EscapeRecord) -> EscapeDiagnosis:
-        """Diagnose one low-confidence escape; act on a terminal verdict.
+        """Diagnose one escape; act on a terminal verdict.
 
         Returns the verdict. ``RESOLVED_ENCODED`` records a ledger resolution
         (high confidence + regression-test encoding) and a sidecar row;
@@ -451,8 +452,8 @@ class EscapeAutoDiagnoser:
             f"auto-diagnose (ADR-0115): {record.detection_source} escape "
             f"`{record.detection_ref[:12]}` is a real bug, already "
             f"regression-encoded ({where}); recorded at high confidence, "
-            "encoded-as regression-test so the low-confidence surface "
-            "self-answers (no human)."
+            "encoded-as regression-test so the surface self-answers "
+            "(no human)."
         )
         try:
             resolve_escape(

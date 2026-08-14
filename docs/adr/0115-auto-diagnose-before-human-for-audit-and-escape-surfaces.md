@@ -114,9 +114,13 @@ rather than fabricating an `upheld` (a false escape cross-link) or a `refuted`
   change is selectivity, not suppression.
 - **A read-only sensor now performs bounded active moves.** The Pattern-B
   contract is amended (not broken): the sensor may auto-answer *its own* low-
-  confidence / disagreement surface (record a resolution, apply a disposition
-  label, close a find issue), but still never opens a fix PR and never gates. The
-  active surface is confined to the finding it would otherwise have filed.
+  confidence / aging / disagreement surface (record a resolution, apply a
+  disposition label, close a find issue), but still never opens a fix PR and
+  never gates. The active surface is confined to the finding it would
+  otherwise have filed. The escape pass diagnoses every surfacing reason
+  (`SURFACE_REASON_LOW_CONFIDENCE` and `SURFACE_REASON_AGING`) the same way —
+  an aging `none-yet` row whose encoding is already on disk self-answers
+  exactly like a low-confidence one (#11161).
 - **Off by default; air-gap-safe.** Both flags default off for staged rollout.
   The escape pass is LLM-free; the audit pass is double-gated behind re-audit, so
   the sandbox reaches no spawn.

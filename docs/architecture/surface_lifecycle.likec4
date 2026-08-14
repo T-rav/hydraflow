@@ -1,0 +1,41 @@
+// Issue #11161 — surface lifecycle for escape bug-issue:9196f7403620.
+// Shows WHY this row can never be answered today: its low-confidence
+// fingerprint was spent BEFORE ADR-0115 auto-diagnose landed (one-shot,
+// reason-scoped), and the aging branch — its only remaining surface — is
+// skipped by the reason pre-filter in _auto_diagnose.
+
+specification {
+  element state
+  element gate
+  relationship transition
+}
+
+model {
+  detected = state 'row recorded: bug-issue / low / encoded_as=none-yet'
+  lowSurface = state 'surfaced:low-confidence — HITL #10724 filed (pre-ADR-0115)' {
+    description 'fingerprint SPENT: select_findings_to_surface skips it forever'
+  }
+  aged = state 'unencoded_aging: none-yet older than escape_ledger_encoding_age_days'
+  agingSurface = state 'surfaced:aging — HITL #11161 filed'
+  gateNow = gate 'AS-IS _auto_diagnose: reason != low-confidence → pass through' {
+    description 'the one surface the machine can answer is the one it may not look at'
+  }
+  gateFix = gate 'TO-BE _auto_diagnose: diagnose EVERY reason'
+  resolved = state 'resolution row: encoded_as=regression-test @ high confidence'
+  closed = state 'reconcile closes BOTH #11161 (aging) and stranded #10724 (low)'
+
+  detected -> lowSurface 'metrics.low_confidence'
+  detected -> aged 'threshold elapsed'
+  aged -> gateNow 'candidate'
+  gateNow -> agingSurface 'AS-IS: false human ask, re-fires under a new number'
+  aged -> gateFix 'candidate'
+  gateFix -> resolved 'regression_hits → RESOLVED_ENCODED'
+  resolved -> closed '_surfacing_answered: encoded_as != none-yet AND confidence != low'
+}
+
+views {
+  view lifecycle {
+    title 'Escape 9196f7403620 — surface lifecycle, AS-IS vs TO-BE (#11161)'
+    include *
+  }
+}

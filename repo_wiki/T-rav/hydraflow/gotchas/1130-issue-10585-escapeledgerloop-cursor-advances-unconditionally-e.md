@@ -5,7 +5,7 @@ source_issue: 10585
 source_phase: plan
 created_at: 2026-07-26T02:30:26.057561+00:00
 status: active
-corroborations: 1
+corroborations: 2
 ---
 
 # EscapeLedgerLoop cursor advances unconditionally even on filing failure

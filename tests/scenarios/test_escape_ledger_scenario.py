@@ -562,3 +562,61 @@ class TestEscapeAutoDiagnoseScenario:
         assert result["status"] == "ok"
         assert result["escapes_recorded"] == 1
         assert result["filed"] == 1, "inconclusive escape must still reach a human"
+
+    async def test_aging_escape_already_encoded_is_auto_resolved_not_filed(
+        self, tmp_path: Path
+    ) -> None:
+        # #11161: auto-diagnose used to run ONLY for SURFACE_REASON_LOW_CONFIDENCE
+        # findings — an AGING finding (encoded_as="none-yet" past the encoding-age
+        # threshold) skipped the diagnoser entirely and always filed a human
+        # issue, even when its regression encoding was already on disk (the live
+        # bug behind escape 9196f7403620 / issue #11161). A `medium`-confidence
+        # row is AGING-eligible only (not low-confidence), isolating the surface
+        # under test.
+        from datetime import UTC, datetime, timedelta
+
+        from escape.ledger import EscapeLedger
+        from escape.models import EscapeRecord
+
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        reg = repo / "tests" / "regressions"
+        reg.mkdir(parents=True)
+        (reg / "test_bug_321.py").write_text(
+            "# regression pin for #321\ndef test_bug(): pass\n"
+        )
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "test: pin regression for #321")
+        (repo / "src" / "crash2.py").write_text("def crash2():\n    return 1\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "fix: resolve crash (fixes #321)")
+        fix_sha = _head(repo)
+
+        state = _make_state(fix_sha)
+        loop = _build_loop(tmp_path, repo, github, state, auto_diagnose=True)
+        old = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+        EscapeLedger(loop._ledger_path).append(
+            EscapeRecord(
+                id=f"bug-issue:{fix_sha}",
+                detected_at=old,
+                detection_source="bug-issue",
+                detection_ref=fix_sha,
+                originating_pr=321,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="fixes-chain",
+                attribution_confidence="medium",
+                encoded_as="none-yet",
+                notes="Fix commit closing #321.",
+            )
+        )
+
+        filed, capped = await loop._surface_findings()
+
+        assert filed == 0, "aging escape already regression-encoded must self-answer"
+        assert capped is False
+        resolved = EscapeLedger(loop._ledger_path).read_latest()[0]
+        assert resolved.attribution_confidence == "high"
+        assert resolved.encoded_as == "regression-test"

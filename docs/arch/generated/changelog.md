@@ -6,8 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
-- `b8d4ca0` — chore(arch): refresh generated artifacts after merging staging *(2026-08-14)*
-- `a24f82e` — feat(ul): term-proposer batch — 1 drafts *(2026-08-14)*
+- `f59c01e` — Fixes #11161: Escape ledger: bug-issue escape `9196f7403620` — unencoded escape has aged past the encoding threshold *(2026-08-14)*
+- `9cb0191` — test(harness): exercise script_plan_credit_exhaustion + promote foreground-verification rule (#11158) (#11158) *(2026-08-14)*
+- `85c104b` — fix(quality): UI vitest lane — conditional fail-loud skip + nvm node discovery (#11155) (#11155) *(2026-08-14)*
+- `e7c0cbc` — feat(audit): P8.7 — code review after every PR (memory-backlog promotion) (#11153) (#11153) *(2026-08-14)*
+- `d34ceac` — feat(ul): term-proposer batch — 1 drafts (#11131) (#11131) *(2026-08-14)*
 - `c31f2ee` — feat(ul): edge-proposer — 39 new edges across 16 terms (#11097) (#11097) *(2026-08-14)*
 - `a1d1d53` — feat(control): setpoint register + first regulator conversion — GateHealthLoop (#11071) (#11071) *(2026-08-13)*
 - `f4ab7e7` — fix(audit): host-hermetic prompt renders — call-time cache root + frozen plugin-skill set (#11069) (#11069) *(2026-08-13)*

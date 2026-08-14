@@ -1,0 +1,105 @@
+// Issue #11161 — the AGING escape surface is never machine-diagnosed.
+// AS-IS: EscapeLedgerLoop._auto_diagnose (src/escape_ledger_loop.py:601) returns
+// every finding whose reason != SURFACE_REASON_LOW_CONFIDENCE UNCHANGED, so an
+// aging row is filed at a human even when its encoding is already on disk.
+// Live instance: bug-issue:9196f7403620 — a docs-only commit closing #10449,
+// whose encoding lives in the PRE-EXISTING tests/regressions/test_issue_10498.py
+// and is reachable ONLY through auto_diagnose.regression_hits' `git grep`.
+// TO-BE: the reason pre-filter is dropped; both surfaces run the same mechanical
+// diagnose. RESOLVED_ENCODED writes encoded_as="regression-test" — which IS the
+// aging answered-predicate in _surfacing_answered — so the surface self-answers
+// and the stranded low-confidence sibling (#10724) closes on the reconcile pass.
+
+specification {
+  element module
+  element klass
+  element method
+  element store
+  element actor
+  relationship calls
+  relationship writes
+  relationship reads
+}
+
+model {
+  human = actor 'Human operator' {
+    description 'today receives a false "please encode this" HITL issue'
+  }
+
+  loop = module 'EscapeLedgerLoop (src/escape_ledger_loop.py)' {
+    reconcile = method '_reconcile_surfaced_issues() — runs FIRST each tick'
+    select = method 'select_findings_to_surface() — low-confidence + aging, capped'
+    autoDiag = method '_auto_diagnose(to_file)  [GATE — the defect lives here]' {
+      description 'AS-IS: `if reason != SURFACE_REASON_LOW_CONFIDENCE: residue.append(...)`'
+    }
+    file = method 'create_issue per surviving finding → SurfacedIssueLedger'
+    answered = method '_surfacing_answered(link, record)' {
+      description 'aging answered ⇔ record.encoded_as != "none-yet"'
+    }
+  }
+
+  diagnoser = module 'escape.auto_diagnose (src/escape/auto_diagnose.py)' {
+    diagnose = klass 'EscapeAutoDiagnoser.diagnose(record)' {
+      description 'sidecar terminal verdict short-circuits; else gather → classify → act'
+    }
+    trace = method '_trace_commit → Fixes #N, introducing shas, added_pin?'
+    grep = method 'regression_hits(repo_root, issue_ref, shas) — git grep HEAD' {
+      description 'the ONLY path that finds a PRE-EXISTING pin (added_paths is empty here)'
+    }
+    classify = method 'classify_diagnosis(evidence) — pure' {
+      description 'regression_paths → RESOLVED_ENCODED; non-bug label → DISMISSED; else INCONCLUSIVE'
+    }
+    record = method '_record_resolution → resolve_escape(high, regression-test)'
+  }
+
+  resolve = module 'escape.resolve.resolve_escape (src/escape/resolve.py)'
+
+  ledger = store 'escape_ledger.jsonl (append-only)' {
+    description 'resolution row: encoded_as=regression-test, attribution_confidence=high'
+  }
+  sidecar = store 'escape_diagnoses.jsonl (terminal verdicts, idempotency guard)'
+  surfaces = store 'escape_surfaces.jsonl (fingerprint → issue number links)'
+
+  gh = module 'PRPort (create_issue / get_issue_labels / post_comment / close_issue)'
+
+  loop.select -> loop.autoDiag 'capped (record, reason) pairs'
+  loop.autoDiag -> diagnoser.diagnose 'AS-IS: low-confidence only / TO-BE: every reason'
+  diagnoser.diagnose -> diagnoser.trace 'commit_info_for_sha(detection_ref)'
+  diagnoser.trace -> diagnoser.grep 'no added pin → grep the committed tree'
+  diagnoser.diagnose -> diagnoser.classify 'DiagnosisEvidence'
+  diagnoser.classify -> diagnoser.record 'RESOLVED_ENCODED'
+  diagnoser.record -> resolve 'escape id + encoding + confidence'
+  resolve -> ledger 'append resolution row (never rewrite)'
+  diagnoser.record -> sidecar 'append terminal verdict'
+  diagnoser.diagnose -> gh 'get_issue_labels(#N)'
+  loop.autoDiag -> loop.file 'INCONCLUSIVE residue only'
+  loop.file -> gh 'create_issue (FALSE ASK today for aging rows)'
+  loop.file -> surfaces 'append_surfaced(fingerprint, issue_number)'
+  loop.file -> human 'HITL issue'
+  loop.reconcile -> ledger 'read_latest_index()'
+  loop.reconcile -> loop.answered 'per open link'
+  loop.reconcile -> gh 'post_comment + close_issue for answered links'
+  loop.select -> sidecar 'terminal_ids exclusion (#11137/#11144)'
+}
+
+views {
+  view componentView {
+    title 'Escape aging surface — auto-diagnose gate (issue #11161)'
+    include *
+  }
+
+  dynamic view agingTick {
+    title 'TO-BE tick: aging row with a grep-only encoding self-answers'
+    loop.reconcile -> ledger 'tick N: row still none-yet → nothing to close'
+    loop.select -> loop.autoDiag '(9196f7403620, "aging")'
+    loop.autoDiag -> diagnoser.diagnose 'reason filter removed'
+    diagnoser.diagnose -> diagnoser.trace 'Fixes #10449'
+    diagnoser.trace -> diagnoser.grep 'added_paths == () → git grep'
+    diagnoser.grep -> diagnoser.classify 'tests/regressions/test_issue_10498.py'
+    diagnoser.classify -> diagnoser.record 'RESOLVED_ENCODED'
+    diagnoser.record -> resolve 'regression-test @ high'
+    resolve -> ledger 'append'
+    loop.autoDiag -> loop.file 'finding DROPPED → no create_issue'
+    loop.reconcile -> gh 'tick N+1: closes #11161 (aging) AND stranded #10724 (low-confidence)'
+  }
+}
