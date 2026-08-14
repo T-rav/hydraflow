@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T11:12:30.886353+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1599
+superseded_by: 1789
 ---
 
 # Rows without detection_ref use __noref__:<id> keys, not singleton

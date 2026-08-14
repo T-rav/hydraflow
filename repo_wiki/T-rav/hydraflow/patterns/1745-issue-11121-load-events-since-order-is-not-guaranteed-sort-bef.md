@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11121
 source_phase: plan
 created_at: 2026-08-14T10:59:17.951035+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1838
 ---
 
 # load_events_since order is not guaranteed — sort before streak math

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T11:12:32.307998+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1632
+superseded_by: 1822
 ---
 
 # Treat undeterminable scopes as empty — never exclude
