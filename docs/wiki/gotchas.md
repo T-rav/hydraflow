@@ -259,7 +259,7 @@ In background loops: fatal (auth/credit) propagates, bugs (local logic) propagat
 
 Example: Failed 5 GitHub API calls → SYSTEM_ALERT, not 6th.
 
-**Why:** Circuit breaker prevents thundering herd; clear failure classification enables targeted recovery.
+**Why:** CircuitBreaker prevents thundering herd; clear failure classification enables targeted recovery.
 
 
 ```json:entry

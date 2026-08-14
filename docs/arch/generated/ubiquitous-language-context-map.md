@@ -51,6 +51,7 @@ graph LR
     authority["Authority<br/><i>policy</i>"]
     basebackgroundloop["BaseBackgroundLoop<br/><i>loop</i>"]
     botprport["BotPRPort<br/><i>port</i>"]
+    circuitbreaker["CircuitBreaker<br/><i>control_role</i>"]
     controller["Controller<br/><i>control_role</i>"]
     credentials["Credentials<br/><i>value_object</i>"]
     creditexhaustederror["CreditExhaustedError<br/><i>domain_event</i>"]
@@ -162,6 +163,8 @@ graph LR
   cimonitorloop -->|depends_on| prport
   cimonitorloop -->|implements| basebackgroundloop
   cimonitorloop -->|depends_on| governor
+  circuitbreaker -->|depends_on| setpoint
+  circuitbreaker -->|depends_on| creditexhaustederror
   contractrefreshloop -->|depends_on| basebackgroundloop
   contractrefreshloop -->|depends_on| hydraflowconfig
   contractrefreshloop -->|depends_on| statetracker

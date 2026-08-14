@@ -6,6 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `b8d4ca0` — chore(arch): refresh generated artifacts after merging staging *(2026-08-14)*
+- `a24f82e` — feat(ul): term-proposer batch — 1 drafts *(2026-08-14)*
+- `c31f2ee` — feat(ul): edge-proposer — 39 new edges across 16 terms (#11097) (#11097) *(2026-08-14)*
+- `a1d1d53` — feat(control): setpoint register + first regulator conversion — GateHealthLoop (#11071) (#11071) *(2026-08-13)*
 - `f4ab7e7` — fix(audit): host-hermetic prompt renders — call-time cache root + frozen plugin-skill set (#11069) (#11069) *(2026-08-13)*
 - `2187acb` — feat(process): encode session lessons — supervisor classify rules, self-check, gotchas (#11065) (#11065) *(2026-08-12)*
 - `a6ecc95` — feat(quality): time-travel guard — detonate fixture time-bombs before real time does (#11054) (#11054) *(2026-08-11)*
