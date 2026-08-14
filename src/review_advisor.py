@@ -63,6 +63,13 @@ class ReviewPlan(BaseModel):
     focus_areas: list[FocusArea] = Field(default_factory=list)
     rubric: list[str] = Field(default_factory=list)
     escalation_signals: list[str] = Field(default_factory=list)
+    # #10836 phase 2: the pre-flight judge's scoreable FORECAST — will this
+    # diff, as written, contain a defect review must block? A plan alone is
+    # not calibratable; verdict+confidence is. Optional + defaulted so older
+    # payloads (and advisors that decline to forecast) validate unchanged —
+    # an absent forecast is honestly skipped by the recorder, never invented.
+    defect_verdict: Literal["PASS", "FAIL"] | None = None
+    confidence: float | None = None
 
 
 class PreFlightInput(BaseModel):
@@ -1042,11 +1049,19 @@ class PreFlightAdvisor:
         *,
         log_path: Path | None = None,
         pr_number: int | None = None,
+        judge_verdict_ledger_path: Path | None = None,
+        calibration_subject_id: str | None = None,
     ) -> None:
         self._runner = runner
         self._cfg = surface_config
         self._log_path = log_path
         self._pr_number = pr_number
+        # #10836 phase 2: the construction site computes the subject join key
+        # explicitly (subject_for_pr vs subject_for_issue) — no precedence
+        # logic here to misjoin the two paths that both flow through this
+        # advisor (PR review vs pre-PR issue review).
+        self._judge_verdict_ledger_path = judge_verdict_ledger_path
+        self._calibration_subject_id = calibration_subject_id
 
     async def run(self, inp: PreFlightInput) -> ReviewPlan | None:
         prompt = self._build_prompt(inp)
@@ -1090,7 +1105,41 @@ class PreFlightAdvisor:
             return None
 
         self._emit_log(prompt=prompt, payload=payload, start=start, error=None)
+        # #10836 phase 2: best-effort proper-scoring record of the plan's
+        # defect forecast. Fail-soft by construction — never affects the plan
+        # returned above.
+        self._record_calibration_verdict(plan)
         return plan
+
+    def _record_calibration_verdict(self, plan: ReviewPlan) -> None:
+        """Best-effort append of the pre-flight forecast to the judge ledger.
+
+        No-op unless a ledger path + subject join key are wired AND the plan
+        carries BOTH a defect_verdict and a numeric confidence — an advisor
+        that declines to forecast is honestly skipped, never coerced.
+        :func:`judge_calibration.record_verdict` never raises, so a recording
+        failure can never degrade pre-flight planning (mirrors
+        PostVerifyAdvisor's recorder; judges never see their own scores
+        in-loop, per the #10836 Goodhart caveat).
+        """
+        if (
+            self._judge_verdict_ledger_path is None
+            or self._calibration_subject_id is None
+            or plan.defect_verdict is None
+            or plan.confidence is None
+        ):
+            return
+        jc.record_verdict(
+            self._judge_verdict_ledger_path,
+            judge_id="pre_flight",
+            judge_family="review_advisor",
+            subject_id=self._calibration_subject_id,
+            verdict=(
+                jc.Verdict.PASS if plan.defect_verdict == "PASS" else jc.Verdict.FAIL
+            ),
+            confidence=plan.confidence,
+            recorded_at=datetime.now(UTC),
+        )
 
     def _emit_log(
         self,
@@ -1151,9 +1200,17 @@ class PreFlightAdvisor:
             '{"risk_summary":str,'
             '"focus_areas":[{"description":str,"files":[str],"rationale":str}],'
             '"rubric":[str],'
-            '"escalation_signals":[str]}'
+            '"escalation_signals":[str],'
+            '"defect_verdict":"PASS"|"FAIL",'
+            '"confidence":float}'
             "\nFocus on: what could go wrong with this diff, what the reviewer "
             "should look for, and any signals that suggest mid-flight consult."
+            "\nReason first — work through the risk analysis (risk_summary, "
+            "focus_areas) before forecasting. defect_verdict is that "
+            "reasoning's CONCLUSION: FAIL if this diff, as written, contains "
+            "a defect review must block; PASS if it is clean. confidence is "
+            "your probability (0.0-1.0) that the forecast is correct — a "
+            "calibrated self-estimate, not a formality."
         )
         prompt = "\n".join(sections)
         return prompt + fenced_steering_guidance(inp.human_guidance)
