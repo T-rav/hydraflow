@@ -107,6 +107,21 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('supervisor-empty')).toBeInTheDocument()
   })
 
+  it('mounts the FinderFaceplatePanel in the vitals slot, empty by default (#10826)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    const vitalsSlot = screen.getByTestId('operator-vitals-slot')
+    expect(vitalsSlot).toContainElement(screen.getByTestId('finder-faceplate-panel'))
+    expect(screen.getByTestId('faceplate-empty')).toBeInTheDocument()
+  })
+
+  it('mounts the LoopFaceplatePanel in the vitals slot, empty by default (#10826)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    const vitalsSlot = screen.getByTestId('operator-vitals-slot')
+    expect(vitalsSlot).toContainElement(screen.getByTestId('loop-faceplate-panel'))
+    // No loop-faceplates payload by default → the calm empty state, no crash.
+    expect(screen.getByTestId('loop-faceplate-empty')).toBeInTheDocument()
+  })
+
   it('mounts the phase timeline in the reclaimed bottom slot (feat/operator-timeline)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     const slot = screen.getByTestId('operator-timeline-slot')

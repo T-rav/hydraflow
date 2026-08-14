@@ -19,11 +19,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import yaml
 from fastapi import APIRouter, HTTPException, Query
 
 import dashboard_routes._cost_rollups as _cost_rollups_mod
 import finder_calibration as fc
 import judge_calibration as jc
+from control_register import fleet_counts, load_fleet, load_setpoints
 from dashboard_routes._cost_merge import (
     group_cost_by_model_by_repo,
     merge_by_loop,
@@ -57,6 +59,7 @@ from finder_faceplate import (
     baseline_ledger_path,
     build_faceplates,
 )
+from loop_faceplate import build_loop_faceplates
 from route_types import REPO_ALL, RepoSlugParam
 from vitals.report import latest_verdict_payload
 
@@ -378,6 +381,51 @@ def build_diagnostics_router(
         now = datetime.now(UTC)
         finders = build_faceplates(floors, baselines, live_rates, now)
         return {"finders": finders, "generated_at": now.isoformat()}
+
+    @router.get("/loop-faceplates")
+    def loop_faceplates(repo: RepoSlugParam = None) -> dict[str, Any]:
+        """Per-loop control faceplates (#10826) — the STATIC register half.
+
+        One row per ``control/fleet.yaml`` entry (#10824): control class, PV
+        label, (possibly unsigned) setpoint, and the calibrated noise-floor
+        sigma via the fleet's finder join. The LIVE half (PV, quiescence,
+        last actuation) already reaches the console on the
+        ``BACKGROUND_WORKER_STATUS`` bus — the UI joins the two client-side,
+        so this endpoint deliberately serves no live telemetry.
+
+        Fail-soft: an unreadable fleet file yields ``loops: []`` with an
+        ``error`` marker (the register is repo-versioned and guard-tested, so
+        this signals a broken deploy — but a diagnostics panel must render,
+        not 500). Unreadable setpoints/calibration degrade to unsigned/None
+        per their loaders.
+        """
+        cfg = _config_for(repo) if repo is not None else config
+        repo_root = Path(cfg.repo_root)
+        now = datetime.now(UTC)
+        try:
+            fleet = load_fleet(repo_root)
+        except (OSError, KeyError, ValueError, yaml.YAMLError) as exc:
+            logger.warning("loop-faceplates: fleet register unreadable: %s", exc)
+            return {
+                "loops": [],
+                "counts": {},
+                "error": "fleet-unreadable",
+                "generated_at": now.isoformat(),
+            }
+        setpoints = load_setpoints(repo_root)
+        floors: dict[str, Any] = {}
+        try:
+            floors = fc.CalibrationLedger(
+                fc.calibration_ledger_path(cfg.data_root)
+            ).latest_by_finder()
+        except (OSError, ValueError, RuntimeError, KeyError):
+            logger.warning("loop-faceplates: calibration read failed", exc_info=True)
+        counts = {str(k): v for k, v in fleet_counts(fleet).items()}
+        return {
+            "loops": build_loop_faceplates(fleet, setpoints, floors),
+            "counts": counts,
+            "generated_at": now.isoformat(),
+        }
 
     @router.get("/judge-calibration")
     def judge_calibration_route(repo: RepoSlugParam = None) -> dict[str, Any]:

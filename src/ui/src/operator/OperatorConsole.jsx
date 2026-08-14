@@ -53,6 +53,9 @@ import { EMPTY_SUPERVISOR_VM } from './model/supervisorThread'
 import { FinderFaceplatePanel } from './FinderFaceplatePanel'
 import { useFinderFaceplates } from './useFinderFaceplates'
 import { EMPTY_FINDER_FACEPLATES_VM } from './model/finderFaceplates'
+import { LoopFaceplatePanel } from './LoopFaceplatePanel'
+import { useLoopFaceplates } from './useLoopFaceplates'
+import { toLoopFaceplates } from './model/loopFaceplates'
 import { JudgeCalibrationPanel } from './JudgeCalibrationPanel'
 import { useJudgeCalibration } from './useJudgeCalibration'
 import { EMPTY_JUDGE_CALIBRATION_VM } from './model/judgeCalibration'
@@ -160,7 +163,7 @@ function ModeToggle({ mode, select, styles }) {
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
@@ -170,6 +173,13 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
   const pipeline = useMemo(
     () => toPipeline({ stages: socket.pipelineIssues, stats: socket.pipelineStats }),
     [socket.pipelineIssues, socket.pipelineStats],
+  )
+  // Loop faceplates (#10826): the static register half arrives via the poll
+  // hook; the live half (PV/quiescence) is the WS backgroundWorkers slice, so
+  // the join recomputes on every WS frame without refetching.
+  const loopFaceplates = useMemo(
+    () => toLoopFaceplates(loopFaceplatesRaw, socket.backgroundWorkers),
+    [loopFaceplatesRaw, socket.backgroundWorkers],
   )
   // Task 9: per-repo portfolio summaries. Only a multi-repo install shows the
   // overview / switcher; a single-repo install drills straight to the pipeline.
@@ -305,6 +315,9 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                 onAckEscalations={socket.ackEscalations}
               />
               <FinderFaceplatePanel faceplates={faceplates} />
+              {/* Read-only slice; promotion to the primary-surface faceplate
+                  grid is the #10942 zone work. */}
+              <LoopFaceplatePanel faceplates={loopFaceplates} />
               <JudgeCalibrationPanel calibration={calibration} />
               <LoopsPanel loops={loops} />
               <SettingsSummary summary={settings} onOpenSettings={() => setSettingsOpen(true)} />
@@ -340,12 +353,16 @@ export function OperatorConsole() {
   // finder's measured noise floor against its live finding-rate on its own pinned
   // cadence (aborted in-flight on unmount), independent of the WS slice.
   const faceplates = useFinderFaceplates()
+  // Loop faceplates (#10826): polls the STATIC control-register half (fleet
+  // class + setpoint + floor sigma) on its own pinned cadence; the view joins
+  // it against the live backgroundWorkers WS slice client-side.
+  const loopFaceplatesRaw = useLoopFaceplates()
   // Judge calibration (#10836): polls the read-only proper-scoring report for
   // each review judge (calibration ECE + discrimination AUC, resolved against
   // the escape ledger) on its own pinned cadence (aborted in-flight on unmount),
   // independent of the WS slice.
   const calibration = useJudgeCalibration()
-  return <OperatorConsoleView socket={socket} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} />
+  return <OperatorConsoleView socket={socket} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} />
 }
 
 export default OperatorConsole
