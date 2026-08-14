@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11103
 source_phase: plan
 created_at: 2026-08-14T07:34:32.949740+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Coverage job is non-gating — absent from ci-gate.needs
