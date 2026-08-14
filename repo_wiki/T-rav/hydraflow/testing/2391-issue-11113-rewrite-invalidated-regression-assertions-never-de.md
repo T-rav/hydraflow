@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11113
 source_phase: plan
 created_at: 2026-08-14T09:30:40.586343+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2579
 ---
 
 # Rewrite invalidated regression assertions, never delete them

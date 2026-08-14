@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.070634+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2193,2213
+superseded_by: 2527
 ---
 
 # Never import src.-prefixed modules in tests — dual alias splits objects

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11160
 source_phase: plan
 created_at: 2026-08-14T18:34:20.225997+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2560
 ---
 
 # Run full make quality for shared loop modules, not subsets

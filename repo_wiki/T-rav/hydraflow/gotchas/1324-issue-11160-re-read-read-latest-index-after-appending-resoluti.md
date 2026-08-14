@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11160
 source_phase: plan
 created_at: 2026-08-14T18:34:20.225983+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Re-read read_latest_index() after appending resolution rows in reconcile

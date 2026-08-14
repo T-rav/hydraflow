@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.043661+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2183
+superseded_by: 2517
 ---
 
 # ADR enforcement metadata: enforced flag + resolvable Enforced-by path

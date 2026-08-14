@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11161
 source_phase: plan
 created_at: 2026-08-14T18:36:34.319408+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2598
 ---
 
 # Inject fake diagnoser in loop tests that seed aged rows

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:36.844676+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2108
+superseded_by: 2443
 ---
 
 # ADR-text + static/unit test fixes skip MockWorld/e2e

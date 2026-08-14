@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11088
 source_phase: plan
 created_at: 2026-08-14T08:31:19.200085+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2572
 ---
 
 # Auditor detector pins must not spell the helper call literal

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11144
 source_phase: plan
 created_at: 2026-08-14T14:39:13.298180+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2596
 ---
 
 # Dismissals write sidecar only; main ledger row forbidden

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11115
 source_phase: plan
 created_at: 2026-08-14T10:03:17.496159+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2580
 ---
 
 # ADR-0049 kill-switch: only for loop/worker/subprocess runners

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11139
 source_phase: plan
 created_at: 2026-08-14T14:16:51.498125+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2594
 ---
 
 # GitHub label queries must route through PRPort, not subprocess
