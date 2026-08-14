@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11166
 source_phase: plan
 created_at: 2026-08-14T19:18:14.572511+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # CULTURAL-severity false-PASS fixes are safe when live CLAUDE.md carries the rule

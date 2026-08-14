@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11164
 source_phase: plan
 created_at: 2026-08-14T18:58:35.986525+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11164 closed
 ---
 
 # Path-filter ratchets must target the filter that actually gates jobs
