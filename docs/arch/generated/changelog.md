@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `57a741d` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-1725) *(2026-08-13)*
 - `1f8ed86` — Merge remote-tracking branch 'origin/main' into rc/2026-08-13-1725 *(2026-08-13)*
 - `a1d1d53` — feat(control): setpoint register + first regulator conversion — GateHealthLoop (#11071) (#11071) *(2026-08-13)*
 - `8eb99a5` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-2315) *(2026-08-13)*
