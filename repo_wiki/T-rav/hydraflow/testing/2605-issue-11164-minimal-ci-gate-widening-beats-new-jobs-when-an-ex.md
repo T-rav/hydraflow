@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11164
 source_phase: plan
 created_at: 2026-08-14T18:58:35.986576+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11164 closed
 ---
 
 # Minimal CI gate-widening beats new jobs when an existing job already has the right checkout
