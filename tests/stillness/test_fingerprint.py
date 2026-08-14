@@ -46,7 +46,7 @@ def test_finder_label_is_self_even_when_human_authored() -> None:
 
 
 def test_hitl_escalation_is_self() -> None:
-    assert classify_origin(("hydraflow-hitl-escalation",)) is Origin.SELF
+    assert classify_origin(("hitl-escalation",)) is Origin.SELF
 
 
 def test_pipeline_label_is_pipeline() -> None:

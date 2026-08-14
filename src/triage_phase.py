@@ -27,6 +27,10 @@ from phase_utils import (
 from state import StateTracker
 from task_source import TaskTransitioner
 from triage import TriageRunner
+from trust_fleet_anomaly_detectors import (
+    HITL_QUEUE_LABEL,
+    TRUST_LOOP_ANOMALY_LABEL,
+)
 
 if TYPE_CHECKING:
     from bug_reproducer import BugReproducer
@@ -754,7 +758,7 @@ class TriagePhase:
         # decomposed into epics + children before the anomaly self-cleared
         # one tick later: one boot artifact became four issues. Escalation
         # labels opt out of auto-decomposition entirely.
-        escalation_labels = {"trust-loop-anomaly", "hitl-escalation"}
+        escalation_labels = {TRUST_LOOP_ANOMALY_LABEL, HITL_QUEUE_LABEL}
         if escalation_labels & set(issue.tags):
             logger.info(
                 "Issue #%d carries an escalation label — anomaly escalations "

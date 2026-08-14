@@ -38,7 +38,7 @@ from enum import StrEnum
 # Labels a loop applies when it files work. `hydraflow-find` is the canonical
 # "a loop opened this" marker; the co-labels name the specific finder.
 FINDER_LABEL = "hydraflow-find"
-HITL_ESCALATION_LABEL = "hydraflow-hitl-escalation"
+HITL_ESCALATION_LABEL = "hitl-escalation"  # #11145: the merged queue root
 OSCILLATION_LABEL = "convergence-oscillation"
 # Co-labels that pin a finder to a specific loop (the only clean loop↔issue key).
 _FINDER_COLABELS = {

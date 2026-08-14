@@ -170,7 +170,7 @@ class TestDivergingAlarm:
         labels = prs.calls[0]["labels"]
         assert "hydraflow-find" in labels
         assert "second-order-vitals" in labels
-        assert "hydraflow-hitl-escalation" in labels
+        assert "hitl-escalation" in labels
         assert state.get_second_order_vitals_last_verdict() == "diverging"
 
     async def test_no_refile_within_open_episode(

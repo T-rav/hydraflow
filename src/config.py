@@ -1784,8 +1784,14 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-diagnose"],
         description="Labels for issues in diagnostic analysis (OR logic)",
     )
+    # #11145 queue-merge ruling (2026-08-14): the bare literal is the
+    # de-facto HITL-escalation queue — most caretaker writers and BOTH
+    # pollers (auto_agent_preflight, detector_calibration) use it, and every
+    # live escalation issue carries it. The prefixed default created a
+    # second, unrouted queue; the default now matches reality so
+    # config-sourced writers land on the queue the readers actually poll.
     hitl_escalation_label: list[str] = Field(
-        default=["hydraflow-hitl-escalation"],
+        default=["hitl-escalation"],
         description="Labels for stuck-loop HITL escalations (e.g. fake-coverage-auditor)",
     )
     fake_coverage_gap_label: list[str] = Field(
@@ -3613,7 +3619,8 @@ class HydraFlowConfig(BaseModel):
     # those that have cycled back to planning (route-back count > 0). The
     # common first-pass issue skips research and lets the planner explore once.
     research_escalation_labels: list[str] = Field(
-        default=["hydraflow-hitl-escalation"],
+        # #11145: follows the merged HITL-escalation queue root.
+        default=["hitl-escalation"],
         description=(
             "Labels that force the research pre-pass before planning "
             "(escalated issues). Cycled issues (route-back count > 0) also "

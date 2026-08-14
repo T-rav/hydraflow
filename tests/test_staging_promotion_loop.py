@@ -670,7 +670,7 @@ class TestRepeatedFailureEscalation:
         assert state.get_consecutive_rc_failures() == 2
         escalations = _escalation_calls(prs)
         assert len(escalations) == 1
-        assert "hydraflow-hitl-escalation" in (
+        assert "hitl-escalation" in (
             escalations[0].kwargs.get("labels") or escalations[0].args[2]
         )
 
@@ -770,7 +770,7 @@ class TestEscalationAutoClose:
         assert "2" not in title  # streak count must NOT be in the title
         assert "2 times in a row" in body
         assert "#70" in body
-        assert "hydraflow-hitl-escalation" in labels
+        assert "hitl-escalation" in labels
         assert "rc-promotion-stuck" in labels
 
     @pytest.mark.asyncio

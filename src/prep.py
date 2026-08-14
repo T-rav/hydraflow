@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from config import Credentials, HydraFlowConfig
 from models import AuditCheck, AuditCheckStatus, AuditResult
 from subprocess_util import run_subprocess, run_subprocess_with_retry
+from trust_fleet_anomaly_detectors import TRUST_LOOP_ANOMALY_LABEL
 
 logger = logging.getLogger("hydraflow.prep")
 
@@ -140,7 +141,7 @@ HYDRAFLOW_LITERAL_LABELS: tuple[tuple[str, str, str], ...] = (
     ("triage-retry-exhausted", "e99695", "Triage retry budget exhausted for an issue"),
     ("auto-agent-exhausted", "e99695", "Auto-agent attempt budget exhausted"),
     # --- *-drift / *-anomaly detector findings (purple) ---
-    ("trust-loop-anomaly", "5319e7", "Trust-fleet sanity loop detected an anomaly"),
+    (TRUST_LOOP_ANOMALY_LABEL, "5319e7", "Trust-fleet sanity loop detected an anomaly"),
     ("shadow-drift", "5319e7", "Shadow drift between fake output and live samples"),
     ("fake-drift", "5319e7", "Fake-adapter output drifted from contract"),
     ("principles-drift", "5319e7", "Principles/ADR-0044 cultural drift detected"),

@@ -188,7 +188,7 @@ class TestSecondOrderVitalsScenario:
         assert {
             "hydraflow-find",
             "second-order-vitals",
-            "hydraflow-hitl-escalation",
+            "hitl-escalation",
         } <= set(labels)
         # The verdict history + report were written.
         assert (diag / "vitals.jsonl").exists()

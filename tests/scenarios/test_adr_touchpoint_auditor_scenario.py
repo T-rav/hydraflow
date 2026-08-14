@@ -388,7 +388,7 @@ class TestAdrTouchpointAuditor:
         assert "ADR-0024" in issue.body
 
         # Required labels: hitl-escalation + adr-drift-stuck.
-        assert "hydraflow-hitl-escalation" in issue.labels
+        assert "hitl-escalation" in issue.labels
         assert "hydraflow-adr-drift-stuck" in issue.labels
 
         # ADR-0050 preflight reachability: hydraflow-adr-drift-stuck must NOT
