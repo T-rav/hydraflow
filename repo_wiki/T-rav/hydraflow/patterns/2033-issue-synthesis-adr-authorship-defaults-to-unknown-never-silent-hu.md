@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T18:39:31.800533+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1925
+superseded_by: 2149
 ---
 
 # ADR authorship defaults to UNKNOWN, never silent HUMAN

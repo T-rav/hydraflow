@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11146
 source_phase: plan
 created_at: 2026-08-14T15:08:46.026264+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2174
 ---
 
 # hitl_escalation_label ≠ bare hitl-escalation literal

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T18:39:31.716602+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1890
+superseded_by: 2114
 ---
 
 # Decompose records own event to prevent child recursion

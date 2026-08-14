@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11161
 source_phase: review
 created_at: 2026-08-14T20:59:54.755919+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Non-converging repro family (5+ attempts) triggers fresh-eyes pass

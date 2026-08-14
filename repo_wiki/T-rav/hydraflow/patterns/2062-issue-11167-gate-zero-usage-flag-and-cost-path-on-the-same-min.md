@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11167
 source_phase: plan
 created_at: 2026-08-14T19:25:35.935686+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2176
 ---
 
 # Gate zero-usage flag and cost path on the same min_window_calls floor

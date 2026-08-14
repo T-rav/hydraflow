@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11160
 source_phase: plan
 created_at: 2026-08-14T18:34:20.225946+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2173
 ---
 
 # Aging surface findings bypass auto-diagnose via reason filter
