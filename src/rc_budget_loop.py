@@ -53,6 +53,12 @@ _WINDOW_DAYS = 30
 _HISTORY_CAP = 60
 _RECENT_N = 5
 _MIN_HISTORY = 5
+# #11121: warmup is normal for a fresh RC-run cache, but a loop that can
+# NEVER leave warmup is degraded, not healthy — after this many consecutive
+# warmup ticks the status becomes "warmup_stalled", which the trust-fleet
+# roll-up counts as degraded instead of a healthy tick. In-memory counter:
+# a restart re-arms the grace window (the safe direction).
+_WARMUP_STALL_TICKS = 6
 # The workflow itself is single-sourced as
 # ``github_cache_loop.RC_PROMOTION_WORKFLOW`` (#9814): this loop reads the
 # shared run snapshot, it no longer names the workflow in a gh command.
@@ -144,6 +150,7 @@ class RCBudgetLoop(BaseBackgroundLoop):
         self._pr = pr_manager
         self._dedup = dedup
         self._github_cache = github_cache
+        self._consecutive_warmups = 0
         self._escalations = EscalationReconciler(
             prs=pr_manager,
             dedup=dedup,
@@ -172,7 +179,15 @@ class RCBudgetLoop(BaseBackgroundLoop):
         await self._reconcile_closed_escalations()
         runs = await self._fetch_recent_runs()
         if len(runs) < _MIN_HISTORY:
+            self._consecutive_warmups += 1
+            if self._consecutive_warmups >= _WARMUP_STALL_TICKS:
+                return {
+                    "status": "warmup_stalled",
+                    "runs_seen": len(runs),
+                    "consecutive_warmups": self._consecutive_warmups,
+                }
             return {"status": "warmup", "runs_seen": len(runs)}
+        self._consecutive_warmups = 0
 
         self._state.set_rc_budget_duration_history(
             [

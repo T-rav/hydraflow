@@ -250,6 +250,14 @@ def _hard_full_suite_reason(path: str, basename: str) -> str | None:
         return f"{path}: workflow changed -> full suite"
     if path.startswith(".githooks/"):
         return f"{path}: git hook changed -> full suite"
+    # #11136: `.claude/hooks/**` and `.claude/settings.json` control agent
+    # tool-gating, secret scanning, and pre-commit validation — behavioral
+    # surfaces with no per-test mapping, same class as `.githooks/`. The
+    # REST of `.claude/**` (agents/, skills/, commands/ — prose assets) is a
+    # DELIBERATE non-mapping: they steer LLM behavior, not test outcomes,
+    # and stay on the always-on architecture+smoke floor.
+    if path.startswith(".claude/hooks/") or path == ".claude/settings.json":
+        return f"{path}: Claude hook/settings changed -> full suite"
     if path in HIGH_FANOUT_SRC or path.startswith("src/arch/"):
         return f"{path}: high-fanout src -> full suite"
     return None
