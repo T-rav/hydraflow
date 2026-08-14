@@ -1,0 +1,22 @@
+# Human-signed setpoints (#10824, ADR-0120). An unsigned setpoint is INERT:
+# the regulator in the loop keeps its legacy finding-driven behavior until a
+# human fills in signed_by/signed_date. The machine may PROPOSE values here
+# (envelope discipline) — it must never sign them.
+#
+# To sign: review the proposed value/band, edit signed_by + signed_date, and
+# land the change through PR review. #10827 (optimization layer) owns future
+# proposals-from-history; until then proposals carry their provenance in a
+# comment.
+
+gate_health:
+  pv: "fleet check pass rate over gate_health_run_window (docs-only failures excluded)"
+  units: fraction
+  # Proposed 2026-08-13 from the born-broken/uncorrelated-blame thresholds the
+  # loop already acts on (a check under ~90% over the window is what its
+  # finders fire on today). UNSIGNED — inert until reviewed and signed.
+  value: 0.90
+  band: 0.05
+  direction: above
+  signed_by: null
+  signed_date: null
+  authority: "ADR-0120 Ruling 1; #10824"

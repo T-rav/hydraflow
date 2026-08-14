@@ -25,12 +25,17 @@ regression (the CI-side mitigation for the same incident).
 from __future__ import annotations
 
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tests.test_rc_budget_loop import _loop, loop_env  # noqa: F401
+
+
+def _iso(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 async def test_cancelled_run_is_never_misreported_as_duration_regression(
@@ -47,26 +52,32 @@ async def test_cancelled_run_is_never_misreported_as_duration_regression(
     loop._fetch_job_breakdown = AsyncMock(return_value=[])
     loop._fetch_junit_tests = AsyncMock(return_value=[])
 
+    # Now-relative (TEST-WALLCLOCK-TIMEBOMB-001): the loop's 30-day window is
+    # cut from datetime.now(UTC), and the original hardcoded 2026-07-15..20
+    # dates aged out of it on 2026-08-14 — runs_seen dropped 6 → 5 with no
+    # code change on either branch.
+    now = datetime.now(UTC)
     healthy = [
         {
             "id": 1000 + i,
             "url": f"https://example/run/{1000 + i}",
             "status": "completed",
             "conclusion": "success",
-            "created_at": f"2026-07-{14 + i:02d}T00:00:00Z",
-            "run_started_at": f"2026-07-{14 + i:02d}T00:00:00Z",
-            "updated_at": f"2026-07-{14 + i:02d}T00:05:00Z",
+            "created_at": _iso(now - timedelta(days=8 - i)),
+            "run_started_at": _iso(now - timedelta(days=8 - i)),
+            "updated_at": _iso(now - timedelta(days=8 - i) + timedelta(minutes=5)),
         }
         for i in range(1, 7)
     ]
+    hung_started = now - timedelta(days=1)
     hung = {
         "id": 2000,
         "url": "https://example/run/2000",
         "status": "completed",
         "conclusion": "cancelled",
-        "created_at": "2026-07-22T02:16:51Z",
-        "run_started_at": "2026-07-22T01:31:51Z",
-        "updated_at": "2026-07-22T02:16:51Z",
+        "created_at": _iso(hung_started + timedelta(minutes=45)),
+        "run_started_at": _iso(hung_started),
+        "updated_at": _iso(hung_started + timedelta(minutes=45)),
     }
     loop._github_cache.get_rc_workflow_runs = AsyncMock(return_value=[*healthy, hung])
 

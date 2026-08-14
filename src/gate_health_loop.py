@@ -28,6 +28,7 @@ import yaml
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from control_register import regulate, setpoint_for
 from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
 from filing_budget import FilingBudget, file_overflow_summary, overflow_line
@@ -265,6 +266,21 @@ def tally_job_stats(
     return stats
 
 
+def fleet_pass_rate(stats: dict[str, JobStats]) -> float:
+    """The regulator PV (#10824): fleet-wide pass fraction over the window.
+
+    Docs-only failures are excluded from the denominator — they are blame
+    noise, not gate health (the same exclusion ``find_uncorrelated_blame``
+    exists to flag). A window with zero conclusive attempts reads 1.0: no
+    attempts is no evidence of error, and the acting mode stays reachable
+    the moment a real failure lands.
+    """
+    passes = sum(s.passes for s in stats.values())
+    failures = sum(s.failures - s.docs_only_failures for s in stats.values())
+    attempts = passes + failures
+    return 1.0 if attempts <= 0 else passes / attempts
+
+
 def find_born_broken(
     stats: dict[str, JobStats], *, min_attempts: int
 ) -> list[dict[str, Any]]:
@@ -378,6 +394,10 @@ class GateHealthLoop(BaseBackgroundLoop):
             "gate_health_findings",
             config.data_root / "dedup" / "gate_health_findings.json",
         )
+        # Regulator quiescence (#10824): held in memory only — a restart
+        # forgets quiescence and re-enters the acting mode, which is the safe
+        # direction (files findings rather than suppresses them).
+        self._quiescent = False
 
     def _get_default_interval(self) -> int:
         return self._config.gate_health_interval
@@ -416,13 +436,32 @@ class GateHealthLoop(BaseBackgroundLoop):
             Path(self._config.repo_root)
         )
 
+        # Regulator assembly (#10824, ADR-0120): PV = fleet pass rate. With a
+        # SIGNED setpoint, in-band quiescence suppresses the pass-rate-driven
+        # finders — no action is the correct output at error ~0. Structural
+        # finders (artifacts, quarantines, hangs) are not pass-rate phenomena
+        # and always run. Unsigned/absent spec → verdict.regulated is False
+        # and behavior is exactly the legacy finding-driven loop.
+        verdict = regulate(
+            fleet_pass_rate(stats),
+            setpoint_for(Path(self._config.repo_root), self._worker_name),
+            previously_quiescent=self._quiescent,
+        )
+        self._quiescent = verdict.quiescent
+
+        pass_rate_findings: list[dict[str, Any]] = []
+        if not (verdict.regulated and verdict.quiescent):
+            pass_rate_findings = [
+                *find_born_broken(
+                    stats, min_attempts=self._config.gate_health_min_attempts
+                ),
+                *find_uncorrelated_blame(
+                    stats, min_occurrences=self._config.gate_health_min_attempts - 1
+                ),
+            ]
+
         findings = [
-            *find_born_broken(
-                stats, min_attempts=self._config.gate_health_min_attempts
-            ),
-            *find_uncorrelated_blame(
-                stats, min_occurrences=self._config.gate_health_min_attempts - 1
-            ),
+            *pass_rate_findings,
             *find_missing_artifacts(failed_run_artifacts),
             *await self._find_stale_quarantines(),
             *find_suspected_hangs(
@@ -438,6 +477,9 @@ class GateHealthLoop(BaseBackgroundLoop):
             "checks_tracked": len(stats),
             "findings": len(findings),
             "filed": filed,
+            "pv_pass_rate": round(verdict.pv, 4),
+            "setpoint_active": verdict.regulated,
+            "quiescent": verdict.quiescent,
         }
 
     async def _collect(
