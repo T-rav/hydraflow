@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11085
 source_phase: plan
 created_at: 2026-08-14T05:58:31.318359+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1640
 ---
 
 # Cost-per-call denominator must exclude usage_unavailable_calls

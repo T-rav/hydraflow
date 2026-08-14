@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:30:39.139196+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1446
+superseded_by: 1615
 ---
 
 # Self-chore exclusion requires path corroboration, not prefix alone

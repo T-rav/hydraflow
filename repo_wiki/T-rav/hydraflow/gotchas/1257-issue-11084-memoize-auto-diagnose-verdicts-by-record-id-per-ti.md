@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11084
 source_phase: plan
 created_at: 2026-08-14T05:53:19.138422+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Memoize auto-diagnose verdicts by record.id per tick
