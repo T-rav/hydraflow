@@ -512,14 +512,14 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         # Terminal verdicts suppress selection even when auto-diagnose is
         # currently disabled — the sidecar on disk is the record of past
         # dismissals, and a config flip must not resurrect them (#11137).
-        # terminal_ids()/unreadable_ids() both derive from the SAME parsed,
-        # last-row-wins map (#11163) — a row whose diagnosis string doesn't
-        # parse is excluded from `terminal` (stays eligible below) rather
-        # than silently and permanently suppressed; it is also LOUD, since a
-        # future-enum-value or corrupted row is otherwise invisible.
+        # terminal_and_unreadable_ids() derives both from the SAME parsed,
+        # last-row-wins map (#11163) in a single sidecar read — a row whose
+        # diagnosis string doesn't parse is excluded from `terminal` (stays
+        # eligible below) rather than silently and permanently suppressed;
+        # it is also LOUD, since a future-enum-value or corrupted row is
+        # otherwise invisible.
         diagnoses = EscapeDiagnosisLedger(self._diagnoses_path)
-        terminal = diagnoses.terminal_ids()
-        unreadable = diagnoses.unreadable_ids()
+        terminal, unreadable = diagnoses.terminal_and_unreadable_ids()
         if unreadable:
             logger.warning(
                 "EscapeLedger: %d escape diagnosis row(s) have an unreadable "

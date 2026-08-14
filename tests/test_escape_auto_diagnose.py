@@ -396,6 +396,26 @@ class TestEscapeDiagnosisLedger:
         assert ledger.unreadable_ids() == set()
         assert ledger.terminal_ids() == {"bug-issue:a"}
 
+    def test_terminal_and_unreadable_ids_matches_the_separate_calls(
+        self, tmp_path: Path
+    ) -> None:
+        # The combined reader exists so EscapeLedgerLoop._surface_findings
+        # reads the sidecar once instead of twice (#11163 review) — it must
+        # agree with calling terminal_ids()/unreadable_ids() separately.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.RESOLVED_ENCODED, "ok")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:b",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        terminal, unreadable = ledger.terminal_and_unreadable_ids()
+        assert terminal == ledger.terminal_ids() == {"bug-issue:a"}
+        assert unreadable == ledger.unreadable_ids() == {"bug-issue:b"}
+
 
 class TestSidecarVerdictLookup:
     """#11111/#11148: the sidecar answers 'what was decided' — verdict_for

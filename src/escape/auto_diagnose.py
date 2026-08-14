@@ -345,6 +345,24 @@ class EscapeDiagnosisLedger(IdentifiedJsonlLedger[EscapeDiagnosisRecord]):
             if verdict is None
         }
 
+    def terminal_and_unreadable_ids(self) -> tuple[set[str], set[str]]:
+        """``(terminal_ids(), unreadable_ids())`` from a single sidecar read.
+
+        Equivalent to calling both separately, but callers that need both
+        (e.g. ``EscapeLedgerLoop._surface_findings``) get one
+        ``_latest_verdicts()`` pass over the sidecar instead of two.
+        """
+        verdicts = self._latest_verdicts()
+        terminal = {
+            escape_id
+            for escape_id, verdict in verdicts.items()
+            if verdict is not None and verdict[0] in _TERMINAL_DIAGNOSES
+        }
+        unreadable = {
+            escape_id for escape_id, verdict in verdicts.items() if verdict is None
+        }
+        return terminal, unreadable
+
     def verdict_for(self, escape_id: str) -> tuple[EscapeDiagnosis, str] | None:
         """The recorded terminal (verdict, reason) for *escape_id*, last row
         wins; ``None`` when the id has no sidecar row or its latest row is
