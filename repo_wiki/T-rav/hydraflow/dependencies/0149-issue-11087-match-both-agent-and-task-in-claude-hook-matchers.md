@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 11087
 source_phase: plan
 created_at: 2026-08-14T06:12:02.565691+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Match both Agent and Task in Claude hook matchers
