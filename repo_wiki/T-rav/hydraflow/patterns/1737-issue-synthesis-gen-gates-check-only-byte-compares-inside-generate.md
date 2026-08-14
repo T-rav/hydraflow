@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T11:12:32.513078+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1644
+superseded_by: 1833
 ---
 
 # gen-gates-check only byte-compares inside generated markers

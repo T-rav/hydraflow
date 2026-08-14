@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T11:12:32.454515+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1638
+superseded_by: 1828
 ---
 
 # Add Shewhart lower-limit as breaches_lower mirror

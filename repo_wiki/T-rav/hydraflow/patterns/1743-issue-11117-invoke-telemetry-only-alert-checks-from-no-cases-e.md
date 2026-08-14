@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11117
 source_phase: plan
 created_at: 2026-08-14T10:58:30.492166+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Invoke telemetry-only alert checks from no_cases early-return branch
