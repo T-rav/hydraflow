@@ -333,6 +333,9 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "shape_runner_critic": frozenset({1, 3, 4, 5, 8}),
     "shape_runner_turn": frozenset({1, 3, 4}),
     "spec_match_requirements_gap": frozenset({2, 3, 5, 8}),
+    # #10830 phase 2 (2026-08-13): the adversarial intake read. Fails 1/3/4/8
+    # at birth — pinned so it can only shed failures from here.
+    "spec_review": frozenset({1, 3, 4, 8}),
     "spec_match_self_review": frozenset({1, 3, 5, 7, 8}),
     "term_proposer": frozenset({1, 3}),
     "test_adequacy": frozenset({2, 3, 5}),
