@@ -1,0 +1,61 @@
+// Issue #11176 — escape surfacing: the ask budget is spent before diagnosis.
+specification {
+  element system
+  element component
+  element store
+}
+
+model {
+  loop = system 'EscapeLedgerLoop' {
+    description 'src/escape_ledger_loop.py — _surface_findings (tick)'
+
+    eligible = component 'eligible_findings' {
+      description 'pure: low-confidence + unencoded-aging rows, minus terminal/dedup'
+    }
+    budget = component 'apply_ask_budget' {
+      description 'pure: truncate to escape_ledger_max_issues_per_tick (3)'
+    }
+    diagnose = component '_auto_diagnose' {
+      description 'ADR-0115 machine pass; TODAY: low-confidence reason only'
+    }
+    file = component 'file HITL issues' {
+      description 'PRPort.create_issue + SurfacedIssueLedger link'
+    }
+  }
+
+  diagnoser = system 'EscapeAutoDiagnoser' {
+    description 'src/escape/auto_diagnose.py — git reads + PRPort labels'
+  }
+
+  ledger = store 'escape_ledger.jsonl' { description '.hydraflow/diagnostics — append-only' }
+  sidecar = store 'escape_diagnoses.jsonl' { description 'terminal verdicts' }
+  surfaces = store 'escape_surfaces.jsonl' { description 'open surfacing links' }
+
+  ledger -> loop.eligible 'read_latest()'
+  loop.eligible -> loop.budget 'ALL eligible (117 aging live)'
+  loop.budget -> loop.diagnose 'first 3 only  ← defect: cap precedes diagnosis'
+  loop.diagnose -> diagnoser 'diagnose(record)'
+  diagnoser -> sidecar 'RESOLVED_ENCODED / DISMISSED'
+  diagnoser -> ledger 'resolve_escape(encoded_as=regression-test)'
+  loop.diagnose -> loop.file 'INCONCLUSIVE residue (not backfilled)'
+  loop.file -> surfaces 'open link (reason=aging)'
+}
+
+views {
+  view components {
+    title 'Escape surfacing — cap-before-diagnose (defect)'
+    include *
+  }
+
+  dynamic view fixedTick {
+    title 'Fixed tick — diagnose the eligible set, THEN spend the ask budget'
+    ledger -> loop.eligible 'all eligible (record, reason)'
+    loop.eligible -> loop.diagnose 'walk in order, both reasons'
+    loop.diagnose -> diagnoser 'bounded by escape_ledger_max_diagnoses_per_tick'
+    diagnoser -> ledger 'self-encoded rows auto-resolve (no human)'
+    diagnoser -> sidecar 'terminal verdict → never eligible again'
+    loop.diagnose -> loop.budget 'INCONCLUSIVE residue only'
+    loop.budget -> loop.file 'at most max_issues_per_tick genuine asks'
+    loop.file -> surfaces 'link filed for a real question'
+  }
+}
