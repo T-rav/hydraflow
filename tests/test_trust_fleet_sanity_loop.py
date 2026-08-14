@@ -252,11 +252,85 @@ async def test_do_work_staleness_detector_uses_bg_worker_state(loop_env) -> None
     loop = _loop(loop_env)
     loop._reconcile_closed_escalations = AsyncMock(return_value=None)
     loop._load_cost_reader = MagicMock(return_value=None)
+    # #11119: boot grace measures staleness from max(last_run, boot) — a
+    # fresh boot would shield the stale heartbeat, so age the boot past the
+    # threshold; and a breach only files once it survives TWO ticks.
+    loop._boot_time = datetime.now(UTC) - timedelta(seconds=99_999)
+    first = await loop._do_work()
+    assert first["anomalies"] == 0  # pending confirmation, not filed
     stats = await loop._do_work()
     assert stats["anomalies"] >= 1
     title = pr.create_issue.await_args.args[0]
     assert "rc_budget" in title
     assert "staleness" in title
+
+
+async def test_staleness_within_boot_grace_never_files(loop_env) -> None:
+    """#11119 heart of the fix: an old PERSISTED heartbeat on a fresh boot is
+    not staleness — the fleet was off, not stalled. Even repeated ticks
+    within the post-boot threshold window must not file."""
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+    old = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "rc_budget": {"status": "ok", "last_run": old, "details": {}},
+    }
+    bg_workers.worker_enabled = {"rc_budget": True}
+    bg_workers.get_interval.return_value = 600
+
+    async def fake_load(since):  # noqa: ARG001
+        return []
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+    loop = _loop(loop_env)  # _boot_time = construction time = now
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+
+    first = await loop._do_work()
+    second = await loop._do_work()
+
+    assert first["anomalies"] == 0
+    assert second["anomalies"] == 0
+    pr.create_issue.assert_not_awaited()
+
+
+async def test_staleness_pending_resets_when_breach_clears(loop_env) -> None:
+    """A single-tick staleness observation that self-clears (the idle-test
+    lifecycle: #11086 filed → self-cleared one tick later) never files."""
+    cfg, state, bg_workers, pr, dedup, bus = loop_env
+    stale = (datetime.now(UTC) - timedelta(seconds=99_999)).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "rc_budget": {"status": "ok", "last_run": stale, "details": {}},
+    }
+    bg_workers.worker_enabled = {"rc_budget": True}
+    bg_workers.get_interval.return_value = 600
+
+    async def fake_load(since):  # noqa: ARG001
+        return []
+
+    bus.load_events_since = fake_load  # type: ignore[method-assign]
+    loop = _loop(loop_env)
+    loop._reconcile_closed_escalations = AsyncMock(return_value=None)
+    loop._load_cost_reader = MagicMock(return_value=None)
+    loop._boot_time = datetime.now(UTC) - timedelta(seconds=99_999)
+
+    first = await loop._do_work()
+    assert first["anomalies"] == 0
+
+    # The loop ticks: heartbeat freshens, breach clears, pending resets.
+    fresh = datetime.now(UTC).isoformat()
+    state.get_worker_heartbeats.return_value = {
+        "rc_budget": {"status": "ok", "last_run": fresh, "details": {}},
+    }
+    second = await loop._do_work()
+    assert second["anomalies"] == 0
+
+    # Goes stale AGAIN much later: the counter restarted — still unconfirmed.
+    state.get_worker_heartbeats.return_value = {
+        "rc_budget": {"status": "ok", "last_run": stale, "details": {}},
+    }
+    third = await loop._do_work()
+    assert third["anomalies"] == 0
+    pr.create_issue.assert_not_awaited()
 
 
 async def test_do_work_cost_spike_skipped_when_reader_absent(loop_env) -> None:

@@ -194,6 +194,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
         event_bus: EventBus,
         deps: LoopDeps,
         bg_workers: BGWorkerManager | None = None,
+        boot_time: datetime | None = None,
     ) -> None:
         super().__init__(
             worker_name="trust_fleet_sanity",
@@ -209,6 +210,18 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
         self._pr = pr_manager
         self._dedup = dedup
         self._source_bus = event_bus  # separate handle for load_events_since
+        # #11119 boot grace: loops are constructed at orchestrator boot, so
+        # construction time approximates session start. Heartbeats persist
+        # across downtime; staleness must never be judged against a clock
+        # that ran while the factory was off. ``boot_time`` is injectable
+        # (the codebase's now-param convention) so tests exercise post-grace
+        # behavior without patching clocks.
+        self._boot_time = boot_time if boot_time is not None else datetime.now(UTC)
+        # #11119 confirm-before-escalate: a staleness breach must survive TWO
+        # consecutive ticks before it files. In-memory by design — a restart
+        # forgets pending breaches and re-arms the one-tick delay, the safe
+        # direction (delays escalation, never spams it). Keyed by worker.
+        self._staleness_pending: set[str] = set()
 
     def set_bg_workers(self, bg_workers: BGWorkerManager) -> None:
         """Late-binding for the post-ctor BGWorkerManager wiring."""
@@ -320,9 +333,24 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                     is_enabled=is_enabled,
                     now=now,
                     max_cycle_s=max_cycle_s,
+                    boot_time=self._boot_time,
                 )
+                # #11119: a staleness breach escalates only when it survives
+                # two consecutive ticks — the idle test showed single-tick
+                # staleness observations self-clearing one tick later, after
+                # the decomposer had already grown each into an epic.
                 if breached:
-                    per_worker_breaches.append(("staleness", details))
+                    if worker in self._staleness_pending:
+                        per_worker_breaches.append(("staleness", details))
+                    else:
+                        self._staleness_pending.add(worker)
+                        logger.info(
+                            "staleness pending confirmation for %s "
+                            "(escalates if still stale next tick)",
+                            worker,
+                        )
+                else:
+                    self._staleness_pending.discard(worker)
 
                 breached, details = detect_cost_spike(
                     worker,
