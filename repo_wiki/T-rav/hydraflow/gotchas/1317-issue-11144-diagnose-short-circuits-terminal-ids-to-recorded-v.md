@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11144
 source_phase: plan
 created_at: 2026-08-14T14:39:13.298126+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # diagnose() short-circuits terminal ids to recorded verdict

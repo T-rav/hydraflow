@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11138
 source_phase: plan
 created_at: 2026-08-14T14:08:04.915441+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Hydraflow ledger notes are append-only; don't backfill HEAD: fixes

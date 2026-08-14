@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11137
 source_phase: plan
 created_at: 2026-08-14T13:57:19.247696+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # dismissed verdict must stay non-mutating in EscapeDiagnosisLedger
