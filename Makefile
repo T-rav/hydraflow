@@ -498,7 +498,8 @@ UI_TEST_CMD = NODE_BIN="$$(command -v node 2>/dev/null)"; \
 	if [ -n "$$NODE_BIN" ] && [ -d $(HYDRAFLOW_DIR)src/ui/node_modules ]; then \
 		(cd $(HYDRAFLOW_DIR)src/ui && PATH="$$(dirname "$$NODE_BIN"):$$PATH" node ./scripts/run-vitest.cjs run) && echo "[ui-tests OK]"; \
 	elif [ -n "$$(git -C $(HYDRAFLOW_DIR). status --porcelain -- src/ui 2>/dev/null)" ] \
-		|| ! git -C $(HYDRAFLOW_DIR). diff --quiet "$$(git -C $(HYDRAFLOW_DIR). merge-base HEAD origin/staging 2>/dev/null || echo HEAD)" -- src/ui 2>/dev/null; then \
+		|| { git -C $(HYDRAFLOW_DIR). rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+		&& ! git -C $(HYDRAFLOW_DIR). diff --quiet "$$(git -C $(HYDRAFLOW_DIR). merge-base HEAD origin/staging 2>/dev/null || echo HEAD)" -- src/ui 2>/dev/null; }; then \
 		echo "$(RED)[ui-tests FAILED] src/ui differs from origin/staging but node or src/ui/node_modules is missing — silently skipping would be the \#11090 false green. Install Node 20.19+/22.12+ (nvm counts, \#11113) then run npm ci in src/ui.$(RESET)"; \
 		exit 1; \
 	else \
