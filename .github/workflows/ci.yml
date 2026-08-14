@@ -27,6 +27,7 @@ jobs:
     outputs:
       python: ${{ steps.filter.outputs.python }}
       core_python: ${{ steps.core_filter.outputs.core_python }}
+      console_ledger: ${{ steps.filter.outputs.console_ledger }}
       arch: ${{ steps.filter.outputs.arch }}
       scenario_tests: ${{ steps.filter.outputs.scenario_tests }}
       regression_tests: ${{ steps.filter.outputs.regression_tests }}
@@ -74,11 +75,14 @@ jobs:
               # run the loader/regulator/parity tests that read these files.
               - 'control/**'
               # agents/** — the console decision ledger and persona contracts
-              # (ARCH-0001). tests/test_console_conformance.py guards record
-              # shape, chair identity, and numbering against the LIVE tree; a
-              # PR that only adds a decision record would otherwise run no
-              # Python tests and land an unconformant ledger green. Same rule
-              # as docs/wiki/** above.
+              # (ARCH-0001). This entry gates lint/typecheck/security only;
+              # the pytest lane is gated by core_python (below), which
+              # deliberately excludes agents/** so a decision-record-only PR
+              # doesn't drag in the heavy smoke/scenario/regression/sandbox
+              # lanes. The ledger's real guard — `make console-conformance`,
+              # including git-history immutability — runs on the dedicated
+              # console_ledger filter below, OR'd into the `audit` job's
+              # `if:` (#11164; see tests/regressions/test_issue_11164.py).
               - 'agents/**'
               # prompts/**: the auto-agent Markdown templates are model-bound
               # prompts. tests/test_audit_prompts.py renders one of them
@@ -87,6 +91,12 @@ jobs:
               # tests/test_ci_path_filter_completeness.py, which exists because
               # this same omission caused two incidents in two days.
               - 'prompts/**'
+            # console_ledger: a narrower agents/** signal used only to make
+            # the `audit` job (which runs `make console-conformance`) fire
+            # for ledger-only PRs, without widening core_python's heavier
+            # blast radius (#11164).
+            console_ledger:
+              - 'agents/**'
             arch:
               - 'src/arch/**'
               - 'tests/architecture/**'
@@ -641,7 +651,10 @@ jobs:
   audit:
     name: Principles Audit
     needs: changes
-    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true'
+    # console_ledger OR'd in (#11164): a PR touching only agents/** (the
+    # ARCH-0001 decision ledger) must still run `make console-conformance`
+    # below — see tests/regressions/test_issue_11164.py.
+    if: needs.changes.outputs.core_python == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.console_ledger == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -687,11 +700,17 @@ jobs:
         # #11110 (sampled-audit upheld): ARCH-0001 declares ledger
         # immutability `Enforced by: make console-conformance`, but nothing
         # in CI ever ran it — the git-history check (#6) needs a full clone,
-        # which THIS job uniquely already has (fetch-depth: 0 above). The
-        # unit test (tests/test_console_conformance.py) covers the
-        # shape/numbering/staleness checks with check_git=False; this step
-        # closes the immutability half so a merged decision record cannot be
-        # silently rewritten green.
+        # which this job has (fetch-depth: 0 above; `arch` also checks out
+        # with fetch-depth: 0, but its own filter doesn't cover agents/**
+        # either). The unit test (tests/test_console_conformance.py) covers
+        # the shape/numbering/staleness checks with check_git=False; this
+        # step closes the immutability half so a merged decision record
+        # cannot be silently rewritten green.
+        # #11164 (sampled-audit upheld): the step above existed but this job
+        # never fired for an agents/**-only PR — the exact "silently
+        # rewritten decision record" scenario #11110 was filed against. The
+        # console_ledger filter + this job's `if:` close that reachability
+        # gap; see tests/regressions/test_issue_11164.py.
         run: make console-conformance
 
   ui-build:
