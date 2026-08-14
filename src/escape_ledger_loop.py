@@ -521,10 +521,11 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
             max_per_tick=max_issues,
             terminal_ids=terminal,
         )
-        # ADR-0115: before filing a LOW-CONFIDENCE finding for a human, run the
-        # machine auto-diagnose pass. A row it resolves (real+regression-encoded)
-        # or dismisses (clear false positive) is dropped from the file list — the
-        # human sees only the genuinely INCONCLUSIVE residue.
+        # ADR-0115: before filing a LOW-CONFIDENCE or AGING finding for a human,
+        # run the machine auto-diagnose pass. A row it resolves
+        # (real+regression-encoded) or dismisses (clear false positive) is
+        # dropped from the file list — the human sees only the genuinely
+        # INCONCLUSIVE residue.
         to_file = await self._auto_diagnose(to_file)
         surfaces = SurfacedIssueLedger(self._surfaces_path)
         filed = 0
@@ -585,22 +586,22 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
     async def _auto_diagnose(
         self, to_file: list[tuple[EscapeRecord, str]]
     ) -> list[tuple[EscapeRecord, str]]:
-        """Filter *to_file*: machine-resolve/dismiss low-confidence findings.
+        """Filter *to_file*: machine-resolve/dismiss findings before filing.
 
-        Only ``SURFACE_REASON_LOW_CONFIDENCE`` findings are diagnosed (the aging
-        surface asks for an encoding, a different human decision). A finding the
-        diagnoser resolves or dismisses is dropped; the human sees only the
-        INCONCLUSIVE residue. Disabled by config → unchanged. A diagnose failure
-        keeps the finding for the human (fail-safe).
+        Every surfacing reason (``SURFACE_REASON_LOW_CONFIDENCE`` AND
+        ``SURFACE_REASON_AGING``) is diagnosed the same way — a reason
+        pre-filter would strand a surface that could self-answer (#11161: an
+        aging row whose encoding was already on disk, but the aging reason
+        skipped the diagnoser entirely). A finding the diagnoser resolves or
+        dismisses is dropped; the human sees only the INCONCLUSIVE residue.
+        Disabled by config → unchanged. A diagnose failure keeps the finding
+        for the human (fail-safe).
         """
         if not self._config.escape_ledger_auto_diagnose_enabled:
             return to_file
         diagnoser = self._get_auto_diagnoser()
         residue: list[tuple[EscapeRecord, str]] = []
         for record, reason in to_file:
-            if reason != SURFACE_REASON_LOW_CONFIDENCE:
-                residue.append((record, reason))
-                continue
             try:
                 verdict = await diagnoser.diagnose(record)
             except Exception as exc:

@@ -35,7 +35,7 @@ The **claim density** of each Accepted ADR — the fraction of its statements ca
 | ADR-0087 | 44% | 76 | 174 |
 | ADR-0104 | 45% | 29 | 65 |
 | ADR-0012 | 45% | 70 | 156 |
-| ADR-0115 | 46% | 68 | 147 |
+| ADR-0115 | 46% | 71 | 154 |
 | ADR-0117 | 46% | 38 | 82 |
 | ADR-0011 | 47% | 47 | 101 |
 | ADR-0014 | 47% | 44 | 94 |

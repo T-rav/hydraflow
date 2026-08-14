@@ -12,11 +12,12 @@ from __future__ import annotations
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from escape.auto_diagnose import EscapeAutoDiagnoser, EscapeDiagnosis
 from escape.ledger import EscapeLedger
 from escape.models import EscapeRecord
 from escape.surfaces import SurfacedIssue, SurfacedIssueLedger
@@ -449,6 +450,96 @@ class TestFindingRateBudget:
 
         with pytest.raises(CreditExhaustedError):
             await loop._surface_findings()
+
+
+# ---------------------------------------------------------------------------
+# Auto-diagnose (#11161): every surfacing reason is diagnosed, not just
+# SURFACE_REASON_LOW_CONFIDENCE — a reason pre-filter stranded aging rows
+# whose encoding was already on disk behind a false human ask.
+# ---------------------------------------------------------------------------
+
+
+class _FakeDiagnoser:
+    """Records which records it was asked to diagnose; returns a fixed verdict.
+
+    Per docs/wiki gotcha 1325/testing 2419: injected via the loop's
+    ``auto_diagnoser`` constructor param so these tests never fall through to
+    the lazily-built production diagnoser's real ``git grep``.
+    """
+
+    def __init__(self, verdict: EscapeDiagnosis) -> None:
+        self.verdict = verdict
+        self.calls: list[EscapeRecord] = []
+
+    async def diagnose(self, record: EscapeRecord) -> EscapeDiagnosis:
+        self.calls.append(record)
+        return self.verdict
+
+
+def _make_loop_with_diagnoser(
+    tmp_path: Path, repo: Path, diagnoser: _FakeDiagnoser
+) -> EscapeLedgerLoop:
+    bg = make_bg_loop_deps(tmp_path)
+    object.__setattr__(bg.config, "repo_root", repo)
+    object.__setattr__(bg.config, "data_root", tmp_path / "data")
+    object.__setattr__(bg.config, "escape_ledger_loop_enabled", True)
+    return EscapeLedgerLoop(
+        config=bg.config,
+        pr_manager=MagicMock(),
+        state=_make_state(),
+        dedup=_make_dedup(),
+        deps=bg.loop_deps,
+        auto_diagnoser=cast(EscapeAutoDiagnoser, diagnoser),
+    )
+
+
+class TestAutoDiagnoseReasonNeutral:
+    async def test_aging_reason_is_diagnosed_not_skipped(self, tmp_path: Path) -> None:
+        # AS-IS bug: `_auto_diagnose` skipped any reason other than
+        # SURFACE_REASON_LOW_CONFIDENCE, so the diagnoser was never even
+        # called for an aging finding.
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.INCONCLUSIVE)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="low", encoded_as="none-yet")
+
+        await loop._auto_diagnose([(record, SURFACE_REASON_AGING)])
+
+        assert diagnoser.calls == [record]
+
+    async def test_resolved_encoded_verdict_drops_aging_finding(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.RESOLVED_ENCODED)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="low", encoded_as="none-yet")
+
+        residue = await loop._auto_diagnose([(record, SURFACE_REASON_AGING)])
+
+        assert residue == []
+
+    async def test_dismissed_verdict_drops_aging_finding(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.DISMISSED)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="low", encoded_as="none-yet")
+
+        residue = await loop._auto_diagnose([(record, SURFACE_REASON_AGING)])
+
+        assert residue == []
+
+    async def test_inconclusive_verdict_keeps_aging_finding_for_human(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.INCONCLUSIVE)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="low", encoded_as="none-yet")
+
+        residue = await loop._auto_diagnose([(record, SURFACE_REASON_AGING)])
+
+        assert residue == [(record, SURFACE_REASON_AGING)]
 
 
 # ---------------------------------------------------------------------------

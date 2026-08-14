@@ -258,6 +258,27 @@ class TestEscapeAutoDiagnoser:
         rows = EscapeLedger(ledger_path).read_all()
         assert len(rows) == 1 and rows[0].attribution_confidence == "low"
 
+    async def test_resolution_note_is_reason_neutral(self, tmp_path: Path) -> None:
+        # #11161: the note text used to name "the low-confidence surface"
+        # specifically, even though this same resolution path now also
+        # answers the AGING surface — reason-neutral wording reads correctly
+        # for either.
+        repo = _init_repo(tmp_path)
+        _commit_regression(repo, 500)
+        fix_sha = _commit_bug_fix(repo, 500)
+
+        prs = AsyncMock()
+        prs.get_issue_labels = AsyncMock(return_value=[])
+        diagnoser, ledger_path = self._diagnoser(repo, tmp_path, prs)
+        record = _bug_row(fix_sha, 500)
+        EscapeLedger(ledger_path).append(record)
+
+        await diagnoser.diagnose(record)
+
+        resolved = EscapeLedger(ledger_path).read_latest()[0]
+        assert "low-confidence" not in resolved.notes.lower()
+        assert "the surface self-answers" in resolved.notes.lower()
+
     async def test_terminal_verdict_is_not_re_acted(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
         fix_sha = _commit_bug_fix(repo, 400)

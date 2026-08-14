@@ -58,9 +58,11 @@ give-up window's "self-solve before human" shape. Both are **feature-gated**
 ### 1. Escape ledger — mechanical auto-diagnose (`src/escape/auto_diagnose.py`)
 
 Gated by `escape_ledger_auto_diagnose_enabled`. Before filing a
-`SURFACE_REASON_LOW_CONFIDENCE` finding, for each eligible row run a **purely
-mechanical** pass (git reads + `PRPort` issue-label reads, **no LLM spawn**, so
-it is air-gap-safe and deterministic):
+`SURFACE_REASON_LOW_CONFIDENCE` or `SURFACE_REASON_AGING` finding, for each
+eligible row run a **purely mechanical** pass (git reads + `PRPort`
+issue-label reads, **no LLM spawn**, so it is air-gap-safe and deterministic)
+— every surfacing reason is diagnosed the same way; there is no reason-scoped
+pre-filter:
 
 - **Trace** the `detection_ref` commit → the bug it closed (`Fixes #N`) + any
   introducing sha.
@@ -69,7 +71,7 @@ it is air-gap-safe and deterministic):
   commit added itself.
 - **`RESOLVED_ENCODED`** (real + encoded) → auto-record the resolution via
   `escape.resolve.resolve_escape` at `attribution_confidence="high"`,
-  `encoded_as="regression-test"`. The low-confidence surface now self-answers
+  `encoded_as="regression-test"`. The surface now self-answers
   (`_surfacing_answered`), so no human finding is filed; the row correctly enters
   the CONFIRMED escape count.
 - **`DISMISSED`** (clear false positive — the referenced issue carries a non-bug
@@ -114,9 +116,13 @@ rather than fabricating an `upheld` (a false escape cross-link) or a `refuted`
   change is selectivity, not suppression.
 - **A read-only sensor now performs bounded active moves.** The Pattern-B
   contract is amended (not broken): the sensor may auto-answer *its own* low-
-  confidence / disagreement surface (record a resolution, apply a disposition
-  label, close a find issue), but still never opens a fix PR and never gates. The
-  active surface is confined to the finding it would otherwise have filed.
+  confidence / aging / disagreement surface (record a resolution, apply a
+  disposition label, close a find issue), but still never opens a fix PR and
+  never gates. The active surface is confined to the finding it would
+  otherwise have filed. The escape pass diagnoses every surfacing reason
+  (`SURFACE_REASON_LOW_CONFIDENCE` and `SURFACE_REASON_AGING`) the same way —
+  an aging `none-yet` row whose encoding is already on disk self-answers
+  exactly like a low-confidence one (#11161).
 - **Off by default; air-gap-safe.** Both flags default off for staged rollout.
   The escape pass is LLM-free; the audit pass is double-gated behind re-audit, so
   the sandbox reaches no spawn.

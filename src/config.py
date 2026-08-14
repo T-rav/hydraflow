@@ -2248,15 +2248,15 @@ class HydraFlowConfig(BaseModel):
     escape_ledger_auto_diagnose_enabled: bool = Field(
         default=True,
         description=(
-            "Before EscapeLedgerLoop files a LOW-CONFIDENCE escape for a human "
-            "(SURFACE_REASON_LOW_CONFIDENCE), run a machine auto-diagnose pass "
-            "(ADR-0115): trace the detecting commit, check whether the bug is "
-            "already regression-encoded, and — if real+encoded — auto-record the "
-            "resolution at high confidence (encoded-as regression-test) so the "
-            "surface self-answers; auto-dismiss a clear false positive with a "
-            "recorded reason. Only an INCONCLUSIVE diagnosis falls through to the "
-            "human surface. Default ON (self-repair on by default; disable via "
-            "the System tab); the "
+            "Before EscapeLedgerLoop files a LOW-CONFIDENCE or AGING escape for a "
+            "human (SURFACE_REASON_LOW_CONFIDENCE / SURFACE_REASON_AGING), run a "
+            "machine auto-diagnose pass (ADR-0115): trace the detecting commit, "
+            "check whether the bug is already regression-encoded, and — if "
+            "real+encoded — auto-record the resolution at high confidence "
+            "(encoded-as regression-test) so the surface self-answers; "
+            "auto-dismiss a clear false positive with a recorded reason. Only an "
+            "INCONCLUSIVE diagnosis falls through to the human surface. Default "
+            "ON (self-repair on by default; disable via the System tab); the "
             "pass is purely mechanical (git + issue-label reads, no LLM spawn), "
             "so it is air-gap-safe."
         ),
