@@ -70,7 +70,12 @@ from audit.detect import (
     merged_changes_for_range,
 )
 from audit.disposition import REFUTED_LABEL, UPHELD_LABEL, reconcile_disposition
-from audit.governance import DEFAULT_BASE_RATE, govern_rate, trim_history
+from audit.governance import (
+    DEFAULT_BASE_RATE,
+    TARGET_DISAGREEMENT_RATE,
+    govern_rate,
+    trim_history,
+)
 from audit.models import (
     AUDIT_INPUT_SOURCES,
     AuditSample,
@@ -82,6 +87,7 @@ from audit.store import AuditSampleLedger
 from audit.stratify import classify_blast_radius
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
+from control_register import regulate, setpoint_for
 from dedup_store import DedupStore
 from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from exception_classify import reraise_on_credit_or_bug
@@ -267,6 +273,9 @@ class SampledAuditLoop(BaseBackgroundLoop):
         # sampled_audit_auto_adjudicate_enabled and sampled_audit_reaudit_enabled
         # are set (the sandbox pins the latter off → no adjudicator spawn).
         self._adjudicator = adjudicator
+        # Regulator quiescence (#10824): in-memory only — a restart forgets
+        # quiescence, the safe direction (reports acting rather than quiet).
+        self._quiescent = False
 
     def _get_default_interval(self) -> int:
         return self._config.sampled_audit_interval
@@ -322,10 +331,26 @@ class SampledAuditLoop(BaseBackgroundLoop):
         # finding never waits on a human. Reconcile then resolves the labels.
         adjudicated = await self._auto_adjudicate()
         reconciled = await self._reconcile_pending()
-        self._govern(audited)
+
+        # Regulator conversion (#10824, ADR-0120): a SIGNED setpoint becomes
+        # the governor's target — replacing the planning-picked
+        # TARGET_DISAGREEMENT_RATE constant with a human-signed number. The
+        # control action stays the governed SAMPLE RATE (the Shewhart governor
+        # is already the regulator here; gating the disagreement filings would
+        # break the adjudication chain AND double-regulate the same PV).
+        # Unsigned/absent spec → the constant, behavior identical to today.
+        spec = setpoint_for(Path(self._config.repo_root), self._worker_name)
+        self._govern(audited, target=spec.value if spec and spec.active else None)
 
         # Advance the cursor unconditionally: this range has been fully sampled.
         self._state.set_sampled_audit_last_processed_sha(current_sha)
+
+        verdict = regulate(
+            self._pooled_disagreement_rate(),
+            spec,
+            previously_quiescent=self._quiescent,
+        )
+        self._quiescent = verdict.quiescent
 
         disagreements = sum(1 for s in audited if s.verdict == "disagree")
         return {
@@ -338,6 +363,9 @@ class SampledAuditLoop(BaseBackgroundLoop):
             "adjudicated": adjudicated,
             "reconciled": reconciled,
             "governed_rate": self._current_rate(),
+            "pv_disagreement_rate": round(verdict.pv, 4),
+            "setpoint_active": verdict.regulated,
+            "quiescent": verdict.quiescent,
         }
 
     def _resolve_range(
@@ -700,8 +728,14 @@ class SampledAuditLoop(BaseBackgroundLoop):
 
     # --- governance ------------------------------------------------------
 
-    def _govern(self, audited: list[AuditSample]) -> None:
+    def _govern(
+        self, audited: list[AuditSample], *, target: float | None = None
+    ) -> None:
         """Record this tick's disagreement observation + update the sample rate.
+
+        *target* is the human-signed setpoint value when one is active
+        (#10824); ``None`` falls through to the planning-picked
+        ``TARGET_DISAGREEMENT_RATE`` constant — the pre-conversion behavior.
 
         Skips a tick that audited NOTHING (Bernoulli selected nothing, the
         budget was exhausted, or the re-audit seam is off): a ``sampled=0``
@@ -720,11 +754,28 @@ class SampledAuditLoop(BaseBackgroundLoop):
         series = [DisagreementObservation.from_json_dict(h) for h in history]
         series.append(observation)
         series = trim_history(series)
-        new_rate = govern_rate(series, current_rate=self._current_rate())
+        new_rate = govern_rate(
+            series,
+            current_rate=self._current_rate(),
+            target=TARGET_DISAGREEMENT_RATE if target is None else target,
+        )
         self._state.set_sampled_audit_disagreement_history(
             [o.to_json_dict() for o in series]
         )
         self._state.set_sampled_audit_governed_rate(new_rate)
+
+    def _pooled_disagreement_rate(self) -> float:
+        """The regulator PV (#10824): pooled disagreement fraction over the
+        retained governance window. A window with no samples reads 0.0 — no
+        evidence of disagreement; the acting mode stays reachable the moment
+        a disagreement lands (direction=below: low PV is the healthy side).
+        """
+        history = self._state.get_sampled_audit_disagreement_history()
+        series = [DisagreementObservation.from_json_dict(h) for h in history]
+        pooled_n = sum(o.sampled for o in series)
+        if pooled_n <= 0:
+            return 0.0
+        return sum(o.disagreements for o in series) / pooled_n
 
 
 def _with_find_issue(sample: AuditSample, issue: int) -> AuditSample:
