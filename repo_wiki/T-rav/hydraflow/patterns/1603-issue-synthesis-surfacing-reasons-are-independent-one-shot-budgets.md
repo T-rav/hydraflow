@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T07:44:05.414882+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1518
+superseded_by: 1697
 ---
 
 # Surfacing reasons are independent one-shot budgets

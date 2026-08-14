@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11095
 source_phase: plan
 created_at: 2026-08-14T08:32:23.164137+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Memory feedback docs flip to status: promoted when enforced in code

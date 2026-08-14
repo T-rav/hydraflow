@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T07:44:04.971277+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1499
+superseded_by: 1678
 ---
 
 # Per-tick issue-filing caps gate filing only, not accumulation

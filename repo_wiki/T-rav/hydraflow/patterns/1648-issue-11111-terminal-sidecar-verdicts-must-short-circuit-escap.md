@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11111
 source_phase: plan
 created_at: 2026-08-14T09:08:28.015626+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 1739
 ---
 
 # Terminal sidecar verdicts must short-circuit EscapeAutoDiagnoser

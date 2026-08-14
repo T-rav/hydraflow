@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11113
 source_phase: plan
 created_at: 2026-08-14T09:30:40.585878+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Node detection in Makefile must share ui-npm.sh's resolution chain

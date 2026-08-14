@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11110
 source_phase: plan
 created_at: 2026-08-14T08:05:02.917612+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # paths-filter entries are load-bearing gate surfaces
