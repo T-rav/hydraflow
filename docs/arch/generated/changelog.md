@@ -6,7 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
-- `f59c01e` — Fixes #11161: Escape ledger: bug-issue escape `9196f7403620` — unencoded escape has aged past the encoding threshold *(2026-08-14)*
+- `3c88ac6` — review: fix ADR-0115 stale flag-default claim + add dual-reason dedup tests (PR #11173) *(2026-08-14)*
+- `344ff01` — Fixes #11161: Escape ledger: bug-issue escape `9196f7403620` — unen... (#11173) (#11173) *(2026-08-14)*
 - `9cb0191` — test(harness): exercise script_plan_credit_exhaustion + promote foreground-verification rule (#11158) (#11158) *(2026-08-14)*
 - `85c104b` — fix(quality): UI vitest lane — conditional fail-loud skip + nvm node discovery (#11155) (#11155) *(2026-08-14)*
 - `e7c0cbc` — feat(audit): P8.7 — code review after every PR (memory-backlog promotion) (#11153) (#11153) *(2026-08-14)*
