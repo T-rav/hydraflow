@@ -19,10 +19,10 @@
       "content_sha": "16b0b3bc4191f5c84a979a6794c6f99c1368e73060e159c9cc9acedc4b560b23"
     },
     "changelog.md": {
-      "content_sha": "746ebe370d0bb24852e735a124fefc2c3842abb301ae0c2d6453eae89d61032b"
+      "content_sha": "4b80d9f72fb6429ca30b16d0178acac9e8d246527e41e7abd085510373236349"
     },
     "coverage_matrix.md": {
-      "content_sha": "b74d666cf36ecdbaa5add72ec7453ab4fb1c533d4cb48ce797fbc3dacfbe5700"
+      "content_sha": "43f4351138f7ca2250f3d77781e5944aa8d862890c1e56074f899949d9e8fdb4"
     },
     "events.md": {
       "content_sha": "eeed474c5b6826050a5a6f3f8a6e2b358e20208f3ce468840918cdd1b7139939"
@@ -52,14 +52,14 @@
       "content_sha": "df86c0747ce17ddad086a080af88c83afde30844363f3dcacab19e9c345fda5b"
     },
     "ubiquitous-language-context-map.md": {
-      "content_sha": "8b6635d1b74a0d03d1c987eab1591e9fd2a922596fd9da95ed2c617417408a37"
+      "content_sha": "e0c059aaa9900d180bf0d168bdc46ef30ff7f325874764fdbc890816aea133bd"
     },
     "ubiquitous-language.md": {
-      "content_sha": "0ff084f7b18c2b79ead31a8fd90887c1645dba481e1995e0d92c64a8f30b9f4a"
+      "content_sha": "4a1b4891b4c5f45bdc2160c40cb8371ce2e322d8b1a4c3495a11c98dee4c4b99"
     },
     "vitals-methodology.md": {
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "940a791838ae1a7ef49d61d42505bb68a63b8ff9f7c60daf8bb903797210da78"
+  "content_sha": "a3b5e191c890d7c59b8bbb51541d17a299574bdce2bb4d8ede5da2677fdc6619"
 }
