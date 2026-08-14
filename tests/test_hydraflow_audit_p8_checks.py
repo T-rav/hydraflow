@@ -144,3 +144,58 @@ def test_trace_collector_detected(tmp_path: Path) -> None:
 def test_trace_collector_missing_fails(tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     assert _run("P8.6", _ctx(tmp_path)).status is Status.FAIL
+
+
+# --- Review after every PR ------------------------------------------------
+
+
+def test_claude_md_requires_review_every_pr_passes(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "CLAUDE.md",
+        "Run a code review after every PR you create, not only substantial features.\n",
+    )
+    assert _run("P8.7", _ctx(tmp_path)).status is Status.PASS
+
+
+def test_claude_md_requires_review_every_pr_case_insensitive(tmp_path: Path) -> None:
+    _write(tmp_path / "CLAUDE.md", "CODE REVIEW AFTER EVERY PR is mandatory.\n")
+    assert _run("P8.7", _ctx(tmp_path)).status is Status.PASS
+
+
+def test_claude_md_review_rule_paraphrase_passes(tmp_path: Path) -> None:
+    """#11153 review: the check must tolerate rewording (sibling P10.1
+    convention) — cadence marker + review co-occurring in one sentence, in
+    either order, not one literal phrase."""
+    _write(
+        tmp_path / "CLAUDE.md",
+        "After every PR you create, run a fresh-eyes code review before "
+        "enabling auto-merge.\n",
+    )
+    assert _run("P8.7", _ctx(tmp_path)).status is Status.PASS
+
+
+def test_claude_md_review_rule_cross_sentence_mention_fails(tmp_path: Path) -> None:
+    """'review' in one sentence and 'every PR' in another must not pass —
+    the co-occurrence window stops at sentence bounds."""
+    _write(
+        tmp_path / "CLAUDE.md",
+        "We value code review. CI runs on every PR automatically.\n",
+    )
+    assert _run("P8.7", _ctx(tmp_path)).status is Status.FAIL
+
+
+def test_claude_md_only_substantial_features_review_fails(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "CLAUDE.md",
+        "For substantial features, plan for 2-3 fresh-eyes review iterations "
+        "before merge.\n",
+    )
+    result = _run("P8.7", _ctx(tmp_path))
+    assert result.status is Status.FAIL
+    assert "every PR" in result.message
+
+
+def test_claude_md_missing_fails_p8_7(tmp_path: Path) -> None:
+    result = _run("P8.7", _ctx(tmp_path))
+    assert result.status is Status.FAIL
+    assert "CLAUDE.md missing" in result.message

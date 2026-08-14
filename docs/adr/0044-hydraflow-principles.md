@@ -332,6 +332,7 @@ with `block-destructive-git` (high value, low controversy).
 | P8.4 | CULTURAL | CLAUDE.md | CLAUDE.md references the six core superpowers skills by name | Must mention: `brainstorming`, `test-driven-development`, `systematic-debugging`, `writing-plans`, `verification-before-completion`, `requesting-code-review`. A vague "use skills" line does not count |
 | P8.5 | STRUCTURAL | CLAUDE.md | `.claude/hooks/` includes at least one hook of each enforced kind: PreToolUse, PostToolUse, Stop | Seed from HydraFlow: `block-destructive-git` (PreToolUse), `auto-lint-after-edit` (PostToolUse), `hf.session-retro` (Stop) |
 | P8.6 | STRUCTURAL | docs/self-improving-harness.md | In-process trace collector writes subprocess traces per phase/run | Port `trace_collector.py`; without traces, session retros have nothing to mine |
+| P8.7 | CULTURAL | CLAUDE.md | CLAUDE.md requires a code review after every PR, not only substantial features | Add a quick-rule bullet naming the review agent/skill to run before enabling auto-merge |
 
 ### P9. Persistence and Data Layout
 
