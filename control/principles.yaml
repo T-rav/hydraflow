@@ -1,0 +1,83 @@
+# Principle register (#11077): every principle the factory claims is either
+# setpoint-encoded (able to rest — silence inside its enforcement) or
+# EXPLICITLY human-held with a currency requirement. Nothing in the middle:
+# "measured but not enforced" is where principles become decoration.
+#
+# Currency staleness is surfaced by the principles_audit LOOP at runtime —
+# deliberately never a CI assertion (that would be a wall-clock time-bomb by
+# design). To exercise a human-held principle: do the review it names, then
+# update last_exercised in the same PR.
+
+# --- ADR-0044 audit contract: setpoint-held (the exemplar — pass = silence) ---
+P1-documentation-contract:
+  statement: "One declarative doc source of truth per repo (ADR-0044 P1)."
+  holding: setpoint
+  enforced_by: "make audit — scripts/hydraflow_audit (ADR-0044 check table)"
+P2-clean-architecture:
+  statement: "DDD, Ports & Adapters, four-layer model (ADR-0044 P2)."
+  holding: setpoint
+  enforced_by: "make audit — scripts/hydraflow_audit (ADR-0044 check table)"
+P3-layered-tests:
+  statement: "MockWorld + layered test pyramid (ADR-0044 P3)."
+  holding: setpoint
+  enforced_by: "make audit — scripts/hydraflow_audit (ADR-0044 check table)"
+P4-quality-gates:
+  statement: "Quality gates run and bite (ADR-0044 P4)."
+  holding: setpoint
+  enforced_by: "make audit — scripts/hydraflow_audit (ADR-0044 check table)"
+P5-ci-branch-protection:
+  statement: "CI + branch protection per the two-tier model (ADR-0044 P5)."
+  holding: setpoint
+  enforced_by: "make audit — scripts/hydraflow_audit (ADR-0044 check table)"
+P6-agents-loops-labels:
+  statement: "Loops, labels, background workers (ADR-0044 P6)."
+  holding: setpoint
+  enforced_by: "make audit — scripts/hydraflow_audit (ADR-0044 check table)"
+P7-observability:
+  statement: "Structured logging + repo wiki observability (ADR-0044 P7)."
+  holding: setpoint
+  enforced_by: "make audit — scripts/hydraflow_audit (ADR-0044 check table)"
+P8-skills-integration:
+  statement: "Superpowers/skills workflow integration (ADR-0044 P8)."
+  holding: setpoint
+  enforced_by: "make audit — scripts/hydraflow_audit (ADR-0044 check table)"
+P9-persistence-layout:
+  statement: "Persistence + data layout conventions (ADR-0044 P9)."
+  holding: setpoint
+  enforced_by: "make audit — scripts/hydraflow_audit (ADR-0044 check table)"
+P10-tdd-discipline:
+  statement: "TDD workflow discipline (ADR-0044 P10)."
+  holding: setpoint
+  enforced_by: "make audit — scripts/hydraflow_audit (ADR-0044 check table)"
+
+# --- Graded "measured but not enforced" 2026-07-30: now EXPLICITLY human-held.
+# Each may later flip to setpoint by signing a per-area band (the #11077
+# worked example: keep-it-simple → entanglement/context-cost band). Until a
+# band is signed, a person holds it — with a currency contract.
+keep-it-simple:
+  statement: "Entanglement and context cost stay acceptable per area."
+  holding: human
+  held_by: travis
+  currency_days: 90
+  last_exercised: "2026-07-30"
+  instruments:
+    - "erosion spread/scatter/concentration sensors"
+    - "context-cost tracking"
+prefer-what-exists:
+  statement: "Reuse and wire existing machinery before building new."
+  holding: human
+  held_by: travis
+  currency_days: 90
+  last_exercised: "2026-07-30"
+  instruments:
+    - "AutoTightenLoop"
+    - "arch module graph"
+improve-by-rate:
+  statement: "Improvement is a governed rate, not an unbounded drive."
+  holding: human
+  held_by: travis
+  currency_days: 90
+  last_exercised: "2026-07-30"
+  instruments:
+    - "loop fitness scores"
+    - "maintenance-flux / oscillation fingerprint"

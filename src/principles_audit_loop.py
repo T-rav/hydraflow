@@ -13,13 +13,17 @@ import logging
 import re
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import yaml
 
 import trace_collector
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from exception_classify import reraise_on_credit_or_bug
 from filing_budget import FilingBudget
 from models import WorkCycleResult
+from principle_register import load_principles, stale_holdings
 from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 
 if TYPE_CHECKING:
@@ -91,6 +95,31 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
     def _get_default_interval(self) -> int:
         return self._config.principles_audit_interval
 
+    def _principle_currency_check(self) -> dict[str, Any]:
+        """Currency status of human-held principles (#11077). Fail-soft: an
+        unreadable register degrades to an error marker — the audit tick must
+        never die on the register file (it is guard-tested in CI; unreadable
+        at runtime means a broken deploy worth surfacing, not a crash)."""
+        try:
+            entries = load_principles(Path(self._config.repo_root))
+        except (OSError, KeyError, ValueError, yaml.YAMLError):
+            logger.warning("principle register unreadable", exc_info=True)
+            return {"error": "register-unreadable"}
+        stale = stale_holdings(entries, now=datetime.now(UTC))
+        human_held = sum(1 for e in entries.values() if e.holding.value == "human")
+        if stale:
+            logger.warning(
+                "human-held principle(s) past currency: %s",
+                ", ".join(
+                    f"{s.principle_id} ({s.days_overdue}d overdue)" for s in stale
+                ),
+            )
+        return {
+            "registered": len(entries),
+            "human_held": human_held,
+            "stale": [s.principle_id for s in stale],
+        }
+
     async def _do_work(self) -> WorkCycleResult:
         """One audit cycle: onboarding reconcile, HydraFlow-self, managed repos."""
         if not self._enabled_cb(self._worker_name):
@@ -117,6 +146,14 @@ class PrinciplesAuditLoop(BaseBackgroundLoop):
         # the "closing this issue clears the counter" promise in the
         # escalation body actually holds (§3.2 lifecycle).
         await self._reconcile_closed_escalations()
+
+        # 0b) Principle-register currency check (#11077): human-held
+        # principles carry a currency requirement, and staleness is surfaced
+        # HERE at runtime — never as a CI assertion, which would be a
+        # wall-clock time-bomb by design. Stats-only v1: rides the worker
+        # details to the console; filing escalation follows if staleness
+        # proves persistent.
+        stats["principle_currency"] = self._principle_currency_check()
 
         # 1) Onboarding reconcile — new or pending slugs.
         stats["onboarded"] = await self._reconcile_onboarding()
