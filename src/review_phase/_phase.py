@@ -19,6 +19,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+# Light, pure, cycle-free (review_advisor imports it at module top too) —
+# the #10836 phase-2 subject-join helpers both advisor constructions need.
+from judge_calibration import (
+    judge_verdict_ledger_path,
+    subject_for_issue,
+    subject_for_pr,
+)
+
 if TYPE_CHECKING:
     from convergence_gate import DetResult, GateResult
     from issue_cache import IssueCache
@@ -1889,6 +1897,9 @@ class ReviewPhase(VisualGateMixin):
             surface_config=surface_cfg,
             log_path=log_path,
             pr_number=pr.number,
+            # #10836 phase 2: the PR path joins the escape ledger by PR.
+            judge_verdict_ledger_path=judge_verdict_ledger_path(self._config.data_root),
+            calibration_subject_id=subject_for_pr(pr.number),
         )
         # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
         # reviews the same issue as the executor, so live operator guidance
@@ -2353,6 +2364,10 @@ class ReviewPhase(VisualGateMixin):
             surface_config=surface_cfg,
             log_path=log_path,
             pr_number=issue.id,
+            # #10836 phase 2: the pre-PR path has no PR yet — join by issue,
+            # the same fallback PostVerifyAdvisor's recorder uses.
+            judge_verdict_ledger_path=judge_verdict_ledger_path(self._config.data_root),
+            calibration_subject_id=subject_for_issue(issue.id),
         )
         # Human-on-the-loop continuous steering (ADR-0099 #4): the advisor
         # reviews the same issue as the executor, so live operator guidance

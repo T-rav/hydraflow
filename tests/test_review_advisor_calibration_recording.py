@@ -17,11 +17,15 @@ from judge_calibration import (
     JudgeCalibrationLedger,
     Verdict,
     judge_verdict_ledger_path,
+    subject_for_issue,
+    subject_for_pr,
 )
 from review_advisor import (
     SURFACE_ADVISOR_CONFIGS,
     PostVerifyAdvisor,
     PostVerifyInput,
+    PreFlightAdvisor,
+    PreFlightInput,
 )
 
 _APPROVE = '{"verdict":"APPROVE","reasoning":"ok","disagreements":[],"confidence":0.9}'
@@ -156,3 +160,97 @@ def test_ledger_write_error_never_propagates(tmp_path: Path) -> None:
     assert result is not None
     assert result.verdict == "APPROVE"
     assert not doomed_path.exists()
+
+
+# --- #10836 phase 2: PreFlightAdvisor → judge-calibration ledger -----------
+
+_PLAN_WITH_FORECAST = (
+    '{"risk_summary":"touches dispatch","focus_areas":[],"rubric":[],'
+    '"escalation_signals":[],"defect_verdict":"FAIL","confidence":0.8}'
+)
+_PLAN_LEGACY_SHAPE = (
+    '{"risk_summary":"touches dispatch","focus_areas":[],"rubric":[],'
+    '"escalation_signals":[]}'
+)
+
+
+def _preflight_input() -> PreFlightInput:
+    return PreFlightInput(surface="pr_review", diff=_unclassed_diff())
+
+
+def test_preflight_records_forecast(tmp_path: Path) -> None:
+    path = judge_verdict_ledger_path(tmp_path)
+    advisor = PreFlightAdvisor(
+        runner=_StubRunner(_PLAN_WITH_FORECAST),
+        surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        pr_number=42,
+        judge_verdict_ledger_path=path,
+        calibration_subject_id=subject_for_pr(42),
+    )
+    plan = asyncio.run(advisor.run(_preflight_input()))
+
+    assert plan is not None
+    records = JudgeCalibrationLedger(path).read_all()
+    assert len(records) == 1
+    rec = records[0]
+    assert rec.judge_id == "pre_flight"
+    assert rec.judge_family == "review_advisor"
+    assert rec.subject_id == "pr:42"
+    assert rec.verdict is Verdict.FAIL
+    assert rec.confidence == 0.8
+
+
+def test_preflight_issue_subject_join(tmp_path: Path) -> None:
+    # The pre-PR path joins by issue — the construction site computes the
+    # subject explicitly, so no pr-vs-issue precedence logic can misjoin.
+    path = judge_verdict_ledger_path(tmp_path)
+    advisor = PreFlightAdvisor(
+        runner=_StubRunner(_PLAN_WITH_FORECAST),
+        surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        pr_number=7,
+        judge_verdict_ledger_path=path,
+        calibration_subject_id=subject_for_issue(7),
+    )
+    asyncio.run(advisor.run(_preflight_input()))
+
+    assert JudgeCalibrationLedger(path).read_all()[0].subject_id == "issue:7"
+
+
+def test_preflight_without_forecast_is_skipped(tmp_path: Path) -> None:
+    # Legacy-shape plan (no defect_verdict/confidence): still a valid plan —
+    # back-compat pinned — but nothing is recorded; absence is honest.
+    path = judge_verdict_ledger_path(tmp_path)
+    advisor = PreFlightAdvisor(
+        runner=_StubRunner(_PLAN_LEGACY_SHAPE),
+        surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        pr_number=42,
+        judge_verdict_ledger_path=path,
+        calibration_subject_id=subject_for_pr(42),
+    )
+    plan = asyncio.run(advisor.run(_preflight_input()))
+
+    assert plan is not None
+    assert plan.risk_summary == "touches dispatch"
+    assert JudgeCalibrationLedger(path).read_all() == []
+
+
+def test_preflight_without_ledger_wiring_is_noop(tmp_path: Path) -> None:
+    advisor = PreFlightAdvisor(
+        runner=_StubRunner(_PLAN_WITH_FORECAST),
+        surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+        pr_number=42,
+    )
+    plan = asyncio.run(advisor.run(_preflight_input()))
+
+    assert plan is not None
+    assert not judge_verdict_ledger_path(tmp_path).exists()
+
+
+def test_preflight_prompt_elicits_forecast() -> None:
+    advisor = PreFlightAdvisor(
+        runner=_StubRunner(_PLAN_WITH_FORECAST),
+        surface_config=SURFACE_ADVISOR_CONFIGS["pr_review"],
+    )
+    prompt = advisor._build_prompt(_preflight_input())
+    assert '"defect_verdict":"PASS"|"FAIL"' in prompt
+    assert "calibrated self-estimate" in prompt
