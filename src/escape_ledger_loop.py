@@ -66,6 +66,7 @@ from escape.auto_diagnose import (
     _DIAGNOSES_FILENAME,
     EscapeAutoDiagnoser,
     EscapeDiagnosis,
+    EscapeDiagnosisLedger,
 )
 from escape.detect import (
     commit_committed_at,
@@ -185,6 +186,7 @@ def select_findings_to_surface(
     aging_threshold_hours: float,
     already_surfaced: set[str],
     max_per_tick: int,
+    terminal_ids: frozenset[str] | set[str] = frozenset(),
 ) -> tuple[list[tuple[EscapeRecord, str]], bool]:
     """Pure finding-rate budget: which (escape, reason) pairs to surface, capped.
 
@@ -207,6 +209,14 @@ def select_findings_to_surface(
         *((r, SURFACE_REASON_AGING) for r in aging),
     ]
     for record, reason in candidates:
+        # #11137/#11144: a row carrying a terminal auto-diagnose verdict
+        # (resolved or dismissed) never surfaces again UNDER ANY REASON —
+        # dismissal deliberately leaves the ledger row untouched, so without
+        # this exclusion the row stays eligible forever, occupying a cap slot
+        # every tick (starving genuine findings) and eventually asking a
+        # human to encode an escape the machine already declared false.
+        if record.id in terminal_ids:
+            continue
         key = (record.id, reason)
         if key in seen:
             continue
@@ -238,6 +248,7 @@ def _surfacing_answered(link: SurfacedIssue, record: EscapeRecord) -> bool:
 def answered_surfacings(
     open_links: list[SurfacedIssue],
     latest_records: dict[str, EscapeRecord],
+    dismissals: dict[str, str] | None = None,
 ) -> list[SurfacedIssue]:
     """Pure policy: which OPEN surfacing links now have an answered ledger row.
 
@@ -251,7 +262,15 @@ def answered_surfacings(
     (a human bump, or a stronger sibling for the same commit) has landed.
     """
     answered: list[SurfacedIssue] = []
+    dismissed = dismissals or {}
     for link in open_links:
+        # #11148: a terminal DISMISSED verdict answers every surfacing for
+        # that escape — the machine declared it a false positive, so an open
+        # HITL asking a human about it is stranded, not pending. Dismissal
+        # deliberately mutates no ledger row, hence this sidecar-keyed path.
+        if link.escape_id in dismissed:
+            answered.append(link)
+            continue
         record = latest_records.get(link.escape_id)
         if record is not None and _surfacing_answered(link, record):
             answered.append(link)
@@ -490,12 +509,17 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         threshold_hours = float(self._config.escape_ledger_encoding_age_days) * 24.0
         max_issues = int(self._config.escape_ledger_max_issues_per_tick)
         seen = self._dedup.get()
+        # Terminal verdicts suppress selection even when auto-diagnose is
+        # currently disabled — the sidecar on disk is the record of past
+        # dismissals, and a config flip must not resurrect them (#11137).
+        terminal = EscapeDiagnosisLedger(self._diagnoses_path).terminal_ids()
         to_file, capped = select_findings_to_surface(
             records,
             now=now,
             aging_threshold_hours=threshold_hours,
             already_surfaced=seen,
             max_per_tick=max_issues,
+            terminal_ids=terminal,
         )
         # ADR-0115: before filing a LOW-CONFIDENCE finding for a human, run the
         # machine auto-diagnose pass. A row it resolves (real+regression-encoded)
@@ -630,14 +654,18 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         # sibling for the same commit would never reconcile (#10731). The index
         # maps every id to its detection_ref winner.
         latest = EscapeLedger(self._ledger_path).read_latest_index()
-        answered = answered_surfacings(open_links, latest)
+        # #11148: DISMISSED verdicts (sidecar-only by design) answer stranded
+        # links too — comment with the recorded dismissal reason and close.
+        dismissals = EscapeDiagnosisLedger(self._diagnoses_path).dismissal_reasons()
+        answered = answered_surfacings(open_links, latest, dismissals)
         closed = 0
         for link in answered:
-            record = latest[link.escape_id]
+            if link.escape_id in dismissals:
+                comment = _dismissal_comment(link.escape_id, dismissals[link.escape_id])
+            else:
+                comment = _resolution_comment(latest[link.escape_id], link.reason)
             try:
-                await self._prs.post_comment(
-                    link.issue_number, _resolution_comment(record, link.reason)
-                )
+                await self._prs.post_comment(link.issue_number, comment)
                 ok = await self._prs.close_issue(link.issue_number, reason="completed")
             except Exception as exc:
                 reraise_on_credit_or_bug(exc)
@@ -667,6 +695,21 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
                 link.reason,
             )
         return closed
+
+
+def _dismissal_comment(escape_id: str, dismissal_reason: str) -> str:
+    """Render the close comment for a machine-dismissed escape's HITL issue
+    (#11148): the dismissal reason IS the resolution — an open surface asking
+    a human about a declared false positive is stranded, not pending."""
+    return (
+        "## Dismissed (EscapeLedgerLoop auto-diagnose, automated)\n\n"
+        f"Escape `{escape_id}` carries a terminal `dismissed` verdict in the "
+        f"auto-diagnose sidecar: {dismissal_reason}\n\n"
+        "Closing this finding — the machine declared the escape a false "
+        "positive, so no human action is pending here (#11148). Reopen if "
+        "you disagree with the dismissal; the sidecar row records the "
+        "evidence it was based on.\n"
+    )
 
 
 def _resolution_comment(record: EscapeRecord, reason: str) -> str:
