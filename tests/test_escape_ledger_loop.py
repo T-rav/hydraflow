@@ -858,6 +858,146 @@ class TestReconcileSurfacedIssues:
 
 
 # ---------------------------------------------------------------------------
+# _diagnose_open_links (#11161: retiring an ALREADY-open surfaced issue)
+#
+# `select_findings_to_surface` drops a (record, reason) pair once its
+# reason-scoped fingerprint is spent, so an escape already surfaced never
+# reaches `_surface_findings`'s `_auto_diagnose` call again — widening that
+# call's reason filter alone cannot retire it. `_reconcile_surfaced_issues`
+# must diagnose the escape behind an open link directly.
+# ---------------------------------------------------------------------------
+
+
+class TestDiagnoseOpenLinks:
+    async def test_reaches_the_diagnoser_for_an_already_open_link(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.INCONCLUSIVE)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="medium")
+        EscapeLedger(loop._ledger_path).append(record)
+        link = SurfacedIssue(
+            fingerprint=surfacing_fingerprint(record.id, SURFACE_REASON_AGING),
+            escape_id=record.id,
+            reason=SURFACE_REASON_AGING,
+            issue_number=1,
+            filed_at="",
+        )
+
+        await loop._diagnose_open_links([link])
+
+        assert diagnoser.calls == [record], (
+            "the escape behind an already-open link must reach the "
+            "diagnoser even though it is not in select_findings_to_surface's "
+            "eligible set"
+        )
+
+    async def test_disabled_by_config_skips_the_diagnoser(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.RESOLVED_ENCODED)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        object.__setattr__(loop._config, "escape_ledger_auto_diagnose_enabled", False)
+        record = _record("bug-issue:aged", confidence="medium")
+        EscapeLedger(loop._ledger_path).append(record)
+        link = SurfacedIssue(
+            fingerprint=surfacing_fingerprint(record.id, SURFACE_REASON_AGING),
+            escape_id=record.id,
+            reason=SURFACE_REASON_AGING,
+            issue_number=1,
+            filed_at="",
+        )
+
+        await loop._diagnose_open_links([link])
+
+        assert diagnoser.calls == []
+
+    async def test_terminal_verdict_is_not_re_diagnosed(self, tmp_path: Path) -> None:
+        from escape.auto_diagnose import EscapeDiagnosisLedger
+
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.RESOLVED_ENCODED)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="medium")
+        EscapeLedger(loop._ledger_path).append(record)
+        EscapeDiagnosisLedger(loop._diagnoses_path).append_diagnosis(
+            record.id, EscapeDiagnosis.DISMISSED, "already decided"
+        )
+        link = SurfacedIssue(
+            fingerprint=surfacing_fingerprint(record.id, SURFACE_REASON_AGING),
+            escape_id=record.id,
+            reason=SURFACE_REASON_AGING,
+            issue_number=1,
+            filed_at="",
+        )
+
+        await loop._diagnose_open_links([link])
+
+        assert diagnoser.calls == []
+
+    async def test_resolved_verdict_from_reconcile_closes_the_open_issue(
+        self, tmp_path: Path
+    ) -> None:
+        # End-to-end within the unit-test fixture: the diagnoser's verdict
+        # alone does not close anything — `_record_resolution`'s ledger write
+        # is what `answered_surfacings` reacts to. This drives the REAL
+        # `EscapeAutoDiagnoser` (via a repo with a matching regression pin) to
+        # prove `_reconcile_surfaced_issues` retires an already-open issue.
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        reg = repo / "tests" / "regressions"
+        reg.mkdir(parents=True)
+        (reg / "test_bug_321.py").write_text(
+            "# regression pin for #321\ndef test_bug(): pass\n"
+        )
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "test: pin regression for #321")
+        (repo / "src" / "crash.py").write_text("def crash():\n    return 1\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "fix: resolve crash (fixes #321)")
+        fix_sha = _head(repo)
+
+        # First tick: auto-diagnose OFF — files the AGING surface
+        # unconditionally, spending its fingerprint (mirrors the live escape
+        # 9196f7403620, surfaced before this diagnoser covered its reason).
+        # `_build_loop_direct` (not `_make_loop`) wires the real FakeGitHub
+        # through untouched — `_make_loop` would clobber its `create_issue`.
+        loop = _build_loop_direct(tmp_path, repo, github)
+        object.__setattr__(loop._config, "escape_ledger_auto_diagnose_enabled", False)
+        ledger = EscapeLedger(loop._ledger_path)
+        old = datetime(2026, 1, 1, tzinfo=UTC).isoformat()
+        ledger.append(
+            EscapeRecord(
+                id=f"bug-issue:{fix_sha}",
+                detected_at=old,
+                detection_source="bug-issue",
+                detection_ref=fix_sha,
+                originating_pr=321,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="fixes-chain",
+                attribution_confidence="medium",
+                encoded_as="none-yet",
+                notes="",
+            )
+        )
+        filed, _capped = await loop._surface_findings()
+        assert filed == 1
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert link.reason == SURFACE_REASON_AGING
+
+        # Second tick: auto-diagnose ON (this fix deployed) — the config
+        # default, so no override needed on this fresh loop instance.
+        loop2 = _build_loop_direct(tmp_path, repo, github)
+
+        closed = await loop2._reconcile_surfaced_issues()
+
+        assert closed == 1, "widening the reason filter alone cannot retire this"
+        assert github._issues[link.issue_number].state == "closed"
+
+
+# ---------------------------------------------------------------------------
 # loop_fitness
 # ---------------------------------------------------------------------------
 

@@ -618,6 +618,44 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
                 residue.append((record, reason))
         return residue
 
+    async def _diagnose_open_links(self, open_links: list[SurfacedIssue]) -> None:
+        """Run auto-diagnose over the escape behind every OPEN surfaced link.
+
+        Independent of the ``select_findings_to_surface`` surfacing budget —
+        an escape whose reason-scoped fingerprint is already spent (it has an
+        open HITL issue) never reaches ``_surface_findings``'s
+        ``_auto_diagnose`` call again, so without this pass a resolution or
+        dismissal could never retire an issue filed before the diagnoser
+        existed, or before it covered that issue's reason (#11161). A row
+        already carrying a terminal sidecar verdict, or repeated across
+        multiple open links for the same escape id, is diagnosed at most once.
+        A diagnose failure is logged and swallowed — the link simply stays
+        open for a later retry, same fail-safe contract as ``_auto_diagnose``.
+        """
+        if not self._config.escape_ledger_auto_diagnose_enabled:
+            return
+        diagnoser = self._get_auto_diagnoser()
+        terminal = EscapeDiagnosisLedger(self._diagnoses_path).terminal_ids()
+        latest = EscapeLedger(self._ledger_path).read_latest_index()
+        diagnosed: set[str] = set()
+        for link in open_links:
+            if link.escape_id in terminal or link.escape_id in diagnosed:
+                continue
+            diagnosed.add(link.escape_id)
+            record = latest.get(link.escape_id)
+            if record is None:
+                continue
+            try:
+                await diagnoser.diagnose(record)
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "EscapeLedger: auto-diagnose failed while reconciling "
+                    "open surface for %s (leaving open for retry)",
+                    link.escape_id,
+                    exc_info=True,
+                )
+
     def _get_auto_diagnoser(self) -> EscapeAutoDiagnoser:
         """Return the injected diagnoser, or lazily build one (production path)."""
         if self._auto_diagnoser is None:
@@ -644,11 +682,23 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         A failed ``close_issue`` (returns ``False`` or raises a non-credit
         error) leaves the link OPEN for a later retry rather than marking it
         closed; ``CreditExhaustedError`` propagates via ``reraise_on_credit_or_bug``.
+
+        Diagnoses every OPEN link's escape FIRST (``_diagnose_open_links``):
+        ``select_findings_to_surface`` drops a (record, reason) pair once its
+        reason-scoped fingerprint is spent, so ``_surface_findings``'s
+        ``_auto_diagnose`` call never re-diagnoses an escape that is already
+        surfaced — including one surfaced before auto-diagnose covered its
+        reason at all (#11161: escape `9196f7403620`'s AGING issue was filed
+        under the pre-#11161 code, so widening ``_auto_diagnose``'s reason
+        filter alone cannot retire it). Diagnosing here, before the reads
+        below, lets a resolution/dismissal recorded on THIS call be answered
+        on the SAME tick.
         """
         surfaces = SurfacedIssueLedger(self._surfaces_path)
         open_links = surfaces.open_links()
         if not open_links:
             return 0
+        await self._diagnose_open_links(open_links)
         # read_latest_index (NOT `{r.id: r for r in read_latest()}`): read_latest
         # collapses by detection_ref and drops the ids of folded-away siblings, so
         # a link filed under a low-confidence id later superseded by a stronger
