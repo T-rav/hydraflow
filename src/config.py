@@ -5995,6 +5995,18 @@ class HydraFlowConfig(BaseModel):
         return self.repo_data_root / "metrics" / "prompt" / "pr_stats.json"
 
     @property
+    def prompt_efficiency_history_path(self) -> Path:
+        """Repo-scoped baseline-history ledger for the efficiency sensor (#11116).
+
+        One JSONL row per SkillPromptEvalLoop telemetry tick: the cumulative
+        `get_source_totals()` snapshot that became the new baseline. The live
+        baseline in state is overwritten every tick; this ledger is what lets
+        a filed `prompt-inefficiency` claim be re-derived — or refuted —
+        after the fact.
+        """
+        return self.repo_data_root / "metrics" / "prompt" / "efficiency_baselines.jsonl"
+
+    @property
     def prompt_gate_audit_path(self) -> Path:
         """Repo-scoped data-governance gate audit trail (CH-6, issue #9734).
 

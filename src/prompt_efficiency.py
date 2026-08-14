@@ -17,8 +17,15 @@ from dataclasses import dataclass
 from typing import Any
 
 # A source whose cost-per-call rose more than 50% vs. the trailing weekly
-# baseline is "inefficient" enough to warrant a filed issue (spec §5c).
+# baseline is "inefficient" enough to warrant a filed issue.
 INEFFICIENCY_THRESHOLD = 0.5
+
+# #11133/#11140: a marginal window smaller than this carries no regression
+# evidence — a 1-3 call window's cost-per-call is dominated by per-call
+# variance, and the 2026-08-14 idle run filed "regressions" (and reordered
+# the refine queue) off exactly such windows. Below the floor the window
+# rate and trend are None: insufficient evidence, not a measurement.
+MIN_WINDOW_CALLS = 5
 
 
 @dataclass
@@ -40,6 +47,18 @@ class SkillEfficiencyRow:
     anomalies: int
     cost_per_call: float
     trend_vs_baseline: float | None
+    # #11118 evidence fields: the numbers that would falsify a filing.
+    #: Effective (usage-bearing) calls in this tick's marginal window; None
+    #: when there was no window at all (no baseline entry, no new raw calls,
+    #: or a counter reset).
+    window_calls: int | None = None
+    #: The baseline reference rate the trend was computed against.
+    base_cost_per_call: float | None = None
+    #: #11117: every RAW call in this tick's window recorded zero usage —
+    #: the source is burning spawns the telemetry cannot see (563 straight
+    #: term_proposer calls in the claude/sonnet era). An operational alert,
+    #: distinct from a cost regression.
+    zero_usage_window: bool = False
 
 
 def _cost_and_calls(totals: dict[str, int]) -> tuple[float, int]:
@@ -55,9 +74,25 @@ def _cost_and_calls(totals: dict[str, int]) -> tuple[float, int]:
     return est_cost_usd, calls
 
 
+def _effective_calls(totals: dict[str, int]) -> int:
+    """Calls that produced observable usage (#11117 data hygiene).
+
+    A zero-usage call (``usage_status=unavailable``) records cost 0 while
+    still counting as a call — 563 such term_proposer calls DEFLATED its
+    cost-per-call for four days, so the first tick of real usage read as a
+    massive "regression". Cost-per-call denominators therefore count only
+    usage-bearing calls; the raw call count stays on the row for honesty.
+    """
+    calls = int(totals.get("inference_calls", 0))
+    zero_usage = int(totals.get("usage_unavailable_calls", 0))
+    return max(0, calls - zero_usage)
+
+
 def compute_skill_efficiency(
     totals_by_source: dict[str, dict[str, int]],
     baseline: dict[str, dict[str, int]] | None,
+    *,
+    min_window_calls: int = MIN_WINDOW_CALLS,
 ) -> list[SkillEfficiencyRow]:
     """Roll up per-source telemetry totals into ranked efficiency rows.
 
@@ -72,15 +107,28 @@ def compute_skill_efficiency(
 
     - ``delta_calls = current.calls - baseline.calls``,
       ``delta_cost = current.est_cost_usd - baseline.est_cost_usd``.
-    - Window cost-per-call = ``delta_cost / delta_calls`` when
-      ``delta_calls > 0``. A zero or negative delta (no new calls this tick,
-      or a counter reset/file rotation dropping the lifetime total below the
-      stored baseline) means there's no window to measure — the window
-      cost-per-call and ``trend_vs_baseline`` are both ``None`` in that case.
+    - EVERY per-call denominator counts only *effective* (usage-bearing)
+      calls — `_effective_calls`, i.e. raw calls minus
+      ``usage_unavailable_calls`` (#11117): a zero-usage call records cost 0
+      while still counting as a call, deflating any rate it participates in.
+      The raw call count stays on the row (``calls``) for honesty.
+    - Window cost-per-call = ``delta_cost / delta_effective_calls`` when
+      there was raw window activity AND the effective window is at least
+      ``min_window_calls`` (#11133/#11140 — a 1-3 call window is variance,
+      not evidence). A zero/negative raw delta (no new calls this tick, or a
+      counter reset/file rotation dropping the lifetime total below the
+      stored baseline) means there's no window to measure. In every
+      no-window/under-floor case the window cost-per-call and
+      ``trend_vs_baseline`` are both ``None``.
+    - A window with raw activity but ZERO effective calls sets
+      ``zero_usage_window`` — the source is burning spawns the telemetry
+      cannot see (#11117). That's an operational alert for the caller, never
+      a rate.
     - The baseline reference point is the baseline snapshot's own cumulative
-      average (``baseline.est_cost_usd / baseline.calls``), not a window —
-      there's nothing before "baseline" to window against. ``None`` when the
-      baseline has no entry for the source or its call count is zero.
+      average (``baseline.est_cost_usd / baseline.effective_calls``), not a
+      window — there's nothing before "baseline" to window against. ``None``
+      when the baseline has no entry for the source or its effective call
+      count is zero.
     - ``trend_vs_baseline`` is the fractional change of window cost-per-call
       vs. that baseline average, when both are defined and the baseline
       average is nonzero (nothing to divide by otherwise — a genuine "new
@@ -96,19 +144,29 @@ def compute_skill_efficiency(
     rows: list[SkillEfficiencyRow] = []
     for source, totals in totals_by_source.items():
         cum_cost_usd, cum_calls = _cost_and_calls(totals)
+        cum_effective = _effective_calls(totals)
         anomalies = int(totals.get("usage_unavailable_calls", 0))
-        cumulative_cost_per_call = cum_cost_usd / cum_calls if cum_calls else 0.0
+        cumulative_cost_per_call = (
+            cum_cost_usd / cum_effective if cum_effective else 0.0
+        )
 
         window_cost_per_call: float | None = None
         base_cost_per_call: float | None = None
+        window_calls: int | None = None
+        zero_usage_window = False
         base_totals = baseline_map.get(source)
         if isinstance(base_totals, dict):
-            base_cost_usd, base_calls = _cost_and_calls(base_totals)
-            base_cost_per_call = base_cost_usd / base_calls if base_calls else None
-            delta_calls = cum_calls - base_calls
-            if delta_calls > 0:
-                delta_cost = cum_cost_usd - base_cost_usd
-                window_cost_per_call = delta_cost / delta_calls
+            base_cost_usd, base_raw_calls = _cost_and_calls(base_totals)
+            base_effective = _effective_calls(base_totals)
+            base_cost_per_call = (
+                base_cost_usd / base_effective if base_effective else None
+            )
+            if cum_calls - base_raw_calls > 0:
+                window_calls = max(cum_effective - base_effective, 0)
+                zero_usage_window = window_calls == 0
+                if window_calls >= min_window_calls:
+                    delta_cost = cum_cost_usd - base_cost_usd
+                    window_cost_per_call = delta_cost / window_calls
 
         trend: float | None = None
         if (
@@ -132,6 +190,9 @@ def compute_skill_efficiency(
                 anomalies=anomalies,
                 cost_per_call=cost_per_call,
                 trend_vs_baseline=trend,
+                window_calls=window_calls,
+                base_cost_per_call=base_cost_per_call,
+                zero_usage_window=zero_usage_window,
             )
         )
     rows.sort(key=lambda r: r.cost_per_call, reverse=True)
@@ -149,9 +210,10 @@ def format_scorecard(rows: list[SkillEfficiencyRow]) -> str:
     """
     header = (
         "| skill | calls (lifetime) | est_cost_usd (lifetime) "
-        "| cost_per_call (window) | anomalies | trend_vs_baseline |"
+        "| cost_per_call (window) | window_calls | anomalies "
+        "| trend_vs_baseline |"
     )
-    sep = "|---|---|---|---|---|---|"
+    sep = "|---|---|---|---|---|---|---|"
     lines = [header, sep]
     for row in rows:
         trend = (
@@ -159,9 +221,10 @@ def format_scorecard(rows: list[SkillEfficiencyRow]) -> str:
             if row.trend_vs_baseline is not None
             else "n/a"
         )
+        window = str(row.window_calls) if row.window_calls is not None else "n/a"
         lines.append(
             f"| {row.source} | {row.calls} | ${row.est_cost_usd:.4f} "
-            f"| ${row.cost_per_call:.4f} | {row.anomalies} | {trend} |"
+            f"| ${row.cost_per_call:.4f} | {window} | {row.anomalies} | {trend} |"
         )
     return "\n".join(lines)
 

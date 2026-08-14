@@ -90,6 +90,13 @@ class PromptTelemetry:
         )
         actual_cache_read_tokens = max(0, _as_int(st.get("cache_read_input_tokens", 0)))
         actual_total_tokens = max(0, _as_int(st.get("total_tokens", 0)))
+        # #11117: derive the total from input+output BEFORE deciding
+        # usage_status — a call reporting real input/output tokens (but no
+        # pre-summed total) is usage-bearing, and branding it "unavailable"
+        # both inflated the anomaly counter and zeroed the call out of
+        # `prompt_efficiency`'s effective-call denominators.
+        if actual_total_tokens <= 0 and (actual_input_tokens or actual_output_tokens):
+            actual_total_tokens = actual_input_tokens + actual_output_tokens
         usage_available = bool(st.get("usage_available", actual_total_tokens > 0))
         usage_status = str(st.get("usage_status", "")).strip().lower()
         if usage_status not in {"available", "unavailable"}:
@@ -116,8 +123,6 @@ class PromptTelemetry:
         # estimated prompt tokens that were likely never billed.
         if not success and actual_total_tokens == 0 and transcript_chars == 0:
             estimated_total_tokens = 0
-        if actual_total_tokens <= 0 and (actual_input_tokens or actual_output_tokens):
-            actual_total_tokens = actual_input_tokens + actual_output_tokens
         token_source = "actual" if actual_total_tokens > 0 else "estimated"
         effective_total_tokens = (
             actual_total_tokens if actual_total_tokens > 0 else estimated_total_tokens
@@ -394,6 +399,15 @@ class PromptTelemetry:
         target["cache_misses"] = _as_int(target.get("cache_misses", 0)) + _as_int(
             record.get("cache_misses", 0)
         )
+        # #11132: cache token columns were recorded per-inference but never
+        # accumulated, so every aggregate (source/lifetime/session/PR/issue)
+        # silently reported a cacheless world.
+        target["cache_creation_input_tokens"] = _as_int(
+            target.get("cache_creation_input_tokens", 0)
+        ) + _as_int(record.get("cache_creation_input_tokens", 0))
+        target["cache_read_input_tokens"] = _as_int(
+            target.get("cache_read_input_tokens", 0)
+        ) + _as_int(record.get("cache_read_input_tokens", 0))
         target["actual_usage_calls"] = _as_int(target.get("actual_usage_calls", 0))
         if record.get("token_source") == "actual":
             target["actual_usage_calls"] = _as_int(target["actual_usage_calls"]) + 1
