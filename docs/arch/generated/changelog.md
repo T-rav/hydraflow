@@ -6,9 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
-- `f4ab7e7` — fix(audit): host-hermetic prompt renders — call-time cache root + frozen plugin-skill set (#11069) (#11069) *(2026-08-13)*
-- `2187acb` — feat(process): encode session lessons — supervisor classify rules, self-check, gotchas (#11065) (#11065) *(2026-08-12)*
-- `a6ecc95` — feat(quality): time-travel guard — detonate fixture time-bombs before real time does (#11054) (#11054) *(2026-08-11)*
+- `1f8ed86` — Merge remote-tracking branch 'origin/main' into rc/2026-08-13-1725 *(2026-08-13)*
+- `a1d1d53` — feat(control): setpoint register + first regulator conversion — GateHealthLoop (#11071) (#11071) *(2026-08-13)*
+- `8eb99a5` — chore(rc): regen arch artifacts after main merge (rc/2026-08-13-2315) *(2026-08-13)*
 - `874be8f` — Merge remote-tracking branch 'origin/main' into rc/2026-08-13-2315 *(2026-08-13)*
 - `f4ab7e7` — fix(audit): host-hermetic prompt renders — call-time cache root + frozen plugin-skill set (#11069) (#11069) *(2026-08-13)*
 - `c5eb54a` — chore(rc): regen arch artifacts after main merge (rc/2026-08-12-2120) *(2026-08-12)*
