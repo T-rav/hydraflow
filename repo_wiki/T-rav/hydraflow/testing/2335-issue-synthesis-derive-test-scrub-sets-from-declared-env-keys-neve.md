@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.062529+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2190
+superseded_by: 2524
 ---
 
 # Derive test scrub sets from declared_env_keys(), never hand-list

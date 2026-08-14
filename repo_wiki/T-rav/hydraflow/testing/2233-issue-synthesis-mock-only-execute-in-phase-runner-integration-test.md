@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:36.791786+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2088
+superseded_by: 2423
 ---
 
 # Mock only _execute() in phase-runner integration tests

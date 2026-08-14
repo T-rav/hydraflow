@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11106
 source_phase: plan
 created_at: 2026-08-14T07:39:28.346544+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2568
 ---
 
 # data_root vs repo_data_root — pick the right root for each reader

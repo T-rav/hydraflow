@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.114142+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2210
+superseded_by: 2543
 ---
 
 # is_self_chore_change must stay subject-only, never read changed_paths

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11133
 source_phase: plan
 created_at: 2026-08-14T12:41:23.460429+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2486
 ---
 
 # Regression tests in tests/regressions/ are immutable contracts

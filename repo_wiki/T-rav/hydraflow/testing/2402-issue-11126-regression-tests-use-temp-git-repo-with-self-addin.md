@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11126
 source_phase: plan
 created_at: 2026-08-14T11:53:15.166065+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2587
 ---
 
 # Regression tests use temp git repo with self-adding fix commit
