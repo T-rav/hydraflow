@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:30:39.158174+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1456
+superseded_by: 1625
 ---
 
 # ADR section numbering: append next free, never renumber

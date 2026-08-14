@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:30:39.131572+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1442
+superseded_by: 1611
 ---
 
 # Trust-loop workers get tight stall multiplier (2), not blanket 3

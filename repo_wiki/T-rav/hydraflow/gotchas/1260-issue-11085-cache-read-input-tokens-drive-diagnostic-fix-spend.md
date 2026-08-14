@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11085
 source_phase: plan
 created_at: 2026-08-14T05:58:31.318375+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # cache_read_input_tokens drive diagnostic_fix spend, not prompt size
