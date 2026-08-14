@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:36.783270+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1940,2201,2223
+superseded_by: 2420
 ---
 
 # Four-lane ADR debt bookkeeping for enforcement ratchet updates

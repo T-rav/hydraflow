@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11118
 source_phase: plan
 created_at: 2026-08-14T10:22:06.549556+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2583
 ---
 
 # Run full regression set, not targeted subset, on filing-body changes

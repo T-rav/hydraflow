@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.076008+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2195
+superseded_by: 2529
 ---
 
 # Gate contract tests pin exact context sets — widen on changes

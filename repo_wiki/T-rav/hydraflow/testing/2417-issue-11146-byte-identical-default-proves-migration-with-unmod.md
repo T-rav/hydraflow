@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11146
 source_phase: plan
 created_at: 2026-08-14T15:08:46.027442+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2597
 ---
 
 # Byte-identical default proves migration with unmodified tests

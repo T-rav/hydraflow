@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:41:45.185188+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0130
+superseded_by: 0156
 ---
 
 # ADR drift: drop src/ prefix, don't add :Symbol, for bare citations

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11138
 source_phase: plan
 created_at: 2026-08-14T14:08:04.915423+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2592
 ---
 
 # Tighten TestRegressionHits from substring to exact-equality tuples

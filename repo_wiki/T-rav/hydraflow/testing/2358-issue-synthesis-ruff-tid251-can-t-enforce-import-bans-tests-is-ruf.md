@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.124937+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2216
+superseded_by: 2547
 ---
 
 # ruff TID251 can't enforce import bans — tests/ is ruff-excluded

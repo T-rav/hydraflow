@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11103
 source_phase: plan
 created_at: 2026-08-14T07:34:32.949709+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2566
 ---
 
 # Makefile is canonical for PYTEST_SERIAL_PATHS, not regression job

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:36.823754+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2100
+superseded_by: 2435
 ---
 
 # Derive git contract fixtures via runtime scan, not literals
