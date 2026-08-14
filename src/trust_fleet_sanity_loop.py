@@ -32,7 +32,9 @@ from exception_classify import reraise_on_credit_or_bug
 from models import Severity, WorkCycleResult
 from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 from trust_fleet_anomaly_detectors import (
+    HITL_QUEUE_LABEL,
     REPAIRED_SUCCESS_KEYS,
+    TRUST_LOOP_ANOMALY_LABEL,
     TRUST_LOOP_WORKERS,
     detect_cost_spike,
     detect_hitl_composition,
@@ -147,7 +149,9 @@ _ANOMALY_KINDS: tuple[str, ...] = (
 # reconcile pass and by every producer loop (auto_agent_preflight, diagnostic,
 # corpus_learning, …) when escalating to a human. The HITL-composition signal
 # (#10310) scans open issues carrying this label.
-_HITL_QUEUE_LABEL = "hitl-escalation"
+# #11139: canonical labels live in trust_fleet_anomaly_detectors — one
+# home for writer and every reader.
+_HITL_QUEUE_LABEL = HITL_QUEUE_LABEL
 
 # Synthetic worker name for the fleet-wide HITL-composition anomaly. The signal
 # is not attributable to a single loop, so it reuses the per-worker escalation
@@ -597,7 +601,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
         return await self._pr.create_issue(
             title,
             body,
-            ["hitl-escalation", "trust-loop-anomaly"],
+            [_HITL_QUEUE_LABEL, TRUST_LOOP_ANOMALY_LABEL],
         )
 
     async def _reconcile_closed_escalations(self) -> None:
@@ -620,7 +624,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             "--label",
             "hitl-escalation",
             "--label",
-            "trust-loop-anomaly",
+            TRUST_LOOP_ANOMALY_LABEL,
             "--author",
             "@me",
             "--limit",

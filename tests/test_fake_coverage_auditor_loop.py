@@ -286,7 +286,7 @@ async def test_escalation_fires_after_three_attempts(
     # The escalation issue is the only one created (no rollup filed when
     # attempts >= _MAX_ATTEMPTS).
     labels = pr.create_issue.await_args.args[2]
-    assert "hydraflow-hitl-escalation" in labels
+    assert "hitl-escalation" in labels
     assert "hydraflow-fake-coverage-stuck" in labels
     # Attempt counter keyed by ``{fake}:{kind}``, not ``{fake}.{method}:{kind}``.
     state.inc_fake_coverage_attempts.assert_called_with("FakeGitHub:adapter-surface")

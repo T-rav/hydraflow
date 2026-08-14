@@ -69,6 +69,14 @@ REPAIRED_SUCCESS_KEYS: tuple[str, ...] = (
 )
 
 
+# #11139/#11145: the canonical trust-fleet escalation labels. Writers AND
+# readers (sanity loop, dashboard trust route, prep label seeding, triage
+# decompose guard) import THESE — a re-literaled copy is exactly the drift
+# that silently blanks a reader on rename.
+HITL_QUEUE_LABEL = "hitl-escalation"
+TRUST_LOOP_ANOMALY_LABEL = "trust-loop-anomaly"
+
+
 def detect_issues_per_hour(
     worker: str,
     metrics: dict[str, Any],

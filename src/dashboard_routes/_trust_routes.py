@@ -30,7 +30,10 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from trust_fleet_anomaly_detectors import REPAIRED_SUCCESS_KEYS
+from trust_fleet_anomaly_detectors import (
+    REPAIRED_SUCCESS_KEYS,
+    TRUST_LOOP_ANOMALY_LABEL,
+)
 
 if TYPE_CHECKING:
     from bg_worker_manager import BGWorkerManager
@@ -83,7 +86,7 @@ def _build_anomaly_reader(
             "--label",
             "hitl-escalation",
             "--label",
-            "trust-loop-anomaly",
+            TRUST_LOOP_ANOMALY_LABEL,
             "--limit",
             "200",
             "--json",

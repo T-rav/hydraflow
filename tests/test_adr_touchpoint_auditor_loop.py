@@ -539,7 +539,7 @@ async def test_escalation_after_three_attempts(loop_env, monkeypatch) -> None:
     assert stats["escalated"] == 1
     assert stats["filed"] == 0
     labels = pr.create_issue.await_args.args[2]
-    assert "hydraflow-hitl-escalation" in labels
+    assert "hitl-escalation" in labels
     assert "hydraflow-adr-drift-stuck" in labels
     # The 3-strike attempt counter key is per ADR, not per (PR, ADR).
     state.inc_adr_audit_attempts.assert_called_with("ADR-0024")

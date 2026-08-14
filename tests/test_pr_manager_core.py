@@ -1844,7 +1844,7 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "custom-verify",
         "hydraflow-parked",
         "hydraflow-diagnose",
-        "hydraflow-hitl-escalation",
+        "hitl-escalation",
         "hydraflow-fake-coverage-gap",
         "hydraflow-adapter-surface",
         "hydraflow-test-helper",
@@ -1862,8 +1862,9 @@ async def test_ensure_labels_exist_uses_config_label_names(config, event_bus, tm
         "hydraflow-memory-backlog-stuck",
         # Ad-hoc literal labels loops pass to create_issue / add_labels — these
         # are NOT config-field-backed and are created from HYDRAFLOW_LITERAL_LABELS.
-        # escalation root
-        "hitl-escalation",
+        # (The escalation root "hitl-escalation" already appears above: after
+        # the #11145 queue merge the config field resolves to the same bare
+        # literal HYDRAFLOW_LITERAL_LABELS seeds.)
         # rc-red / RC-duration / revert family
         "rc-red-attribution",
         "rc-red-bisect-exhausted",
