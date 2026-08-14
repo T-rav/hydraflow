@@ -58,11 +58,9 @@ give-up window's "self-solve before human" shape. Both are **feature-gated**
 ### 1. Escape ledger — mechanical auto-diagnose (`src/escape/auto_diagnose.py`)
 
 Gated by `escape_ledger_auto_diagnose_enabled`. Before filing a
-`SURFACE_REASON_LOW_CONFIDENCE` or `SURFACE_REASON_AGING` finding, for each
-eligible row run a **purely mechanical** pass (git reads + `PRPort`
-issue-label reads, **no LLM spawn**, so it is air-gap-safe and deterministic)
-— every surfacing reason is diagnosed the same way; there is no reason-scoped
-pre-filter:
+`SURFACE_REASON_LOW_CONFIDENCE` finding, for each eligible row run a **purely
+mechanical** pass (git reads + `PRPort` issue-label reads, **no LLM spawn**, so
+it is air-gap-safe and deterministic):
 
 - **Trace** the `detection_ref` commit → the bug it closed (`Fixes #N`) + any
   introducing sha.
@@ -71,7 +69,7 @@ pre-filter:
   commit added itself.
 - **`RESOLVED_ENCODED`** (real + encoded) → auto-record the resolution via
   `escape.resolve.resolve_escape` at `attribution_confidence="high"`,
-  `encoded_as="regression-test"`. The surface now self-answers
+  `encoded_as="regression-test"`. The low-confidence surface now self-answers
   (`_surfacing_answered`), so no human finding is filed; the row correctly enters
   the CONFIRMED escape count.
 - **`DISMISSED`** (clear false positive — the referenced issue carries a non-bug
