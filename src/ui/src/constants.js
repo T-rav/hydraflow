@@ -65,6 +65,17 @@ export const SUPERVISOR_POLL_MS = 30_000
 export const FINDER_FACEPLATE_POLL_MS = 60_000
 
 /**
+ * Operator loop-faceplate panel (#10826) REST-poll cadence. The panel reads
+ * `/api/diagnostics/loop-faceplates` — the STATIC control-register half only
+ * (fleet class, setpoint, floor sigma from repo-versioned `control/*.yaml`),
+ * which changes when a PR lands, not per tick. The LIVE half (PV, quiescence)
+ * rides the BACKGROUND_WORKER_STATUS websocket and re-joins client-side on
+ * every frame, so this poll exists only to catch register edits; 60s matches
+ * its finder-faceplate sibling.
+ */
+export const LOOP_FACEPLATE_POLL_MS = 60_000
+
+/**
  * Operator judge-calibration panel (#10836) REST-poll cadence. The panel reads
  * `/api/diagnostics/judge-calibration` (a proper-scoring rollup over the
  * append-only judge-verdict ledger, resolved against the escape ledger), so it
