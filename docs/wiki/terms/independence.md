@@ -5,13 +5,13 @@ kind: "policy"
 bounded_context: "shared-kernel"
 code_anchor: "src/judge_independence.py:IndependenceDisposition"
 aliases: []
-related: []
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-08-01T00:00:00+00:00"
-updated_at: "2026-08-01T00:00:00+00:00"
+updated_at: "2026-08-14T05:32:18.123535+00:00"
 ---
 
 ## Definition

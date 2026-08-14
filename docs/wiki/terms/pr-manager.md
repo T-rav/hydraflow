@@ -5,13 +5,13 @@ kind: "adapter"
 bounded_context: "shared-kernel"
 code_anchor: "src/pr_manager.py:PRManager"
 aliases: ["pr manager", "github adapter", "pull request manager"]
-related: [{"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}, {"kind": "depends_on", "target": "01KY4QF8BE4Y5782543MPQNDQ0"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KYABD5XVX4ZXFXT3Z76KMQZ0"}, {"kind": "depends_on", "target": "01KYBV9N8VSTKDRVDFC0FE40ZM"}, {"kind": "depends_on", "target": "01KYM003P7D6GN4KSS1X9RBEXQ"}]
+related: [{"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}, {"kind": "depends_on", "target": "01KY4QF8BE4Y5782543MPQNDQ0"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KYABD5XVX4ZXFXT3Z76KMQZ0"}, {"kind": "depends_on", "target": "01KYBV9N8VSTKDRVDFC0FE40ZM"}, {"kind": "depends_on", "target": "01KYM003P7D6GN4KSS1X9RBEXQ"}, {"kind": "depends_on", "target": "01KYW34KGZNXKF5N1TNB7VB731"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-22T10:56:21.147213+00:00"
-updated_at: "2026-07-28T19:17:03.630439+00:00"
+updated_at: "2026-08-14T05:32:18.123535+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-07-22T10:56:21.147157+00:00"
 proposal_signals: ["S2"]

@@ -5,13 +5,13 @@ kind: "loop"
 bounded_context: "caretaker"
 code_anchor: "src/goal_supervisor_loop.py:GoalSupervisorLoop"
 aliases: ["goal supervisor loop", "tier-2 goal supervisor", "goal supervisor", "mini-me supervisor"]
-related: []
+related: [{"kind": "depends_on", "target": "01JZ9FK3C0M01HYR42BF11W0A1"}, {"kind": "depends_on", "target": "01KYM003P7D6GN4KSS1X9RBEXQ"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01JZ9FK3C0M03HYR42BF33W0C3"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "depends_on", "target": "01KYW34KGZNXKF5N1TNB7VB731"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}]
 evidence: []
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-08-02T00:00:00.000000+00:00"
-updated_at: "2026-08-02T00:00:00.000000+00:00"
+updated_at: "2026-08-14T05:32:18.123535+00:00"
 ---
 
 ## Definition
