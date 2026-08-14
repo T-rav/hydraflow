@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11099
 source_phase: plan
 created_at: 2026-08-14T07:08:09.480579+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Derive loop/worker names at runtime — never hardcode

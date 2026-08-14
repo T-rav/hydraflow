@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11087
 source_phase: plan
 created_at: 2026-08-14T06:12:02.565814+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Derive marker dir identically to hf.track-code-changes.sh
