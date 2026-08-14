@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11089
 source_phase: plan
 created_at: 2026-08-14T06:37:49.577152+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Sample-size floors gate statistical claims in detectors

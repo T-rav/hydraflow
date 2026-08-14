@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 11090
 source_phase: plan
 created_at: 2026-08-14T06:25:31.261890+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # command -v node misses nvm node that scripts/ui-npm.sh finds

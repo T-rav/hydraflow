@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T07:44:05.638267+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1532
+superseded_by: 1711
 ---
 
 # Gauntlet-classified artifacts are not adversarial
