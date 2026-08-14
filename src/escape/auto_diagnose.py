@@ -203,7 +203,15 @@ def _grep(
         args += ["HEAD", "--", pathspec]
         out = _run_git(repo_root, args)
         if out:
-            files.extend(line.strip() for line in out.split("\n") if line.strip())
+            # `git grep -l <rev>` prefixes every path with `<rev>:`. Strip it
+            # at this adapter boundary (#11138) — the paths flow verbatim into
+            # ledger resolution notes and HITL close comments, which must name
+            # openable repo-relative files, not `HEAD:tests/...` strings.
+            files.extend(
+                line.strip().removeprefix("HEAD:")
+                for line in out.split("\n")
+                if line.strip()
+            )
     # Dedup, preserve order.
     seen: set[str] = set()
     ordered: list[str] = []

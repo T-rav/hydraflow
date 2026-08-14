@@ -116,6 +116,45 @@ def test_read_fleet_tallies_background_worker_status(config) -> None:
     assert workers["rc_budget"]["interval_s"] == 300
 
 
+def test_read_fleet_counts_warmup_ticks(config) -> None:
+    """#11121: non-productive ticks carry payload status "ok" — the roll-up
+    must read the details status to count warmup and flag a stalled loop."""
+    warm = _mk_event("rc_budget", "success")
+    warm.data["details"]["status"] = "warmup"
+    stalled = _mk_event("rc_budget", "success")
+    stalled.data["details"]["status"] = "warmup_stalled"
+
+    bus = MagicMock()
+
+    async def _load(since):
+        return [warm, stalled, _mk_event("rc_budget", "success")]
+
+    bus.load_events_since = _load
+    bg = MagicMock()
+    bg.worker_enabled.return_value = True
+    bg.get_interval.return_value = 300
+    state = MagicMock()
+    state.get_worker_heartbeats.return_value = {
+        "rc_budget": "2026-04-22T10:05:00+00:00",
+    }
+    import asyncio
+
+    result = asyncio.run(
+        _read_fleet(
+            config,
+            event_bus=bus,
+            bg_workers=bg,
+            state=state,
+            range_td=timedelta(days=7),
+            anomaly_reader=lambda repo: [],
+        )
+    )
+    row = {r["worker_name"]: r for r in result["loops"]}["rc_budget"]
+    assert row["ticks_warmup"] == 2
+    assert row["warmup_stalled"] is True
+    assert row["ticks_errored"] == 0
+
+
 def test_read_fleet_30d_reports_range(config) -> None:
     bus = MagicMock()
     bus.load_events_since = AsyncMock(return_value=[])

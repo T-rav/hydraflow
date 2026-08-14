@@ -73,6 +73,8 @@ Response JSON:
       "last_tick_at": "<iso8601>" | null, # from worker_heartbeats
       "ticks_total": <int>,               # window-scoped count from event log
       "ticks_errored": <int>,             # status=="error" in the window
+      "ticks_warmup": <int>,              # details.status warmup/warmup_stalled (#11121)
+      "warmup_stalled": <bool>,           # loop self-reported it cannot leave warmup
       "issues_filed_total": <int>,        # sum of details.filed over the window
       "issues_closed_total": <int>,       # sum from `EventType.ISSUE_CLOSED` events (best-effort; 0 if absent)
       "issues_open_escalated": <int>,     # currently-open issues the loop filed with hitl-escalation label

@@ -55,6 +55,41 @@ def _loop(env) -> RCBudgetLoop:
     )
 
 
+async def test_warmup_streak_degrades_to_warmup_stalled(loop_env) -> None:
+    """#11121: warmup is normal for a fresh cache; a loop that can NEVER
+    leave warmup must stop reading as a healthy tick. After
+    _WARMUP_STALL_TICKS consecutive warmups the status flips."""
+    from rc_budget_loop import _WARMUP_STALL_TICKS
+
+    loop = _loop(loop_env)
+    loop._fetch_recent_runs = AsyncMock(return_value=[])
+    for _ in range(_WARMUP_STALL_TICKS - 1):
+        assert (await loop._do_work())["status"] == "warmup"
+    stats = await loop._do_work()
+    assert stats["status"] == "warmup_stalled"
+    assert stats["consecutive_warmups"] == _WARMUP_STALL_TICKS
+    # And it stays stalled while the condition persists.
+    assert (await loop._do_work())["status"] == "warmup_stalled"
+
+
+async def test_productive_tick_resets_warmup_streak(loop_env) -> None:
+    loop = _loop(loop_env)
+    loop._consecutive_warmups = 4
+    runs = [
+        {
+            "databaseId": i,
+            "duration_s": 300,
+            "createdAt": f"2026-04-{i:02d}T00:00:00Z",
+            "conclusion": "success",
+        }
+        for i in range(1, 7)
+    ]
+    loop._fetch_recent_runs = AsyncMock(return_value=runs)
+    stats = await loop._do_work()
+    assert stats["status"] != "warmup_stalled"
+    assert loop._consecutive_warmups == 0
+
+
 def test_skeleton_worker_name_and_interval(loop_env) -> None:
     loop = _loop(loop_env)
     assert loop._worker_name == "rc_budget"

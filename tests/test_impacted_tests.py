@@ -199,6 +199,38 @@ def test_infra_change_forces_full_suite(path: str, fs: InMemoryFileIndex) -> Non
 @pytest.mark.parametrize(
     "path",
     [
+        ".claude/hooks/hf.block-destructive-git.sh",
+        ".claude/settings.json",
+    ],
+)
+def test_claude_behavioral_surface_forces_full_suite(
+    path: str, fs: InMemoryFileIndex
+) -> None:
+    """#11136: Claude hooks + settings gate tools/secret-scanning/pre-commit
+    validation — same no-test-mapping-but-load-bearing class as .githooks/."""
+    _, reason = classify_path(path, fs)
+    assert reason is not None and "full suite" in reason
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".claude/agents/code-reviewer.md",
+        ".claude/skills/deploy/SKILL.md",
+        ".claude/commands/review.md",
+    ],
+)
+def test_claude_prose_assets_stay_on_floor(path: str, fs: InMemoryFileIndex) -> None:
+    """#11136 deliberate non-mapping: agent/skill/command prose steers LLM
+    behavior, not test outcomes — the always-on floor is the right cost."""
+    tests, reason = classify_path(path, fs)
+    assert tests == frozenset()
+    assert reason is None
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
         "docs/wiki/index.md",
         "README.md",
         ".github/ISSUE_TEMPLATE/bug.md",

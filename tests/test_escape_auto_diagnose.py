@@ -151,6 +151,16 @@ class TestRegressionHits:
         hits = regression_hits(repo, issue_ref=123, shas=())
         assert any("test_bug_123.py" in h for h in hits)
 
+    def test_hits_are_repo_relative_without_rev_prefix(self, tmp_path: Path) -> None:
+        """#11138: `git grep -l ... HEAD` prefixes every path with `HEAD:`.
+        The adapter strips it so ledger resolution notes and HITL close
+        comments record openable repo-relative paths."""
+        repo = _init_repo(tmp_path)
+        _commit_regression(repo, 123)
+        hits = regression_hits(repo, issue_ref=123, shas=())
+        assert hits and all(not h.startswith("HEAD:") for h in hits)
+        assert hits[0].startswith("tests/regressions/")
+
     def test_no_hit_returns_empty(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
         _commit_regression(repo, 123)
