@@ -179,27 +179,27 @@ def surfacing_fingerprint(escape_id: str, reason: str) -> str:
     return f"surfaced:{reason}:{escape_id}"
 
 
-def select_findings_to_surface(
+def eligible_findings(
     records: list[EscapeRecord],
     *,
     now: datetime,
     aging_threshold_hours: float,
     already_surfaced: set[str],
-    max_per_tick: int,
     terminal_ids: frozenset[str] | set[str] = frozenset(),
-) -> tuple[list[tuple[EscapeRecord, str]], bool]:
-    """Pure finding-rate budget: which (escape, reason) pairs to surface, capped.
+) -> list[tuple[EscapeRecord, str]]:
+    """Pure eligibility: every (escape, reason) pair worth diagnosing, UNCAPPED.
 
     Eligible = low-confidence attributions (need a human label) + ``none-yet``
     rows older than *aging_threshold_hours* (should have been encoded by now).
     Each criterion is a SEPARATE one-shot budget: a row eligible under BOTH
-    criteria can surface once per reason (never collapsed by id), and a
+    criteria yields one pair per reason (never collapsed by id), and a
     (record, reason) pair is skipped only when its reason-scoped fingerprint is
     already in *already_surfaced* — repeat noise from the SAME reason stays
-    suppressed. Returns ``(to_file, capped)`` where ``to_file`` is at most
-    *max_per_tick* ``(record, reason)`` pairs and ``capped`` is True when
-    eligible exceeded the cap. This caps issue filing under a synthetic flood —
-    recording rows is never capped, only filing.
+    suppressed. Deliberately uncapped (#11176): the ask-budget cap must apply
+    AFTER auto-diagnose, not before, or a diagnosable finding ranked past the
+    cap never reaches the diagnoser and can age forever without ever getting a
+    chance to self-resolve. Use :func:`apply_ask_budget` to cap the residue
+    left after diagnosis for human filing.
     """
     eligible: list[tuple[EscapeRecord, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -224,8 +224,21 @@ def select_findings_to_surface(
         if surfacing_fingerprint(record.id, reason) in already_surfaced:
             continue
         eligible.append((record, reason))
-    capped = len(eligible) > max_per_tick
-    return eligible[:max_per_tick], capped
+    return eligible
+
+
+def apply_ask_budget(
+    findings: list[tuple[EscapeRecord, str]], *, max_per_tick: int
+) -> tuple[list[tuple[EscapeRecord, str]], bool]:
+    """Pure finding-rate budget: cap *findings* (post-diagnose residue) for a
+    human. Returns ``(to_file, capped)`` where ``to_file`` is at most
+    *max_per_tick* ``(record, reason)`` pairs and ``capped`` is True when
+    *findings* exceeded the cap. This caps issue FILING under a synthetic
+    flood — recording rows is never capped, and diagnosis runs over the full
+    :func:`eligible_findings` set regardless of this cap.
+    """
+    capped = len(findings) > max_per_tick
+    return findings[:max_per_tick], capped
 
 
 def _surfacing_answered(link: SurfacedIssue, record: EscapeRecord) -> bool:
@@ -513,20 +526,23 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         # currently disabled — the sidecar on disk is the record of past
         # dismissals, and a config flip must not resurrect them (#11137).
         terminal = EscapeDiagnosisLedger(self._diagnoses_path).terminal_ids()
-        to_file, capped = select_findings_to_surface(
+        eligible = eligible_findings(
             records,
             now=now,
             aging_threshold_hours=threshold_hours,
             already_surfaced=seen,
-            max_per_tick=max_issues,
             terminal_ids=terminal,
         )
-        # ADR-0115: before filing a LOW-CONFIDENCE or AGING finding for a human,
-        # run the machine auto-diagnose pass. A row it resolves
-        # (real+regression-encoded) or dismisses (clear false positive) is
-        # dropped from the file list — the human sees only the genuinely
-        # INCONCLUSIVE residue.
-        to_file = await self._auto_diagnose(to_file)
+        # ADR-0115/#11176: run the machine auto-diagnose pass over the FULL
+        # uncapped eligible set BEFORE the ask-budget cap — a diagnosable
+        # finding must self-answer regardless of how many OTHER findings are
+        # competing for this tick's ask budget, or it can rank past the cap
+        # and age forever without ever reaching the diagnoser. A row the
+        # diagnoser resolves (real+regression-encoded) or dismisses (clear
+        # false positive) is dropped from the residue; the human sees only
+        # the genuinely INCONCLUSIVE residue, THEN capped for filing.
+        residue = await self._auto_diagnose(eligible)
+        to_file, capped = apply_ask_budget(residue, max_per_tick=max_issues)
         surfaces = SurfacedIssueLedger(self._surfaces_path)
         filed = 0
         for record, reason in to_file:
@@ -584,9 +600,9 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
     # --- machine auto-diagnose (ADR-0115) -------------------------------
 
     async def _auto_diagnose(
-        self, to_file: list[tuple[EscapeRecord, str]]
+        self, eligible: list[tuple[EscapeRecord, str]]
     ) -> list[tuple[EscapeRecord, str]]:
-        """Filter *to_file*: machine-resolve/dismiss findings before filing.
+        """Filter *eligible*: machine-resolve/dismiss findings before filing.
 
         Every surfacing reason (``SURFACE_REASON_LOW_CONFIDENCE`` AND
         ``SURFACE_REASON_AGING``) is diagnosed the same way — a reason
@@ -596,12 +612,23 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         dismisses is dropped; the human sees only the INCONCLUSIVE residue.
         Disabled by config → unchanged. A diagnose failure keeps the finding
         for the human (fail-safe).
+
+        *eligible* is the UNCAPPED set (#11176) — bounded here only by
+        ``escape_ledger_max_diagnoses_per_tick``, a separate and wider cap
+        than the ask budget, so a synthetic flood of eligible findings cannot
+        drive unbounded git/PRPort reads in one tick. Findings beyond that
+        bound fall through to the ask budget undiagnosed, same as an
+        INCONCLUSIVE verdict (fail-safe: they may still reach a human).
         """
         if not self._config.escape_ledger_auto_diagnose_enabled:
-            return to_file
+            return eligible
+        max_diagnoses = int(self._config.escape_ledger_max_diagnoses_per_tick)
         diagnoser = self._get_auto_diagnoser()
         residue: list[tuple[EscapeRecord, str]] = []
-        for record, reason in to_file:
+        for index, (record, reason) in enumerate(eligible):
+            if index >= max_diagnoses:
+                residue.append((record, reason))
+                continue
             try:
                 verdict = await diagnoser.diagnose(record)
             except Exception as exc:
@@ -621,7 +648,7 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
     async def _diagnose_open_links(self, open_links: list[SurfacedIssue]) -> None:
         """Run auto-diagnose over the escape behind every OPEN surfaced link.
 
-        Independent of the ``select_findings_to_surface`` surfacing budget —
+        Independent of the ``eligible_findings`` surfacing budget —
         an escape whose reason-scoped fingerprint is already spent (it has an
         open HITL issue) never reaches ``_surface_findings``'s
         ``_auto_diagnose`` call again, so without this pass a resolution or
@@ -684,7 +711,7 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
         closed; ``CreditExhaustedError`` propagates via ``reraise_on_credit_or_bug``.
 
         Diagnoses every OPEN link's escape FIRST (``_diagnose_open_links``):
-        ``select_findings_to_surface`` drops a (record, reason) pair once its
+        ``eligible_findings`` drops a (record, reason) pair once its
         reason-scoped fingerprint is spent, so ``_surface_findings``'s
         ``_auto_diagnose`` call never re-diagnoses an escape that is already
         surfaced — including one surfaced before auto-diagnose covered its

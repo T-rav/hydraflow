@@ -10,6 +10,7 @@
 - pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human
 - pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed
 - pytest:tests/test_audit_adjudicate.py::TestParseAdjudication::test_unparseable_is_inconclusive_not_upheld
+- pytest:tests/regressions/test_issue_11176.py::test_aging_resolvable_escape_self_answers_despite_a_busy_ask_budget
 
 **Precedent:** Automated triage / auto-remediation before paging — the SRE incident-response tradition in which a known alert first runs its remediation runbook, and a human is paged only for what the runbook cannot resolve (Beyer et al., *Site Reliability Engineering*, O'Reilly 2016 — "reduce toil", auto-remediation before human escalation).
 **Divergence:** that tradition assumes a *deterministic runbook keyed to a known alert*, so the machine step is a fixed script; here the two surfaces are ambiguous signals with no fixed runbook — a **low-confidence escape attribution** (which merge introduced this?) and an **adversarial re-audit disagreement** (is this a real escape?) — so the rule is that the machine runs a bounded, **fail-safe DIAGNOSE** (evidence-gated resolve / dismiss / adjudicate) that self-answers the surface when it can, and only an *inconclusive* diagnosis pages a human (receipt: #10748, #10749, #10750, #10751 — ~5 manual human-resolutions in one operating session that were all machine-resolvable confirm-or-dismiss-with-evidence).
@@ -121,6 +122,18 @@ rather than fabricating an `upheld` (a false escape cross-link) or a `refuted`
   (`SURFACE_REASON_LOW_CONFIDENCE` and `SURFACE_REASON_AGING`) the same way —
   an aging `none-yet` row whose encoding is already on disk self-answers
   exactly like a low-confidence one (#11161).
+- **Diagnosis runs over the full eligible set BEFORE the ask-budget cap, not
+  after (#11176).** `EscapeLedgerLoop._surface_findings` used to select the
+  finding-rate budget's `escape_ledger_max_issues_per_tick` slice first
+  (`select_findings_to_surface`) and only then diagnose that slice — so on a
+  busy tick a diagnosable finding ranked past the cap was silently dropped
+  from the eligible set and never reached the diagnoser, and could stay
+  `encoded_as: none-yet` indefinitely no matter how many ticks passed. The
+  loop now runs `eligible_findings` (uncapped) → `_auto_diagnose` (bounded by
+  the separate, wider `escape_ledger_max_diagnoses_per_tick`) →
+  `apply_ask_budget` (the human-ask cap), so a machine-resolvable finding
+  self-answers regardless of how many other findings are competing for that
+  tick's ask budget.
 - **On by default; air-gap-safe.** Both flags (`escape_ledger_auto_diagnose_enabled`,
   `sampled_audit_auto_adjudicate_enabled`) default ON — self-repair is the
   default posture, disable via the System tab. The escape pass is LLM-free; the
@@ -169,3 +182,8 @@ new-autonomy switch (`giveup_window_enabled`) for a safe, reversible rollout.
   audit auto-adjudicate and its wiring.
 - #10748, #10749, #10750, #10751 (this decision's receipts — the machine-
   resolvable findings that reached a human).
+- #11161 — widened the escape pass to diagnose the AGING reason, not just
+  LOW_CONFIDENCE.
+- #11176 — reordered the escape pass to diagnose the full eligible set before
+  the ask-budget cap, so a diagnosable finding can no longer be starved out of
+  diagnosis by a busy tick.
