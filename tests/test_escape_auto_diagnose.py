@@ -258,6 +258,15 @@ class TestEscapeAutoDiagnoser:
         assert verdict is EscapeDiagnosis.INCONCLUSIVE
         rows = EscapeLedger(ledger_path).read_all()
         assert len(rows) == 1 and rows[0].attribution_confidence == "low"
+        # #11163: terminal_ids() now excludes INCONCLUSIVE from the terminal
+        # set (not just unparseable rows) — safe only because diagnose()
+        # never writes an INCONCLUSIVE row to the sidecar in the first place.
+        # If a future writer ever did, that escape would flip from
+        # permanently suppressed (pre-#11163: any row counted as terminal)
+        # to re-eligible every tick, reintroducing the #11111 noise class.
+        assert (
+            EscapeDiagnosisLedger(tmp_path / "escape_diagnoses.jsonl").read_all() == []
+        )
 
     async def test_resolution_note_is_reason_neutral(self, tmp_path: Path) -> None:
         # #11161: the note text used to name "the low-confidence surface"
