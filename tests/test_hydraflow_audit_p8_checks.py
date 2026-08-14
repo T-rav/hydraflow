@@ -185,9 +185,10 @@ def test_claude_md_review_rule_cross_sentence_mention_fails(tmp_path: Path) -> N
 
 
 def test_claude_md_review_substring_words_do_not_pass(tmp_path: Path) -> None:
-    """#11166 (re-audit find): 'preview'/'interview' contain the substring
-    'review' — an unanchored regex passed CLAUDE.md text that says nothing
-    about running a code review."""
+    """#11166 (re-audit find): 'preview' contains the substring 'review' —
+    an unanchored regex passed CLAUDE.md text that says nothing about
+    running a code review. The interview case guards the same anchor from
+    the cadence-first alternation side."""
     _write(
         tmp_path / "CLAUDE.md",
         "Preview environments are generated for every PR automatically.\n",

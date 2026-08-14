@@ -141,7 +141,7 @@ def _trace_collector(ctx: CheckContext) -> Finding:
 # inside one sentence, in either order. A reworded but compliant rule still
 # passes; the substantial-features-only review-iteration rule (no per-PR
 # cadence marker) still fails. Both "review" mentions are word-anchored
-# (#11166 re-audit find): "preview"/"interview" contain the substring and
+# (#11166 re-audit find): a word like "preview" contains the substring and
 # must never satisfy the check.
 _P87_REVIEW_EVERY_PR_RE = re.compile(
     r"\breview[^.\n]{0,80}\b(?:every|each)\s+pr\b"
