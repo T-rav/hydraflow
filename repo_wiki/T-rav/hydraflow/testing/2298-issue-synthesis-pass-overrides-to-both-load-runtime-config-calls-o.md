@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:36.962957+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2153
+superseded_by: 2488
 ---
 
 # Pass overrides to both load_runtime_config calls on restore

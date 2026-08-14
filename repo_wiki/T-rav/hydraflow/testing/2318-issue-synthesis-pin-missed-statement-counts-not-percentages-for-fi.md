@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.016206+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2173
+superseded_by: 2508
 ---
 
 # Pin missed-statement counts, not percentages, for fixture ratchets

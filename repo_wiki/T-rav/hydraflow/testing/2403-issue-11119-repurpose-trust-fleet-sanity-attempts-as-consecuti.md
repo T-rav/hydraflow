@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11119
 source_phase: plan
 created_at: 2026-08-14T12:19:29.537925+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2588
 ---
 
 # Repurpose trust_fleet_sanity_attempts as consecutive streak, not cumulative

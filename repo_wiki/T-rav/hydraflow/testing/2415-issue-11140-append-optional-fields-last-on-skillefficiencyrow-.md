@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11140
 source_phase: plan
 created_at: 2026-08-14T14:36:07.424584+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2561
 ---
 
 # Append optional fields last on SkillEfficiencyRow for compat

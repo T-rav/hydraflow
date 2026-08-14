@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11136
 source_phase: plan
 created_at: 2026-08-14T13:02:38.765851+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2590
 ---
 
 # Full-suite triggers must be anchored at repo root

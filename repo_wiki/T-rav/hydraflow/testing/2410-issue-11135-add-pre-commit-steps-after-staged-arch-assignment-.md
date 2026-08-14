@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11135
 source_phase: plan
 created_at: 2026-08-14T13:08:51.035568+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2591
 ---
 
 # Add pre-commit steps after STAGED_ARCH assignment, never inside it

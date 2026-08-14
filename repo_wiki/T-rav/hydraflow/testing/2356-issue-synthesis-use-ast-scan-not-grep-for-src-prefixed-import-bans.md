@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.119553+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2214
+superseded_by: 2545
 ---
 
 # Use AST scan not grep for src-prefixed import bans in tests/

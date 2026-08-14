@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.100538+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2205
+superseded_by: 2538
 ---
 
 # Redirect _find_repo_root to tmp_path for hermetic dotenv tests
