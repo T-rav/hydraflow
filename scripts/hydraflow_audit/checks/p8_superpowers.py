@@ -134,3 +134,19 @@ def _trace_collector(ctx: CheckContext) -> Finding:
         Status.FAIL,
         "no trace collector module found — session retros have no subprocess traces to mine",
     )
+
+
+@register("P8.7")
+def _claude_md_requires_review_every_pr(ctx: CheckContext) -> Finding:
+    claude = ctx.root / "CLAUDE.md"
+    if not claude.exists():
+        return finding("P8.7", Status.FAIL, "CLAUDE.md missing")
+    text = claude.read_text(encoding="utf-8", errors="replace").lower()
+    if "code review after every pr" in text:
+        return finding("P8.7", Status.PASS)
+    return finding(
+        "P8.7",
+        Status.FAIL,
+        "CLAUDE.md does not require a code review after every PR "
+        "(only the substantial-features review-iteration rule was found)",
+    )

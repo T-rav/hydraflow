@@ -2,9 +2,9 @@
 source: feedback_code_review_after_each_pr.md
 name: feedback-code-review-after-each-pr
 description: Travis wants a code review run after EVERY PR is created, not just for substantial features. Standing workflow step.
-status: pending
-issue: null
-promoted_in: null
+status: promoted
+issue: 11087
+promoted_in: '#11087'
 wontfix_reason: null
 created: '2026-07-31'
 ---
