@@ -19,9 +19,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from escape.auto_diagnose import EscapeDiagnosis  # noqa: E402
 from escape.models import EscapeRecord  # noqa: E402
-from escape_ledger_loop import SURFACE_REASON_AGING  # noqa: E402
-from escape_ledger_loop import SURFACE_REASON_LOW_CONFIDENCE  # noqa: E402
-from escape_ledger_loop import EscapeLedgerLoop  # noqa: E402
+from escape_ledger_loop import (
+    SURFACE_REASON_AGING,  # noqa: E402
+    SURFACE_REASON_LOW_CONFIDENCE,  # noqa: E402
+    EscapeLedgerLoop,  # noqa: E402
+)
 
 
 class _FakeDiagnoser:
