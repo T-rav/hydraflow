@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11136
 source_phase: plan
 created_at: 2026-08-14T13:02:38.765870+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2050
 ---
 
 # `_hard_full_suite_reason` ordering precedes .py name-mapping

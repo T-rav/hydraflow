@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11137
 source_phase: plan
 created_at: 2026-08-14T13:57:19.247679+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2051
 ---
 
 # AUTO_DIAGNOSED_REASONS: one constant for selector and _auto_diagnose

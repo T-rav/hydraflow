@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T14:29:27.049286+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1832
+superseded_by: 2038
 ---
 
 # StateTracker construction mutates state files — use StateData for reads

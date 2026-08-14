@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T14:29:27.061205+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1834
+superseded_by: 2040
 ---
 
 # Scope ledger immutability to merge-base(HEAD, base)
