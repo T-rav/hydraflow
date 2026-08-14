@@ -78,6 +78,18 @@ class TestSetpointLoading:
         )
         assert load_setpoints(tmp_path) == {}
 
+    def test_syntactically_broken_yaml_degrades_to_no_setpoints(
+        self, tmp_path: Path
+    ) -> None:
+        # Signing is a hand edit; a syntax slip must never crash a loop
+        # cycle — it degrades to "no setpoints" (legacy behavior).
+        _write_control(tmp_path, "setpoints.yaml", "gate_health:\n  value: [unclosed\n")
+        assert load_setpoints(tmp_path) == {}
+
+    def test_non_mapping_yaml_degrades_to_no_setpoints(self, tmp_path: Path) -> None:
+        _write_control(tmp_path, "setpoints.yaml", "- just\n- a\n- list\n")
+        assert load_setpoints(tmp_path) == {}
+
     def test_setpoint_for_returns_single_spec(self, tmp_path: Path) -> None:
         _write_control(
             tmp_path, "setpoints.yaml", "gate_health:\n  value: 0.9\n  band: 0.05\n"

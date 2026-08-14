@@ -126,7 +126,21 @@ def load_setpoints(repo_root: Path) -> dict[str, SetpointSpec]:
     path = repo_root / CONTROL_DIR / SETPOINTS_FILENAME
     if not path.is_file():
         return {}
-    raw = yaml.safe_load(path.read_text()) or {}
+    try:
+        raw = yaml.safe_load(path.read_text()) or {}
+    except (yaml.YAMLError, OSError):
+        # This file is designed for ad-hoc human edits (signing IS a hand
+        # edit). A syntax slip must degrade to "no setpoints" — regulators
+        # fall back to legacy behavior — never fail a caller's whole cycle.
+        logger.warning(
+            "control_register: unreadable %s — treating as no setpoints", path
+        )
+        return {}
+    if not isinstance(raw, dict):
+        logger.warning(
+            "control_register: %s is not a mapping — treating as no setpoints", path
+        )
+        return {}
     specs: dict[str, SetpointSpec] = {}
     for worker_name, entry in raw.items():
         data = entry or {}

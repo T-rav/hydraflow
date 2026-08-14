@@ -175,7 +175,7 @@ jobs:
           predicate-quantifier: 'every'
           filters: |
             core_python:
-              - '{src/**/*.py,tests/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,prompts/**}'
+              - '{src/**/*.py,tests/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,prompts/**,control/**}'
               - '!src/arch/**'
               - '!tests/architecture/**'
               - '!tests/regressions/**'
