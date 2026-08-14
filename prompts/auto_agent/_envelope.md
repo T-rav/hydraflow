@@ -75,6 +75,13 @@ work around the restriction.
 
 You MUST terminate by returning ONE of three statuses. **Default to fixing.**
 
+**Verification runs in the FOREGROUND.** Never background `make quality` /
+`make test` and stop, expecting to resume when it completes — your process
+terminates the moment you return, nothing re-invokes you, and the run's
+result is lost (#11095: attempts on #11087 each burned a full pass exactly
+this way). Block on the gate, then return `resolved` with the PR open — or
+`retry` reporting what you had verified so far.
+
 1. **`resolved`** — you made the change, ran the tests, pushed the branch, and
    opened a PR. Provide the PR URL and a brief diagnosis.
 

@@ -2,9 +2,9 @@
 source: feedback_subagent_backgrounds_quality_then_stops.md
 name: feedback_subagent_backgrounds_quality_then_stops
 description: 'Dispatched subagents on long verification runs background `make quality`/`make test` and then STOP, expecting a monitor to auto-resume them — but their process is dead, so they never resume. Fix: SendMessage-resume (context intact), don''t restart; and prompt them to block foreground + not stop until the PR is open.'
-status: pending
-issue: null
-promoted_in: null
+status: promoted
+issue: 11095
+promoted_in: '#11095'
 wontfix_reason: null
 created: '2026-07-26'
 ---
