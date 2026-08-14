@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.027016+00:00
-status: active
+status: stale
 corroborations: 1
 supersedes: 2177
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # HydraFlowConfig pydantic extra=ignore tolerates stale keys
