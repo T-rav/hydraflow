@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T11:12:32.169302+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1631
+superseded_by: 1821
 ---
 
 # Gauntlet stratum bypasses self-chore exclusion in select_sample

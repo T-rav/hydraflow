@@ -119,7 +119,7 @@ class TestTriageRetryScenario:
         escalations = [
             issue
             for issue in world._github._issues.values()
-            if "hydraflow-hitl-escalation" in issue.labels
+            if "hitl-escalation" in issue.labels
             and "triage-retry-exhausted" in issue.labels
         ]
         assert len(escalations) == 1, (

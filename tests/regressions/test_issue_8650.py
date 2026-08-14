@@ -111,7 +111,10 @@ async def test_trust_loop_stale_heartbeat_still_escalates(tmp_path: Path) -> Non
     """A stale ``rc_budget`` (trust loop) heartbeat still triggers a staleness alert.
 
     Verify the fix did not accidentally disable staleness detection for real
-    trust-loop workers.
+    trust-loop workers. Updated for #11119: staleness is judged against
+    ``max(last_run, boot_time)`` (so the boot is backdated past the
+    threshold — a genuine post-boot stall, not downtime) and a breach must
+    survive TWO consecutive ticks before it files.
     """
     env = _make_env(tmp_path)
     _, state, bg_workers, pr, _, _ = env
@@ -124,7 +127,12 @@ async def test_trust_loop_stale_heartbeat_still_escalates(tmp_path: Path) -> Non
     bg_workers.get_interval.return_value = 600
 
     loop = _loop(env)
+    loop._boot_time = datetime.now(UTC) - timedelta(seconds=99_999)
     loop._source_bus.load_events_since = _fake_load_empty  # type: ignore[method-assign]
+
+    first = await loop._do_work()
+    assert first is not None
+    assert first["anomalies"] == 0  # pending confirmation (#11119)
 
     stats = await loop._do_work()
     assert stats is not None

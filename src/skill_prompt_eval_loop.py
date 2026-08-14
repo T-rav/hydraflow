@@ -110,6 +110,30 @@ def _inefficiency_subject(title: str) -> str | None:
     return m.group(1) if m else None
 
 
+# #11117: a source whose whole marginal window is zero-usage calls is burning
+# spawns the telemetry cannot see (563 straight term_proposer calls in the
+# 2026-08 idle run). That's an operational blind spot, not a cost regression,
+# so it files under its own title/key namespace — while sharing the
+# `prompt-inefficiency` marker label so operators find both classes in one
+# place (the reconcilers stay disjoint because each one's title parser
+# returns None for the other's titles).
+_ZERO_USAGE_KEY_PREFIX = "skill_prompt_eval:zero_usage"
+
+
+def _zero_usage_title(source: str) -> str:
+    return f"Prompt telemetry blind spot: {source} calls record no usage"
+
+
+_ZERO_USAGE_TITLE_RE = re.compile(
+    r"^Prompt telemetry blind spot: (.+?) calls record no usage$"
+)
+
+
+def _zero_usage_subject(title: str) -> str | None:
+    m = _ZERO_USAGE_TITLE_RE.match(title)
+    return m.group(1) if m else None
+
+
 # Hard cap on the heavy ``make trust-adversarial`` subprocess read: the
 # operator-tunable ``config.skill_prompt_eval_adversarial_timeout_seconds``
 # knob (#9555, default 3600), re-read from the live config at every
@@ -364,6 +388,15 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             clear_attempts=lambda _subject: None,
             subject_from_title=_inefficiency_subject,
         )
+        # Same closed-path reconcile for #11117 zero-usage blind-spot alerts.
+        self._zero_usage_alerts = EscalationReconciler(
+            prs=pr_manager,
+            dedup=dedup,
+            key_prefix=_ZERO_USAGE_KEY_PREFIX,
+            stuck_label=_INEFFICIENCY_LABEL,
+            clear_attempts=lambda _subject: None,
+            subject_from_title=_zero_usage_subject,
+        )
 
     def _get_default_interval(self) -> int:
         return self._config.skill_prompt_eval_interval
@@ -514,6 +547,7 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         # closed (triaged) inefficiency issue clears its dedup key so a
         # re-degradation of the same source re-files fresh (#10025).
         await self._inefficiencies.reconcile_closed()
+        await self._zero_usage_alerts.reconcile_closed()
 
         cases = await self._run_corpus()
         if not cases:
@@ -665,13 +699,41 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         scorecard = format_scorecard(rows)
         ordered_cases = pick_refine_order(cases, rows)
         for row in rows:
+            if row.zero_usage_window:
+                await self._file_zero_usage_alert(row)
             if (
                 row.trend_vs_baseline is not None
                 and row.trend_vs_baseline > INEFFICIENCY_THRESHOLD
             ):
                 await self._file_inefficiency_issue(row)
+        # #11116: the state baseline is destructively overwritten below —
+        # append this tick's snapshot to the history ledger FIRST so every
+        # baseline any filing was ever computed against stays re-derivable.
+        self._append_baseline_history(totals_by_source)
         self._state.set_prompt_efficiency_baseline(totals_by_source)
         return ordered_cases, scorecard
+
+    def _append_baseline_history(self, snapshot: dict[str, dict[str, int]]) -> None:
+        """Append this tick's cumulative snapshot to the history ledger (#11116).
+
+        Best-effort: a full disk or unwritable metrics dir must not break the
+        eval tick — the live baseline in state still advances.
+        """
+        path = self._config.prompt_efficiency_history_path
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            row = {
+                "recorded_at": datetime.now(UTC).isoformat(),
+                "totals_by_source": snapshot,
+            }
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, sort_keys=True) + "\n")
+        except OSError:
+            logger.warning(
+                "skill-prompt-eval: baseline-history append failed (%s)",
+                path,
+                exc_info=True,
+            )
 
     async def _file_inefficiency_issue(self, row: SkillEfficiencyRow) -> None:
         """File a deduped `prompt-inefficiency` issue for a degraded source.
@@ -690,19 +752,73 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
             if row.trend_vs_baseline is not None
             else "n/a"
         )
+        base_rate = (
+            f"${row.base_cost_per_call:.4f}"
+            if row.base_cost_per_call is not None
+            else "n/a"
+        )
+        window_calls = str(row.window_calls) if row.window_calls is not None else "n/a"
+        history_path = self._config.prompt_efficiency_history_path
+        # #11118: carry the numbers that would falsify the claim, and
+        # (#11115) cite the real provenance — `compute_skill_efficiency`
+        # (spec §5, telemetry consumption), not a phantom spec section.
         body = (
             f"## Cost-per-call regression\n\n"
-            f"Source `{row.source}` cost-per-call is **{trend_pct}** vs. last "
-            f"week's baseline — now ${row.cost_per_call:.4f}/call across "
-            f"{row.calls} calls (${row.est_cost_usd:.4f} total, "
-            f"{row.anomalies} usage anomalies).\n\n"
-            f"_Spec §5c — filed by `skill_prompt_eval` loop's weekly "
-            f"telemetry consumption. Standard repair path: check for "
-            f"context bloat, cache-hit-rate drops, or a model swap for this "
-            f"source._"
+            f"Source `{row.source}` window cost-per-call is **{trend_pct}** "
+            f"vs. the previous tick's baseline rate.\n\n"
+            f"| evidence | value |\n"
+            f"|---|---|\n"
+            f"| window cost-per-call | ${row.cost_per_call:.4f} |\n"
+            f"| baseline cost-per-call | {base_rate} |\n"
+            f"| window calls (usage-bearing) | {window_calls} |\n"
+            f"| lifetime calls | {row.calls} |\n"
+            f"| lifetime est. cost | ${row.est_cost_usd:.4f} |\n"
+            f"| lifetime zero-usage calls | {row.anomalies} |\n"
+            f"| filing threshold | trend > {INEFFICIENCY_THRESHOLD:+.0%} |\n\n"
+            f"To falsify: recompute `delta cost / delta usage-bearing calls` "
+            f"from the last two rows of `{history_path}` — the ledger of "
+            f"every baseline snapshot this sensor has compared against.\n\n"
+            f"_Filed by `SkillPromptEvalLoop._consume_efficiency_telemetry` "
+            f"(`compute_skill_efficiency`, spec §5 telemetry consumption). "
+            f"Standard repair path: check for context bloat, cache-hit-rate "
+            f"drops, or a model swap for this source._"
         )
         await self._pr.create_issue(
             title, body, ["hydraflow-find", _INEFFICIENCY_LABEL]
+        )
+        dedup.add(key)
+        self._dedup.set_all(dedup)
+
+    async def _file_zero_usage_alert(self, row: SkillEfficiencyRow) -> None:
+        """File a deduped telemetry blind-spot alert (#11117).
+
+        Fired when a source's whole marginal window is zero-usage calls —
+        cost 0 recorded while spawns keep burning. Same close-clears-dedup
+        lifecycle as inefficiency filings (`self._zero_usage_alerts`).
+        """
+        dedup = self._dedup.get()
+        key = f"{_ZERO_USAGE_KEY_PREFIX}:{row.source}"
+        if key in dedup:
+            return
+        body = (
+            f"## Telemetry blind spot\n\n"
+            f"Every raw call `{row.source}` made since the previous baseline "
+            f"tick reported `usage_status=unavailable` — the calls are "
+            f"burning spawns whose usage (and cost) the telemetry cannot "
+            f"see. Lifetime: {row.calls} calls, {row.anomalies} zero-usage "
+            f"(${row.est_cost_usd:.4f} recorded).\n\n"
+            f"These calls are EXCLUDED from cost-per-call math (#11117) — "
+            f"this alert is the honest surface for them instead. Standard "
+            f"repair path: check the source's spawn harness for a usage-"
+            f"reporting regression (CLI flag drift, backend swap, parser "
+            f"miss).\n\n"
+            f"_Filed by `SkillPromptEvalLoop._consume_efficiency_telemetry` "
+            f"(`compute_skill_efficiency`, spec §5 telemetry consumption)._"
+        )
+        await self._pr.create_issue(
+            _zero_usage_title(row.source),
+            body,
+            ["hydraflow-find", _INEFFICIENCY_LABEL],
         )
         dedup.add(key)
         self._dedup.set_all(dedup)

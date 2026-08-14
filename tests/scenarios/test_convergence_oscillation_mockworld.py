@@ -110,7 +110,7 @@ class TestConvergenceOscillationMockWorld:
         esc_issue = created[0]
         assert "convergence-oscillation" in esc_issue.labels
         # HITL escalation label must be present (exact value from config).
-        hitl_label = "hydraflow-hitl-escalation"
+        hitl_label = "hitl-escalation"
         assert hitl_label in esc_issue.labels, (
             f"HITL label '{hitl_label}' missing; got labels={esc_issue.labels}"
         )

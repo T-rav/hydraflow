@@ -69,6 +69,14 @@ REPAIRED_SUCCESS_KEYS: tuple[str, ...] = (
 )
 
 
+# #11139/#11145: the canonical trust-fleet escalation labels. Writers AND
+# readers (sanity loop, dashboard trust route, prep label seeding, triage
+# decompose guard) import THESE — a re-literaled copy is exactly the drift
+# that silently blanks a reader on rename.
+HITL_QUEUE_LABEL = "hitl-escalation"
+TRUST_LOOP_ANOMALY_LABEL = "trust-loop-anomaly"
+
+
 def detect_issues_per_hour(
     worker: str,
     metrics: dict[str, Any],
@@ -198,6 +206,7 @@ def detect_staleness(
     is_enabled: bool,
     now: datetime,
     max_cycle_s: int = 0,
+    boot_time: datetime | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Enabled loop idle past its expected-idle window (spec §12.1 bullet 4).
 
@@ -227,10 +236,21 @@ def detect_staleness(
         return False, {"worker": worker, "status": "bad_heartbeat_iso"}
     if last_run.tzinfo is None:
         last_run = last_run.replace(tzinfo=UTC)
-    elapsed_s = (now - last_run).total_seconds()
+    # Boot grace (#11119): heartbeats PERSIST across factory downtime, so on
+    # a cold boot every loop's last_run reads hours-to-days old and the whole
+    # fleet false-flags stale before any loop has had a chance to tick.
+    # Staleness is therefore measured from the LATER of last_run and the
+    # orchestrator boot — after a boot, a loop gets its full threshold window
+    # before being judged.
+    reference = last_run
+    boot_governed = False
+    if boot_time is not None and boot_time > last_run:
+        reference = boot_time
+        boot_governed = True
+    elapsed_s = (now - reference).total_seconds()
     threshold_s = max(multiplier * interval_s, float(max_cycle_s))
     breached = elapsed_s >= threshold_s
-    return breached, {
+    details = {
         "worker": worker,
         "elapsed_s": int(elapsed_s),
         "interval_s": interval_s,
@@ -239,6 +259,11 @@ def detect_staleness(
         "threshold_s": int(threshold_s),
         "last_run_iso": last_run_iso,
     }
+    if boot_governed and not breached:
+        # Distinguishable in the rollup: within-grace is not "healthy tick",
+        # it is "not judged yet" (#11121's warmup-vs-healthy distinction).
+        details["status"] = "boot_grace"
+    return breached, details
 
 
 def detect_cost_spike(

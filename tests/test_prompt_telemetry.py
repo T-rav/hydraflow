@@ -182,6 +182,67 @@ class TestPromptTelemetry:
         assert rollup["lifetime"]["total_tokens"] == 200
         assert rollup["sessions"]["sess-2"]["total_tokens"] == 200
 
+    def test_input_output_only_stats_are_usage_bearing(self, telemetry):
+        """#11117: a call reporting real input/output tokens but no pre-summed
+        `total_tokens` is usage-bearing — `usage_status` must be decided AFTER
+        the input+output fallback, or the call inflates the anomaly counter
+        and gets zeroed out of `prompt_efficiency`'s effective-call
+        denominators."""
+        telemetry.record(
+            source="implementer",
+            tool="claude",
+            model="opus",
+            issue_number=7,
+            pr_number=203,
+            session_id="sess-io",
+            prompt_chars=1000,
+            transcript_chars=500,
+            duration_seconds=1.0,
+            success=True,
+            stats={"input_tokens": 123, "output_tokens": 77},
+        )
+
+        row = json.loads(telemetry._config.cost_inferences_path.read_text().strip())
+        assert row["token_source"] == "actual"
+        assert row["usage_status"] == "available"
+        assert row["total_tokens"] == 200
+
+        rollup = json.loads(telemetry._config.pr_stats_path.read_text())
+        assert rollup["prs"]["203"]["usage_unavailable_calls"] == 0
+        assert rollup["prs"]["203"]["actual_usage_calls"] == 1
+
+    def test_accumulator_mirrors_unavailable_cost(self):
+        """#11152 review find: cost recorded by usage-unavailable calls needs
+        its own accumulator so `prompt_efficiency` can subtract it from rate
+        numerators (same-population math)."""
+        from prompt_telemetry import PromptTelemetry
+
+        target: dict[str, object] = {}
+        PromptTelemetry._accumulate_counter(
+            target,
+            {
+                "usage_status": "unavailable",
+                "token_source": "estimated",
+                "estimated_cost_usd": 0.002,
+                "timestamp": "t1",
+            },
+        )
+        assert target["estimated_cost_microusd"] == 2000
+        assert target["unavailable_est_cost_microusd"] == 2000
+
+        PromptTelemetry._accumulate_counter(
+            target,
+            {
+                "usage_status": "available",
+                "token_source": "actual",
+                "estimated_cost_usd": 0.01,
+                "timestamp": "t2",
+            },
+        )
+        assert target["estimated_cost_microusd"] == 12000
+        # Usage-bearing cost never lands in the unavailable accumulator.
+        assert target["unavailable_est_cost_microusd"] == 2000
+
     def test_record_marks_usage_unavailable_when_backend_reports_none(self, telemetry):
         telemetry.record(
             source="triage",

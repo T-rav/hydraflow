@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11116
 source_phase: plan
 created_at: 2026-08-14T10:10:56.158163+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # SkillEfficiencyRow carries baseline endpoint for self-contained filings

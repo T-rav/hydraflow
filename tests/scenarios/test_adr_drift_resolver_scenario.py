@@ -96,7 +96,7 @@ class TestAdrDriftResolver:
 
         issue = world.github.issue(issue_number)
         assert issue.state == "closed"
-        assert "hydraflow-hitl-escalation" not in issue.labels
+        assert "hitl-escalation" not in issue.labels
         assert "hydraflow-adr-drift-stuck" not in issue.labels
         assert any("CONSISTENT" in c.body for c in issue.comments)
         assert any("comment wording change" in c.body for c in issue.comments)
@@ -154,7 +154,7 @@ class TestAdrDriftResolver:
         assert issue.state == "open"
         assert "hydraflow-find" in issue.labels
         assert "hydraflow-adr-drift" not in issue.labels
-        assert "hydraflow-hitl-escalation" not in issue.labels
+        assert "hitl-escalation" not in issue.labels
         assert "Decision" in issue.body
         assert "made them async" in issue.body
         assert any("real_drift" in c.body for c in issue.comments)
@@ -220,5 +220,5 @@ class TestAdrDriftResolver:
 
         issue = world.github.issue(issue_number)
         assert issue.state == "closed"
-        assert "hydraflow-hitl-escalation" not in issue.labels
+        assert "hitl-escalation" not in issue.labels
         assert any("CONSISTENT for all batched ADRs" in c.body for c in issue.comments)

@@ -1,0 +1,15 @@
+---
+id: 1942
+topic: patterns
+source_issue: 11136
+source_phase: plan
+created_at: 2026-08-14T13:02:38.765870+00:00
+status: active
+corroborations: 1
+---
+
+# `_hard_full_suite_reason` ordering precedes .py name-mapping
+
+In `scripts/impacted_tests.py`, `_hard_full_suite_reason` runs before the `.py`-based `test_<stem>` mapping. This ordering is load-bearing: `.codex/skills/**/*.py` correctly hits the agent-asset full-suite trigger rather than falling through to `scripts/`-style name mapping. Do not reorder these branches.
+
+**Why:** Reordering would cause `.py` files under agent-asset roots to silently bypass the full-suite rule and map to nothing.

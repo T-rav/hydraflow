@@ -151,6 +151,16 @@ class TestRegressionHits:
         hits = regression_hits(repo, issue_ref=123, shas=())
         assert any("test_bug_123.py" in h for h in hits)
 
+    def test_hits_are_repo_relative_without_rev_prefix(self, tmp_path: Path) -> None:
+        """#11138: `git grep -l ... HEAD` prefixes every path with `HEAD:`.
+        The adapter strips it so ledger resolution notes and HITL close
+        comments record openable repo-relative paths."""
+        repo = _init_repo(tmp_path)
+        _commit_regression(repo, 123)
+        hits = regression_hits(repo, issue_ref=123, shas=())
+        assert hits and all(not h.startswith("HEAD:") for h in hits)
+        assert hits[0].startswith("tests/regressions/")
+
     def test_no_hit_returns_empty(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
         _commit_regression(repo, 123)
@@ -260,9 +270,12 @@ class TestEscapeAutoDiagnoser:
 
         first = await diagnoser.diagnose(record)
         assert first is EscapeDiagnosis.DISMISSED
-        # Second pass: the sidecar terminal id short-circuits — no second row.
+        # Second pass: the sidecar terminal id short-circuits with the
+        # RECORDED verdict (#11111) — returning INCONCLUSIVE here made the
+        # caller re-file the row to a human, so a dismissal bought exactly
+        # one tick of quiet. No second sidecar row either way.
         second = await diagnoser.diagnose(record)
-        assert second is EscapeDiagnosis.INCONCLUSIVE
+        assert second is EscapeDiagnosis.DISMISSED
         diag = EscapeDiagnosisLedger(tmp_path / "escape_diagnoses.jsonl").read_all()
         assert len(diag) == 1
 
@@ -277,3 +290,36 @@ class TestEscapeDiagnosisLedger:
         assert row.diagnosis == "dismissed"
         assert row.reason == "why"
         assert row.decided_at
+
+
+class TestSidecarVerdictLookup:
+    """#11111/#11148: the sidecar answers 'what was decided' — verdict_for
+    re-reports the recorded terminal verdict; dismissal_reasons feeds the
+    stranded-HITL reconcile pass."""
+
+    def test_verdict_for_returns_recorded_verdict(self, tmp_path: Path) -> None:
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        assert ledger.verdict_for("bug-issue:a") is None
+        ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.DISMISSED, "docs-only")
+        verdict = ledger.verdict_for("bug-issue:a")
+        assert verdict is not None
+        assert verdict[0] is EscapeDiagnosis.DISMISSED
+        assert verdict[1] == "docs-only"
+
+    def test_verdict_for_last_row_wins(self, tmp_path: Path) -> None:
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.DISMISSED, "first")
+        ledger.append_diagnosis(
+            "bug-issue:a", EscapeDiagnosis.RESOLVED_ENCODED, "second"
+        )
+        verdict = ledger.verdict_for("bug-issue:a")
+        assert verdict is not None
+        assert verdict[0] is EscapeDiagnosis.RESOLVED_ENCODED
+
+    def test_dismissal_reasons_maps_only_dismissed(self, tmp_path: Path) -> None:
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.DISMISSED, "fp")
+        ledger.append_diagnosis(
+            "bug-issue:b", EscapeDiagnosis.RESOLVED_ENCODED, "encoded"
+        )
+        assert ledger.dismissal_reasons() == {"bug-issue:a": "fp"}

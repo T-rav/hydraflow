@@ -32,7 +32,9 @@ from exception_classify import reraise_on_credit_or_bug
 from models import Severity, WorkCycleResult
 from subprocess_util import SubprocessTimeoutError, run_subprocess_result
 from trust_fleet_anomaly_detectors import (
+    HITL_QUEUE_LABEL,
     REPAIRED_SUCCESS_KEYS,
+    TRUST_LOOP_ANOMALY_LABEL,
     TRUST_LOOP_WORKERS,
     detect_cost_spike,
     detect_hitl_composition,
@@ -71,6 +73,8 @@ Response JSON:
       "last_tick_at": "<iso8601>" | null, # from worker_heartbeats
       "ticks_total": <int>,               # window-scoped count from event log
       "ticks_errored": <int>,             # status=="error" in the window
+      "ticks_warmup": <int>,              # details.status warmup/warmup_stalled (#11121)
+      "warmup_stalled": <bool>,           # loop self-reported it cannot leave warmup
       "issues_filed_total": <int>,        # sum of details.filed over the window
       "issues_closed_total": <int>,       # sum from `EventType.ISSUE_CLOSED` events (best-effort; 0 if absent)
       "issues_open_escalated": <int>,     # currently-open issues the loop filed with hitl-escalation label
@@ -147,7 +151,9 @@ _ANOMALY_KINDS: tuple[str, ...] = (
 # reconcile pass and by every producer loop (auto_agent_preflight, diagnostic,
 # corpus_learning, …) when escalating to a human. The HITL-composition signal
 # (#10310) scans open issues carrying this label.
-_HITL_QUEUE_LABEL = "hitl-escalation"
+# #11139: canonical labels live in trust_fleet_anomaly_detectors — one
+# home for writer and every reader.
+_HITL_QUEUE_LABEL = HITL_QUEUE_LABEL
 
 # Synthetic worker name for the fleet-wide HITL-composition anomaly. The signal
 # is not attributable to a single loop, so it reuses the per-worker escalation
@@ -194,6 +200,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
         event_bus: EventBus,
         deps: LoopDeps,
         bg_workers: BGWorkerManager | None = None,
+        boot_time: datetime | None = None,
     ) -> None:
         super().__init__(
             worker_name="trust_fleet_sanity",
@@ -209,6 +216,18 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
         self._pr = pr_manager
         self._dedup = dedup
         self._source_bus = event_bus  # separate handle for load_events_since
+        # #11119 boot grace: loops are constructed at orchestrator boot, so
+        # construction time approximates session start. Heartbeats persist
+        # across downtime; staleness must never be judged against a clock
+        # that ran while the factory was off. ``boot_time`` is injectable
+        # (the codebase's now-param convention) so tests exercise post-grace
+        # behavior without patching clocks.
+        self._boot_time = boot_time if boot_time is not None else datetime.now(UTC)
+        # #11119 confirm-before-escalate: a staleness breach must survive TWO
+        # consecutive ticks before it files. In-memory by design — a restart
+        # forgets pending breaches and re-arms the one-tick delay, the safe
+        # direction (delays escalation, never spams it). Keyed by worker.
+        self._staleness_pending: set[str] = set()
 
     def set_bg_workers(self, bg_workers: BGWorkerManager) -> None:
         """Late-binding for the post-ctor BGWorkerManager wiring."""
@@ -320,9 +339,24 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
                     is_enabled=is_enabled,
                     now=now,
                     max_cycle_s=max_cycle_s,
+                    boot_time=self._boot_time,
                 )
+                # #11119: a staleness breach escalates only when it survives
+                # two consecutive ticks — the idle test showed single-tick
+                # staleness observations self-clearing one tick later, after
+                # the decomposer had already grown each into an epic.
                 if breached:
-                    per_worker_breaches.append(("staleness", details))
+                    if worker in self._staleness_pending:
+                        per_worker_breaches.append(("staleness", details))
+                    else:
+                        self._staleness_pending.add(worker)
+                        logger.info(
+                            "staleness pending confirmation for %s "
+                            "(escalates if still stale next tick)",
+                            worker,
+                        )
+                else:
+                    self._staleness_pending.discard(worker)
 
                 breached, details = detect_cost_spike(
                     worker,
@@ -569,7 +603,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
         return await self._pr.create_issue(
             title,
             body,
-            ["hitl-escalation", "trust-loop-anomaly"],
+            [_HITL_QUEUE_LABEL, TRUST_LOOP_ANOMALY_LABEL],
         )
 
     async def _reconcile_closed_escalations(self) -> None:
@@ -592,7 +626,7 @@ class TrustFleetSanityLoop(BaseBackgroundLoop):
             "--label",
             "hitl-escalation",
             "--label",
-            "trust-loop-anomaly",
+            TRUST_LOOP_ANOMALY_LABEL,
             "--author",
             "@me",
             "--limit",

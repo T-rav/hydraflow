@@ -171,6 +171,37 @@ def test_phase_scripts_do_not_break_legacy_script_methods() -> None:
     assert result.success is True
 
 
+def test_script_plan_credit_exhaustion_fires_once_then_recovers() -> None:
+    """#11088: exercise `script_plan_credit_exhaustion` (#10570) so it is
+    part of the working contract. The FIRST plan call for the armed issue
+    raises the AUTHORITATIVE CreditExhaustedError (the air-gapped stand-in
+    for a weekly-limit CLI termination); subsequent calls plan normally —
+    the resumed loop's recovery path."""
+    import asyncio
+    from datetime import UTC, datetime
+
+    from mockworld.fakes.fake_llm import FakeLLM
+    from subprocess_util import CreditExhaustedError
+    from tests.conftest import PlanResultFactory, TaskFactory
+
+    llm = FakeLLM()
+    resume = datetime(2026, 1, 2, 3, 0, tzinfo=UTC)  # equality pin, never vs now()
+    llm.script_plan_credit_exhaustion(
+        7, message="You've hit your weekly limit", resume_at=resume
+    )
+    llm.script_plan(7, [PlanResultFactory.create(issue_number=7, success=True)])
+
+    task = TaskFactory.create(id=7)
+    with pytest.raises(CreditExhaustedError) as excinfo:
+        asyncio.run(llm.planners.plan(task))
+    assert excinfo.value.resume_at == resume
+    assert excinfo.value.authoritative is True
+
+    # One-shot: the signal never re-fires; the scripted plan proceeds.
+    result = asyncio.run(llm.planners.plan(task))
+    assert result.success is True
+
+
 def test_fake_llm_is_fake_adapter_marker_preserved() -> None:
     """Sentinel-check sites read ``_is_fake_adapter`` to disambiguate from mocks."""
     from mockworld.fakes.fake_llm import FakeLLM

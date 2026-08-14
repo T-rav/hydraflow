@@ -203,7 +203,15 @@ def _grep(
         args += ["HEAD", "--", pathspec]
         out = _run_git(repo_root, args)
         if out:
-            files.extend(line.strip() for line in out.split("\n") if line.strip())
+            # `git grep -l <rev>` prefixes every path with `<rev>:`. Strip it
+            # at this adapter boundary (#11138) — the paths flow verbatim into
+            # ledger resolution notes and HITL close comments, which must name
+            # openable repo-relative files, not `HEAD:tests/...` strings.
+            files.extend(
+                line.strip().removeprefix("HEAD:")
+                for line in out.split("\n")
+                if line.strip()
+            )
     # Dedup, preserve order.
     seen: set[str] = set()
     ordered: list[str] = []
@@ -284,6 +292,34 @@ class EscapeDiagnosisLedger(IdentifiedJsonlLedger[EscapeDiagnosisRecord]):
         """Escape ids that already carry a terminal (resolved/dismissed) verdict."""
         return set(self.existing_ids())
 
+    def verdict_for(self, escape_id: str) -> tuple[EscapeDiagnosis, str] | None:
+        """The recorded terminal (verdict, reason) for *escape_id*, last row
+        wins; ``None`` when the id has no terminal sidecar row. Unknown
+        diagnosis strings (a future enum value read by an old build) map to
+        ``None`` — the caller treats the row as undiagnosed rather than
+        guessing (#11111)."""
+        found: tuple[EscapeDiagnosis, str] | None = None
+        for row in self.read_all():
+            if row.escape_id != escape_id:
+                continue
+            try:
+                found = (EscapeDiagnosis(row.diagnosis), row.reason)
+            except ValueError:
+                found = None
+        return found
+
+    def dismissal_reasons(self) -> dict[str, str]:
+        """escape_id → recorded reason for every DISMISSED verdict (last row
+        wins). The reconcile pass uses this to close stranded HITL issues
+        with the dismissal explanation (#11148)."""
+        out: dict[str, str] = {}
+        for row in self.read_all():
+            if row.diagnosis == EscapeDiagnosis.DISMISSED.value:
+                out[row.escape_id] = row.reason
+            elif row.escape_id in out:
+                out.pop(row.escape_id)
+        return out
+
     def append_diagnosis(
         self, escape_id: str, diagnosis: EscapeDiagnosis, reason: str
     ) -> EscapeDiagnosisRecord:
@@ -328,10 +364,13 @@ class EscapeAutoDiagnoser:
         positive never inflates the confirmed-escape count); ``INCONCLUSIVE``
         records nothing and the caller files the human surface. A row already
         carrying a terminal sidecar verdict is skipped (re-returned as its
-        recorded verdict) so it is never re-acted on.
+        recorded verdict) so it is never re-acted on — returning INCONCLUSIVE
+        here was #11111: a dismissal bought exactly one tick of quiet before
+        the row was re-filed to a human.
         """
-        if record.id in self._diagnoses.terminal_ids():
-            return EscapeDiagnosis.INCONCLUSIVE
+        recorded = self._diagnoses.verdict_for(record.id)
+        if recorded is not None:
+            return recorded[0]
         evidence = await self._gather(record)
         verdict = classify_diagnosis(evidence)
         if verdict is EscapeDiagnosis.RESOLVED_ENCODED:

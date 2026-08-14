@@ -483,16 +483,27 @@ stamp:
 # #9617). Parity fix: quality runs the same suite through the same entry point
 # CI uses (`npm test` -> src/ui/scripts/run-vitest.cjs; NOT raw `npx vitest`,
 # which skips the wrapper's jsdom patch + encoding shim). Node is an optional
-# local tool, so machines without node or an installed src/ui/node_modules
-# degrade LOUDLY-but-green: the stage prints a SKIPPED warning instead of
-# failing quality — CI's Dashboard Build job still gates the merge either way.
+# local tool — but the degrade path is CONDITIONAL (#11090): when this
+# checkout's src/ui differs from origin/staging, missing node/node_modules
+# FAILS the stage (a silent skip there is a false green that merges untested
+# UI); when src/ui is untouched it degrades loudly-but-green with a SKIPPED
+# warning — CI's Dashboard Build job still gates the merge either way. Node
+# discovery also falls back to the newest nvm-installed node (#11113), since
+# non-interactive make shells don't source nvm's PATH setup.
 # Single definition shared by `make test-ui` and the quality parallel block.
 # Kept inline (no $(MAKE) recursion) so `make -n quality` stays a pure dry-run:
 # recipe lines containing $(MAKE) execute even under -n.
-UI_TEST_CMD = if command -v node >/dev/null 2>&1 && [ -d $(HYDRAFLOW_DIR)src/ui/node_modules ]; then \
-		(cd $(HYDRAFLOW_DIR)src/ui && node ./scripts/run-vitest.cjs run) && echo "[ui-tests OK]"; \
+UI_TEST_CMD = NODE_BIN="$$(command -v node 2>/dev/null)"; \
+	if [ -z "$$NODE_BIN" ]; then NODE_BIN="$$(ls -t "$$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | head -1)"; fi; \
+	if [ -n "$$NODE_BIN" ] && [ -d $(HYDRAFLOW_DIR)src/ui/node_modules ]; then \
+		(cd $(HYDRAFLOW_DIR)src/ui && PATH="$$(dirname "$$NODE_BIN"):$$PATH" node ./scripts/run-vitest.cjs run) && echo "[ui-tests OK]"; \
+	elif [ -n "$$(git -C $(HYDRAFLOW_DIR). status --porcelain -- src/ui 2>/dev/null)" ] \
+		|| { git -C $(HYDRAFLOW_DIR). rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+		&& ! git -C $(HYDRAFLOW_DIR). diff --quiet "$$(git -C $(HYDRAFLOW_DIR). merge-base HEAD origin/staging 2>/dev/null || echo HEAD)" -- src/ui 2>/dev/null; }; then \
+		echo "$(RED)[ui-tests FAILED] src/ui differs from origin/staging but node or src/ui/node_modules is missing — silently skipping would be the \#11090 false green. Install Node 20.19+/22.12+ (nvm counts, \#11113) then run npm ci in src/ui.$(RESET)"; \
+		exit 1; \
 	else \
-		echo "$(YELLOW)[ui-tests SKIPPED] node or src/ui/node_modules missing — UI vitest suite NOT run locally; CI Dashboard Build still runs it. Fix: install Node 20.19+/22.12+ then run npm ci in src/ui$(RESET)"; \
+		echo "$(YELLOW)[ui-tests SKIPPED] node or src/ui/node_modules missing and src/ui untouched vs origin/staging — UI vitest suite NOT run locally; CI Dashboard Build still runs it. Fix: install Node 20.19+/22.12+ then run npm ci in src/ui$(RESET)"; \
 	fi
 
 test-ui:

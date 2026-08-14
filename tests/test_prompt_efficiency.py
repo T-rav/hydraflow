@@ -17,8 +17,11 @@ marginal-window math this exercises.
 
 from __future__ import annotations
 
+import pytest
+
 from prompt_efficiency import (
     INEFFICIENCY_THRESHOLD,
+    MIN_WINDOW_CALLS,
     SkillEfficiencyRow,
     compute_skill_efficiency,
     format_scorecard,
@@ -51,8 +54,12 @@ def test_row_math_is_derived_correctly() -> None:
     assert row.est_cost_usd == 10.0
     assert row.anomalies == 2
     # No baseline => no window to measure => falls back to cumulative average.
-    assert row.cost_per_call == 1.0
+    # #11117: the denominator counts only usage-bearing calls (10 - 2 = 8) —
+    # zero-usage calls record cost 0 and would deflate the rate.
+    assert row.cost_per_call == 1.25
     assert row.trend_vs_baseline is None
+    assert row.window_calls is None
+    assert row.zero_usage_window is False
 
 
 def test_trend_vs_baseline_uses_marginal_window_not_lifetime_cumulative() -> None:
@@ -127,6 +134,101 @@ def test_zero_calls_does_not_raise_zero_division() -> None:
     rows = compute_skill_efficiency({"diff-sanity": _totals(0, 0)}, baseline=None)
     assert rows[0].calls == 0
     assert rows[0].cost_per_call == 0.0
+
+
+def test_under_sampled_window_yields_no_trend() -> None:
+    """#11133/#11140: a window below MIN_WINDOW_CALLS is variance, not
+    evidence — the 2026-08-14 idle run filed 'regressions' (and reordered
+    the refine queue) off 1-3 call windows. Even a 10x per-call spike over
+    2 calls must not produce a window rate or a trend."""
+    assert MIN_WINDOW_CALLS > 2
+    rows = compute_skill_efficiency(
+        {"diff-sanity": _totals(1_200_000, 102)},  # +2 calls at $0.10 each
+        baseline={"diff-sanity": _totals(1_000_000, 100)},  # $0.01/call
+    )
+    row = rows[0]
+    assert row.trend_vs_baseline is None
+    assert row.window_calls == 2
+    # Falls back to the cumulative average instead of the 2-call rate.
+    assert row.cost_per_call == 1.2 / 102
+
+
+def test_window_at_floor_yields_trend() -> None:
+    baseline = {"diff-sanity": _totals(1_000_000, 100)}  # $0.01/call
+    current = {
+        "diff-sanity": _totals(
+            1_000_000 + MIN_WINDOW_CALLS * 100_000, 100 + MIN_WINDOW_CALLS
+        )
+    }  # floor-sized window at $0.10/call
+    rows = compute_skill_efficiency(current, baseline=baseline)
+    row = rows[0]
+    assert row.window_calls == MIN_WINDOW_CALLS
+    assert row.cost_per_call == pytest.approx(0.1)
+    assert row.trend_vs_baseline == pytest.approx(9.0)
+
+
+def test_zero_usage_calls_excluded_from_denominators() -> None:
+    """#11117: zero-usage calls (cost 0, still counted as calls) must not
+    deflate cost-per-call. Baseline: 563 zero-usage calls + 37 real calls
+    at ~$0.054 — the raw-denominator rate would be ~$0.0033/call, so 10 new
+    real calls at the UNCHANGED $0.054 rate would read as a huge fake
+    regression. Effective denominators keep the trend flat."""
+    baseline = {
+        "term_proposer": _totals(2_000_000, 600, anomalies=563)  # $2 / 37 real
+    }
+    current = {
+        "term_proposer": _totals(2_540_000, 610, anomalies=563)  # +$0.54 / +10 real
+    }
+    rows = compute_skill_efficiency(current, baseline=baseline)
+    row = rows[0]
+    assert row.base_cost_per_call is not None
+    assert abs(row.base_cost_per_call - 2.0 / 37) < 1e-9
+    assert row.window_calls == 10
+    assert row.cost_per_call == pytest.approx(0.054)
+    assert row.trend_vs_baseline is not None
+    assert abs(row.trend_vs_baseline) < INEFFICIENCY_THRESHOLD
+
+
+def test_estimated_cost_of_zero_usage_calls_excluded_from_numerator() -> None:
+    """Review find on #11117: small-prompt zero-usage calls still record
+    char-ESTIMATED cost. Excluding them from the denominator but not the
+    numerator would INFLATE the window rate — the mirror image of the
+    deflation FP. `unavailable_est_cost_microusd` keeps the numerator on
+    the same population."""
+    baseline = {"diff-sanity": _totals(1_000_000, 100)}  # $0.01/call, all real
+    # Window: +5 real calls at $0.01 ($0.05) plus 20 zero-usage calls that
+    # each picked up $0.002 char-estimated cost ($0.04). A full-cost
+    # numerator would read 0.09/5 = $0.018/call — a fake +80% trend.
+    current_totals = _totals(1_090_000, 125, anomalies=20)
+    current_totals["unavailable_est_cost_microusd"] = 40_000
+    row = compute_skill_efficiency({"diff-sanity": current_totals}, baseline=baseline)[
+        0
+    ]
+    assert row.window_calls == 5
+    assert row.cost_per_call == pytest.approx(0.01)
+    assert row.trend_vs_baseline == pytest.approx(0.0, abs=1e-9)
+
+
+def test_all_zero_usage_window_sets_flag_not_rate() -> None:
+    """#11117: raw window activity whose every call is zero-usage is a
+    telemetry blind spot, not a measurable rate."""
+    rows = compute_skill_efficiency(
+        {"term_proposer": _totals(1_000_000, 120, anomalies=30)},
+        baseline={"term_proposer": _totals(1_000_000, 100, anomalies=10)},
+    )
+    row = rows[0]
+    assert row.zero_usage_window is True
+    assert row.window_calls == 0
+    assert row.trend_vs_baseline is None
+
+
+def test_no_window_activity_does_not_set_zero_usage_flag() -> None:
+    rows = compute_skill_efficiency(
+        {"diff-sanity": _totals(1_000_000, 100, anomalies=10)},
+        baseline={"diff-sanity": _totals(1_000_000, 100, anomalies=10)},
+    )
+    assert rows[0].zero_usage_window is False
+    assert rows[0].window_calls is None
 
 
 def test_pick_refine_order_prefers_inefficient_skill() -> None:

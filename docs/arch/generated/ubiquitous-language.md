@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_83 terms across 3 bounded contexts._
+_84 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -143,6 +143,18 @@ Caretaker loop that watches CI status on the main branch and files a `hydraflow-
 - At most one open `hydraflow-ci-failure` issue exists at any time; the loop tracks `_open_issue` to enforce this.
 - On startup the loop rehydrates from existing `hydraflow-ci-failure` issues before its first check — a clean restart never duplicates a pre-existing issue.
 - Kill-switch is via `enabled_cb("ci_monitor")` and `config.ci_monitor_loop_enabled` (ADR-0049).
+
+## CircuitBreaker
+
+**Kind:** `control_role` · **Context:** `shared-kernel` · **Anchor:** `src/circuit_breaker.py:CircuitBreaker` · **Confidence:** `accepted`
+**Aliases:** `circuit breaker`, `breaker`
+
+Three-state (CLOSED → OPEN → HALF_OPEN → CLOSED) resilience primitive that protects against cascading failures by opening after `max_failures` consecutive failures and probing HALF_OPEN after `reset_timeout` seconds. Re-exported from `signal_control.controllers` alongside `PidController`, `AimdController`, and `RetryController` as a peer in the control vocabulary, and used by subprocess execution to gate calls that may raise `CreditExhaustedError`.
+
+**Invariants:**
+- After `max_failures` consecutive failures, state transitions to OPEN and `allow_request()` returns False.
+- State transitions OPEN → HALF_OPEN only after `reset_timeout` seconds have elapsed since the last failure.
+- A success recorded in HALF_OPEN or CLOSED zeroes the failure count and returns state to CLOSED.
 
 ## ContractRefreshLoop
 

@@ -30,7 +30,10 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from trust_fleet_anomaly_detectors import REPAIRED_SUCCESS_KEYS
+from trust_fleet_anomaly_detectors import (
+    REPAIRED_SUCCESS_KEYS,
+    TRUST_LOOP_ANOMALY_LABEL,
+)
 
 if TYPE_CHECKING:
     from bg_worker_manager import BGWorkerManager
@@ -83,7 +86,7 @@ def _build_anomaly_reader(
             "--label",
             "hitl-escalation",
             "--label",
-            "trust-loop-anomaly",
+            TRUST_LOOP_ANOMALY_LABEL,
             "--limit",
             "200",
             "--json",
@@ -180,6 +183,8 @@ def _tally_events(events: list[Any]) -> dict[str, dict[str, Any]]:
             {
                 "ticks_total": 0,
                 "ticks_errored": 0,
+                "ticks_warmup": 0,
+                "warmup_stalled": False,
                 "issues_filed_total": 0,
                 "issues_closed_total": 0,
                 "issues_open_escalated": 0,
@@ -194,6 +199,16 @@ def _tally_events(events: list[Any]) -> dict[str, dict[str, Any]]:
             row["ticks_errored"] += 1
         details = data.get("details") or {}
         if isinstance(details, dict):
+            # #11121: a completed cycle always carries payload status "ok" —
+            # non-productive ticks only show in the details status. Count
+            # warmup ticks separately, and flag a loop whose own detail
+            # status says "warmup_stalled" so the roll-up reads degraded
+            # instead of 100% healthy.
+            detail_status = str(details.get("status", "")).lower()
+            if detail_status in ("warmup", "warmup_stalled"):
+                row["ticks_warmup"] += 1
+                if detail_status == "warmup_stalled":
+                    row["warmup_stalled"] = True
             row["issues_filed_total"] += int(details.get("filed", 0) or 0)
             row["issues_closed_total"] += int(details.get("closed", 0) or 0)
             row["issues_open_escalated"] += int(details.get("escalated", 0) or 0)
@@ -263,6 +278,8 @@ def _empty_loop_row() -> dict[str, Any]:
     return {
         "ticks_total": 0,
         "ticks_errored": 0,
+        "ticks_warmup": 0,
+        "warmup_stalled": False,
         "issues_filed_total": 0,
         "issues_closed_total": 0,
         "issues_open_escalated": 0,

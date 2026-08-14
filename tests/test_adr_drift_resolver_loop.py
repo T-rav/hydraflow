@@ -241,7 +241,7 @@ class TestClassificationRouting:
         pr.close_issue.assert_not_called()
         pr.update_issue_body.assert_not_called()
         pr.remove_label.assert_not_called()
-        pr.add_labels.assert_awaited_once_with(42, ["hydraflow-hitl-escalation"])
+        pr.add_labels.assert_awaited_once_with(42, ["hitl-escalation"])
         pr.post_comment.assert_awaited_once()
 
 

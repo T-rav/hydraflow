@@ -27,6 +27,10 @@ from phase_utils import (
 from state import StateTracker
 from task_source import TaskTransitioner
 from triage import TriageRunner
+from trust_fleet_anomaly_detectors import (
+    HITL_QUEUE_LABEL,
+    TRUST_LOOP_ANOMALY_LABEL,
+)
 
 if TYPE_CHECKING:
     from bug_reproducer import BugReproducer
@@ -745,6 +749,22 @@ class TriagePhase:
             or result.complexity_score
             < self._config.epic_decompose_complexity_threshold
         ):
+            return False
+
+        # Escalation-class guard (#11119): an anomaly escalation is a SIGNAL
+        # about a possibly-transient condition ("the anomaly IS the
+        # escalation", trust-fleet spec §12.1) — never a project to plan.
+        # The 2026-08-14 idle test showed cold-boot staleness observations
+        # decomposed into epics + children before the anomaly self-cleared
+        # one tick later: one boot artifact became four issues. Escalation
+        # labels opt out of auto-decomposition entirely.
+        escalation_labels = {TRUST_LOOP_ANOMALY_LABEL, HITL_QUEUE_LABEL}
+        if escalation_labels & set(issue.tags):
+            logger.info(
+                "Issue #%d carries an escalation label — anomaly escalations "
+                "are signals, not projects; skipping auto-decomposition",
+                issue.id,
+            )
             return False
 
         # Intake-vector guard (ADR-0105 §4): an issue stamped

@@ -1771,9 +1771,11 @@ def _build_trust_fleet_sanity(ports: dict[str, Any], config: Any, deps: Any) -> 
 
     The loop reads heartbeats/enabled state from ``StateTracker`` and
     ``BGWorkerManager``; tests may pre-seed mocks via ``trust_fleet_sanity_state``
-    and ``trust_fleet_sanity_bg_workers`` ports. ``bg_workers`` is injected
-    post-construction since the real orchestrator builds BGWorkerManager
-    from the loop registry (chicken-and-egg).
+    and ``trust_fleet_sanity_bg_workers`` ports (plus an optional
+    ``trust_fleet_sanity_boot_time`` to exercise post-boot-grace behavior,
+    #11119). ``bg_workers`` is injected post-construction since the real
+    orchestrator builds BGWorkerManager from the loop registry
+    (chicken-and-egg).
     """
     from trust_fleet_sanity_loop import TrustFleetSanityLoop  # noqa: PLC0415
 
@@ -1802,6 +1804,7 @@ def _build_trust_fleet_sanity(ports: dict[str, Any], config: Any, deps: Any) -> 
         dedup=dedup,
         event_bus=event_bus,
         deps=deps,
+        boot_time=ports.get("trust_fleet_sanity_boot_time"),
     )
 
     bg_workers = ports.get("trust_fleet_sanity_bg_workers")
