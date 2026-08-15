@@ -5,7 +5,7 @@ source_issue: 11167
 source_phase: plan
 created_at: 2026-08-14T19:25:35.935724+00:00
 status: active
-corroborations: 1
+corroborations: 2
 ---
 
 # Regression tests assert on filed issues via real loop ticks, not internals

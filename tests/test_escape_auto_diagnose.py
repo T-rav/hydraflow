@@ -16,6 +16,7 @@ from escape.auto_diagnose import (
     EscapeAutoDiagnoser,
     EscapeDiagnosis,
     EscapeDiagnosisLedger,
+    EscapeDiagnosisRecord,
     classify_diagnosis,
     regression_hits,
 )
@@ -257,6 +258,15 @@ class TestEscapeAutoDiagnoser:
         assert verdict is EscapeDiagnosis.INCONCLUSIVE
         rows = EscapeLedger(ledger_path).read_all()
         assert len(rows) == 1 and rows[0].attribution_confidence == "low"
+        # #11163: terminal_ids() now excludes INCONCLUSIVE from the terminal
+        # set (not just unparseable rows) — safe only because diagnose()
+        # never writes an INCONCLUSIVE row to the sidecar in the first place.
+        # If a future writer ever did, that escape would flip from
+        # permanently suppressed (pre-#11163: any row counted as terminal)
+        # to re-eligible every tick, reintroducing the #11111 noise class.
+        assert (
+            EscapeDiagnosisLedger(tmp_path / "escape_diagnoses.jsonl").read_all() == []
+        )
 
     async def test_resolution_note_is_reason_neutral(self, tmp_path: Path) -> None:
         # #11161: the note text used to name "the low-confidence surface"
@@ -312,6 +322,100 @@ class TestEscapeDiagnosisLedger:
         assert row.reason == "why"
         assert row.decided_at
 
+    def test_terminal_ids_includes_resolved_encoded(self, tmp_path: Path) -> None:
+        # Both terminal verdicts must gate selection, not just DISMISSED.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append_diagnosis(
+            "bug-issue:a", EscapeDiagnosis.RESOLVED_ENCODED, "encoded"
+        )
+        assert ledger.terminal_ids() == {"bug-issue:a"}
+
+    def test_terminal_ids_excludes_inconclusive(self, tmp_path: Path) -> None:
+        # INCONCLUSIVE is a valid enum member but the fail-safe default, not
+        # a terminal verdict — it must stay eligible for re-diagnosis and
+        # surfacing rather than being folded into the terminal set.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:a",
+                diagnosis=EscapeDiagnosis.INCONCLUSIVE.value,
+                reason="not enough evidence",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        assert ledger.terminal_ids() == set()
+
+    def test_terminal_ids_excludes_unparseable_diagnosis(self, tmp_path: Path) -> None:
+        # #11163: a sidecar row whose diagnosis string doesn't parse into the
+        # current EscapeDiagnosis enum (a future enum value from a newer
+        # build, or corruption) must NOT be terminal. verdict_for() already
+        # treats this as undiagnosed ("re-diagnose rather than guess");
+        # terminal_ids() has to agree, or the id is silently and permanently
+        # hidden from every human/aging surface without ever being
+        # re-diagnosed — existing_ids() counted any row as terminal
+        # regardless of whether the diagnosis field parsed.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:a",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        assert ledger.terminal_ids() == set()
+
+    def test_unreadable_ids_surfaces_unparseable_rows(self, tmp_path: Path) -> None:
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        assert ledger.unreadable_ids() == set()
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:a",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        assert ledger.unreadable_ids() == {"bug-issue:a"}
+
+    def test_unreadable_ids_cleared_by_a_later_parseable_row(
+        self, tmp_path: Path
+    ) -> None:
+        # Last-row-wins: a re-diagnosis that lands a valid verdict after an
+        # unparseable row must clear the id from unreadable_ids().
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:a",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.DISMISSED, "resolved")
+        assert ledger.unreadable_ids() == set()
+        assert ledger.terminal_ids() == {"bug-issue:a"}
+
+    def test_terminal_and_unreadable_ids_matches_the_separate_calls(
+        self, tmp_path: Path
+    ) -> None:
+        # The combined reader exists so EscapeLedgerLoop._surface_findings
+        # reads the sidecar once instead of twice (#11163 review) — it must
+        # agree with calling terminal_ids()/unreadable_ids() separately.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.RESOLVED_ENCODED, "ok")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:b",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        terminal, unreadable = ledger.terminal_and_unreadable_ids()
+        assert terminal == ledger.terminal_ids() == {"bug-issue:a"}
+        assert unreadable == ledger.unreadable_ids() == {"bug-issue:b"}
+
 
 class TestSidecarVerdictLookup:
     """#11111/#11148: the sidecar answers 'what was decided' — verdict_for
@@ -337,6 +441,18 @@ class TestSidecarVerdictLookup:
         assert verdict is not None
         assert verdict[0] is EscapeDiagnosis.RESOLVED_ENCODED
 
+    def test_verdict_for_unparseable_diagnosis_is_none(self, tmp_path: Path) -> None:
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:a",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        assert ledger.verdict_for("bug-issue:a") is None
+
     def test_dismissal_reasons_maps_only_dismissed(self, tmp_path: Path) -> None:
         ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
         ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.DISMISSED, "fp")
@@ -344,3 +460,18 @@ class TestSidecarVerdictLookup:
             "bug-issue:b", EscapeDiagnosis.RESOLVED_ENCODED, "encoded"
         )
         assert ledger.dismissal_reasons() == {"bug-issue:a": "fp"}
+
+    def test_dismissal_reasons_supersession_by_later_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        # Last-row-wins: a DISMISSED row later superseded by a re-diagnosis
+        # (e.g. RESOLVED_ENCODED) must drop out of dismissal_reasons() — the
+        # stranded-HITL reconcile pass must not comment with a stale
+        # dismissal reason for an id that is now resolved.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.DISMISSED, "first")
+        ledger.append_diagnosis(
+            "bug-issue:a", EscapeDiagnosis.RESOLVED_ENCODED, "re-diagnosed"
+        )
+        assert ledger.dismissal_reasons() == {}
+        assert ledger.terminal_ids() == {"bug-issue:a"}
