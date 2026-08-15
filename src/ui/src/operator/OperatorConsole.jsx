@@ -249,7 +249,12 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
   const paused = vitals?.factory?.state === 'paused'
   // An idle repo has no active work and nothing drilled into — show the calm
   // idle screen in the detail area (the hero/vitals stay visible).
-  const idle = activeCount === 0 && item == null && !showOverview
+  // Instruments mode is exempt (#11203 review): it shows GLOBAL diagnostics
+  // (noise floors, loop control register, judge calibration) that matter
+  // precisely when the pipeline is quiet — pre-promotion these panels were
+  // always visible in the rail, so gating them behind idle would regress.
+  const idle =
+    activeCount === 0 && item == null && !showOverview && mode !== 'instruments'
   // Focus mode (a single ItemWorkspace) claims the full detail width (#8): the
   // detail area spans both grid columns. All-active / overview / idle keep the
   // vitals column beside the detail row.
