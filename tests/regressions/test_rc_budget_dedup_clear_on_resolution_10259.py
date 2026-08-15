@@ -28,6 +28,7 @@ bug (1) — cancelled runs polluting the baseline.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -40,22 +41,33 @@ from rc_budget_loop import RCBudgetLoop
 _MEDIAN_KEY = "rc_budget:median"
 
 
+def _iso(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _breaching_runs() -> list[dict[str, object]]:
     """One newest 500s run over six 300s history runs.
 
     median(others)=300 → median fires at 1.5*300=450s (500>=450). recent_max=300
     → spike fires at 2.0*300=600s (500<600 → NOT tripped), so exactly ONE signal
     (``median``) fires and the test tracks a single dedup key.
+
+    Timestamps are relative to ``now`` (not hardcoded calendar dates) so the
+    fixture stays inside ``RCBudgetLoop``'s 30-day rolling window regardless
+    of when the test runs — a hardcoded date ages out of that window and
+    silently drops ``runs_seen`` below ``_MIN_HISTORY``, flipping the loop
+    into ``"warmup"`` instead of ``"ok"``.
     """
+    now = datetime.now(UTC)
     history = [
         {
             "id": 1000 + i,
             "url": f"https://example/run/{1000 + i}",
             "status": "completed",
             "conclusion": "success",
-            "created_at": f"2026-07-{13 + i:02d}T00:00:00Z",
-            "run_started_at": f"2026-07-{13 + i:02d}T00:00:00Z",
-            "updated_at": f"2026-07-{13 + i:02d}T00:05:00Z",  # 300s
+            "created_at": _iso(now - timedelta(days=7 - i)),
+            "run_started_at": _iso(now - timedelta(days=7 - i)),
+            "updated_at": _iso(now - timedelta(days=7 - i) + timedelta(seconds=300)),
         }
         for i in range(1, 7)
     ]
@@ -64,9 +76,9 @@ def _breaching_runs() -> list[dict[str, object]]:
         "url": "https://example/run/2500",
         "status": "completed",
         "conclusion": "success",
-        "created_at": "2026-07-22T00:00:00Z",
-        "run_started_at": "2026-07-22T00:00:00Z",
-        "updated_at": "2026-07-22T00:08:20Z",  # 500s
+        "created_at": _iso(now),
+        "run_started_at": _iso(now),
+        "updated_at": _iso(now + timedelta(seconds=500)),
     }
     return [current, *history]
 
