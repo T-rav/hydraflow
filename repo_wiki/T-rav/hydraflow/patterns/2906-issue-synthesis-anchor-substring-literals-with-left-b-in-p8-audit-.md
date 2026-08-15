@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T11:44:52.402538+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2777
+superseded_by: 3033
 ---
 
 # Anchor substring literals with left \b in p8 audit regexes
