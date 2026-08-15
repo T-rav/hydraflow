@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T20:26:28.552382+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0143
+superseded_by: 0169
 ---
 
 # _follow_reexports reuses _collect_defined_symbols helper

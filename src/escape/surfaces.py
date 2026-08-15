@@ -16,7 +16,7 @@ State supersedes last-row-wins per fingerprint — the same convention as
 across restarts and the reconcile pass files exactly one comment+close per link.
 The dedup fingerprint format is unchanged: the issue number lives here as
 separate metadata, never encoded into the fingerprint (which would break the
-exact-match one-shot budget in ``select_findings_to_surface``, #10503).
+exact-match one-shot budget in ``eligible_findings``, #10503).
 """
 
 from __future__ import annotations

@@ -312,6 +312,40 @@ class TestEscapeLedgerScenario:
         assert "| total recorded escapes | 1 |" in text
         assert "| encoded / unencoded | 1 / 0 |" in text
 
+    async def test_resolved_row_evidence_notes_appear_in_report(
+        self, tmp_path: Path
+    ) -> None:
+        # #11185: the encoding evidence recorded on resolution (the artifact
+        # that closes the escape) must reach the rendered report, not just
+        # the JSONL ledger -- an operator reads the Markdown, not the JSONL.
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base_sha, _head_sha = _seed_revert(repo)
+
+        state = _make_state(base_sha)
+        loop = _build_loop(tmp_path, repo, github, state)
+
+        first = await loop._do_work()
+        assert first["escapes_recorded"] == 1
+
+        from escape.ledger import EscapeLedger
+
+        ledger = EscapeLedger(loop._ledger_path)
+        (record,) = ledger.read_all()
+        resolved = ledger.append_resolution(
+            record.id,
+            encoded_as="regression-test",
+            notes="tests/regressions/test_issue_10367.py",
+        )
+        assert resolved is not None
+
+        loop._render_reports(repo)
+
+        report_path = repo / "docs/arch/generated/escape-ledger.md"
+        text = report_path.read_text(encoding="utf-8")
+        assert "tests/regressions/test_issue_10367.py" in text
+
     async def test_surface_findings_reads_through_the_collapse(
         self, tmp_path: Path
     ) -> None:
@@ -634,6 +668,107 @@ class TestEscapeAutoDiagnoseScenario:
         resolved = EscapeLedger(loop._ledger_path).read_latest()[0]
         assert resolved.attribution_confidence == "high"
         assert resolved.encoded_as == "regression-test"
+
+    async def test_aging_resolvable_escape_self_answers_despite_busy_ask_budget(
+        self, tmp_path: Path
+    ) -> None:
+        # #11176: `_surface_findings` used to apply the per-tick ask-budget cap
+        # BEFORE auto-diagnose ran, via `eligible[:max_per_tick]`. On a busy
+        # tick (more eligible low-confidence + aging findings than the ask
+        # budget) a diagnosable AGING escape ranked past the cap was silently
+        # dropped from the eligible set and never reached the diagnoser — it
+        # would keep aging past the encoding threshold forever. End-to-end
+        # over FakeGitHub: 3 unrelated low-confidence findings exactly fill the
+        # default ask budget (3) and rank ahead of the aging finding, yet the
+        # aging finding must still self-resolve and never file a GitHub issue.
+        from datetime import UTC, datetime, timedelta
+
+        from escape.ledger import EscapeLedger
+        from escape.models import EscapeRecord
+        from escape.surfaces import SurfacedIssueLedger
+
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        reg = repo / "tests" / "regressions"
+        reg.mkdir(parents=True)
+        (reg / "test_bug_654.py").write_text(
+            "# regression pin for #654\ndef test_bug(): pass\n"
+        )
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "test: pin regression for #654")
+        (repo / "src" / "crash3.py").write_text("def crash3():\n    return 1\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "fix: resolve crash (fixes #654)")
+        fix_sha = _head(repo)
+
+        state = _make_state(fix_sha)
+        loop = _build_loop(tmp_path, repo, github, state, auto_diagnose=True)
+        ledger = EscapeLedger(loop._ledger_path)
+
+        # 3 unrelated low-confidence findings — exactly the default
+        # `escape_ledger_max_issues_per_tick` — compete with the aging
+        # finding for the ask budget. Diagnosis runs over the full eligible
+        # set, bounded only by `escape_ledger_max_diagnoses_per_tick` (default
+        # 25, well above these 4 rows), so a cap-before-diagnose bug would
+        # have starved the aging row out of the eligible set before it ever
+        # reached the diagnoser.
+        fresh = datetime.now(UTC).isoformat()
+        for i in range(3):
+            ledger.append(
+                EscapeRecord(
+                    id=f"bug-issue:noise{i}",
+                    detected_at=fresh,
+                    detection_source="bug-issue",
+                    detection_ref=f"noise{i}",
+                    originating_pr=None,
+                    originating_merge_sha="",
+                    merged_at="",
+                    time_to_detection_hours=None,
+                    attribution_method="fixes-chain",
+                    attribution_confidence="low",
+                    encoded_as="none-yet",
+                    notes="",
+                )
+            )
+
+        aging_id = f"bug-issue:{fix_sha}"
+        old = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+        ledger.append(
+            EscapeRecord(
+                id=aging_id,
+                detected_at=old,
+                detection_source="bug-issue",
+                detection_ref=fix_sha,
+                originating_pr=654,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="fixes-chain",
+                attribution_confidence="medium",  # AGING-eligible only
+                encoded_as="none-yet",
+                notes="",
+            )
+        )
+
+        filed, capped = await loop._surface_findings()
+
+        assert filed == 3, "the 3 noise findings still spend the ask budget"
+        assert capped is False
+
+        resolved = EscapeLedger(loop._ledger_path).read_latest_index()[aging_id]
+        assert resolved.attribution_confidence == "high", (
+            "the diagnosable aging escape must self-resolve even when it "
+            "ranks past the per-tick ask budget"
+        )
+        assert resolved.encoded_as == "regression-test"
+
+        links = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert aging_id not in {link.escape_id for link in links}, (
+            "a self-resolved escape must never have consumed a human-ask slot"
+        )
+        for link in links:
+            assert await github.get_issue_state(link.issue_number) == "OPEN"
 
     async def test_unreadable_diagnosis_row_does_not_silently_suppress_surfacing(
         self, tmp_path: Path

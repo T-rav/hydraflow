@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from config import HydraFlowConfig
 from escape.auto_diagnose import EscapeAutoDiagnoser, EscapeDiagnosis
 from escape.ledger import EscapeLedger
 from escape.models import EscapeRecord
@@ -32,7 +33,8 @@ from escape_ledger_loop import (
     _render_finding,
     _resolution_comment,
     answered_surfacings,
-    select_findings_to_surface,
+    apply_ask_budget,
+    eligible_findings,
     surfacing_fingerprint,
 )
 from mockworld.fakes.fake_github import FakeGitHub
@@ -417,15 +419,54 @@ class TestFindingRateBudget:
 
         now = datetime(2026, 6, 1, tzinfo=UTC)
         flood = [_record(f"bug-issue:{i}", confidence="low") for i in range(20)]
-        to_file, capped = select_findings_to_surface(
+        eligible = eligible_findings(
             flood,
             now=now,
             aging_threshold_hours=24 * 14,
             already_surfaced=set(),
-            max_per_tick=3,
         )
+        to_file, capped = apply_ask_budget(eligible, max_per_tick=3)
         assert len(to_file) == 3
         assert capped is True
+
+    def test_reasons_are_interleaved_so_a_backlog_cannot_starve_the_other(
+        self,
+    ) -> None:
+        """#11191 review: candidates used to be a static concatenation — every
+        low-confidence pair BEFORE every aging pair. `_auto_diagnose` and
+        `apply_ask_budget` both cap on POSITION in this list, so a
+        low-confidence backlog >= escape_ledger_max_diagnoses_per_tick
+        (default 25) would push the ONLY aging candidate past every
+        positional cap, forever — the exact starvation class #11176 closed,
+        reintroduced one layer deeper. Interleaving guarantees a candidate of
+        the smaller reason-group survives into any prefix at least as long
+        as that group.
+        """
+        from datetime import UTC, datetime
+
+        now = datetime(2026, 6, 1, tzinfo=UTC)
+        # 30 low-confidence rows, already encoded so none is ALSO aging-eligible.
+        low_conf = [
+            _record(f"bug-issue:lc{i}", confidence="low", encoded_as="regression-test")
+            for i in range(30)
+        ]
+        # One aging row (detected 2026-01-01 by `_record`'s default, well past
+        # the 14-day threshold), not low-confidence.
+        aging_row = _record("bug-issue:aging0", confidence="medium")
+
+        eligible = eligible_findings(
+            [*low_conf, aging_row],
+            now=now,
+            aging_threshold_hours=24 * 14,
+            already_surfaced=set(),
+        )
+
+        default_max_diagnoses = HydraFlowConfig().escape_ledger_max_diagnoses_per_tick
+        prefix_reasons = {reason for _rec, reason in eligible[:default_max_diagnoses]}
+        assert SURFACE_REASON_AGING in prefix_reasons, (
+            "a 30-strong low-confidence backlog must not push the sole aging "
+            "candidate past the diagnose cap position"
+        )
 
     def test_already_surfaced_are_skipped(self) -> None:
         from datetime import UTC, datetime
@@ -438,15 +479,15 @@ class TestFindingRateBudget:
             _record("bug-issue:a", encoded_as="regression-test"),
             _record("bug-issue:b", encoded_as="regression-test"),
         ]
-        to_file, capped = select_findings_to_surface(
+        eligible = eligible_findings(
             recs,
             now=now,
             aging_threshold_hours=24 * 14,
             already_surfaced={
                 surfacing_fingerprint("bug-issue:a", SURFACE_REASON_LOW_CONFIDENCE)
             },
-            max_per_tick=5,
         )
+        to_file, capped = apply_ask_budget(eligible, max_per_tick=5)
         assert {rec.id for rec, _reason in to_file} == {"bug-issue:b"}
         assert {reason for _rec, reason in to_file} == {SURFACE_REASON_LOW_CONFIDENCE}
         assert capped is False
@@ -641,6 +682,56 @@ class TestAutoDiagnoseReasonNeutral:
         resolved = EscapeLedger(loop._ledger_path).read_latest_index()[record.id]
         assert resolved.attribution_confidence == "high"
         assert resolved.encoded_as == "regression-test"
+
+
+# ---------------------------------------------------------------------------
+# escape_ledger_max_diagnoses_per_tick (#11176): bounds the diagnose pass
+# itself, separate from and wider than the human ask budget.
+# ---------------------------------------------------------------------------
+
+
+class TestMaxDiagnosesPerTick:
+    async def test_diagnoser_is_bounded_by_the_diagnoses_cap(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.INCONCLUSIVE)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        object.__setattr__(loop._config, "escape_ledger_max_diagnoses_per_tick", 2)
+        eligible = [
+            (_record(f"bug-issue:{i}", confidence="low"), SURFACE_REASON_LOW_CONFIDENCE)
+            for i in range(5)
+        ]
+
+        residue = await loop._auto_diagnose(eligible)
+
+        assert len(diagnoser.calls) == 2, (
+            "the diagnoser must only run for the first "
+            "escape_ledger_max_diagnoses_per_tick eligible findings"
+        )
+        assert diagnoser.calls == [rec for rec, _reason in eligible[:2]]
+        # Fail-safe: findings beyond the diagnoses cap fall through UNDIAGNOSED
+        # (same as an INCONCLUSIVE verdict) rather than being silently dropped —
+        # they may still reach a human via the ask-budget cap downstream.
+        assert residue == eligible
+
+    async def test_diagnoses_cap_does_not_apply_when_disabled(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.RESOLVED_ENCODED)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        object.__setattr__(loop._config, "escape_ledger_max_diagnoses_per_tick", 2)
+        object.__setattr__(loop._config, "escape_ledger_auto_diagnose_enabled", False)
+        eligible = [
+            (_record(f"bug-issue:{i}", confidence="low"), SURFACE_REASON_LOW_CONFIDENCE)
+            for i in range(5)
+        ]
+
+        residue = await loop._auto_diagnose(eligible)
+
+        assert diagnoser.calls == []
+        assert residue == eligible
 
 
 # ---------------------------------------------------------------------------
@@ -961,7 +1052,7 @@ class TestReconcileSurfacedIssues:
 # ---------------------------------------------------------------------------
 # _diagnose_open_links (#11161: retiring an ALREADY-open surfaced issue)
 #
-# `select_findings_to_surface` drops a (record, reason) pair once its
+# `eligible_findings` drops a (record, reason) pair once its
 # reason-scoped fingerprint is spent, so an escape already surfaced never
 # reaches `_surface_findings`'s `_auto_diagnose` call again — widening that
 # call's reason filter alone cannot retire it. `_reconcile_surfaced_issues`
@@ -990,7 +1081,7 @@ class TestDiagnoseOpenLinks:
 
         assert diagnoser.calls == [record], (
             "the escape behind an already-open link must reach the "
-            "diagnoser even though it is not in select_findings_to_surface's "
+            "diagnoser even though it is not in eligible_findings's "
             "eligible set"
         )
 
@@ -1192,14 +1283,14 @@ class TestTerminalVerdictQuiescence:
         # One dismissed row eligible under BOTH reasons + one genuine row.
         dismissed = _record("bug-issue:dead", confidence="low")
         genuine = _record("bug-issue:live", confidence="low")
-        to_file, capped = select_findings_to_surface(
+        eligible = eligible_findings(
             [dismissed, genuine],
             now=self._NOW,
             aging_threshold_hours=0.0,  # everything aging-eligible too
             already_surfaced=set(),
-            max_per_tick=10,
             terminal_ids={"bug-issue:dead"},
         )
+        to_file, capped = apply_ask_budget(eligible, max_per_tick=10)
         ids = {r.id for r, _ in to_file}
         assert ids == {"bug-issue:live"}
         assert capped is False
@@ -1209,14 +1300,14 @@ class TestTerminalVerdictQuiescence:
         # genuine finding.
         dismissed = _record("bug-issue:dead", confidence="low")
         genuine = _record("bug-issue:live", confidence="low")
-        to_file, _ = select_findings_to_surface(
+        eligible = eligible_findings(
             [dismissed, genuine],
             now=self._NOW,
             aging_threshold_hours=0.0,
             already_surfaced=set(),
-            max_per_tick=1,
             terminal_ids={"bug-issue:dead"},
         )
+        to_file, _ = apply_ask_budget(eligible, max_per_tick=1)
         assert [(r.id, _reason) for r, _reason in to_file][0][0] == "bug-issue:live"
 
     def test_dismissal_answers_stranded_links(self) -> None:

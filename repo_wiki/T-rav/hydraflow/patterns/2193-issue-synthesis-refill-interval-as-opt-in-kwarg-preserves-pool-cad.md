@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:09.637499+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2077
+superseded_by: 2313
 ---
 
 # refill_interval as opt-in kwarg preserves pool cadence

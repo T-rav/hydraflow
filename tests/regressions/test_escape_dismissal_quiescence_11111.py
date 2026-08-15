@@ -27,7 +27,8 @@ from escape_ledger_loop import (  # noqa: E402
     SURFACE_REASON_AGING,
     SURFACE_REASON_LOW_CONFIDENCE,
     answered_surfacings,
-    select_findings_to_surface,
+    apply_ask_budget,
+    eligible_findings,
     surfacing_fingerprint,
 )
 
@@ -61,14 +62,15 @@ def test_sidecar_re_reports_recorded_verdict(tmp_path: Path) -> None:
 
 def test_dismissed_row_never_selected_and_never_occupies_budget() -> None:
     dismissed, genuine = _record("bug-issue:dead"), _record("bug-issue:live")
-    to_file, _ = select_findings_to_surface(
+    eligible = eligible_findings(
         [dismissed, genuine],
         now=_NOW,
         aging_threshold_hours=0.0,  # eligible under BOTH reasons
         already_surfaced=set(),
-        max_per_tick=1,  # the #11137 starvation shape
         terminal_ids={"bug-issue:dead"},
     )
+    # the #11137 starvation shape
+    to_file, _ = apply_ask_budget(eligible, max_per_tick=1)
     assert [r.id for r, _reason in to_file] == ["bug-issue:live"]
 
 

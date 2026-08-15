@@ -28,7 +28,7 @@
  * `useTokens()` — no inline literals, no hardcoded hex.
  */
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useHydraFlowSocket } from '../hooks/useHydraFlowSocket'
 import { ThemeProvider, useTokens } from '../styles/primitives'
 import { useThemeMode } from './useThemeMode'
@@ -86,6 +86,11 @@ const MODES = [
   // workers with an explicit state. The URL key stays 'all-active' (selection
   // contract); only the operator-facing label reads 'Agents'.
   { key: 'all-active', label: 'Agents' },
+  // Instruments: the finder/loop faceplates + judge calibration promoted out
+  // of the vitals rail into a full-width grid (the #10942 primary-surface
+  // direction) — eight stacked rail panels had turned the 280px column into
+  // an endless scroll.
+  { key: 'instruments', label: 'Instruments' },
 ]
 
 function makeStyles(t) {
@@ -117,6 +122,13 @@ function makeStyles(t) {
     }),
     slot: (area) => ({ minWidth: 0, gridArea: area }),
     vitalsSlot: { minWidth: 0, gridArea: 'vitals', display: 'flex', flexDirection: 'column', gap: t.space.md },
+    // Instruments mode: full-width responsive card grid in the detail slot.
+    instrumentsGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+      gap: t.space.md,
+      alignItems: 'start',
+    },
     switcherWrap: { marginBottom: t.space.sm },
     toggleBar: { display: 'flex', gap: t.space.xs, marginBottom: t.space.sm },
     toggleBtn: (active) => ({
@@ -134,7 +146,7 @@ function makeStyles(t) {
 }
 
 /**
- * Focus <-> All-active mode toggle (Task 5). A two-button segmented control;
+ * Focus / Agents / Instruments mode toggle (Task 5, #10942). A segmented control;
  * each button calls `select('mode', key)`, which the selection hook mirrors
  * into the URL query (`?mode=all-active`; focus is the clean default).
  * @param {{ mode: string, select: Function, styles: object }} props
@@ -237,7 +249,12 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
   const paused = vitals?.factory?.state === 'paused'
   // An idle repo has no active work and nothing drilled into — show the calm
   // idle screen in the detail area (the hero/vitals stay visible).
-  const idle = activeCount === 0 && item == null && !showOverview
+  // Instruments mode is exempt (#11203 review): it shows GLOBAL diagnostics
+  // (noise floors, loop control register, judge calibration) that matter
+  // precisely when the pipeline is quiet — pre-promotion these panels were
+  // always visible in the rail, so gating them behind idle would regress.
+  const idle =
+    activeCount === 0 && item == null && !showOverview && mode !== 'instruments'
   // Focus mode (a single ItemWorkspace) claims the full detail width (#8): the
   // detail area spans both grid columns. All-active / overview / idle keep the
   // vitals column beside the detail row.
@@ -300,6 +317,12 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                   now={now}
                   select={select}
                 />
+              ) : mode === 'instruments' ? (
+                <div data-testid="instruments-grid" style={styles.instrumentsGrid}>
+                  <FinderFaceplatePanel faceplates={faceplates} />
+                  <LoopFaceplatePanel faceplates={loopFaceplates} />
+                  <JudgeCalibrationPanel calibration={calibration} />
+                </div>
               ) : (
                 <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
               )}
@@ -314,11 +337,9 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                 onRestartLoop={socket.restartLoop}
                 onAckEscalations={socket.ackEscalations}
               />
-              <FinderFaceplatePanel faceplates={faceplates} />
-              {/* Read-only slice; promotion to the primary-surface faceplate
-                  grid is the #10942 zone work. */}
-              <LoopFaceplatePanel faceplates={loopFaceplates} />
-              <JudgeCalibrationPanel calibration={calibration} />
+              {/* Finder/Loop faceplates + judge calibration moved to the
+                  full-width Instruments mode (the #10942 primary-surface
+                  promotion) — the rail keeps only glanceable panels. */}
               <LoopsPanel loops={loops} />
               <SettingsSummary summary={settings} onOpenSettings={() => setSettingsOpen(true)} />
             </div>
@@ -339,8 +360,24 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
  * behind the `?console=operator` / toggle cutover flag (Task 10); the classic
  * dashboard remains the default until parity is human-verified.
  */
+// One-second wall-clock tick. The view previously defaulted `now` to a bare
+// `Date.now()` PARAMETER DEFAULT, so every render — and the WS context
+// re-renders this tree on every event — produced a fresh `now`, invalidating
+// the `toTimeline`/`uptime` useMemos and re-deriving the O(MAX_EVENTS)
+// timeline transform per render (#100 slowness investigation). A 1s state
+// tick keeps `now` referentially stable between ticks.
+function useNowTick(intervalMs = 1000) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs)
+    return () => clearInterval(id)
+  }, [intervalMs])
+  return now
+}
+
 export function OperatorConsole() {
   const socket = useHydraFlowSocket()
+  const now = useNowTick()
   // Cost feed (#10785): polls the repo + per-repo cost-per-model rollup on its
   // own pinned cadence (aborted in-flight on unmount), independent of the WS
   // slice the shell otherwise renders from.
@@ -362,7 +399,7 @@ export function OperatorConsole() {
   // the escape ledger) on its own pinned cadence (aborted in-flight on unmount),
   // independent of the WS slice.
   const calibration = useJudgeCalibration()
-  return <OperatorConsoleView socket={socket} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} />
+  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} />
 }
 
 export default OperatorConsole

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11178
 source_phase: plan
 created_at: 2026-08-14T23:03:00.703662+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11178 closed
 ---
 
 # Run full make quality for escape_ledger_loop.py changes

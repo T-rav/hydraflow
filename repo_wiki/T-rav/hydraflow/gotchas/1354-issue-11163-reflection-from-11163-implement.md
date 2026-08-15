@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11163
 source_phase: legacy-migrated
 created_at: 2026-08-14T23:47:54.580176+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11163 closed
 ---
 
 # Reflection from #11163 (implement)

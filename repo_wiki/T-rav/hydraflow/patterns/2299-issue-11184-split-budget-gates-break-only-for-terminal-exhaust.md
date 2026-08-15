@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11184
 source_phase: plan
 created_at: 2026-08-14T23:44:16.701404+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2419
 ---
 
 # Split budget gates: break only for terminal exhaustion, continue for per-item skip

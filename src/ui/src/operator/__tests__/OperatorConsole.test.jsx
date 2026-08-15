@@ -107,19 +107,37 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('supervisor-empty')).toBeInTheDocument()
   })
 
-  it('mounts the FinderFaceplatePanel in the vitals slot, empty by default (#10826)', () => {
+  it('keeps the faceplate panels OUT of the vitals rail (promoted to Instruments mode)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     const vitalsSlot = screen.getByTestId('operator-vitals-slot')
-    expect(vitalsSlot).toContainElement(screen.getByTestId('finder-faceplate-panel'))
-    expect(screen.getByTestId('faceplate-empty')).toBeInTheDocument()
+    expect(vitalsSlot.querySelector('[data-testid="finder-faceplate-panel"]')).toBeNull()
+    expect(vitalsSlot.querySelector('[data-testid="loop-faceplate-panel"]')).toBeNull()
+    expect(vitalsSlot.querySelector('[data-testid="judge-calibration-panel"]')).toBeNull()
   })
 
-  it('mounts the LoopFaceplatePanel in the vitals slot, empty by default (#10826)', () => {
+  it('keeps Instruments reachable on an IDLE repo (#11203 review find)', () => {
+    // Empty pipeline → idle would normally claim the detail slot; the
+    // instruments grid shows global diagnostics and must win instead.
+    const idleSocket = makeSocket({
+      issues: { triage: [], plan: [], implement: [], review: [], hitl: [], merged: [] },
+    })
+    render(<OperatorConsoleView socket={idleSocket} />)
+    fireEvent.click(screen.getByTestId('mode-toggle-instruments'))
+    expect(screen.getByTestId('instruments-grid')).toBeInTheDocument()
+    expect(screen.queryByTestId('operator-idle-state')).toBeNull()
+  })
+
+  it('renders the faceplate panels as a full-width grid in Instruments mode (#10942)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
-    const vitalsSlot = screen.getByTestId('operator-vitals-slot')
-    expect(vitalsSlot).toContainElement(screen.getByTestId('loop-faceplate-panel'))
-    // No loop-faceplates payload by default → the calm empty state, no crash.
+    fireEvent.click(screen.getByTestId('mode-toggle-instruments'))
+    const grid = screen.getByTestId('instruments-grid')
+    expect(grid).toContainElement(screen.getByTestId('finder-faceplate-panel'))
+    expect(grid).toContainElement(screen.getByTestId('loop-faceplate-panel'))
+    // Empty payloads render each panel's calm empty state, no crash.
+    expect(screen.getByTestId('faceplate-empty')).toBeInTheDocument()
     expect(screen.getByTestId('loop-faceplate-empty')).toBeInTheDocument()
+    // The detail slot spans full width in instruments mode (focusFull path).
+    expect(screen.getByTestId('operator-detail-slot')).toHaveAttribute('data-fullwidth', 'true')
   })
 
   it('mounts the phase timeline in the reclaimed bottom slot (feat/operator-timeline)', () => {
