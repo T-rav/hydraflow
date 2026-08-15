@@ -196,9 +196,18 @@ def test_mutated_adr0049_pin_self_retires_without_blowup(
         f"pin module failed an assertion for ADR-0049 under fate={fate} "
         f"instead of self-retiring: {outcomes}"
     )
-    assert "skipped" in outcomes.values(), (
-        f"expected ADR-0049 under fate={fate} to self-retire (skip) its case, "
-        f"but nothing skipped: {outcomes}"
+    # The ADR-0049 pin is the single case that must self-retire (skip) under
+    # each fate — assert it *specifically*, not merely that something skipped,
+    # so an unrelated skip elsewhere can't mask the ADR-0049 case erroring or
+    # passing when it should have retired (#11180 review).
+    pin_case = "test_adr0049_base_background_loop_citation_parses"
+    assert pin_case in outcomes, (
+        f"expected the ADR-0049 pin case in outcomes under fate={fate}: "
+        f"{outcomes}"
+    )
+    assert outcomes[pin_case] == "skipped", (
+        f"expected ADR-0049 pin to self-retire (skip) under fate={fate}, "
+        f"but it was {outcomes[pin_case]!r}: {outcomes}"
     )
 
 
