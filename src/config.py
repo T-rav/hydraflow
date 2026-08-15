@@ -2476,11 +2476,12 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=20,
         description=(
-            "Max open ADR-drift rollups AdrDriftResolverLoop triages "
-            "(spends an LLM call on) in one tick (#9976). Overflow "
-            "candidates are simply retried next tick — no carryover "
-            "bookkeeping needed since the candidate set is re-derived from "
-            "state each tick."
+            "Max LLM triage calls AdrDriftResolverLoop attempts in one tick "
+            "(#9976) — every call ATTEMPTED counts against this budget, "
+            "including one that errors, not just successful triages "
+            "(#11181). Overflow candidates are simply retried next tick — "
+            "no carryover bookkeeping needed since the candidate set is "
+            "re-derived from state each tick."
         ),
     )
 

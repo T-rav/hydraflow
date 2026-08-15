@@ -79,11 +79,16 @@ and aggregates fail-closed:
   (one triage attempt per batch issue lifetime, same fingerprint shape as
   the per-ADR path below); only a call ERROR withholds the mark.
 - The shared per-tick budget (``adr_drift_resolver_max_triage_per_tick``)
-  is gated per LLM CALL, not per batch: a batch spends one call per member
-  ADR, so a batch is only started when its full member count fits in what
-  is left of the tick's budget after the per-ADR loop above. A batch that
-  doesn't fit is deferred whole to next tick rather than starting it and
-  overshooting the configured budget partway through.
+  is gated per LLM CALL ATTEMPTED, not per batch and not per successful
+  triage: a batch spends one call per member ADR, so a batch is only
+  started when its full member count fits in what is left of the tick's
+  budget after the per-ADR loop above. A batch that doesn't fit is
+  deferred whole to next tick rather than starting it and overshooting the
+  configured budget partway through. Both halves of the shared budget
+  (the per-ADR loop's own call count and the running fleet total) count a
+  triage-call ERROR as spent exactly like a success — the call was still
+  made — so an error-heavy tick can never make the gate think there is
+  more room than there really is (#11181).
 
 ## Idempotency: one triage per rollup ISSUE, not per rollup ADR
 
@@ -352,6 +357,7 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
         max_per_tick = int(self._config.adr_drift_resolver_max_triage_per_tick)
 
         triaged = 0
+        calls_spent = 0
         closed = 0
         relabeled = 0
         escalated = 0
@@ -359,7 +365,7 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
         skipped = 0
 
         for rollup_key, issue_number, pr_numbers in candidates:
-            if triaged >= max_per_tick:
+            if calls_spent >= max_per_tick:
                 break
 
             adr_number = _adr_num_from_key(rollup_key)
@@ -406,16 +412,22 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
                 # crashing the tick on every malformed model reply). FAIL
                 # CLOSED: no dedup entry, so the SAME rollup is retried next
                 # tick rather than silently skipped or defaulted to any
-                # resolve action.
+                # resolve action. The call was still SPENT (a real LLM call
+                # was made and failed) — ``calls_spent`` counts it even
+                # though ``triaged`` (a success-only stat) does not, so the
+                # per-tick budget below can never undercount real call
+                # volume on an error-heavy tick (#11181).
                 logger.warning(
                     "adr_drift_resolver: triage failed for %s issue #%s: %s",
                     rollup_key,
                     issue_number,
                     exc,
                 )
+                calls_spent += 1
                 errors += 1
                 continue  # FAIL-CLOSED: no dedup entry, retried next tick
 
+            calls_spent += 1
             triaged += 1
             if verdict.classification == DriftClassification.CONSISTENT:
                 await self._resolve_consistent(issue_number, verdict)
@@ -444,19 +456,29 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
             # gated on the batch's full member count up front: a batch that
             # wouldn't fit in what's left of max_per_tick is deferred whole
             # to next tick rather than starting it and overshooting the
-            # configured per-tick call budget partway through.
-            remaining_budget = max_per_tick - (triaged + fleet_calls_spent)
+            # configured per-tick call budget partway through. ``calls_spent``
+            # (not ``triaged``) is the per-ADR loop's real call volume —
+            # errored calls were still spent and must reduce this tick's
+            # remaining room exactly like a success would (#11181).
+            remaining_budget = max_per_tick - (calls_spent + fleet_calls_spent)
             if remaining_budget <= 0 or len(adr_numbers) > remaining_budget:
                 break
 
-            outcome = await self._triage_fleet_batch(
+            outcome, batch_calls_spent = await self._triage_fleet_batch(
                 issue_number, pr_number, adr_numbers
             )
+            # The actual number of classify() calls the batch attempted —
+            # 0 for 'skipped' (no member validated), the count up to and
+            # including a failing member for 'error', the full member count
+            # for 'closed'/'open'. NEVER assume len(adr_numbers): a batch
+            # that errors partway through has spent fewer real calls than
+            # its member count, and the next fleet candidate this tick must
+            # see the shared budget reduced by what was actually spent.
+            fleet_calls_spent += batch_calls_spent
             if outcome == "skipped":
                 fleet_skipped += 1
                 continue
 
-            fleet_calls_spent += len(adr_numbers)
             if outcome == "error":
                 fleet_errors += 1
                 continue  # FAIL-CLOSED: no dedup entry, retried next tick
@@ -487,21 +509,34 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
 
     async def _triage_fleet_batch(
         self, issue_number: int, pr_number: int, adr_numbers: list[int]
-    ) -> str:
+    ) -> tuple[str, int]:
         """Triage every member ADR of one fleet batch against *pr_number*.
 
-        Returns ``'closed' | 'open' | 'skipped' | 'error'``. Fail-closed at
-        two levels: a missing member ADR (renumbered/deleted — 'skipped') or
-        a triage-call error ('error') leaves the WHOLE batch untriaged, no
-        partial resolution and no dedup mark, so it's retried in full next
-        tick. All member ADRs are validated to exist BEFORE any triage call
-        is spent, so a missing member never wastes an LLM call on the others.
-        Once every member triages successfully, the aggregate is 'closed'
-        only when ALL members classify CONSISTENT; otherwise 'open' — a
-        batched fleet issue stays one-shot/human-closed for any non-clean
-        verdict, matching ``AdrTouchpointAuditorLoop``'s existing fleet
-        close semantics. Either 'closed' or 'open' is a definitive outcome
-        and marks dedup (mirrors the per-ADR ESCALATE branch) — only a call
+        Returns ``(outcome, calls_spent)`` where ``outcome`` is
+        ``'closed' | 'open' | 'skipped' | 'error'`` and ``calls_spent`` is
+        the number of real ``classify()`` calls actually ATTEMPTED before
+        returning — ``0`` for ``'skipped'`` (member validation fails before
+        any call is spent), the count up to and including the failing
+        member for ``'error'`` (a partial batch still spends real calls on
+        the members triaged before the failure), and the full member count
+        for ``'closed'``/``'open'`` (every member was triaged). Callers MUST
+        use this count, not ``len(adr_numbers)``, to keep the shared
+        per-tick budget (``adr_drift_resolver_max_triage_per_tick``)
+        accurate (#11181) — assuming the full member count was always spent
+        would misstate the budget on any partial-batch error.
+
+        Fail-closed at two levels: a missing member ADR
+        (renumbered/deleted — 'skipped') or a triage-call error ('error')
+        leaves the WHOLE batch untriaged, no partial resolution and no
+        dedup mark, so it's retried in full next tick. All member ADRs are
+        validated to exist BEFORE any triage call is spent, so a missing
+        member never wastes an LLM call on the others. Once every member
+        triages successfully, the aggregate is 'closed' only when ALL
+        members classify CONSISTENT; otherwise 'open' — a batched fleet
+        issue stays one-shot/human-closed for any non-clean verdict,
+        matching ``AdrTouchpointAuditorLoop``'s existing fleet close
+        semantics. Either 'closed' or 'open' is a definitive outcome and
+        marks dedup (mirrors the per-ADR ESCALATE branch) — only a call
         ERROR withholds it.
         """
         members: list[tuple[ADR, str]] = []
@@ -509,7 +544,7 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
             adr = self._find_adr(adr_number)
             adr_markdown = self._read_adr_markdown(adr_number)
             if adr is None or adr_markdown is None:
-                return "skipped"
+                return "skipped", 0
             members.append((adr, adr_markdown))
 
         verdicts: list[TriageVerdict] = []
@@ -519,6 +554,7 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
         # diff text N times would be N redundant gh/network calls for no
         # benefit; only the per-ADR path filter differs, applied locally.
         raw_pr_diff = await self._fetch_raw_pr_diff(pr_number)
+        calls_spent = 0
         for adr, adr_markdown in members:
             pr_diff = filter_diff_to_paths(raw_pr_diff, adr.source_files)
             ctx = TriageContext(
@@ -535,6 +571,7 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
             except (AuthenticationError, CreditExhaustedError):
                 raise  # billing/auth signal — propagate, see per-ADR comment above
             except (ValueError, RuntimeError) as exc:
+                calls_spent += 1  # the failing call was still a real spend
                 logger.warning(
                     "adr_drift_resolver: fleet triage failed for issue #%s "
                     "ADR-%04d: %s",
@@ -542,7 +579,8 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
                     adr.number,
                     exc,
                 )
-                return "error"
+                return "error", calls_spent
+            calls_spent += 1
             verdicts.append(verdict)
 
         if all(v.classification == DriftClassification.CONSISTENT for v in verdicts):
@@ -550,8 +588,8 @@ class AdrDriftResolverLoop(BaseBackgroundLoop):
             await self._resolve_fleet_consistent(
                 issue_number, adr_numbers_in_order, verdicts
             )
-            return "closed"
-        return "open"
+            return "closed", calls_spent
+        return "open", calls_spent
 
     async def _resolve_fleet_consistent(
         self,
