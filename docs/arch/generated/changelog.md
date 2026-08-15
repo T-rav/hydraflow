@@ -6,7 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `1a381ff` — rc: merge main back into rc/2026-08-15-2032 (#11216 manual bridge) *(2026-08-15)*
+- `4718776` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-15)*
 - `25dc931` — rc: merge main back into rc/2026-08-15-1628 (#11216 manual bridge) *(2026-08-15)*
+- `9d7bf33` — feat(providers): ZAI_CODING_PLAN_KEY — plan vs API billing lane split (#11267) (#11267) *(2026-08-15)*
 - `54e0906` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-15)*
 - `bc0a457` — rc: merge main back into rc/2026-08-15-1023 (#11216 manual bridge) *(2026-08-15)*
 - `66b3cff` — Fixes #11208: make factory should auto-start the orchestrator (#11257) (#11257) *(2026-08-15)*

@@ -36,7 +36,7 @@ Config: `credit_failover_enabled` (default **on**, env `HYDRAFLOW_CREDIT_FAILOVE
 ## Consequences
 
 - **The factory keeps working through a Claude cap** instead of losing capacity, at GLM quality/cost for the duration. This is the intended trade: continued throughput over idle waiting.
-- **Failover requires `ZAI_API_KEY`.** Without it, `resolve_harness_env` would silently fall back to Claude, so the engage path refuses to fire and the existing pause behavior is preserved — a safe, explicit precondition, not a silent no-op mid-spawn.
+- **Failover requires a zai key** (`ZAI_CODING_PLAN_KEY` or `ZAI_API_KEY` — the harness lane prefers the plan key since #11267). Original rationale unchanged: Without it, `resolve_harness_env` would silently fall back to Claude, so the engage path refuses to fire and the existing pause behavior is preserved — a safe, explicit precondition, not a silent no-op mid-spawn.
 - **Maintenance loops are untouched** — they dial their backend independently (`maintenance_provider`). Failover is scoped to the Claude *work* loops.
 - **Bounded flap during a weekly cap:** because the probe can't see weekly exhaustion, a cleared-then-re-capped cycle wastes at most one Claude work spawn per cooldown (15 min). Longer cooldowns trade recovery latency for fewer wasted spawns.
 - **No persistence (v1).** The failover flag is a process-global that survives an in-process stop/start (so `_rearm_failover_probe_if_active` re-arms the probe on start), but not a full process restart. A fresh process re-engages on the first cap. Cross-restart persistence is a possible follow-up.

@@ -291,7 +291,7 @@ Codex credentials are mounted automatically from `~/.codex/` on your host. No ex
 
 **Other supported providers** (set in `.env` as needed):
 
-`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`
+`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ZAI_API_KEY, ZAI_CODING_PLAN_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `TOGETHER_API_KEY`, `GROQ_API_KEY`
 
 ### 4. Verify
 

@@ -384,9 +384,6 @@ async def stream_claude_process(
         result_text → accumulated_text → raw_lines.
     """
     env = make_clean_env(config.gh_token)
-    # Per-spawn harness override (e.g. z.ai's /api/anthropic endpoint). Merged
-    # after the clean-env strip; empty for native Anthropic (main workers).
-    env.update(config.harness_env)
     runner = config.runner or get_default_runner()
     cmd_to_run, stdin_mode = _route_prompt_to_cmd(cmd, prompt)
 
@@ -404,6 +401,10 @@ async def stream_claude_process(
         stderr=asyncio.subprocess.PIPE,
         limit=1024 * 1024,  # 1 MB — stream-json lines can exceed 64 KB default
         start_new_session=True,  # Own process group for reliable cleanup
+        # #11263: the harness backend override travels as its OWN param — the
+        # env= dict is deliberately ignored by DockerRunner, which silently
+        # stranded rerouted glm spawns on the native Anthropic endpoint.
+        harness_env=config.harness_env or None,
     )
     active_procs.add(proc)
     _ALL_TRACKED_PROCS.add(proc)
@@ -801,6 +802,20 @@ def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str,
     backend = _OPENAI_COMPAT_BACKENDS.get(provider)
     if backend is None:
         return "", ""
+    # Key-split (#11267 review find): when the harness lane authenticates
+    # with a DIFFERENT credential (the coding-plan key), corroborating a
+    # non-authoritative cap against the REST key would falsely refute a
+    # plan-quota exhaustion — probe healthy, signal discarded, retry storm
+    # against the still-capped plan (the #9895/#10558 class). Probe the
+    # lane the signal came from: non-authoritative (prose-scan) signals
+    # originate from CLI spawns, which bill the HARNESS key; REST-lane
+    # failures arrive as structured HTTP errors that parse authoritative
+    # and never reach this probe.
+    harness = _HARNESS_BACKENDS.get(provider)
+    if harness is not None:
+        harness_key = harness.api_key()
+        if harness_key and harness_key != backend.api_key():
+            return harness.base_url(config), harness_key
     return backend.base_url(config), backend.api_key()
 
 
@@ -812,7 +827,18 @@ def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str,
 _HARNESS_BACKENDS: dict[str, _OpenAICompatBackend] = {
     _ZAI: _OpenAICompatBackend(
         base_url_field="zai_harness_base_url",
-        api_key_envs=("ZAI_API_KEY", "HYDRAFLOW_ZAI_API_KEY"),
+        # Two-key lane split: the agentic harness (Claude CLI ->
+        # /api/anthropic) PREFERS the flat-rate GLM Coding Plan key, falling
+        # back to the shared API-credits key. The one-shot REST lane
+        # (_OPENAI_COMPAT_BACKENDS above) deliberately keeps ZAI_API_KEY
+        # only — background-worker traffic stays on API credits, outside
+        # the coding plan's prompts-per-window/concurrency quota.
+        api_key_envs=(
+            "ZAI_CODING_PLAN_KEY",
+            "HYDRAFLOW_ZAI_CODING_PLAN_KEY",
+            "ZAI_API_KEY",
+            "HYDRAFLOW_ZAI_API_KEY",
+        ),
     ),
 }
 

@@ -30,7 +30,15 @@ if TYPE_CHECKING:
 # The env keys the zai harness backend reads (mirrors runner_utils `_HARNESS_BACKENDS`
 # `api_key_envs` for zai). Failover is a no-op without one of these set, because
 # `resolve_harness_env` would otherwise silently fall back to the Claude endpoint.
-_ZAI_API_KEY_ENVS = ("ZAI_API_KEY", "HYDRAFLOW_ZAI_API_KEY")
+# Any zai credential enables failover: the harness lane prefers the coding-
+# plan key (flat-rate) and falls back to the API key — see
+# runner_utils._HARNESS_BACKENDS.
+_ZAI_API_KEY_ENVS = (
+    "ZAI_CODING_PLAN_KEY",
+    "HYDRAFLOW_ZAI_CODING_PLAN_KEY",
+    "ZAI_API_KEY",
+    "HYDRAFLOW_ZAI_API_KEY",
+)
 
 
 @dataclass(frozen=True)
