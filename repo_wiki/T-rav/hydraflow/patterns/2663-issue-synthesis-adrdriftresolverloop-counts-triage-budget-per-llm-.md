@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T08:32:49.057851+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2540
+superseded_by: 2786
 ---
 
 # AdrDriftResolverLoop counts triage budget per LLM classify call, not per batch
