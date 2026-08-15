@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11178
 source_phase: plan
 created_at: 2026-08-14T23:03:00.703679+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # tests/regressions/test_issue_*.py must be RED on staging before src change

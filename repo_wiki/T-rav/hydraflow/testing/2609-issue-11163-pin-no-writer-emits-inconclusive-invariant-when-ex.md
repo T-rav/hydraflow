@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11163
 source_phase: review
 created_at: 2026-08-14T23:12:52.334776+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11163 closed
 ---
 
 # Pin no-writer-emits-INCONCLUSIVE invariant when excluding from terminal set

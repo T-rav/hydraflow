@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11163
 source_phase: plan
 created_at: 2026-08-14T18:57:58.285615+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11163 closed
 ---
 
 # "Terminal" in escape ledger means a parsed verdict, not row presence

@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11180
 source_phase: plan
 created_at: 2026-08-14T23:23:17.598899+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Guard against harness false-green from import-time failures

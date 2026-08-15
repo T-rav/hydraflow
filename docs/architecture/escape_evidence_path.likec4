@@ -1,0 +1,129 @@
+// Issue #11178 — where the encoding evidence for an escape comes from, and
+// how it survives to the ledger and the HITL close comment. The aging/
+// quiet-tick family defect is already fixed on staging (#11173); this view
+// documents the fix for the residual: the added-pin shortcut used to record
+// a placeholder instead of the real regression path — `attribution.
+// regression_pins_added` now carries the real paths through instead.
+specification {
+  element system
+  element container
+  element component
+  element store
+}
+
+model {
+  hydraflow = system 'HydraFlow factory' {
+
+    loop = container 'EscapeLedgerLoop' {
+      description 'src/escape_ledger_loop.py — caretaker loop (ADR-0029)'
+
+      doWork = component '_do_work' {
+        description 'tick entry; reconcile runs ABOVE _resolve_range early exits'
+      }
+      reconcile = component '_reconcile_surfaced_issues' {
+        description 'diagnoses OPEN links, comments + closes answered issues (#10577)'
+      }
+      diagnoseLinks = component '_diagnose_open_links' {
+        description 'runs the diagnoser for every already-surfaced escape (#11161)'
+      }
+      surfaceFindings = component '_surface_findings' {
+        description 'select -> _auto_diagnose -> file HITL issues'
+      }
+      resolutionComment = component '_resolution_comment' {
+        description 'close-comment text; names encoded_as PLUS record.notes for aging (#11178)'
+      }
+    }
+
+    diag = container 'escape.auto_diagnose' {
+      description 'src/escape/auto_diagnose.py — mechanical, no LLM (ADR-0115)'
+
+      diagnose = component 'EscapeAutoDiagnoser.diagnose'
+      gather = component '_gather' {
+        description 'pin_paths (real) if non-empty, else regression_hits(git grep)'
+      }
+      trace = component '_trace_commit' {
+        description 'reads detecting commit -> issue ref, shas, real pin PATHS'
+      }
+      classify = component 'classify_diagnosis' {
+        description 'pure: regression_paths non-empty -> RESOLVED_ENCODED'
+      }
+      recordResolution = component '_record_resolution' {
+        description 'writes notes naming regression_paths; the audit trail'
+      }
+    }
+
+    attribution = container 'escape.attribution' {
+      pinsAdded = component 'regression_pins_added' {
+        description 'tuple[str,...]: the REAL tests/regressions/ paths a commit added (#11178)'
+      }
+      addsPin = component 'adds_regression_pin' {
+        description 'bool wrapper over regression_pins_added; kept for escape/detect.py:106'
+      }
+    }
+
+    detect = container 'escape.detect' {
+      commitInfo = component 'commit_info_for_sha' {
+        description 'CommitInfo incl. added_paths — the real path source'
+      }
+    }
+
+    resolve = container 'escape.resolve' {
+      resolveEscape = component 'resolve_escape' {
+        description 'validates + appends a NEW superseding ledger row'
+      }
+    }
+
+    ledger = store 'escape_ledger.jsonl' {
+      description 'append-only; notes field is the permanent encoding evidence'
+    }
+    surfaces = store 'escape_surfaces.jsonl' {
+      description 'fingerprint -> filed HITL issue number'
+    }
+    github = container 'PRPort' {
+      description 'post_comment / close_issue / get_issue_labels'
+    }
+  }
+
+  hydraflow.loop.doWork -> hydraflow.loop.reconcile 'quiet tick still reaches this'
+  hydraflow.loop.doWork -> hydraflow.loop.surfaceFindings 'only on a tick with new commits'
+  hydraflow.loop.reconcile -> hydraflow.loop.diagnoseLinks
+  hydraflow.loop.diagnoseLinks -> hydraflow.diag.diagnose
+  hydraflow.loop.surfaceFindings -> hydraflow.diag.diagnose
+  hydraflow.diag.diagnose -> hydraflow.diag.gather
+  hydraflow.diag.gather -> hydraflow.diag.trace
+  hydraflow.diag.trace -> hydraflow.detect.commitInfo 'added_paths'
+  hydraflow.diag.trace -> hydraflow.attribution.pinsAdded 'real paths, not a bool (#11178 fix)'
+  hydraflow.detect.commitInfo -> hydraflow.attribution.addsPin 'detection-time bool (unchanged)'
+  hydraflow.diag.gather -> hydraflow.diag.classify
+  hydraflow.diag.classify -> hydraflow.diag.recordResolution 'RESOLVED_ENCODED'
+  hydraflow.diag.recordResolution -> hydraflow.resolve.resolveEscape
+  hydraflow.resolve.resolveEscape -> hydraflow.ledger 'append resolution row + notes (real path)'
+  hydraflow.loop.reconcile -> hydraflow.loop.resolutionComment
+  hydraflow.loop.resolutionComment -> hydraflow.github 'comment (names the evidence) + close'
+  hydraflow.loop.reconcile -> hydraflow.surfaces 'append closed link'
+}
+
+views {
+  view evidencePath {
+    title 'Escape encoding evidence — source, and the path it now survives on'
+    include *
+  }
+
+  dynamic view quietTickResolution {
+    title 'Quiet tick auto-resolves an already-surfaced aging escape (#11178, fixed)'
+
+    hydraflow.loop.doWork -> hydraflow.loop.reconcile 'tick: no new commits'
+    hydraflow.loop.reconcile -> hydraflow.loop.diagnoseLinks 'open link for #11178'
+    hydraflow.loop.diagnoseLinks -> hydraflow.diag.diagnose 'regression-pin:7fb2ed07...'
+    hydraflow.diag.diagnose -> hydraflow.diag.gather
+    hydraflow.diag.gather -> hydraflow.diag.trace
+    hydraflow.diag.trace -> hydraflow.detect.commitInfo 'added_paths = (test_issue_10411_...py,)'
+    hydraflow.diag.trace -> hydraflow.attribution.pinsAdded 'returns (test_issue_10411_...py,)'
+    hydraflow.diag.gather -> hydraflow.diag.classify 'regression_paths = real pin path'
+    hydraflow.diag.classify -> hydraflow.diag.recordResolution 'RESOLVED_ENCODED'
+    hydraflow.diag.recordResolution -> hydraflow.resolve.resolveEscape 'encoded_as=regression-test'
+    hydraflow.resolve.resolveEscape -> hydraflow.ledger 'notes name the real file, not a placeholder'
+    hydraflow.loop.reconcile -> hydraflow.loop.resolutionComment 'aging surfacing answered'
+    hydraflow.loop.resolutionComment -> hydraflow.github 'close #11178, comment names the real path'
+  }
+}

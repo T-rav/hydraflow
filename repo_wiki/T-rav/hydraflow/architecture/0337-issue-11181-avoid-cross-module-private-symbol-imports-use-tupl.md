@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11181
 source_phase: plan
 created_at: 2026-08-14T23:04:04.877842+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Avoid cross-module private-symbol imports; use tuple returns
