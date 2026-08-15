@@ -754,6 +754,7 @@ _ENV_INT_OVERRIDES += [
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
+    ("factory_autostart", "HYDRAFLOW_FACTORY_AUTOSTART", True),
     (
         "test_adequacy_verifier_enabled",
         "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_ENABLED",
@@ -4216,6 +4217,16 @@ class HydraFlowConfig(BaseModel):
     )
     dashboard_enabled: bool = Field(
         default=True, description="Enable the live web dashboard"
+    )
+    factory_autostart: bool = Field(
+        default=True,
+        description=(
+            "Autostart the host orchestrator once the server is healthy at "
+            "boot — the same path as POST /api/control/start (#11208). "
+            "Suppressed by an active operator-stopped latch (see "
+            "state.get_operator_stopped); production only, never reached by "
+            "MockWorld or the sandbox docker entrypoint."
+        ),
     )
 
     # Polling

@@ -2130,6 +2130,15 @@ class StateData(BaseModel):
     )
     disabled_workers: list[str] = Field(default_factory=list)
     default_disabled_workers_seeded: list[str] = Field(default_factory=list)
+    operator_stopped: bool = Field(
+        default=False,
+        description=(
+            "Set when an operator explicitly stops the factory via "
+            "POST /api/control/stop; cleared on POST /api/control/start. "
+            "Persisted so a deliberate stop survives relaunch and suppresses "
+            "boot-time autostart (#11208) — deliberate downtime stays down."
+        ),
+    )
     cost_budget_killed_workers: list[str] = Field(
         default_factory=list,
         description=(
