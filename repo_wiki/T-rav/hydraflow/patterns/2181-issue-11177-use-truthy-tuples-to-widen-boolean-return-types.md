@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11177
 source_phase: plan
 created_at: 2026-08-14T22:44:18.538089+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2297
 ---
 
 # Use truthy tuples to widen boolean return types

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T23:28:16.255329+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1994
+superseded_by: 2226
 ---
 
 # Gate wiki anchor liveness via AST symbols from wiki_rot_citations

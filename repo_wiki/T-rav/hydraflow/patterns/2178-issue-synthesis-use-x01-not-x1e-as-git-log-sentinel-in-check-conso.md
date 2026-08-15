@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T23:28:16.658851+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2065
+superseded_by: 2294
 ---
 
 # Use %x01 not %x1e as git log sentinel in check_console_conformance.py

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T23:28:16.104688+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1976
+superseded_by: 2208
 ---
 
 # CREDIT_PROSE_SCAN=False marks runners that don't scan transcripts
