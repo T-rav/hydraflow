@@ -398,6 +398,19 @@ class MockWorldSeed:
     # every existing seed payload unchanged.
     credit_exhaustion: dict[str, Any] | None = None
 
+    # Branch-ref fixtures materialized into FakeGitHub._branch_tips at boot
+    # (#11227). Each entry is a dict with keys ``branch`` (required) and
+    # optionally ``sha`` (defaults to the deterministic ``sha-<branch>``
+    # convention push_branch/create_rc_branch use), ``last_commit_at``
+    # (ISO-8601, default ``2026-01-01T00:00:00Z``) and ``commit_messages``
+    # (list[str], newest-first — backs the ``_run_gh`` commits read
+    # StaleIssueLoop's branch-GC composes for age + ``Fixes #N`` extraction).
+    # Both loaders (``FakeGitHub.from_seed`` for sandbox_main +
+    # ``MockWorld.apply_seed`` for the in-process harness) thread this
+    # through ``FakeGitHub.seed_branch``. Default empty: no branch state is
+    # seeded, every existing scenario payload unaffected.
+    branches: list[dict[str, Any]] = field(default_factory=list)
+
     def to_json(self) -> str:
         """Serialize to JSON for cross-process transfer."""
         return json.dumps(asdict(self), indent=2)

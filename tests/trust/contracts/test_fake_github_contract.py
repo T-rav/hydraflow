@@ -231,7 +231,12 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         return FakeOutput(exit_code=0, stdout=_json.dumps(branches) + "\n", stderr="")
 
     if method == "delete_branch":
-        ok = await fake.delete_branch(str(args[0]))
+        # delete_branch returns False for an untracked ref (#11227, mirrors
+        # gh api DELETE's 422) — seed the branch first so this cassette
+        # covers the real "existing ref" deletion the retention sweep hits.
+        branch = str(args[0])
+        fake.seed_branch(branch)
+        ok = await fake.delete_branch(branch)
         return FakeOutput(exit_code=0, stdout=f"{ok}\n", stderr="")
 
     if method == "rerun_workflow_failed":

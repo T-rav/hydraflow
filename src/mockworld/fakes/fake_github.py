@@ -144,6 +144,11 @@ class FakePR:
     # zero-commit PRs from real ones. Defaults to 1 so seeded PRs look
     # "real" without explicit setup.
     commits: int = 1
+    # The branch's _branch_tips sha at merge time (#11227), captured by
+    # merge_pr/merge_promotion_pr before the tip is dropped — emulates
+    # ``gh pr merge --delete-branch``. Empty when the branch was never
+    # pushed/tracked at merge time.
+    merged_head_sha: str = ""
 
 
 class FakeGitHub:
@@ -219,6 +224,21 @@ class FakeGitHub:
         # every branch, matching the raw ``gh api`` 404 case, so existing
         # ruleset-only seeds see no new drift from this seam.
         self._legacy_protection: dict[str, dict[str, Any]] = {}
+        # #11227: branch -> head sha, the fake's single source of truth for
+        # ref existence. push_branch/create_rc_branch/push_synthetic_commit/
+        # ensure_branch_exists/create_pr are the only writers; delete_branch
+        # and merge_pr/merge_promotion_pr (delete-branch-on-merge) are the
+        # only removers. _run_gh's matching-refs read is served straight off
+        # this map's keys.
+        self._branch_tips: dict[str, str] = {}
+        # branch -> (last_commit_iso, [messages newest-first]), backing the
+        # _run_gh commits read StaleIssueLoop's branch-GC composes for a
+        # branch's age and its ``Fixes #N`` reference.
+        self._branch_commits: dict[str, tuple[str, list[str]]] = {}
+        # Per-branch force-push counter — the only way an ordinary re-push
+        # (force=False) leaves the tip sha unchanged is if force-pushes are
+        # the sole source of a *new* sha; this counter is that source.
+        self._branch_force_push_counts: dict[str, int] = {}
 
     @classmethod
     def from_seed(cls, seed: MockWorldSeed) -> FakeGitHub:
@@ -260,6 +280,13 @@ class FakeGitHub:
             gh.set_ci_main_status(conclusion, url)
         for name, cfg in seed.rulesets.items():
             gh.add_ruleset(name, cfg)
+        for branch_dict in seed.branches:
+            gh.seed_branch(
+                branch_dict["branch"],
+                sha=branch_dict.get("sha"),
+                last_commit_at=branch_dict.get("last_commit_at", _RC_FIXED_DATE),
+                commit_messages=branch_dict.get("commit_messages"),
+            )
         return gh
 
     # --- Seed API ---
@@ -384,6 +411,38 @@ class FakeGitHub:
         caller's dict does not retroactively alter seeded state.
         """
         self._legacy_protection[branch] = dict(config)
+
+    def seed_branch(
+        self,
+        branch: str,
+        *,
+        sha: str | None = None,
+        last_commit_at: str = "2026-01-01T00:00:00Z",
+        commit_messages: list[str] | None = None,
+    ) -> None:
+        """Seed-API helper: register a branch ref with a tip sha + commit history.
+
+        Mirrors what ``push_branch`` records so a scenario can seed a branch
+        without driving the full push flow. ``sha`` defaults to the same
+        deterministic ``sha-<branch>`` convention ``push_branch`` uses.
+        ``commit_messages`` (newest-first) backs the ``_run_gh`` commits read
+        ``StaleIssueLoop``'s branch-GC reconciler composes for branch age and
+        ``Fixes #N`` extraction; defaults to one generic commit so a bare
+        ``seed_branch(branch)`` still yields a non-empty commits read.
+        """
+        self._branch_tips[branch] = sha or f"sha-{branch}"
+        self._branch_commits[branch] = (
+            last_commit_at,
+            list(commit_messages) if commit_messages else ["auto-agent commit"],
+        )
+
+    def branch_tip(self, branch: str) -> str | None:
+        """Return the current tip sha for *branch*, or None if untracked."""
+        return self._branch_tips.get(branch)
+
+    def branch_tips(self) -> dict[str, str]:
+        """Return a defensive copy of every tracked branch -> tip sha."""
+        return dict(self._branch_tips)
 
     def script_ci(self, pr_number: int, results: list[tuple[bool, str]]) -> None:
         self._ci_scripts[pr_number] = deque(results)
@@ -631,11 +690,21 @@ class FakeGitHub:
 
     async def push_branch(
         self,
-        *args: Any,
+        worktree_path: Any = None,
+        branch: str = "",
+        *,
+        force: bool = False,
         **_kwargs: Any,
     ) -> bool:
         self._maybe_rate_limit()
-        _ = args
+        _ = worktree_path
+        if branch:
+            if force:
+                n = self._branch_force_push_counts.get(branch, 0) + 1
+                self._branch_force_push_counts[branch] = n
+                self._branch_tips[branch] = f"sha-{branch}-force-{n}"
+            else:
+                self._branch_tips.setdefault(branch, f"sha-{branch}")
         return True
 
     async def create_pr(
@@ -657,6 +726,9 @@ class FakeGitHub:
             draft=draft,
             url=f"https://github.com/test/repo/pull/{number}",
         )
+        # Opening a PR implies the branch already exists on the remote — do
+        # not clobber a tip push_branch already recorded (#11227).
+        self._branch_tips.setdefault(branch, f"sha-{branch}")
         return PRInfoFactory.create(
             number=number,
             issue_number=issue_number,
@@ -727,6 +799,11 @@ class FakeGitHub:
 
     async def get_pr_head_sha(self, pr_number: int) -> str:
         self._maybe_rate_limit()
+        pr = self._prs.get(pr_number)
+        if pr is not None:
+            tip = self._branch_tips.get(pr.branch)
+            if tip:
+                return tip
         return "abc123"
 
     def set_pr_diff_stats(self, pr_number: int, stats: PRDiffStats) -> None:
@@ -846,9 +923,19 @@ class FakeGitHub:
 
     async def merge_pr(self, pr_number: int, **_kw: Any) -> bool:
         self._maybe_rate_limit()
-        if pr_number in self._prs:
-            self._prs[pr_number].merged = True
+        pr = self._prs.get(pr_number)
+        if pr is not None:
+            pr.merged = True
+            self._drop_branch_ref_on_merge(pr)
         return True
+
+    def _drop_branch_ref_on_merge(self, pr: FakePR) -> None:
+        """Emulate ``gh pr merge --delete-branch``: stamp the merge-time tip
+        sha on *pr* then drop the ref (#11227). No-ops (records no sha) when
+        the branch was never pushed/tracked."""
+        pr.merged_head_sha = self._branch_tips.pop(pr.branch, "")
+        self._branch_commits.pop(pr.branch, None)
+        self._rc_branches.pop(pr.branch, None)
 
     async def refresh_pr_branch_with_arch_regen(
         self, pr_number: int, branch: str, **_kw: Any
@@ -1373,13 +1460,17 @@ class FakeGitHub:
 
     async def create_rc_branch(self, rc_branch: str) -> str:
         self._rc_branches[rc_branch] = _RC_FIXED_DATE
-        return f"sha-{rc_branch}"
+        sha = f"sha-{rc_branch}"
+        self._branch_tips[rc_branch] = sha
+        return sha
 
     async def push_synthetic_commit(self, branch: str, message: str) -> str:
         """Record a synthetic commit; deterministic SHA in scenarios."""
         _ = (message,)
         self._maybe_rate_limit()
-        return f"synthetic-sha-{branch}"
+        sha = f"synthetic-sha-{branch}"
+        self._branch_tips[branch] = sha
+        return sha
 
     async def create_promotion_pr(
         self, *, rc_branch: str, title: str, body: str, **_kw: Any
@@ -1414,8 +1505,10 @@ class FakeGitHub:
         return None
 
     async def merge_promotion_pr(self, pr_number: int, **_kw: Any) -> bool:
-        if pr_number in self._prs:
-            self._prs[pr_number].merged = True
+        pr = self._prs.get(pr_number)
+        if pr is not None:
+            pr.merged = True
+            self._drop_branch_ref_on_merge(pr)
         return True
 
     async def update_pr_branch(self, pr_number: int, *, method: str = "rebase") -> bool:
@@ -1440,6 +1533,10 @@ class FakeGitHub:
         return list(self._rc_branches.items())
 
     async def delete_branch(self, branch: str) -> bool:
+        if branch not in self._branch_tips:
+            return False
+        del self._branch_tips[branch]
+        self._branch_commits.pop(branch, None)
         self._rc_branches.pop(branch, None)
         return True
 
@@ -1459,7 +1556,11 @@ class FakeGitHub:
         ]
 
     async def ensure_branch_exists(self, branch: str, *, base: str) -> bool:
-        _ = (branch, base)
+        _ = base
+        # Models the steady state (branch already present): always False,
+        # but the branch is guaranteed to exist afterward either way, so a
+        # missing tip is created without clobbering one already tracked.
+        self._branch_tips.setdefault(branch, f"sha-{branch}")
         return False
 
     async def apply_staging_branch_protection(self, branch: str) -> dict[str, Any]:
@@ -1645,32 +1746,9 @@ class FakeGitHub:
         verb = args[0]
 
         if verb == "issue" and len(args) > 1:
-            sub = args[1]
-            if sub == "list":
-                # Return minimally-shaped issue list. StaleIssueLoop expects
-                # number/title/updatedAt/labels.
-                payload = [
-                    {
-                        "number": issue.number,
-                        "title": issue.title,
-                        "updatedAt": getattr(
-                            issue, "updated_at", "2026-01-01T00:00:00Z"
-                        ),
-                        "labels": [{"name": lbl} for lbl in issue.labels],
-                    }
-                    for issue in self._issues.values()
-                    if issue.state == "open"
-                ]
-                return _json.dumps(payload)
-            if sub == "close":
-                # Best-effort: extract issue number from positional args.
-                for a in args[2:]:
-                    if a.isdigit():
-                        await self.close_issue(int(a))
-                        break
-                return ""
-            if sub == "view":
-                return _json.dumps({"comments": []})
+            issue_read = await self._run_gh_issue_read(args)
+            if issue_read is not None:
+                return issue_read
 
         if verb == "pr" and len(args) > 1:
             sub = args[1]
@@ -1687,6 +1765,82 @@ class FakeGitHub:
                 ]
                 return _json.dumps(payload)
 
+        if verb == "api" and len(args) > 1:
+            branch_read = self._run_gh_branch_read(args)
+            if branch_read is not None:
+                return branch_read
+
         # Unknown verb: return empty JSON array — safe default for
         # callers that ``json.loads`` the output.
         return "[]"
+
+    async def _run_gh_issue_read(self, args: list[str]) -> str | None:
+        """Serve the ``gh issue <sub>`` shapes StaleIssueLoop's generic
+        auto-close sweep and close path use. Returns ``None`` when *args*
+        isn't one of the recognized ``list``/``close``/``view`` shapes, so
+        ``_run_gh`` falls through to its generic unknown-verb default.
+        """
+        import json as _json
+
+        sub = args[1]
+        if sub == "list":
+            # Minimally-shaped issue list. StaleIssueLoop expects
+            # number/title/updatedAt/labels.
+            payload = [
+                {
+                    "number": issue.number,
+                    "title": issue.title,
+                    "updatedAt": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+                    "labels": [{"name": lbl} for lbl in issue.labels],
+                }
+                for issue in self._issues.values()
+                if issue.state == "open"
+            ]
+            return _json.dumps(payload)
+        if sub == "close":
+            # Best-effort: extract issue number from positional args.
+            for a in args[2:]:
+                if a.isdigit():
+                    await self.close_issue(int(a))
+                    break
+            return ""
+        if sub == "view":
+            return _json.dumps({"comments": []})
+        return None
+
+    def _run_gh_branch_read(self, args: list[str]) -> str | None:
+        """Serve the two ``gh api`` branch reads StaleIssueLoop's branch-GC
+        composes (#11227), off live ``_branch_tips``/``_branch_commits``
+        state in their post-``--jq`` shapes. Returns ``None`` when *args*
+        isn't one of the two recognized branch-read shapes, so ``_run_gh``
+        falls through to its generic unknown-verb default.
+        """
+        import json as _json
+
+        path = args[1]
+        # StaleIssueLoop._branch_gc_candidate_branches: matching-refs.
+        if "/git/matching-refs/heads/" in path:
+            prefix = path.split("/git/matching-refs/heads/", 1)[1]
+            refs = sorted(
+                f"refs/heads/{b}" for b in self._branch_tips if b.startswith(prefix)
+            )
+            return _json.dumps(refs)
+        # StaleIssueLoop._branch_gc_commit_info: commits (newest-first).
+        if path.endswith("/commits"):
+            branch = ""
+            for i, a in enumerate(args):
+                if (
+                    a == "--field"
+                    and i + 1 < len(args)
+                    and args[i + 1].startswith("sha=")
+                ):
+                    branch = args[i + 1].removeprefix("sha=")
+                    break
+            info = self._branch_commits.get(branch)
+            if info is None or not info[1]:
+                return "[]"
+            last_commit_iso, messages = info
+            payload = [{"date": last_commit_iso, "message": messages[0]}]
+            payload.extend({"date": "", "message": m} for m in messages[1:])
+            return _json.dumps(payload)
+        return None

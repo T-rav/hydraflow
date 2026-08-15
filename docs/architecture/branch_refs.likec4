@@ -1,0 +1,132 @@
+// Issue #11227 — FakeGitHub models PRs but no branch refs.
+// AS-IS: push_branch is a no-op returning True; delete_branch only pops
+// _rc_branches; merge_pr just flips FakePR.merged. Any behaviour keyed on
+// "does the head ref still exist" (post-merge orphan detection, branch GC,
+// PR recreation) has no observable surface at the MockWorld tier, so
+// tests/scenarios/test_caretaker_loops_part2.py::TestL23cBranchGC drives
+// StaleIssueLoop with a MagicMock prs instead of FakeGitHub ("Pattern B").
+// TO-BE: a _branch_tips ref map is the single source of truth for ref
+// existence; the lifecycle methods mutate it and _run_gh serves the two
+// branch reads (matching-refs, commits) off it.
+
+specification {
+  element module
+  element klass
+  element method
+  element loop
+  element test
+  relationship uses
+}
+
+model {
+
+  // ---- Production side (unchanged by this issue) ----
+  prod = module 'production adapters' {
+    prPort = klass 'PRPort (src/ports.py)' {
+      description 'hexagonal boundary — push_branch / delete_branch / merge_pr / get_pr_head_sha'
+    }
+    prManager = klass 'PRManager (src/pr_manager.py)' {
+      description 'git push --no-verify; gh pr merge --squash --delete-branch'
+    }
+    promoMixin = klass 'PRManagerPromotionMixin (src/pr_manager_promotion.py)' {
+      description 'create_rc_branch / list_rc_branches / delete_branch (gh api DELETE git/refs/heads)'
+    }
+  }
+  prManager -> prPort uses 'implements'
+  promoMixin -> prPort uses 'implements the RC/promotion slice'
+
+  // ---- Consumers whose behaviour is ref-existence-shaped ----
+  consumers = module 'ref-existence consumers' {
+    staleLoop = loop 'StaleIssueLoop branch-GC (src/stale_issue_loop.py)' {
+      description 'inventories refs via _run_gh matching-refs; deletes via delete_branch'
+      m_cand = method '_branch_gc_candidate_branches() -> gh api git/matching-refs/heads/<prefix>'
+      m_info = method '_branch_gc_commit_info() -> gh api /commits --field sha=<branch>'
+    }
+    promoLoop = loop 'StagingPromotionLoop (src/staging_promotion_loop.py)' {
+      description 'cut rc/* -> open promotion PR -> merge -> retention sweep delete_branch'
+    }
+    gcScan = klass 'branch_gc_scan (src/branch_gc_scan.py)' {
+      description 'pure classify/should_delete_branch engine — no I/O'
+    }
+  }
+  staleLoop -> gcScan uses 'classify_branch / should_delete_branch'
+  staleLoop -> prPort uses 'delete_branch, find_open_pr_for_branch, _run_gh'
+  promoLoop -> prPort uses 'create_rc_branch, merge_promotion_pr, delete_branch'
+
+  // ---- AS-IS fake: no ref state ----
+  asis = module 'FakeGitHub AS-IS' {
+    fakeOld = klass 'FakeGitHub (src/mockworld/fakes/fake_github.py)' {
+      description 'FakePR records only; _rc_branches is the sole branch-ish map'
+      m_push_old = method 'push_branch(*args) -> True   [NO-OP]'
+      m_del_old = method 'delete_branch(b) -> pops _rc_branches only'
+      m_merge_old = method 'merge_pr(n) -> pr.merged = True   [no ref deletion]'
+      m_sha_old = method 'get_pr_head_sha(n) -> "abc123"   [constant]'
+      m_gh_old = method '_run_gh(gh api matching-refs|commits) -> "[]"   [unknown verb]'
+    }
+  }
+  mockTest = test 'TestL23cBranchGC (tests/scenarios/test_caretaker_loops_part2.py)' {
+    description 'Pattern B: MagicMock prs + AsyncMock delete_branch — the workaround #11227 removes'
+  }
+  mockTest -> fakeOld uses 'BYPASSES the fake — no observable ref surface'
+  staleLoop -> fakeOld uses '_run_gh returns [] -> branch GC never fires in MockWorld'
+
+  // ---- TO-BE fake: _branch_tips is the ref source of truth ----
+  tobe = module 'FakeGitHub TO-BE' {
+    tips = klass '_branch_tips: dict[branch -> sha]  NEW' {
+      description 'ref existence + tip sha; deterministic shas, no wall clock (mirrors _RC_FIXED_DATE)'
+    }
+    meta = klass '_branch_commits: dict[branch -> (last_commit_iso, messages)]  NEW' {
+      description 'per-branch commit metadata backing the gh api /commits read'
+    }
+    seedApi = klass 'seed / inspect helpers  NEW' {
+      m_seed = method 'seed_branch(branch, *, sha, last_commit_at, commit_messages)'
+      m_tip = method 'branch_tip(branch) -> str | None'
+      m_tips = method 'branch_tips() -> dict  [defensive copy]'
+    }
+    lifecycle = klass 'lifecycle methods (rewired)' {
+      m_push = method 'push_branch(worktree, branch, *, force) -> records/refreshes tip'
+      m_del = method 'delete_branch(b) -> drops tip; False when absent (mirrors gh 422)'
+      m_rc = method 'create_rc_branch / push_synthetic_commit / ensure_branch_exists -> record tip'
+      m_merge = method 'merge_pr / merge_promotion_pr -> FakePR.merged_head_sha = tip; drop tip'
+      m_sha = method 'get_pr_head_sha(n) -> tip of pr.branch, else "abc123" fallback'
+    }
+    ghReads = klass '_run_gh branch reads  NEW' {
+      m_refs = method 'gh api repos/*/git/matching-refs/heads/<prefix> -> post-jq [refs/heads/...]'
+      m_commits = method 'gh api repos/*/commits --field sha=<branch> -> [{date, message}]'
+    }
+  }
+  lifecycle -> tips uses 'sole mutator of ref state'
+  ghReads -> tips uses 'refs served from live tip map, not a hardcoded []'
+  ghReads -> meta uses 'commit date/messages for branch age + Fixes #N extraction'
+  seedApi -> tips uses 'seed / inspect'
+  seedApi -> meta uses 'seed_branch threads commit metadata'
+
+  seedModel = klass 'MockWorldSeed.branches (src/mockworld/seed.py)  NEW FIELD' {
+    description 'list[dict]: branch, sha?, last_commit_at?, commit_messages? — absent key = no-op'
+  }
+  seedModel -> seedApi uses 'from_seed + MockWorld.apply_seed thread each entry'
+
+  newScenario = test 'test_branch_lifecycle_scenario.py  NEW' {
+    description 'release-gating MockWorld scenario: RC cut->merge drops the tip; branch GC deletes a stale ref'
+  }
+  newScenario -> tobe uses 'asserts on branch_tip()/branch_tips() — FakeGitHub only, no subprocess'
+  staleLoop -> ghReads uses 'branch GC now observable at the MockWorld tier'
+  promoLoop -> lifecycle uses 'rc tip present after cut, gone after merge/sweep'
+}
+
+views {
+  view asisView {
+    title 'AS-IS — no ref state in FakeGitHub; branch-GC scenarios fall back to MagicMock'
+    include prod, consumers, asis, prPort, prManager, promoMixin,
+            staleLoop, promoLoop, gcScan, fakeOld, mockTest, *
+  }
+  view tobeView {
+    title 'TO-BE — _branch_tips as the ref source of truth (#11227)'
+    include prod, consumers, tobe, prPort, staleLoop, promoLoop,
+            tips, meta, seedApi, lifecycle, ghReads, seedModel, newScenario, *
+  }
+  view fakeOnly {
+    title 'FakeGitHub branch-ref seam — state, mutators, reads'
+    include tobe, tips, meta, seedApi, lifecycle, ghReads, seedModel
+  }
+}

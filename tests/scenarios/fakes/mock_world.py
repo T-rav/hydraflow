@@ -528,6 +528,15 @@ class MockWorld:
                 self._github.add_pr_label(pr_dict["number"], label)
         for name, cfg in seed.rulesets.items():
             self._github.add_ruleset(name, cfg)
+        for branch_dict in seed.branches:
+            self._github.seed_branch(
+                branch_dict["branch"],
+                sha=branch_dict.get("sha"),
+                last_commit_at=branch_dict.get(
+                    "last_commit_at", "2026-01-01T00:00:00Z"
+                ),
+                commit_messages=branch_dict.get("commit_messages"),
+            )
         for phase, by_issue in seed.scripts.items():
             for issue_number, results in by_issue.items():
                 for result in results:
