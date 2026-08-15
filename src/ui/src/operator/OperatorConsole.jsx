@@ -86,6 +86,11 @@ const MODES = [
   // workers with an explicit state. The URL key stays 'all-active' (selection
   // contract); only the operator-facing label reads 'Agents'.
   { key: 'all-active', label: 'Agents' },
+  // Instruments: the finder/loop faceplates + judge calibration promoted out
+  // of the vitals rail into a full-width grid (the #10942 primary-surface
+  // direction) — eight stacked rail panels had turned the 280px column into
+  // an endless scroll.
+  { key: 'instruments', label: 'Instruments' },
 ]
 
 function makeStyles(t) {
@@ -117,6 +122,13 @@ function makeStyles(t) {
     }),
     slot: (area) => ({ minWidth: 0, gridArea: area }),
     vitalsSlot: { minWidth: 0, gridArea: 'vitals', display: 'flex', flexDirection: 'column', gap: t.space.md },
+    // Instruments mode: full-width responsive card grid in the detail slot.
+    instrumentsGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+      gap: t.space.md,
+      alignItems: 'start',
+    },
     switcherWrap: { marginBottom: t.space.sm },
     toggleBar: { display: 'flex', gap: t.space.xs, marginBottom: t.space.sm },
     toggleBtn: (active) => ({
@@ -134,7 +146,7 @@ function makeStyles(t) {
 }
 
 /**
- * Focus <-> All-active mode toggle (Task 5). A two-button segmented control;
+ * Focus / Agents / Instruments mode toggle (Task 5, #10942). A segmented control;
  * each button calls `select('mode', key)`, which the selection hook mirrors
  * into the URL query (`?mode=all-active`; focus is the clean default).
  * @param {{ mode: string, select: Function, styles: object }} props
@@ -300,6 +312,12 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                   now={now}
                   select={select}
                 />
+              ) : mode === 'instruments' ? (
+                <div data-testid="instruments-grid" style={styles.instrumentsGrid}>
+                  <FinderFaceplatePanel faceplates={faceplates} />
+                  <LoopFaceplatePanel faceplates={loopFaceplates} />
+                  <JudgeCalibrationPanel calibration={calibration} />
+                </div>
               ) : (
                 <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
               )}
@@ -314,11 +332,9 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                 onRestartLoop={socket.restartLoop}
                 onAckEscalations={socket.ackEscalations}
               />
-              <FinderFaceplatePanel faceplates={faceplates} />
-              {/* Read-only slice; promotion to the primary-surface faceplate
-                  grid is the #10942 zone work. */}
-              <LoopFaceplatePanel faceplates={loopFaceplates} />
-              <JudgeCalibrationPanel calibration={calibration} />
+              {/* Finder/Loop faceplates + judge calibration moved to the
+                  full-width Instruments mode (the #10942 primary-surface
+                  promotion) — the rail keeps only glanceable panels. */}
               <LoopsPanel loops={loops} />
               <SettingsSummary summary={settings} onOpenSettings={() => setSettingsOpen(true)} />
             </div>
