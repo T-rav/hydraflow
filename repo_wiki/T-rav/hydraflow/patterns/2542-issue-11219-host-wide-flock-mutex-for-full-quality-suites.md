@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11219
 source_phase: plan
 created_at: 2026-08-15T06:20:11.276950+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2665
 ---
 
 # Host-wide flock mutex for full quality suites

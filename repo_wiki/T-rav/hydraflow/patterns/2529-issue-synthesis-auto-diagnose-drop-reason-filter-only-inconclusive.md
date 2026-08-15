@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T06:55:24.248385+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2409
+superseded_by: 2652
 ---
 
 # _auto_diagnose: drop reason filter; only INCONCLUSIVE reaches human

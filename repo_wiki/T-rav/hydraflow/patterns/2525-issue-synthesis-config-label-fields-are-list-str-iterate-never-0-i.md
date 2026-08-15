@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T06:55:24.206423+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2405
+superseded_by: 2648
 ---
 
 # Config label fields are list[str] — iterate, never [0]-index

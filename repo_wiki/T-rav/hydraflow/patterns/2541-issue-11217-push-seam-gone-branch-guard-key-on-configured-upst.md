@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11217
 source_phase: plan
 created_at: 2026-08-15T06:04:15.266840+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2664
 ---
 
 # Push-seam gone-branch guard: key on configured-upstream-[gone], not absent origin ref
