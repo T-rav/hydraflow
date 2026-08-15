@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { OperatorConsoleView } from '../OperatorConsole'
 
@@ -99,27 +99,125 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('loops-category-toggle-repo_health')).toBeInTheDocument()
   })
 
-  it('mounts the SupervisorPanel in the vitals slot, empty by default (#10733)', () => {
+  it('mounts the compact SupervisorSummary (not the full panel) in the vitals slot (#11207)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     const vitalsSlot = screen.getByTestId('operator-vitals-slot')
-    expect(vitalsSlot).toContainElement(screen.getByTestId('supervisor-panel'))
-    // Default supervisor VM is empty → the calm empty state renders, no crash.
+    expect(vitalsSlot).toContainElement(screen.getByTestId('supervisor-summary'))
+    expect(screen.getByTestId('supervisor-summary-verdict')).toBeInTheDocument()
+  })
+
+  it('keeps the full SupervisorPanel OUT of the vitals rail (promoted to Supervisor mode, #11207)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    const vitalsSlot = screen.getByTestId('operator-vitals-slot')
+    expect(vitalsSlot.querySelector('[data-testid="supervisor-panel"]')).toBeNull()
+  })
+
+  it('keeps the faceplate panels OUT of the vitals rail (promoted to Instruments mode)', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    const vitalsSlot = screen.getByTestId('operator-vitals-slot')
+    expect(vitalsSlot.querySelector('[data-testid="finder-faceplate-panel"]')).toBeNull()
+    expect(vitalsSlot.querySelector('[data-testid="loop-faceplate-panel"]')).toBeNull()
+    expect(vitalsSlot.querySelector('[data-testid="judge-calibration-panel"]')).toBeNull()
+  })
+
+  // --- Supervisor mode (#11207): gauge-first full-width tab ------------------
+
+  it('clicking the rail summary jumps to the Supervisor tab', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    fireEvent.click(screen.getByTestId('supervisor-summary'))
+    expect(screen.getByTestId('supervisor-mode')).toBeInTheDocument()
+    expect(screen.getByTestId('mode-toggle-supervisor')).toHaveAttribute('aria-pressed', 'true')
+    expect(new URLSearchParams(window.location.search).get('mode')).toBe('supervisor')
+  })
+
+  it('renders the gauges row + the reused SupervisorPanel thread in Supervisor mode', () => {
+    render(<OperatorConsoleView socket={makeSocket()} />)
+    fireEvent.click(screen.getByTestId('mode-toggle-supervisor'))
+    expect(screen.getByTestId('supervisor-gauges')).toBeInTheDocument()
+    expect(screen.getByTestId('supervisor-gauge-tick-health')).toBeInTheDocument()
+    expect(screen.getByTestId('supervisor-panel')).toBeInTheDocument()
     expect(screen.getByTestId('supervisor-empty')).toBeInTheDocument()
+    // The detail slot spans full width in supervisor mode (focusFull path).
+    expect(screen.getByTestId('operator-detail-slot')).toHaveAttribute('data-fullwidth', 'true')
   })
 
-  it('mounts the FinderFaceplatePanel in the vitals slot, empty by default (#10826)', () => {
+  it('flows the fleet prop through to the Supervisor tick-health gauge (container wiring, #11207)', () => {
+    // The container composes the useTrustFleet `fleet` VM into the gauges; a
+    // populated fleet must reach the RENDERED gauge value (not just render the
+    // tile). Pins the OperatorConsoleView → toSupervisorGauges → SupervisorMode
+    // integration a prior attempt left untested (the VM + the panel were each
+    // pinned in isolation, never joined at the container).
+    const fleet = {
+      tickHealth: { total: 10, ok: 7, warmup: 3, errored: 0, loopCount: 1 },
+      attemptBudget: { attempts: 0, successes: 0, failures: 0 },
+    }
+    render(<OperatorConsoleView socket={makeSocket()} fleet={fleet} />)
+    fireEvent.click(screen.getByTestId('mode-toggle-supervisor'))
+    expect(screen.getByTestId('supervisor-gauge-tick-health-value')).toHaveTextContent('7 ok / 3 warmup / 0 errored')
+    expect(screen.getByTestId('supervisor-gauge-tick-health-tone')).toHaveTextContent('warning')
+  })
+
+  it('wires the socket control handlers through to the Supervisor action buttons (container wiring, #11207)', () => {
+    // The operator's Resume/Pause in the Supervisor tab must reach the factory
+    // control endpoints via the socket — the container threads
+    // socket.startOrchestrator/stopOrchestrator into SupervisorMode →
+    // SupervisorPanel. SupervisorMode.test pins the inner pass-through in
+    // isolation (injected vi.fns); this pins the container-level wiring a
+    // prior attempt left untested.
+    const startOrchestrator = vi.fn()
+    const stopOrchestrator = vi.fn()
+    render(<OperatorConsoleView socket={makeSocket({ startOrchestrator, stopOrchestrator })} />)
+    fireEvent.click(screen.getByTestId('mode-toggle-supervisor'))
+    // Resume reaches the START endpoint only — pins the correct mapping, not
+    // just "some handler fired" (a Resume↔Pause swap would fail here).
+    fireEvent.click(screen.getByTestId('supervisor-action-resume'))
+    expect(startOrchestrator).toHaveBeenCalledTimes(1)
+    expect(stopOrchestrator).not.toHaveBeenCalled()
+    // Pause reaches the STOP endpoint.
+    fireEvent.click(screen.getByTestId('supervisor-action-pause'))
+    expect(stopOrchestrator).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps Supervisor reachable on an IDLE repo (mirrors the #11203 Instruments idle-exemption)', () => {
+    // Empty pipeline (every stage's issue list cleared) → idle would normally
+    // claim the detail slot; the Supervisor tab shows factory-wide signals
+    // that matter precisely when the pipeline is quiet, so it must win instead.
+    const idleSocket = makeSocket({
+      pipelineIssues: { triage: [], plan: [], implement: [], review: [], hitl: [], merged: [] },
+    })
+    render(<OperatorConsoleView socket={idleSocket} />)
+    fireEvent.click(screen.getByTestId('mode-toggle-supervisor'))
+    expect(screen.getByTestId('supervisor-mode')).toBeInTheDocument()
+    expect(screen.queryByTestId('operator-idle-state')).toBeNull()
+  })
+
+  it('keeps Instruments reachable on an IDLE repo (#11203 review find)', () => {
+    // Empty pipeline → idle would normally claim the detail slot; the
+    // instruments grid shows global diagnostics and must win instead. The
+    // override MUST clear `pipelineIssues` (the key makeSocket builds stages
+    // from) — a prior attempt used the wrong key `issues` (ignored by
+    // makeSocket), leaving the pipeline active so the test passed regardless of
+    // the exemption (vacuous). The Supervisor sibling below mirrors this fix.
+    const idleSocket = makeSocket({
+      pipelineIssues: { triage: [], plan: [], implement: [], review: [], hitl: [], merged: [] },
+    })
+    render(<OperatorConsoleView socket={idleSocket} />)
+    fireEvent.click(screen.getByTestId('mode-toggle-instruments'))
+    expect(screen.getByTestId('instruments-grid')).toBeInTheDocument()
+    expect(screen.queryByTestId('operator-idle-state')).toBeNull()
+  })
+
+  it('renders the faceplate panels as a full-width grid in Instruments mode (#10942)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
-    const vitalsSlot = screen.getByTestId('operator-vitals-slot')
-    expect(vitalsSlot).toContainElement(screen.getByTestId('finder-faceplate-panel'))
+    fireEvent.click(screen.getByTestId('mode-toggle-instruments'))
+    const grid = screen.getByTestId('instruments-grid')
+    expect(grid).toContainElement(screen.getByTestId('finder-faceplate-panel'))
+    expect(grid).toContainElement(screen.getByTestId('loop-faceplate-panel'))
+    // Empty payloads render each panel's calm empty state, no crash.
     expect(screen.getByTestId('faceplate-empty')).toBeInTheDocument()
-  })
-
-  it('mounts the LoopFaceplatePanel in the vitals slot, empty by default (#10826)', () => {
-    render(<OperatorConsoleView socket={makeSocket()} />)
-    const vitalsSlot = screen.getByTestId('operator-vitals-slot')
-    expect(vitalsSlot).toContainElement(screen.getByTestId('loop-faceplate-panel'))
-    // No loop-faceplates payload by default → the calm empty state, no crash.
     expect(screen.getByTestId('loop-faceplate-empty')).toBeInTheDocument()
+    // The detail slot spans full width in instruments mode (focusFull path).
+    expect(screen.getByTestId('operator-detail-slot')).toHaveAttribute('data-fullwidth', 'true')
   })
 
   it('mounts the phase timeline in the reclaimed bottom slot (feat/operator-timeline)', () => {

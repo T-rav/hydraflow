@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:09.941173+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2166
+superseded_by: 2402
 ---
 
 # _hard_full_suite_reason ordering precedes .py name-mapping

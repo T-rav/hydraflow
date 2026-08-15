@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T20:26:28.553271+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0145
+superseded_by: 0171
 ---
 
 # Placeholder stripping pipeline order in prompt_fitness.py

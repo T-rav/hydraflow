@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:10.005902+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2182
+superseded_by: 2418
 ---
 
 # adds_regression_pin shortcut is sole evidence path for zero-needle rows

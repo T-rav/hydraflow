@@ -4,11 +4,11 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 ## Population
 
-- **Population:** Accepted (80 ADRs)
+- **Population:** Accepted (81 ADRs)
 - **Mean density** (per-ADR, unweighted): 96%
-- **Executable fraction** (check-weighted): 98% (136 of 139 cited checks)
-- **Check kinds:** pytest 135, make 1, script 0, prose 3
-- **Prose-count control limit** (Shewhart c-chart UCL): 0.62
+- **Executable fraction** (check-weighted): 98% (142 of 145 cited checks)
+- **Check kinds:** pytest 141, make 1, script 0, prose 3
+- **Prose-count control limit** (Shewhart c-chart UCL): 0.61
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 
 > The monthly time-series and the shared Shewhart baseline framework are deferred to the epic's framework child (#10915). This surface is the per-PR snapshot; the longitudinal trend is a later phase.
@@ -92,11 +92,12 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0112 | Per-Issue Isolation via Local Git Clone | 100% | 1 | 0 |
 | ADR-0113 | ADR lineage — Precedent and Divergence lines | 100% | 1 | 0 |
 | ADR-0114 | Optional per-type EventBus subscription | 100% | 1 | 0 |
-| ADR-0115 | Auto-diagnose before human for audit + escape surfaces | 100% | 6 | 0 |
+| ADR-0115 | Auto-diagnose before human for audit + escape surfaces | 100% | 7 | 0 |
 | ADR-0116 | Prompts as a measured contract | 100% | 4 | 0 |
 | ADR-0117 | Observed prompt coverage — the denominator is measured, not inferred | 100% | 1 | 0 |
 | ADR-0118 | Observability belongs to the SRE agent, not the loops | 100% | 1 | 0 |
 | ADR-0119 | Credit failover — reroute work to GLM instead of pausing when Claude credits are exhausted | 100% | 1 | 0 |
+| ADR-0134 | Per-repo model/harness selection — run Claude and GLM projects side by side | 100% | 5 | 0 |
 
 
 <!-- arch:generated -->

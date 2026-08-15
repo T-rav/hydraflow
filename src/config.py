@@ -285,6 +285,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_ESCAPE_LEDGER_ENCODING_AGE_DAYS",
         14,
     ),
+    (
+        "escape_ledger_max_diagnoses_per_tick",
+        "HYDRAFLOW_ESCAPE_LEDGER_MAX_DIAGNOSES_PER_TICK",
+        25,
+    ),
     ("intervention_tally_interval", "HYDRAFLOW_INTERVENTION_TALLY_INTERVAL", 86400),
     (
         "intervention_tally_max_classify_per_tick",
@@ -757,6 +762,7 @@ _ENV_INT_OVERRIDES += [
 
 _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     ("dry_run", "HYDRAFLOW_DRY_RUN", False),
+    ("factory_autostart", "HYDRAFLOW_FACTORY_AUTOSTART", True),
     (
         "test_adequacy_verifier_enabled",
         "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_ENABLED",
@@ -2253,6 +2259,23 @@ class HydraFlowConfig(BaseModel):
             "escape should terminate in an encoding (test/lesson/detector/ADR)."
         ),
     )
+    escape_ledger_max_diagnoses_per_tick: int = Field(
+        default=25,
+        ge=1,
+        le=500,
+        description=(
+            "Cap on how many eligible (low-confidence or aging-unencoded) "
+            "escapes EscapeLedgerLoop runs the auto-diagnose pass (ADR-0115) "
+            "over in one tick (#11176). Diagnosis runs over the FULL eligible "
+            "set BEFORE the ask-budget cap (`escape_ledger_max_issues_per_tick`) "
+            "is applied, so a machine-resolvable finding self-answers "
+            "regardless of how many other findings are competing for that "
+            "tick's ask budget; this separate, wider cap bounds the git/PRPort "
+            "reads a synthetic flood of eligible findings could otherwise drive "
+            "in one tick. Eligible findings beyond this cap fall through to the "
+            "ask budget undiagnosed (fail-safe: they may still reach a human)."
+        ),
+    )
     escape_ledger_auto_diagnose_enabled: bool = Field(
         default=True,
         description=(
@@ -2462,11 +2485,12 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=20,
         description=(
-            "Max open ADR-drift rollups AdrDriftResolverLoop triages "
-            "(spends an LLM call on) in one tick (#9976). Overflow "
-            "candidates are simply retried next tick — no carryover "
-            "bookkeeping needed since the candidate set is re-derived from "
-            "state each tick."
+            "Max LLM triage calls AdrDriftResolverLoop attempts in one tick "
+            "(#9976) — every call ATTEMPTED counts against this budget, "
+            "including one that errors, not just successful triages "
+            "(#11181). Overflow candidates are simply retried next tick — "
+            "no carryover bookkeeping needed since the candidate set is "
+            "re-derived from state each tick."
         ),
     )
 
@@ -2680,7 +2704,9 @@ class HydraFlowConfig(BaseModel):
             "endpoint the Claude CLI is pointed at (via ANTHROPIC_BASE_URL) when "
             "an agentic role sets provider='zai', so a tool-using maintenance loop "
             "runs on GLM. Distinct from zai_base_url (the one-shot /paas/v4 face). "
-            "The API key is read from ZAI_API_KEY (a secret — env-only)."
+            "Auth prefers ZAI_CODING_PLAN_KEY (flat-rate GLM Coding Plan) and "
+            "falls back to ZAI_API_KEY, so agentic spawns ride the plan while "
+            "one-shot background traffic stays on API credits (secrets — env-only)."
         ),
     )
     kimi_base_url: str = Field(
@@ -2764,16 +2790,43 @@ class HydraFlowConfig(BaseModel):
             "maintenance role-set, never the work loops."
         ),
     )
+    # Per-repo harness/backend override (#11211): lets an operator run this
+    # repo's factory work on GLM while another repo (a different HydraFlowConfig
+    # instance — one per registered repo, see repo_store.py) stays on Claude.
+    # Applied at spawn time by repo_backend.apply_repo_provider, layered UNDER
+    # any explicit per-role *_provider dial (which always wins when it has
+    # already routed a role off "claude") and UNDER credit-failover (which only
+    # further reroutes a spawn still resolving to "claude"). Resolution order:
+    # role dial > repo_provider > credit-failover.
+    repo_provider: Literal["claude", "zai"] = Field(
+        default="claude",
+        description=(
+            "Repo-wide harness backend override for this repo's work spawns. "
+            "Set to 'zai' to run this repo on GLM; pair with repo_model. A "
+            "role's own *_provider dial, when explicitly routed off claude, "
+            "always wins over this. Falls back to claude (each role's own "
+            "default) when unset."
+        ),
+    )
+    repo_model: str = Field(
+        default="",
+        description=(
+            "Model used when repo_provider reroutes a spawn to 'zai' (e.g. "
+            "'glm-5.2'). Empty falls back to credit_failover_model."
+        ),
+    )
     # Credit failover (#10844): when a Claude *work* spawn hits an authoritative
     # Anthropic credit cap, reroute work spawns to the z.ai GLM backend and keep
-    # going instead of pausing. Requires ZAI_API_KEY (no-op without it). Switch
+    # going instead of pausing. Requires a zai key — ZAI_CODING_PLAN_KEY or
+    # ZAI_API_KEY (no-op without one). Switch
     # back auto-probes Claude after cooldown / the error's reset time. Never
     # touches maintenance loops (they dial independently).
     credit_failover_enabled: bool = Field(
         default=True,
         description=(
             "Reroute work spawns to the GLM backend on an authoritative Claude "
-            "credit cap instead of pausing (#10844). Requires ZAI_API_KEY."
+            "credit cap instead of pausing (#10844). Requires ZAI_CODING_PLAN_KEY "
+            "or ZAI_API_KEY."
         ),
     )
     credit_failover_model: str = Field(
@@ -4176,6 +4229,16 @@ class HydraFlowConfig(BaseModel):
     )
     dashboard_enabled: bool = Field(
         default=True, description="Enable the live web dashboard"
+    )
+    factory_autostart: bool = Field(
+        default=True,
+        description=(
+            "Autostart the host orchestrator once the server is healthy at "
+            "boot — the same path as POST /api/control/start (#11208). "
+            "Suppressed by an active operator-stopped latch (see "
+            "state.get_operator_stopped); production only, never reached by "
+            "MockWorld or the sandbox docker entrypoint."
+        ),
     )
 
     # Polling
@@ -5843,6 +5906,22 @@ class HydraFlowConfig(BaseModel):
             msg = (
                 f"credit_failover_model must be a glm-* model (got '{v}') — the "
                 "zai harness backend only accepts glm-* models."
+            )
+            raise ValueError(msg)
+        return v
+
+    @field_validator("repo_model")
+    @classmethod
+    def repo_model_must_be_glm_when_set(cls, v: str) -> str:
+        """A non-empty repo_model runs on the zai backend, which requires glm-* (#11211).
+
+        Empty is the "unset — fall back to credit_failover_model" sentinel and
+        is always valid.
+        """
+        if v and not v.startswith("glm"):
+            msg = (
+                f"repo_model must be a glm-* model (got '{v}') — the zai "
+                "harness backend only accepts glm-* models."
             )
             raise ValueError(msg)
         return v

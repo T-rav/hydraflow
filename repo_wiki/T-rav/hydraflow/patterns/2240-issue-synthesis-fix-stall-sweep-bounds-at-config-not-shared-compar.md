@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:09.795246+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2124
+superseded_by: 2360
 ---
 
 # Fix stall sweep bounds at config, not shared comparison operators

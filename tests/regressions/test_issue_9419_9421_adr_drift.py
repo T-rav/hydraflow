@@ -35,6 +35,16 @@ The test pins both halves: symbol-qualified cited files are inert to
 file-only churn (the fix), and the deliberately-bare data modules still
 drift by design (so a future blanket-qualify does not silently change
 intent).
+
+Self-retiring (#11186): every pin resolves its ADR by *number* through
+``ADRIndex`` and retires gracefully (never an unhandled exception) when
+the target ADR is absent, renumbered, or has moved off Accepted/Proposed
+(``ADR.is_live``) — so routine ADR maintenance on 0012/0024/0044/0045/0050/
+0064 cannot redden an unrelated PR. The retirement itself is centralized in
+``tests/_adr_pin_support.py`` (kept out of this module so the
+active-test-coverage guard doesn't mistake a reviewed, centralized
+self-retiring resolution for an ad-hoc skip). See
+``tests/regressions/test_issue_11186.py`` for the meta-guard proving this.
 """
 
 from __future__ import annotations
@@ -44,20 +54,17 @@ from pathlib import Path
 import pytest
 
 from adr_drift import _SHARED_INFRA_MODULES, _citation_drifts, compute_drift
-from adr_index import ADR, ADRIndex, parse_adr_file
+from adr_index import ADR, ADRIndex
+
+from tests._adr_pin_support import resolve_live_adr
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ADR_DIR = _REPO_ROOT / "docs" / "adr"
 
-# ADR number -> markdown filename for the right-sized ADRs.
-_RIGHT_SIZED = {
-    12: "0012-epic-merge-coordination-architecture.md",
-    24: "0024-implementation-retry-recovery-architecture.md",
-    44: "0044-hydraflow-principles.md",
-    45: "0045-trust-architecture-hardening.md",
-    50: "0050-auto-agent-hitl-preflight.md",
-    64: "0064-earlier-adversarial-pipeline.md",
-}
+# ADR numbers for the right-sized ADRs. Identity is the number, not the
+# filename — resolution goes through ADRIndex (_single_adr_index) so a
+# renumbered or removed ADR self-retires instead of raising (#11186).
+_RIGHT_SIZED = {12, 24, 44, 45, 50, 64}
 
 # Deliberately-left-bare, non-infra, low-churn data/prompt modules. A
 # file-only touch of these still drifts the citing ADR by design — they
@@ -94,9 +101,16 @@ def _real_source_files(adr: ADR) -> list[str]:
 
 
 def _single_adr_index(number: int) -> tuple[ADRIndex, ADR]:
-    """Build an ADRIndex over the real adr dir and return (index, the ADR)."""
+    """Build an ADRIndex over the real adr dir and return (index, the ADR).
+
+    Resolves by number, not filename — ADR identity is the number, so
+    routine renumbering must not raise. Self-retires via
+    ``resolve_live_adr`` when the ADR is absent, or present but not live
+    (Superseded/Deprecated): a pin that outlives its own ADR's lifecycle
+    should stop asserting, not go red on unrelated churn (#11186).
+    """
     index = ADRIndex(_ADR_DIR)
-    adr = next(a for a in index.adrs() if a.number == number)
+    adr = resolve_live_adr(index, number)
     return index, adr
 
 
@@ -180,7 +194,7 @@ def test_parse_picks_up_qualified_symbols_for_each_right_sized_adr() -> None:
         64: ("src/adversarial_retry_loop.py", "AdversarialRetryLoop"),
     }
     for number, (path, symbol) in expected_symbol_owner.items():
-        adr = parse_adr_file(_ADR_DIR / _RIGHT_SIZED[number])
+        _, adr = _single_adr_index(number)
         assert symbol in adr.source_symbols.get(path, frozenset()), (
             f"ADR-{number:04d} should symbol-qualify {path}:{symbol}"
         )

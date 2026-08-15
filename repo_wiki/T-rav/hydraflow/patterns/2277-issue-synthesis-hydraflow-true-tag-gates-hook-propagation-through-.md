@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:09.923357+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2161
+superseded_by: 2397
 ---
 
 # _hydraflow: true tag gates hook propagation through merge

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from boot_gap_detector import compute_boot_gap_alert, last_event_timestamp
 from config import HydraFlowConfig, build_credentials
 from events import EventType, HydraFlowEvent
+from factory_autostart import maybe_autostart_host
 from log import setup_logging
 from prompt_gate import most_restrictive_data_class
 from runtime_config import (
@@ -23,6 +24,7 @@ from runtime_config import (
 from unpushed_branch_alert import check_and_alert_unpushed_branches
 
 if TYPE_CHECKING:
+    from dashboard import HydraFlowDashboard
     from events import EventBus
     from repo_runtime import RepoRuntimeRegistry
     from repo_store import RepoRegistryStore
@@ -145,7 +147,18 @@ async def _check_and_publish_boot_gap(config: HydraFlowConfig, bus: EventBus) ->
         await bus.publish(HydraFlowEvent(type=EventType.SYSTEM_ALERT, data=alert))
 
 
-async def _run_with_dashboard(config: HydraFlowConfig) -> None:
+async def _boot_factory(
+    config: HydraFlowConfig,
+) -> tuple[HydraFlowDashboard, RepoRuntimeRegistry]:
+    """Boot the factory up to (and including) autostart — everything
+    ``_run_with_dashboard`` does before it blocks forever on
+    ``stop_event.wait()``.
+
+    Deliberately extracted into its own async function — same precedent as
+    ``_check_and_publish_boot_gap`` — so the ``maybe_autostart_host`` boot-time
+    call site (#11208) is directly unit-testable without booting a real
+    dashboard or blocking on a signal handler.
+    """
     from dashboard import HydraFlowDashboard  # noqa: PLC0415
     from events import EventBus, EventLog  # noqa: PLC0415
     from models import Phase  # noqa: PLC0415
@@ -294,12 +307,27 @@ async def _run_with_dashboard(config: HydraFlowConfig) -> None:
     )
     await dashboard.start()
 
+    # Autostart the host orchestrator once the server is healthy — the
+    # server-up != factory-running gap (#11208). Fires the exact same path
+    # POST /api/control/start does; suppressed by config, an active
+    # operator-stopped latch, or an already-running host (see
+    # factory_autostart.decide_autostart).
+    await maybe_autostart_host(
+        config=config, host_runtime=host_runtime, state=state, event_bus=bus
+    )
+
     await bus.publish(
         HydraFlowEvent(
             type=EventType.PHASE_CHANGE,
             data={"phase": Phase.IDLE.value},
         )
     )
+
+    return dashboard, registry
+
+
+async def _run_with_dashboard(config: HydraFlowConfig) -> None:
+    dashboard, registry = await _boot_factory(config)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

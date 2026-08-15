@@ -85,6 +85,13 @@ flips a dial.
 - The tool axis is `claude`+`codex` only; gemini/pi are un-configurable and
   un-spawnable (their inert transcript-shape parsers remain as defensive code).
 
+- **Key-split clarification (2026-08-15, #11267):** the Decision's "both
+  faces authenticate from `ZAI_API_KEY`" is superseded in one direction —
+  the harness face now PREFERS `ZAI_CODING_PLAN_KEY` (flat-rate GLM Coding
+  Plan) and falls back to `ZAI_API_KEY`; the one-shot face deliberately
+  stays on `ZAI_API_KEY` alone so background traffic never bills the plan
+  quota. Credit probes follow the harness key when the two diverge.
+
 ## Alternatives considered
 
 - **A new `claude-zai` tool enum value** — re-fuses CLI and endpoint into one

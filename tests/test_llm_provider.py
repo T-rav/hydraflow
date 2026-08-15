@@ -183,6 +183,75 @@ class TestBackendRegistry:
         assert _OPENAI_COMPAT_BACKENDS["kimi"].base_url(config) == config.kimi_base_url
 
 
+class TestZaiCodingPlanKeySplit:
+    """Two-key lane split: the harness (agentic Claude-CLI) lane prefers the
+    flat-rate ZAI_CODING_PLAN_KEY; the one-shot REST lane stays on
+    ZAI_API_KEY so background traffic never eats the plan quota."""
+
+    _ALL = (
+        "ZAI_CODING_PLAN_KEY",
+        "HYDRAFLOW_ZAI_CODING_PLAN_KEY",
+        "ZAI_API_KEY",
+        "HYDRAFLOW_ZAI_API_KEY",
+    )
+
+    def _clear(self, monkeypatch):
+        for env in self._ALL:
+            monkeypatch.delenv(env, raising=False)
+
+    def test_harness_prefers_coding_plan_key(self, monkeypatch):
+        from runner_utils import _HARNESS_BACKENDS
+
+        self._clear(monkeypatch)
+        monkeypatch.setenv("ZAI_API_KEY", "sk-api")
+        monkeypatch.setenv("ZAI_CODING_PLAN_KEY", "sk-plan")
+        assert _HARNESS_BACKENDS["zai"].api_key() == "sk-plan"
+
+    def test_harness_falls_back_to_api_key(self, monkeypatch):
+        from runner_utils import _HARNESS_BACKENDS
+
+        self._clear(monkeypatch)
+        monkeypatch.setenv("ZAI_API_KEY", "sk-api")
+        assert _HARNESS_BACKENDS["zai"].api_key() == "sk-api"
+
+    def test_rest_lane_ignores_coding_plan_key(self, monkeypatch):
+        """Background one-shot traffic must NEVER bill the coding plan."""
+        self._clear(monkeypatch)
+        monkeypatch.setenv("ZAI_CODING_PLAN_KEY", "sk-plan")
+        assert _OPENAI_COMPAT_BACKENDS["zai"].api_key() == ""
+        monkeypatch.setenv("ZAI_API_KEY", "sk-api")
+        assert _OPENAI_COMPAT_BACKENDS["zai"].api_key() == "sk-api"
+
+    def test_probe_follows_harness_key_when_split(self, monkeypatch):
+        """#11267 review find: a plan-quota cap must be corroborated against
+        the PLAN credential — probing the REST key would falsely refute it
+        (probe healthy -> signal discarded -> retry storm)."""
+        from runner_utils import backend_probe_endpoint
+        from tests.helpers import ConfigFactory
+
+        self._clear(monkeypatch)
+        config = ConfigFactory.create()
+        monkeypatch.setenv("ZAI_API_KEY", "sk-api")
+        monkeypatch.setenv("ZAI_CODING_PLAN_KEY", "sk-plan")
+        base_url, key = backend_probe_endpoint("zai", config)
+        assert key == "sk-plan"
+        assert base_url == config.zai_harness_base_url
+
+        # Single-key setups keep the pre-split REST probe pair.
+        monkeypatch.delenv("ZAI_CODING_PLAN_KEY", raising=False)
+        base_url, key = backend_probe_endpoint("zai", config)
+        assert key == "sk-api"
+        assert base_url == config.zai_base_url
+
+    def test_failover_enabled_by_plan_key_alone(self, monkeypatch):
+        from credit_failover import zai_key_present
+
+        self._clear(monkeypatch)
+        assert zai_key_present() is False
+        monkeypatch.setenv("ZAI_CODING_PLAN_KEY", "sk-plan")
+        assert zai_key_present() is True
+
+
 class TestProviderKeyPresence:
     """The UI badge source: which backends have their secret key set — booleans
     only, keyed by provider name, never the value."""

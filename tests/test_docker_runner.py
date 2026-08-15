@@ -508,6 +508,31 @@ class TestDockerRunnerCreateStreamingProcess:
         assert volumes[str(tmp_path / "logs")] == {"bind": "/logs", "mode": "rw"}
 
     @pytest.mark.asyncio
+    async def test_harness_env_overrides_container_env(self, tmp_path: Path) -> None:
+        """#11263: the sanctioned backend override must reach the container —
+        env= is ignored by design, so without this param a credit-failover
+        reroute ships glm --model to the native endpoint and dies with
+        unrecognized_model."""
+        runner, client = _make_runner(log_dir=tmp_path / "logs", gh_token="ghp_test")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-native"}, clear=True):
+            await runner.create_streaming_process(
+                ["claude", "-p", "--model", "glm-5.2"],
+                harness_env={
+                    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+                    "ANTHROPIC_AUTH_TOKEN": "zai-token",
+                    "ANTHROPIC_API_KEY": "",
+                },
+            )
+
+        env = client.containers.create.call_args.kwargs.get("environment", {})
+        assert env["ANTHROPIC_BASE_URL"] == "https://api.z.ai/api/anthropic"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "zai-token"
+        # The override WINS over the injected native key (merged after _build_env).
+        assert env["ANTHROPIC_API_KEY"] == ""
+
+    @pytest.mark.asyncio
     async def test_passes_minimal_env_vars(self, tmp_path: Path) -> None:
         runner, client = _make_runner(
             log_dir=tmp_path / "logs",
@@ -1402,6 +1427,28 @@ class TestBuildMounts:
             "bind": "/home/hydraflow/.claude.json",
             "mode": "rw",
         }
+
+    def test_harness_routed_suppresses_claude_mounts(self, tmp_path: Path) -> None:
+        """#11263 review find + the suppress-claude-mounts pattern (#10600):
+        a harness-routed spawn must NOT mount the host OAuth session — the
+        CLI can prefer it over the injected AUTH_TOKEN and silently bill
+        the exhausted native account. The flag is part of the mount-cache
+        key so a native spawn right after gets its mounts back."""
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True, exist_ok=True)
+        (home / ".claude.json").write_text("{}")
+        runner, _ = _make_runner(log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        with patch("docker_runner.Path.home", return_value=home):
+            harness = runner._build_mounts(None, harness_routed=True)
+            native = runner._build_mounts(None)
+
+        assert str(home / ".claude") not in harness
+        assert str(home / ".claude.json") not in harness
+        # Cache-key transition: the SAME runner serves the full set natively.
+        assert str(home / ".claude") in native
+        assert str(home / ".claude.json") in native
 
     def test_skips_claude_json_when_absent(self, tmp_path: Path) -> None:
         home = tmp_path / "home"

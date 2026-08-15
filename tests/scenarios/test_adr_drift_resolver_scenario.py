@@ -4,13 +4,18 @@ Drives the loop end-to-end against a rollup issue seeded exactly as
 ``AdrTouchpointAuditorLoop`` (ADR-0056) would have filed it — a real
 ``ADRIndex``/ADR-file fixture on disk, a real ``FakeGitHub`` issue with the
 same labels the auditor uses — with the TRIAGE LLM boundary FAKED (no real
-model calls, per #9976's requirement). Two scenarios:
+model calls, per #9976's requirement). Scenarios:
 
 * A CONSISTENT verdict auto-closes the rollup with an audit comment and
   never touches HITL labels.
 * A REAL_DRIFT verdict relabels the rollup ``hydraflow-find`` with a
   concrete ADR-edit brief in the body, and leaves it open (the normal
   discover→plan→implement→review pipeline picks it up from there).
+* A fleet batch closes when every member ADR triages CONSISTENT.
+* #11181 error-flood: a tick's worth of per-ADR triage-call errors still
+  spends the tick's real LLM-call budget, so a competing fleet batch is
+  correctly deferred instead of overshooting
+  ``adr_drift_resolver_max_triage_per_tick``.
 
 Mirrors the port-seeding pattern of
 ``tests/scenarios/test_adr_touchpoint_auditor_scenario.py``.
@@ -222,3 +227,110 @@ class TestAdrDriftResolver:
         assert issue.state == "closed"
         assert "hitl-escalation" not in issue.labels
         assert any("CONSISTENT for all batched ADRs" in c.body for c in issue.comments)
+
+    async def test_error_flood_defers_competing_fleet_batch_within_budget(
+        self, tmp_path
+    ) -> None:
+        """#11181 — a fresh adversarial re-audit of #10474 found that a
+        tick's worth of per-ADR triage-CALL errors doesn't reduce the
+        fleet gate's computed remaining budget, letting a fleet batch spend
+        real LLM calls when the tick's true call volume is already at (or
+        over) ``adr_drift_resolver_max_triage_per_tick`` (default 5). Five
+        per-ADR rollups all hit a triage-call error (5 real calls spent,
+        exhausting the default budget) in the SAME tick as one competing
+        fleet batch — the fleet batch must be deferred whole to next tick,
+        never touching its issue."""
+        from adr_drift_triage import DriftClassification, TriageVerdict  # noqa: PLC0415
+        from adr_index import ADRIndex  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+
+        repo = tmp_path / "repo"
+        adr_dir = repo / "docs" / "adr"
+        adr_dir.mkdir(parents=True)
+        per_adr_numbers = [11, 12, 13, 14, 15]
+        for n in per_adr_numbers:
+            _write_adr(
+                adr_dir, number=n, title=f"errflood{n}", related=[f"src/m{n}.py"]
+            )
+        _write_adr(adr_dir, number=16, title="fleetmember", related=["src/m16.py"])
+        adr_index = ADRIndex(adr_dir)
+
+        rollups: dict[str, dict] = {}
+        for n in per_adr_numbers:
+            pr_number = 9000 + n
+            issue_number = await world.github.create_issue(
+                f"ADR drift: ADR-{n:04d} cited modules drifted",
+                f"## ADR drift rollup\n\nPR #{pr_number} changed `src/m{n}.py`.\n",
+                labels=["hydraflow-find", "hydraflow-adr-drift"],
+            )
+            world.github.seed_pr_diff(
+                pr_number,
+                f"diff --git a/src/m{n}.py b/src/m{n}.py\n"
+                "@@ -1,1 +1,1 @@\n"
+                "-# old\n"
+                "+# churn\n",
+            )
+            rollups[f"ADR-{n:04d}"] = {
+                "issue_number": issue_number,
+                "pr_numbers": [pr_number],
+            }
+
+        fleet_issue_number = await world.github.create_issue(
+            "ADR drift: fleet PR #9700 drifted 1 ADR (batched)",
+            "## ADR drift rollup — cross-cutting fleet PR (batched)\n\n"
+            "PR #9700 changed `src/m16.py`.\n",
+            labels=["hydraflow-find", "hydraflow-adr-drift"],
+        )
+        world.github.seed_pr_diff(
+            9700,
+            "diff --git a/src/m16.py b/src/m16.py\n"
+            "@@ -1,1 +1,1 @@\n"
+            "-# old\n"
+            "+# refactor only\n",
+        )
+        rollups["FLEET-9700"] = {
+            "issue_number": fleet_issue_number,
+            "pr_numbers": [9700],
+            "adr_numbers": [16],
+        }
+
+        state = MagicMock()
+        state.all_adr_rollups.return_value = rollups
+
+        triage = MagicMock()
+        triage.classify = AsyncMock(
+            side_effect=[
+                RuntimeError("llm call failed"),
+                RuntimeError("llm call failed"),
+                RuntimeError("llm call failed"),
+                RuntimeError("llm call failed"),
+                RuntimeError("llm call failed"),
+                # Only reached if the (buggy) gate wrongly lets the fleet
+                # batch start — kept so a regression fails on the clean
+                # assertions below instead of an unhandled StopIteration.
+                TriageVerdict(
+                    classification=DriftClassification.CONSISTENT,
+                    rationale="fleet member ok",
+                ),
+            ]
+        )
+
+        _seed_ports(
+            world,
+            adr_drift_resolver_state=state,
+            adr_drift_resolver_index=adr_index,
+            adr_drift_resolver_triage=triage,
+        )
+
+        results = await world.run_with_loops(["adr_drift_resolver"], cycles=1)
+        stats = results["adr_drift_resolver"]
+        assert stats["errors"] == 5
+        assert stats["fleet_candidates"] == 1
+        assert stats["fleet_triaged"] == 0
+        assert stats["fleet_closed"] == 0
+        assert triage.classify.await_count == 5
+
+        fleet_issue = world.github.issue(fleet_issue_number)
+        assert fleet_issue.state == "open"
+        assert fleet_issue.comments == []

@@ -1443,6 +1443,9 @@ class RepoRuntimeInfo(BaseModel):
     session_id: str | None = None
     uptime_seconds: float = 0.0
     last_error: str | None = None
+    # The repo's resolved harness backend (config.repo_provider, #11211) — lets
+    # the operator console badge a repo running on GLM.
+    provider: str = "claude"
 
 
 class IssueOutcomeType(StrEnum):
@@ -2127,6 +2130,15 @@ class StateData(BaseModel):
     )
     disabled_workers: list[str] = Field(default_factory=list)
     default_disabled_workers_seeded: list[str] = Field(default_factory=list)
+    operator_stopped: bool = Field(
+        default=False,
+        description=(
+            "Set when an operator explicitly stops the factory via "
+            "POST /api/control/stop; cleared on POST /api/control/start. "
+            "Persisted so a deliberate stop survives relaunch and suppresses "
+            "boot-time autostart (#11208) — deliberate downtime stays down."
+        ),
+    )
     cost_budget_killed_workers: list[str] = Field(
         default_factory=list,
         description=(

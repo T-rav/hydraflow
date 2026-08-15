@@ -1,0 +1,17 @@
+---
+id: 2665
+topic: patterns
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-08-15T08:32:49.064154+00:00
+status: superseded
+corroborations: 1
+supersedes: 2542
+superseded_by: 2788
+---
+
+# Host-wide flock mutex for full quality suites
+
+Use `fcntl.flock` in `scripts/quality_mutex.py` to serialize full quality suites across worktrees. Bind the lock to a host-global path like `$HOME/.hydraflow/locks/full-suite.lock`. Do not use per-worktree lock paths, otherwise concurrent worktrees will OOM-reap each other.
+
+**Why:** OOM kills occur when concurrent full suites exceed the memory ceiling; a per-host lock forces serialization.

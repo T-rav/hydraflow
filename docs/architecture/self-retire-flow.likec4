@@ -1,0 +1,34 @@
+// Issue #11186 — dynamic view: resolution of one pinned ADR, before vs after.
+// The fix replaces two total lookups with one partial lookup + liveness gate.
+
+specification {
+  element step
+  tag before
+  tag after
+}
+
+model {
+  test = step 'pin test (ADR number N)'
+  index = step 'ADRIndex(docs/adr).adrs()'
+  corpus = step 'docs/adr/*.md'
+  live = step 'ADR.is_live gate (Accepted | Proposed)'
+  drift = step 'compute_drift / _citation_drifts'
+  boom = step 'CI RED on an unrelated PR'
+  retire = step 'pytest.skip — pin self-retires'
+
+  test -> corpus 'BEFORE: parse_adr_file(_ADR_DIR / hardcoded_filename)'
+  corpus -> boom 'BEFORE: renumbered -> FileNotFoundError'
+  test -> index 'BEFORE: next(a for a in adrs() if a.number == N)'
+  index -> boom 'BEFORE: removed -> StopIteration'
+  index -> live 'AFTER: next((...), None) -> None when absent'
+  live -> retire 'AFTER: absent OR not is_live -> skip'
+  live -> drift 'AFTER: present AND live -> assert as today'
+  corpus -> index 'scan_adr_directory parses every file (same parser coverage)'
+}
+
+views {
+  view flow {
+    title 'Pin resolution: total lookup (RED) vs partial lookup + liveness gate (retire)'
+    include *
+  }
+}

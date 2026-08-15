@@ -6,7 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
-- `3c88ac6` — review: fix ADR-0115 stale flag-default claim + add dual-reason dedup tests (PR #11173) *(2026-08-14)*
+- `66b3cff` — Fixes #11208: make factory should auto-start the orchestrator (#11257) (#11257) *(2026-08-15)*
+- `0434348` — Fixes #11211: Per-project model/harness selection: run claude and g... (#11233) (#11233) *(2026-08-15)*
+- `6c8b9ba` — feat(ul): edge-proposer — 2 new edges across 2 terms (#11226) (#11226) *(2026-08-15)*
+- `8783d2c` — Fixes #11176: Escape ledger: regression-pin escape `055267e7b2b7` —... (#11191) (#11191) *(2026-08-14)*
+- `55f225f` — review: fix ADR-0115 stale flag-default claim + add dual-reason dedup tests (PR #11173) (#11174) (#11174) *(2026-08-14)*
 - `344ff01` — Fixes #11161: Escape ledger: bug-issue escape `9196f7403620` — unen... (#11173) (#11173) *(2026-08-14)*
 - `9cb0191` — test(harness): exercise script_plan_credit_exhaustion + promote foreground-verification rule (#11158) (#11158) *(2026-08-14)*
 - `85c104b` — fix(quality): UI vitest lane — conditional fail-loud skip + nvm node discovery (#11155) (#11155) *(2026-08-14)*
@@ -582,12 +586,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `d8257f4` — Merge branch 'staging' into audit/factory-phase-drift *(2026-05-18)*
 - `e8aff97` — Merge branch 'staging' into audit/dark-factory-compat *(2026-05-18)*
 - `c0c7aab` — Merge pull request #8824 from T-rav/docs/promote-adrs-31-47 *(2026-05-18)*
-
-## 2026-W20
-
-- `0c98560` — merge: reconcile main into staging (33 commits ahead) *(2026-05-16)*
-- `b1eafc5` — fix(staging): wire LiveCorpusReplayLoop + audit fixes — unblock RC promotion (#8939) (#8939) *(2026-05-16)*
-- `ef3b5f5` — chore(arch): regen arch + wiki artifacts from staging tip (#8926) (#8926) *(2026-05-16)*
 
 
 <!-- arch:generated -->

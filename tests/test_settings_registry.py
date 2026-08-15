@@ -173,6 +173,36 @@ class TestHeavyMakeTimeoutKnobs:
         assert row["max"] == 14400
 
 
+class TestRepoBackendOverride:
+    """#11211 — per-repo model/harness override is Settings-drawer visible.
+
+    Registering repo_provider/repo_model here is what makes them PATCH
+    /api/control/config-editable per-repo (the route derives its allowlist
+    from ``set(SETTINGS)``), not just config-file/env settable.
+    """
+
+    def _schema(self) -> dict[str, dict]:
+        rows = build_settings_schema(HydraFlowConfig())
+        return {r["name"]: r for r in rows}
+
+    def test_repo_provider_is_mutable_and_schema_visible(self) -> None:
+        assert "repo_provider" in mutable_field_names()
+        row = self._schema()["repo_provider"]
+        assert row["type"] == "enum"
+        assert set(row["choices"]) == {"claude", "zai"}
+        assert row["live"] is True
+        assert row["default"] == "claude"
+        assert row["description"]
+
+    def test_repo_model_is_mutable_and_schema_visible(self) -> None:
+        assert "repo_model" in mutable_field_names()
+        row = self._schema()["repo_model"]
+        assert row["type"] == "str"
+        assert row["live"] is True
+        assert row["default"] == ""
+        assert row["description"]
+
+
 class TestWorkflowSection:
     """#10786 — schema rows carry a server-derived ``section`` (coarse,
     stage/concern grouping) so the operator console's workflow-config panel can

@@ -35,6 +35,7 @@ from exception_classify import reraise_on_credit_or_bug
 from model_pricing import load_pricing
 from prompt_gate import PromptGateBlockedError, gate_prompt
 from prompt_telemetry import PromptTelemetry
+from repo_backend import apply_repo_provider
 from runner_utils import (
     AuthenticationRetryError,
     StreamConfig,
@@ -192,11 +193,16 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
 
         self._pre_spawn_hook(prompt)
         cmd = self._build_command(prompt, Path(worktree_path))
+        # Repo-wide backend override (#11211): these runners have no provider
+        # dial of their own (always native Claude), so config.repo_provider is
+        # the only lever routing this seam's spawns to GLM. No-op unless
+        # repo_provider == "zai" and ZAI_API_KEY is present.
+        provider, cmd = apply_repo_provider("claude", cmd, self._config)
         # Credit failover (#10844): these runners always spawn on native Claude
         # (no provider dial), so without this a Claude cap would crash-loop the
         # loop instead of failing over. Reroute the spawn to GLM while failover
         # is active, mirroring base_runner._execute. No-op otherwise.
-        provider, cmd = apply_credit_failover("claude", cmd, self._config)
+        provider, cmd = apply_credit_failover(provider, cmd, self._config)
         harness_env = resolve_harness_env(provider, self._config)
 
         usage_stats: dict[str, object] = {}

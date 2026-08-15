@@ -28,6 +28,10 @@ describe('readSelectionFromUrl — pure URL parse', () => {
   it('coerces an unknown mode back to the focus default', () => {
     expect(readSelectionFromUrl('mode=bogus').mode).toBe('focus')
   })
+
+  it('accepts mode=supervisor (#11207)', () => {
+    expect(readSelectionFromUrl('mode=supervisor').mode).toBe('supervisor')
+  })
 })
 
 describe('useOperatorSelection', () => {
@@ -112,6 +116,17 @@ describe('useOperatorSelection', () => {
     act(() => result.current.select('mode', 'focus'))
     expect(result.current.mode).toBe('focus')
     expect(new URLSearchParams(window.location.search).get('mode')).toBeNull()
+  })
+
+  it('?mode=supervisor round-trips through the URL (#11207)', () => {
+    const { result } = renderHook(() => useOperatorSelection())
+    act(() => result.current.select('mode', 'supervisor'))
+    expect(result.current.mode).toBe('supervisor')
+    expect(new URLSearchParams(window.location.search).get('mode')).toBe('supervisor')
+
+    setUrl('mode=supervisor')
+    const restored = renderHook(() => useOperatorSelection())
+    expect(restored.result.current.mode).toBe('supervisor')
   })
 
   it('preserves unrelated query params (e.g. ?tab) when writing selection', () => {

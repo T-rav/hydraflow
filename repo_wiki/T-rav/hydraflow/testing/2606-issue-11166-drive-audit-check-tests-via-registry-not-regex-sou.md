@@ -5,7 +5,7 @@ source_issue: 11166
 source_phase: plan
 created_at: 2026-08-14T19:18:14.572505+00:00
 status: active
-corroborations: 1
+corroborations: 3
 ---
 
 # Drive audit check tests via registry, not regex source

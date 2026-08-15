@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:09.994976+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2179
+superseded_by: 2415
 ---
 
 # Pass -M explicitly in check #6 git argv to survive diff.renames=false

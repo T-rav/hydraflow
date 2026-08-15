@@ -13,7 +13,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from events import EventBus, EventLog
 from mockworld.fakes.fake_clock import FakeClock
@@ -387,7 +387,13 @@ class MockWorld:
         return self
 
     def add_repo(
-        self, slug: str, path: str, *, with_pipeline: bool = False
+        self,
+        slug: str,
+        path: str,
+        *,
+        with_pipeline: bool = False,
+        repo_provider: Literal["claude", "zai"] = "claude",
+        repo_model: str = "",
     ) -> MockWorld:
         """Seed a RepoRegistryStore entry AND a live runtime in the registry.
 
@@ -405,6 +411,11 @@ class MockWorld:
         ``registry.get(slug).orchestrator.issue_store.mark_active(n, stage)``.
         Default ``False`` keeps the legacy orchestrator-less runtime so existing
         callers are unaffected.
+
+        ``repo_provider``/``repo_model`` (#11211) seed this repo's per-repo
+        harness/backend dial — lets a multi-repo scenario put two repos on
+        different backends and assert both configs resolve independently.
+        Defaults keep every existing caller on native Claude.
         """
         from types import SimpleNamespace  # noqa: PLC0415
 
@@ -422,7 +433,12 @@ class MockWorld:
         # building it never touches the seed's filesystem location.
         repo_root = self._tmp_path / "repo_runtimes" / dash
         repo_root.mkdir(parents=True, exist_ok=True)
-        cfg = ConfigFactory.create(repo=slug, repo_root=repo_root)
+        cfg = ConfigFactory.create(
+            repo=slug,
+            repo_root=repo_root,
+            repo_provider=repo_provider,
+            repo_model=repo_model,
+        )
         bus = EventBus()
         bus.set_repo(dash)
         st = StateTracker(repo_root / "state.json")
