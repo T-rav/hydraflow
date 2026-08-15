@@ -128,6 +128,12 @@ def _make_prs(
     prs.create_issue = AsyncMock(return_value=issue)
     prs.get_issue_state = AsyncMock(return_value=state)
     prs.get_issue_labels = AsyncMock(return_value=labels or [])
+    # Adjudication exits (post_comment / add_labels / close_issue) are async on
+    # the real PRPort (src/ports.py); mock them so the awaited adjudication path
+    # in _apply_adjudication doesn't trip on a synchronous MagicMock child.
+    prs.post_comment = AsyncMock(return_value=None)
+    prs.add_labels = AsyncMock(return_value=None)
+    prs.close_issue = AsyncMock(return_value=None)
     return prs
 
 
