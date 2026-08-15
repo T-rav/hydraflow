@@ -127,12 +127,12 @@ class TestL2WorkspaceGCCleansStale:
         world.github.issue(300).state = "closed"
 
         await world._workspace.create(300, "agent/issue-300")
-        await world._workspace.create(400, "agent/issue-400")
+        await world._workspace.create(400, "agent/auto-agent-400")
 
         state = MagicMock()
         state.get_active_workspaces.return_value = {
             300: "agent/issue-300",
-            400: "agent/issue-400",
+            400: "agent/auto-agent-400",
         }
         # NOTE: 400 is deliberately NOT in the active set — the guard must rely
         # solely on the auto-agent attempt counter to preserve it.

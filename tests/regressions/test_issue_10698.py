@@ -25,6 +25,7 @@ parse = WorkspaceGCLoop._parse_issue_from_branch
         # factory-native (must still work — no behaviour change)
         ("issue-10698", 10698),
         ("agent/issue-10698", 10698),
+        ("agent/auto-agent-10698", 10698),  # #11182: Auto-Agent session branches
         # the namespaces the defect missed
         ("fix/workspace-gc-all-roots-10698", 10698),
         ("feat/operator-console-shell-10556", 10556),
@@ -49,6 +50,10 @@ def test_parses_issue_number_across_all_namespaces(branch: str, expected: int) -
         "fix/no-trailing-number",
         "feat/plain-slug",
         "some-random-branch",
+        # #11182: auto-agent lookalikes — suffix must be digits only.
+        "agent/auto-agent-10698-x",
+        "agent/auto-agent-x",
+        "auto-agent-10698",
     ],
 )
 def test_non_issue_branches_are_fail_closed_none(branch) -> None:

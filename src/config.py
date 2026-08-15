@@ -26,6 +26,14 @@ from queue_strategy import BandWeights, QueueStrategy
 
 logger = logging.getLogger("hydraflow.config")
 
+# Branch prefix minted for Auto-Agent (preflight) sessions — see
+# ``HydraFlowConfig.auto_agent_branch_for_issue``. Public (no leading
+# underscore) so every module that mints or parses this namespace
+# (``auto_agent_preflight_loop``, ``dependabot_merge_loop``,
+# ``workspace_gc_loop``) shares one definition instead of duplicating the
+# literal (#11182).
+AUTO_AGENT_BRANCH_PREFIX = "agent/auto-agent-"
+
 
 class Credentials(BaseModel):
     """Infrastructure credentials — separated from domain config.
@@ -6172,6 +6180,10 @@ class HydraFlowConfig(BaseModel):
     def branch_for_issue(self, issue_number: int) -> str:
         """Return the canonical branch name for a given issue number."""
         return f"agent/issue-{issue_number}"
+
+    def auto_agent_branch_for_issue(self, issue_number: int) -> str:
+        """Return the Auto-Agent (preflight) session branch name for an issue."""
+        return f"{AUTO_AGENT_BRANCH_PREFIX}{issue_number}"
 
     def regulated_label_set(self) -> frozenset[str]:
         """Parse ``regulated_labels`` CSV into a label set (CH-5).

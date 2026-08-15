@@ -1,0 +1,91 @@
+// #11182 — auto-agent branch namespace is invisible to WorkspaceGCLoop phase 3.
+// Minting site and parsing site disagree; the fix makes them share one constant.
+specification {
+  element system
+  element component
+  element klass
+  relationship mints
+  relationship parses
+}
+
+model {
+  factory = system 'HydraFlow factory' {
+
+    cfg = component 'config.HydraFlowConfig' {
+      description '
+        branch_for_issue(n) -> agent/issue-<n>
+        NEW: auto_agent_branch_for_issue(n) -> agent/auto-agent-<n>
+        NEW: module const AUTO_AGENT_BRANCH_PREFIX
+      '
+    }
+
+    aapl = component 'AutoAgentPreflightLoop' {
+      description 'src/auto_agent_preflight_loop.py:_resolve_worktree — mints the branch'
+    }
+
+    dep = component 'DependabotMergeLoop' {
+      description 'src/dependabot_merge_loop.py — _AUTO_AGENT_BRANCH_PREFIX (3rd copy of the literal)'
+    }
+
+    gc = component 'WorkspaceGCLoop' {
+      description 'src/workspace_gc_loop.py'
+
+      parser = klass '_parse_issue_from_branch / _ISSUE_BRANCH_RES' {
+        description '
+          ^(?:agent/)?issue-(\d+)$
+          ^(?:fix|feat|refactor|chore|test|docs)/.*-(\d+)$
+          MISSING: ^agent/auto-agent-(\d+)$
+        '
+      }
+      guard = klass '_in_retry_window' {
+        description 'skips while impl OR auto_agent counter is 0<n<max (ADR-0069 contract)'
+      }
+      p3 = klass 'phase 3 _collect_orphaned_branches' {
+        description 'git branch --list -> parse -> guards -> git branch -D'
+      }
+      p5 = klass 'phase 5 _collect_orphaned_worktrees' {
+        description 'git worktree list -> parse -> _reap_worktree_if_safe'
+      }
+    }
+
+    git = component 'local git repo' {
+      description 'agent/issue-<n>, agent/auto-agent-<n>, fix|feat|…/<slug>-<n>'
+    }
+  }
+
+  aapl .mints git 'creates agent/auto-agent-<n> worktree branch'
+  aapl -> cfg 'should derive the name (fix)'
+  dep -> cfg 'should derive the prefix (fix)'
+  gc.parser -> cfg 'compiles pattern from AUTO_AGENT_BRANCH_PREFIX (fix)'
+  gc.p3 -> git 'lists / force-deletes local branches'
+  gc.p3 .parses gc.parser 'issue_number is None -> continue (bug: drops before guards)'
+  gc.p3 -> gc.guard 'unreachable today for auto-agent branches'
+  gc.p5 .parses gc.parser 'None -> unattributed path bypasses _is_safe_to_gc'
+}
+
+views {
+  view components {
+    title 'Branch namespace: minting vs parsing (#11182)'
+    include *, gc.*
+  }
+
+  dynamic view phase3_today {
+    title 'Phase 3 today — auto-agent branch dropped before any guard'
+    gc.p3 -> git 'git branch --list'
+    git -> gc.p3 'agent/auto-agent-88'
+    gc.p3 -> gc.parser '_parse_issue_from_branch("agent/auto-agent-88")'
+    gc.parser -> gc.p3 'None'
+    gc.p3 -> gc.p3 'continue — guard never consulted, branch leaks forever'
+  }
+
+  dynamic view phase3_fixed {
+    title 'Phase 3 after fix — attributed, then guarded'
+    gc.p3 -> git 'git branch --list'
+    git -> gc.p3 'agent/auto-agent-88'
+    gc.p3 -> gc.parser '_parse_issue_from_branch'
+    gc.parser -> gc.p3 '88'
+    gc.p3 -> gc.guard '_in_retry_window(88)'
+    gc.guard -> gc.p3 'True while session in flight -> skip'
+    gc.p3 -> git 'else git branch -D agent/auto-agent-88'
+  }
+}
