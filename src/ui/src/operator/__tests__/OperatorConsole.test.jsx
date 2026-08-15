@@ -115,6 +115,18 @@ describe('OperatorConsoleView — shell', () => {
     expect(vitalsSlot.querySelector('[data-testid="judge-calibration-panel"]')).toBeNull()
   })
 
+  it('keeps Instruments reachable on an IDLE repo (#11203 review find)', () => {
+    // Empty pipeline → idle would normally claim the detail slot; the
+    // instruments grid shows global diagnostics and must win instead.
+    const idleSocket = makeSocket({
+      issues: { triage: [], plan: [], implement: [], review: [], hitl: [], merged: [] },
+    })
+    render(<OperatorConsoleView socket={idleSocket} />)
+    fireEvent.click(screen.getByTestId('mode-toggle-instruments'))
+    expect(screen.getByTestId('instruments-grid')).toBeInTheDocument()
+    expect(screen.queryByTestId('operator-idle-state')).toBeNull()
+  })
+
   it('renders the faceplate panels as a full-width grid in Instruments mode (#10942)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     fireEvent.click(screen.getByTestId('mode-toggle-instruments'))
