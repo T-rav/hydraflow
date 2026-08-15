@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T06:55:23.470446+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2352
+superseded_by: 2595
 ---
 
 # Wiki repair CLI: dry-run default, --apply to write, --only-id to scope

@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11219
 source_phase: plan
 created_at: 2026-08-15T06:20:11.277017+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2666
 ---
 
 # Prevent self-deadlock in nested quality suites

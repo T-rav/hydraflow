@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T06:55:23.866752+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2381
+superseded_by: 2624
 ---
 
 # FakeGitHub tracks workflow display name and file name separately

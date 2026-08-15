@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T06:55:23.231441+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2338
+superseded_by: 2581
 ---
 
 # Suppress ~/.claude mounts when injecting ANTHROPIC_AUTH_TOKEN

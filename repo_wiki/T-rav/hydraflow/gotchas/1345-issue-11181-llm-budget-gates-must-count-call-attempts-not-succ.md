@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11181
 source_phase: plan
 created_at: 2026-08-14T23:04:04.877807+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11181 closed
 ---
 
 # LLM budget gates must count call attempts, not successes

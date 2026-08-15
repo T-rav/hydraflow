@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11223
 source_phase: plan
 created_at: 2026-08-15T06:46:05.624510+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2667
 ---
 
 # Dead SHA skip guards in ReviewPhase must stay deleted
