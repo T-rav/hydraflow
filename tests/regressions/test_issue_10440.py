@@ -12,7 +12,11 @@ Two guards:
 1. No ADR uses a ``src/….py::`` double-colon citation (broad — this class of
    typo can never silently kill drift coverage again).
 2. ADR-0049's ``base_background_loop.py:LoopDeps`` citation actually parses via
-   the real drift regex (pins the fix direction, not just the absence of ``::``).
+   the real drift regex into ``source_symbols`` (pins the fix direction, not
+   just the absence of ``::``). Resolves ADR-0049 by *number* through
+   ``ADRIndex`` and self-retires (skips) if the ADR is removed, renumbered, or
+   moves off Accepted/Proposed — the adr-drift-regression-test convention
+   (#11180; meta-guard: ``tests/regressions/test_issue_11180.py``).
 """
 
 from __future__ import annotations
@@ -22,7 +26,9 @@ from pathlib import Path
 
 import pytest
 
-from adr_index import _SOURCE_FILE_CITATION_RE
+from adr_index import ADRIndex
+
+from tests._adr_pin_support import resolve_live_adr
 
 _ADR_DIR = Path(__file__).resolve().parents[2] / "docs" / "adr"
 # A backtick-wrapped src/*.py citation immediately followed by a second colon.
@@ -44,10 +50,19 @@ def test_no_double_colon_py_citation(adr: Path) -> None:
 
 
 def test_adr0049_base_background_loop_citation_parses() -> None:
-    """The fixed ADR-0049 citation resolves to its file via the real drift regex."""
-    text = (_ADR_DIR / "0049-trust-loop-kill-switch-convention.md").read_text(
-        encoding="utf-8"
+    """The fixed ADR-0049 citation resolves to its file via the real drift regex.
+
+    Pins the fix *direction* (not just the absence of ``::``): ADR-0049's
+    ``src/base_background_loop.py:LoopDeps`` citation must parse via the real
+    drift regex into ``source_symbols``. Resolves ADR-0049 by *number* through
+    ``ADRIndex`` and self-retires (skips) when the ADR is removed, renumbered,
+    or moves off Accepted/Proposed — the adr-drift-regression-test convention
+    (#11180). See ``tests/regressions/test_issue_11180.py`` for the meta-guard.
+    """
+    adr = resolve_live_adr(ADRIndex(_ADR_DIR), 49)
+    symbols = adr.source_symbols.get("src/base_background_loop.py", frozenset())
+    assert "LoopDeps" in symbols, (
+        "ADR-0049's `src/base_background_loop.py:LoopDeps` citation did not "
+        "parse into source_symbols via the real drift regex — a `::` typo may "
+        "have been reintroduced (the #10440 regression this guard pins)."
     )
-    assert "`src/base_background_loop.py:LoopDeps`" in text
-    m = _SOURCE_FILE_CITATION_RE.search("`src/base_background_loop.py:LoopDeps`")
-    assert m is not None and m.group(1) == "src/base_background_loop.py"
