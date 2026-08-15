@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11169
 source_phase: plan
 created_at: 2026-08-14T19:43:33.955250+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2156
 ---
 
 # Immutability check needs merge-base range AND per-record ls-tree set

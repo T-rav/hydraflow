@@ -9,6 +9,7 @@ issue-surfacing except.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1267,3 +1268,97 @@ class TestTerminalVerdictQuiescence:
         rec = _record("bug-issue:a", encoded_as="none-yet")
         assert answered_surfacings([link], {rec.id: rec}, {}) == []
         assert answered_surfacings([link], {rec.id: rec}) == []
+
+
+class TestUnreadableDiagnosisRow:
+    """#11163: a sidecar row whose diagnosis string doesn't parse into the
+    current EscapeDiagnosis enum used to count as terminal via bare row
+    presence — permanently hiding the escape from every surface even though
+    it was never actually resolved or dismissed. It must stay eligible for
+    surfacing, and the loop must log one loud aggregate warning naming it."""
+
+    async def test_unreadable_row_does_not_suppress_surfacing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from escape.auto_diagnose import EscapeDiagnosisLedger, EscapeDiagnosisRecord
+
+        repo = _init_repo(tmp_path)
+        loop = _make_loop(tmp_path, repo)
+        # encoded_as != "none-yet" so only the low-confidence reason is
+        # eligible — isolates the surface under test from the aging one.
+        record = _record(
+            "bug-issue:corrupt", confidence="low", encoded_as="regression-test"
+        )
+        EscapeLedger(loop._ledger_path).append(record)
+        EscapeDiagnosisLedger(loop._diagnoses_path).append(
+            EscapeDiagnosisRecord(
+                escape_id=record.id,
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.escape_ledger"):
+            filed, capped = await loop._surface_findings()
+
+        assert filed == 1, "unreadable diagnosis must not silently suppress"
+        assert capped is False
+        assert any(
+            "unreadable" in rec.message.lower() and record.id in rec.message
+            for rec in caplog.records
+        )
+
+    async def test_no_unreadable_rows_logs_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        loop = _make_loop(tmp_path, repo)
+        record = _record("bug-issue:clean", confidence="low")
+        EscapeLedger(loop._ledger_path).append(record)
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.escape_ledger"):
+            await loop._surface_findings()
+
+        assert not any("unreadable" in rec.message.lower() for rec in caplog.records)
+
+    async def test_multiple_unreadable_rows_log_one_aggregate_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # The plan calls for ONE aggregate WARNING (count + ids), not one
+        # warning per unreadable row — a flood of corrupted rows must not
+        # also flood the log.
+        from escape.auto_diagnose import EscapeDiagnosisLedger, EscapeDiagnosisRecord
+
+        repo = _init_repo(tmp_path)
+        loop = _make_loop(tmp_path, repo)
+        first = _record(
+            "bug-issue:corrupt1", confidence="low", encoded_as="regression-test"
+        )
+        second = _record(
+            "bug-issue:corrupt2", confidence="low", encoded_as="regression-test"
+        )
+        EscapeLedger(loop._ledger_path).append(first)
+        EscapeLedger(loop._ledger_path).append(second)
+        diagnoses = EscapeDiagnosisLedger(loop._diagnoses_path)
+        for record in (first, second):
+            diagnoses.append(
+                EscapeDiagnosisRecord(
+                    escape_id=record.id,
+                    diagnosis="some-future-verdict",
+                    reason="?",
+                    decided_at="2026-01-01T00:00:00+00:00",
+                )
+            )
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.escape_ledger"):
+            filed, _capped = await loop._surface_findings()
+
+        assert filed == 2
+        unreadable_warnings = [
+            rec for rec in caplog.records if "unreadable" in rec.message.lower()
+        ]
+        assert len(unreadable_warnings) == 1, "must be ONE aggregate warning"
+        assert "2" in unreadable_warnings[0].message
+        assert first.id in unreadable_warnings[0].message
+        assert second.id in unreadable_warnings[0].message

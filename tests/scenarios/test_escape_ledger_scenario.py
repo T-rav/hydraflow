@@ -719,3 +719,39 @@ class TestEscapeAutoDiagnoseScenario:
         )
         for link in links:
             assert await github.get_issue_state(link.issue_number) == "OPEN"
+
+    async def test_unreadable_diagnosis_row_does_not_silently_suppress_surfacing(
+        self, tmp_path: Path
+    ) -> None:
+        # #11163: terminal_ids() used to treat ANY sidecar row as terminal
+        # (bare existing_ids() presence), regardless of whether its
+        # diagnosis field parsed into the current EscapeDiagnosis enum. A
+        # corrupted/future-enum-value row for this escape id would have
+        # permanently hidden it from every human/aging surface even though
+        # it was never actually resolved or dismissed. End-to-end over
+        # FakeGitHub + a real repo: the escape still reaches the human
+        # surface.
+        from escape.auto_diagnose import EscapeDiagnosisLedger, EscapeDiagnosisRecord
+
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base_sha, head_sha = _seed_bug_fix_no_regression(repo, 999)
+
+        state = _make_state(base_sha)
+        loop = _build_loop(tmp_path, repo, github, state, auto_diagnose=True)
+        escape_id = f"bug-issue:{head_sha}"
+        EscapeDiagnosisLedger(loop._diagnoses_path).append(
+            EscapeDiagnosisRecord(
+                escape_id=escape_id,
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ok"
+        assert result["escapes_recorded"] == 1
+        assert result["filed"] == 1, "unreadable diagnosis must not silently suppress"

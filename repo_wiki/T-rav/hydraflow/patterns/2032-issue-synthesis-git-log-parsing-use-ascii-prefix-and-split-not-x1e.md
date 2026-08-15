@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-14T18:39:31.798108+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 1924
+superseded_by: 2148
 ---
 
 # Git log parsing: use ASCII prefix and split, not \x1e delimiter
