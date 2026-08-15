@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.check_console_conformance import collect_errors
+from scripts.check_console_conformance import (
+    _COMMIT_MARK,
+    _is_record_path,
+    _ledger_change_argv,
+    _parse_ledger_changes,
+    collect_errors,
+)
 
 RECORD = """# ARCH-0001: test
 
@@ -133,3 +139,103 @@ def test_ci_audit_job_runs_console_conformance() -> None:
         "audit job checkout must keep fetch-depth: 0 — the immutability "
         "check reads real git history and false-passes on a shallow clone"
     )
+
+
+# --- Check #6 helpers: pure unit ring (no subprocess) ----------------------
+# Integration-level base-resolution / real-git behavior is covered in
+# tests/regressions/test_issue_11169.py.
+
+
+def test_is_record_path_accepts_numbered_record() -> None:
+    assert _is_record_path("agents/console/decisions/arch/0001-test.md") is True
+
+
+def test_is_record_path_rejects_readme() -> None:
+    assert _is_record_path("agents/console/decisions/arch/README.md") is False
+
+
+def test_is_record_path_rejects_non_markdown() -> None:
+    assert _is_record_path("agents/console/decisions/arch/0001-test.txt") is False
+
+
+def test_ledger_change_argv_covers_delete_modify_rename() -> None:
+    argv = _ledger_change_argv("agents/console/decisions", "deadbeef")
+    assert "-M" in argv
+    assert "--diff-filter=DMR" in argv
+    assert "--no-merges" not in argv, (
+        "excluding merge commits would silently hide a record modification "
+        "delivered via a merge commit inside the PR's own range"
+    )
+    assert "deadbeef..HEAD" in argv
+    assert argv[-2:] == ["--", "agents/console/decisions"]
+
+
+def test_parse_ledger_changes_modified_record() -> None:
+    known = {"agents/console/decisions/arch/0001-test.md"}
+    log = f"{_COMMIT_MARK}abc123 fix: typo\nM\tagents/console/decisions/arch/0001-test.md\n"
+    violations = _parse_ledger_changes(log, known)
+    assert len(violations) == 1
+    assert "0001-test.md" in violations[0]
+    assert "modified" in violations[0]
+    assert "abc123" in violations[0]
+
+
+def test_parse_ledger_changes_deleted_record() -> None:
+    known = {"agents/console/decisions/arch/0001-test.md"}
+    log = f"{_COMMIT_MARK}abc123 rm: cleanup\nD\tagents/console/decisions/arch/0001-test.md\n"
+    violations = _parse_ledger_changes(log, known)
+    assert len(violations) == 1
+    assert "deleted" in violations[0]
+
+
+def test_parse_ledger_changes_renamed_record() -> None:
+    known = {"agents/console/decisions/arch/0001-test.md"}
+    log = (
+        f"{_COMMIT_MARK}abc123 mv: relocate\n"
+        "R100\tagents/console/decisions/arch/0001-test.md\t"
+        "agents/console/decisions/design/0001-test.md\n"
+    )
+    violations = _parse_ledger_changes(log, known)
+    assert len(violations) == 1
+    assert "renamed" in violations[0]
+    assert "arch/0001-test.md" in violations[0]
+    assert "design/0001-test.md" in violations[0]
+
+
+def test_parse_ledger_changes_multiple_commits_attributed_separately() -> None:
+    known = {
+        "agents/console/decisions/arch/0001-test.md",
+        "agents/console/decisions/arch/0002-test.md",
+    }
+    log = (
+        f"{_COMMIT_MARK}aaa111 fix: amend one\n"
+        "M\tagents/console/decisions/arch/0001-test.md\n"
+        f"{_COMMIT_MARK}bbb222 fix: amend two\n"
+        "M\tagents/console/decisions/arch/0002-test.md\n"
+    )
+    violations = _parse_ledger_changes(log, known)
+    assert len(violations) == 2
+    joined = "\n".join(violations)
+    assert "0001-test.md" in joined and "aaa111" in joined
+    assert "0002-test.md" in joined and "bbb222" in joined
+
+
+def test_parse_ledger_changes_empty_log_yields_no_violations() -> None:
+    assert (
+        _parse_ledger_changes("", {"agents/console/decisions/arch/0001-test.md"}) == []
+    )
+
+
+def test_parse_ledger_changes_ignores_path_not_in_known_records() -> None:
+    # A record created and then typo-fixed within the same PR is not part of
+    # the merge-base record set — this is the false-positive the original
+    # issue (#11169) was filed against.
+    known: set[str] = set()
+    log = f"{_COMMIT_MARK}abc123 fix: typo\nM\tagents/console/decisions/arch/0002-new.md\n"
+    assert _parse_ledger_changes(log, known) == []
+
+
+def test_parse_ledger_changes_ignores_added_status_defensively() -> None:
+    known = {"agents/console/decisions/arch/0001-test.md"}
+    log = f"{_COMMIT_MARK}abc123 feat: new record\nA\tagents/console/decisions/arch/0001-test.md\n"
+    assert _parse_ledger_changes(log, known) == []
