@@ -1,0 +1,94 @@
+// Issue #11241 — where EscapeRecord.notes reaches a public GitHub artifact.
+// Adjudicates the sampled re-audit of PR #11197: the aging close comment is
+// NOT the first public path — _render_finding already published notes.
+
+specification {
+  element system
+  element container
+  element component
+  element store
+  element actor
+  relationship writes
+  relationship reads
+  relationship publishes
+}
+
+model {
+  operator = actor 'Human operator' {
+    description 'Runs scripts/resolve_escape.py --notes "<free text>"'
+  }
+  github = system 'GitHub' {
+    description 'PUBLIC surface — issue bodies and close comments'
+  }
+
+  hydraflow = system 'HydraFlow' {
+
+    ledgerFile = store 'escape_ledger.jsonl' {
+      description '.hydraflow/diagnostics/ — gitignored, local only. notes: free text'
+    }
+    reportFile = store 'docs/arch/generated/escape-ledger.md' {
+      description 'gitignored runtime report — NOT public'
+    }
+
+    cli = container 'scripts/resolve_escape.py' {
+      description '--notes help text does NOT warn the value becomes public'
+    }
+    resolveSvc = component 'escape/resolve.py::resolve_escape' {
+      description 'validates encoded_as/confidence; notes passes through UNVALIDATED'
+    }
+    autoDiag = component 'escape/auto_diagnose.py::_record_resolution' {
+      description 'machine notes: ADR-0115 evidence string + git-derived paths'
+    }
+    detect = component 'escape/detect.py::_classify' {
+      description 'machine notes at detection time'
+    }
+    report = component 'escape/report.py' {
+      description 'HAS _sanitize_evidence_cell: collapse + truncate 100 + escape pipe'
+    }
+
+    loop = container 'EscapeLedgerLoop (src/escape_ledger_loop.py)' {
+      renderFinding = component '_render_finding (:865)' {
+        description 'DEFECT: renders raw notes into a Markdown TABLE CELL, unsanitized'
+      }
+      resolutionComment = component '_resolution_comment (:825)' {
+        description 'PR #11197 added raw notes to the aging close comment'
+      }
+      remediation = component '_SURFACE_REASON_REMEDIATION (:157,:166)' {
+        description 'tells the human to pass --notes; omits that it is published'
+      }
+    }
+  }
+
+  operator -> cli 'resolve --notes "<private?>"'
+  cli -> resolveSvc
+  resolveSvc -> ledgerFile .writes 'append_resolution (superseding row)'
+  autoDiag -> resolveSvc 'notes = evidence string'
+  detect -> ledgerFile .writes 'notes at detection'
+
+  ledgerFile -> report .reads 'read_latest'
+  report -> reportFile .writes 'sanitized cell'
+
+  ledgerFile -> renderFinding .reads 'read_latest (collapsed: LATEST notes wins)'
+  ledgerFile -> resolutionComment .reads 'read_latest_index'
+
+  renderFinding -> github .publishes 'create_issue body — PRE-EXISTING public path'
+  resolutionComment -> github .publishes 'close comment — added by PR #11197'
+  remediation -> github .publishes 'inside the same issue body'
+}
+
+views {
+  view publication {
+    title 'EscapeRecord.notes — write sources and public exits'
+    include *, operator, github, hydraflow.*, loop.*
+    autoLayout LeftRight
+  }
+
+  dynamic view leakSequence {
+    title 'Human note reaching a public issue WITHOUT PR #11197'
+    operator -> cli 'resolve <id> --confidence high --notes "internal"'
+    cli -> resolveSvc 'notes unvalidated'
+    resolveSvc -> ledgerFile 'superseding row carries human notes'
+    ledgerFile -> renderFinding 'later tick: aging surface fires, latest row wins'
+    renderFinding -> github 'issue body table renders notes verbatim'
+  }
+}
