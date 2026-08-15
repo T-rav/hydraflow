@@ -6,14 +6,14 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 80
-- **REAL** (real asserting enforcement): 77 (96.2%)
+- **Accepted ADRs:** 81
+- **REAL** (real asserting enforcement): 78 (96.3%)
 - **WEAK** (prose-only or tautological): 3
 - **MISSING** (no `**Enforced by:**`): 0
 - **Justified exemptions** (process-only, allow-listed): 3
-- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 80 = 0.0%**
+- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 81 = 0.0%**
 
-By declared `**Enforcement:**` kind: `enforced` 77 · `manual` 3 · `decision-of-record` 0.
+By declared `**Enforcement:**` kind: `enforced` 78 · `manual` 3 · `decision-of-record` 0.
 
 ## Classification
 
@@ -99,6 +99,7 @@ By declared `**Enforcement:**` kind: `enforced` 77 · `manual` 3 · `decision-of
 | ADR-0117 | REAL | — | enforced | `pytest:tests/test_prompt_observatory.py` |
 | ADR-0118 | REAL | — | enforced | `pytest:tests/architecture/test_no_otel_imports.py` |
 | ADR-0119 | REAL | — | enforced | `pytest:tests/test_credit_failover.py` |
+| ADR-0134 | REAL | — | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
 
 ## Unenforced-decision debt
 

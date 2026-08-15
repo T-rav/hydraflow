@@ -140,6 +140,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0131 | `src.assumption_surfacer`, `src.spec_intake_gate` | `'pytest:tests/test_spec_intake_gate.py'` |
 | ADR-0132 | — | — |
 | ADR-0133 | `src.audit.governance`, `src.finder_calibration`, `src.judge_independence`, `src.vitals.control`, `src.vitals_methodology` | `'pytest:tests/test_vitals_methodology.py'` |
+| ADR-0134 | — | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
 
 ## Module → ADRs
 

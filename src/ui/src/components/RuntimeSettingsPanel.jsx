@@ -14,12 +14,16 @@ export function humanize(name) {
 }
 
 // A `<provider>_base_url` field is annotated with whether that provider's secret
-// API key is present. Returns true/false for such a field, or null for any other
-// field (no badge). `providerKeys` maps provider name -> key-present boolean.
-export function providerKeyStatus(fieldName, providerKeys) {
+// API key is present. `repo_provider` (the per-repo backend dial, #11211) is
+// additionally annotated when its selected value is "zai" — the field an
+// operator sets to route a repo's work to GLM, so the key-presence badge
+// belongs there too, not just on the unrelated `zai_base_url` row. Returns
+// true/false when annotated, or null for any other field/value (no badge).
+// `providerKeys` maps provider name -> key-present boolean.
+export function providerKeyStatus(fieldName, providerKeys, currentValue) {
   const m = /^(.+)_base_url$/.exec(fieldName)
-  if (!m) return null
-  const provider = m[1]
+  const provider = m ? m[1] : fieldName === 'repo_provider' && currentValue === 'zai' ? 'zai' : null
+  if (!provider) return null
   if (!providerKeys || !(provider in providerKeys)) return null
   return !!providerKeys[provider]
 }
@@ -127,7 +131,7 @@ export function RuntimeSettingsPanel() {
               dirty={row.name in drafts}
               savedState={saved[row.name]}
               disabled={isAggregate}
-              keyStatus={providerKeyStatus(row.name, providerKeys)}
+              keyStatus={providerKeyStatus(row.name, providerKeys, valueOf(row))}
               onChange={(v) => setDraft(row.name, v)}
               onSave={() => save(row)}
             />
