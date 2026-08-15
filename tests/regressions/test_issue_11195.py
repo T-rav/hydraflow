@@ -4,9 +4,11 @@
 ``next(a for a in adrs if a.number == 13)`` with no default. If ADR-0013 is
 ever renumbered, removed, or its file dropped, that raises an unhandled
 ``StopIteration`` in CI on a completely unrelated PR — the same
-non-self-retiring shape #11180/#11186/#11192 each fixed in a sibling module.
-The reference shape is ``tests/regressions/test_issue_9176.py``, which uses
-``next((...), None)`` and keeps holding when the ADR disappears.
+non-self-retiring shape flagged in sibling modules by #11180/#11186/#11192
+(open at the time of this fix; each describes the identical defect
+elsewhere, not yet repaired). The reference shape is
+``tests/regressions/test_issue_9176.py``, which uses ``next((...), None)``
+and keeps holding when the ADR disappears.
 
 Differential guard: this test executes the real ``test_issue_10565`` pin
 function against a copy of ``docs/adr`` where ADR-0013 is renumbered,
