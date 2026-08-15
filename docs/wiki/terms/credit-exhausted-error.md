@@ -5,13 +5,13 @@ kind: "domain_event"
 bounded_context: "shared-kernel"
 code_anchor: "src/subprocess_util.py:CreditExhaustedError"
 aliases: []
-related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KY4QKSBGMKHY3AV0JJ0QNMMD"}]
+related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KY4QKSBGMKHY3AV0JJ0QNMMD"}, {"kind": "depends_on", "target": "01KZZTMMG25DET54FHSH9WK37S"}]
 evidence: ["01KYEF98BHWVZEC1S5YEBDJPK3"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-07-24T10:12:16.378615+00:00"
-updated_at: "2026-07-27T18:08:24.118398+00:00"
+updated_at: "2026-08-15T05:33:38.290486+00:00"
 proposed_by: "TermProposerLoop"
 proposed_at: "2026-07-24T10:12:16.378571+00:00"
 proposal_signals: ["S2"]
