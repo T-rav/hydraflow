@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T11:44:52.231041+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2755
+superseded_by: 3011
 ---
 
 # Compare window-to-window, not window-vs-lifetime, in skill efficiency

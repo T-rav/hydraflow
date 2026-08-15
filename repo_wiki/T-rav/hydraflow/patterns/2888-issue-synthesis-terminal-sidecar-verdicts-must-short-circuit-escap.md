@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T11:44:52.264500+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2759
+superseded_by: 3015
 ---
 
 # Terminal sidecar verdicts must short-circuit EscapeAutoDiagnoser

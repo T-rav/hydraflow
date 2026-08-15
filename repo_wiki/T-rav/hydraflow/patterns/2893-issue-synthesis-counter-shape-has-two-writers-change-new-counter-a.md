@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T11:44:52.297460+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2764
+superseded_by: 3020
 ---
 
 # Counter shape has two writers — change _new_counter and _accumulate

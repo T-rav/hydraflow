@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T11:44:52.333661+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2770
+superseded_by: 3026
 ---
 
 # Gate EscapeDiagnosisLedger.terminal_ids() on auto-diagnose config
