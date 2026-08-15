@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from config import HydraFlowConfig
 from escape.auto_diagnose import EscapeAutoDiagnoser, EscapeDiagnosis
 from escape.ledger import EscapeLedger
 from escape.models import EscapeRecord
@@ -422,7 +423,7 @@ class TestFindingRateBudget:
             already_surfaced=set(),
         )
 
-        default_max_diagnoses = 25
+        default_max_diagnoses = HydraFlowConfig().escape_ledger_max_diagnoses_per_tick
         prefix_reasons = {reason for _rec, reason in eligible[:default_max_diagnoses]}
         assert SURFACE_REASON_AGING in prefix_reasons, (
             "a 30-strong low-confidence backlog must not push the sole aging "

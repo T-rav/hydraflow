@@ -69,7 +69,8 @@ def test_dismissed_row_never_selected_and_never_occupies_budget() -> None:
         already_surfaced=set(),
         terminal_ids={"bug-issue:dead"},
     )
-    to_file, _ = apply_ask_budget(eligible, max_per_tick=1)  # the #11137 starvation shape
+    # the #11137 starvation shape
+    to_file, _ = apply_ask_budget(eligible, max_per_tick=1)
     assert [r.id for r, _reason in to_file] == ["bug-issue:live"]
 
 
