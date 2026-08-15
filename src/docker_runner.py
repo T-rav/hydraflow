@@ -495,6 +495,7 @@ class DockerRunner:
         stderr: int | None = None,  # noqa: ARG002
         limit: int = 1024 * 1024,  # noqa: ARG002
         start_new_session: bool = True,  # noqa: ARG002
+        harness_env: dict[str, str] | None = None,
     ) -> asyncio.subprocess.Process:
         """Create a streaming Docker container process.
 
@@ -505,7 +506,9 @@ class DockerRunner:
         .. note::
             The ``env`` parameter is intentionally ignored.  DockerRunner
             always builds its own minimal environment via :meth:`_build_env`
-            to enforce container isolation.  Passing a full host environment
+            to enforce container isolation. The ONLY sanctioned override is
+            the explicit ``harness_env`` param (#11263), a bounded
+            three-key backend redirect merged after ``_build_env``.  Passing a full host environment
             (e.g. from :func:`subprocess_util.make_clean_env`) would leak
             ``PATH``, ``PYTHONPATH``, and other host-specific variables into
             the container, defeating the security boundary.
@@ -515,6 +518,15 @@ class DockerRunner:
         loop = asyncio.get_running_loop()
         mounts = self._build_mounts(cwd)
         container_env = self._build_env()
+        # #11263: the harness backend override (ANTHROPIC_BASE_URL/AUTH_TOKEN,
+        # cleared ANTHROPIC_API_KEY) MUST reach the container or a credit-
+        # failover/repo-provider reroute sends a glm --model to the native
+        # Anthropic endpoint (unrecognized_model, exit 1). This is a bounded
+        # three-key allowlist from resolve_harness_env — NOT the host env
+        # leak the ignored ``env`` param guards against — merged after
+        # _build_env so it wins over the injected native key.
+        if harness_env:
+            container_env.update(harness_env)
         working_dir = "/workspace" if cwd else None
 
         needs_stdin = stdin is None or stdin == asyncio.subprocess.PIPE

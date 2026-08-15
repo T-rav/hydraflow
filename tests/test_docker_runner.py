@@ -508,6 +508,31 @@ class TestDockerRunnerCreateStreamingProcess:
         assert volumes[str(tmp_path / "logs")] == {"bind": "/logs", "mode": "rw"}
 
     @pytest.mark.asyncio
+    async def test_harness_env_overrides_container_env(self, tmp_path: Path) -> None:
+        """#11263: the sanctioned backend override must reach the container —
+        env= is ignored by design, so without this param a credit-failover
+        reroute ships glm --model to the native endpoint and dies with
+        unrecognized_model."""
+        runner, client = _make_runner(log_dir=tmp_path / "logs", gh_token="ghp_test")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-native"}, clear=True):
+            await runner.create_streaming_process(
+                ["claude", "-p", "--model", "glm-5.2"],
+                harness_env={
+                    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+                    "ANTHROPIC_AUTH_TOKEN": "zai-token",
+                    "ANTHROPIC_API_KEY": "",
+                },
+            )
+
+        env = client.containers.create.call_args.kwargs.get("environment", {})
+        assert env["ANTHROPIC_BASE_URL"] == "https://api.z.ai/api/anthropic"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "zai-token"
+        # The override WINS over the injected native key (merged after _build_env).
+        assert env["ANTHROPIC_API_KEY"] == ""
+
+    @pytest.mark.asyncio
     async def test_passes_minimal_env_vars(self, tmp_path: Path) -> None:
         runner, client = _make_runner(
             log_dir=tmp_path / "logs",
