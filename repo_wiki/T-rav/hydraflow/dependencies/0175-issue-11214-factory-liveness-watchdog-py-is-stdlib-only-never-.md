@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 11214
 source_phase: plan
 created_at: 2026-08-15T05:26:51.324021+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0187
 ---
 
 # factory_liveness_watchdog.py is stdlib-only, never imports src/

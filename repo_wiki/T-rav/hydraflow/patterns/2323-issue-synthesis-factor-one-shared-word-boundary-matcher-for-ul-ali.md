@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T05:19:55.605162+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2203
+superseded_by: 2443
 ---
 
 # Factor one shared word-boundary matcher for UL alias checks
