@@ -965,7 +965,7 @@ def test_render_report_recent_escapes_evidence_truncates_and_preserves_leading_p
 def test_render_report_recent_escapes_evidence_truncation_keeps_pipe_at_boundary_intact() -> (
     None
 ):
-    from escape.report import EVIDENCE_MAX_CHARS
+    from escape.notes import EVIDENCE_MAX_CHARS
 
     now = datetime(2026, 2, 1, tzinfo=UTC)
     prefix = "tests/regressions/test_issue_11185.py: "
@@ -993,7 +993,7 @@ def test_render_report_recent_escapes_evidence_truncation_keeps_pipe_at_boundary
 def test_render_report_recent_escapes_evidence_truncation_drops_pipe_past_boundary() -> (
     None
 ):
-    from escape.report import EVIDENCE_MAX_CHARS
+    from escape.notes import EVIDENCE_MAX_CHARS
 
     now = datetime(2026, 2, 1, tzinfo=UTC)
     prefix = "tests/regressions/test_issue_11185.py: "

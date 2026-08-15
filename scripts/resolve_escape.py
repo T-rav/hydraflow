@@ -13,12 +13,15 @@ targets wrap these with ``PYTHONPATH=src``)::
     python scripts/resolve_escape.py list
     python scripts/resolve_escape.py resolve <escape-id> --encoded-as regression-test \
         --confidence high --notes "pinned by tests/regressions/test_x.py"
-    python scripts/resolve_escape.py resolve <escape-id> --confidence medium \
-        --notes "attribution confirmed, encoding not yet known"
 
 Filesystem-only: it reads and appends the append-only JSONL ledger, no git / gh /
 network. ``--ledger-path`` overrides the default repo-scoped location resolved
 from config.
+
+``--notes`` records the encoding evidence (a regression-test path, ADR number,
+or stored lesson). It is PUBLISHED to the public GitHub issue that surfaces this
+escape — the filed HITL body and the auto-close comment both render it — so keep
+it evidence-only: never put secrets or private/internal text in ``--notes``.
 """
 
 from __future__ import annotations
@@ -78,7 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
         "answers a low-confidence surfacing).",
     )
     resolve.add_argument(
-        "--notes", default=None, help="Optional free-text note recorded on the row."
+        "--notes",
+        default=None,
+        help="Encoding-evidence note recorded on the row. Published to the public "
+        "GitHub issue that surfaces this escape (filed body + close comment) — "
+        "keep it evidence-only, no secrets or private text.",
     )
 
     sub.add_parser(

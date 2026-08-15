@@ -78,6 +78,7 @@ from escape.detect import (
 from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
 from escape.metrics import low_confidence, unencoded_aging
 from escape.models import EscapeCandidate, EscapeRecord
+from escape.notes import sanitize_notes_cell, sanitize_notes_prose
 from escape.report import render_escape_ledger_markdown
 from escape.surfaces import SurfacedIssue, SurfacedIssueLedger
 from exception_classify import reraise_on_credit_or_bug
@@ -156,6 +157,8 @@ _SURFACE_REASON_REMEDIATION = {
         'make escape-resolve ARGS="{id} --confidence '
         "<high|medium> --notes '<why>'\"\n"
         "```\n"
+        "`--notes` is published to this public GitHub issue — keep it "
+        "evidence-only (no secrets or private text).\n"
     ),
     SURFACE_REASON_AGING: (
         "Point at the encoding with the operator CLI (#10574) — this appends "
@@ -165,6 +168,8 @@ _SURFACE_REASON_REMEDIATION = {
         'make escape-resolve ARGS="{id} --encoded-as '
         "<regression-test|stored-lesson|detector|adr> --notes '<why>'\"\n"
         "```\n"
+        "`--notes` is published to this public GitHub issue — keep it "
+        "evidence-only (no secrets or private text).\n"
     ),
 }
 
@@ -826,14 +831,24 @@ def _resolution_comment(record: EscapeRecord, reason: str) -> str:
 
     Names the resolution that answered the surfacing so the closed issue leaves
     an audit trail: an ``aging`` surface reports the encoding it terminated in
-    plus the recorded evidence (``record.notes`` — the ledger's permanent,
-    already-written resolution text, never re-derived here, #11178), a
-    ``low-confidence`` surface reports the confidence a human confirmed it at.
+    plus the recorded evidence, a ``low-confidence`` surface reports the
+    confidence a human confirmed it at.
+
+    ``record.notes`` is free text from EITHER the machine auto-diagnoser
+    (ADR-0115, evidence-only) OR a human operator (``scripts/resolve_escape.py
+    --notes``). It reaches this PUBLIC close comment, so the ``aging`` branch
+    funnels it through :func:`escape.notes.sanitize_notes_prose` — collapsed to
+    a single safe line — rather than appending it verbatim (#11241). Sanitizing
+    shapes the text; it is not a disclosure filter: the operator CLI names the
+    public destination so a human keeps ``--notes`` evidence-only. Prose is not
+    truncated — the comment's purpose (#11178) is to name the evidence, and the
+    auto-diagnose reason places the encoding path past the cell truncation bound.
     """
     if reason == SURFACE_REASON_AGING:
         detail = f"encoded as `{record.encoded_as}`"
-        if record.notes:
-            detail += f" — {record.notes}"
+        sanitized_notes = sanitize_notes_prose(record.notes)
+        if sanitized_notes:
+            detail += f" — {sanitized_notes}"
     else:
         detail = f"attribution confidence is now `{record.attribution_confidence}`"
     return (
@@ -896,7 +911,7 @@ def _render_finding(record: EscapeRecord, reason: str) -> tuple[str, str]:
         f"| attribution_method | {record.attribution_method} |\n"
         f"| attribution_confidence | {record.attribution_confidence} |\n"
         f"| encoded_as | {record.encoded_as} |\n"
-        f"| notes | {record.notes or '—'} |\n\n"
+        f"| notes | {sanitize_notes_cell(record.notes)} |\n\n"
         "This is a falsification-instrument finding (escape ledger, #10367). "
         "It is bookkeeping ABOUT the gauntlet, not a gate: the escape already "
         "became work through normal triage. Filed for a human to either "

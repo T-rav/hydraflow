@@ -18,8 +18,7 @@ from datetime import datetime
 
 from escape import metrics
 from escape.models import EscapeRecord
-
-EVIDENCE_MAX_CHARS = 100
+from escape.notes import sanitize_notes_cell
 
 
 def _fmt_hours(value: float | None) -> str:
@@ -28,23 +27,6 @@ def _fmt_hours(value: float | None) -> str:
 
 def _fmt_num(value: float | None) -> str:
     return "—" if value is None else f"{value:.1f}"
-
-
-def _sanitize_evidence_cell(notes: str) -> str:
-    """Render ``notes`` as a single safe Markdown table cell.
-
-    Truncates the raw text FIRST, then escapes ``|`` — never the reverse.
-    Escaping first and truncating second can slice an already-inserted
-    ``\\|`` pair in half at the length boundary, corrupting the row's
-    column count. Truncating raw text first means there's no escape
-    sequence yet to split.
-    """
-    collapsed = " ".join(notes.split())
-    if not collapsed:
-        return "—"
-    if len(collapsed) > EVIDENCE_MAX_CHARS:
-        collapsed = collapsed[:EVIDENCE_MAX_CHARS] + "…"
-    return collapsed.replace("|", "\\|")
 
 
 def render_escape_ledger_markdown(
@@ -142,7 +124,7 @@ def render_escape_ledger_markdown(
             f"`{r.detection_ref[:12]}` | {merge} | "
             f"{_fmt_num(r.time_to_detection_hours)} | {r.attribution_method} | "
             f"{r.attribution_confidence} | {r.encoded_as} | "
-            f"{_sanitize_evidence_cell(r.notes)} |"
+            f"{sanitize_notes_cell(r.notes)} |"
         )
     if not recent:
         lines.append("| (no escapes recorded) | — | — | — | — | — | — | — | — |")
