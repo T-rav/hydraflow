@@ -10,7 +10,7 @@ whose encoding is reachable only through ``auto_diagnose.regression_hits``'
 same diagnose pass.
 
 Widening the reason filter alone is NOT enough to retire the live escape,
-though: ``select_findings_to_surface`` drops a (record, reason) pair once its
+though: ``eligible_findings`` drops a (record, reason) pair once its
 reason-scoped fingerprint is already spent, and ``9196f7403620``'s AGING
 fingerprint was spent the moment the pre-#11161 code filed its issue — so
 ``_surface_findings``'s ``_auto_diagnose`` call never sees that escape again,
@@ -204,7 +204,7 @@ async def test_already_surfaced_aging_escape_is_retired_via_reconcile(
     """The live escape `9196f7403620`: its AGING issue was already OPEN
     (filed under the pre-#11161 code) by the time the widened reason filter
     landed, so its ``surfaced:aging:<id>`` fingerprint was already spent.
-    ``select_findings_to_surface`` never re-offers a spent fingerprint, so
+    ``eligible_findings`` never re-offers a spent fingerprint, so
     ``_surface_findings``'s ``_auto_diagnose`` call can never re-diagnose it —
     the widened reason filter alone cannot retire this issue.
     ``_reconcile_surfaced_issues`` must diagnose the escape behind an
