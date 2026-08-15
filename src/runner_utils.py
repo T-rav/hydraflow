@@ -801,6 +801,20 @@ def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str,
     backend = _OPENAI_COMPAT_BACKENDS.get(provider)
     if backend is None:
         return "", ""
+    # Key-split (#11267 review find): when the harness lane authenticates
+    # with a DIFFERENT credential (the coding-plan key), corroborating a
+    # non-authoritative cap against the REST key would falsely refute a
+    # plan-quota exhaustion — probe healthy, signal discarded, retry storm
+    # against the still-capped plan (the #9895/#10558 class). Probe the
+    # lane the signal came from: non-authoritative (prose-scan) signals
+    # originate from CLI spawns, which bill the HARNESS key; REST-lane
+    # failures arrive as structured HTTP errors that parse authoritative
+    # and never reach this probe.
+    harness = _HARNESS_BACKENDS.get(provider)
+    if harness is not None:
+        harness_key = harness.api_key()
+        if harness_key and harness_key != backend.api_key():
+            return harness.base_url(config), harness_key
     return backend.base_url(config), backend.api_key()
 
 

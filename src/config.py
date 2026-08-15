@@ -2809,14 +2809,16 @@ class HydraFlowConfig(BaseModel):
     )
     # Credit failover (#10844): when a Claude *work* spawn hits an authoritative
     # Anthropic credit cap, reroute work spawns to the z.ai GLM backend and keep
-    # going instead of pausing. Requires ZAI_API_KEY (no-op without it). Switch
+    # going instead of pausing. Requires a zai key — ZAI_CODING_PLAN_KEY or
+    # ZAI_API_KEY (no-op without one). Switch
     # back auto-probes Claude after cooldown / the error's reset time. Never
     # touches maintenance loops (they dial independently).
     credit_failover_enabled: bool = Field(
         default=True,
         description=(
             "Reroute work spawns to the GLM backend on an authoritative Claude "
-            "credit cap instead of pausing (#10844). Requires ZAI_API_KEY."
+            "credit cap instead of pausing (#10844). Requires ZAI_CODING_PLAN_KEY "
+            "or ZAI_API_KEY."
         ),
     )
     credit_failover_model: str = Field(

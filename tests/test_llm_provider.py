@@ -222,6 +222,27 @@ class TestZaiCodingPlanKeySplit:
         monkeypatch.setenv("ZAI_API_KEY", "sk-api")
         assert _OPENAI_COMPAT_BACKENDS["zai"].api_key() == "sk-api"
 
+    def test_probe_follows_harness_key_when_split(self, monkeypatch):
+        """#11267 review find: a plan-quota cap must be corroborated against
+        the PLAN credential — probing the REST key would falsely refute it
+        (probe healthy -> signal discarded -> retry storm)."""
+        from runner_utils import backend_probe_endpoint
+        from tests.helpers import ConfigFactory
+
+        self._clear(monkeypatch)
+        config = ConfigFactory.create()
+        monkeypatch.setenv("ZAI_API_KEY", "sk-api")
+        monkeypatch.setenv("ZAI_CODING_PLAN_KEY", "sk-plan")
+        base_url, key = backend_probe_endpoint("zai", config)
+        assert key == "sk-plan"
+        assert base_url == config.zai_harness_base_url
+
+        # Single-key setups keep the pre-split REST probe pair.
+        monkeypatch.delenv("ZAI_CODING_PLAN_KEY", raising=False)
+        base_url, key = backend_probe_endpoint("zai", config)
+        assert key == "sk-api"
+        assert base_url == config.zai_base_url
+
     def test_failover_enabled_by_plan_key_alone(self, monkeypatch):
         from credit_failover import zai_key_present
 
