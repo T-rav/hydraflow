@@ -53,9 +53,27 @@ def _write_control(repo_root: Path, *, signed: bool = False) -> None:
         "workspace_gc:\n  class: infrastructure\n"
     )
     signer = "signed_by: travis" if signed else "signed_by: null"
+    date = "  signed_date: 2026-08-15\n" if signed else ""
     (control / "setpoints.yaml").write_text(
         f"gate_health:\n  value: 0.90\n  band: 0.05\n  units: fraction\n  {signer}\n"
+        f"{date}"
     )
+
+
+def _ctx_with_orchestrator(cfg: MagicMock, orch: object | None) -> MagicMock:
+    """A RouteContext stand-in resolving ``(cfg, state, bus, get_orch)``.
+
+    Only ``resolve_runtime`` is exercised by this endpoint; the orchestrator
+    getter yields *orch* (``None`` = factory not started).
+    """
+    ctx = MagicMock()
+    ctx.resolve_runtime.return_value = (
+        cfg,
+        MagicMock(),
+        MagicMock(),
+        lambda: orch,
+    )
+    return ctx
 
 
 def test_serves_register_rows_with_counts(tmp_path: Path) -> None:
@@ -134,3 +152,69 @@ def test_signed_setpoint_surfaces_signer(tmp_path: Path) -> None:
     gate = body["loops"][0]
     assert gate["setpoint"]["signed"] is True
     assert gate["setpoint"]["signed_by"] == "travis"
+    assert gate["setpoint"]["signed_date"] == "2026-08-15"
+
+
+def test_interval_s_resolved_from_live_orchestrator(tmp_path: Path) -> None:
+    """#11232: with a ctx + started factory, each row carries the loop's
+    effective tick interval (weekly for gate_health) so the client can render
+    "awaiting next tick (due last_tick + interval)"."""
+    cfg = _config(tmp_path)
+    _write_control(cfg.repo_root)
+    orch = MagicMock()
+    orch.get_bg_worker_interval = lambda name: {
+        "gate_health": 604800,
+        "wiki_rot_detector": 900,
+    }[name]
+    app = FastAPI()
+    app.include_router(
+        build_diagnostics_router(cfg, ctx=_ctx_with_orchestrator(cfg, orch))
+    )
+
+    body = TestClient(app).get("/api/diagnostics/loop-faceplates").json()
+
+    rows = {r["worker_name"]: r for r in body["loops"]}
+    assert rows["gate_health"]["interval_s"] == 604800
+    assert rows["wiki_rot_detector"]["interval_s"] == 900
+
+
+def test_interval_s_none_when_orchestrator_not_started(tmp_path: Path) -> None:
+    """Fail-soft: no live orchestrator → interval_s None ("due unknown"),
+    never a 500 — the register half still serves."""
+    cfg = _config(tmp_path)
+    _write_control(cfg.repo_root)
+    app = FastAPI()
+    app.include_router(
+        build_diagnostics_router(cfg, ctx=_ctx_with_orchestrator(cfg, None))
+    )
+
+    resp = TestClient(app).get("/api/diagnostics/loop-faceplates")
+
+    assert resp.status_code == 200
+    assert all(r["interval_s"] is None for r in resp.json()["loops"])
+
+
+def test_interval_s_fail_soft_when_runtime_resolve_raises(tmp_path: Path) -> None:
+    """A malformed runtime (resolve_runtime raises) degrades to "due unknown"
+    for every row — never a 500 — the register half still serves."""
+    cfg = _config(tmp_path)
+    _write_control(cfg.repo_root)
+    ctx = MagicMock()
+    ctx.resolve_runtime.side_effect = AttributeError("no runtime")
+    app = FastAPI()
+    app.include_router(build_diagnostics_router(cfg, ctx=ctx))
+
+    resp = TestClient(app).get("/api/diagnostics/loop-faceplates")
+
+    assert resp.status_code == 200
+    assert all(r["interval_s"] is None for r in resp.json()["loops"])
+
+
+def test_interval_s_none_without_ctx(tmp_path: Path) -> None:
+    """Legacy single-repo callers (no ctx) get interval_s None everywhere."""
+    cfg = _config(tmp_path)
+    _write_control(cfg.repo_root)
+
+    body = _client(cfg).get("/api/diagnostics/loop-faceplates").json()
+
+    assert all(r["interval_s"] is None for r in body["loops"])

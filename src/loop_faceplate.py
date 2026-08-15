@@ -45,6 +45,7 @@ def _setpoint_cell(spec: SetpointSpec | None) -> dict[str, Any] | None:
         "direction": spec.direction,
         "signed": spec.active,
         "signed_by": spec.signed_by or None,
+        "signed_date": spec.signed_date or None,
         "authority": spec.authority,
     }
 
@@ -53,13 +54,16 @@ def build_loop_faceplates(
     fleet: dict[str, FleetEntry],
     setpoints: dict[str, SetpointSpec],
     floors: dict[str, Any],
+    intervals: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """One faceplate row per fleet entry.
 
     Rows sort by control class (convertible/error-driven first — those carry
     the control surface) then worker name. ``floor_sigma`` is ``None`` when
     the loop has no finder join or the finder is uncalibrated — "cannot
-    sense", never an invented variance.
+    sense", never an invented variance. ``interval_s`` (#11232) is the loop's
+    effective tick interval — ``None`` when *intervals* has no entry, so the
+    client renders "due unknown" rather than inventing a cadence.
     """
     rows: list[dict[str, Any]] = []
     for worker_name in sorted(
@@ -73,6 +77,7 @@ def build_loop_faceplates(
                 "pv_label": entry.pv,
                 "finder_id": entry.finder_id,
                 "floor_sigma": measurement_noise_for(worker_name, fleet, floors),
+                "interval_s": (intervals or {}).get(worker_name),
                 "setpoint": _setpoint_cell(setpoints.get(worker_name)),
             }
         )

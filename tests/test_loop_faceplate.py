@@ -66,6 +66,7 @@ def test_unsigned_setpoint_marked_signed_false() -> None:
         "direction": "above",
         "signed": False,
         "signed_by": None,
+        "signed_date": None,
         "authority": "#10824",
     }
 
@@ -84,6 +85,49 @@ def test_signed_setpoint_carries_signer() -> None:
     gate = next(r for r in rows if r["worker_name"] == "gate_health")
     assert gate["setpoint"]["signed"] is True
     assert gate["setpoint"]["signed_by"] == "travis"
+
+
+def test_signed_setpoint_carries_signing_date() -> None:
+    """#11232: the client needs the signing DATE to tell "hasn't ticked since
+    signing" (awaiting tick) from "ticked but didn't engage" (not engaged)."""
+    spec = SetpointSpec(
+        worker_name="gate_health",
+        pv="fleet pass rate",
+        units="fraction",
+        value=0.90,
+        band=0.05,
+        signed_by="travis",
+        signed_date="2026-08-15",
+    )
+    rows = build_loop_faceplates(_fleet(), {"gate_health": spec}, {})
+    gate = next(r for r in rows if r["worker_name"] == "gate_health")
+    assert gate["setpoint"]["signed_date"] == "2026-08-15"
+
+
+def test_unsigned_setpoint_signed_date_is_none() -> None:
+    rows = build_loop_faceplates(_fleet(), {"gate_health": _unsigned_spec()}, {})
+    gate = next(r for r in rows if r["worker_name"] == "gate_health")
+    assert gate["setpoint"]["signed_date"] is None
+
+
+def test_interval_s_joined_per_worker() -> None:
+    """#11232: the row carries the loop's effective tick interval so the UI can
+    compute `due = last_tick + interval` for the awaiting-tick state."""
+    rows = build_loop_faceplates(
+        _fleet(), {}, {}, {"gate_health": 604800, "wiki_rot_detector": 900}
+    )
+    by_name = {r["worker_name"]: r for r in rows}
+    assert by_name["gate_health"]["interval_s"] == 604800
+    assert by_name["wiki_rot_detector"]["interval_s"] == 900
+
+
+def test_interval_s_none_when_unknown_or_absent() -> None:
+    rows = build_loop_faceplates(_fleet(), {}, {"gate_health": 604800})
+    by_name = {r["worker_name"]: r for r in rows}
+    # Not in the mapping → None ("due unknown"), never an invented cadence.
+    assert by_name["workspace_gc"]["interval_s"] is None
+    # No intervals mapping at all (legacy callers) → every row None.
+    assert all(r["interval_s"] is None for r in build_loop_faceplates(_fleet(), {}, {}))
 
 
 def test_no_setpoint_is_none_not_zero() -> None:

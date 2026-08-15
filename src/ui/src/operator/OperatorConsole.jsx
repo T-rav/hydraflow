@@ -197,10 +197,11 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
   )
   // Loop faceplates (#10826): the static register half arrives via the poll
   // hook; the live half (PV/quiescence) is the WS backgroundWorkers slice, so
-  // the join recomputes on every WS frame without refetching.
+  // the join recomputes on every WS frame without refetching. The injected
+  // `now` drives the #11232 overdue classification deterministically.
   const loopFaceplates = useMemo(
-    () => toLoopFaceplates(loopFaceplatesRaw, socket.backgroundWorkers),
-    [loopFaceplatesRaw, socket.backgroundWorkers],
+    () => toLoopFaceplates(loopFaceplatesRaw, socket.backgroundWorkers, { now }),
+    [loopFaceplatesRaw, socket.backgroundWorkers, now],
   )
   // Task 9: per-repo portfolio summaries. Only a multi-repo install shows the
   // overview / switcher; a single-repo install drills straight to the pipeline.
@@ -339,7 +340,11 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
               ) : mode === 'instruments' ? (
                 <div data-testid="instruments-grid" style={styles.instrumentsGrid}>
                   <FinderFaceplatePanel faceplates={faceplates} />
-                  <LoopFaceplatePanel faceplates={loopFaceplates} />
+                  <LoopFaceplatePanel
+                    faceplates={loopFaceplates}
+                    now={now}
+                    onRunNow={socket.triggerBgWorker}
+                  />
                   <JudgeCalibrationPanel calibration={calibration} />
                 </div>
               ) : mode === 'supervisor' ? (

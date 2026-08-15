@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { formatRelative, formatDuration } from '../timeFormat'
+import { formatRelative, formatDuration, formatUntil } from '../timeFormat'
 
 describe('formatRelative', () => {
   beforeEach(() => {
@@ -69,5 +69,37 @@ describe('formatDuration', () => {
 
   it('returns empty string when end is before start', () => {
     expect(formatDuration('2026-04-22T12:01:00Z', '2026-04-22T12:00:00Z')).toBe('')
+  })
+})
+
+// #11232: the awaiting-tick due caption needs a FUTURE-relative formatter —
+// formatRelative is past-only and would render every future date "just now".
+describe('formatUntil', () => {
+  const now = Date.parse('2026-04-22T12:00:00Z')
+
+  it('returns seconds when under a minute', () => {
+    expect(formatUntil('2026-04-22T12:00:45Z', now)).toBe('in 45s')
+  })
+
+  it('returns minutes when under an hour', () => {
+    expect(formatUntil('2026-04-22T12:15:00Z', now)).toBe('in 15m')
+  })
+
+  it('returns hours when under a day', () => {
+    expect(formatUntil('2026-04-22T15:00:00Z', now)).toBe('in 3h')
+  })
+
+  it('returns days when over a day', () => {
+    expect(formatUntil('2026-04-24T12:00:00Z', now)).toBe('in 2d')
+  })
+
+  it('returns "overdue" when the instant has passed', () => {
+    expect(formatUntil('2026-04-22T11:00:00Z', now)).toBe('overdue')
+    expect(formatUntil('2026-04-22T12:00:00Z', now)).toBe('overdue')
+  })
+
+  it('returns empty string for missing or invalid input', () => {
+    expect(formatUntil(null, now)).toBe('')
+    expect(formatUntil('not-a-date', now)).toBe('')
   })
 })

@@ -31,6 +31,13 @@
  *     unconverted), never a fabricated PV of 0;
  *   - an UNSIGNED setpoint shows its proposed value WITH the unsigned badge —
  *     visible but visibly inert;
+ *   - a SIGNED setpoint whose loop hasn't ticked since signing renders the
+ *     SIGNED lamp + "awaiting tick · due <date> · in <wait>" caption
+ *     (#11232) — never a blank lamp that reads "signing didn't take";
+ *     "due unknown" when the cadence or last tick is unknown, and a
+ *     run-now poke so the operator needn't wait out a weekly cadence;
+ *   - a post-signing tick that still doesn't regulate renders NOT ENGAGED —
+ *     the fault this state was previously masking;
  *   - QUIESCENT renders as a calm success tone — it is a correct state, not
  *     a fault;
  *   - an empty / failed feed renders a calm empty state, never a crash;
@@ -39,17 +46,24 @@
 
 import React from 'react'
 import { useTokens, Text, Badge } from '../styles/primitives'
+import { formatUntil } from '../utils/timeFormat'
 import {
   EMPTY_LOOP_FACEPLATES_VM,
+  MODE_AWAITING_TICK,
   MODE_AUTO,
+  MODE_NOT_ENGAGED,
   MODE_QUIESCENT,
 } from './model/loopFaceplates'
 
 // mode → lamp { label, tone }. AUTO acts; QUIESCENT is calm-by-design;
-// unconverted is neutral absence.
+// unconverted is neutral absence. SIGNED (#11232) is the intermediate state
+// — the setpoint took, the owning loop just hasn't read it yet; NOT ENGAGED
+// is the genuine fault — a post-signing tick that still didn't regulate.
 const MODE_LAMP = {
   [MODE_AUTO]: { label: 'AUTO', tone: 'warning' },
   [MODE_QUIESCENT]: { label: 'QUIESCENT', tone: 'success' },
+  [MODE_AWAITING_TICK]: { label: 'SIGNED', tone: 'info' },
+  [MODE_NOT_ENGAGED]: { label: 'NOT ENGAGED', tone: 'danger' },
 }
 const UNCONVERTED_LAMP = { label: '—', tone: 'neutral' }
 
@@ -82,7 +96,26 @@ function makeStyles(t) {
     name: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
     metrics: { display: 'flex', alignItems: 'baseline', gap: t.space.sm, flexShrink: 0 },
     metric: { display: 'inline-flex', alignItems: 'baseline', gap: t.space.xxs },
-    lamp: { display: 'inline-flex', alignItems: 'center', gap: t.space.xxs, flexShrink: 0 },
+    // Lamp column: mode badge, the #11232 awaiting-tick due caption beneath
+    // it, and (when the row is signed but inert) the run-now poke.
+    lamp: {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'flex-end',
+      gap: t.space.xxs,
+      flexShrink: 0,
+    },
+    runBtn: {
+      border: `1px solid ${t.color.border}`,
+      borderRadius: t.radius.md,
+      background: 'transparent',
+      color: t.color.textMuted,
+      cursor: 'pointer',
+      padding: `1px ${t.space.xs}px`,
+      font: 'inherit',
+      fontSize: t.type.size.xs,
+      fontWeight: t.type.weight.semibold,
+    },
     // Census line under a token divider (borderTop longhand only — never the
     // `border` shorthand, per the border-shorthand guard).
     census: {
@@ -108,9 +141,21 @@ function Metric({ label, value, styles, testid }) {
   )
 }
 
+/** The #11232 awaiting-tick caption: due date + relative wait, or an honest
+ * "due unknown" when the cadence or last tick is unknown. */
+function dueCaption(row, now) {
+  if (!row.dueAt) return 'awaiting tick · due unknown'
+  const day = String(row.dueAt).slice(0, 10)
+  return `awaiting tick · due ${day} · ${formatUntil(row.dueAt, now)}`
+}
+
 /** One regulator-class loop: identity + setpoint + live PV + mode lamp. */
-function RegulatorRow({ row, styles }) {
+function RegulatorRow({ row, styles, now, onRunNow }) {
   const lamp = MODE_LAMP[row.mode] ?? UNCONVERTED_LAMP
+  // The run-now poke exists for exactly the #11232 trap: a signed setpoint
+  // the loop hasn't acted on. Engaged rows don't need it.
+  const runnable =
+    row.setpoint && row.setpoint.signed && row.live.setpointActive !== true
   return (
     <div data-testid={`loop-faceplate-row-${row.workerName}`} style={styles.row}>
       <span style={styles.nameCol}>
@@ -156,15 +201,41 @@ function RegulatorRow({ row, styles }) {
         <Badge tone={lamp.tone} data-testid={`loop-faceplate-mode-${row.workerName}`}>
           {lamp.label}
         </Badge>
+        {row.mode === MODE_AWAITING_TICK && (
+          <Text
+            as="span"
+            size="xs"
+            tone="muted"
+            data-testid={`loop-faceplate-due-${row.workerName}`}
+          >
+            {dueCaption(row, now)}
+          </Text>
+        )}
+        {runnable && typeof onRunNow === 'function' && (
+          <button
+            type="button"
+            style={styles.runBtn}
+            onClick={() => onRunNow(row.workerName)}
+            title="trigger one immediate tick of this loop"
+            data-testid={`loop-faceplate-run-${row.workerName}`}
+          >
+            run now
+          </button>
+        )}
       </span>
     </div>
   )
 }
 
 /**
- * @param {{ faceplates?: ReturnType<typeof import('./model/loopFaceplates').toLoopFaceplates> }} props
+ * @param {{ faceplates?: ReturnType<typeof import('./model/loopFaceplates').toLoopFaceplates>,
+ *           now?: number, onRunNow?: (workerName: string) => void }} props
  */
-export function LoopFaceplatePanel({ faceplates = EMPTY_LOOP_FACEPLATES_VM }) {
+export function LoopFaceplatePanel({
+  faceplates = EMPTY_LOOP_FACEPLATES_VM,
+  now = Date.now(),
+  onRunNow,
+}) {
   const t = useTokens()
   const styles = makeStyles(t)
   const { headerLabel, byClass, rows, regulatingCount } = faceplates
@@ -192,7 +263,13 @@ export function LoopFaceplatePanel({ faceplates = EMPTY_LOOP_FACEPLATES_VM }) {
       ) : (
         <>
           {regulators.map(row => (
-            <RegulatorRow key={row.workerName} row={row} styles={styles} />
+            <RegulatorRow
+              key={row.workerName}
+              row={row}
+              styles={styles}
+              now={now}
+              onRunNow={onRunNow}
+            />
           ))}
           <Text
             size="xs"

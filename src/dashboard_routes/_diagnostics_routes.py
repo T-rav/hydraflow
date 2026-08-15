@@ -393,6 +393,13 @@ def build_diagnostics_router(
         ``BACKGROUND_WORKER_STATUS`` bus — the UI joins the two client-side,
         so this endpoint deliberately serves no live telemetry.
 
+        One live scalar is served per row since #11232: ``interval_s``, the
+        loop's effective tick interval from the resolved orchestrator —
+        without it the client cannot compute "due = last_tick + interval"
+        for the awaiting-tick state, and a signed-but-unticked weekly loop
+        renders a blank lamp for days. Fail-soft to ``None`` (no orchestrator
+        yet, no ctx) — "due unknown", never an invented cadence.
+
         Fail-soft: an unreadable fleet file yields ``loops: []`` with an
         ``error`` marker (the register is repo-versioned and guard-tested, so
         this signals a broken deploy — but a diagnostics panel must render,
@@ -420,9 +427,32 @@ def build_diagnostics_router(
             ).latest_by_finder()
         except (OSError, ValueError, RuntimeError, KeyError):
             logger.warning("loop-faceplates: calibration read failed", exc_info=True)
+        intervals: dict[str, int] = {}
+        if ctx is not None:
+            # Narrow catch, not a blanket except (the suppression ratchet
+            # only shrinks): resolve_runtime is in-memory lookups — a raise
+            # here means a malformed runtime object, and "due unknown" is the
+            # honest degradation for this panel.
+            try:
+                orch = ctx.resolve_runtime(repo)[3]()
+            except (AttributeError, KeyError, TypeError, ValueError):
+                logger.warning(
+                    "loop-faceplates: orchestrator resolve failed", exc_info=True
+                )
+                orch = None
+            if orch is not None:
+                for worker_name in fleet:
+                    try:
+                        intervals[worker_name] = int(
+                            orch.get_bg_worker_interval(worker_name)
+                        )
+                    except (AttributeError, KeyError, TypeError, ValueError):
+                        logger.warning(
+                            "loop-faceplates: no interval for %s", worker_name
+                        )
         counts = {str(k): v for k, v in fleet_counts(fleet).items()}
         return {
-            "loops": build_loop_faceplates(fleet, setpoints, floors),
+            "loops": build_loop_faceplates(fleet, setpoints, floors, intervals),
             "counts": counts,
             "generated_at": now.isoformat(),
         }

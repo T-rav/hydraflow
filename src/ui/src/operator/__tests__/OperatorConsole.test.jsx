@@ -220,6 +220,56 @@ describe('OperatorConsoleView — shell', () => {
     expect(screen.getByTestId('operator-detail-slot')).toHaveAttribute('data-fullwidth', 'true')
   })
 
+  it('wires the awaiting-tick caption + run-now poke into Instruments mode (#11232)', () => {
+    // The issue's evidence shape: signed weekly setpoint, last tick the day
+    // before signing, pre-signing setpoint_active: false.
+    const triggerBgWorker = vi.fn()
+    const socket = makeSocket({
+      triggerBgWorker,
+      backgroundWorkers: [
+        {
+          name: 'gate_health',
+          status: 'ok',
+          last_run: '2026-08-14T05:34:00Z',
+          details: { pv_pass_rate: 0.94, setpoint_active: false, quiescent: false },
+          enabled: true,
+        },
+      ],
+    })
+    const loopsRaw = {
+      generated_at: '2026-08-15T04:20:00Z',
+      counts: { convertible: 1, error_driven: 0, exploratory: 0, infrastructure: 0 },
+      loops: [
+        {
+          worker_name: 'gate_health',
+          control_class: 'convertible',
+          pv_label: 'fleet pass rate',
+          finder_id: '',
+          floor_sigma: null,
+          interval_s: 604800,
+          setpoint: {
+            value: 0.9, band: 0.05, units: 'fraction', direction: 'above',
+            signed: true, signed_by: 'travis', signed_date: '2026-08-15', authority: '#10824',
+          },
+        },
+      ],
+    }
+    render(
+      <OperatorConsoleView
+        socket={socket}
+        loopFaceplatesRaw={loopsRaw}
+        now={Date.parse('2026-08-15T04:20:00Z')}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('mode-toggle-instruments'))
+    // The blank mode lamp is gone: explicit SIGNED + due caption.
+    expect(screen.getByTestId('loop-faceplate-mode-gate_health')).toHaveTextContent('SIGNED')
+    expect(screen.getByTestId('loop-faceplate-due-gate_health')).toHaveTextContent('due 2026-08-21')
+    // The poke reaches the console's trigger action, keyed by worker name.
+    fireEvent.click(screen.getByTestId('loop-faceplate-run-gate_health'))
+    expect(triggerBgWorker).toHaveBeenCalledWith('gate_health')
+  })
+
   it('mounts the phase timeline in the reclaimed bottom slot (feat/operator-timeline)', () => {
     render(<OperatorConsoleView socket={makeSocket()} />)
     const slot = screen.getByTestId('operator-timeline-slot')
