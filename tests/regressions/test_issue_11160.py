@@ -123,9 +123,11 @@ async def test_already_surfaced_regression_pin_aging_escape_is_retired_via_recon
     (repo / "src" / "crash.py").write_text("def crash():\n    return 1\n")
     reg = repo / "tests" / "regressions"
     reg.mkdir(parents=True)
-    (reg / "test_issue_555.py").write_text(
-        "# regression pin for #555\ndef test_bug(): pass\n"
-    )
+    # No literal issue-number text in the pin body: regression_hits' git-grep
+    # fallback must NOT be able to find this file too, or a broken added_pin
+    # detection could still pass via the fallback (the branch this test exists
+    # to isolate).
+    (reg / "test_issue_555.py").write_text("def test_bug():\n    pass\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "fix: resolve crash (fixes #555)")
     fix_sha = _head(repo)
