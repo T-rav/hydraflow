@@ -1,0 +1,126 @@
+// Issue #11232 — loop faceplates: signed setpoint must show
+// "SIGNED — awaiting next tick (due X)" instead of a blank mode/PV lamp.
+
+specification {
+  element person
+  element system
+  element container
+  element component
+}
+
+model {
+  operator = person 'Operator' {
+    description 'Signs a setpoint in control/setpoints.yaml, then reads the faceplate'
+  }
+
+  hydraflow = system 'HydraFlow' {
+
+    register = container 'Control register' {
+      description 'Repo-versioned YAML, ADR-0120 / #10824'
+      fleetYaml = component 'control/fleet.yaml' {
+        description 'worker_name -> control class, pv label, finder_id'
+      }
+      setpointsYaml = component 'control/setpoints.yaml' {
+        description 'value/band/direction + signed_by/signed_date (human signature)'
+      }
+    }
+
+    api = container 'Dashboard API (FastAPI)' {
+      faceplateRoute = component 'GET /api/diagnostics/loop-faceplates' {
+        description 'STATIC register half; fail-soft; ADDS interval_s (this change)'
+      }
+      faceplateBuilder = component 'loop_faceplate.build_loop_faceplates' {
+        description 'Pure join: fleet x setpoints x floors (+ intervals, this change)'
+      }
+      triggerRoute = component 'POST /api/control/bg-worker/trigger' {
+        description 'Existing operator poke -> orchestrator.trigger_bg_worker'
+      }
+    }
+
+    orch = container 'Orchestrator' {
+      bgWorkers = component 'BGWorkerManager' {
+        description 'get_interval(name), trigger(name), worker heartbeats'
+      }
+      gateHealth = component 'GateHealthLoop' {
+        description 'weekly tick; regulate() -> setpoint_active / quiescent / pv_pass_rate'
+      }
+      bus = component 'EventBus (BACKGROUND_WORKER_STATUS)' {
+        description 'LIVE half: last_run + details{pv_pass_rate, setpoint_active, quiescent}'
+      }
+    }
+
+    ui = container 'Operator console (React)' {
+      hook = component 'useLoopFaceplates' {
+        description 'Polls the static payload on LOOP_FACEPLATE_POLL_MS'
+      }
+      viewModel = component 'toLoopFaceplates(raw, workers, {now})' {
+        description 'Client-side join; derives mode incl. awaiting_tick / not_engaged'
+      }
+      panel = component 'LoopFaceplatePanel' {
+        description 'Mode lamp + setpoint cell + due caption + run-now button'
+      }
+      timeFmt = component 'utils/timeFormat' {
+        description 'formatRelative (past) + formatUntil (future due, this change)'
+      }
+    }
+  }
+
+  // --- relations -----------------------------------------------------------
+  operator -> setpointsYaml 'signs (edits signed_by/signed_date via PR)'
+  operator -> panel 'reads the faceplate'
+  operator -> panel 'clicks run now'
+
+  faceplateRoute -> fleetYaml 'load_fleet'
+  faceplateRoute -> setpointsYaml 'load_setpoints'
+  faceplateRoute -> faceplateBuilder 'builds rows'
+  faceplateRoute -> bgWorkers 'get_bg_worker_interval(name) [new, fail-soft]'
+
+  gateHealth -> setpointsYaml 'setpoint_for() each tick'
+  gateHealth -> bus 'publishes setpoint_active / quiescent / pv'
+
+  hook -> faceplateRoute 'GET'
+  viewModel -> hook 'raw payload'
+  viewModel -> bus 'backgroundWorkers slice (WS)'
+  viewModel -> timeFmt 'due label'
+  panel -> viewModel 'row + mode'
+  panel -> triggerRoute 'run now (poke)'
+  triggerRoute -> bgWorkers 'trigger(name)'
+  bgWorkers -> gateHealth 'wakes the sleeping loop'
+}
+
+views {
+  view context {
+    title 'Context — who reads and writes the faceplate'
+    include operator, hydraflow
+  }
+
+  view containers of hydraflow {
+    title 'Containers — register, API, orchestrator, console'
+    include *
+  }
+
+  view components {
+    title 'Components — the faceplate join and the poke path'
+    include operator, register.*, api.*, orch.*, ui.*
+  }
+
+  dynamic view signAndAwait {
+    title 'Dynamic — sign, await the tick, then engage'
+
+    operator -> setpointsYaml 'edit signed_by/signed_date, merge PR'
+    hook -> faceplateRoute 'poll'
+    faceplateRoute -> faceplateBuilder 'fleet x setpoints x floors x intervals'
+    faceplateBuilder -> hook 'row: setpoint{signed, signed_date}, interval_s'
+    hook -> viewModel 'raw'
+    bus -> viewModel 'last_run (pre-signing), setpoint_active=false'
+    viewModel -> panel 'mode=awaiting_tick, dueAt=last_run+interval_s'
+    panel -> operator 'SIGNED — awaiting next tick (due 2026-08-21)'
+    operator -> panel 'run now'
+    panel -> triggerRoute 'POST {name}'
+    triggerRoute -> bgWorkers 'trigger'
+    bgWorkers -> gateHealth 'wake'
+    gateHealth -> bus 'setpoint_active=true, pv, quiescent'
+    bus -> viewModel 'live details'
+    viewModel -> panel 'mode=auto | quiescent, pv rendered'
+  }
+}
