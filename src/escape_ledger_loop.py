@@ -781,11 +781,15 @@ def _resolution_comment(record: EscapeRecord, reason: str) -> str:
     """Render the close comment for a resolved escape's HITL issue (#10577).
 
     Names the resolution that answered the surfacing so the closed issue leaves
-    an audit trail: an ``aging`` surface reports the encoding it terminated in,
-    a ``low-confidence`` surface reports the confidence a human confirmed it at.
+    an audit trail: an ``aging`` surface reports the encoding it terminated in
+    plus the recorded evidence (``record.notes`` — the ledger's permanent,
+    already-written resolution text, never re-derived here, #11178), a
+    ``low-confidence`` surface reports the confidence a human confirmed it at.
     """
     if reason == SURFACE_REASON_AGING:
         detail = f"encoded as `{record.encoded_as}`"
+        if record.notes:
+            detail += f" — {record.notes}"
     else:
         detail = f"attribution confidence is now `{record.attribution_confidence}`"
     return (

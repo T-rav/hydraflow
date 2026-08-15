@@ -157,6 +157,18 @@ class TestAttribution:
         assert attribution.adds_regression_pin(("tests/regressions/test_x.py",))
         assert not attribution.adds_regression_pin(("tests/test_x.py",))
 
+    def test_regression_pins_added_returns_matching_paths(self) -> None:
+        # #11178: the caller needs the REAL pin paths (not just a bool) so it
+        # can record them as encoding evidence instead of a placeholder.
+        assert attribution.regression_pins_added(
+            ("tests/regressions/test_x.py", "src/mod.py", "tests/test_y.py")
+        ) == ("tests/regressions/test_x.py",)
+
+    def test_regression_pins_added_empty_when_none_match(self) -> None:
+        assert (
+            attribution.regression_pins_added(("tests/test_x.py", "src/mod.py")) == ()
+        )
+
 
 # ---------------------------------------------------------------------------
 # detect — one candidate per commit, precedence
