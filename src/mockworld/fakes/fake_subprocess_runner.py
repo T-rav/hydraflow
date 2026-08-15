@@ -129,8 +129,12 @@ class FakeSubprocessRunner:
         stderr: int | None = None,
         limit: int = 1024 * 1024,
         start_new_session: bool = True,
+        harness_env: dict[str, str] | None = None,
     ) -> asyncio.subprocess.Process:
         _ = (cwd, stdin, stdout, stderr, limit, start_new_session)
+        # #11263: recorded so scenarios can assert the backend override
+        # reached the runner seam (the air-gapped fake never spawns).
+        self.last_harness_env = dict(harness_env) if harness_env else None
         event_iter = await self._docker.run_agent(
             command=list(cmd),
             env=env,

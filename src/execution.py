@@ -49,11 +49,20 @@ class SubprocessRunner(Protocol):
         stderr: int | None = None,
         limit: int = 1024 * 1024,
         start_new_session: bool = True,
+        harness_env: dict[str, str] | None = None,
     ) -> asyncio.subprocess.Process:
         """Create a subprocess with stdin/stdout/stderr pipes for streaming.
 
         The caller is responsible for writing to stdin, reading stdout,
         draining stderr, and managing the process lifecycle.
+
+        ``harness_env`` is the SANCTIONED per-spawn backend override
+        (``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN``/cleared
+        ``ANTHROPIC_API_KEY`` — see ``resolve_harness_env``). Unlike ``env``
+        — which DockerRunner deliberately ignores for container isolation —
+        every runner MUST honor ``harness_env``, or a credit-failover/
+        repo-provider reroute ships a glm ``--model`` to the native
+        Anthropic endpoint and dies with ``unrecognized_model`` (#11263).
         """
         ...
 
@@ -112,8 +121,11 @@ class HostRunner:
         stderr: int | None = None,
         limit: int = 1024 * 1024,
         start_new_session: bool = True,
+        harness_env: dict[str, str] | None = None,
     ) -> asyncio.subprocess.Process:
         """Create a streaming subprocess on the host."""
+        if harness_env:
+            env = {**(env or {}), **harness_env}
         return await asyncio.create_subprocess_exec(
             *cmd,
             cwd=cwd,

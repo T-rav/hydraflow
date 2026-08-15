@@ -309,7 +309,7 @@ class DockerRunner:
         self._last_spawn_time: float = 0.0
         self._containers: set[Any] = set()
         self._user_tool_mounts_cache: dict[str, dict[str, str]] | None = None
-        self._user_tool_mounts_cache_key: tuple[str, str, str, str] | None = None
+        self._user_tool_mounts_cache_key: tuple[str, str, str, str, bool] | None = None
 
     def _ensure_client(self, max_retries: int = 6, delay: float = 5.0) -> None:
         """Verify Docker is reachable; wait and retry if the daemon is restarting.
@@ -360,8 +360,18 @@ class DockerRunner:
     async def __aexit__(self, *_: object) -> None:
         await self.cleanup()
 
-    def _build_mounts(self, cwd: str | None) -> dict[str, dict[str, str]]:
-        """Build Docker volume mount specification."""
+    def _build_mounts(
+        self, cwd: str | None, *, harness_routed: bool = False
+    ) -> dict[str, dict[str, str]]:
+        """Build Docker volume mount specification.
+
+        *harness_routed* — this spawn carries a harness backend override
+        (#11263): the ``~/.claude``/``~/.claude.json`` mounts are suppressed
+        so a mounted OAuth session cannot shadow the injected
+        ``ANTHROPIC_AUTH_TOKEN`` and silently route traffic to the exhausted
+        native account (the long-standing suppress-claude-mounts wiki
+        pattern, source #10600).
+        """
         mounts: dict[str, dict[str, str]] = {}
         if cwd:
             mounts[cwd] = {"bind": "/workspace", "mode": "rw"}
@@ -378,7 +388,7 @@ class DockerRunner:
 
         self._log_dir.mkdir(parents=True, exist_ok=True)
         mounts[str(self._log_dir)] = {"bind": "/logs", "mode": "rw"}
-        mounts.update(self._get_user_tool_mounts())
+        mounts.update(self._get_user_tool_mounts(harness_routed=harness_routed))
         for spec in self._extra_mounts:
             parts = spec.split(":")
             if len(parts) >= 2:
@@ -386,23 +396,35 @@ class DockerRunner:
                 mounts[parts[0]] = {"bind": parts[1], "mode": mode}
         return mounts
 
-    def _get_user_tool_mounts(self) -> dict[str, dict[str, str]]:
-        """Return cached user-tool mounts, refreshing when env/home selection changes."""
+    def _get_user_tool_mounts(
+        self, *, harness_routed: bool = False
+    ) -> dict[str, dict[str, str]]:
+        """Return cached user-tool mounts, refreshing when env/home selection changes.
+
+        ``harness_routed`` is part of the cache key — a harness spawn and a
+        native spawn need DIFFERENT mount sets (claude mounts suppressed vs
+        present), so caching across the transition must not serve a stale set.
+        """
         key = (
             str(Path.home()),
             os.environ.get("PI_CODING_AGENT_DIR", "").strip(),
             os.environ.get("CODEX_HOME", "").strip(),
             os.environ.get("CLAUDE_CONFIG_DIR", "").strip(),
+            harness_routed,
         )
         if (
             self._user_tool_mounts_cache is None
             or key != self._user_tool_mounts_cache_key
         ):
-            self._user_tool_mounts_cache = self._build_user_tool_mounts()
+            self._user_tool_mounts_cache = self._build_user_tool_mounts(
+                harness_routed=harness_routed
+            )
             self._user_tool_mounts_cache_key = key
         return dict(self._user_tool_mounts_cache)
 
-    def _build_user_tool_mounts(self) -> dict[str, dict[str, str]]:
+    def _build_user_tool_mounts(
+        self, *, harness_routed: bool = False
+    ) -> dict[str, dict[str, str]]:
         """Mount host user agent settings into container when present."""
         mounts: dict[str, dict[str, str]] = {}
         home = Path.home()
@@ -427,22 +449,33 @@ class DockerRunner:
         if codex_home.exists():
             mounts[str(codex_home)] = {"bind": _CONTAINER_CODEX_HOME, "mode": "rw"}
 
-        claude_home_raw = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
-        claude_home = (
-            Path(claude_home_raw).expanduser() if claude_home_raw else home / ".claude"
-        )
-        if claude_home.exists():
-            mounts[str(claude_home)] = {"bind": _CONTAINER_CLAUDE_HOME, "mode": "rw"}
+        # #11263 + suppress-claude-mounts pattern (#10600): when this spawn
+        # carries a harness backend override, the claude OAuth mounts MUST
+        # NOT ride along — the CLI can prefer the mounted live session over
+        # the injected ANTHROPIC_AUTH_TOKEN, silently billing the exhausted
+        # native account instead of routing to the harness endpoint.
+        if not harness_routed:
+            claude_home_raw = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+            claude_home = (
+                Path(claude_home_raw).expanduser()
+                if claude_home_raw
+                else home / ".claude"
+            )
+            if claude_home.exists():
+                mounts[str(claude_home)] = {
+                    "bind": _CONTAINER_CLAUDE_HOME,
+                    "mode": "rw",
+                }
 
-        # Claude CLI stores auth tokens in ~/.claude.json (separate from
-        # the ~/.claude/ config directory).  Without this file the CLI
-        # reports "Not logged in" and produces no useful output.
-        claude_json = home / ".claude.json"
-        if claude_json.is_file():
-            mounts[str(claude_json)] = {
-                "bind": f"{_CONTAINER_HOME}/.claude.json",
-                "mode": "rw",
-            }
+            # Claude CLI stores auth tokens in ~/.claude.json (separate from
+            # the ~/.claude/ config directory).  Without this file the CLI
+            # reports "Not logged in" and produces no useful output.
+            claude_json = home / ".claude.json"
+            if claude_json.is_file():
+                mounts[str(claude_json)] = {
+                    "bind": f"{_CONTAINER_HOME}/.claude.json",
+                    "mode": "rw",
+                }
 
         return mounts
 
@@ -495,6 +528,7 @@ class DockerRunner:
         stderr: int | None = None,  # noqa: ARG002
         limit: int = 1024 * 1024,  # noqa: ARG002
         start_new_session: bool = True,  # noqa: ARG002
+        harness_env: dict[str, str] | None = None,
     ) -> asyncio.subprocess.Process:
         """Create a streaming Docker container process.
 
@@ -505,7 +539,9 @@ class DockerRunner:
         .. note::
             The ``env`` parameter is intentionally ignored.  DockerRunner
             always builds its own minimal environment via :meth:`_build_env`
-            to enforce container isolation.  Passing a full host environment
+            to enforce container isolation. The ONLY sanctioned override is
+            the explicit ``harness_env`` param (#11263), a bounded
+            three-key backend redirect merged after ``_build_env``.  Passing a full host environment
             (e.g. from :func:`subprocess_util.make_clean_env`) would leak
             ``PATH``, ``PYTHONPATH``, and other host-specific variables into
             the container, defeating the security boundary.
@@ -513,8 +549,21 @@ class DockerRunner:
         await self._enforce_spawn_delay()
 
         loop = asyncio.get_running_loop()
-        mounts = self._build_mounts(cwd)
+        mounts = self._build_mounts(cwd, harness_routed=bool(harness_env))
         container_env = self._build_env()
+        # #11263: the harness backend override (ANTHROPIC_BASE_URL/AUTH_TOKEN,
+        # cleared ANTHROPIC_API_KEY) MUST reach the container or a credit-
+        # failover/repo-provider reroute sends a glm --model to the native
+        # Anthropic endpoint (unrecognized_model, exit 1). This is a bounded
+        # three-key allowlist from resolve_harness_env — NOT the host env
+        # leak the ignored ``env`` param guards against — merged after
+        # _build_env so it wins over the injected native key.
+        if harness_env:
+            # Enforce the bound, not just document it: only the ANTHROPIC_*
+            # backend-redirect keys may cross the isolation boundary.
+            container_env.update(
+                {k: v for k, v in harness_env.items() if k.startswith("ANTHROPIC_")}
+            )
         working_dir = "/workspace" if cwd else None
 
         needs_stdin = stdin is None or stdin == asyncio.subprocess.PIPE

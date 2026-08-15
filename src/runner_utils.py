@@ -384,9 +384,6 @@ async def stream_claude_process(
         result_text → accumulated_text → raw_lines.
     """
     env = make_clean_env(config.gh_token)
-    # Per-spawn harness override (e.g. z.ai's /api/anthropic endpoint). Merged
-    # after the clean-env strip; empty for native Anthropic (main workers).
-    env.update(config.harness_env)
     runner = config.runner or get_default_runner()
     cmd_to_run, stdin_mode = _route_prompt_to_cmd(cmd, prompt)
 
@@ -404,6 +401,10 @@ async def stream_claude_process(
         stderr=asyncio.subprocess.PIPE,
         limit=1024 * 1024,  # 1 MB — stream-json lines can exceed 64 KB default
         start_new_session=True,  # Own process group for reliable cleanup
+        # #11263: the harness backend override travels as its OWN param — the
+        # env= dict is deliberately ignored by DockerRunner, which silently
+        # stranded rerouted glm spawns on the native Anthropic endpoint.
+        harness_env=config.harness_env or None,
     )
     active_procs.add(proc)
     _ALL_TRACKED_PROCS.add(proc)
