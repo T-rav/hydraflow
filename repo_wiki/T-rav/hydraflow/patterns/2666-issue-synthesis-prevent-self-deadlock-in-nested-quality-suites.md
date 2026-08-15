@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T08:32:49.067321+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2543
+superseded_by: 2789
 ---
 
 # Prevent self-deadlock in nested quality suites
