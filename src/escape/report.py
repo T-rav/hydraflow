@@ -5,6 +5,11 @@ Follows ``loop-fitness.md``'s generated-report convention: a runtime-written
 each tick), NOT an ``arch-regen`` artifact. Pure over ``list[EscapeRecord]``
 + an injected merge count / ``now`` so the rendered numbers match the metrics
 module exactly and the render is unit-testable.
+
+The "Recent escapes" table's ``evidence`` column surfaces ``EscapeRecord
+.notes`` (#11185) — the only place the concrete encoding (regression-test
+path, ADR number, or stored lesson) is recorded, so an operator can point at
+the encoding without grepping the JSONL.
 """
 
 from __future__ import annotations
@@ -14,6 +19,8 @@ from datetime import datetime
 from escape import metrics
 from escape.models import EscapeRecord
 
+EVIDENCE_MAX_CHARS = 100
+
 
 def _fmt_hours(value: float | None) -> str:
     return "—" if value is None else f"{value:.1f}h"
@@ -21,6 +28,23 @@ def _fmt_hours(value: float | None) -> str:
 
 def _fmt_num(value: float | None) -> str:
     return "—" if value is None else f"{value:.1f}"
+
+
+def _sanitize_evidence_cell(notes: str) -> str:
+    """Render ``notes`` as a single safe Markdown table cell.
+
+    Truncates the raw text FIRST, then escapes ``|`` — never the reverse.
+    Escaping first and truncating second can slice an already-inserted
+    ``\\|`` pair in half at the length boundary, corrupting the row's
+    column count. Truncating raw text first means there's no escape
+    sequence yet to split.
+    """
+    collapsed = " ".join(notes.split())
+    if not collapsed:
+        return "—"
+    if len(collapsed) > EVIDENCE_MAX_CHARS:
+        collapsed = collapsed[:EVIDENCE_MAX_CHARS] + "…"
+    return collapsed.replace("|", "\\|")
 
 
 def render_escape_ledger_markdown(
@@ -107,9 +131,9 @@ def render_escape_ledger_markdown(
     lines.append("")
     lines.append(
         "| detected_at | source | ref | originating merge | ttd | "
-        "attribution | confidence | encoded_as |"
+        "attribution | confidence | encoded_as | evidence |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
     recent = sorted(records, key=lambda r: r.detected_at, reverse=True)[:25]
     for r in recent:
         merge = r.originating_merge_sha[:7] if r.originating_merge_sha else "—"
@@ -117,10 +141,11 @@ def render_escape_ledger_markdown(
             f"| {r.detected_at} | {r.detection_source} | "
             f"`{r.detection_ref[:12]}` | {merge} | "
             f"{_fmt_num(r.time_to_detection_hours)} | {r.attribution_method} | "
-            f"{r.attribution_confidence} | {r.encoded_as} |"
+            f"{r.attribution_confidence} | {r.encoded_as} | "
+            f"{_sanitize_evidence_cell(r.notes)} |"
         )
     if not recent:
-        lines.append("| (no escapes recorded) | — | — | — | — | — | — | — |")
+        lines.append("| (no escapes recorded) | — | — | — | — | — | — | — | — |")
     lines.append("")
 
     return "\n".join(lines) + "\n"

@@ -312,6 +312,40 @@ class TestEscapeLedgerScenario:
         assert "| total recorded escapes | 1 |" in text
         assert "| encoded / unencoded | 1 / 0 |" in text
 
+    async def test_resolved_row_evidence_notes_appear_in_report(
+        self, tmp_path: Path
+    ) -> None:
+        # #11185: the encoding evidence recorded on resolution (the artifact
+        # that closes the escape) must reach the rendered report, not just
+        # the JSONL ledger -- an operator reads the Markdown, not the JSONL.
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base_sha, _head_sha = _seed_revert(repo)
+
+        state = _make_state(base_sha)
+        loop = _build_loop(tmp_path, repo, github, state)
+
+        first = await loop._do_work()
+        assert first["escapes_recorded"] == 1
+
+        from escape.ledger import EscapeLedger
+
+        ledger = EscapeLedger(loop._ledger_path)
+        (record,) = ledger.read_all()
+        resolved = ledger.append_resolution(
+            record.id,
+            encoded_as="regression-test",
+            notes="tests/regressions/test_issue_10367.py",
+        )
+        assert resolved is not None
+
+        loop._render_reports(repo)
+
+        report_path = repo / "docs/arch/generated/escape-ledger.md"
+        text = report_path.read_text(encoding="utf-8")
+        assert "tests/regressions/test_issue_10367.py" in text
+
     async def test_surface_findings_reads_through_the_collapse(
         self, tmp_path: Path
     ) -> None:

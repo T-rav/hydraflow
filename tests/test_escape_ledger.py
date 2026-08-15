@@ -828,3 +828,188 @@ def test_render_report_confirmed_rate_not_inflated_by_low_confidence() -> None:
     # the low-confidence bug-issue row does NOT inflate the confirmed headline.
     assert "**confirmed escapes per 100 merges** | **1.00**" in md
     assert "escapes per 100 merges (all confidence) | 2.00" in md
+
+
+def _table_cells(line: str) -> list[str]:
+    """Split a markdown table row into cells, treating ``\\|`` as literal."""
+    body = line.strip()
+    assert body.startswith("|") and body.endswith("|"), line
+    body = body[1:-1]
+    cells: list[str] = []
+    current: list[str] = []
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if ch == "\\" and i + 1 < len(body) and body[i + 1] == "|":
+            current.append("\\|")
+            i += 2
+            continue
+        if ch == "|":
+            cells.append("".join(current).strip())
+            current = []
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+    cells.append("".join(current).strip())
+    return cells
+
+
+def _recent_escapes_table(md: str) -> tuple[str, str, list[str]]:
+    lines = md.splitlines()
+    idx = lines.index("## Recent escapes")
+    header = lines[idx + 2]
+    separator = lines[idx + 3]
+    rows = []
+    i = idx + 4
+    while i < len(lines) and lines[i] != "":
+        rows.append(lines[i])
+        i += 1
+    return header, separator, rows
+
+
+def test_render_report_recent_escapes_header_and_separator_have_nine_cells() -> None:
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    md = render_escape_ledger_markdown([], now=now, merge_count_30d=10)
+    header, separator, _ = _recent_escapes_table(md)
+    assert "evidence" in header
+    assert len(_table_cells(header)) == 9
+    assert len(_table_cells(separator)) == 9
+
+
+def test_render_report_recent_escapes_placeholder_row_has_nine_cells() -> None:
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    md = render_escape_ledger_markdown([], now=now, merge_count_30d=10)
+    _, _, rows = _recent_escapes_table(md)
+    assert len(rows) == 1
+    assert len(_table_cells(rows[0])) == 9
+
+
+def test_render_report_recent_escapes_evidence_is_the_last_cell() -> None:
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    recs = [
+        _record(
+            "revert:a",
+            detected_at="2026-01-20T00:00:00+00:00",
+            notes="tests/regressions/test_issue_10367.py",
+        )
+    ]
+    md = render_escape_ledger_markdown(recs, now=now, merge_count_30d=200)
+    _, _, rows = _recent_escapes_table(md)
+    cells = _table_cells(rows[0])
+    assert len(cells) == 9
+    assert cells[-1] == "tests/regressions/test_issue_10367.py"
+
+
+def test_render_report_recent_escapes_evidence_dash_when_notes_empty() -> None:
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    recs = [_record("revert:a", detected_at="2026-01-20T00:00:00+00:00", notes="")]
+    md = render_escape_ledger_markdown(recs, now=now, merge_count_30d=200)
+    _, _, rows = _recent_escapes_table(md)
+    assert _table_cells(rows[0])[-1] == "—"
+
+
+def test_render_report_recent_escapes_evidence_collapses_multiline_notes_to_one_row() -> (
+    None
+):
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    recs = [
+        _record(
+            "revert:a",
+            detected_at="2026-01-20T00:00:00+00:00",
+            notes="line one\nline two\n\nline three",
+        )
+    ]
+    md = render_escape_ledger_markdown(recs, now=now, merge_count_30d=200)
+    _, _, rows = _recent_escapes_table(md)
+    assert len(rows) == 1
+    cells = _table_cells(rows[0])
+    assert len(cells) == 9
+    assert cells[-1] == "line one line two line three"
+
+
+def test_render_report_recent_escapes_evidence_escapes_pipe_characters() -> None:
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    recs = [
+        _record(
+            "revert:a",
+            detected_at="2026-01-20T00:00:00+00:00",
+            notes="ADR-0367 | see also #10367",
+        )
+    ]
+    md = render_escape_ledger_markdown(recs, now=now, merge_count_30d=200)
+    _, _, rows = _recent_escapes_table(md)
+    cells = _table_cells(rows[0])
+    assert len(cells) == 9
+    assert cells[-1] == "ADR-0367 \\| see also #10367"
+
+
+def test_render_report_recent_escapes_evidence_truncates_and_preserves_leading_path() -> (
+    None
+):
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    long_note = "tests/regressions/test_issue_11185.py: " + ("detail " * 40)
+    recs = [
+        _record("revert:a", detected_at="2026-01-20T00:00:00+00:00", notes=long_note)
+    ]
+    md = render_escape_ledger_markdown(recs, now=now, merge_count_30d=200)
+    _, _, rows = _recent_escapes_table(md)
+    cells = _table_cells(rows[0])
+    assert len(cells) == 9
+    evidence = cells[-1]
+    assert evidence.startswith("tests/regressions/test_issue_11185.py:")
+    assert evidence.endswith("…")
+    assert len(evidence) < len(long_note)
+
+
+def test_render_report_recent_escapes_evidence_truncation_keeps_pipe_at_boundary_intact() -> (
+    None
+):
+    from escape.report import EVIDENCE_MAX_CHARS
+
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    prefix = "tests/regressions/test_issue_11185.py: "
+    padding = "a" * (EVIDENCE_MAX_CHARS - len(prefix) - 1)
+    # The pipe is the LAST character truncation keeps -- escape-then-truncate
+    # could split its backslash from the pipe right here.
+    long_note = f"{prefix}{padding}|" + "b" * 30
+    recs = [
+        _record("revert:a", detected_at="2026-01-20T00:00:00+00:00", notes=long_note)
+    ]
+    md = render_escape_ledger_markdown(recs, now=now, merge_count_30d=200)
+    _, _, rows = _recent_escapes_table(md)
+    cells = _table_cells(rows[0])
+    assert len(cells) == 9, (
+        "a pipe at the truncation boundary corrupted the row's cell count"
+    )
+    evidence = cells[-1]
+    assert evidence.startswith(prefix)
+    assert evidence.endswith("\\|…"), (
+        "escaping before truncating leaves a dangling backslash with no "
+        f"pipe (got {evidence[-15:]!r}) -- truncate the raw text first"
+    )
+
+
+def test_render_report_recent_escapes_evidence_truncation_drops_pipe_past_boundary() -> (
+    None
+):
+    from escape.report import EVIDENCE_MAX_CHARS
+
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    prefix = "tests/regressions/test_issue_11185.py: "
+    padding = "a" * (EVIDENCE_MAX_CHARS - len(prefix))
+    # The pipe is the FIRST character truncation drops entirely.
+    long_note = f"{prefix}{padding}|" + "b" * 30
+    recs = [
+        _record("revert:a", detected_at="2026-01-20T00:00:00+00:00", notes=long_note)
+    ]
+    md = render_escape_ledger_markdown(recs, now=now, merge_count_30d=200)
+    _, _, rows = _recent_escapes_table(md)
+    cells = _table_cells(rows[0])
+    assert len(cells) == 9
+    evidence = cells[-1]
+    assert evidence.startswith(prefix)
+    assert evidence.endswith("…")
+    assert "|" not in evidence.replace("\\|", ""), (
+        "no bare unescaped pipe should leak into the cell"
+    )
