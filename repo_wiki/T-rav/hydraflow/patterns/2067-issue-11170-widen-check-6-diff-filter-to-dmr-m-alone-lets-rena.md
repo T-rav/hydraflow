@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11170
 source_phase: plan
 created_at: 2026-08-14T20:23:54.672687+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2180
 ---
 
 # Widen check #6 --diff-filter to DMR; M alone lets renames flip verdicts
