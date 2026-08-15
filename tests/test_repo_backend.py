@@ -1,4 +1,4 @@
-"""Unit: repo-wide harness backend override — spawn routing (#11211)."""
+"""Unit: repo-wide harness backend override — spawn routing (ADR-0134, #11211)."""
 
 from __future__ import annotations
 

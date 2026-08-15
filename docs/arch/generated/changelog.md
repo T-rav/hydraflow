@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `20aafc6` — Fixes #11211: per-repo model/harness selection — run Claude and GLM projects side by side *(2026-08-14)*
 - `8783d2c` — Fixes #11176: Escape ledger: regression-pin escape `055267e7b2b7` —... (#11191) (#11191) *(2026-08-14)*
 - `55f225f` — review: fix ADR-0115 stale flag-default claim + add dual-reason dedup tests (PR #11173) (#11174) (#11174) *(2026-08-14)*
 - `344ff01` — Fixes #11161: Escape ledger: bug-issue escape `9196f7403620` — unen... (#11173) (#11173) *(2026-08-14)*

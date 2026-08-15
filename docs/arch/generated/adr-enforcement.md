@@ -173,6 +173,5 @@ REAL ADRs whose cited test resolves and asserts, but whose text never names the 
 | ADR-0111 | `pytest:tests/test_flows.py` |
 | ADR-0117 | `pytest:tests/test_prompt_observatory.py` |
 | ADR-0119 | `pytest:tests/test_credit_failover.py` |
-| ADR-0134 | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py` |
 
 <!-- arch:generated -->
