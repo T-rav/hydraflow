@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `42126d7` — review: fix mutation-blind scenario test + surface ZAI_API_KEY on repo_provider (PR #11233) *(2026-08-15)*
 - `63d3730` — review: fix ADR-0134 seam-coverage overclaim + repo-provider badge fidelity (PR #11233) *(2026-08-15)*
 - `c48c8e8` — Merge remote-tracking branch 'origin/staging' into agent/issue-11211 *(2026-08-15)*
 - `fac4b0b` — Fixes #11211: attribute ADR-0134 in its enforcing test + regen arch docs *(2026-08-15)*

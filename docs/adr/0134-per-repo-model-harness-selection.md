@@ -122,10 +122,15 @@ layered UNDER any explicit per-role dial and UNDER credit-failover.**
    badges a non-default repo (`"GLM"`) in the multi-repo portfolio row. The
    Settings drawer needs no bespoke component — `repo_provider`/`repo_model`
    render generically like every other `SETTINGS` entry, in the same "Model
-   Routing" group as `zai_base_url`. `ZAI_API_KEY` presence is already
-   surfaced generically by `GET /api/control/settings-schema`'s
-   `provider_keys` (keyed by the same `"zai"` backend credit-failover and
-   ADR-0110 already use) — no new key-presence plumbing needed.
+   Routing" group as `zai_base_url`. `ZAI_API_KEY` presence is read from
+   `GET /api/control/settings-schema`'s `provider_keys` (keyed by the same
+   `"zai"` backend credit-failover and ADR-0110 already use); the backend
+   exposes the key status generically, but
+   `RuntimeSettingsPanel.providerKeyStatus` was extended with a
+   `currentValue` argument so the `repo_provider` row itself badges that zai
+   key status when `"zai"` is selected — its prior `<provider>_base_url`-only
+   match never reached the `repo_provider` dial, so without this an operator
+   selecting GLM for a repo would see no missing-key signal.
 
 ## Consequences
 
