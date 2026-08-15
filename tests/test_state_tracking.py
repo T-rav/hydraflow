@@ -200,6 +200,11 @@ class TestInitialization:
             "second_order_vitals_series_history",
             "second_order_vitals_last_verdict",
             "second_order_vitals_last_observation_ts",
+            # FactoryControlStateMixin (#11208) — persisted operator-stopped
+            # latch: set by POST /api/control/stop, cleared by /start, and
+            # consulted by boot-time autostart so a deliberate stop survives
+            # relaunch.
+            "operator_stopped",
         }
         assert set(d.keys()) == expected_keys
 

@@ -35,6 +35,33 @@ usual; pull them into your clean checkout with `git pull`.
 | `HYDRAFLOW_FACTORY_WORKSPACE` | `~/.hydraflow/factory-workspace/hydraflow` | Where the dedicated clone lives |
 | `HYDRAFLOW_FACTORY_BRANCH` | `staging` | Branch the factory runs (ADR-0042; `main` only via RC promotion) |
 
+## Autostart: server-up now means factory-running
+
+`make factory` (and every unattended relaunch — stale-code heal, OOM
+recovery, reboot) used to only bring up the dashboard/server; the runtime
+booted `running:false` until someone remembered `POST /api/control/start`.
+`server.py`'s boot sequence now fires that same call automatically once the
+dashboard is healthy (`src/factory_autostart.py`), so a fresh boot goes
+straight to working instead of sitting idle.
+
+Two things suppress it, both intentional:
+
+| Suppressor | Where it lives | Effect |
+|---|---|---|
+| `factory_autostart` config flag (`HYDRAFLOW_FACTORY_AUTOSTART`, default `true`) | `HydraFlowConfig` | Set `false` to boot idle every time, e.g. for a debug session where you want to inspect state before pressing Play. |
+| Operator-stopped latch (`state.operator_stopped`) | persisted `state.json` | Set the moment an operator hits `POST /api/control/stop`; cleared on the next `POST /api/control/start`. A deliberate Stop survives relaunch — autostart never resurrects a factory the operator explicitly took down. |
+
+An active credit pause is not a suppressor: autostart fires the identical
+`host_runtime.start()` call `POST /api/control/start` makes, so if the
+account is still exhausted the orchestrator's own credit-exhaustion detection
+re-pauses it on the first spawn — the factory boots *into* the pause, not
+past it.
+
+MockWorld and the sandbox docker entrypoint (`mockworld/sandbox_main.py`)
+never autostart — both boot a `HydraFlowDashboard` directly and never import
+`factory_autostart`, so the guarantee is structural, not a runtime flag
+(enforced by `tests/architecture/test_factory_autostart_confinement.py`).
+
 ## Boot-correctness: the liveness kernel never starts a stale factory
 
 The launchd liveness kernel (`scripts/factory_liveness_watchdog.py`, agent
@@ -51,6 +78,12 @@ incident where a restart booted the factory 90 commits behind on `main`, idle.
 It also reaps orphaned `pytest -n auto` workers from a dead/OOM'd build and
 probes a wedged `credits_paused_until`. It is deterministic, LLM-free, and
 stdlib-only.
+
+The kernel's own `START` action (`decide_boot_action`) now overlaps with
+server-boot autostart above — both end up calling `POST /api/control/start`
+on a healthy, verified-correct boot. That's fine: `host_runtime.start()` is a
+no-op when the line is already running, so whichever one gets there first
+wins and the other is a harmless idempotent check.
 
 ## Why not just `git restore` after each run?
 

@@ -198,3 +198,88 @@ class TestCheckAndPublishBootGap:
         await _check_and_publish_boot_gap(config, bus)
 
         bus.publish.assert_not_awaited()
+
+
+class TestBootFactoryAutostart:
+    """#11208: the server-up != factory-running gap.
+
+    ``_boot_factory`` is the boot sequence extracted out of
+    ``_run_with_dashboard`` up to (but not including) the blocking
+    ``stop_event.wait()`` — the same extraction precedent as
+    ``_check_and_publish_boot_gap`` above — so the ``maybe_autostart_host``
+    boot-time call site is directly unit-testable without booting a real
+    dashboard or blocking forever on a signal.
+    """
+
+    @pytest.mark.asyncio
+    async def test_calls_maybe_autostart_host_with_the_host_runtime(
+        self, tmp_path: Path
+    ) -> None:
+        from config import HydraFlowConfig
+
+        config = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+            repo="org/host",
+        )
+
+        mock_dashboard = MagicMock()
+        mock_dashboard.start = AsyncMock()
+
+        with (
+            patch("dashboard.HydraFlowDashboard", return_value=mock_dashboard),
+            patch(
+                "server.maybe_autostart_host",
+                new=AsyncMock(return_value=True),
+            ) as mock_autostart,
+        ):
+            from server import _boot_factory
+
+            await _boot_factory(config)
+
+        mock_dashboard.start.assert_awaited_once()
+        mock_autostart.assert_awaited_once()
+        call_kwargs = mock_autostart.call_args.kwargs
+        assert call_kwargs["config"] is config
+        assert call_kwargs["host_runtime"].slug == "org-host"
+
+    @pytest.mark.asyncio
+    async def test_autostart_runs_after_dashboard_is_healthy(
+        self, tmp_path: Path
+    ) -> None:
+        """Autostart must fire once the server is healthy — after
+        ``dashboard.start()``, not before."""
+        from config import HydraFlowConfig
+
+        config = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+
+        call_order: list[str] = []
+
+        mock_dashboard = MagicMock()
+
+        async def _record_start() -> None:
+            call_order.append("dashboard.start")
+
+        mock_dashboard.start = AsyncMock(side_effect=_record_start)
+
+        async def _record_autostart(**_kwargs: object) -> bool:
+            call_order.append("maybe_autostart_host")
+            return True
+
+        with (
+            patch("dashboard.HydraFlowDashboard", return_value=mock_dashboard),
+            patch(
+                "server.maybe_autostart_host",
+                new=AsyncMock(side_effect=_record_autostart),
+            ),
+        ):
+            from server import _boot_factory
+
+            await _boot_factory(config)
+
+        assert call_order == ["dashboard.start", "maybe_autostart_host"]
