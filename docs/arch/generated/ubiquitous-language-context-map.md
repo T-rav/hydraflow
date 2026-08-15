@@ -26,6 +26,7 @@ graph LR
     escalationreconciler["EscalationReconciler<br/><i>service</i>"]
     fakecoverageauditorloop["FakeCoverageAuditorLoop<br/><i>loop</i>"]
     fitnesscontext["FitnessContext<br/><i>value_object</i>"]
+    fitnesskind["FitnessKind<br/><i>value_object</i>"]
     fitnessscorecardloop["FitnessScorecardLoop<br/><i>loop</i>"]
     flaketrackerloop["FlakeTrackerLoop<br/><i>loop</i>"]
     githubcacheloop["GitHubCacheLoop<br/><i>loop</i>"]
@@ -283,6 +284,11 @@ graph LR
   fakecoverageauditorloop -->|depends_on| escalationreconciler
   fakecoverageauditorloop -->|depends_on| prmanager
   fakecoverageauditorloop -->|depends_on| dedupstore
+  fitnesskind -->|depends_on| basebackgroundloop
+  fitnesskind -->|depends_on| erosion
+  fitnesskind -->|depends_on| fitnessscorecardloop
+  fitnesskind -->|depends_on| goalsupervisorloop
+  fitnesskind -->|depends_on| railsdriftcaretakerloop
   fitnessscorecardloop -->|depends_on| hydraflowconfig
   fitnessscorecardloop -->|depends_on| governor
   fitnessscorecardloop -->|depends_on| basebackgroundloop

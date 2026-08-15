@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_84 terms across 3 bounded contexts._
+_85 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -383,6 +383,17 @@ Frozen, data-only Pydantic model that is the **sole input** to any `loop_fitness
 - Carries no live client or callable; the model is frozen (`model_config = {"frozen": True}`).
 - `issues` is a snapshot list of `IssueRecord` rows; each loop attributes its own artifacts by querying this list for its label.
 - The same `FitnessContext` instance that powers the live scorecard can power an offline optimizer replay — that equivalence is the design invariant this type enforces.
+
+## FitnessKind
+
+**Kind:** `value_object` · **Context:** `caretaker` · **Anchor:** `src/loop_fitness.py:FitnessKind` · **Confidence:** `accepted`
+**Aliases:** `fitness kind`, `loop fitness kind`, `scored vs housekeeping`
+
+Closed-set classification of whether a loop emits a normalized fitness score (SCORED) or only raw housekeeping counters (HOUSEKEEPING). Each loop's archetype determines its kind: proposer loops with measurable acceptance rates are SCORED, while caretaker loops without a normalized outcome metric are HOUSEKEEPING. Carried on every LoopFitness so the FitnessScorecardLoop knows whether to compute and present a normalized score or leave score null.
+
+**Invariants:**
+- Exactly two members: SCORED (normalized score) and HOUSEKEEPING (raw counters only) — a loop is one or the other, never both.
+- HOUSEKEEPING loops leave LoopFitness.score null; SCORED loops populate score once sample_count meets the min-samples threshold, otherwise return null with INSUFFICIENT_DATA confidence.
 
 ## FitnessScorecardLoop
 
