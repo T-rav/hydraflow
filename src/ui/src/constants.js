@@ -107,6 +107,22 @@ export const WS_RECONNECT_BASE_MS = 1_000
 export const WS_RECONNECT_MAX_MS = 30_000
 
 /**
+ * WS event batching (#11221, second half of the #100 console-slowness fix;
+ * first half: the now-tick PR #11220). Every WS frame previously dispatched
+ * its own reducer action, rebuilding the O(MAX_EVENTS) events array and
+ * changing the context value once per frame — fanning out a full re-render to
+ * every consumer (classic dashboard + operator console) at event rate. Live
+ * frames are now queued in a ref and flushed through the reducer as one
+ * WS_BATCH action at this cadence — or immediately once WS_BATCH_MAX_QUEUE
+ * frames are pending — so a burst of N events produces one context-value
+ * change instead of N. Throttled (fixed cadence from the first queued frame),
+ * not debounced (reset per frame): worst-case added latency is bounded at
+ * WS_BATCH_FLUSH_MS regardless of how fast frames keep arriving.
+ */
+export const WS_BATCH_FLUSH_MS = 220
+export const WS_BATCH_MAX_QUEUE = 25
+
+/**
  * Canonical pipeline stage definitions.
  * All stage metadata lives here to prevent drift across components.
  * Components derive their own views (uppercase labels, filtered subsets, etc.) from this array.

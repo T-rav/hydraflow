@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, act, waitFor } from '@testing-library/react'
-import { reducer } from '../HydraFlowContext'
+import { reducer, createWsBatcher } from '../HydraFlowContext'
+import { WS_BATCH_FLUSH_MS, WS_BATCH_MAX_QUEUE, WS_RECONNECT_BASE_MS } from '../../constants'
 
 const emptyPipeline = {
   triage: [],
@@ -285,6 +286,166 @@ describe('HydraFlowContext reducer', () => {
       timestamp: new Date().toISOString(),
     })
     expect(next.githubMetrics).toEqual({ open_by_label: { 'hydraflow-plan': 2 }, total_closed: 1, total_merged: 1 })
+  })
+})
+
+describe('WS_BATCH reducer (#11221 event coalescing)', () => {
+  it('applies queued actions sequentially — a later duplicate id is dropped by dedup against the earlier one in the same batch', () => {
+    const actions = [
+      { type: 'log', timestamp: 't1', data: {}, id: 5 },
+      { type: 'log', timestamp: 't2', data: {}, id: 5 },
+      { type: 'log', timestamp: 't3', data: {}, id: 6 },
+    ]
+    const next = reducer(initialState, { type: 'WS_BATCH', actions })
+    expect(next.events.map(e => e.id)).toEqual([6, 5])
+    expect(next.lastSeenId).toBe(6)
+  })
+
+  it('produces state identical to dispatching the same actions one at a time (byte-identical semantics)', () => {
+    const actions = [
+      { type: 'worker_update', data: { issue: 1, status: 'active', worker: 0 } },
+      { type: 'transcript_line', data: { issue: 1, line: 'hello' } },
+      { type: 'pr_created', data: { pr: 10, issue: 1 } },
+      { type: 'log', timestamp: 't1', data: {}, id: 1 },
+    ]
+    const viaBatch = reducer(initialState, { type: 'WS_BATCH', actions })
+    const viaSequential = actions.reduce((s, a) => reducer(s, a), initialState)
+    expect(viaBatch).toEqual(viaSequential)
+  })
+
+  it('an empty actions array is a no-op', () => {
+    const next = reducer(initialState, { type: 'WS_BATCH', actions: [] })
+    expect(next).toEqual(initialState)
+  })
+
+  it('preserves repo-keyed dedup semantics across a batch under repo=__all__', () => {
+    const state = { ...initialState, selectedRepoSlug: '__all__' }
+    const actions = [
+      { type: 'log', timestamp: 't1', data: {}, id: 5, repo: 'owner-a' },
+      { type: 'log', timestamp: 't2', data: {}, id: 5, repo: 'owner-b' },
+      { type: 'log', timestamp: 't3', data: {}, id: 5, repo: 'owner-a' },
+    ]
+    const next = reducer(state, { type: 'WS_BATCH', actions })
+    expect(next.events).toHaveLength(2)
+    expect(next.events.map(e => e.repo).sort()).toEqual(['owner-a', 'owner-b'])
+  })
+})
+
+describe('createWsBatcher (#11221 pure throttle/queue logic)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('does not dispatch when a single frame is enqueued but the flush window has not elapsed', () => {
+    const dispatch = vi.fn()
+    const batcher = createWsBatcher(dispatch, { flushMs: WS_BATCH_FLUSH_MS, maxQueue: WS_BATCH_MAX_QUEUE })
+    batcher.enqueue({ type: 'log', id: 1 })
+    vi.advanceTimersByTime(WS_BATCH_FLUSH_MS - 1)
+    expect(dispatch).not.toHaveBeenCalled()
+  })
+
+  it('flushes a single queued frame as one WS_BATCH dispatch once the flush window elapses', () => {
+    const dispatch = vi.fn()
+    const batcher = createWsBatcher(dispatch, { flushMs: WS_BATCH_FLUSH_MS, maxQueue: WS_BATCH_MAX_QUEUE })
+    batcher.enqueue({ type: 'log', id: 1 })
+    vi.advanceTimersByTime(WS_BATCH_FLUSH_MS)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(dispatch).toHaveBeenCalledWith({ type: 'WS_BATCH', actions: [{ type: 'log', id: 1 }] })
+  })
+
+  it('coalesces a burst of frames within one window into a single dispatch, in arrival order', () => {
+    const dispatch = vi.fn()
+    const batcher = createWsBatcher(dispatch, { flushMs: WS_BATCH_FLUSH_MS, maxQueue: WS_BATCH_MAX_QUEUE })
+    batcher.enqueue({ type: 'log', id: 1 })
+    batcher.enqueue({ type: 'log', id: 2 })
+    batcher.enqueue({ type: 'log', id: 3 })
+    vi.advanceTimersByTime(WS_BATCH_FLUSH_MS)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(dispatch.mock.calls[0][0].actions.map(a => a.id)).toEqual([1, 2, 3])
+  })
+
+  it('is throttled, not debounced: a frame arriving mid-window does not push the flush deadline out', () => {
+    const dispatch = vi.fn()
+    const batcher = createWsBatcher(dispatch, { flushMs: WS_BATCH_FLUSH_MS, maxQueue: WS_BATCH_MAX_QUEUE })
+    batcher.enqueue({ type: 'log', id: 1 })
+    // Halfway through the window, a second frame arrives. A debounce
+    // implementation would reset the timer here, pushing the flush out to
+    // (WS_BATCH_FLUSH_MS / 2) + WS_BATCH_FLUSH_MS. A throttle must still fire
+    // at the ORIGINAL deadline, measured from the first frame.
+    vi.advanceTimersByTime(WS_BATCH_FLUSH_MS / 2)
+    batcher.enqueue({ type: 'log', id: 2 })
+    vi.advanceTimersByTime(WS_BATCH_FLUSH_MS / 2)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(dispatch.mock.calls[0][0].actions.map(a => a.id)).toEqual([1, 2])
+  })
+
+  it('re-arms the flush timer after firing so a second burst is coalesced too (multi-cycle)', () => {
+    const dispatch = vi.fn()
+    const batcher = createWsBatcher(dispatch, { flushMs: WS_BATCH_FLUSH_MS, maxQueue: WS_BATCH_MAX_QUEUE })
+    batcher.enqueue({ type: 'log', id: 1 })
+    vi.advanceTimersByTime(WS_BATCH_FLUSH_MS)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+
+    // Second, independent burst — must also flush on its own window, proving
+    // the timer re-armed rather than staying "used up" after the first fire.
+    batcher.enqueue({ type: 'log', id: 2 })
+    batcher.enqueue({ type: 'log', id: 3 })
+    vi.advanceTimersByTime(WS_BATCH_FLUSH_MS - 1)
+    expect(dispatch).toHaveBeenCalledTimes(1) // not yet — window hasn't elapsed
+    vi.advanceTimersByTime(1)
+    expect(dispatch).toHaveBeenCalledTimes(2)
+    expect(dispatch.mock.calls[1][0].actions.map(a => a.id)).toEqual([2, 3])
+  })
+
+  it('flushes immediately once maxQueue frames are pending, without waiting for the timer', () => {
+    const dispatch = vi.fn()
+    const batcher = createWsBatcher(dispatch, { flushMs: WS_BATCH_FLUSH_MS, maxQueue: WS_BATCH_MAX_QUEUE })
+    for (let i = 0; i < WS_BATCH_MAX_QUEUE; i += 1) {
+      batcher.enqueue({ type: 'log', id: i })
+    }
+    // No timer advance at all — the threshold alone must trigger the flush.
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(dispatch.mock.calls[0][0].actions).toHaveLength(WS_BATCH_MAX_QUEUE)
+  })
+
+  it('a frame enqueued right after a threshold flush starts a fresh window (timer re-arms post-threshold-flush too)', () => {
+    const dispatch = vi.fn()
+    const batcher = createWsBatcher(dispatch, { flushMs: WS_BATCH_FLUSH_MS, maxQueue: WS_BATCH_MAX_QUEUE })
+    for (let i = 0; i < WS_BATCH_MAX_QUEUE; i += 1) {
+      batcher.enqueue({ type: 'log', id: i })
+    }
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    batcher.enqueue({ type: 'log', id: 999 })
+    vi.advanceTimersByTime(WS_BATCH_FLUSH_MS - 1)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(1)
+    expect(dispatch).toHaveBeenCalledTimes(2)
+    expect(dispatch.mock.calls[1][0].actions).toEqual([{ type: 'log', id: 999 }])
+  })
+
+  it('flush() drains and dispatches the pending queue immediately (the unmount/visibilitychange trigger)', () => {
+    const dispatch = vi.fn()
+    const batcher = createWsBatcher(dispatch, { flushMs: WS_BATCH_FLUSH_MS, maxQueue: WS_BATCH_MAX_QUEUE })
+    batcher.enqueue({ type: 'log', id: 1 })
+    batcher.enqueue({ type: 'log', id: 2 })
+    batcher.flush()
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(dispatch.mock.calls[0][0].actions.map(a => a.id)).toEqual([1, 2])
+    // The armed timer must be cancelled by the manual flush — advancing past
+    // the original deadline must NOT produce a second, empty dispatch.
+    vi.advanceTimersByTime(WS_BATCH_FLUSH_MS)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+  })
+
+  it('flush() on an empty queue is a no-op (no spurious empty-batch dispatch)', () => {
+    const dispatch = vi.fn()
+    const batcher = createWsBatcher(dispatch, { flushMs: WS_BATCH_FLUSH_MS, maxQueue: WS_BATCH_MAX_QUEUE })
+    batcher.flush()
+    expect(dispatch).not.toHaveBeenCalled()
   })
 })
 
@@ -2755,5 +2916,260 @@ describe('WebSocket reconnect backoff (PR5)', () => {
     // Fire every armed timer: exactly ONE new socket, not two.
     act(() => { vi.advanceTimersByTime(WS_RECONNECT_MAX_MS) })
     expect(wsInstances.length).toBe(countBefore + 1)
+  })
+})
+
+describe('WS event batching wiring (#11221)', () => {
+  let originalWebSocket
+  let wsInstances
+
+  beforeEach(() => {
+    originalWebSocket = global.WebSocket
+    wsInstances = []
+    vi.useFakeTimers()
+    vi.spyOn(global, 'fetch').mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('/api/events?since=')) return Promise.resolve({ ok: true, json: async () => [] })
+      if (url.includes('/api/system/workers')) return Promise.resolve({ ok: true, json: async () => ({ workers: [] }) })
+      if (url.includes('/api/sessions')) return Promise.resolve({ ok: true, json: async () => [] })
+      if (url.includes('/api/repos')) return Promise.resolve({ ok: true, json: async () => ({ repos: [] }) })
+      if (url.includes('/api/runtimes')) return Promise.resolve({ ok: true, json: async () => ({ runtimes: [] }) })
+      if (url.includes('/api/epics')) return Promise.resolve({ ok: true, json: async () => ({ epics: [] }) })
+      if (url.includes('/api/pipeline')) return Promise.resolve({ ok: true, json: async () => ({ stages: {} }) })
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    })
+    global.WebSocket = class MockWS {
+      constructor() { wsInstances.push(this) }
+      close() {}
+    }
+  })
+
+  afterEach(() => {
+    global.WebSocket = originalWebSocket
+    document.body.removeAttribute('data-connected')
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.resetModules()
+  })
+
+  function sendFrame(ws, { type = 'log', id, timestamp }) {
+    ws.onmessage({ data: JSON.stringify({ type, data: {}, timestamp, id }) })
+  }
+
+  it('does not apply a single WS frame to context state until the flush window elapses', async () => {
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let captured = null
+    function Probe() { captured = useHydraFlow(); return null }
+    await act(async () => {
+      render(<HydraFlowProvider><Probe /></HydraFlowProvider>)
+    })
+    const ws = wsInstances[0]
+
+    await act(async () => { sendFrame(ws, { id: 1, timestamp: 't1' }) })
+    expect(captured.events).toHaveLength(0)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS) })
+    expect(captured.events.map(e => e.id)).toEqual([1])
+  })
+
+  it('is throttled end-to-end: a frame arriving mid-window does not push the flush past the fixed deadline (not a debounce)', async () => {
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let captured = null
+    function Probe() { captured = useHydraFlow(); return null }
+    await act(async () => {
+      render(<HydraFlowProvider><Probe /></HydraFlowProvider>)
+    })
+    const ws = wsInstances[0]
+
+    await act(async () => { sendFrame(ws, { id: 1, timestamp: 't1' }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS / 2) })
+    // A debounce implementation would reset the deadline here, pushing the
+    // flush out to 1.5x the window from the first frame.
+    await act(async () => { sendFrame(ws, { id: 2, timestamp: 't2' }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS / 2) })
+
+    expect(captured.events.map(e => e.id).sort()).toEqual([1, 2])
+  })
+
+  it('re-arms after firing so a second burst is coalesced too (multi-cycle, end-to-end)', async () => {
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let captured = null
+    function Probe() { captured = useHydraFlow(); return null }
+    await act(async () => {
+      render(<HydraFlowProvider><Probe /></HydraFlowProvider>)
+    })
+    const ws = wsInstances[0]
+
+    await act(async () => { sendFrame(ws, { id: 1, timestamp: 't1' }) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS) })
+    expect(captured.events.map(e => e.id)).toEqual([1])
+
+    await act(async () => {
+      sendFrame(ws, { id: 2, timestamp: 't2' })
+      sendFrame(ws, { id: 3, timestamp: 't3' })
+    })
+    // Not yet — the second window hasn't elapsed.
+    expect(captured.events.map(e => e.id)).toEqual([1])
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS) })
+    expect(captured.events.map(e => e.id).sort()).toEqual([1, 2, 3])
+  })
+
+  it('coalesces a burst into one context update for both a classic-dashboard consumer (useHydraFlow) and the operator console (useHydraFlowSocket)', async () => {
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    const { useHydraFlowSocket } = await import('../../hooks/useHydraFlowSocket')
+
+    const classicRenderCount = { current: 0 }
+    const operatorRenderCount = { current: 0 }
+
+    // These probes use the exact hooks each real dashboard subscribes
+    // through: classic-dashboard components (StreamView, SystemPanel, ...)
+    // call useHydraFlow() directly; OperatorConsole calls useHydraFlowSocket().
+    // Both read from the same Provider, so a per-frame context-value change
+    // must fan out to both — this asserts it no longer does.
+    function ClassicDashboardProbe() {
+      useHydraFlow()
+      classicRenderCount.current += 1
+      return null
+    }
+    function OperatorConsoleProbe() {
+      useHydraFlowSocket()
+      operatorRenderCount.current += 1
+      return null
+    }
+
+    await act(async () => {
+      render(
+        <HydraFlowProvider>
+          <ClassicDashboardProbe />
+          <OperatorConsoleProbe />
+        </HydraFlowProvider>
+      )
+    })
+    const ws = wsInstances[0]
+
+    const classicBefore = classicRenderCount.current
+    const operatorBefore = operatorRenderCount.current
+
+    // A burst well under WS_BATCH_MAX_QUEUE, all inside one flush window.
+    // Pre-#11221 behavior: N frames => N fan-out re-renders on both
+    // dashboards. Post-#11221: one flush => one re-render on both.
+    const burstSize = 10
+    await act(async () => {
+      for (let i = 0; i < burstSize; i += 1) {
+        sendFrame(ws, { id: i, timestamp: `t${i}` })
+      }
+    })
+    expect(classicRenderCount.current).toBe(classicBefore)
+    expect(operatorRenderCount.current).toBe(operatorBefore)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS) })
+
+    expect(classicRenderCount.current).toBe(classicBefore + 1)
+    expect(operatorRenderCount.current).toBe(operatorBefore + 1)
+  })
+
+  it('flushes immediately once WS_BATCH_MAX_QUEUE frames arrive, end-to-end (no timer wait needed)', async () => {
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let captured = null
+    function Probe() { captured = useHydraFlow(); return null }
+    await act(async () => {
+      render(<HydraFlowProvider><Probe /></HydraFlowProvider>)
+    })
+    const ws = wsInstances[0]
+
+    await act(async () => {
+      for (let i = 0; i < WS_BATCH_MAX_QUEUE; i += 1) {
+        sendFrame(ws, { id: i, timestamp: `t${i}` })
+      }
+    })
+    expect(captured.events).toHaveLength(WS_BATCH_MAX_QUEUE)
+  })
+
+  it('flushes the pending WS queue when the document becomes hidden (visibilitychange)', async () => {
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let captured = null
+    function Probe() { captured = useHydraFlow(); return null }
+    await act(async () => {
+      render(<HydraFlowProvider><Probe /></HydraFlowProvider>)
+    })
+    const ws = wsInstances[0]
+
+    await act(async () => {
+      sendFrame(ws, { id: 1, timestamp: 't1' })
+      sendFrame(ws, { id: 2, timestamp: 't2' })
+    })
+    expect(captured.events).toHaveLength(0)
+
+    const originalVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+    try {
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+      expect(captured.events.map(e => e.id).sort()).toEqual([1, 2])
+    } finally {
+      if (originalVisibility) {
+        Object.defineProperty(document, 'visibilityState', originalVisibility)
+      } else {
+        delete document.visibilityState
+      }
+    }
+  })
+
+  it('preserves queued-but-unflushed WS frames across a reconnect/backfill without loss or duplication', async () => {
+    global.fetch.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('/api/events?since=')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ([{ type: 'log', timestamp: 't-backfill', data: {}, id: 99 }]),
+        })
+      }
+      if (url.includes('/api/system/workers')) return Promise.resolve({ ok: true, json: async () => ({ workers: [] }) })
+      if (url.includes('/api/sessions')) return Promise.resolve({ ok: true, json: async () => [] })
+      if (url.includes('/api/repos')) return Promise.resolve({ ok: true, json: async () => ({ repos: [] }) })
+      if (url.includes('/api/runtimes')) return Promise.resolve({ ok: true, json: async () => ({ runtimes: [] }) })
+      if (url.includes('/api/epics')) return Promise.resolve({ ok: true, json: async () => ({ epics: [] }) })
+      if (url.includes('/api/pipeline')) return Promise.resolve({ ok: true, json: async () => ({ stages: {} }) })
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    })
+
+    const { HydraFlowProvider, useHydraFlow } = await import('../HydraFlowContext')
+    let captured = null
+    function Probe() { captured = useHydraFlow(); return null }
+    await act(async () => {
+      render(<HydraFlowProvider><Probe /></HydraFlowProvider>)
+    })
+
+    // Open the first connection.
+    await act(async () => { wsInstances[0].onopen && wsInstances[0].onopen() })
+
+    // Queue two frames — deliberately NOT advancing the flush timer, so they
+    // are still sitting in the ref-queue when the connection drops. (onopen's
+    // own orchestrator_status REST dispatch already added one unrelated,
+    // unbatched event — id -1 — before this point; only frames 1 and 2 are
+    // under test here.)
+    await act(async () => {
+      sendFrame(wsInstances[0], { id: 1, timestamp: 't1' })
+      sendFrame(wsInstances[0], { id: 2, timestamp: 't2' })
+    })
+    expect(captured.events.some(e => e.id === 1)).toBe(false)
+    expect(captured.events.some(e => e.id === 2)).toBe(false)
+
+    // Drop the connection (non-1008 => reconnect backoff armed). The ref
+    // queue is owned by the provider, not the socket, so it must survive.
+    await act(async () => { wsInstances[0].onclose({ code: 1006 }) })
+
+    // Advance past both the reconnect delay (<= WS_RECONNECT_BASE_MS) and the
+    // WS_BATCH_FLUSH_MS flush window — a new socket opens AND the
+    // pre-disconnect queue flushes.
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_RECONNECT_BASE_MS) })
+    expect(wsInstances.length).toBe(2)
+
+    // The new connection's onopen fires the backfill fetch, seeded from
+    // lastEventTsRef (updated synchronously in onmessage, independent of the
+    // flush timer) — so it does not re-request the already-seen t1/t2.
+    await act(async () => { wsInstances[1].onopen && wsInstances[1].onopen() })
+
+    const ids = captured.events.map(e => e.id).filter(id => id !== -1).sort((a, b) => a - b)
+    expect(ids).toEqual([1, 2, 99])
   })
 })
