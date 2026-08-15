@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T10:07:02.128118+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2656
+superseded_by: 2908
 ---
 
 # Fix flag conditions at the arithmetic site, not in the loop consumer

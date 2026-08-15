@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 11241
 source_phase: plan
 created_at: 2026-08-15T10:09:34.777759+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Two-mode Markdown sanitizer: cell escapes pipes, prose does not

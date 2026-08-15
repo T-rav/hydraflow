@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11239
 source_phase: plan
 created_at: 2026-08-15T09:47:55.217040+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2923
 ---
 
 # ADR-0049 kill-switch scope: BaseBackgroundLoop or subprocess runners only

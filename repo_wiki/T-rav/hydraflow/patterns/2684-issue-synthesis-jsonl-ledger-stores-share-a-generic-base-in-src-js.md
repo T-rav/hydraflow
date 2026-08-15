@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T10:07:01.684403+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2561
+superseded_by: 2813
 ---
 
 # JSONL ledger stores share a generic base in src/jsonl_ledger.py
