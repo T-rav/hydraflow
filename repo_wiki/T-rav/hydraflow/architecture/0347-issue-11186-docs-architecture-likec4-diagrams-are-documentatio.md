@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11186
 source_phase: review
 created_at: 2026-08-15T02:28:30.947521+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # docs/architecture/*.likec4 diagrams are documentation-only

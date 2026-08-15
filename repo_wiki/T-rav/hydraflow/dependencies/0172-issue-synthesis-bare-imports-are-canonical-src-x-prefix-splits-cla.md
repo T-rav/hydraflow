@@ -1,13 +1,12 @@
 ---
-id: 0161
+id: 0172
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-14T20:26:28.553731+00:00
-status: superseded
+created_at: 2026-08-15T03:53:31.806136+00:00
+status: active
 corroborations: 1
-supersedes: 0146
-superseded_by: 0172
+supersedes: 0161
 ---
 
 # Bare imports are canonical; src.X prefix splits class identity

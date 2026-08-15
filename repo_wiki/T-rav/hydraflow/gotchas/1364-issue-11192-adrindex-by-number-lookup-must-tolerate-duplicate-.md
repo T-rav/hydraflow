@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11192
 source_phase: plan
 created_at: 2026-08-15T00:51:35.394353+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # ADRIndex by-number lookup must tolerate duplicate ADR numbers

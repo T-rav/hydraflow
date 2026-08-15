@@ -1,13 +1,12 @@
 ---
-id: 0153
+id: 0164
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-14T20:26:28.550057+00:00
-status: superseded
+created_at: 2026-08-15T03:53:31.802908+00:00
+status: active
 corroborations: 1
-supersedes: 0138
-superseded_by: 0164
+supersedes: 0153
 ---
 
 # Map cross-dependencies before parallel-extracting a god class
