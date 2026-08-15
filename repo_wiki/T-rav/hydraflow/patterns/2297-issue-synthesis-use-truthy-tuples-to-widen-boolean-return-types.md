@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:10.002606+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2181
+superseded_by: 2417
 ---
 
 # Use truthy tuples to widen boolean return types

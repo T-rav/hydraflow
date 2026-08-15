@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:09.775231+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2118
+superseded_by: 2354
 ---
 
 # Do not clean pre-flag seed events with timestamp heuristics

@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11185
 source_phase: review
 created_at: 2026-08-15T03:31:43.632068+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11185 closed
 ---
 
 # escape-ledger.md and erosion-trends.md are runtime-written, not arch-regen

@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11185
 source_phase: plan
 created_at: 2026-08-14T23:55:43.383213+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11185 closed
 ---
 
 # Regression pin tests assert content, not output shape
