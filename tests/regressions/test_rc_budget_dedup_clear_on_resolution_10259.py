@@ -28,6 +28,7 @@ bug (1) — cancelled runs polluting the baseline.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -40,22 +41,34 @@ from rc_budget_loop import RCBudgetLoop
 _MEDIAN_KEY = "rc_budget:median"
 
 
+def _iso(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _breaching_runs() -> list[dict[str, object]]:
     """One newest 500s run over six 300s history runs.
 
     median(others)=300 → median fires at 1.5*300=450s (500>=450). recent_max=300
     → spike fires at 2.0*300=600s (500<600 → NOT tripped), so exactly ONE signal
     (``median``) fires and the test tracks a single dedup key.
+
+    Dates are NOW-RELATIVE (wall-clock time-bomb class, 4th detonation
+    2026-08-15 UTC-midnight): the loop windows runs to the trailing 30 days,
+    so the original hardcoded 2026-07-13..22 fixtures aged out one per day
+    until runs_seen fell under _MIN_HISTORY and every tick read "warmup".
+    Same now-relative idiom as test_rc_budget_cancelled_run_misclassification
+    _10215.py (the 3rd detonation's fix).
     """
+    now = datetime.now(UTC)
     history = [
         {
             "id": 1000 + i,
             "url": f"https://example/run/{1000 + i}",
             "status": "completed",
             "conclusion": "success",
-            "created_at": f"2026-07-{13 + i:02d}T00:00:00Z",
-            "run_started_at": f"2026-07-{13 + i:02d}T00:00:00Z",
-            "updated_at": f"2026-07-{13 + i:02d}T00:05:00Z",  # 300s
+            "created_at": _iso(now - timedelta(days=10 - i)),
+            "run_started_at": _iso(now - timedelta(days=10 - i)),
+            "updated_at": _iso(now - timedelta(days=10 - i, minutes=-5)),  # 300s
         }
         for i in range(1, 7)
     ]
@@ -64,15 +77,16 @@ def _breaching_runs() -> list[dict[str, object]]:
         "url": "https://example/run/2500",
         "status": "completed",
         "conclusion": "success",
-        "created_at": "2026-07-22T00:00:00Z",
-        "run_started_at": "2026-07-22T00:00:00Z",
-        "updated_at": "2026-07-22T00:08:20Z",  # 500s
+        "created_at": _iso(now - timedelta(days=1)),
+        "run_started_at": _iso(now - timedelta(days=1)),
+        "updated_at": _iso(now - timedelta(days=1) + timedelta(seconds=500)),
     }
     return [current, *history]
 
 
 async def test_dedup_key_clears_on_issue_close_and_breach_refires(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     """Full fire → hold-while-open → close → clear → re-fire lifecycle."""
     cfg = HydraFlowConfig(data_root=tmp_path, repo="hydra/hydraflow")
