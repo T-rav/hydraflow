@@ -659,10 +659,12 @@ class TestEscapeAutoDiagnoseScenario:
         ledger = EscapeLedger(loop._ledger_path)
 
         # 3 unrelated low-confidence findings — exactly the default
-        # `escape_ledger_max_issues_per_tick` — rank AHEAD of the aging
-        # finding in eligibility order (low-confidence rows precede aging
-        # rows), so a cap-before-diagnose bug would starve the aging row out
-        # of the eligible set before it ever reaches the diagnoser.
+        # `escape_ledger_max_issues_per_tick` — compete with the aging
+        # finding for the ask budget. Diagnosis runs over the full eligible
+        # set, bounded only by `escape_ledger_max_diagnoses_per_tick` (default
+        # 25, well above these 4 rows), so a cap-before-diagnose bug would
+        # have starved the aging row out of the eligible set before it ever
+        # reached the diagnoser.
         fresh = datetime.now(UTC).isoformat()
         for i in range(3):
             ledger.append(

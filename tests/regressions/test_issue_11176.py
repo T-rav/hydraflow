@@ -129,11 +129,12 @@ async def test_aging_resolvable_escape_self_answers_despite_a_busy_ask_budget(
     ledger = EscapeLedger(loop._ledger_path)
 
     # 3 unrelated low-confidence findings — exactly the default
-    # `escape_ledger_max_issues_per_tick` worth — rank AHEAD of the aging
-    # finding in `low_confidence()` + `unencoded_aging()`'s concatenation
-    # order (candidates = low-confidence rows THEN aging rows), so a
-    # cap-before-diagnose bug would starve the aging row out of the eligible
-    # set entirely, before it ever reaches the diagnoser.
+    # `escape_ledger_max_issues_per_tick` worth — compete with the aging
+    # finding for the ask budget. Diagnosis runs over the full eligible set,
+    # bounded only by `escape_ledger_max_diagnoses_per_tick` (default 25,
+    # well above these 4 rows), so a cap-before-diagnose bug would have
+    # starved the aging row out of the eligible set entirely, before it ever
+    # reached the diagnoser.
     for i in range(3):
         ledger.append(_low_confidence_record(f"bug-issue:noise{i}"))
 
