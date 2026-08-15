@@ -28,7 +28,7 @@
  * `useTokens()` — no inline literals, no hardcoded hex.
  */
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useHydraFlowSocket } from '../hooks/useHydraFlowSocket'
 import { ThemeProvider, useTokens } from '../styles/primitives'
 import { useThemeMode } from './useThemeMode'
@@ -360,8 +360,24 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
  * behind the `?console=operator` / toggle cutover flag (Task 10); the classic
  * dashboard remains the default until parity is human-verified.
  */
+// One-second wall-clock tick. The view previously defaulted `now` to a bare
+// `Date.now()` PARAMETER DEFAULT, so every render — and the WS context
+// re-renders this tree on every event — produced a fresh `now`, invalidating
+// the `toTimeline`/`uptime` useMemos and re-deriving the O(MAX_EVENTS)
+// timeline transform per render (#100 slowness investigation). A 1s state
+// tick keeps `now` referentially stable between ticks.
+function useNowTick(intervalMs = 1000) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs)
+    return () => clearInterval(id)
+  }, [intervalMs])
+  return now
+}
+
 export function OperatorConsole() {
   const socket = useHydraFlowSocket()
+  const now = useNowTick()
   // Cost feed (#10785): polls the repo + per-repo cost-per-model rollup on its
   // own pinned cadence (aborted in-flight on unmount), independent of the WS
   // slice the shell otherwise renders from.
@@ -383,7 +399,7 @@ export function OperatorConsole() {
   // the escape ledger) on its own pinned cadence (aborted in-flight on unmount),
   // independent of the WS slice.
   const calibration = useJudgeCalibration()
-  return <OperatorConsoleView socket={socket} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} />
+  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} />
 }
 
 export default OperatorConsole
