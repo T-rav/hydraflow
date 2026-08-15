@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11093
 source_phase: plan
 created_at: 2026-08-14T06:48:30.313353+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2563
 ---
 
 # Pin false filings with RED regressions before fixing the metric

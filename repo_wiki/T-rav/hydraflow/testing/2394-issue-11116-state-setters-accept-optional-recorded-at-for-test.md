@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11116
 source_phase: plan
 created_at: 2026-08-14T10:10:56.158191+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2582
 ---
 
 # State setters accept optional recorded_at for test determinism

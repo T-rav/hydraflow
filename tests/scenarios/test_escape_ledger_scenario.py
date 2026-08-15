@@ -171,6 +171,20 @@ def _seed_bug_fix_with_regression(repo: Path, issue: int) -> tuple[str, str]:
     return base, _head(repo)
 
 
+def _seed_self_pin_no_issue_ref(repo: Path) -> tuple[str, str]:
+    """A single commit that BOTH adds its own regression pin and is the
+    detecting commit — no issue ref, no originating sha (the zero-needle
+    case). Mirrors the live #11178 escape row (regression-pin detection
+    source, ``originating_pr``/``originating_merge_sha`` both empty)."""
+    base = _head(repo)
+    reg = repo / "tests" / "regressions"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / "test_live_failure.py").write_text("def test_live_failure(): pass\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "test: pin regression for a live failure")
+    return base, _head(repo)
+
+
 def _seed_bug_fix_no_regression(repo: Path, issue: int) -> tuple[str, str]:
     """A `fix: … fixes #N` commit with NO regression pin — inconclusive."""
     base = _head(repo)
@@ -562,3 +576,152 @@ class TestEscapeAutoDiagnoseScenario:
         assert result["status"] == "ok"
         assert result["escapes_recorded"] == 1
         assert result["filed"] == 1, "inconclusive escape must still reach a human"
+
+    async def test_aging_escape_already_encoded_is_auto_resolved_not_filed(
+        self, tmp_path: Path
+    ) -> None:
+        # #11161: auto-diagnose used to run ONLY for SURFACE_REASON_LOW_CONFIDENCE
+        # findings — an AGING finding (encoded_as="none-yet" past the encoding-age
+        # threshold) skipped the diagnoser entirely and always filed a human
+        # issue, even when its regression encoding was already on disk (the live
+        # bug behind escape 9196f7403620 / issue #11161). A `medium`-confidence
+        # row is AGING-eligible only (not low-confidence), isolating the surface
+        # under test.
+        from datetime import UTC, datetime, timedelta
+
+        from escape.ledger import EscapeLedger
+        from escape.models import EscapeRecord
+
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        reg = repo / "tests" / "regressions"
+        reg.mkdir(parents=True)
+        (reg / "test_bug_321.py").write_text(
+            "# regression pin for #321\ndef test_bug(): pass\n"
+        )
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "test: pin regression for #321")
+        (repo / "src" / "crash2.py").write_text("def crash2():\n    return 1\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "fix: resolve crash (fixes #321)")
+        fix_sha = _head(repo)
+
+        state = _make_state(fix_sha)
+        loop = _build_loop(tmp_path, repo, github, state, auto_diagnose=True)
+        old = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+        EscapeLedger(loop._ledger_path).append(
+            EscapeRecord(
+                id=f"bug-issue:{fix_sha}",
+                detected_at=old,
+                detection_source="bug-issue",
+                detection_ref=fix_sha,
+                originating_pr=321,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="fixes-chain",
+                attribution_confidence="medium",
+                encoded_as="none-yet",
+                notes="Fix commit closing #321.",
+            )
+        )
+
+        filed, capped = await loop._surface_findings()
+
+        assert filed == 0, "aging escape already regression-encoded must self-answer"
+        assert capped is False
+        resolved = EscapeLedger(loop._ledger_path).read_latest()[0]
+        assert resolved.attribution_confidence == "high"
+        assert resolved.encoded_as == "regression-test"
+
+    async def test_unreadable_diagnosis_row_does_not_silently_suppress_surfacing(
+        self, tmp_path: Path
+    ) -> None:
+        # #11163: terminal_ids() used to treat ANY sidecar row as terminal
+        # (bare existing_ids() presence), regardless of whether its
+        # diagnosis field parsed into the current EscapeDiagnosis enum. A
+        # corrupted/future-enum-value row for this escape id would have
+        # permanently hidden it from every human/aging surface even though
+        # it was never actually resolved or dismissed. End-to-end over
+        # FakeGitHub + a real repo: the escape still reaches the human
+        # surface.
+        from escape.auto_diagnose import EscapeDiagnosisLedger, EscapeDiagnosisRecord
+
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base_sha, head_sha = _seed_bug_fix_no_regression(repo, 999)
+
+        state = _make_state(base_sha)
+        loop = _build_loop(tmp_path, repo, github, state, auto_diagnose=True)
+        escape_id = f"bug-issue:{head_sha}"
+        EscapeDiagnosisLedger(loop._diagnoses_path).append(
+            EscapeDiagnosisRecord(
+                escape_id=escape_id,
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+
+        result = await loop._do_work()
+
+        assert result["status"] == "ok"
+        assert result["escapes_recorded"] == 1
+        assert result["filed"] == 1, "unreadable diagnosis must not silently suppress"
+
+    async def test_self_pin_aging_link_resolves_with_real_path_and_names_it_in_close(
+        self, tmp_path: Path
+    ) -> None:
+        # #11178 (live row `regression-pin:7fb2ed07e756...`): a regression-pin
+        # escape whose detecting commit adds its OWN pin, with no issue ref
+        # and no originating sha — the zero-needle case `regression_hits`
+        # cannot grep its way to. Mirrors production: a HITL issue was filed
+        # before auto-diagnose ever ran over the row. A later tick's
+        # auto-diagnose pass over the OPEN link must read the REAL pin path
+        # (not a placeholder) and the close comment must name it.
+        from datetime import UTC, datetime, timedelta
+
+        from escape.ledger import EscapeLedger
+        from escape.models import EscapeRecord
+        from escape.surfaces import SurfacedIssueLedger
+
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        _base, pin_sha = _seed_self_pin_no_issue_ref(repo)
+
+        state = _make_state(pin_sha)
+        loop = _build_loop(tmp_path, repo, github, state, auto_diagnose=False)
+        old = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+        EscapeLedger(loop._ledger_path).append(
+            EscapeRecord(
+                id=f"regression-pin:{pin_sha}",
+                detected_at=old,
+                detection_source="regression-pin",
+                detection_ref=pin_sha,
+                originating_pr=None,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="regression-pin",
+                attribution_confidence="medium",
+                encoded_as="none-yet",
+                notes="Adds a tests/regressions/ pin for a post-merge failure.",
+            )
+        )
+        filed, capped = await loop._surface_findings()
+        assert filed == 1 and capped is False
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+
+        object.__setattr__(loop._config, "escape_ledger_auto_diagnose_enabled", True)
+        closed = await loop._reconcile_surfaced_issues()
+
+        assert closed == 1
+        assert github._issues[link.issue_number].state == "closed"
+        resolved = EscapeLedger(loop._ledger_path).read_latest()[0]
+        assert "tests/regressions/test_live_failure.py" in resolved.notes
+        assert "<detecting-commit-regression-pin>" not in resolved.notes
+        close_comment = str(github._issues[link.issue_number].comments[-1])
+        assert "tests/regressions/test_live_failure.py" in close_comment

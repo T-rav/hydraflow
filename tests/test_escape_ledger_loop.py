@@ -9,14 +9,16 @@ issue-surfacing except.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from escape.auto_diagnose import EscapeAutoDiagnoser, EscapeDiagnosis
 from escape.ledger import EscapeLedger
 from escape.models import EscapeRecord
 from escape.surfaces import SurfacedIssue, SurfacedIssueLedger
@@ -28,6 +30,7 @@ from escape_ledger_loop import (
     EscapeLedgerLoop,
     _current_head_sha,
     _render_finding,
+    _resolution_comment,
     answered_surfacings,
     select_findings_to_surface,
     surfacing_fingerprint,
@@ -371,6 +374,43 @@ class TestRenderFinding:
         assert set(_SURFACE_REASON_REMEDIATION) == set(_SURFACE_REASON_TEXT)
 
 
+class TestResolutionComment:
+    def test_aging_reason_names_the_recorded_notes(self) -> None:
+        # #11178: the aging close comment used to name only encoded_as,
+        # discarding the actual evidence (e.g. a regression-test path)
+        # recorded in the ledger's notes field.
+        record = _record(
+            "regression-pin:7fb2ed07e756",
+            confidence="high",
+            encoded_as="regression-test",
+            notes="auto-diagnose (ADR-0115): regression-pin escape "
+            "`7fb2ed07e756` is a real bug, already regression-encoded "
+            "(tests/regressions/test_issue_11178.py); recorded at high "
+            "confidence.",
+        )
+        comment = _resolution_comment(record, SURFACE_REASON_AGING)
+        assert "encoded as `regression-test`" in comment
+        assert "tests/regressions/test_issue_11178.py" in comment
+
+    def test_aging_reason_without_notes_names_only_the_encoding(self) -> None:
+        record = _record(
+            "bug-issue:x", confidence="high", encoded_as="regression-test", notes=""
+        )
+        comment = _resolution_comment(record, SURFACE_REASON_AGING)
+        assert "encoded as `regression-test`" in comment
+        assert comment.count("—") == 1
+
+    def test_low_confidence_reason_is_unaffected_by_notes(self) -> None:
+        record = _record(
+            "bug-issue:x",
+            confidence="high",
+            notes="evidence that must not leak into this reason's comment",
+        )
+        comment = _resolution_comment(record, SURFACE_REASON_LOW_CONFIDENCE)
+        assert "attribution confidence is now `high`" in comment
+        assert "evidence that must not leak" not in comment
+
+
 class TestFindingRateBudget:
     def test_flood_is_capped_at_max_per_tick(self) -> None:
         from datetime import UTC, datetime
@@ -449,6 +489,158 @@ class TestFindingRateBudget:
 
         with pytest.raises(CreditExhaustedError):
             await loop._surface_findings()
+
+
+# ---------------------------------------------------------------------------
+# Auto-diagnose (#11161): every surfacing reason is diagnosed, not just
+# SURFACE_REASON_LOW_CONFIDENCE — a reason pre-filter stranded aging rows
+# whose encoding was already on disk behind a false human ask.
+# ---------------------------------------------------------------------------
+
+
+class _FakeDiagnoser:
+    """Records which records it was asked to diagnose; returns a fixed verdict.
+
+    Per docs/wiki gotcha 1325/testing 2419: injected via the loop's
+    ``auto_diagnoser`` constructor param so these tests never fall through to
+    the lazily-built production diagnoser's real ``git grep``.
+    """
+
+    def __init__(self, verdict: EscapeDiagnosis) -> None:
+        self.verdict = verdict
+        self.calls: list[EscapeRecord] = []
+
+    async def diagnose(self, record: EscapeRecord) -> EscapeDiagnosis:
+        self.calls.append(record)
+        return self.verdict
+
+
+def _make_loop_with_diagnoser(
+    tmp_path: Path, repo: Path, diagnoser: _FakeDiagnoser
+) -> EscapeLedgerLoop:
+    bg = make_bg_loop_deps(tmp_path)
+    object.__setattr__(bg.config, "repo_root", repo)
+    object.__setattr__(bg.config, "data_root", tmp_path / "data")
+    object.__setattr__(bg.config, "escape_ledger_loop_enabled", True)
+    return EscapeLedgerLoop(
+        config=bg.config,
+        pr_manager=MagicMock(),
+        state=_make_state(),
+        dedup=_make_dedup(),
+        deps=bg.loop_deps,
+        auto_diagnoser=cast(EscapeAutoDiagnoser, diagnoser),
+    )
+
+
+class TestAutoDiagnoseReasonNeutral:
+    async def test_aging_reason_is_diagnosed_not_skipped(self, tmp_path: Path) -> None:
+        # AS-IS bug: `_auto_diagnose` skipped any reason other than
+        # SURFACE_REASON_LOW_CONFIDENCE, so the diagnoser was never even
+        # called for an aging finding.
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.INCONCLUSIVE)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="low", encoded_as="none-yet")
+
+        await loop._auto_diagnose([(record, SURFACE_REASON_AGING)])
+
+        assert diagnoser.calls == [record]
+
+    async def test_resolved_encoded_verdict_drops_aging_finding(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.RESOLVED_ENCODED)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="low", encoded_as="none-yet")
+
+        residue = await loop._auto_diagnose([(record, SURFACE_REASON_AGING)])
+
+        assert residue == []
+
+    async def test_dismissed_verdict_drops_aging_finding(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.DISMISSED)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="low", encoded_as="none-yet")
+
+        residue = await loop._auto_diagnose([(record, SURFACE_REASON_AGING)])
+
+        assert residue == []
+
+    async def test_inconclusive_verdict_keeps_aging_finding_for_human(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.INCONCLUSIVE)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="low", encoded_as="none-yet")
+
+        residue = await loop._auto_diagnose([(record, SURFACE_REASON_AGING)])
+
+        assert residue == [(record, SURFACE_REASON_AGING)]
+
+    async def test_record_eligible_under_both_reasons_is_diagnosed_once(
+        self, tmp_path: Path
+    ) -> None:
+        # A row can be eligible under BOTH SURFACE_REASON_LOW_CONFIDENCE and
+        # SURFACE_REASON_AGING in the same tick's `to_file` (#11161 widened
+        # `_auto_diagnose` to run for both — previously only low-confidence
+        # ever reached this loop, so a record could never appear twice here).
+        # Drives the REAL `EscapeAutoDiagnoser` (not `_FakeDiagnoser`, which
+        # doesn't persist anything) to prove the second pass short-circuits
+        # via `verdict_for` rather than writing a second ledger resolution.
+        from escape.auto_diagnose import EscapeDiagnosisLedger
+
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        reg = repo / "tests" / "regressions"
+        reg.mkdir(parents=True)
+        (reg / "test_bug_654.py").write_text(
+            "# regression pin for #654\ndef test_bug(): pass\n"
+        )
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "test: pin regression for #654")
+        (repo / "src" / "crash3.py").write_text("def crash3():\n    return 1\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "fix: resolve crash (fixes #654)")
+        fix_sha = _head(repo)
+
+        loop = _build_loop_direct(tmp_path, repo, github)
+        record = EscapeRecord(
+            id=f"bug-issue:{fix_sha}",
+            detected_at=datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
+            detection_source="bug-issue",
+            detection_ref=fix_sha,
+            originating_pr=654,
+            originating_merge_sha="",
+            merged_at="",
+            time_to_detection_hours=None,
+            attribution_method="fixes-chain",
+            attribution_confidence="low",
+            encoded_as="none-yet",
+            notes="",
+        )
+        EscapeLedger(loop._ledger_path).append(record)
+
+        residue = await loop._auto_diagnose(
+            [
+                (record, SURFACE_REASON_LOW_CONFIDENCE),
+                (record, SURFACE_REASON_AGING),
+            ]
+        )
+
+        assert residue == [], (
+            "a record resolved under one reason must not surface under the other"
+        )
+        diagnosis_rows = EscapeDiagnosisLedger(loop._diagnoses_path).read_all()
+        assert len(diagnosis_rows) == 1, (
+            "the second pass must short-circuit on the recorded verdict, "
+            "not re-run the diagnoser and write a second sidecar row"
+        )
+        resolved = EscapeLedger(loop._ledger_path).read_latest_index()[record.id]
+        assert resolved.attribution_confidence == "high"
+        assert resolved.encoded_as == "regression-test"
 
 
 # ---------------------------------------------------------------------------
@@ -767,6 +959,212 @@ class TestReconcileSurfacedIssues:
 
 
 # ---------------------------------------------------------------------------
+# _diagnose_open_links (#11161: retiring an ALREADY-open surfaced issue)
+#
+# `select_findings_to_surface` drops a (record, reason) pair once its
+# reason-scoped fingerprint is spent, so an escape already surfaced never
+# reaches `_surface_findings`'s `_auto_diagnose` call again — widening that
+# call's reason filter alone cannot retire it. `_reconcile_surfaced_issues`
+# must diagnose the escape behind an open link directly.
+# ---------------------------------------------------------------------------
+
+
+class TestDiagnoseOpenLinks:
+    async def test_reaches_the_diagnoser_for_an_already_open_link(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.INCONCLUSIVE)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="medium")
+        EscapeLedger(loop._ledger_path).append(record)
+        link = SurfacedIssue(
+            fingerprint=surfacing_fingerprint(record.id, SURFACE_REASON_AGING),
+            escape_id=record.id,
+            reason=SURFACE_REASON_AGING,
+            issue_number=1,
+            filed_at="",
+        )
+
+        await loop._diagnose_open_links([link])
+
+        assert diagnoser.calls == [record], (
+            "the escape behind an already-open link must reach the "
+            "diagnoser even though it is not in select_findings_to_surface's "
+            "eligible set"
+        )
+
+    async def test_disabled_by_config_skips_the_diagnoser(self, tmp_path: Path) -> None:
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.RESOLVED_ENCODED)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        object.__setattr__(loop._config, "escape_ledger_auto_diagnose_enabled", False)
+        record = _record("bug-issue:aged", confidence="medium")
+        EscapeLedger(loop._ledger_path).append(record)
+        link = SurfacedIssue(
+            fingerprint=surfacing_fingerprint(record.id, SURFACE_REASON_AGING),
+            escape_id=record.id,
+            reason=SURFACE_REASON_AGING,
+            issue_number=1,
+            filed_at="",
+        )
+
+        await loop._diagnose_open_links([link])
+
+        assert diagnoser.calls == []
+
+    async def test_terminal_verdict_is_not_re_diagnosed(self, tmp_path: Path) -> None:
+        from escape.auto_diagnose import EscapeDiagnosisLedger
+
+        repo = _init_repo(tmp_path)
+        diagnoser = _FakeDiagnoser(EscapeDiagnosis.RESOLVED_ENCODED)
+        loop = _make_loop_with_diagnoser(tmp_path, repo, diagnoser)
+        record = _record("bug-issue:aged", confidence="medium")
+        EscapeLedger(loop._ledger_path).append(record)
+        EscapeDiagnosisLedger(loop._diagnoses_path).append_diagnosis(
+            record.id, EscapeDiagnosis.DISMISSED, "already decided"
+        )
+        link = SurfacedIssue(
+            fingerprint=surfacing_fingerprint(record.id, SURFACE_REASON_AGING),
+            escape_id=record.id,
+            reason=SURFACE_REASON_AGING,
+            issue_number=1,
+            filed_at="",
+        )
+
+        await loop._diagnose_open_links([link])
+
+        assert diagnoser.calls == []
+
+    async def test_resolved_verdict_from_reconcile_closes_the_open_issue(
+        self, tmp_path: Path
+    ) -> None:
+        # End-to-end within the unit-test fixture: the diagnoser's verdict
+        # alone does not close anything — `_record_resolution`'s ledger write
+        # is what `answered_surfacings` reacts to. This drives the REAL
+        # `EscapeAutoDiagnoser` (via a repo with a matching regression pin) to
+        # prove `_reconcile_surfaced_issues` retires an already-open issue.
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        reg = repo / "tests" / "regressions"
+        reg.mkdir(parents=True)
+        (reg / "test_bug_321.py").write_text(
+            "# regression pin for #321\ndef test_bug(): pass\n"
+        )
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "test: pin regression for #321")
+        (repo / "src" / "crash.py").write_text("def crash():\n    return 1\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "fix: resolve crash (fixes #321)")
+        fix_sha = _head(repo)
+
+        # First tick: auto-diagnose OFF — files the AGING surface
+        # unconditionally, spending its fingerprint (mirrors the live escape
+        # 9196f7403620, surfaced before this diagnoser covered its reason).
+        # `_build_loop_direct` (not `_make_loop`) wires the real FakeGitHub
+        # through untouched — `_make_loop` would clobber its `create_issue`.
+        loop = _build_loop_direct(tmp_path, repo, github)
+        object.__setattr__(loop._config, "escape_ledger_auto_diagnose_enabled", False)
+        ledger = EscapeLedger(loop._ledger_path)
+        old = datetime(2026, 1, 1, tzinfo=UTC).isoformat()
+        ledger.append(
+            EscapeRecord(
+                id=f"bug-issue:{fix_sha}",
+                detected_at=old,
+                detection_source="bug-issue",
+                detection_ref=fix_sha,
+                originating_pr=321,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="fixes-chain",
+                attribution_confidence="medium",
+                encoded_as="none-yet",
+                notes="",
+            )
+        )
+        filed, _capped = await loop._surface_findings()
+        assert filed == 1
+        (link,) = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert link.reason == SURFACE_REASON_AGING
+
+        # Second tick: auto-diagnose ON (this fix deployed) — the config
+        # default, so no override needed on this fresh loop instance.
+        loop2 = _build_loop_direct(tmp_path, repo, github)
+
+        closed = await loop2._reconcile_surfaced_issues()
+
+        assert closed == 1, "widening the reason filter alone cannot retire this"
+        assert github._issues[link.issue_number].state == "closed"
+
+    async def test_resolved_verdict_closes_both_reason_links_for_the_same_escape(
+        self, tmp_path: Path
+    ) -> None:
+        # The scenario docs/architecture/aging_auto_diagnose.likec4 documents as
+        # this fix's payoff: an escape surfaced under BOTH reasons (a
+        # low-confidence HITL issue AND a separate aging HITL issue — the live
+        # #10724 / #11161 pair) is diagnosed once by `_diagnose_open_links`
+        # (deduped by escape id) and BOTH stranded links close on the same
+        # reconcile pass, not just the one that happened to trigger it.
+        github = FakeGitHub()
+        repo = _init_repo(tmp_path)
+        reg = repo / "tests" / "regressions"
+        reg.mkdir(parents=True)
+        (reg / "test_bug_987.py").write_text(
+            "# regression pin for #987\ndef test_bug(): pass\n"
+        )
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "test: pin regression for #987")
+        (repo / "src" / "crash4.py").write_text("def crash4():\n    return 1\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "fix: resolve crash (fixes #987)")
+        fix_sha = _head(repo)
+
+        # First tick: auto-diagnose OFF — the row is both low-confidence AND
+        # aged past the threshold, so BOTH reasons file separately.
+        loop = _build_loop_direct(tmp_path, repo, github)
+        object.__setattr__(loop._config, "escape_ledger_auto_diagnose_enabled", False)
+        ledger = EscapeLedger(loop._ledger_path)
+        old = datetime(2026, 1, 1, tzinfo=UTC).isoformat()
+        ledger.append(
+            EscapeRecord(
+                id=f"bug-issue:{fix_sha}",
+                detected_at=old,
+                detection_source="bug-issue",
+                detection_ref=fix_sha,
+                originating_pr=987,
+                originating_merge_sha="",
+                merged_at="",
+                time_to_detection_hours=None,
+                attribution_method="fixes-chain",
+                attribution_confidence="low",
+                encoded_as="none-yet",
+                notes="",
+            )
+        )
+        filed, _capped = await loop._surface_findings()
+        assert filed == 2
+        links = SurfacedIssueLedger(loop._surfaces_path).open_links()
+        assert {link.reason for link in links} == {
+            SURFACE_REASON_LOW_CONFIDENCE,
+            SURFACE_REASON_AGING,
+        }
+
+        # Second tick: auto-diagnose ON — one diagnose call resolves the
+        # escape; both stranded links must close together.
+        loop2 = _build_loop_direct(tmp_path, repo, github)
+
+        closed = await loop2._reconcile_surfaced_issues()
+
+        assert closed == 2, (
+            "both reason-scoped links for the resolved escape must close together"
+        )
+        assert all(
+            github._issues[link.issue_number].state == "closed" for link in links
+        )
+
+
+# ---------------------------------------------------------------------------
 # loop_fitness
 # ---------------------------------------------------------------------------
 
@@ -857,3 +1255,97 @@ class TestTerminalVerdictQuiescence:
         rec = _record("bug-issue:a", encoded_as="none-yet")
         assert answered_surfacings([link], {rec.id: rec}, {}) == []
         assert answered_surfacings([link], {rec.id: rec}) == []
+
+
+class TestUnreadableDiagnosisRow:
+    """#11163: a sidecar row whose diagnosis string doesn't parse into the
+    current EscapeDiagnosis enum used to count as terminal via bare row
+    presence — permanently hiding the escape from every surface even though
+    it was never actually resolved or dismissed. It must stay eligible for
+    surfacing, and the loop must log one loud aggregate warning naming it."""
+
+    async def test_unreadable_row_does_not_suppress_surfacing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from escape.auto_diagnose import EscapeDiagnosisLedger, EscapeDiagnosisRecord
+
+        repo = _init_repo(tmp_path)
+        loop = _make_loop(tmp_path, repo)
+        # encoded_as != "none-yet" so only the low-confidence reason is
+        # eligible — isolates the surface under test from the aging one.
+        record = _record(
+            "bug-issue:corrupt", confidence="low", encoded_as="regression-test"
+        )
+        EscapeLedger(loop._ledger_path).append(record)
+        EscapeDiagnosisLedger(loop._diagnoses_path).append(
+            EscapeDiagnosisRecord(
+                escape_id=record.id,
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.escape_ledger"):
+            filed, capped = await loop._surface_findings()
+
+        assert filed == 1, "unreadable diagnosis must not silently suppress"
+        assert capped is False
+        assert any(
+            "unreadable" in rec.message.lower() and record.id in rec.message
+            for rec in caplog.records
+        )
+
+    async def test_no_unreadable_rows_logs_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        loop = _make_loop(tmp_path, repo)
+        record = _record("bug-issue:clean", confidence="low")
+        EscapeLedger(loop._ledger_path).append(record)
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.escape_ledger"):
+            await loop._surface_findings()
+
+        assert not any("unreadable" in rec.message.lower() for rec in caplog.records)
+
+    async def test_multiple_unreadable_rows_log_one_aggregate_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # The plan calls for ONE aggregate WARNING (count + ids), not one
+        # warning per unreadable row — a flood of corrupted rows must not
+        # also flood the log.
+        from escape.auto_diagnose import EscapeDiagnosisLedger, EscapeDiagnosisRecord
+
+        repo = _init_repo(tmp_path)
+        loop = _make_loop(tmp_path, repo)
+        first = _record(
+            "bug-issue:corrupt1", confidence="low", encoded_as="regression-test"
+        )
+        second = _record(
+            "bug-issue:corrupt2", confidence="low", encoded_as="regression-test"
+        )
+        EscapeLedger(loop._ledger_path).append(first)
+        EscapeLedger(loop._ledger_path).append(second)
+        diagnoses = EscapeDiagnosisLedger(loop._diagnoses_path)
+        for record in (first, second):
+            diagnoses.append(
+                EscapeDiagnosisRecord(
+                    escape_id=record.id,
+                    diagnosis="some-future-verdict",
+                    reason="?",
+                    decided_at="2026-01-01T00:00:00+00:00",
+                )
+            )
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.escape_ledger"):
+            filed, _capped = await loop._surface_findings()
+
+        assert filed == 2
+        unreadable_warnings = [
+            rec for rec in caplog.records if "unreadable" in rec.message.lower()
+        ]
+        assert len(unreadable_warnings) == 1, "must be ONE aggregate warning"
+        assert "2" in unreadable_warnings[0].message
+        assert first.id in unreadable_warnings[0].message
+        assert second.id in unreadable_warnings[0].message

@@ -141,10 +141,11 @@ def compute_skill_efficiency(
       stored baseline) means there's no window to measure. In every
       no-window/under-floor case the window cost-per-call and
       ``trend_vs_baseline`` are both ``None``.
-    - A window with raw activity but ZERO effective calls sets
-      ``zero_usage_window`` — the source is burning spawns the telemetry
-      cannot see (#11117). That's an operational alert for the caller, never
-      a rate.
+    - A window of at least ``min_window_calls`` RAW calls with ZERO
+      effective calls sets ``zero_usage_window`` — the source is burning
+      spawns the telemetry cannot see (#11117). Sub-floor windows never
+      flag (#11167): one stray unavailable call is n=1 evidence, not a
+      blind spot. An operational alert for the caller, never a rate.
     - The baseline reference point is the baseline snapshot's own cumulative
       average (``baseline.est_cost_usd / baseline.effective_calls``), not a
       window — there's nothing before "baseline" to window against. ``None``
@@ -184,9 +185,15 @@ def compute_skill_efficiency(
             base_cost_per_call = (
                 base_effective_cost / base_effective if base_effective else None
             )
-            if cum_calls - base_raw_calls > 0:
+            raw_delta = cum_calls - base_raw_calls
+            if raw_delta > 0:
                 window_calls = max(cum_effective - base_effective, 0)
-                zero_usage_window = window_calls == 0
+                # #11167 (re-audit find): the blind-spot flag needs the same
+                # evidence floor as the regression path — a single stray
+                # zero-usage call (small prompts legitimately record none)
+                # must not read as "EVERY call went dark". Only a raw window
+                # of at least min_window_calls that is ALL zero-usage flags.
+                zero_usage_window = window_calls == 0 and raw_delta >= min_window_calls
                 if window_calls >= min_window_calls:
                     delta_cost = cum_effective_cost - base_effective_cost
                     window_cost_per_call = delta_cost / window_calls

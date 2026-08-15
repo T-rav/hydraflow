@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:36.870643+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2118
+superseded_by: 2453
 ---
 
 # ADR-drift regressions replay real PR files through ADRIndex

@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11136
 source_phase: plan
 created_at: 2026-08-14T13:02:38.765805+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2049
 ---
 
 # Agent-asset roots force full suite, not dependent mapping

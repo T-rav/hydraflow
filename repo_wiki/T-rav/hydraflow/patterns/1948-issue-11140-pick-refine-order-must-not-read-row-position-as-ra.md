@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11140
 source_phase: plan
 created_at: 2026-08-14T14:36:07.424525+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2054
 ---
 
 # pick_refine_order must not read row position as rank

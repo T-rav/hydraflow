@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:36.936360+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2143
+superseded_by: 2478
 ---
 
 # escape/metrics.py must stay import-pure of escape/ledger.py

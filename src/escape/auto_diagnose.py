@@ -1,13 +1,14 @@
-"""Machine auto-diagnose for LOW-CONFIDENCE escape-ledger surfaces (ADR-0115).
+"""Machine auto-diagnose for escape-ledger HITL surfaces (ADR-0115).
 
-Before ``EscapeLedgerLoop`` files a ``SURFACE_REASON_LOW_CONFIDENCE`` finding for
-a human, this module runs the move a human used to run by hand (the manual
-resolution of #10748 / #10749): trace the escape's ``detection_ref`` commit back
-to the bug it fixed, check whether that bug is ALREADY regression-encoded, and
+Before ``EscapeLedgerLoop`` files a ``SURFACE_REASON_LOW_CONFIDENCE`` or
+``SURFACE_REASON_AGING`` finding for a human, this module runs the move a human
+used to run by hand (the manual resolution of #10748 / #10749): trace the
+escape's ``detection_ref`` commit back to the bug it fixed, check whether that
+bug is ALREADY regression-encoded, and
 
 * **real + regression-encoded** → auto-record the ledger resolution at ``high``
   confidence with ``encoded_as = regression-test`` (``escape.resolve``), so the
-  low-confidence surface self-answers and no human is bothered;
+  surface self-answers and no human is bothered;
 * **clear false positive** (the referenced issue is plainly not a bug) →
   auto-dismiss with a recorded reason, so the surface is not filed;
 * **inconclusive** → fall through to the human surface UNCHANGED.
@@ -23,9 +24,9 @@ never auto-closed — it reaches a human exactly as before.
 Terminal verdicts (resolved / dismissed) are recorded in an append-only sidecar
 ``<data_root>/diagnostics/escape_diagnoses.jsonl`` — both the "recorded reason"
 audit trail the dismissal path requires and the idempotency guard that stops a
-row being re-diagnosed every tick (a resolved row already leaves the
-low-confidence set once its ledger confidence is bumped; a dismissed row does
-not mutate the ledger, so the sidecar is what keeps it from re-firing).
+row being re-diagnosed every tick (a resolved row already leaves the eligible
+set once its ledger confidence is bumped and it is encoded; a dismissed row
+does not mutate the ledger, so the sidecar is what keeps it from re-firing).
 """
 
 from __future__ import annotations
@@ -92,7 +93,7 @@ _NON_BUG_LABELS: frozenset[str] = frozenset(
 
 
 class EscapeDiagnosis(StrEnum):
-    """The verdict of a machine auto-diagnose pass over one low-confidence row."""
+    """The verdict of a machine auto-diagnose pass over one escape row."""
 
     # Real bug, already regression-encoded → ledger resolution auto-recorded
     # (high confidence, encoded-as regression-test). Surface self-answers.
@@ -282,43 +283,102 @@ class EscapeDiagnosisRecord:
         )
 
 
+#: Verdicts that permanently retire an escape from every human/aging
+#: surface. INCONCLUSIVE is deliberately excluded — it is the fail-safe
+#: default and must keep the row eligible for re-diagnosis and surfacing.
+_TERMINAL_DIAGNOSES: frozenset[EscapeDiagnosis] = frozenset(
+    {EscapeDiagnosis.RESOLVED_ENCODED, EscapeDiagnosis.DISMISSED}
+)
+
+
 class EscapeDiagnosisLedger(IdentifiedJsonlLedger[EscapeDiagnosisRecord]):
     """Append-only reader/writer over the escape auto-diagnose sidecar."""
 
     def __init__(self, path: Path) -> None:
         super().__init__(path, EscapeDiagnosisRecord, logger=logger)
 
+    def _latest_verdicts(self) -> dict[str, tuple[EscapeDiagnosis, str] | None]:
+        """escape_id → latest parsed ``(verdict, reason)``, last row wins.
+
+        A row whose ``diagnosis`` string doesn't parse into the current
+        ``EscapeDiagnosis`` enum (a future enum value written by a newer
+        build, or corruption) maps to ``None`` — "undiagnosed, re-diagnose
+        rather than guess" (#11111). Every public reader below derives from
+        this ONE map so the views can never diverge again: ``terminal_ids()``
+        used to trust bare row presence (``existing_ids()``) while
+        ``verdict_for()`` validated the diagnosis field, so an unparseable
+        row counted as terminal for selection but undiagnosed for the
+        verdict lookup — silently and permanently hiding the escape from
+        every human/aging surface even though the documented recovery path
+        ("map to None, caller re-diagnoses") was never dead (#11163).
+        """
+        out: dict[str, tuple[EscapeDiagnosis, str] | None] = {}
+        for row in self.read_all():
+            try:
+                out[row.escape_id] = (EscapeDiagnosis(row.diagnosis), row.reason)
+            except ValueError:
+                out[row.escape_id] = None
+        return out
+
     def terminal_ids(self) -> set[str]:
-        """Escape ids that already carry a terminal (resolved/dismissed) verdict."""
-        return set(self.existing_ids())
+        """Escape ids whose latest sidecar row is a terminal verdict.
+
+        Excludes ids whose latest row is unparseable or INCONCLUSIVE — those
+        stay eligible for re-diagnosis and human/aging surfacing.
+        """
+        return {
+            escape_id
+            for escape_id, verdict in self._latest_verdicts().items()
+            if verdict is not None and verdict[0] in _TERMINAL_DIAGNOSES
+        }
+
+    def unreadable_ids(self) -> set[str]:
+        """Escape ids whose latest sidecar row didn't parse (#11163).
+
+        Callers surface this as a loud aggregate warning — an unparseable
+        row must never be a silent, permanent loss of visibility; the id
+        stays out of ``terminal_ids()`` so it is re-diagnosed instead.
+        """
+        return {
+            escape_id
+            for escape_id, verdict in self._latest_verdicts().items()
+            if verdict is None
+        }
+
+    def terminal_and_unreadable_ids(self) -> tuple[set[str], set[str]]:
+        """``(terminal_ids(), unreadable_ids())`` from a single sidecar read.
+
+        Equivalent to calling both separately, but callers that need both
+        (e.g. ``EscapeLedgerLoop._surface_findings``) get one
+        ``_latest_verdicts()`` pass over the sidecar instead of two.
+        """
+        verdicts = self._latest_verdicts()
+        terminal = {
+            escape_id
+            for escape_id, verdict in verdicts.items()
+            if verdict is not None and verdict[0] in _TERMINAL_DIAGNOSES
+        }
+        unreadable = {
+            escape_id for escape_id, verdict in verdicts.items() if verdict is None
+        }
+        return terminal, unreadable
 
     def verdict_for(self, escape_id: str) -> tuple[EscapeDiagnosis, str] | None:
         """The recorded terminal (verdict, reason) for *escape_id*, last row
-        wins; ``None`` when the id has no terminal sidecar row. Unknown
-        diagnosis strings (a future enum value read by an old build) map to
-        ``None`` — the caller treats the row as undiagnosed rather than
+        wins; ``None`` when the id has no sidecar row or its latest row is
+        unparseable — the caller treats the row as undiagnosed rather than
         guessing (#11111)."""
-        found: tuple[EscapeDiagnosis, str] | None = None
-        for row in self.read_all():
-            if row.escape_id != escape_id:
-                continue
-            try:
-                found = (EscapeDiagnosis(row.diagnosis), row.reason)
-            except ValueError:
-                found = None
-        return found
+        return self._latest_verdicts().get(escape_id)
 
     def dismissal_reasons(self) -> dict[str, str]:
         """escape_id → recorded reason for every DISMISSED verdict (last row
         wins). The reconcile pass uses this to close stranded HITL issues
         with the dismissal explanation (#11148)."""
-        out: dict[str, str] = {}
-        for row in self.read_all():
-            if row.diagnosis == EscapeDiagnosis.DISMISSED.value:
-                out[row.escape_id] = row.reason
-            elif row.escape_id in out:
-                out.pop(row.escape_id)
-        return out
+        return {
+            escape_id: verdict[1]
+            for escape_id, verdict in self._latest_verdicts().items()
+            if verdict is not None and verdict[0] is EscapeDiagnosis.DISMISSED
+        }
 
     def append_diagnosis(
         self, escape_id: str, diagnosis: EscapeDiagnosis, reason: str
@@ -334,7 +394,7 @@ class EscapeDiagnosisLedger(IdentifiedJsonlLedger[EscapeDiagnosisRecord]):
 
 
 class EscapeAutoDiagnoser:
-    """Runs the mechanical auto-diagnose pass for one low-confidence escape.
+    """Runs the mechanical auto-diagnose pass for one surfacing-eligible escape.
 
     Owns the git/GitHub reads and the resolve/dismiss actions; the pure verdict
     is delegated to :func:`classify_diagnosis`. Injected into ``EscapeLedgerLoop``
@@ -356,7 +416,7 @@ class EscapeAutoDiagnoser:
         self._diagnoses = EscapeDiagnosisLedger(diagnoses_path)
 
     async def diagnose(self, record: EscapeRecord) -> EscapeDiagnosis:
-        """Diagnose one low-confidence escape; act on a terminal verdict.
+        """Diagnose one escape; act on a terminal verdict.
 
         Returns the verdict. ``RESOLVED_ENCODED`` records a ledger resolution
         (high confidence + regression-test encoding) and a sidecar row;
@@ -381,12 +441,10 @@ class EscapeAutoDiagnoser:
 
     async def _gather(self, record: EscapeRecord) -> DiagnosisEvidence:
         """Trace the detecting commit → referenced bug → regression encoding."""
-        issue_ref, shas, added_pin = self._trace_commit(record)
-        paths: tuple[str, ...] = ()
-        if added_pin:
-            paths = ("<detecting-commit-regression-pin>",)
-        else:
-            paths = regression_hits(self._repo_root, issue_ref=issue_ref, shas=shas)
+        issue_ref, shas, pin_paths = self._trace_commit(record)
+        paths = pin_paths or regression_hits(
+            self._repo_root, issue_ref=issue_ref, shas=shas
+        )
         labels = await self._issue_labels(issue_ref)
         return DiagnosisEvidence(
             escape_id=record.id,
@@ -397,28 +455,30 @@ class EscapeAutoDiagnoser:
 
     def _trace_commit(
         self, record: EscapeRecord
-    ) -> tuple[int | None, tuple[str, ...], bool]:
-        """Return (referenced_issue, introducing_shas, detecting_commit_added_pin).
+    ) -> tuple[int | None, tuple[str, ...], tuple[str, ...]]:
+        """Return (referenced_issue, introducing_shas, detecting_commit_pin_paths).
 
         Re-reads the detecting ``detection_ref`` commit to recover the bug it
-        closed (``Fixes #N``) and any introducing sha it named, plus whether the
-        commit added its own ``tests/regressions/`` pin. Falls back to the
-        already-recorded ``originating_merge_sha`` when the commit can't be read.
+        closed (``Fixes #N``), any introducing sha it named, and the real
+        ``tests/regressions/`` paths it added itself (if any) — this is the
+        zero-needle evidence path for rows with no issue ref and no
+        originating sha (#11178). Falls back to the already-recorded
+        ``originating_merge_sha`` when the commit can't be read.
         """
         commit = commit_info_for_sha(self._repo_root, record.detection_ref)
         introducing: list[str] = []
         if record.originating_merge_sha:
             introducing.append(record.originating_merge_sha)
         if commit is None:
-            return record.originating_pr, tuple(introducing), False
+            return record.originating_pr, tuple(introducing), ()
         text = f"{commit.subject}\n{commit.body}"
         fixes = attribution.extract_fixes_refs(text)
         issue_ref = fixes[0] if fixes else record.originating_pr
         for sha in attribution.extract_referenced_shas(commit.body, exclude=commit.sha):
             if sha not in introducing:
                 introducing.append(sha)
-        added_pin = attribution.adds_regression_pin(commit.added_paths)
-        return issue_ref, tuple(introducing), added_pin
+        pin_paths = attribution.regression_pins_added(commit.added_paths)
+        return issue_ref, tuple(introducing), pin_paths
 
     async def _issue_labels(self, issue_ref: int | None) -> tuple[str, ...] | None:
         """Referenced-issue labels via the PRPort, or ``None`` on no ref/failure.
@@ -451,8 +511,8 @@ class EscapeAutoDiagnoser:
             f"auto-diagnose (ADR-0115): {record.detection_source} escape "
             f"`{record.detection_ref[:12]}` is a real bug, already "
             f"regression-encoded ({where}); recorded at high confidence, "
-            "encoded-as regression-test so the low-confidence surface "
-            "self-answers (no human)."
+            "encoded-as regression-test so the surface self-answers "
+            "(no human)."
         )
         try:
             resolve_escape(

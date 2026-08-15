@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11124
 source_phase: plan
 created_at: 2026-08-14T11:33:53.102511+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2586
 ---
 
 # merge_settings_file must be idempotent across repeated runs

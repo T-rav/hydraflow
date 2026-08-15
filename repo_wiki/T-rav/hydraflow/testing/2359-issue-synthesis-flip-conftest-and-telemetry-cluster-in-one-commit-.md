@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.127628+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2217
+superseded_by: 2548
 ---
 
 # Flip conftest and telemetry cluster in one commit or reset inverts

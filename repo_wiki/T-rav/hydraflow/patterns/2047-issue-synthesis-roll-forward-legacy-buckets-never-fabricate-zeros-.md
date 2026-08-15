@@ -1,0 +1,19 @@
+---
+id: 2047
+topic: patterns
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-08-14T18:39:31.834564+00:00
+status: superseded
+corroborations: 1
+supersedes: 1939
+superseded_by: 2163
+---
+
+# Roll forward legacy buckets — never fabricate zeros for missing keys
+
+When introducing new counter keys into `src/prompt_telemetry.py`, a bucket written before the fix must accumulate forward from its next record, not be backfilled with a fabricated zero.
+
+Example: Use `_as_int(target.get(k, 0)) + _as_int(record.get(k, 0))` so a legacy bucket picks up the key only when a post-fix record lands; a bucket with no subsequent record still omits both keys, keeping "never tracked" distinguishable from "tracked, zero" in `pr_stats.json`.
+
+**Why:** Backfilling zeros destroys the semantic distinction between a source that had zero cache usage and one that predates cache tracking.

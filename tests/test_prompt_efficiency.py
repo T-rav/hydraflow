@@ -222,6 +222,17 @@ def test_all_zero_usage_window_sets_flag_not_rate() -> None:
     assert row.trend_vs_baseline is None
 
 
+def test_single_zero_usage_call_does_not_flag_blind_spot() -> None:
+    """#11167 (re-audit find): one stray unavailable call (small prompts
+    legitimately record no usage) is n=1 evidence — the blind-spot flag
+    needs the same MIN_WINDOW_CALLS floor as the regression path."""
+    rows = compute_skill_efficiency(
+        {"diff-sanity": _totals(1_000_000, 1001, anomalies=201)},
+        baseline={"diff-sanity": _totals(1_000_000, 1000, anomalies=200)},
+    )
+    assert rows[0].zero_usage_window is False
+
+
 def test_no_window_activity_does_not_set_zero_usage_flag() -> None:
     rows = compute_skill_efficiency(
         {"diff-sanity": _totals(1_000_000, 100, anomalies=10)},

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:37.146603+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2225
+superseded_by: 2555
 ---
 
 # Guard-test ADR population filters against adr_conformance.py

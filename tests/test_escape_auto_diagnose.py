@@ -16,6 +16,7 @@ from escape.auto_diagnose import (
     EscapeAutoDiagnoser,
     EscapeDiagnosis,
     EscapeDiagnosisLedger,
+    EscapeDiagnosisRecord,
     classify_diagnosis,
     regression_hits,
 )
@@ -127,6 +128,34 @@ def _commit_bug_fix(repo: Path, issue: int) -> str:
     return _head(repo)
 
 
+def _commit_self_pin(repo: Path, filename: str) -> str:
+    """A single commit that adds its OWN regression pin and names no issue/PR
+    — the zero-needle case ``regression_hits`` cannot resolve via grep."""
+    reg = repo / "tests" / "regressions"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / filename).write_text("def test_bug(): pass\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "test: pin regression for a live failure")
+    return _head(repo)
+
+
+def _pin_row(detection_ref: str) -> EscapeRecord:
+    return EscapeRecord(
+        id=f"regression-pin:{detection_ref}",
+        detected_at="2026-01-01T00:00:00+00:00",
+        detection_source="regression-pin",
+        detection_ref=detection_ref,
+        originating_pr=None,
+        originating_merge_sha="",
+        merged_at="",
+        time_to_detection_hours=None,
+        attribution_method="regression-pin",
+        attribution_confidence="medium",
+        encoded_as="none-yet",
+        notes="Adds a tests/regressions/ pin for a post-merge failure.",
+    )
+
+
 def _bug_row(detection_ref: str, issue: int) -> EscapeRecord:
     return EscapeRecord(
         id=f"bug-issue:{detection_ref}",
@@ -211,6 +240,29 @@ class TestEscapeAutoDiagnoser:
         assert resolved.encoded_as == "regression-test"
         assert "auto-diagnose" in resolved.notes.lower()
 
+    async def test_self_added_pin_records_real_path_not_placeholder(
+        self, tmp_path: Path
+    ) -> None:
+        # #11178: the detecting commit adding its OWN regression pin, with no
+        # issue ref and no originating sha (the zero-needle case
+        # `regression_hits` cannot grep its way to), used to record a
+        # placeholder string instead of the real evidence path.
+        repo = _init_repo(tmp_path)
+        sha = _commit_self_pin(repo, "test_live_failure.py")
+
+        prs = AsyncMock()
+        prs.get_issue_labels = AsyncMock(return_value=[])
+        diagnoser, ledger_path = self._diagnoser(repo, tmp_path, prs)
+        record = _pin_row(sha)
+        EscapeLedger(ledger_path).append(record)
+
+        verdict = await diagnoser.diagnose(record)
+
+        assert verdict is EscapeDiagnosis.RESOLVED_ENCODED
+        resolved = EscapeLedger(ledger_path).read_latest()[0]
+        assert "tests/regressions/test_live_failure.py" in resolved.notes
+        assert "<detecting-commit-regression-pin>" not in resolved.notes
+
     async def test_false_positive_non_bug_label_dismisses_without_ledger_mutation(
         self, tmp_path: Path
     ) -> None:
@@ -257,6 +309,36 @@ class TestEscapeAutoDiagnoser:
         assert verdict is EscapeDiagnosis.INCONCLUSIVE
         rows = EscapeLedger(ledger_path).read_all()
         assert len(rows) == 1 and rows[0].attribution_confidence == "low"
+        # #11163: terminal_ids() now excludes INCONCLUSIVE from the terminal
+        # set (not just unparseable rows) — safe only because diagnose()
+        # never writes an INCONCLUSIVE row to the sidecar in the first place.
+        # If a future writer ever did, that escape would flip from
+        # permanently suppressed (pre-#11163: any row counted as terminal)
+        # to re-eligible every tick, reintroducing the #11111 noise class.
+        assert (
+            EscapeDiagnosisLedger(tmp_path / "escape_diagnoses.jsonl").read_all() == []
+        )
+
+    async def test_resolution_note_is_reason_neutral(self, tmp_path: Path) -> None:
+        # #11161: the note text used to name "the low-confidence surface"
+        # specifically, even though this same resolution path now also
+        # answers the AGING surface — reason-neutral wording reads correctly
+        # for either.
+        repo = _init_repo(tmp_path)
+        _commit_regression(repo, 500)
+        fix_sha = _commit_bug_fix(repo, 500)
+
+        prs = AsyncMock()
+        prs.get_issue_labels = AsyncMock(return_value=[])
+        diagnoser, ledger_path = self._diagnoser(repo, tmp_path, prs)
+        record = _bug_row(fix_sha, 500)
+        EscapeLedger(ledger_path).append(record)
+
+        await diagnoser.diagnose(record)
+
+        resolved = EscapeLedger(ledger_path).read_latest()[0]
+        assert "low-confidence" not in resolved.notes.lower()
+        assert "the surface self-answers" in resolved.notes.lower()
 
     async def test_terminal_verdict_is_not_re_acted(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
@@ -279,6 +361,25 @@ class TestEscapeAutoDiagnoser:
         diag = EscapeDiagnosisLedger(tmp_path / "escape_diagnoses.jsonl").read_all()
         assert len(diag) == 1
 
+    async def test_unreadable_detecting_commit_stays_inconclusive(
+        self, tmp_path: Path
+    ) -> None:
+        # `_trace_commit` falls back to `()` pin paths (never a crash) when
+        # the detecting commit's sha can't be read from the repo.
+        repo = _init_repo(tmp_path)
+
+        prs = AsyncMock()
+        prs.get_issue_labels = AsyncMock(return_value=[])
+        diagnoser, ledger_path = self._diagnoser(repo, tmp_path, prs)
+        record = _pin_row("0" * 40)
+        EscapeLedger(ledger_path).append(record)
+
+        verdict = await diagnoser.diagnose(record)
+
+        assert verdict is EscapeDiagnosis.INCONCLUSIVE
+        rows = EscapeLedger(ledger_path).read_all()
+        assert len(rows) == 1 and rows[0].encoded_as == "none-yet"
+
 
 class TestEscapeDiagnosisLedger:
     def test_append_and_terminal_ids(self, tmp_path: Path) -> None:
@@ -290,6 +391,100 @@ class TestEscapeDiagnosisLedger:
         assert row.diagnosis == "dismissed"
         assert row.reason == "why"
         assert row.decided_at
+
+    def test_terminal_ids_includes_resolved_encoded(self, tmp_path: Path) -> None:
+        # Both terminal verdicts must gate selection, not just DISMISSED.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append_diagnosis(
+            "bug-issue:a", EscapeDiagnosis.RESOLVED_ENCODED, "encoded"
+        )
+        assert ledger.terminal_ids() == {"bug-issue:a"}
+
+    def test_terminal_ids_excludes_inconclusive(self, tmp_path: Path) -> None:
+        # INCONCLUSIVE is a valid enum member but the fail-safe default, not
+        # a terminal verdict — it must stay eligible for re-diagnosis and
+        # surfacing rather than being folded into the terminal set.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:a",
+                diagnosis=EscapeDiagnosis.INCONCLUSIVE.value,
+                reason="not enough evidence",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        assert ledger.terminal_ids() == set()
+
+    def test_terminal_ids_excludes_unparseable_diagnosis(self, tmp_path: Path) -> None:
+        # #11163: a sidecar row whose diagnosis string doesn't parse into the
+        # current EscapeDiagnosis enum (a future enum value from a newer
+        # build, or corruption) must NOT be terminal. verdict_for() already
+        # treats this as undiagnosed ("re-diagnose rather than guess");
+        # terminal_ids() has to agree, or the id is silently and permanently
+        # hidden from every human/aging surface without ever being
+        # re-diagnosed — existing_ids() counted any row as terminal
+        # regardless of whether the diagnosis field parsed.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:a",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        assert ledger.terminal_ids() == set()
+
+    def test_unreadable_ids_surfaces_unparseable_rows(self, tmp_path: Path) -> None:
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        assert ledger.unreadable_ids() == set()
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:a",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        assert ledger.unreadable_ids() == {"bug-issue:a"}
+
+    def test_unreadable_ids_cleared_by_a_later_parseable_row(
+        self, tmp_path: Path
+    ) -> None:
+        # Last-row-wins: a re-diagnosis that lands a valid verdict after an
+        # unparseable row must clear the id from unreadable_ids().
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:a",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.DISMISSED, "resolved")
+        assert ledger.unreadable_ids() == set()
+        assert ledger.terminal_ids() == {"bug-issue:a"}
+
+    def test_terminal_and_unreadable_ids_matches_the_separate_calls(
+        self, tmp_path: Path
+    ) -> None:
+        # The combined reader exists so EscapeLedgerLoop._surface_findings
+        # reads the sidecar once instead of twice (#11163 review) — it must
+        # agree with calling terminal_ids()/unreadable_ids() separately.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.RESOLVED_ENCODED, "ok")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:b",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        terminal, unreadable = ledger.terminal_and_unreadable_ids()
+        assert terminal == ledger.terminal_ids() == {"bug-issue:a"}
+        assert unreadable == ledger.unreadable_ids() == {"bug-issue:b"}
 
 
 class TestSidecarVerdictLookup:
@@ -316,6 +511,18 @@ class TestSidecarVerdictLookup:
         assert verdict is not None
         assert verdict[0] is EscapeDiagnosis.RESOLVED_ENCODED
 
+    def test_verdict_for_unparseable_diagnosis_is_none(self, tmp_path: Path) -> None:
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append(
+            EscapeDiagnosisRecord(
+                escape_id="bug-issue:a",
+                diagnosis="some-future-verdict",
+                reason="?",
+                decided_at="2026-01-01T00:00:00+00:00",
+            )
+        )
+        assert ledger.verdict_for("bug-issue:a") is None
+
     def test_dismissal_reasons_maps_only_dismissed(self, tmp_path: Path) -> None:
         ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
         ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.DISMISSED, "fp")
@@ -323,3 +530,18 @@ class TestSidecarVerdictLookup:
             "bug-issue:b", EscapeDiagnosis.RESOLVED_ENCODED, "encoded"
         )
         assert ledger.dismissal_reasons() == {"bug-issue:a": "fp"}
+
+    def test_dismissal_reasons_supersession_by_later_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        # Last-row-wins: a DISMISSED row later superseded by a re-diagnosis
+        # (e.g. RESOLVED_ENCODED) must drop out of dismissal_reasons() — the
+        # stranded-HITL reconcile pass must not comment with a stale
+        # dismissal reason for an id that is now resolved.
+        ledger = EscapeDiagnosisLedger(tmp_path / "d.jsonl")
+        ledger.append_diagnosis("bug-issue:a", EscapeDiagnosis.DISMISSED, "first")
+        ledger.append_diagnosis(
+            "bug-issue:a", EscapeDiagnosis.RESOLVED_ENCODED, "re-diagnosed"
+        )
+        assert ledger.dismissal_reasons() == {}
+        assert ledger.terminal_ids() == {"bug-issue:a"}

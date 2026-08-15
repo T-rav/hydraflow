@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11135
 source_phase: plan
 created_at: 2026-08-14T13:08:51.035584+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Probe make target existence in shared pre-commit for managed repos

@@ -4,9 +4,10 @@ topic: testing
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-07-31T18:40:36.873307+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2119
+superseded_by: 2454
 ---
 
 # Keep store-specific methods on subclass, not shared base

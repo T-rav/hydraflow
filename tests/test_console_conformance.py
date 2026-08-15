@@ -102,8 +102,16 @@ def test_ci_audit_job_runs_console_conformance() -> None:
     as `Enforced by: make console-conformance`, but no CI job invoked it —
     the git-history check needs a full clone, so `test_repo_ledger_is_
     conformant` above deliberately passes check_git=False. The enforcement
-    lives as a step in the audit job (the one job with fetch-depth: 0);
-    pin it so the claim can never silently go false again."""
+    lives as a step in the audit job (a job with fetch-depth: 0); pin it so
+    the claim can never silently go false again.
+
+    This only pins that the step exists in the job's step list — it does not
+    evaluate whether the job's `if:` actually fires for a given changeset.
+    That reachability question is a separate, sharper failure mode (#11164:
+    the step existed here but the job never ran for an agents/**-only PR,
+    which is the exact scenario #11110 was filed against) and is pinned in
+    tests/regressions/test_issue_11164.py.
+    """
     import yaml
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -117,9 +125,8 @@ def test_ci_audit_job_runs_console_conformance() -> None:
         if "make console-conformance" in str(step.get("run", ""))
     ]
     assert conformance_runs, (
-        "the audit job must run `make console-conformance` — it is the only "
-        "job with a full-history clone, and without it the ledger's "
-        "immutability guarantee is enforced nowhere (#11110)"
+        "the audit job must run `make console-conformance` — without it the "
+        "ledger's immutability guarantee is enforced nowhere (#11110)"
     )
     checkout = next(s for s in audit_steps if "checkout" in str(s.get("uses", "")))
     assert checkout.get("with", {}).get("fetch-depth") == 0, (
