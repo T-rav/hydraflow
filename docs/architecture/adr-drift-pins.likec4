@@ -1,0 +1,75 @@
+// Issue #11186 — ADR-drift regression pins must self-retire.
+// Component view of how the pin module reaches ADR data, plus the meta-guard
+// that proves it self-retires when an ADR is renumbered / removed / de-lived.
+
+specification {
+  element system
+  element component
+  element data
+  tag defect
+  tag fix
+  tag guard
+}
+
+model {
+  hydraflow = system 'HydraFlow repo' {
+
+    adrCorpus = data 'docs/adr/*.md' {
+      description '~130 ADR markdown files. Renumbering / retiring one is routine maintenance. Identity = ADR number, NOT filename.'
+    }
+
+    adrIndex = component 'src/adr_index.py' {
+      description 'parse_adr_file -> ADR(number, status, source_files, source_symbols). scan_adr_directory parses every file. ADRIndex.adrs() caches by mtime. ADR.is_live == status in {Accepted, Proposed}.'
+    }
+
+    adrDrift = component 'src/adr_drift.py' {
+      description 'compute_drift -> adrs_touching (LIVE ADRs only) -> _citation_drifts. Bare cite drifts on any touch; symbol-qualified cite is inert to a file-only diff (#9176).'
+    }
+
+    pins = component 'tests/regressions/test_issue_9419_9421_adr_drift.py' {
+      #defect
+      description '14 pins over ADR-0012/0024/0044/0045/0050/0064 (0044 is Proposed, not Accepted).'
+    }
+
+    guard = component 'tests/regressions/test_issue_11186.py' {
+      #guard
+      description 'Meta-guard. Copies pins into a fake repo tree whose docs/adr has the target ADR renumbered / removed, symlinks real src/, runs every test (incl. parametrized) and requires no blowups.'
+    }
+
+    exemplar = component 'tests/regressions/test_issue_9176.py' {
+      description 'Convention exemplar: resolves via ADRIndex, asserts rollup is None — keeps holding when the ADR vanishes.'
+    }
+
+    sibling = component 'tests/regressions/test_issue_11180.py' {
+      description 'Same meta-guard shape for test_issue_10440.py. Zero-arg tests only.'
+    }
+  }
+
+  // Defective resolution paths — both are total lookups.
+  pins -> adrCorpus 'parse_adr_file(_ADR_DIR / _RIGHT_SIZED[n]) -> FileNotFoundError' {
+    #defect
+  }
+  pins -> adrIndex 'next(a for a in index.adrs() if a.number == n) -> StopIteration' {
+    #defect
+  }
+  pins -> adrDrift 'compute_drift / _citation_drifts on the resolved ADR'
+  adrIndex -> adrCorpus 'scan_adr_directory reads every *.md'
+  adrDrift -> adrIndex 'adrs_touching filters to is_live'
+
+  guard -> pins 'loads a copy against a mutated docs/adr'
+  guard -> adrCorpus 'copytree + renumber / unlink / (new) supersede'
+  exemplar -> adrIndex 'total-safe: next(..., None)'
+  sibling -> adrIndex 'sibling precedent'
+}
+
+views {
+  view components {
+    title 'ADR-drift pin resolution and its meta-guard (#11186)'
+    include *
+  }
+
+  view pinsOnly of pins {
+    title 'What the pin module touches'
+    include *, pins -> *, * -> pins
+  }
+}
