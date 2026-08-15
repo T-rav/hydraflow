@@ -17,8 +17,10 @@ gate_health:
   value: 0.90
   band: 0.05
   direction: above
-  signed_by: null
-  signed_date: null
+  # Signed 2026-08-15 on Travis's explicit authorization ("ok to flip it",
+  # dark-factory session) after idle test 2 validated the quiescence stack.
+  signed_by: "T-rav"
+  signed_date: "2026-08-15"
   authority: "ADR-0120 Ruling 1; #10824"
 
 sampled_audit:
@@ -33,6 +35,9 @@ sampled_audit:
   value: 0.05
   band: 0.02
   direction: below
-  signed_by: null
-  signed_date: null
+  # Signed 2026-08-15 on Travis's explicit authorization ("ok to flip it",
+  # dark-factory session). The governor reads this as its p-chart anchor;
+  # filings are never gated.
+  signed_by: "T-rav"
+  signed_date: "2026-08-15"
   authority: "ADR-0120 Ruling 1; #10824; audit.governance TARGET_DISAGREEMENT_RATE"

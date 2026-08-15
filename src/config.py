@@ -277,6 +277,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_ESCAPE_LEDGER_ENCODING_AGE_DAYS",
         14,
     ),
+    (
+        "escape_ledger_max_diagnoses_per_tick",
+        "HYDRAFLOW_ESCAPE_LEDGER_MAX_DIAGNOSES_PER_TICK",
+        25,
+    ),
     ("intervention_tally_interval", "HYDRAFLOW_INTERVENTION_TALLY_INTERVAL", 86400),
     (
         "intervention_tally_max_classify_per_tick",
@@ -2243,6 +2248,23 @@ class HydraFlowConfig(BaseModel):
             "How long an escape may stay `encoded_as: none-yet` before "
             "EscapeLedgerLoop surfaces it for human triage (#10367). Every "
             "escape should terminate in an encoding (test/lesson/detector/ADR)."
+        ),
+    )
+    escape_ledger_max_diagnoses_per_tick: int = Field(
+        default=25,
+        ge=1,
+        le=500,
+        description=(
+            "Cap on how many eligible (low-confidence or aging-unencoded) "
+            "escapes EscapeLedgerLoop runs the auto-diagnose pass (ADR-0115) "
+            "over in one tick (#11176). Diagnosis runs over the FULL eligible "
+            "set BEFORE the ask-budget cap (`escape_ledger_max_issues_per_tick`) "
+            "is applied, so a machine-resolvable finding self-answers "
+            "regardless of how many other findings are competing for that "
+            "tick's ask budget; this separate, wider cap bounds the git/PRPort "
+            "reads a synthetic flood of eligible findings could otherwise drive "
+            "in one tick. Eligible findings beyond this cap fall through to the "
+            "ask budget undiagnosed (fail-safe: they may still reach a human)."
         ),
     )
     escape_ledger_auto_diagnose_enabled: bool = Field(

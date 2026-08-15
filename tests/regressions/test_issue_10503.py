@@ -12,8 +12,8 @@ encoding was silently never re-raised.
 Fix: scope the fingerprint per surfacing REASON —
 ``surfaced:low-confidence:<id>`` vs ``surfaced:aging:<id>`` — so each criterion
 gets its own one-shot budget while still suppressing repeat noise from the SAME
-criterion. ``select_findings_to_surface`` now returns ``(record, reason)`` pairs
-so the caller stores the correct reason-scoped fingerprint.
+criterion. ``eligible_findings`` now returns ``(record, reason)`` pairs so the
+caller stores the correct reason-scoped fingerprint.
 
 These tests assert the CORRECT (post-fix) behaviour and are GREEN once the fix
 lands.
@@ -31,7 +31,8 @@ from escape.models import EscapeRecord
 from escape_ledger_loop import (
     SURFACE_REASON_AGING,
     SURFACE_REASON_LOW_CONFIDENCE,
-    select_findings_to_surface,
+    apply_ask_budget,
+    eligible_findings,
     surfacing_fingerprint,
 )
 
@@ -61,13 +62,13 @@ def _low_conf_aging_record(rid: str = "bug-issue:a") -> EscapeRecord:
 
 
 def _select(record: EscapeRecord, already_surfaced: set[str]):
-    return select_findings_to_surface(
+    eligible = eligible_findings(
         [record],
         now=NOW,
         aging_threshold_hours=AGING_THRESHOLD_HOURS,
         already_surfaced=already_surfaced,
-        max_per_tick=10,
     )
+    return apply_ask_budget(eligible, max_per_tick=10)
 
 
 def test_fingerprint_is_reason_scoped() -> None:
