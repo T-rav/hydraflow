@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T08:32:48.943026+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2504
+superseded_by: 2750
 ---
 
 # Use %x01 not %x1e as git log sentinel — splitlines corrupts records

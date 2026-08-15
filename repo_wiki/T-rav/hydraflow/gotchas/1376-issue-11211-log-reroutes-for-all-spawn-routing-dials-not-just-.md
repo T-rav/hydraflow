@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11211
 source_phase: review
 created_at: 2026-08-15T06:58:01.011527+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11211 closed
 ---
 
 # Log reroutes for all spawn-routing dials, not just failovers

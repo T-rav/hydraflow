@@ -47,9 +47,13 @@ import { LoopsPanel } from './LoopsPanel'
 import { CostPanel } from './CostPanel'
 import { useCostByRepo } from './useCostByRepo'
 import { EMPTY_COST_VM } from './model/cost'
-import { SupervisorPanel } from './SupervisorPanel'
+import { SupervisorSummary } from './SupervisorSummary'
+import { SupervisorMode } from './SupervisorMode'
 import { useSupervisorThread } from './useSupervisorThread'
 import { EMPTY_SUPERVISOR_VM } from './model/supervisorThread'
+import { useTrustFleet } from './useTrustFleet'
+import { toSupervisorGauges } from './model/supervisorGauges'
+import { EMPTY_TRUST_FLEET_VM } from './model/trustFleet'
 import { FinderFaceplatePanel } from './FinderFaceplatePanel'
 import { useFinderFaceplates } from './useFinderFaceplates'
 import { EMPTY_FINDER_FACEPLATES_VM } from './model/finderFaceplates'
@@ -91,6 +95,11 @@ const MODES = [
   // direction) — eight stacked rail panels had turned the 280px column into
   // an endless scroll.
   { key: 'instruments', label: 'Instruments' },
+  // Supervisor: a gauge-first supervision surface (#11207) promoted out of
+  // the cramped rail card, following the exact #11203 Instruments pattern —
+  // the rail keeps only a compact one-line summary (SupervisorSummary) that
+  // deep-links here.
+  { key: 'supervisor', label: 'Supervisor' },
 ]
 
 function makeStyles(t) {
@@ -175,7 +184,7 @@ function ModeToggle({ mode, select, styles }) {
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
@@ -234,6 +243,12 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
   // System tab for the full configuration surface.
   const settings = useMemo(() => toSettingsSummary(socket.config), [socket.config])
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // Supervisor gauges (#11207): composes the already-fetched fleet/supervisor/
+  // vitals/cost VMs — no new backend — into the Supervisor tab's gauge row.
+  const gauges = useMemo(
+    () => toSupervisorGauges({ fleet, supervisor, vitals, cost, now }),
+    [fleet, supervisor, vitals, cost, now],
+  )
 
   // --- State-screen signals (Task 10) --------------------------------------
   // `disconnected` is surfaced additively by useHydraFlowSocket (connected===false).
@@ -253,8 +268,12 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
   // (noise floors, loop control register, judge calibration) that matter
   // precisely when the pipeline is quiet — pre-promotion these panels were
   // always visible in the rail, so gating them behind idle would regress.
+  // Supervisor mode is exempt for the same reason (#11207): a paused / credit-
+  // failed-over factory IS the idle case an operator most needs the gauges +
+  // observation thread for — gating them behind idle would hide the tab
+  // exactly when it matters most.
   const idle =
-    activeCount === 0 && item == null && !showOverview && mode !== 'instruments'
+    activeCount === 0 && item == null && !showOverview && mode !== 'instruments' && mode !== 'supervisor'
   // Focus mode (a single ItemWorkspace) claims the full detail width (#8): the
   // detail area spans both grid columns. All-active / overview / idle keep the
   // vitals column beside the detail row.
@@ -323,6 +342,15 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                   <LoopFaceplatePanel faceplates={loopFaceplates} />
                   <JudgeCalibrationPanel calibration={calibration} />
                 </div>
+              ) : mode === 'supervisor' ? (
+                <SupervisorMode
+                  gauges={gauges}
+                  supervisor={supervisor}
+                  onResume={socket.startOrchestrator}
+                  onPause={socket.stopOrchestrator}
+                  onRestartLoop={socket.restartLoop}
+                  onAckEscalations={socket.ackEscalations}
+                />
               ) : (
                 <ItemWorkspace item={item} transcript={transcript} mode={mode} select={select} />
               )}
@@ -330,13 +358,11 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
             <div data-testid="operator-vitals-slot" style={styles.vitalsSlot}>
               <VitalsCard vitals={vitals} />
               <CostPanel cost={cost} />
-              <SupervisorPanel
-                supervisor={supervisor}
-                onResume={socket.startOrchestrator}
-                onPause={socket.stopOrchestrator}
-                onRestartLoop={socket.restartLoop}
-                onAckEscalations={socket.ackEscalations}
-              />
+              {/* Full SupervisorPanel (observation thread + actions) moved to the
+                  full-width Supervisor mode (#11207); the rail keeps only a
+                  compact one-line summary that deep-links to the tab — the same
+                  rail-compaction Instruments got (#10942 promotion). */}
+              <SupervisorSummary supervisor={supervisor} onOpen={() => select('mode', 'supervisor')} />
               {/* Finder/Loop faceplates + judge calibration moved to the
                   full-width Instruments mode (the #10942 primary-surface
                   promotion) — the rail keeps only glanceable panels. */}
@@ -399,7 +425,11 @@ export function OperatorConsole() {
   // the escape ledger) on its own pinned cadence (aborted in-flight on unmount),
   // independent of the WS slice.
   const calibration = useJudgeCalibration()
-  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} />
+  // Trust fleet (#11207): polls the per-loop tick + repair-attempt tallies for
+  // the Supervisor tab's gauges on its own pinned cadence (aborted in-flight
+  // on unmount), independent of the WS slice the shell otherwise renders from.
+  const fleet = useTrustFleet()
+  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} />
 }
 
 export default OperatorConsole

@@ -538,6 +538,11 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 return JSONResponse(
                     {"error": "No host runtime registered"}, status_code=501
                 )
+            # An explicit Start is the operator's intent regardless of whether
+            # the host was already running — clear the operator-stopped latch
+            # (#11208) so a future relaunch's boot-time autostart isn't
+            # suppressed by a stop that's no longer in effect.
+            ctx.state.set_operator_stopped(False)
             if not host_rt.running:
                 await host_rt.start()
             await ctx.event_bus.publish(
@@ -552,6 +557,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         orch = ctx.get_orchestrator()
         if orch and orch.running:
             return JSONResponse({"error": "already running"}, status_code=409)
+
+        # Explicit Start clears the operator-stopped latch (#11208) — see the
+        # registry branch above for why.
+        ctx.state.set_operator_stopped(False)
 
         # Remove pipeline workers from the disabled set
         existing_disabled = ctx.state.get_disabled_workers()
@@ -600,6 +609,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             if not any(rt.running for rt in registry.all):
                 return JSONResponse({"error": "not running"}, status_code=400)
             await registry.stop_all()
+            # Persist the operator-stopped latch (#11208) so a relaunch's
+            # boot-time autostart honours this deliberate stop instead of
+            # bringing the factory back up behind the operator's back.
+            ctx.state.set_operator_stopped(True)
             return JSONResponse({"status": "stopping"})
 
         # Legacy single-repo/test wiring (no registry): stop the host orch.
@@ -607,6 +620,8 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         if not orch or not orch.running:
             return JSONResponse({"error": "not running"}, status_code=400)
         await orch.request_stop()
+        # See the registry branch above — persist the operator-stopped latch.
+        ctx.state.set_operator_stopped(True)
         return JSONResponse({"status": "stopping"})
 
     @router.post("/api/control/clear-credit-pause")

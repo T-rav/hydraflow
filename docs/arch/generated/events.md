@@ -37,8 +37,8 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 | **MEMORY_SYNC** ⚠️ | — | — |
 | **MERGE_UPDATE** | `src.pr_manager:PRManager.merge_pr`<br>`src.pr_manager_promotion:PRManagerPromotionMixin.merge_promotion_pr` | ★ all (fan-out) |
 | **METRICS_UPDATE** | `src.metrics_manager:MetricsManager.sync` | ★ all (fan-out) |
-| **ORCHESTRATOR_STATUS** | `src.dashboard_routes._control_routes:register.start_orchestrator`<br>`src.orchestrator:HydraFlowOrchestrator._publish_status` | ★ all (fan-out) |
-| **PHASE_CHANGE** | `src.server:_run_with_dashboard` | ★ all (fan-out) |
+| **ORCHESTRATOR_STATUS** | `src.dashboard_routes._control_routes:register.start_orchestrator`<br>`src.factory_autostart:maybe_autostart_host`<br>`src.orchestrator:HydraFlowOrchestrator._publish_status` | ★ all (fan-out) |
+| **PHASE_CHANGE** | `src.server:_boot_factory` | ★ all (fan-out) |
 | **PIPELINE_SNAPSHOT** | `src.issue_store:IssueStore._flush_pipeline_snapshot` | ★ all (fan-out) |
 | **PIPELINE_STATS** | `src.orchestrator:HydraFlowOrchestrator.emit_pipeline_stats` | ★ all (fan-out) |
 | **PLANNER_UPDATE** | `src.planner:PlannerRunner._emit_status` | ★ all (fan-out) |

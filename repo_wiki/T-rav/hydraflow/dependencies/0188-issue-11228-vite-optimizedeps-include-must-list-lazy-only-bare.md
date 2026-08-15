@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 11228
 source_phase: plan
 created_at: 2026-08-15T07:17:21.034753+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Vite optimizeDeps.include must list lazy-only bare packages in src/ui
