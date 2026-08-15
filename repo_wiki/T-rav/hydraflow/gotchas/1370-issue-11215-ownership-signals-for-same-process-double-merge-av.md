@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11215
 source_phase: plan
 created_at: 2026-08-15T05:13:01.079657+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Ownership signals for same-process double-merge avoidance

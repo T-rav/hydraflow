@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T05:19:55.901763+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2296
+superseded_by: 2535
 ---
 
 # Widen check #6 --diff-filter to DMR; M alone lets renames flip verdicts
