@@ -1363,6 +1363,10 @@ class TestParseIssueFromBranch:
             "feat/slug-without-issue",
             "issue-abc",
             "random/branch-name",
+            # #11182: auto-agent lookalikes — suffix must be digits only.
+            "agent/auto-agent-88-x",
+            "agent/auto-agent-x",
+            "auto-agent-88",  # bare — prefix must carry the agent/ scope
         ],
     )
     def test_unparseable_returns_none(self, branch: str | None) -> None:
@@ -1708,6 +1712,65 @@ class TestCollectOrphanedWorktrees:
             count = await loop._collect_orphaned_worktrees()
         assert count == 0
         assert removed == []
+        # The attribution contract itself: the auto-agent branch must route
+        # through the attributed guard, not the unattributed reap-if-empty
+        # path — pin that the guard was consulted for the parsed issue.
+        loop._is_safe_to_gc.assert_awaited_once_with(88)
+
+    @pytest.mark.asyncio
+    async def test_reap_preserves_unrelated_branch_entry_for_same_issue(
+        self, tmp_path: Path
+    ) -> None:
+        """Reaping a worktree in one namespace must NOT evict a tracked
+        ``active_branches`` entry naming a *different*, still-live branch
+        for the same issue (#11182) — the same cross-namespace aliasing
+        guard phase 3 carries.
+        """
+        root = tmp_path / "roots"
+        wt = root / "auto-agent"
+        wt.mkdir(parents=True)
+        loop, state, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        state.set_branch(99, "agent/issue-99")  # live impl branch, tracked
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        loop._get_issue_state = AsyncMock(return_value="closed")
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/agent/auto-agent-99\n"
+        removed: list[str] = []
+        deleted: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(
+                worktrees=porcelain, removed=removed, deleted_branches=deleted
+            ),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 1
+        assert deleted == ["agent/auto-agent-99"]
+        assert state.get_branch(99) == "agent/issue-99"
+
+    @pytest.mark.asyncio
+    async def test_reap_evicts_branch_entry_naming_the_deleted_branch(
+        self, tmp_path: Path
+    ) -> None:
+        """When the tracked entry names the branch just reaped, it IS evicted
+        — the aliasing guard must not turn into permanent retention."""
+        root = tmp_path / "roots"
+        wt = root / "impl"
+        wt.mkdir(parents=True)
+        loop, state, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        state.set_branch(99, "agent/issue-99")  # tracked entry == reaped branch
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        loop._get_issue_state = AsyncMock(return_value="closed")
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/agent/issue-99\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 1
+        assert state.get_branch(99) is None
 
     @pytest.mark.asyncio
     async def test_reaps_unparseable_only_when_provably_empty(

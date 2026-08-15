@@ -710,5 +710,12 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 )
         if issue_number is not None:
             self._state.remove_workspace(issue_number)
-            self._state.remove_branch(issue_number)
+            # Cross-namespace aliasing guard (same as phase 3, #11182): the
+            # tracked ``active_branches`` entry may name a *different*,
+            # still-live branch for this issue — only evict it when it
+            # matches the branch just deleted.
+            if branch and (
+                self._state.get_active_branches().get(issue_number) == branch
+            ):
+                self._state.remove_branch(issue_number)
         logger.info("GC: reaped orphan worktree %s (branch %s)", path, branch)

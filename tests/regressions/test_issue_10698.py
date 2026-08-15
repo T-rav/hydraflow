@@ -50,6 +50,10 @@ def test_parses_issue_number_across_all_namespaces(branch: str, expected: int) -
         "fix/no-trailing-number",
         "feat/plain-slug",
         "some-random-branch",
+        # #11182: auto-agent lookalikes — suffix must be digits only.
+        "agent/auto-agent-10698-x",
+        "agent/auto-agent-x",
+        "auto-agent-10698",
     ],
 )
 def test_non_issue_branches_are_fail_closed_none(branch) -> None:
