@@ -18,12 +18,11 @@ Neither path skips when a pinned ADR moves off ``Accepted``/``Proposed``
 superseded pin still tries to assert real drift and gets a plain assertion
 failure instead of a graceful retirement.
 
-This is the exact convention violation #11180 flagged in
-``test_issue_10440.py`` — see the ``adr-drift-regression-test-conventions``
-wiki entry: ADR-drift regression pins must resolve ADRs by number through
-``ADRIndex`` and self-retire (skip/return early) when the target is absent,
-renumbered, or not live, so routine ADR maintenance doesn't redden an
-unrelated PR.
+This mirrors the self-retiring convention ``tests/regressions/test_issue_9176.py``
+(#9176) already established for ADR-drift regression pins: resolve each ADR
+by number through ``ADRIndex`` and self-retire (skip/return early) when the
+target is absent, renumbered, or not live, so routine ADR maintenance
+doesn't redden an unrelated PR.
 
 This meta-guard proves both the defect and the fix without stubbing
 anything: it copies the real pin module into a throwaway repo tree whose
