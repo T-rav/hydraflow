@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
-from config import Credentials, HydraFlowConfig
+from config import AUTO_AGENT_BRANCH_PREFIX, Credentials, HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
 from state import StateTracker
 from subprocess_util import run_subprocess
@@ -109,7 +109,8 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             )
             collected += orphan_count
 
-        # Phase 3: delete orphaned agent/issue-* local branches
+        # Phase 3: delete orphaned local branches across every issue-branch
+        # namespace (agent/issue-*, agent/auto-agent-*, fix|feat|.../*-N)
         if not self._stop_event.is_set():
             branch_count = await self._collect_orphaned_branches(
                 _MAX_GC_PER_CYCLE - collected
@@ -341,11 +342,15 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         return collected
 
     # Real branch namespaces the pipeline and sub-agents create. Matches
-    # ``issue-<N>`` / ``agent/issue-<N>`` and the trailing ``-<N>`` suffix on
-    # ``fix|feat|refactor|chore|test|docs/<slug>-<N>`` branches (#10698).
+    # ``issue-<N>`` / ``agent/issue-<N>``, the trailing ``-<N>`` suffix on
+    # ``fix|feat|refactor|chore|test|docs/<slug>-<N>`` branches (#10698), and
+    # Auto-Agent (preflight) session branches, ``agent/auto-agent-<N>``
+    # (#11182) — minted by ``AutoAgentPreflightLoop._resolve_worktree`` via
+    # ``HydraFlowConfig.auto_agent_branch_for_issue``.
     _ISSUE_BRANCH_RES: tuple[re.Pattern[str], ...] = (
         re.compile(r"^(?:agent/)?issue-(\d+)$"),
         re.compile(r"^(?:fix|feat|refactor|chore|test|docs)/.*-(\d+)$"),
+        re.compile(rf"^{re.escape(AUTO_AGENT_BRANCH_PREFIX)}(\d+)$"),
     )
 
     @classmethod
@@ -367,7 +372,8 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
     async def _collect_orphaned_branches(self, budget: int = _MAX_GC_PER_CYCLE) -> int:
         """Delete local orphaned branches with no corresponding worktree.
 
-        Covers every real branch namespace (``agent/issue-<N>`` plus
+        Covers every real branch namespace (``agent/issue-<N>``,
+        ``agent/auto-agent-<N>`` (#11182), and
         ``fix|feat|refactor|chore|test|docs/<slug>-<N>``) — not just
         ``agent/issue-*`` (#10698) — with the same skip guards as before.
         """

@@ -1311,6 +1311,7 @@ class TestParseIssueFromBranch:
             ("issue-42", 42),
             ("agent/issue-42", 42),
             ("refs/heads/agent/issue-42", 42),
+            ("agent/auto-agent-88", 88),  # #11182: Auto-Agent session branches
             ("fix/broaden-gc-coverage-10698", 10698),
             ("feat/operator-console-shell-10556", 10556),
             ("refactor/extract-thing-777", 777),

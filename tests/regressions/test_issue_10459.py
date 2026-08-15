@@ -118,8 +118,15 @@ class TestActiveAutoAgentWorktreePreserved:
     async def test_orphan_branch_skipped_for_active_auto_agent(
         self, tmp_path: Path
     ) -> None:
-        """Phase 3 (orphan agent/issue-* branch deletion) must honour the same
-        auto-agent retry-window guard, or it deletes the session's branch."""
+        """Phase 3 (orphan branch deletion) must honour the same auto-agent
+        retry-window guard, or it deletes the session's branch.
+
+        Uses the real Auto-Agent branch name (``agent/auto-agent-<N>``, minted
+        by ``AutoAgentPreflightLoop._resolve_worktree``) — a fabricated
+        ``agent/issue-<N>`` name here would pass regardless of whether the
+        guard is reachable, since that namespace was never in-flight for an
+        auto-agent session in the first place (#11182).
+        """
         loop, state = _make_loop(tmp_path)
         state.bump_auto_agent_attempts(88)  # in-flight auto-agent session
         # Restore the real method (the test factory stubs it out).
@@ -127,14 +134,54 @@ class TestActiveAutoAgentWorktreePreserved:
             WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
         )  # type: ignore[method-assign]
 
+        # The branch must actually be attributed to #88 for the guard below
+        # to be reachable at all — pin that separately from the outward
+        # skip-count assertion, which a fail-closed "unparseable" skip would
+        # satisfy just as well.
+        assert WorkspaceGCLoop._parse_issue_from_branch("agent/auto-agent-88") == 88
+
         with patch(
             "workspace_gc_loop.run_subprocess", new_callable=AsyncMock
         ) as run_sub:
-            run_sub.return_value = "  agent/issue-88\n"
+            run_sub.return_value = "  agent/auto-agent-88\n"
             count = await loop._collect_orphaned_branches()
 
         assert count == 0
         assert run_sub.await_count == 1  # only the list call; no delete
+
+    @pytest.mark.asyncio
+    async def test_orphan_branch_deleted_for_stale_auto_agent_session(
+        self, tmp_path: Path
+    ) -> None:
+        """A stale (no longer in-flight) ``agent/auto-agent-<N>`` branch must
+        actually be reaped by phase 3.
+
+        Before #11182, ``_parse_issue_from_branch`` never matched this
+        namespace, so the branch was invisible to phase 3 regardless of the
+        guard — an orphaned Auto-Agent branch leaked forever instead of being
+        collected once its session ended.
+        """
+        loop, _state = _make_loop(tmp_path)
+        loop._collect_orphaned_branches = (
+            WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
+        )  # type: ignore[method-assign]
+
+        with patch(
+            "workspace_gc_loop.run_subprocess", new_callable=AsyncMock
+        ) as run_sub:
+            run_sub.side_effect = ["  agent/auto-agent-89\n", ""]
+            count = await loop._collect_orphaned_branches()
+
+        assert count == 1
+        assert run_sub.await_count == 2  # list + delete
+        run_sub.assert_any_call(
+            "git",
+            "branch",
+            "-D",
+            "agent/auto-agent-89",
+            cwd=loop._config.repo_root,
+            gh_token=loop._credentials.gh_token,
+        )
 
 
 class TestInRetryWindowHelper:

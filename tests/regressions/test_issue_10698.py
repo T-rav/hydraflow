@@ -25,6 +25,7 @@ parse = WorkspaceGCLoop._parse_issue_from_branch
         # factory-native (must still work — no behaviour change)
         ("issue-10698", 10698),
         ("agent/issue-10698", 10698),
+        ("agent/auto-agent-10698", 10698),  # #11182: Auto-Agent session branches
         # the namespaces the defect missed
         ("fix/workspace-gc-all-roots-10698", 10698),
         ("feat/operator-console-shell-10556", 10556),
