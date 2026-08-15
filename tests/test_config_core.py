@@ -384,6 +384,31 @@ class TestBranchForIssue:
         assert cfg.branch_for_issue(99999) == "agent/issue-99999"
 
 
+class TestAutoAgentBranchForIssue:
+    """#11182: Auto-Agent (preflight) session branch naming, centralized
+
+    alongside ``branch_for_issue`` so the minting site
+    (``AutoAgentPreflightLoop._resolve_worktree``), the dependabot-merge
+    shepherd match, and the GC branch parser share one definition.
+    """
+
+    def test_returns_auto_agent_branch_name(self, tmp_path: Path) -> None:
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.auto_agent_branch_for_issue(42) == "agent/auto-agent-42"
+
+    def test_distinct_from_branch_for_issue(self, tmp_path: Path) -> None:
+        cfg = HydraFlowConfig(
+            repo_root=tmp_path,
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "s.json",
+        )
+        assert cfg.auto_agent_branch_for_issue(42) != cfg.branch_for_issue(42)
+
+
 class TestWorktreePathForIssue:
     def test_returns_path_under_workspace_base(self, tmp_path: Path) -> None:
         cfg = HydraFlowConfig(
