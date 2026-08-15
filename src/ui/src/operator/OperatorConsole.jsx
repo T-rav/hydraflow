@@ -28,7 +28,7 @@
  * `useTokens()` — no inline literals, no hardcoded hex.
  */
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useHydraFlowSocket } from '../hooks/useHydraFlowSocket'
 import { ThemeProvider, useTokens } from '../styles/primitives'
 import { useThemeMode } from './useThemeMode'
@@ -249,7 +249,12 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
   const paused = vitals?.factory?.state === 'paused'
   // An idle repo has no active work and nothing drilled into — show the calm
   // idle screen in the detail area (the hero/vitals stay visible).
-  const idle = activeCount === 0 && item == null && !showOverview
+  // Instruments mode is exempt (#11203 review): it shows GLOBAL diagnostics
+  // (noise floors, loop control register, judge calibration) that matter
+  // precisely when the pipeline is quiet — pre-promotion these panels were
+  // always visible in the rail, so gating them behind idle would regress.
+  const idle =
+    activeCount === 0 && item == null && !showOverview && mode !== 'instruments'
   // Focus mode (a single ItemWorkspace) claims the full detail width (#8): the
   // detail area spans both grid columns. All-active / overview / idle keep the
   // vitals column beside the detail row.
@@ -355,8 +360,24 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
  * behind the `?console=operator` / toggle cutover flag (Task 10); the classic
  * dashboard remains the default until parity is human-verified.
  */
+// One-second wall-clock tick. The view previously defaulted `now` to a bare
+// `Date.now()` PARAMETER DEFAULT, so every render — and the WS context
+// re-renders this tree on every event — produced a fresh `now`, invalidating
+// the `toTimeline`/`uptime` useMemos and re-deriving the O(MAX_EVENTS)
+// timeline transform per render (#100 slowness investigation). A 1s state
+// tick keeps `now` referentially stable between ticks.
+function useNowTick(intervalMs = 1000) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs)
+    return () => clearInterval(id)
+  }, [intervalMs])
+  return now
+}
+
 export function OperatorConsole() {
   const socket = useHydraFlowSocket()
+  const now = useNowTick()
   // Cost feed (#10785): polls the repo + per-repo cost-per-model rollup on its
   // own pinned cadence (aborted in-flight on unmount), independent of the WS
   // slice the shell otherwise renders from.
@@ -378,7 +399,7 @@ export function OperatorConsole() {
   // the escape ledger) on its own pinned cadence (aborted in-flight on unmount),
   // independent of the WS slice.
   const calibration = useJudgeCalibration()
-  return <OperatorConsoleView socket={socket} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} />
+  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} />
 }
 
 export default OperatorConsole

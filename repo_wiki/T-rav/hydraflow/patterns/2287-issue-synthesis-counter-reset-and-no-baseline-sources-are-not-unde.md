@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:09.958810+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2171
+superseded_by: 2407
 ---
 
 # Counter-reset and no-baseline sources are not under-sampled

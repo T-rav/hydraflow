@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:09.663035+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2084
+superseded_by: 2320
 ---
 
 # ADR-drift threshold configs must thread to both auditor call sites

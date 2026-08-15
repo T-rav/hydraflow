@@ -208,5 +208,5 @@ source = ["src"]
 omit = ["tests/*", "*/__init__.py", "venv/*", ".venv/*", "templates/*"]
 
 [tool.coverage.report]
-fail_under = 90.6
+fail_under = 91.3
 show_missing = true

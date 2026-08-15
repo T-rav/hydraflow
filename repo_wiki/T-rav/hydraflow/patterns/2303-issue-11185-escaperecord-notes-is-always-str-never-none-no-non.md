@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11185
 source_phase: review
 created_at: 2026-08-15T03:31:43.632107+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11185 closed
 ---
 
 # EscapeRecord.notes is always str (never None) — no None-guard needed
