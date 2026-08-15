@@ -6,9 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
-- `0434348` — Fixes #11211: Per-project model/harness selection: run claude and g... (#11233) (#11233) *(2026-08-15)*
-- `6c8b9ba` — feat(ul): edge-proposer — 2 new edges across 2 terms (#11226) (#11226) *(2026-08-15)*
+- `25dc931` — rc: merge main back into rc/2026-08-15-1628 (#11216 manual bridge) *(2026-08-15)*
+- `54e0906` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-15)*
 - `bc0a457` — rc: merge main back into rc/2026-08-15-1023 (#11216 manual bridge) *(2026-08-15)*
+- `66b3cff` — Fixes #11208: make factory should auto-start the orchestrator (#11257) (#11257) *(2026-08-15)*
 - `0434348` — Fixes #11211: Per-project model/harness selection: run claude and g... (#11233) (#11233) *(2026-08-15)*
 - `f65da66` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-15)*
 - `a546050` — rc: merge main back into rc/2026-08-15-0623 (resolves promotion conflict; #11216 manual bridge) *(2026-08-15)*
