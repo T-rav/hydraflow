@@ -1428,6 +1428,28 @@ class TestBuildMounts:
             "mode": "rw",
         }
 
+    def test_harness_routed_suppresses_claude_mounts(self, tmp_path: Path) -> None:
+        """#11263 review find + the suppress-claude-mounts pattern (#10600):
+        a harness-routed spawn must NOT mount the host OAuth session — the
+        CLI can prefer it over the injected AUTH_TOKEN and silently bill
+        the exhausted native account. The flag is part of the mount-cache
+        key so a native spawn right after gets its mounts back."""
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True, exist_ok=True)
+        (home / ".claude.json").write_text("{}")
+        runner, _ = _make_runner(log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        with patch("docker_runner.Path.home", return_value=home):
+            harness = runner._build_mounts(None, harness_routed=True)
+            native = runner._build_mounts(None)
+
+        assert str(home / ".claude") not in harness
+        assert str(home / ".claude.json") not in harness
+        # Cache-key transition: the SAME runner serves the full set natively.
+        assert str(home / ".claude") in native
+        assert str(home / ".claude.json") in native
+
     def test_skips_claude_json_when_absent(self, tmp_path: Path) -> None:
         home = tmp_path / "home"
         home.mkdir(parents=True, exist_ok=True)

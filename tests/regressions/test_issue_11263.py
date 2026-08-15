@@ -100,3 +100,16 @@ async def test_host_runner_merges_harness_env_over_env(monkeypatch) -> None:
     assert env["ANTHROPIC_BASE_URL"] == _HARNESS["ANTHROPIC_BASE_URL"]
     assert env["ANTHROPIC_API_KEY"] == ""  # override wins over the native key
     assert env["PATH"] == "/usr/bin"  # base env preserved
+
+
+async def test_mockworld_fake_records_harness_env() -> None:
+    """The air-gapped fake must record the override so scenarios can assert
+    backend routing without spawning (review find: recording was inert)."""
+    from mockworld.fakes.fake_docker import FakeDocker
+    from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
+
+    docker = FakeDocker()
+    docker.script_run([])  # one scripted empty run for the fake spawn
+    fake = FakeSubprocessRunner(docker=docker)
+    await fake.create_streaming_process(["claude", "-p"], harness_env=dict(_HARNESS))
+    assert fake.last_harness_env == _HARNESS
