@@ -128,6 +128,15 @@ def _make_prs(
     prs.create_issue = AsyncMock(return_value=issue)
     prs.get_issue_state = AsyncMock(return_value=state)
     prs.get_issue_labels = AsyncMock(return_value=labels or [])
+    # The adjudication path (``_apply_adjudication``) awaits the PR-side
+    # mutations that dispose of a filed finding — comment, label, and (for a
+    # refuted finding) close. These are async on the real ``PrManager`` port, so
+    # the fakes must be ``AsyncMock`` too; a bare ``MagicMock`` returns a
+    # non-awaitable, which ``reraise_on_credit_or_bug`` re-raises as a likely
+    # bug (``TypeError``) instead of letting the success path run.
+    prs.post_comment = AsyncMock(return_value=None)
+    prs.add_labels = AsyncMock(return_value=None)
+    prs.close_issue = AsyncMock(return_value=None)
     return prs
 
 
