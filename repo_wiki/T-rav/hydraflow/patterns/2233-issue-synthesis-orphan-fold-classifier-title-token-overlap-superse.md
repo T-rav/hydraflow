@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:09.771673+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2117
+superseded_by: 2353
 ---
 
 # Orphan-fold classifier: title-token overlap + supersedes count >=2

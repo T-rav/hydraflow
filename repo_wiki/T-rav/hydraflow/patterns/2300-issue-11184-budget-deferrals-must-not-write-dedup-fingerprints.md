@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11184
 source_phase: plan
 created_at: 2026-08-14T23:44:16.701452+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2420
 ---
 
 # Budget deferrals must not write dedup fingerprints or mark rollups handled

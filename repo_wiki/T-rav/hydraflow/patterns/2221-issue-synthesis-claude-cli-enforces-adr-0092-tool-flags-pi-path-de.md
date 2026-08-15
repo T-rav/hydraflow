@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T01:03:09.732236+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2105
+superseded_by: 2341
 ---
 
 # claude CLI enforces ADR-0092 tool flags; pi path degrades to prose
