@@ -110,6 +110,11 @@ def extract_referenced_shas(text: str, *, exclude: str = "") -> list[str]:
     return seen
 
 
+def regression_pins_added(added_paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Return every NEW file in *added_paths* under ``tests/regressions/``."""
+    return tuple(p for p in added_paths if p.startswith(_REGRESSION_DIR))
+
+
 def adds_regression_pin(added_paths: tuple[str, ...]) -> bool:
     """True when this commit adds a NEW file under ``tests/regressions/``."""
-    return any(p.startswith(_REGRESSION_DIR) for p in added_paths)
+    return bool(regression_pins_added(added_paths))

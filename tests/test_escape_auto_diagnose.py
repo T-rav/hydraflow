@@ -128,6 +128,34 @@ def _commit_bug_fix(repo: Path, issue: int) -> str:
     return _head(repo)
 
 
+def _commit_self_pin(repo: Path, filename: str) -> str:
+    """A single commit that adds its OWN regression pin and names no issue/PR
+    — the zero-needle case ``regression_hits`` cannot resolve via grep."""
+    reg = repo / "tests" / "regressions"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / filename).write_text("def test_bug(): pass\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "test: pin regression for a live failure")
+    return _head(repo)
+
+
+def _pin_row(detection_ref: str) -> EscapeRecord:
+    return EscapeRecord(
+        id=f"regression-pin:{detection_ref}",
+        detected_at="2026-01-01T00:00:00+00:00",
+        detection_source="regression-pin",
+        detection_ref=detection_ref,
+        originating_pr=None,
+        originating_merge_sha="",
+        merged_at="",
+        time_to_detection_hours=None,
+        attribution_method="regression-pin",
+        attribution_confidence="medium",
+        encoded_as="none-yet",
+        notes="Adds a tests/regressions/ pin for a post-merge failure.",
+    )
+
+
 def _bug_row(detection_ref: str, issue: int) -> EscapeRecord:
     return EscapeRecord(
         id=f"bug-issue:{detection_ref}",
@@ -211,6 +239,29 @@ class TestEscapeAutoDiagnoser:
         assert resolved.attribution_confidence == "high"
         assert resolved.encoded_as == "regression-test"
         assert "auto-diagnose" in resolved.notes.lower()
+
+    async def test_self_added_pin_records_real_path_not_placeholder(
+        self, tmp_path: Path
+    ) -> None:
+        # #11178: the detecting commit adding its OWN regression pin, with no
+        # issue ref and no originating sha (the zero-needle case
+        # `regression_hits` cannot grep its way to), used to record a
+        # placeholder string instead of the real evidence path.
+        repo = _init_repo(tmp_path)
+        sha = _commit_self_pin(repo, "test_live_failure.py")
+
+        prs = AsyncMock()
+        prs.get_issue_labels = AsyncMock(return_value=[])
+        diagnoser, ledger_path = self._diagnoser(repo, tmp_path, prs)
+        record = _pin_row(sha)
+        EscapeLedger(ledger_path).append(record)
+
+        verdict = await diagnoser.diagnose(record)
+
+        assert verdict is EscapeDiagnosis.RESOLVED_ENCODED
+        resolved = EscapeLedger(ledger_path).read_latest()[0]
+        assert "tests/regressions/test_live_failure.py" in resolved.notes
+        assert "<detecting-commit-regression-pin>" not in resolved.notes
 
     async def test_false_positive_non_bug_label_dismisses_without_ledger_mutation(
         self, tmp_path: Path
@@ -309,6 +360,25 @@ class TestEscapeAutoDiagnoser:
         assert second is EscapeDiagnosis.DISMISSED
         diag = EscapeDiagnosisLedger(tmp_path / "escape_diagnoses.jsonl").read_all()
         assert len(diag) == 1
+
+    async def test_unreadable_detecting_commit_stays_inconclusive(
+        self, tmp_path: Path
+    ) -> None:
+        # `_trace_commit` falls back to `()` pin paths (never a crash) when
+        # the detecting commit's sha can't be read from the repo.
+        repo = _init_repo(tmp_path)
+
+        prs = AsyncMock()
+        prs.get_issue_labels = AsyncMock(return_value=[])
+        diagnoser, ledger_path = self._diagnoser(repo, tmp_path, prs)
+        record = _pin_row("0" * 40)
+        EscapeLedger(ledger_path).append(record)
+
+        verdict = await diagnoser.diagnose(record)
+
+        assert verdict is EscapeDiagnosis.INCONCLUSIVE
+        rows = EscapeLedger(ledger_path).read_all()
+        assert len(rows) == 1 and rows[0].encoded_as == "none-yet"
 
 
 class TestEscapeDiagnosisLedger:

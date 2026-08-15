@@ -441,12 +441,10 @@ class EscapeAutoDiagnoser:
 
     async def _gather(self, record: EscapeRecord) -> DiagnosisEvidence:
         """Trace the detecting commit → referenced bug → regression encoding."""
-        issue_ref, shas, added_pin = self._trace_commit(record)
-        paths: tuple[str, ...] = ()
-        if added_pin:
-            paths = ("<detecting-commit-regression-pin>",)
-        else:
-            paths = regression_hits(self._repo_root, issue_ref=issue_ref, shas=shas)
+        issue_ref, shas, pin_paths = self._trace_commit(record)
+        paths = pin_paths or regression_hits(
+            self._repo_root, issue_ref=issue_ref, shas=shas
+        )
         labels = await self._issue_labels(issue_ref)
         return DiagnosisEvidence(
             escape_id=record.id,
@@ -457,28 +455,30 @@ class EscapeAutoDiagnoser:
 
     def _trace_commit(
         self, record: EscapeRecord
-    ) -> tuple[int | None, tuple[str, ...], bool]:
-        """Return (referenced_issue, introducing_shas, detecting_commit_added_pin).
+    ) -> tuple[int | None, tuple[str, ...], tuple[str, ...]]:
+        """Return (referenced_issue, introducing_shas, detecting_commit_pin_paths).
 
         Re-reads the detecting ``detection_ref`` commit to recover the bug it
-        closed (``Fixes #N``) and any introducing sha it named, plus whether the
-        commit added its own ``tests/regressions/`` pin. Falls back to the
-        already-recorded ``originating_merge_sha`` when the commit can't be read.
+        closed (``Fixes #N``), any introducing sha it named, and the real
+        ``tests/regressions/`` paths it added itself (if any) — this is the
+        zero-needle evidence path for rows with no issue ref and no
+        originating sha (#11178). Falls back to the already-recorded
+        ``originating_merge_sha`` when the commit can't be read.
         """
         commit = commit_info_for_sha(self._repo_root, record.detection_ref)
         introducing: list[str] = []
         if record.originating_merge_sha:
             introducing.append(record.originating_merge_sha)
         if commit is None:
-            return record.originating_pr, tuple(introducing), False
+            return record.originating_pr, tuple(introducing), ()
         text = f"{commit.subject}\n{commit.body}"
         fixes = attribution.extract_fixes_refs(text)
         issue_ref = fixes[0] if fixes else record.originating_pr
         for sha in attribution.extract_referenced_shas(commit.body, exclude=commit.sha):
             if sha not in introducing:
                 introducing.append(sha)
-        added_pin = attribution.adds_regression_pin(commit.added_paths)
-        return issue_ref, tuple(introducing), added_pin
+        pin_paths = attribution.regression_pins_added(commit.added_paths)
+        return issue_ref, tuple(introducing), pin_paths
 
     async def _issue_labels(self, issue_ref: int | None) -> tuple[str, ...] | None:
         """Referenced-issue labels via the PRPort, or ``None`` on no ref/failure.

@@ -30,6 +30,7 @@ from escape_ledger_loop import (
     EscapeLedgerLoop,
     _current_head_sha,
     _render_finding,
+    _resolution_comment,
     answered_surfacings,
     select_findings_to_surface,
     surfacing_fingerprint,
@@ -371,6 +372,43 @@ class TestRenderFinding:
         # also have a remediation block, or a new reason silently falls back
         # to the wrong (aging) instructions.
         assert set(_SURFACE_REASON_REMEDIATION) == set(_SURFACE_REASON_TEXT)
+
+
+class TestResolutionComment:
+    def test_aging_reason_names_the_recorded_notes(self) -> None:
+        # #11178: the aging close comment used to name only encoded_as,
+        # discarding the actual evidence (e.g. a regression-test path)
+        # recorded in the ledger's notes field.
+        record = _record(
+            "regression-pin:7fb2ed07e756",
+            confidence="high",
+            encoded_as="regression-test",
+            notes="auto-diagnose (ADR-0115): regression-pin escape "
+            "`7fb2ed07e756` is a real bug, already regression-encoded "
+            "(tests/regressions/test_issue_11178.py); recorded at high "
+            "confidence.",
+        )
+        comment = _resolution_comment(record, SURFACE_REASON_AGING)
+        assert "encoded as `regression-test`" in comment
+        assert "tests/regressions/test_issue_11178.py" in comment
+
+    def test_aging_reason_without_notes_names_only_the_encoding(self) -> None:
+        record = _record(
+            "bug-issue:x", confidence="high", encoded_as="regression-test", notes=""
+        )
+        comment = _resolution_comment(record, SURFACE_REASON_AGING)
+        assert "encoded as `regression-test`" in comment
+        assert comment.count("—") == 1
+
+    def test_low_confidence_reason_is_unaffected_by_notes(self) -> None:
+        record = _record(
+            "bug-issue:x",
+            confidence="high",
+            notes="evidence that must not leak into this reason's comment",
+        )
+        comment = _resolution_comment(record, SURFACE_REASON_LOW_CONFIDENCE)
+        assert "attribution confidence is now `high`" in comment
+        assert "evidence that must not leak" not in comment
 
 
 class TestFindingRateBudget:
