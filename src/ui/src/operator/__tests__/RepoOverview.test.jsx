@@ -98,6 +98,14 @@ describe('RepoOverview', () => {
     expect(screen.getByTestId('repo-activity-acme/app')).toHaveTextContent('12:00:02')
   })
 
+  it('shows a backend badge when a repo is not on the default claude provider', () => {
+    const repos = makeRepos()
+    repos[1].provider = 'zai'
+    render(<RepoOverview repos={repos} select={() => {}} />)
+    expect(screen.getByTestId('repo-backend-acme/lib')).toHaveTextContent('GLM')
+    expect(screen.queryByTestId('repo-backend-acme/app')).toBeNull()
+  })
+
   it('calls select("repo", slug) when a row is clicked', () => {
     const select = vi.fn()
     render(<RepoOverview repos={makeRepos()} select={select} />)
@@ -210,5 +218,14 @@ describe('buildRepoSummaries', () => {
   it('returns an empty list when there are no supervised repos', () => {
     expect(buildRepoSummaries({})).toEqual([])
     expect(buildRepoSummaries({ supervisedRepos: [] })).toEqual([])
+  })
+
+  it('reads the resolved backend from the runtime map, defaulting to claude', () => {
+    const [app, lib] = buildRepoSummaries(makeSocket({
+      runtimes: [{ slug: 'acme/app', running: true, provider: 'zai' }],
+    }))
+    expect(app.provider).toBe('zai')
+    // acme/lib has no runtime entry in the fixture — falls back to 'claude'.
+    expect(lib.provider).toBe('claude')
   })
 })

@@ -202,6 +202,10 @@ SETTINGS: dict[str, SettingSpec] = {
     "term_proposer_provider": SettingSpec("Model Routing", live=True, order=60),
     "term_proposer_model": SettingSpec("Model Routing", live=True, order=61),
     "background_model": SettingSpec("Models", live=True, order=3),
+    # --- Repo Backend (per-repo model/harness override, #11211) -----------
+    # Live: repo_backend.apply_repo_provider re-reads both at every spawn.
+    "repo_provider": SettingSpec("Model Routing", live=True, order=70),
+    "repo_model": SettingSpec("Model Routing", live=True, order=71),
     # --- Issue Refinement (backlog dedup + priority scoring, #9957) ----------
     "issue_refinement_enabled": SettingSpec("Issue Refinement", live=True, order=0),
     "issue_refinement_pair_budget": SettingSpec("Issue Refinement", live=True, order=1),

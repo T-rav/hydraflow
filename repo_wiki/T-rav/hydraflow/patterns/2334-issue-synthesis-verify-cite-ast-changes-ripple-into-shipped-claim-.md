@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T05:19:55.636645+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2214
+superseded_by: 2454
 ---
 
 # verify_cite_ast changes ripple into _shipped_claim_corroborated

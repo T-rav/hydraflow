@@ -57,6 +57,9 @@ export function buildRepoSummaries(socket = {}) {
     const canonical = canonicalRepoSlug(rawSlug)
     const runtime = runtimeMap.get(canonical)
     const running = Boolean(runtime?.running ?? repo.running ?? repo.status === 'running')
+    // Resolved harness backend (config.repo_provider, #11211) — defaults to
+    // 'claude' when the runtime hasn't reported one (e.g. not yet started).
+    const provider = runtime?.provider ?? 'claude'
 
     // Filter the aggregate snapshot down to this repo, then reuse toPipeline.
     const perRepoStages = {}
@@ -91,6 +94,7 @@ export function buildRepoSummaries(socket = {}) {
       attention: { hitl, failed },
       health,
       lastActivity,
+      provider,
     }
   })
 }
@@ -186,8 +190,22 @@ function makeStyles(t) {
       flexShrink: 0,
       background: t.color[HEALTH_COLOR_KEY[health]] ?? t.color.textMuted,
     }),
+    backend: {
+      fontSize: 10,
+      fontWeight: t.type.weight.bold,
+      color: t.color.purple,
+      border: `1px solid ${t.color.purple}`,
+      borderRadius: t.radius.pill,
+      padding: `${t.space.xxs}px ${t.space.sm}px`,
+      background: t.color.purpleSubtle,
+      whiteSpace: 'nowrap',
+      flexShrink: 0,
+    },
   }
 }
+
+// Non-default repo_provider values -> the operator-facing badge label.
+const BACKEND_LABEL = { zai: 'GLM' }
 
 // Short mini-pipeline labels, in lifecycle order.
 const MINI_LABEL = {
@@ -256,6 +274,16 @@ export function RepoOverview({ repos = [], select = () => {} }) {
                 title={`${repo.attention?.hitl ?? 0} HITL · ${repo.attention?.failed ?? 0} failed`}
               >
                 needs you {attentionTotal}
+              </span>
+            )}
+
+            {BACKEND_LABEL[repo.provider] && (
+              <span
+                data-testid={`repo-backend-${repo.slug}`}
+                style={styles.backend}
+                title={`harness backend: ${repo.provider}`}
+              >
+                {BACKEND_LABEL[repo.provider]}
               </span>
             )}
 

@@ -2476,11 +2476,12 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=20,
         description=(
-            "Max open ADR-drift rollups AdrDriftResolverLoop triages "
-            "(spends an LLM call on) in one tick (#9976). Overflow "
-            "candidates are simply retried next tick — no carryover "
-            "bookkeeping needed since the candidate set is re-derived from "
-            "state each tick."
+            "Max LLM triage calls AdrDriftResolverLoop attempts in one tick "
+            "(#9976) — every call ATTEMPTED counts against this budget, "
+            "including one that errors, not just successful triages "
+            "(#11181). Overflow candidates are simply retried next tick — "
+            "no carryover bookkeeping needed since the candidate set is "
+            "re-derived from state each tick."
         ),
     )
 
@@ -2776,6 +2777,31 @@ class HydraFlowConfig(BaseModel):
             "Model applied to every maintenance loop when set (e.g. 'glm-5.2'). "
             "Empty keeps each maintenance role's own model. Only touches the "
             "maintenance role-set, never the work loops."
+        ),
+    )
+    # Per-repo harness/backend override (#11211): lets an operator run this
+    # repo's factory work on GLM while another repo (a different HydraFlowConfig
+    # instance — one per registered repo, see repo_store.py) stays on Claude.
+    # Applied at spawn time by repo_backend.apply_repo_provider, layered UNDER
+    # any explicit per-role *_provider dial (which always wins when it has
+    # already routed a role off "claude") and UNDER credit-failover (which only
+    # further reroutes a spawn still resolving to "claude"). Resolution order:
+    # role dial > repo_provider > credit-failover.
+    repo_provider: Literal["claude", "zai"] = Field(
+        default="claude",
+        description=(
+            "Repo-wide harness backend override for this repo's work spawns. "
+            "Set to 'zai' to run this repo on GLM; pair with repo_model. A "
+            "role's own *_provider dial, when explicitly routed off claude, "
+            "always wins over this. Falls back to claude (each role's own "
+            "default) when unset."
+        ),
+    )
+    repo_model: str = Field(
+        default="",
+        description=(
+            "Model used when repo_provider reroutes a spawn to 'zai' (e.g. "
+            "'glm-5.2'). Empty falls back to credit_failover_model."
         ),
     )
     # Credit failover (#10844): when a Claude *work* spawn hits an authoritative
@@ -5857,6 +5883,22 @@ class HydraFlowConfig(BaseModel):
             msg = (
                 f"credit_failover_model must be a glm-* model (got '{v}') — the "
                 "zai harness backend only accepts glm-* models."
+            )
+            raise ValueError(msg)
+        return v
+
+    @field_validator("repo_model")
+    @classmethod
+    def repo_model_must_be_glm_when_set(cls, v: str) -> str:
+        """A non-empty repo_model runs on the zai backend, which requires glm-* (#11211).
+
+        Empty is the "unset — fall back to credit_failover_model" sentinel and
+        is always valid.
+        """
+        if v and not v.startswith("glm"):
+            msg = (
+                f"repo_model must be a glm-* model (got '{v}') — the zai "
+                "harness backend only accepts glm-* models."
             )
             raise ValueError(msg)
         return v

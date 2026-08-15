@@ -193,6 +193,7 @@ cadence and files remediation issues on drift.
 | [0131](0131-spec-intake-gate.md) | Spec intake gate — stress-testing prose before it becomes a setpoint | Proposed |
 | [0132](0132-cognitive-process-constitution.md) | The cognitive-process constitution — the harness as a governor of thought | Proposed |
 | [0133](0133-vitals-methodology-multiplicity-mde-tbe.md) | Vitals methodology — widened-limit multiplicity, published MDE, and time-between-events charts | Proposed |
+| [0134](0134-per-repo-model-harness-selection.md) | Per-repo model/harness selection — run Claude and GLM projects side by side | Accepted |
 
 ## Adding a new ADR
 

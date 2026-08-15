@@ -225,6 +225,11 @@ class ConfigFactory:
         system_model: str = "",
         background_tool: Literal["inherit", "claude", "codex", "pi"] = "inherit",
         background_model: str = "",
+        # Per-repo harness/backend override (#11211): defaults keep every
+        # existing caller on native Claude; tests exercising the repo-wide
+        # dial opt in explicitly.
+        repo_provider: Literal["claude", "zai"] = "claude",
+        repo_model: str = "",
         implementation_tool: Literal["claude", "codex", "pi"] = "claude",
         model: str = "sonnet",
         review_tool: Literal["claude", "codex", "pi"] = "claude",
@@ -486,6 +491,8 @@ class ConfigFactory:
                 system_model=system_model,
                 background_tool=background_tool,
                 background_model=background_model,
+                repo_provider=repo_provider,
+                repo_model=repo_model,
                 implementation_tool=implementation_tool,
                 model=model,
                 review_tool=review_tool,

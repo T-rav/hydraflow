@@ -669,3 +669,231 @@ class TestFleetTriage:
         assert result["fleet_triaged"] == 0
         triage.classify.assert_not_called()
         pr.close_issue.assert_not_called()
+
+    async def test_fleet_batch_success_path_reports_exact_calls_spent(
+        self, loop_env
+    ) -> None:
+        """#11181 — the shared per-tick budget must be gated on the ACTUAL
+        number of classify() calls attempted, not an assumption. On the
+        success path every member is triaged, so the reported calls_spent
+        equals the member count exactly."""
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        triage.classify = AsyncMock(
+            side_effect=[
+                _verdict(DriftClassification.CONSISTENT, rationale="alpha is fine"),
+                _verdict(DriftClassification.CONSISTENT, rationale="beta is fine"),
+            ]
+        )
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+
+        outcome, calls_spent = await loop._triage_fleet_batch(77, 9603, [24, 27])
+
+        assert outcome == "closed"
+        assert calls_spent == 2
+
+    async def test_fleet_batch_open_path_reports_exact_calls_spent(
+        self, loop_env
+    ) -> None:
+        """A mixed-verdict batch ('open', not 'closed') still triages every
+        member — the calls_spent counting is identical to the 'closed'
+        path, only the aggregate outcome differs."""
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        triage.classify = AsyncMock(
+            side_effect=[
+                _verdict(DriftClassification.CONSISTENT, rationale="alpha is fine"),
+                _verdict(
+                    DriftClassification.REAL_DRIFT,
+                    rationale="beta's decision actually changed",
+                    section="Decision",
+                ),
+            ]
+        )
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+
+        outcome, calls_spent = await loop._triage_fleet_batch(77, 9603, [24, 27])
+
+        assert outcome == "open"
+        assert calls_spent == 2
+
+    async def test_fleet_batch_error_on_second_member_reports_two_calls_spent(
+        self, loop_env
+    ) -> None:
+        """A batch that errors on its SECOND member has spent exactly 2 real
+        calls (member 1 succeeded, member 2 errored) — not the full member
+        count and not zero. Callers must use this exact count, not
+        ``len(adr_numbers)``, to keep the shared budget accurate."""
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        triage.classify = AsyncMock(
+            side_effect=[
+                _verdict(DriftClassification.CONSISTENT, rationale="alpha is fine"),
+                RuntimeError("llm call failed"),
+            ]
+        )
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+
+        outcome, calls_spent = await loop._triage_fleet_batch(77, 9603, [24, 27])
+
+        assert outcome == "error"
+        assert calls_spent == 2
+
+    async def test_fleet_batch_error_on_first_member_reports_one_call_spent(
+        self, loop_env
+    ) -> None:
+        """The error happens on the FIRST member this time — only 1 real
+        call was attempted before the batch bailed out."""
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        triage.classify = AsyncMock(side_effect=RuntimeError("llm call failed"))
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+
+        outcome, calls_spent = await loop._triage_fleet_batch(77, 9603, [24, 27])
+
+        assert outcome == "error"
+        assert calls_spent == 1
+
+    async def test_fleet_batch_skipped_path_reports_zero_calls_spent(
+        self, loop_env
+    ) -> None:
+        """A missing member ADR is validated BEFORE any triage call is
+        spent — the skipped outcome must report zero calls spent."""
+        cfg, state, pr, dedup, idx, triage = self._fleet_env(loop_env)
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+
+        outcome, calls_spent = await loop._triage_fleet_batch(77, 9603, [24, 9999])
+
+        assert outcome == "skipped"
+        assert calls_spent == 0
+        triage.classify.assert_not_called()
+
+
+class TestSharedBudgetAccounting:
+    """#11181 — a fresh adversarial re-audit of #10474 found that
+    ``triaged``/``fleet_triaged`` (success-only counters) undercount the
+    real number of LLM calls spent whenever a triage call errors: the call
+    was still made (a real spend), but only ``errors``/``fleet_errors``
+    bumps, not the success counter. Both the per-ADR loop's own
+    ``>= max_per_tick`` break AND the fleet gate's ``remaining_budget``
+    computation must be driven by calls actually ATTEMPTED (success +
+    error), never by successes alone — otherwise the tick's true call
+    volume can exceed ``adr_drift_resolver_max_triage_per_tick`` without
+    either gate ever noticing."""
+
+    async def test_per_adr_errors_still_count_against_shared_fleet_budget(
+        self, loop_env
+    ) -> None:
+        """The exact escape from #11181: 2 per-ADR candidates both hit a
+        triage-call error (2 real LLM calls spent; ``triaged`` stays 0),
+        then a competing fleet batch needing 1 more call must be DEFERRED —
+        the tick's true call volume (2) already equals max_per_tick (2), so
+        there is no room left, even though ``triaged`` alone would say
+        there was room for 2 more calls."""
+        cfg, state, pr, dedup, idx, triage = loop_env
+        cfg.adr_drift_resolver_max_triage_per_tick = 2
+        adr_dir = Path(cfg.repo_root) / "docs" / "adr"
+        _write_adr(adr_dir, number=27, title="beta", related=["src/runner.py"])
+        state.all_adr_rollups.return_value = {
+            "ADR-0024": {"issue_number": 42, "pr_numbers": [8473]},
+            "ADR-0027": {"issue_number": 43, "pr_numbers": [8474]},
+            "FLEET-9603": {
+                "issue_number": 77,
+                "pr_numbers": [9603],
+                "adr_numbers": [24],
+            },
+        }
+        triage.classify = AsyncMock(
+            side_effect=[
+                RuntimeError("llm call failed"),
+                RuntimeError("llm call failed"),
+                # Only reached if the (buggy) gate wrongly lets the fleet
+                # batch start — kept so a regression fails on clean
+                # assertions below instead of an unhandled StopIteration.
+                _verdict(DriftClassification.CONSISTENT, rationale="fleet member ok"),
+            ]
+        )
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["errors"] == 2
+        assert result["triaged"] == 0
+        assert result["fleet_candidates"] == 1
+        assert result["fleet_triaged"] == 0
+        assert result["fleet_closed"] == 0
+        # Exactly the 2 per-ADR error calls — the fleet batch must never
+        # spend a 3rd call this tick; it's deferred whole to next tick.
+        assert triage.classify.await_count == 2
+        pr.close_issue.assert_not_called()
+
+    async def test_per_adr_loop_stops_at_calls_spent_not_triaged_when_all_error(
+        self, loop_env
+    ) -> None:
+        """3 per-ADR candidates in one tick, max_per_tick=2, all 3 hit a
+        triage-call error. If the loop's own cap were driven by ``triaged``
+        (success-only), it would stay 0 forever and the ``>= max_per_tick``
+        break would never fire — spending 3 real LLM calls against a
+        budget of 2. The loop must stop after exactly 2 attempts."""
+        cfg, state, pr, dedup, idx, triage = loop_env
+        cfg.adr_drift_resolver_max_triage_per_tick = 2
+        adr_dir = Path(cfg.repo_root) / "docs" / "adr"
+        _write_adr(adr_dir, number=27, title="beta", related=["src/runner.py"])
+        _write_adr(adr_dir, number=30, title="gamma", related=["src/state.py"])
+        state.all_adr_rollups.return_value = {
+            "ADR-0024": {"issue_number": 42, "pr_numbers": [8473]},
+            "ADR-0027": {"issue_number": 43, "pr_numbers": [8474]},
+            "ADR-0030": {"issue_number": 44, "pr_numbers": [8475]},
+        }
+        triage.classify = AsyncMock(side_effect=RuntimeError("llm call failed"))
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["errors"] == 2
+        assert result["triaged"] == 0
+        assert triage.classify.await_count == 2
+
+    async def test_fleet_calls_spent_uses_actual_attempted_count_for_next_batch(
+        self, loop_env
+    ) -> None:
+        """A partial-error fleet batch (errors on member 2 of 3) has only
+        spent 2 real calls, not ``len(adr_numbers)`` == 3. A second fleet
+        batch triaged later in the SAME tick must see the budget reduced by
+        the ACTUAL attempted count (2), not the first batch's full member
+        count — with max_per_tick=3, that leaves exactly 1 call of room for
+        a 1-member second batch, which must then proceed and close."""
+        cfg, state, pr, dedup, idx, triage = loop_env
+        cfg.adr_drift_resolver_max_triage_per_tick = 3
+        adr_dir = Path(cfg.repo_root) / "docs" / "adr"
+        _write_adr(adr_dir, number=27, title="beta", related=["src/runner.py"])
+        _write_adr(adr_dir, number=30, title="gamma", related=["src/state.py"])
+        state.all_adr_rollups.return_value = {
+            "FLEET-9603": {
+                "issue_number": 77,
+                "pr_numbers": [9603],
+                "adr_numbers": [24, 27, 30],
+            },
+            "FLEET-9700": {
+                "issue_number": 88,
+                "pr_numbers": [9700],
+                "adr_numbers": [24],
+            },
+        }
+        triage.classify = AsyncMock(
+            side_effect=[
+                _verdict(DriftClassification.CONSISTENT, rationale="alpha is fine"),
+                RuntimeError("llm call failed"),
+                _verdict(DriftClassification.CONSISTENT, rationale="alpha again"),
+            ]
+        )
+        stop = asyncio.Event()
+        loop = _make_loop(loop_env, stop)
+        result = await loop._do_work()
+
+        assert result["fleet_candidates"] == 2
+        assert result["fleet_errors"] == 1
+        assert result["fleet_closed"] == 1
+        assert triage.classify.await_count == 3
+        pr.close_issue.assert_awaited_once_with(88, reason="not planned")

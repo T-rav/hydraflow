@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T03:53:31.806915+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0163
+superseded_by: 0186
 ---
 
 # Baseline YAML drives p-chart limits; golden-window mean is centerline
