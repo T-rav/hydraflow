@@ -392,6 +392,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
 
         active_workspaces = self._state.get_active_workspaces()
         active_issues = set(self._state.get_active_issue_numbers())
+        active_branches = self._state.get_active_branches()
 
         for line in output.strip().splitlines():
             if collected >= budget:
@@ -419,7 +420,14 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                     cwd=self._config.repo_root,
                     gh_token=self._credentials.gh_token,
                 )
-                self._state.remove_branch(issue_number)
+                # Multiple branch namespaces (agent/issue-<N>,
+                # agent/auto-agent-<N>, fix|feat|.../*-N) can share one issue
+                # number (#11182). Only clear the tracked ``active_branches``
+                # entry when the branch just deleted is the one it points at
+                # — otherwise deleting a stale namespace's branch would evict
+                # a live entry for a different, still-existing branch.
+                if active_branches.get(issue_number) == branch:
+                    self._state.remove_branch(issue_number)
                 collected += 1
                 logger.info("GC: deleted orphaned branch %s", branch)
             except Exception as exc:  # noqa: BLE001

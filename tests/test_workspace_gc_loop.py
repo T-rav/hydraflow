@@ -859,6 +859,33 @@ class TestGCRemovesBranchStateOnOrphanedBranchDeletion:
             await loop._collect_orphaned_branches()
         assert state.get_branch(99) is None
 
+    @pytest.mark.asyncio
+    async def test_phase3_preserves_unrelated_branch_entry_for_same_issue(
+        self, tmp_path: Path
+    ) -> None:
+        """Deleting a stale branch in one namespace must NOT evict a tracked
+        ``active_branches`` entry that points at a *different*, still-live
+        branch for the same issue number (#11182).
+
+        Two namespaces (e.g. ``agent/auto-agent-<N>`` and ``agent/issue-<N>``)
+        can share an issue number. If the live ``agent/issue-99`` implement
+        branch is tracked while a stale ``agent/auto-agent-99`` branch is
+        swept, the tracked entry must survive — it names a branch that was
+        never touched.
+        """
+        loop, state, _e = _make_loop(tmp_path)
+        state.set_branch(99, "agent/issue-99")  # live impl branch, tracked
+        loop._collect_orphaned_branches = (
+            WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
+        )  # type: ignore[attr-defined]
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
+            # Only the stale auto-agent branch is listed/deleted; agent/issue-99
+            # is untouched (it has a live worktree so it isn't even listed here).
+            m.side_effect = ["  agent/auto-agent-99\n", ""]
+            count = await loop._collect_orphaned_branches()
+        assert count == 1
+        assert state.get_branch(99) == "agent/issue-99"
+
 
 class TestGCPrunesStaleActiveBranches:
     """Phase 4: prune active_branches entries with no worktree and safe to GC."""
