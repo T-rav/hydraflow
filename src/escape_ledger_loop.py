@@ -39,6 +39,7 @@ never capped; only issue-filing is. Attribution and recording never block.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import re
 import subprocess
@@ -200,14 +201,30 @@ def eligible_findings(
     cap never reaches the diagnoser and can age forever without ever getting a
     chance to self-resolve. Use :func:`apply_ask_budget` to cap the residue
     left after diagnosis for human filing.
+
+    The two reason-groups are interleaved round-robin, NOT concatenated
+    low-confidence-then-aging: ``_auto_diagnose`` and ``apply_ask_budget``
+    both cap on POSITION within this list, so a static
+    low-confidence-first ordering would let a low-confidence backlog at or
+    above ``escape_ledger_max_diagnoses_per_tick`` permanently starve every
+    aging candidate out of both the diagnose pass and the filing cap — the
+    exact starvation class #11176 was filed to close, just reintroduced one
+    layer deeper. Interleaving guarantees each reason gets a fair share of
+    both budgets regardless of how lopsided the backlog is.
     """
     eligible: list[tuple[EscapeRecord, str]] = []
     seen: set[tuple[str, str]] = set()
     aging = unencoded_aging(records, now, threshold_hours=aging_threshold_hours)
-    candidates: list[tuple[EscapeRecord, str]] = [
-        *((r, SURFACE_REASON_LOW_CONFIDENCE) for r in low_confidence(records)),
-        *((r, SURFACE_REASON_AGING) for r in aging),
+    low_conf_pairs = [
+        (r, SURFACE_REASON_LOW_CONFIDENCE) for r in low_confidence(records)
     ]
+    aging_pairs = [(r, SURFACE_REASON_AGING) for r in aging]
+    candidates: list[tuple[EscapeRecord, str]] = []
+    for lc_pair, aging_pair in itertools.zip_longest(low_conf_pairs, aging_pairs):
+        if lc_pair is not None:
+            candidates.append(lc_pair)
+        if aging_pair is not None:
+            candidates.append(aging_pair)
     for record, reason in candidates:
         # #11137/#11144: a row carrying a terminal auto-diagnose verdict
         # (resolved or dismissed) never surfaces again UNDER ANY REASON —

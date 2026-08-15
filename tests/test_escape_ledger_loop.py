@@ -390,6 +390,45 @@ class TestFindingRateBudget:
         assert len(to_file) == 3
         assert capped is True
 
+    def test_reasons_are_interleaved_so_a_backlog_cannot_starve_the_other(
+        self,
+    ) -> None:
+        """#11191 review: candidates used to be a static concatenation — every
+        low-confidence pair BEFORE every aging pair. `_auto_diagnose` and
+        `apply_ask_budget` both cap on POSITION in this list, so a
+        low-confidence backlog >= escape_ledger_max_diagnoses_per_tick
+        (default 25) would push the ONLY aging candidate past every
+        positional cap, forever — the exact starvation class #11176 closed,
+        reintroduced one layer deeper. Interleaving guarantees a candidate of
+        the smaller reason-group survives into any prefix at least as long
+        as that group.
+        """
+        from datetime import UTC, datetime
+
+        now = datetime(2026, 6, 1, tzinfo=UTC)
+        # 30 low-confidence rows, already encoded so none is ALSO aging-eligible.
+        low_conf = [
+            _record(f"bug-issue:lc{i}", confidence="low", encoded_as="regression-test")
+            for i in range(30)
+        ]
+        # One aging row (detected 2026-01-01 by `_record`'s default, well past
+        # the 14-day threshold), not low-confidence.
+        aging_row = _record("bug-issue:aging0", confidence="medium")
+
+        eligible = eligible_findings(
+            [*low_conf, aging_row],
+            now=now,
+            aging_threshold_hours=24 * 14,
+            already_surfaced=set(),
+        )
+
+        default_max_diagnoses = 25
+        prefix_reasons = {reason for _rec, reason in eligible[:default_max_diagnoses]}
+        assert SURFACE_REASON_AGING in prefix_reasons, (
+            "a 30-strong low-confidence backlog must not push the sole aging "
+            "candidate past the diagnose cap position"
+        )
+
     def test_already_surfaced_are_skipped(self) -> None:
         from datetime import UTC, datetime
 

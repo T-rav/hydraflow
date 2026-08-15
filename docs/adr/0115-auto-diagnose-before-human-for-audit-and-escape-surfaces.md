@@ -133,7 +133,13 @@ rather than fabricating an `upheld` (a false escape cross-link) or a `refuted`
   the separate, wider `escape_ledger_max_diagnoses_per_tick`) →
   `apply_ask_budget` (the human-ask cap), so a machine-resolvable finding
   self-answers regardless of how many other findings are competing for that
-  tick's ask budget.
+  tick's ask budget. `eligible_findings` interleaves the low-confidence and
+  aging candidate groups round-robin rather than concatenating one group
+  ahead of the other — both downstream caps are POSITIONAL, so a static
+  ordering would let a backlog in one reason at or above
+  `escape_ledger_max_diagnoses_per_tick` permanently starve every candidate
+  of the other reason out of both the diagnose pass and the filing cap,
+  reintroducing the same starvation class one layer deeper.
 - **On by default; air-gap-safe.** Both flags (`escape_ledger_auto_diagnose_enabled`,
   `sampled_audit_auto_adjudicate_enabled`) default ON — self-repair is the
   default posture, disable via the System tab. The escape pass is LLM-free; the
