@@ -2696,7 +2696,9 @@ class HydraFlowConfig(BaseModel):
             "endpoint the Claude CLI is pointed at (via ANTHROPIC_BASE_URL) when "
             "an agentic role sets provider='zai', so a tool-using maintenance loop "
             "runs on GLM. Distinct from zai_base_url (the one-shot /paas/v4 face). "
-            "The API key is read from ZAI_API_KEY (a secret — env-only)."
+            "Auth prefers ZAI_CODING_PLAN_KEY (flat-rate GLM Coding Plan) and "
+            "falls back to ZAI_API_KEY, so agentic spawns ride the plan while "
+            "one-shot background traffic stays on API credits (secrets — env-only)."
         ),
     )
     kimi_base_url: str = Field(

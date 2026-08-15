@@ -812,7 +812,18 @@ def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str,
 _HARNESS_BACKENDS: dict[str, _OpenAICompatBackend] = {
     _ZAI: _OpenAICompatBackend(
         base_url_field="zai_harness_base_url",
-        api_key_envs=("ZAI_API_KEY", "HYDRAFLOW_ZAI_API_KEY"),
+        # Two-key lane split: the agentic harness (Claude CLI ->
+        # /api/anthropic) PREFERS the flat-rate GLM Coding Plan key, falling
+        # back to the shared API-credits key. The one-shot REST lane
+        # (_OPENAI_COMPAT_BACKENDS above) deliberately keeps ZAI_API_KEY
+        # only — background-worker traffic stays on API credits, outside
+        # the coding plan's prompts-per-window/concurrency quota.
+        api_key_envs=(
+            "ZAI_CODING_PLAN_KEY",
+            "HYDRAFLOW_ZAI_CODING_PLAN_KEY",
+            "ZAI_API_KEY",
+            "HYDRAFLOW_ZAI_API_KEY",
+        ),
     ),
 }
 
