@@ -87,6 +87,16 @@ export const LOOP_FACEPLATE_POLL_MS = 60_000
 export const JUDGE_CALIBRATION_POLL_MS = 60_000
 
 /**
+ * Operator Supervisor-mode gauges (#11207) REST-poll cadence. The gauges'
+ * tick-health / attempt-budget readouts read `/api/trust/fleet` (an
+ * event-scan + per-loop cost rollup with a 60s-cached escape-closure gh call
+ * — see `_read_fleet` in `dashboard_routes/_trust_routes.py`), so this polls
+ * on the same slow cadence as its cost / faceplate / calibration siblings —
+ * one pinned interval, aborted in-flight on unmount.
+ */
+export const TRUST_FLEET_POLL_MS = 60_000
+
+/**
  * WebSocket reconnect backoff (PR5). A flapping socket previously re-ran the
  * heavy onopen fan-out (10+ fetches + history replay) every fixed 2s. We now
  * back off exponentially with full jitter — delay = random(0, min(BASE * 2**n,

@@ -20,14 +20,15 @@
  * shallower level clears everything deeper (picking a new repo drops the stage
  * and item; picking a stage drops the item). Passing `null` pops that level and
  * everything below it — which is exactly what a breadcrumb "jump up" needs.
- * `mode` (focus | all-active | instruments) is orthogonal to depth and never cleared by drill.
+ * `mode` (focus | all-active | instruments | supervisor) is orthogonal to depth
+ * and never cleared by drill.
  */
 
 import { useCallback, useMemo, useState } from 'react'
 import { OPERATOR_STAGES } from './model/pipeline'
 
 const DEFAULT_MODE = 'focus'
-const VALID_MODES = new Set([DEFAULT_MODE, 'all-active', 'instruments'])
+const VALID_MODES = new Set([DEFAULT_MODE, 'all-active', 'instruments', 'supervisor'])
 
 /** Human label for a stage key, falling back to the raw key. */
 function stageLabel(key) {
