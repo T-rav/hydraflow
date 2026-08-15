@@ -1,13 +1,12 @@
 ---
-id: 0155
+id: 0166
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-14T20:26:28.551068+00:00
-status: superseded
+created_at: 2026-08-15T03:53:31.803724+00:00
+status: active
 corroborations: 1
-supersedes: 0140
-superseded_by: 0166
+supersedes: 0155
 ---
 
 # Extend TrustFleetSanityLoop for new anomaly kinds, not a new loop
