@@ -41,6 +41,11 @@ const ROUTING_SCHEMA = {
       description: 'z.ai base URL', default: '', value: 'https://api.z.ai/api/paas/v4',
       min: null, max: null, choices: null,
     },
+    {
+      name: 'repo_provider', group: 'Model Routing', live: true, type: 'enum',
+      description: 'Repo-wide harness backend override', default: 'claude', value: 'zai',
+      min: null, max: null, choices: ['claude', 'zai'],
+    },
   ],
   provider_keys: { openrouter: true, zai: false },
 }
@@ -90,6 +95,11 @@ describe('providerKeyStatus', () => {
   it('returns null when the provider has no key entry', () => {
     expect(providerKeyStatus('mistral_base_url', keys)).toBeNull()
     expect(providerKeyStatus('zai_base_url', {})).toBeNull()
+  })
+
+  it('badges repo_provider with its zai key presence only when "zai" is selected', () => {
+    expect(providerKeyStatus('repo_provider', keys, 'zai')).toBe(false)
+    expect(providerKeyStatus('repo_provider', keys, 'claude')).toBeNull()
   })
 })
 
@@ -194,6 +204,10 @@ describe('RuntimeSettingsPanel', () => {
     // openrouter key present → "detected"; zai key absent → "not set".
     expect(screen.getByTestId('keystatus-openrouter_base_url').textContent).toContain('detected')
     expect(screen.getByTestId('keystatus-zai_base_url').textContent).toContain('not set')
+    // repo_provider (#11211) is seeded at "zai" with no zai key → also "not set",
+    // so an operator who selects GLM for a repo sees the missing-key warning on
+    // the dial itself, not just on the unrelated zai_base_url row.
+    expect(screen.getByTestId('keystatus-repo_provider').textContent).toContain('not set')
   })
 
   it('never renders a key badge on a non-provider field', async () => {

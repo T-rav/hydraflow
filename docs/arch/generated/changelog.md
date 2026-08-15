@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `63d3730` — review: fix ADR-0134 seam-coverage overclaim + repo-provider badge fidelity (PR #11233) *(2026-08-15)*
 - `c48c8e8` — Merge remote-tracking branch 'origin/staging' into agent/issue-11211 *(2026-08-15)*
 - `fac4b0b` — Fixes #11211: attribute ADR-0134 in its enforcing test + regen arch docs *(2026-08-15)*
 - `6c8b9ba` — feat(ul): edge-proposer — 2 new edges across 2 terms (#11226) (#11226) *(2026-08-15)*

@@ -86,19 +86,24 @@ layered UNDER any explicit per-role dial and UNDER credit-failover.**
    independent `HydraFlowConfig`, event bus, and orchestrator (its own
    runner pools), so two repos on different `repo_provider` values already
    run concurrently by construction (ADR-0009). Credit-exhaustion pause
-   isolation (#9807) is already per-orchestrator-instance-scoped. The one
-   genuinely process-wide piece is `credit_failover`'s engage flag (ADR-0119,
-   §Consequences: "one shared Claude subscription") — it composes correctly
-   with no code change: `apply_repo_provider` runs first and, once it has
-   already routed a repo's spawn to `"zai"`, `apply_credit_failover`'s own
-   `provider != "claude"` guard is a no-op. A GLM-native repo is therefore
-   immune to a Claude-cap failover engaged by a different, Claude-native repo
-   sharing the process; a repo left on the factory default still fails over,
-   unchanged from pre-#11211 behavior. Verified in
-   `tests/test_repo_backend.py` (composition) and
+   isolation (#9807) is already per-orchestrator-instance-scoped *across
+   repos* — one repo's Claude cap never pauses a different repo's loops. The
+   one genuinely process-wide piece is `credit_failover`'s engage flag
+   (ADR-0119, §Consequences: "one shared Claude subscription") — it composes
+   correctly with no code change: `apply_repo_provider` runs first and, once
+   it has already routed a repo's spawn to `"zai"`, `apply_credit_failover`'s
+   own `provider != "claude"` guard is a no-op. A GLM-native repo is
+   therefore immune to a Claude-cap failover engaged by a different,
+   Claude-native repo sharing the process; a repo left on the factory
+   default still fails over, unchanged from pre-#11211 behavior. Verified in
+   `tests/test_repo_backend.py` (composition, through the real
+   `apply_repo_provider`/`apply_credit_failover` seam functions) and
    `tests/scenarios/test_multi_repo_backend_routing.py` (two repos, two
    backends, live simultaneously; a sibling's engaged failover doesn't move
-   the GLM-native repo's resolved provider).
+   the GLM-native repo's resolved provider or model). **Not covered:**
+   *within* a single GLM-pinned repo's own orchestrator, the #9807
+   pause-classifier (`orchestrator._loop_providers`) has no knowledge of
+   `repo_provider` — see the Known gap below.
 
 4. **Cost attribution** — no new plumbing. The rerouted `cmd` (with its
    rewritten `--model`) flows unchanged into `parse_command_tool_model` and
@@ -153,6 +158,23 @@ layered UNDER any explicit per-role dial and UNDER credit-failover.**
   `stream_claude_with_telemetry` would also reroute `report_issue`, which is
   maintenance-class and must stay untouched per the bullet above. Tracked
   as a follow-up (#11235); not yet enforced by this ADR's test list.
+- **Known gap: the #9807 credit-pause classifier does not consult
+  `repo_provider`.** `orchestrator._loop_providers` maps only the
+  *maintenance* loop names to their own `*_provider` dial via
+  `_BACKEND_WORKER_LOOPS`; every other loop — including the four work loops
+  `repo_provider` routes (`implement`/`review`/`plan`/`triage`) — always
+  classifies as `PROVIDER_ANTHROPIC` for pause-scoping, regardless of
+  `repo_provider`. Combined with the gap above (ac/judge/report_issue still
+  spawning on native Claude for a GLM-pinned repo), an Anthropic cap raised
+  by one of those still-Claude seams pauses that *same* repo's own
+  `implement`/`review`/`plan`/`triage` loops and terminates its harness
+  runner pools — even though those loops' own spawns already route to GLM.
+  This does not contradict the Concurrency section's isolation claim (that
+  claim is about one repo's pause never reaching a *different* repo's
+  loops, which still holds); it is a distinct, intra-repo classification gap
+  the pause-scoping code predates #11211 for the existing per-role
+  `*_provider` dials and this ADR does not close. Tracked as a follow-up
+  (#11238); not yet enforced by this ADR's test list.
 - **The `credit_failover` process-wide engage flag is unchanged** and still
   a known, documented limitation (ADR-0119 §Consequences: "one shared Claude
   subscription"). This ADR does not scope it per-repo; a GLM-native repo is
