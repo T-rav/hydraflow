@@ -6,10 +6,10 @@ each tick), NOT an ``arch-regen`` artifact. Pure over ``list[EscapeRecord]``
 + an injected merge count / ``now`` so the rendered numbers match the metrics
 module exactly and the render is unit-testable.
 
-The "Recent escapes" table's ``evidence`` column surfaces ``EscapeRecord
-.notes`` (#11185) — the only place the concrete encoding (regression-test
-path, ADR number, or stored lesson) is recorded, so an operator can point at
-the encoding without grepping the JSONL.
+The "Recent escapes" table's ``evidence`` column surfaces
+``EscapeRecord.notes`` (#11185) — the only place the concrete encoding
+(regression-test path, ADR number, or stored lesson) is recorded, so an
+operator can point at the encoding without grepping the JSONL.
 """
 
 from __future__ import annotations
