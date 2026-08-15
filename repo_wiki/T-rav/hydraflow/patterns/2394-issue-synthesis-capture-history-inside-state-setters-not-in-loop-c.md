@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T05:19:55.823211+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2274
+superseded_by: 2514
 ---
 
 # Capture history inside state setters, not in loop call sites

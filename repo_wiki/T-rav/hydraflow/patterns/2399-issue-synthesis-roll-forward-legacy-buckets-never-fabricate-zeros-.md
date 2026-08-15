@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T05:19:55.838989+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2279
+superseded_by: 2519
 ---
 
 # Roll forward legacy buckets — never fabricate zeros for missing keys

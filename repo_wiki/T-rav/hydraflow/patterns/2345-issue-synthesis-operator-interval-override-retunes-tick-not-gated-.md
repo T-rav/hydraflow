@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T05:19:55.670157+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2225
+superseded_by: 2465
 ---
 
 # Operator interval override retunes tick, not gated heavy pass

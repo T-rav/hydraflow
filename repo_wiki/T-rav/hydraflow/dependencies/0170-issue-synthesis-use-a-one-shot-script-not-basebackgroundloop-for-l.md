@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T03:53:31.805414+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0159
+superseded_by: 0182
 ---
 
 # Use a one-shot script, not BaseBackgroundLoop, for loop analysis

@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11215
 source_phase: plan
 created_at: 2026-08-15T05:13:01.079608+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Convergence ledger persistence as a cross-restart signal
