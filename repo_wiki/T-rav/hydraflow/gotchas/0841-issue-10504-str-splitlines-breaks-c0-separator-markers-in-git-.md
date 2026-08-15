@@ -5,7 +5,7 @@ source_issue: 10504
 source_phase: plan
 created_at: 2026-07-25T02:18:04.061411+00:00
 status: active
-corroborations: 1
+corroborations: 2
 fixed_in_pr: #10521
 code_refs: src/escape/detect.py:_SHA_MARKER,src/audit/detect.py:_SHA_MARKER
 ---
