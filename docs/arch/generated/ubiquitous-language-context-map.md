@@ -186,6 +186,7 @@ graph LR
   corpuslearningloop -->|depends_on| dedupstore
   creditexhaustederror -->|depends_on| basebackgroundloop
   creditexhaustederror -->|depends_on| subprocessrunner
+  creditexhaustederror -->|depends_on| circuitbreaker
   dedupstore -->|depends_on| adrcouncilreviewer
   dedupstore -->|depends_on| adrtouchpointauditorloop
   dedupstore -->|depends_on| contractrefreshloop
@@ -426,6 +427,7 @@ graph LR
   set_point -->|depends_on| task
   set_point -->|depends_on| eventtype
   set_point -->|depends_on| hydraflowevent
+  setpoint -->|depends_on| circuitbreaker
   skillpromptevalloop -->|depends_on| basebackgroundloop
   skillpromptevalloop -->|depends_on| hydraflowconfig
   skillpromptevalloop -->|depends_on| statetracker
