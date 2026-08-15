@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from adr_drift import bare_infra_citation_nudges
 from adr_index import scan_adr_directory
 
@@ -34,8 +36,12 @@ _ADR_DIR = _REPO_ROOT / "docs" / "adr"
 
 
 def test_adr_0013_superseded_is_never_nudged() -> None:
+    # Self-retiring per #11195: skip (never explode) once ADR-0013 is
+    # renumbered or removed — see tests/regressions/test_issue_11195.py.
     adrs = scan_adr_directory(_ADR_DIR)
-    adr_0013 = next(a for a in adrs if a.number == 13)
+    adr_0013 = next((a for a in adrs if a.number == 13), None)
+    if adr_0013 is None:
+        pytest.skip("ADR-0013 not present in this corpus; pin self-retires")
     assert adr_0013.status == "Superseded", (
         "this test pins the exact shipped false positive against ADR-0013 — "
         "if its status changed, update the fixture ADR used here instead"

@@ -1,0 +1,65 @@
+// Issue #11195 — ADR-drift regression pins must self-retire.
+// Scope: tests/regressions only. No src/ behaviour changes.
+
+specification {
+  element system
+  element container
+  element component
+  element datastore
+}
+
+model {
+  corpus = datastore 'docs/adr' {
+    description 'Real ADR corpus. Renumbering / retiring an ADR is routine maintenance.'
+  }
+
+  prod = system 'ADR drift subsystem (src/)' {
+    scan = component 'adr_index.scan_adr_directory' {
+      description 'Parses every ADR file; number comes from the "# ADR-NNNN:" heading.'
+    }
+    index = component 'adr_index.ADRIndex' {
+      description 'Mtime-cached wrapper; adrs() delegates to scan_adr_directory.'
+    }
+    nudges = component 'adr_drift.bare_infra_citation_nudges' {
+      description 'Pure over the parsed ADR list — never probes the filesystem for cited modules.'
+    }
+  }
+
+  tests = system 'tests/regressions' {
+    pin = container 'test_issue_10565.py' {
+      description 'Pins: ADR-0013 (Superseded) is never nudged. THE FILE THAT CHANGES.'
+    }
+    guard = container 'test_issue_11195.py' {
+      description 'Differential guard: loads a copy of the pin into a fake repo tree where ADR-0013 is renumbered / removed / intact.'
+    }
+    reference = container 'test_issue_9176.py' {
+      description 'Reference self-retiring shape: next((...), None).'
+    }
+  }
+
+  scan -> corpus 'reads every *.md'
+  index -> scan 'delegates'
+  pin -> scan 'scan_adr_directory(_ADR_DIR)'
+  pin -> nudges 'feeds the unfiltered corpus'
+  guard -> pin 'copies + executes against a mutated docs/adr'
+  pin -> reference 'adopts lookup shape'
+}
+
+views {
+  view component_view {
+    title 'ADR pin self-retirement — component view'
+    include prod.*, tests.*, corpus
+  }
+
+  dynamic view renumbering_flow {
+    title 'What happens when ADR-0013 is renumbered (dynamic)'
+
+    guard -> pin 'load module copy from fake repo tree'
+    pin -> scan 'scan_adr_directory(<tmp>/docs/adr)'
+    scan -> corpus 'ADR-0013 absent; ADR-0913 present'
+    scan -> pin 'list[ADR] without number == 13'
+    // BEFORE: next(a for a in adrs if a.number == 13) -> StopIteration -> CI red on an unrelated PR
+    // AFTER:  next((...), None) -> pytest.skip -> pin self-retires, guard green
+    pin -> guard 'skip (self-retired), not StopIteration'
+  }
+}
