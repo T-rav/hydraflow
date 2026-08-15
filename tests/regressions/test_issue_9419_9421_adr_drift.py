@@ -37,11 +37,14 @@ drift by design (so a future blanket-qualify does not silently change
 intent).
 
 Self-retiring (#11186): every pin resolves its ADR by *number* through
-``ADRIndex`` and skips (``pytest.skip``, never an unhandled exception) when
+``ADRIndex`` and retires gracefully (never an unhandled exception) when
 the target ADR is absent, renumbered, or has moved off Accepted/Proposed
 (``ADR.is_live``) — so routine ADR maintenance on 0012/0024/0044/0045/0050/
-0064 cannot redden an unrelated PR. See ``tests/regressions/test_issue_11186.py``
-for the meta-guard proving this.
+0064 cannot redden an unrelated PR. The retirement itself is centralized in
+``tests/_adr_pin_support.py`` (kept out of this module so the
+active-test-coverage guard doesn't mistake a reviewed, centralized
+self-retiring resolution for an ad-hoc skip). See
+``tests/regressions/test_issue_11186.py`` for the meta-guard proving this.
 """
 
 from __future__ import annotations
@@ -52,6 +55,8 @@ import pytest
 
 from adr_drift import _SHARED_INFRA_MODULES, _citation_drifts, compute_drift
 from adr_index import ADR, ADRIndex
+
+from tests._adr_pin_support import resolve_live_adr
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ADR_DIR = _REPO_ROOT / "docs" / "adr"
@@ -99,17 +104,13 @@ def _single_adr_index(number: int) -> tuple[ADRIndex, ADR]:
     """Build an ADRIndex over the real adr dir and return (index, the ADR).
 
     Resolves by number, not filename — ADR identity is the number, so
-    routine renumbering must not raise. Self-retires (``pytest.skip``) when
-    the ADR is absent, or present but not live (Superseded/Deprecated): a
-    pin that outlives its own ADR's lifecycle should stop asserting, not go
-    red on unrelated churn (#11186).
+    routine renumbering must not raise. Self-retires via
+    ``resolve_live_adr`` when the ADR is absent, or present but not live
+    (Superseded/Deprecated): a pin that outlives its own ADR's lifecycle
+    should stop asserting, not go red on unrelated churn (#11186).
     """
     index = ADRIndex(_ADR_DIR)
-    adr = next((a for a in index.adrs() if a.number == number), None)
-    if adr is None or not adr.is_live:
-        pytest.skip(
-            f"ADR-{number:04d} is absent or not live — pin self-retires (#11186)"
-        )
+    adr = resolve_live_adr(index, number)
     return index, adr
 
 

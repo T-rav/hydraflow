@@ -54,6 +54,11 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _ADR_DIR = _REPO_ROOT / "docs" / "adr"
 _PIN_MODULE = _REPO_ROOT / "tests" / "regressions" / "test_issue_9419_9421_adr_drift.py"
+# The pin module's self-retiring resolution lives in this tests/-root support
+# module (#11186) — the fake repo must carry it too, as a real `tests`
+# package, so the pin module's `from tests._adr_pin_support import
+# resolve_live_adr` resolves under subprocess pytest.
+_PIN_SUPPORT_MODULE = _REPO_ROOT / "tests" / "_adr_pin_support.py"
 
 # Two of the six right-sized ADRs: 45 is a plain Accepted pin, 64 additionally
 # carries the deliberately-bare-data-module assertion
@@ -121,9 +126,13 @@ def _build_fake_repo(
         target = fake_root / "docs" / "adr" / _adr_filename(number)
         _mutate(target, number, fate)
 
-    pin_dir = fake_root / "tests" / "regressions"
+    tests_dir = fake_root / "tests"
+    pin_dir = tests_dir / "regressions"
     pin_dir.mkdir(parents=True)
+    (tests_dir / "__init__.py").touch()
+    (pin_dir / "__init__.py").touch()
     shutil.copy(_PIN_MODULE, pin_dir / _PIN_MODULE.name)
+    shutil.copy(_PIN_SUPPORT_MODULE, tests_dir / _PIN_SUPPORT_MODULE.name)
     (fake_root / "src").symlink_to(_REPO_ROOT / "src")
     return fake_root
 
