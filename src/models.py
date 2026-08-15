@@ -1443,6 +1443,9 @@ class RepoRuntimeInfo(BaseModel):
     session_id: str | None = None
     uptime_seconds: float = 0.0
     last_error: str | None = None
+    # The repo's resolved harness backend (config.repo_provider, #11211) — lets
+    # the operator console badge a repo running on GLM.
+    provider: str = "claude"
 
 
 class IssueOutcomeType(StrEnum):

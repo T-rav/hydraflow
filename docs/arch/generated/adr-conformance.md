@@ -88,6 +88,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0117 | enforced | `pytest:tests/test_prompt_observatory.py` |
 | ADR-0118 | enforced | `pytest:tests/architecture/test_no_otel_imports.py` |
 | ADR-0119 | enforced | `pytest:tests/test_credit_failover.py` |
+| ADR-0134 | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py` |
 
 ## Check → ADRs it protects
 
@@ -142,9 +143,12 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_auto_agent_preflight_loop.py` | ADR-0050 |
 | `pytest:tests/test_auto_tighten_invariant.py` | ADR-0104 |
 | `pytest:tests/test_base_runner.py` | ADR-0004 |
+| `pytest:tests/test_base_runner_repo_provider.py` | ADR-0134 |
+| `pytest:tests/test_base_subprocess_runner_repo_provider.py` | ADR-0134 |
 | `pytest:tests/test_caretaker_loop_wiring.py` | ADR-0029 |
 | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` | ADR-0110 |
 | `pytest:tests/test_config_env.py` | ADR-0103 |
+| `pytest:tests/test_config_repo_provider.py` | ADR-0134 |
 | `pytest:tests/test_convergence_gate.py` | ADR-0094 |
 | `pytest:tests/test_convergence_ledger.py` | ADR-0094 |
 | `pytest:tests/test_credit_failover.py` | ADR-0119 |
@@ -188,6 +192,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_prompt_registry_completeness.py` | ADR-0087, ADR-0116 |
 | `pytest:tests/test_prompt_rubric_calibration.py` | ADR-0116 |
 | `pytest:tests/test_release.py` | ADR-0011 |
+| `pytest:tests/test_repo_backend.py` | ADR-0134 |
 | `pytest:tests/test_repo_wiki.py` | ADR-0032 |
 | `pytest:tests/test_repo_wiki_ingest.py` | ADR-0032 |
 | `pytest:tests/test_repo_wiki_store_git.py` | ADR-0032 |

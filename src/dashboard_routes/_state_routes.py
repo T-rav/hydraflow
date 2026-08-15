@@ -100,6 +100,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                         if rt.running
                         else None,
                         last_error=rt.last_error,
+                        provider=rt.config.repo_provider,
                     ).model_dump()
                 )
         return JSONResponse({"runtimes": infos})
@@ -120,6 +121,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             running=rt.running,
             session_id=rt.orchestrator.current_session_id if rt.running else None,
             last_error=rt.last_error,
+            provider=rt.config.repo_provider,
         )
         return JSONResponse(info.model_dump())
 

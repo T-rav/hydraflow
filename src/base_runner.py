@@ -23,6 +23,7 @@ from execution import get_default_runner
 from models import LoopResult, TranscriptEventData
 from prompt_gate import GateResult, gate_prompt
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
+from repo_backend import apply_repo_provider
 from runner_utils import (
     AuthenticationRetryError,
     StreamConfig,
@@ -248,6 +249,11 @@ class BaseRunner:
         # credit-scoping provider). Default "claude" (native Anthropic) is a
         # no-op; a runner whose role dial is "zai" runs on the GLM harness.
         provider = self._resolve_provider()
+        # Repo-wide backend override (#11211): a still-Claude spawn reroutes to
+        # this repo's zai dial (config.repo_provider) when the role itself
+        # hasn't already routed off Claude. No-op unless repo_provider == "zai"
+        # and ZAI_API_KEY is present.
+        provider, cmd = apply_repo_provider(provider, cmd, self._config)
         # Credit failover (#10844): while Claude credits are exhausted, reroute a
         # would-be Claude work spawn to the GLM backend (rewriting --model to the
         # failover model) instead of pausing. No-op unless failover is active,

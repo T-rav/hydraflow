@@ -1725,6 +1725,7 @@ class TestRuntimeEndpointsWithRegistry:
         mock_rt = MagicMock()
         mock_rt.slug = "owner-repo"
         mock_rt.config.repo = "owner/repo"
+        mock_rt.config.repo_provider = "claude"
         mock_rt.running = False
         mock_rt.last_error = None
 
@@ -1755,6 +1756,7 @@ class TestRuntimeEndpointsWithRegistry:
         mock_rt = MagicMock()
         mock_rt.slug = "owner-repo"
         mock_rt.config.repo = "owner/repo"
+        mock_rt.config.repo_provider = "claude"
         mock_rt.running = False
         mock_rt.last_error = "RuntimeError: sanitize_repo failed"
 
@@ -1779,6 +1781,7 @@ class TestRuntimeEndpointsWithRegistry:
         mock_rt = MagicMock()
         mock_rt.slug = "owner-repo"
         mock_rt.config.repo = "owner/repo"
+        mock_rt.config.repo_provider = "claude"
         mock_rt.running = False
         mock_rt.last_error = None
 
@@ -1794,6 +1797,55 @@ class TestRuntimeEndpointsWithRegistry:
         data = json.loads(resp.body)
         assert resp.status_code == 200
         assert data["slug"] == "owner-repo"
+
+    @pytest.mark.asyncio
+    async def test_list_runtimes_surfaces_repo_provider(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """#11211 — the per-repo model/harness dial is visible to the UI."""
+        mock_rt = MagicMock()
+        mock_rt.slug = "owner-repo"
+        mock_rt.config.repo = "owner/repo"
+        mock_rt.config.repo_provider = "zai"
+        mock_rt.running = False
+        mock_rt.last_error = None
+
+        mock_registry = MagicMock()
+        mock_registry.all = [mock_rt]
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = find_endpoint(router, "/api/runtimes")
+
+        resp = await endpoint()
+        data = json.loads(resp.body)
+        registered = [r for r in data["runtimes"] if r["slug"] == "owner-repo"]
+        assert len(registered) == 1
+        assert registered[0]["provider"] == "zai"
+
+    @pytest.mark.asyncio
+    async def test_get_runtime_status_surfaces_repo_provider(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        mock_rt = MagicMock()
+        mock_rt.slug = "owner-repo"
+        mock_rt.config.repo = "owner/repo"
+        mock_rt.config.repo_provider = "zai"
+        mock_rt.running = False
+        mock_rt.last_error = None
+
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = mock_rt
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = find_endpoint(router, "/api/runtimes/{slug}", "GET")
+
+        resp = await endpoint("owner-repo")
+        data = json.loads(resp.body)
+        assert data["provider"] == "zai"
 
     @pytest.mark.asyncio
     async def test_get_runtime_status_not_found(
