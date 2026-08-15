@@ -1656,6 +1656,33 @@ class TestCollectOrphanedWorktrees:
         assert removed == []
 
     @pytest.mark.asyncio
+    async def test_keeps_inflight_auto_agent_worktree(self, tmp_path: Path) -> None:
+        """An in-flight ``agent/auto-agent-<N>`` worktree (retry window active)
+        is preserved by phase 5 — the branch must attribute to its issue so
+        ``_is_safe_to_gc`` is consulted, not the unattributed "reap if empty"
+        path (#11182).
+
+        Before the fix ``_parse_issue_from_branch`` returned ``None`` for this
+        namespace, so a clean, 0-unique-commit in-flight worktree was reaped
+        without the retry-window guard — a #10459-style data-loss-adjacent gap.
+        """
+        root = tmp_path / "roots"
+        wt = root / "auto-agent"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/agent/auto-agent-88\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0
+        assert removed == []
+
+    @pytest.mark.asyncio
     async def test_reaps_unparseable_only_when_provably_empty(
         self, tmp_path: Path
     ) -> None:
