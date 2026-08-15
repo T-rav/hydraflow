@@ -690,8 +690,8 @@ class FakeGitHub:
 
     async def push_branch(
         self,
-        worktree_path: Any = None,
-        branch: str = "",
+        worktree_path: Any,
+        branch: str,
         *,
         force: bool = False,
         **_kwargs: Any,

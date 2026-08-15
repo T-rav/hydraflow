@@ -69,5 +69,6 @@
   "registered_workers": {},
   "worker_status_history": {},
   "repo_wiki_fixtures": [],
-  "credit_exhaustion": null
+  "credit_exhaustion": null,
+  "branches": []
 }
