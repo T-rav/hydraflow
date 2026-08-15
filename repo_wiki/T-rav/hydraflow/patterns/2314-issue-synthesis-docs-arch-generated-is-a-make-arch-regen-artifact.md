@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T05:19:55.578929+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2194
+superseded_by: 2434
 ---
 
 # docs/arch/generated/* is a make arch-regen artifact

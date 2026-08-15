@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T05:19:55.752946+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2252
+superseded_by: 2492
 ---
 
 # Prompt audit report must be byte-identical across machines (ADR-0116)

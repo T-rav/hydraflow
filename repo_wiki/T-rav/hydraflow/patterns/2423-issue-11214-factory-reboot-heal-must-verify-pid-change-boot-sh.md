@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11214
 source_phase: plan
 created_at: 2026-08-15T05:26:51.323996+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Factory reboot heal must verify PID change + boot_sha before marking success
