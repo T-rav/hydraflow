@@ -1,25 +1,25 @@
 {
   "artifacts": {
     "adr-assertion-density.md": {
-      "content_sha": "fcefe51fc9e43953b474c82e27eff3198e63be371acedae3755a42c8d3c4a105"
+      "content_sha": "b49f4de4e4d414a9e94b5c687af1b83bc28ff22cdbca11c6a30b8a58a6afe0b8"
     },
     "adr-conformance.md": {
-      "content_sha": "c597718c12fba3d1ba937fd574e00d5432f2ef87a34939d6609335081dc37ab4"
+      "content_sha": "0221b5fa2e3599b19a87d71800d5cc728554c79beb6bf39cafcc5d4652f66cae"
     },
     "adr-enforcement.md": {
-      "content_sha": "02720caa29839c32c5bc9981c84ac0343b0bc163d10247a3c96d6aa648603a95"
+      "content_sha": "0b3b69a331ac79b96082a9b65637d94ff51b2a173ecd3188795ae484622decd6"
     },
     "adr-falsifiability.md": {
-      "content_sha": "7f70fb0ce4408412280918266f2bb0c3b96cb50d28baa35e2d4ba8c7e14de18a"
+      "content_sha": "dc331d165225c67facb07e687f68366287f8e7398f65bd7828b29ad3536753e9"
     },
     "adr_xref.md": {
-      "content_sha": "82873c13df6a2f52053157ccea7908afff38bebac6828e50b1315064cec0a857"
+      "content_sha": "07c464f1ca73d87ddc522cfcb3bc82dc8d160b89d1b8b6069400e7d1790e6552"
     },
     "ai_system_inventory.md": {
       "content_sha": "16b0b3bc4191f5c84a979a6794c6f99c1368e73060e159c9cc9acedc4b560b23"
     },
     "changelog.md": {
-      "content_sha": "fdd4384da2d90088efb3f5f468222a5530e4bb52d3a6dcbd15ccfd395598d629"
+      "content_sha": "91547f84707906e780240863dd045be3d02a9aef9af8872a1ec810a85622760e"
     },
     "coverage_matrix.md": {
       "content_sha": "43f4351138f7ca2250f3d77781e5944aa8d862890c1e56074f899949d9e8fdb4"
@@ -52,7 +52,7 @@
       "content_sha": "df86c0747ce17ddad086a080af88c83afde30844363f3dcacab19e9c345fda5b"
     },
     "ubiquitous-language-context-map.md": {
-      "content_sha": "e0c059aaa9900d180bf0d168bdc46ef30ff7f325874764fdbc890816aea133bd"
+      "content_sha": "461790aedeeb92e64745ecc069d3f718b787f6c7099023026f07e8eafa566de0"
     },
     "ubiquitous-language.md": {
       "content_sha": "4a1b4891b4c5f45bdc2160c40cb8371ce2e322d8b1a4c3495a11c98dee4c4b99"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "42498344ed46cbf03c1aa1bef20ebe0bf9a21aa03add1b7e8dbe27ac12454feb"
+  "content_sha": "66bed16354de536a2e5cd7b7ec320e42e2ad145ccb70b82d4a2c768784b4df51"
 }
