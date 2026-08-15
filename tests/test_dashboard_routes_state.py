@@ -1800,9 +1800,15 @@ class TestRuntimeEndpointsWithRegistry:
 
     @pytest.mark.asyncio
     async def test_list_runtimes_surfaces_repo_provider(
-        self, config, event_bus: EventBus, state, tmp_path: Path
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """#11211 — the per-repo model/harness dial is visible to the UI."""
+        monkeypatch.setenv("ZAI_API_KEY", "k")
         mock_rt = MagicMock()
         mock_rt.slug = "owner-repo"
         mock_rt.config.repo = "owner/repo"
@@ -1825,9 +1831,52 @@ class TestRuntimeEndpointsWithRegistry:
         assert registered[0]["provider"] == "zai"
 
     @pytest.mark.asyncio
-    async def test_get_runtime_status_surfaces_repo_provider(
-        self, config, event_bus: EventBus, state, tmp_path: Path
+    async def test_list_runtimes_provider_falls_back_to_claude_without_zai_key(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """#11211 — a repo configured for zai with no key spawns on Claude;
+
+        the badge must report that resolved reality, not the configured
+        intent, or an operator reading "GLM" has no signal the key is missing.
+        """
+        monkeypatch.delenv("ZAI_API_KEY", raising=False)
+        monkeypatch.delenv("HYDRAFLOW_ZAI_API_KEY", raising=False)
+        mock_rt = MagicMock()
+        mock_rt.slug = "owner-repo"
+        mock_rt.config.repo = "owner/repo"
+        mock_rt.config.repo_provider = "zai"
+        mock_rt.running = False
+        mock_rt.last_error = None
+
+        mock_registry = MagicMock()
+        mock_registry.all = [mock_rt]
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = find_endpoint(router, "/api/runtimes")
+
+        resp = await endpoint()
+        data = json.loads(resp.body)
+        registered = [r for r in data["runtimes"] if r["slug"] == "owner-repo"]
+        assert len(registered) == 1
+        assert registered[0]["provider"] == "claude"
+
+    @pytest.mark.asyncio
+    async def test_get_runtime_status_surfaces_repo_provider(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("ZAI_API_KEY", "k")
         mock_rt = MagicMock()
         mock_rt.slug = "owner-repo"
         mock_rt.config.repo = "owner/repo"
@@ -1846,6 +1895,36 @@ class TestRuntimeEndpointsWithRegistry:
         resp = await endpoint("owner-repo")
         data = json.loads(resp.body)
         assert data["provider"] == "zai"
+
+    @pytest.mark.asyncio
+    async def test_get_runtime_status_provider_falls_back_to_claude_without_zai_key(
+        self,
+        config,
+        event_bus: EventBus,
+        state,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("ZAI_API_KEY", raising=False)
+        monkeypatch.delenv("HYDRAFLOW_ZAI_API_KEY", raising=False)
+        mock_rt = MagicMock()
+        mock_rt.slug = "owner-repo"
+        mock_rt.config.repo = "owner/repo"
+        mock_rt.config.repo_provider = "zai"
+        mock_rt.running = False
+        mock_rt.last_error = None
+
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = mock_rt
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = find_endpoint(router, "/api/runtimes/{slug}", "GET")
+
+        resp = await endpoint("owner-repo")
+        data = json.loads(resp.body)
+        assert data["provider"] == "claude"
 
     @pytest.mark.asyncio
     async def test_get_runtime_status_not_found(

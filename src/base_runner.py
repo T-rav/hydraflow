@@ -253,7 +253,15 @@ class BaseRunner:
         # this repo's zai dial (config.repo_provider) when the role itself
         # hasn't already routed off Claude. No-op unless repo_provider == "zai"
         # and ZAI_API_KEY is present.
+        pre_repo_provider = provider
         provider, cmd = apply_repo_provider(provider, cmd, self._config)
+        if provider != pre_repo_provider:
+            self._log.info(
+                "repo-provider: rerouting %s spawn to %s/%s",
+                pre_repo_provider,
+                provider,
+                parse_command_tool_model(cmd)[1],
+            )
         # Credit failover (#10844): while Claude credits are exhausted, reroute a
         # would-be Claude work spawn to the GLM backend (rewriting --model to the
         # failover model) instead of pausing. No-op unless failover is active,

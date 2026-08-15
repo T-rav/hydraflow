@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `c48c8e8` — Merge remote-tracking branch 'origin/staging' into agent/issue-11211 *(2026-08-15)*
+- `fac4b0b` — Fixes #11211: attribute ADR-0134 in its enforcing test + regen arch docs *(2026-08-15)*
+- `6c8b9ba` — feat(ul): edge-proposer — 2 new edges across 2 terms (#11226) (#11226) *(2026-08-15)*
 - `20aafc6` — Fixes #11211: per-repo model/harness selection — run Claude and GLM projects side by side *(2026-08-14)*
 - `8783d2c` — Fixes #11176: Escape ledger: regression-pin escape `055267e7b2b7` —... (#11191) (#11191) *(2026-08-14)*
 - `55f225f` — review: fix ADR-0115 stale flag-default claim + add dual-reason dedup tests (PR #11173) (#11174) (#11174) *(2026-08-14)*

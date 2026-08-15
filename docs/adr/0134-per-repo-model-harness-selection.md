@@ -13,6 +13,7 @@ pytest:tests/test_repo_backend.py
 pytest:tests/test_config_repo_provider.py
 pytest:tests/test_base_runner_repo_provider.py
 pytest:tests/test_base_subprocess_runner_repo_provider.py
+pytest:tests/test_dashboard_routes_state.py
 
 ## Context
 
@@ -39,7 +40,7 @@ independent `HydraFlowConfig` instance (`repo_store.py`/`repo_runtime.py`,
 ADR-0009's per-repo isolation) — the missing piece is a single per-repo dial
 that governs the *work loop* role-set at spawn time, mirroring
 `maintenance_provider`'s "one knob, coherent provider+model" pattern but for
-implement/review/plan/triage/ac instead of maintenance, and threaded through
+implement/review/plan/triage instead of maintenance, and threaded through
 the Settings-drawer-editable / `RepoRecord.overrides`-persisted seam every
 other per-repo setting already uses.
 
@@ -107,12 +108,17 @@ layered UNDER any explicit per-role dial and UNDER credit-failover.**
    correctly for free.
 
 5. **UI** — `RepoRuntimeInfo.provider` (new field, sourced from
-   `config.repo_provider`) surfaces the resolved backend to
-   `GET /api/runtimes`/`GET /api/runtimes/{slug}`; `RepoOverview.jsx` badges
-   a non-default repo (`"GLM"`) in the multi-repo portfolio row. The Settings
-   drawer needs no bespoke component — `repo_provider`/`repo_model` render
-   generically like every other `SETTINGS` entry. `ZAI_API_KEY` presence is
-   already surfaced generically by `GET /api/control/settings-schema`'s
+   `_state_routes._effective_repo_provider`) surfaces the resolved backend —
+   not just the configured dial — to `GET /api/runtimes`/
+   `GET /api/runtimes/{slug}`: `repo_provider == "zai"` with no
+   `ZAI_API_KEY` present resolves to `"claude"` (mirroring
+   `apply_repo_provider`'s own fail-safe), so the badge never claims GLM for
+   a repo whose spawns are silently staying on Claude. `RepoOverview.jsx`
+   badges a non-default repo (`"GLM"`) in the multi-repo portfolio row. The
+   Settings drawer needs no bespoke component — `repo_provider`/`repo_model`
+   render generically like every other `SETTINGS` entry, in the same "Model
+   Routing" group as `zai_base_url`. `ZAI_API_KEY` presence is already
+   surfaced generically by `GET /api/control/settings-schema`'s
    `provider_keys` (keyed by the same `"zai"` backend credit-failover and
    ADR-0110 already use) — no new key-presence plumbing needed.
 
@@ -120,14 +126,33 @@ layered UNDER any explicit per-role dial and UNDER credit-failover.**
 
 - **A repo's backend choice is a single dial**, not five separate `*_provider`
   fields — an operator sets `repo_provider=zai` (+ `repo_model`) once per
-  repo and every work-loop role (implement/review/plan/triage/ac) and every
-  `BaseSubprocessRunner`-based spawn for that repo routes to GLM.
+  repo and every `BaseRunner`-based work-loop role (implement/review/plan/
+  triage) and every `BaseSubprocessRunner`-based spawn for that repo routes
+  to GLM.
 - **An explicit per-role dial still wins.** `repo_provider` only acts on a
   spawn still resolving to `"claude"`; a repo that wants e.g. `triage` alone
   routed differently sets `triage_provider` directly and it is untouched by
   `repo_provider`.
 - **Maintenance loops are untouched** — `maintenance_provider` dials that
   role-set independently, same as it does today under ADR-0119.
+- **Known gap: direct `stream_claude_with_telemetry` callers are NOT
+  covered.** `repo_provider` is wired at the same two seams
+  `apply_credit_failover` uses (`base_runner._execute`,
+  `BaseSubprocessRunner.run`) — mirroring ADR-0119's identical scope, not a
+  regression from it. Roles that spawn directly through
+  `runner_utils.stream_claude_with_telemetry` bypass both seams and stay on
+  their own `*_provider` dial regardless of `repo_provider`: the AC
+  generator (`acceptance_criteria.py`, `ac_provider`), the verification
+  judge (`verification_judge.py`, `review_provider`), and `report_issue`
+  (`report_issue_loop.py`, hardcoded `"claude"`). A repo set to
+  `repo_provider=zai` with these dials left at their `"claude"` default
+  still spawns AC generation, AC precheck, the verification judge, and
+  report-issue on native Claude. Fixing this belongs at the call sites (an
+  explicit `ac_provider`/`review_provider` override, or a future per-role
+  fallback to `repo_provider`), not inside the shared seam — blanket-wiring
+  `stream_claude_with_telemetry` would also reroute `report_issue`, which is
+  maintenance-class and must stay untouched per the bullet above. Tracked
+  as a follow-up (#11235); not yet enforced by this ADR's test list.
 - **The `credit_failover` process-wide engage flag is unchanged** and still
   a known, documented limitation (ADR-0119 §Consequences: "one shared Claude
   subscription"). This ADR does not scope it per-repo; a GLM-native repo is

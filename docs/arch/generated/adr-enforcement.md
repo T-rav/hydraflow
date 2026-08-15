@@ -99,7 +99,7 @@ By declared `**Enforcement:**` kind: `enforced` 78 · `manual` 3 · `decision-of
 | ADR-0117 | REAL | — | enforced | `pytest:tests/test_prompt_observatory.py` |
 | ADR-0118 | REAL | — | enforced | `pytest:tests/architecture/test_no_otel_imports.py` |
 | ADR-0119 | REAL | — | enforced | `pytest:tests/test_credit_failover.py` |
-| ADR-0134 | REAL | — | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py` |
+| ADR-0134 | REAL | — | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
 
 ## Unenforced-decision debt
 

@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Query
 from fastapi.responses import JSONResponse
 
+from credit_failover import zai_key_present
 from dashboard_routes._common import _SAFE_SLUG_COMPONENT
 from dashboard_routes._routes import (
     RouteContext,
@@ -24,6 +25,20 @@ from models import RepoRuntimeInfo
 from prompt_gate import is_valid_data_class
 
 logger = logging.getLogger("hydraflow.dashboard")
+
+
+def _effective_repo_provider(repo_config: Any) -> str:
+    """The backend a repo's spawns actually resolve to, not just its configured dial.
+
+    Mirrors ``repo_backend.apply_repo_provider``'s fail-safe: ``repo_provider ==
+    "zai"`` with no ``ZAI_API_KEY`` present is a silent no-op at spawn time (the
+    repo stays on native Claude), so the UI must report "claude" too — a badge
+    that shows the configured intent instead of the resolved effect would hide
+    exactly the misconfiguration (a missing key) an operator needs to notice.
+    """
+    if repo_config.repo_provider == "zai" and not zai_key_present():
+        return "claude"
+    return repo_config.repo_provider
 
 
 def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
@@ -100,7 +115,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                         if rt.running
                         else None,
                         last_error=rt.last_error,
-                        provider=rt.config.repo_provider,
+                        provider=_effective_repo_provider(rt.config),
                     ).model_dump()
                 )
         return JSONResponse({"runtimes": infos})
@@ -121,7 +136,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             running=rt.running,
             session_id=rt.orchestrator.current_session_id if rt.running else None,
             last_error=rt.last_error,
-            provider=rt.config.repo_provider,
+            provider=_effective_repo_provider(rt.config),
         )
         return JSONResponse(info.model_dump())
 
