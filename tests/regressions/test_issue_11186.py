@@ -84,8 +84,12 @@ def _mutate(target: Path, number: int, fate: str) -> None:
 
     if fate == "renumber":
         new_number = number + 9000
-        text = target.read_text().replace(f"ADR-{number:04d}", f"ADR-{new_number:04d}")
-        target.write_text(text)
+        old_marker, new_marker = f"ADR-{number:04d}", f"ADR-{new_number:04d}"
+        text = target.read_text()
+        assert old_marker in text, (
+            f"could not find {old_marker!r} to renumber in {target}"
+        )
+        target.write_text(text.replace(old_marker, new_marker))
         target.rename(
             target.with_name(target.name.replace(f"{number:04d}", f"{new_number:04d}"))
         )

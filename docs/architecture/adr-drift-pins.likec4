@@ -7,7 +7,6 @@ specification {
   element component
   element data
   tag defect
-  tag fix
   tag guard
 }
 
@@ -39,10 +38,6 @@ model {
     exemplar = component 'tests/regressions/test_issue_9176.py' {
       description 'Convention exemplar: resolves via ADRIndex, asserts rollup is None — keeps holding when the ADR vanishes.'
     }
-
-    sibling = component 'tests/regressions/test_issue_11180.py' {
-      description 'Same meta-guard shape for test_issue_10440.py. Zero-arg tests only.'
-    }
   }
 
   // Defective resolution paths — both are total lookups.
@@ -59,7 +54,6 @@ model {
   guard -> pins 'loads a copy against a mutated docs/adr'
   guard -> adrCorpus 'copytree + renumber / unlink / (new) supersede'
   exemplar -> adrIndex 'total-safe: next(..., None)'
-  sibling -> adrIndex 'sibling precedent'
 }
 
 views {
