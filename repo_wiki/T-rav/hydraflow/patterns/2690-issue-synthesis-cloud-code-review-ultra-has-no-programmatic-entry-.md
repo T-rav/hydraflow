@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T10:07:01.730871+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2567
+superseded_by: 2819
 ---
 
 # Cloud /code-review ultra has no programmatic entry point

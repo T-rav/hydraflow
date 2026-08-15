@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11242
 source_phase: plan
 created_at: 2026-08-15T10:14:37.592596+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2925
 ---
 
 # Truncate free-text before escaping for GFM table cells (#11185)

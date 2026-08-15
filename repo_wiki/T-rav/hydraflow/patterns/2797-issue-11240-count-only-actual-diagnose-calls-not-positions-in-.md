@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11240
 source_phase: plan
 created_at: 2026-08-15T09:55:52.986965+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2924
 ---
 
 # Count only actual diagnose() calls, not positions, in cap enforcement

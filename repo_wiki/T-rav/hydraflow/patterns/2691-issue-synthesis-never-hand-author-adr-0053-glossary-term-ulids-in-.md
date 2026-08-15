@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T10:07:01.734664+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2568
+superseded_by: 2820
 ---
 
 # Never hand-author ADR-0053 glossary term ULIDs in docs/wiki/terms/

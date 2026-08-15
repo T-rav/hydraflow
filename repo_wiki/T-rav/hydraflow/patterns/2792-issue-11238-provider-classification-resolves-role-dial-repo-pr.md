@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11238
 source_phase: plan
 created_at: 2026-08-15T09:37:15.548486+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 2921
 ---
 
 # Provider classification resolves role dial > repo_provider > claude

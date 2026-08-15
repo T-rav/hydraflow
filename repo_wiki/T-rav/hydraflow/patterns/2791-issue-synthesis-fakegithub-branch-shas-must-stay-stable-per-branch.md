@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T10:07:02.178648+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2668
+superseded_by: 2920
 ---
 
 # FakeGitHub branch SHAs must stay stable per branch unless force-pushed
