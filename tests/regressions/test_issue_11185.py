@@ -8,12 +8,12 @@ An operator reading ``docs/.../escape-ledger.md`` could see a row was
 ``encoded_as: regression-test`` but had no way to open the artifact that
 closed it without grepping the JSONL.
 
-A first attempt at the fix escaped ``|`` BEFORE truncating the cell to
-``EVIDENCE_MAX_CHARS``, so a ``|`` sitting near the truncation boundary
-could have its escaping backslash kept while the pipe itself was silently
-dropped by the slice (or vice versa), corrupting the row's column count.
-The fix truncates the raw note text first and escapes second — truncation
-can never split an escape sequence that doesn't exist yet.
+This pin asserts the issue's intent — that the encoding evidence reaches
+the rendered Markdown — and pins *content*, not output shape (gotcha:
+regression pins assert content, not output shape; the issue accepts either
+a table column or a detail line, so a column-count assertion would
+over-pin). The column-count and pipe-escaping/truncation invariants live
+in ``tests/test_escape_ledger.py``.
 """
 
 from __future__ import annotations
@@ -21,10 +21,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from escape.models import EscapeRecord
-from escape.report import EVIDENCE_MAX_CHARS, render_escape_ledger_markdown
+from escape.report import render_escape_ledger_markdown
 
 
-def _record(notes: str) -> EscapeRecord:
+def _record(notes: str, *, encoded_as: str = "regression-test") -> EscapeRecord:
     return EscapeRecord(
         id="revert:deadbeef",
         detected_at="2026-01-20T00:00:00+00:00",
@@ -36,85 +36,32 @@ def _record(notes: str) -> EscapeRecord:
         time_to_detection_hours=24.0,
         attribution_method="revert-parse",
         attribution_confidence="high",
-        encoded_as="regression-test",
+        encoded_as=encoded_as,
         notes=notes,
     )
 
 
-def _table_cells(line: str) -> list[str]:
-    """Split a markdown table row into cells, treating ``\\|`` as literal."""
-    body = line.strip()
-    assert body.startswith("|") and body.endswith("|"), line
-    body = body[1:-1]
-    cells: list[str] = []
-    current: list[str] = []
-    i = 0
-    while i < len(body):
-        ch = body[i]
-        if ch == "\\" and i + 1 < len(body) and body[i + 1] == "|":
-            current.append("\\|")
-            i += 2
-            continue
-        if ch == "|":
-            cells.append("".join(current).strip())
-            current = []
-            i += 1
-            continue
-        current.append(ch)
-        i += 1
-    cells.append("".join(current).strip())
-    return cells
-
-
-def _recent_escapes_row(md: str) -> str:
-    lines = md.splitlines()
-    idx = lines.index("## Recent escapes")
-    return lines[idx + 4]
-
-
-def test_evidence_column_renders_the_encoding_artifact_path() -> None:
+def test_resolved_escape_encoding_notes_render_in_the_report() -> None:
+    # #11185: a resolved escape whose notes name the encoding artifact must
+    # surface that artifact in the rendered report, not just the JSONL ledger
+    # -- an operator reads the Markdown, not the JSONL.
     now = datetime(2026, 2, 1, tzinfo=UTC)
     md = render_escape_ledger_markdown(
         [_record("tests/regressions/test_issue_10367.py")],
         now=now,
         merge_count_30d=200,
     )
-    row = _recent_escapes_row(md)
-    cells = _table_cells(row)
-    assert len(cells) == 9, "evidence must be a 9th column, not folded into an existing one"
-    assert cells[-1] == "tests/regressions/test_issue_10367.py"
+    assert "tests/regressions/test_issue_10367.py" in md
 
 
-def test_evidence_truncation_never_splits_an_escaped_pipe_at_the_boundary() -> None:
+def test_evidence_renders_for_a_non_path_encoding_artifact() -> None:
+    # The encoding artifact reaches the report regardless of category or
+    # shape -- an ADR reference (not a file path) recorded on resolution must
+    # also appear, so the evidence column is not silently path-only.
     now = datetime(2026, 2, 1, tzinfo=UTC)
-    prefix = "tests/regressions/test_issue_11185.py: "
-    padding = "a" * (EVIDENCE_MAX_CHARS - len(prefix) - 1)
-    # The pipe is the LAST character truncation would keep -- exactly where
-    # escape-then-truncate used to corrupt the row.
-    notes = f"{prefix}{padding}|" + "b" * 30
-    md = render_escape_ledger_markdown([_record(notes)], now=now, merge_count_30d=200)
-    row = _recent_escapes_row(md)
-    cells = _table_cells(row)
-    assert len(cells) == 9, "a pipe at the truncation boundary corrupted the row's cell count"
-    evidence = cells[-1]
-    assert evidence.startswith(prefix), "leading artifact path must survive truncation"
-    assert evidence.endswith("\\|…"), (
-        "escaping before truncating leaves a dangling backslash with no "
-        f"pipe (got {evidence[-15:]!r}) -- truncate the raw text first"
+    md = render_escape_ledger_markdown(
+        [_record("ADR-0042", encoded_as="adr")],
+        now=now,
+        merge_count_30d=200,
     )
-
-
-def test_evidence_truncation_drops_a_pipe_that_falls_past_the_boundary() -> None:
-    now = datetime(2026, 2, 1, tzinfo=UTC)
-    prefix = "tests/regressions/test_issue_11185.py: "
-    padding = "a" * (EVIDENCE_MAX_CHARS - len(prefix))
-    # The pipe is the FIRST character truncation drops entirely.
-    notes = f"{prefix}{padding}|" + "b" * 30
-    md = render_escape_ledger_markdown([_record(notes)], now=now, merge_count_30d=200)
-    row = _recent_escapes_row(md)
-    cells = _table_cells(row)
-    assert len(cells) == 9
-    evidence = cells[-1]
-    assert evidence.startswith(prefix)
-    assert evidence.endswith("…")
-    assert "|" not in evidence.replace("\\|", ""), "no bare pipe should leak into the cell"
+    assert "ADR-0042" in md
