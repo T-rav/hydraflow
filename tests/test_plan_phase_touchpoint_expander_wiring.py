@@ -57,6 +57,8 @@ class _StubReviewer:
         prior_findings: list | None = None,
     ) -> PlanReview:
         self.calls.append((task, plan_result))
+        self.prior_contexts = getattr(self, "prior_contexts", [])
+        self.prior_contexts.append((prior_summary, prior_findings))
         if not self._reviews:
             raise AssertionError("ran out of scripted reviews")
         return self._reviews.pop(0)
@@ -335,3 +337,41 @@ class TestPriorReviewContext:
         cache = SimpleNamespace(latest_review=lambda _id: object())
         phase._issue_cache = cache  # type: ignore[attr-defined]
         assert phase._prior_review_context(1) == (None, None)
+
+
+@pytest.mark.asyncio
+class TestPrimaryReviewThreading:
+    """#11301 review find: the PRIMARY review call must receive the cached
+    prior round — both halves were unit-tested but the glue was not."""
+
+    async def test_primary_review_receives_cached_prior_round(self, config) -> None:
+        from types import SimpleNamespace
+
+        phase, _state, _planners, _prs, _store, _stop = make_plan_phase(config)
+        reviewer = _StubReviewer([_clean_review(303)])
+        phase._plan_reviewer = reviewer  # type: ignore[assignment]
+
+        record = SimpleNamespace(
+            payload={
+                "review_text": "1 blocking finding",
+                "findings": [
+                    {
+                        "severity": "critical",
+                        "dimension": "test_strategy",
+                        "description": "no failing test named",
+                    }
+                ],
+            }
+        )
+        cache = AsyncMock()
+        cache.record_plan_stored = lambda *_a, **_kw: 2
+        cache.record_review_stored = lambda *_a, **_kw: None
+        cache.latest_review = lambda _id: record
+        phase._issue_cache = cache  # type: ignore[assignment]
+
+        await phase._write_plan_records(_task(), _result())
+
+        assert reviewer.prior_contexts, "review() was never called"
+        summary, findings = reviewer.prior_contexts[0]
+        assert summary == "1 blocking finding"
+        assert findings is not None and findings[0].dimension == "test_strategy"

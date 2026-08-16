@@ -545,7 +545,12 @@ class TestDeltaReReview:
         assert "RE-REVIEW" in block
         assert "[high] correctness: claims Foo.bar exists" in block
         assert "Suggestion: verify Foo" in block
-        assert "do NOT re-explore" in block
+        assert "avoid re-verifying" in block
+        # #11301 review find: the narrowing carries an escape valve — a
+        # restructured plan gets first-review depth, and critical defects
+        # are flaggable regardless.
+        assert "RESTRUCTURED" in block
+        assert "never licenses missing a real defect" in block
 
     def test_build_prompt_includes_prior_block_before_issue(self) -> None:
         prompt = PlanReviewer._build_prompt(

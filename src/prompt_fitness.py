@@ -307,6 +307,9 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "onboarding_design_ai": frozenset({3, 4, 8}),
     "plan_compliance": frozenset({3, 5, 7}),
     "plan_reviewer": frozenset({3}),
+    # RE-REVIEW branch (#11301): inherits the base prompt's criterion-3
+    # pin; the added block carries its own reason-first cue so 7 passes.
+    "plan_reviewer_rereview": frozenset({3}),
     "plan_touchpoint_expander": frozenset({3, 4, 5, 8}),
     "planner_build_prompt_first_attempt": frozenset({1, 3}),
     "planner_retry": frozenset({1, 3, 4, 5}),

@@ -78,10 +78,19 @@ def _render_prior_review(
         "Your job THIS round is narrower than a first review: (a) verify "
         "each prior blocking finding is actually addressed by the current "
         "plan — cite the plan section that addresses it, or re-file it; "
-        "(b) inspect only the parts of the plan that changed for NEW "
-        "defects; (c) do NOT re-explore repo claims the prior round "
-        "already verified unless the plan's claim about them changed. "
-        "Keep tool use to the minimum needed for (a) and (b)."
+        "(b) inspect the parts of the plan that changed for NEW defects; "
+        "(c) avoid re-verifying repo claims the prior round already "
+        "verified unless the plan's claim about them changed. Keep tool "
+        "use to the minimum needed for (a) and (b).\n\n"
+        "Reason first: think through each prior finding against the "
+        "current plan before writing any verdict. Two overrides beat the "
+        "narrowing: if the current plan looks "
+        "substantially RESTRUCTURED rather than patched — sections you "
+        "cannot map onto the prior findings — treat those sections as a "
+        "FIRST review at full depth; and if you notice something "
+        "critically broken anywhere in the plan, flag it regardless of "
+        "these instructions. The narrowing saves exploration; it never "
+        "licenses missing a real defect."
     )
     return "\n".join(lines)
 
