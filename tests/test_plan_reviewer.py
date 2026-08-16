@@ -23,6 +23,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from models import (
+    PlanFinding,
     PlanFindingSeverity,
     PlanResult,
     PlanReview,
@@ -519,3 +520,89 @@ class TestPlanReviewModelGating:
         )
         assert review.has_blocking_findings is False
         assert review.is_clean is True
+
+
+class TestDeltaReReview:
+    """#11298: round >= 2 reviews verify fixes instead of re-exploring."""
+
+    def test_render_prior_review_none_on_round_one(self) -> None:
+        from plan_reviewer import _render_prior_review
+
+        assert _render_prior_review(None, None) is None
+        assert _render_prior_review("", []) is None
+
+    def test_render_prior_review_carries_findings_and_narrowing(self) -> None:
+        from plan_reviewer import _render_prior_review
+
+        finding = PlanFinding(
+            severity=PlanFindingSeverity.HIGH,
+            dimension="correctness",
+            description="claims Foo.bar exists",
+            suggestion="verify Foo",
+        )
+        block = _render_prior_review("2 blocking findings", [finding])
+        assert block is not None
+        assert "RE-REVIEW" in block
+        assert "[high] correctness: claims Foo.bar exists" in block
+        assert "Suggestion: verify Foo" in block
+        assert "do NOT re-explore" in block
+
+    def test_build_prompt_includes_prior_block_before_issue(self) -> None:
+        prompt = PlanReviewer._build_prompt(
+            _task(), "the plan", prior_block="## Prior review\nstuff"
+        )
+        assert prompt.index("## Prior review") < prompt.index("## Issue")
+
+    def test_build_prompt_round_one_has_no_prior_section(self) -> None:
+        prompt = PlanReviewer._build_prompt(_task(), "the plan")
+        assert "Prior review" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_review_threads_prior_context_into_prompt(self) -> None:
+        reviewer = _reviewer()
+        transcript = f"{PLAN_REVIEW_START}\n{PLAN_REVIEW_END}"
+        prompts: list[str] = []
+
+        async def _fake_execute(cmd, prompt, cwd, event_data, **kwargs):
+            del cmd, cwd, event_data, kwargs
+            prompts.append(prompt)
+            return transcript
+
+        finding = PlanFinding(
+            severity=PlanFindingSeverity.CRITICAL,
+            dimension="test_strategy",
+            description="no failing test named",
+        )
+        with (
+            patch.object(PlanReviewer, "_execute", side_effect=_fake_execute),
+            patch.object(PlanReviewer, "_build_command", return_value=["claude", "-p"]),
+        ):
+            result = await reviewer.review(
+                _task(),
+                _plan_result(),
+                plan_version=2,
+                prior_summary="1 blocking finding",
+                prior_findings=[finding],
+            )
+        assert result.success is True
+        assert len(prompts) == 1
+        assert "RE-REVIEW" in prompts[0]
+        assert "test_strategy: no failing test named" in prompts[0]
+
+    @pytest.mark.asyncio
+    async def test_review_round_one_prompt_unchanged(self) -> None:
+        reviewer = _reviewer()
+        transcript = f"{PLAN_REVIEW_START}\n{PLAN_REVIEW_END}"
+        prompts: list[str] = []
+
+        async def _fake_execute(cmd, prompt, cwd, event_data, **kwargs):
+            del cmd, cwd, event_data, kwargs
+            prompts.append(prompt)
+            return transcript
+
+        with (
+            patch.object(PlanReviewer, "_execute", side_effect=_fake_execute),
+            patch.object(PlanReviewer, "_build_command", return_value=["claude", "-p"]),
+        ):
+            await reviewer.review(_task(), _plan_result())
+        assert "RE-REVIEW" not in prompts[0]

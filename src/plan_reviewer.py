@@ -51,6 +51,41 @@ if TYPE_CHECKING:
 logger = logging.getLogger("hydraflow.plan_reviewer")
 
 
+def _render_prior_review(
+    summary: str | None, findings: list[PlanFinding] | None
+) -> str | None:
+    """Render the round-N re-review context block (#11298), or None on round 1.
+
+    Pure. The block instructs the reviewer to VERIFY fixes and inspect only
+    what changed instead of re-exploring the repo from scratch — the prior
+    round already paid for that exploration.
+    """
+    if not summary and not findings:
+        return None
+    lines = ["## Prior review (this is a RE-REVIEW — read this first)", ""]
+    if summary:
+        lines.append(f"Prior verdict: {summary}")
+        lines.append("")
+    if findings:
+        lines.append("Prior findings:")
+        for f in findings:
+            sev = getattr(f.severity, "value", f.severity)
+            lines.append(f"- [{sev}] {f.dimension}: {f.description}")
+            if f.suggestion:
+                lines.append(f"  Suggestion: {f.suggestion}")
+        lines.append("")
+    lines.append(
+        "Your job THIS round is narrower than a first review: (a) verify "
+        "each prior blocking finding is actually addressed by the current "
+        "plan — cite the plan section that addresses it, or re-file it; "
+        "(b) inspect only the parts of the plan that changed for NEW "
+        "defects; (c) do NOT re-explore repo claims the prior round "
+        "already verified unless the plan's claim about them changed. "
+        "Keep tool use to the minimum needed for (a) and (b)."
+    )
+    return "\n".join(lines)
+
+
 # ---------------------------------------------------------------------------
 # Marker contract
 # ---------------------------------------------------------------------------
@@ -116,6 +151,8 @@ class PlanReviewer(BaseRunner):
         plan_result: PlanResult,
         *,
         plan_version: int = 1,
+        prior_summary: str | None = None,
+        prior_findings: list[PlanFinding] | None = None,
     ) -> PlanReview:
         """Run the reviewer on *plan_result* for *task*.
 
@@ -173,7 +210,12 @@ class PlanReviewer(BaseRunner):
             return review
 
         try:
-            transcript = await self._run_review_subprocess(task, plan_result)
+            transcript = await self._run_review_subprocess(
+                task,
+                plan_result,
+                prior_summary=prior_summary,
+                prior_findings=prior_findings,
+            )
         except Exception as exc:  # noqa: BLE001
             reraise_on_credit_or_bug(exc)
             review.error = f"reviewer subprocess failed: {exc}"
@@ -200,7 +242,14 @@ class PlanReviewer(BaseRunner):
         )
         return review
 
-    async def _run_review_subprocess(self, task: Task, plan_result: PlanResult) -> str:
+    async def _run_review_subprocess(
+        self,
+        task: Task,
+        plan_result: PlanResult,
+        *,
+        prior_summary: str | None = None,
+        prior_findings: list[PlanFinding] | None = None,
+    ) -> str:
         """Spawn the reviewer subprocess and return its raw transcript.
 
         Builds the reviewer prompt from ``_build_prompt`` and runs it
@@ -214,7 +263,11 @@ class PlanReviewer(BaseRunner):
         terminates on ``PLAN_END``.
         """
         cmd = self._build_command()
-        prompt = self._build_prompt(task, plan_result.plan)
+        prompt = self._build_prompt(
+            task,
+            plan_result.plan,
+            prior_block=_render_prior_review(prior_summary, prior_findings),
+        )
 
         def _check_review_complete(accumulated: str) -> bool:
             # Only checks the END marker, not START — same shape as
@@ -276,13 +329,21 @@ class PlanReviewer(BaseRunner):
     # ------------------------------------------------------------------
 
     @classmethod
-    def _build_prompt(cls, task: Task, plan: str) -> str:
+    def _build_prompt(
+        cls, task: Task, plan: str, *, prior_block: str | None = None
+    ) -> str:
         """Build the reviewer prompt for *task* against *plan*.
 
         Returns the full system+user prompt string the reviewer agent
         is launched with. Pure function — no subprocess, no I/O.
+        ``prior_block`` (#11298 delta re-review) is the rendered prior
+        findings section for round >= 2; it converts the round from a
+        fresh full-repo exploration into a verify-the-fixes pass —
+        telemetry showed plan_reviewer consuming 42% of ALL factory
+        tokens, mostly re-exploring on every round.
         """
         dimensions_list = "\n".join(f"- {d}" for d in REVIEW_DIMENSIONS)
+        prior_section = f"{prior_block}\n\n" if prior_block else ""
         return (
             f"You are an adversarial plan reviewer for HydraFlow issue "
             f"#{task.id}. Your job is to find problems, not to validate work. "
@@ -313,6 +374,7 @@ class PlanReviewer(BaseRunner):
             f"- **Reliability & tests** (test_strategy, security) — how does it "
             f"fail; is the test strategy adequate to catch a regression; what "
             f"is the untrusted-input or unattended-failure path?\n\n"
+            f"{prior_section}"
             f"## Issue\n\n"
             f"**Title:** {task.title}\n\n"
             f"**Body:**\n{task.body}\n\n"
