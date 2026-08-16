@@ -73,7 +73,7 @@ Role registry from `config._ENV_COMBO_OVERRIDES` — each combo env var resolves
 | `cost_budget_watcher` | `CostBudgetWatcherLoop` | Operations | — | — | — | Polls rolling-24h LLM spend; disables caretaker loops when daily cap exceeded. Default unlimited. |
 | `dependabot_merge` | `DependabotMergeLoop` | Repo Health | — | — | HITL escalation | Auto-merges dependency update PRs from configured bots after CI passes. |
 | `detector_calibration` | `DetectorCalibrationLoop` | Autonomy | — | — | HITL escalation | Mines closed escalations for repeat-offender subjects — churn means the detector is miscalibrated, not the code. |
-| `diagnostic` | `DiagnosticLoop` | Operations | `model` | — | HITL escalation | Analyzes escalated issues, classifies severity, and attempts targeted fixes before HITL. |
+| `diagnostic` | `DiagnosticLoop` | Operations | `model` | ✅ | HITL escalation | Analyzes escalated issues, classifies severity, and attempts targeted fixes before HITL. |
 | `diagram_loop` | `DiagramLoop` | Governance & Audit | — | — | PR review + merge gate | Self-documenting architecture caretaker. Walks src/, tests/, docs/adr/ every 4h; emits regenerated docs/arch/generated/ markdown + opens a PR when the live truth has drifted. Per ADR-0029 (caretaker pattern) and the Architecture Knowledge System spec. |
 | `disturbance_dampener` | `DisturbanceDampenerLoop` | Autonomy | — | ✅ | PR review + merge gate | Burns down disturbance backlog by selecting units per dimension+file, dispatching an auto-agent fix, and opening one PR per file (ADR-0095). |
 | `edge_proposer` | `EdgeProposerLoop` | Learning & Insights | — | — | — | Caretaker that proposes depends_on + implements edges between existing UL terms based on import graph + class inheritance. See ADR-0058. |
