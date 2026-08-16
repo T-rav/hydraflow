@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T04:41:06.039392+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3022
+superseded_by: 3289
 ---
 
 # Carry baseline forward for under-sampled telemetry sources

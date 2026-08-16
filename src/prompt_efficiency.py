@@ -59,6 +59,11 @@ class SkillEfficiencyRow:
     #: term_proposer calls in the claude/sonnet era). An operational alert,
     #: distinct from a cost regression.
     zero_usage_window: bool = False
+    #: #11280: the baseline's last-recorded model regime differs from this
+    #: source's current one (e.g. claude -> glm-5.2) — the window/trend were
+    #: nulled and treated as a fresh baseline (see `compute_skill_efficiency`)
+    #: rather than comparing cost-per-call across a pricing regime change.
+    regime_changed: bool = False
 
 
 def _cost_and_calls(totals: dict[str, int]) -> tuple[float, int]:
@@ -109,6 +114,8 @@ def compute_skill_efficiency(
     baseline: dict[str, dict[str, int]] | None,
     *,
     min_window_calls: int = MIN_WINDOW_CALLS,
+    current_regimes: dict[str, str] | None = None,
+    baseline_regimes: dict[str, str] | None = None,
 ) -> list[SkillEfficiencyRow]:
     """Roll up per-source telemetry totals into ranked efficiency rows.
 
@@ -161,8 +168,22 @@ def compute_skill_efficiency(
     the source's cumulative lifetime average so the scorecard still shows a
     meaningful rate for a source with no baseline/no window activity instead
     of a bare zero.
+
+    ``current_regimes``/``baseline_regimes`` (#11280, both optional — omitted
+    or missing an entry means "regime unknown", never treated as a mismatch)
+    map source -> its most-recently-recorded model
+    (`PromptTelemetry.get_source_regimes()`). When both are known for a
+    source and DIFFER (e.g. the baseline was built in the sonnet era and the
+    fleet has since switched to glm-5.2), the source is treated exactly like
+    a fresh source with no baseline entry — window/trend/base_cost_per_call
+    all stay ``None`` and ``regime_changed`` is set — the same "start a fresh
+    baseline" behavior the counter-reset path already gives a raw-delta drop.
+    A pricing-regime change must never read as a cost improvement or
+    regression against a stale cross-regime baseline.
     """
     baseline_map = baseline if isinstance(baseline, dict) else {}
+    current_regime_map = current_regimes if isinstance(current_regimes, dict) else {}
+    baseline_regime_map = baseline_regimes if isinstance(baseline_regimes, dict) else {}
     rows: list[SkillEfficiencyRow] = []
     for source, totals in totals_by_source.items():
         cum_cost_usd, cum_calls = _cost_and_calls(totals)
@@ -177,7 +198,12 @@ def compute_skill_efficiency(
         base_cost_per_call: float | None = None
         window_calls: int | None = None
         zero_usage_window = False
-        base_totals = baseline_map.get(source)
+        current_regime = current_regime_map.get(source, "")
+        baseline_regime = baseline_regime_map.get(source, "")
+        regime_changed = bool(
+            current_regime and baseline_regime and current_regime != baseline_regime
+        )
+        base_totals = None if regime_changed else baseline_map.get(source)
         if isinstance(base_totals, dict):
             _, base_raw_calls = _cost_and_calls(base_totals)
             base_effective = _effective_calls(base_totals)
@@ -223,6 +249,7 @@ def compute_skill_efficiency(
                 window_calls=window_calls,
                 base_cost_per_call=base_cost_per_call,
                 zero_usage_window=zero_usage_window,
+                regime_changed=regime_changed,
             )
         )
     rows.sort(key=lambda r: r.cost_per_call, reverse=True)
@@ -246,11 +273,14 @@ def format_scorecard(rows: list[SkillEfficiencyRow]) -> str:
     sep = "|---|---|---|---|---|---|---|"
     lines = [header, sep]
     for row in rows:
-        trend = (
-            f"{row.trend_vs_baseline:+.0%}"
-            if row.trend_vs_baseline is not None
-            else "n/a"
-        )
+        if row.trend_vs_baseline is not None:
+            trend = f"{row.trend_vs_baseline:+.0%}"
+        elif row.regime_changed:
+            # #11280: distinguish "baseline reset by a model-regime change"
+            # from plain "no baseline/window yet" — both render `trend=None`.
+            trend = "n/a (regime reset)"
+        else:
+            trend = "n/a"
         window = str(row.window_calls) if row.window_calls is not None else "n/a"
         lines.append(
             f"| {row.source} | {row.calls} | ${row.est_cost_usd:.4f} "

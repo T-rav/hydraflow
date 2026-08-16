@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T04:41:05.397055+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2953
+superseded_by: 3220
 ---
 
 # wiki_rot_citations _STYLE_A_RE matches line refs as symbol cites

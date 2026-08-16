@@ -676,6 +676,98 @@ def test_per_loop_cost_buckets_missing_model_under_unknown(
     assert rows[0]["model_breakdown"]["unknown"]["calls"] == 1
 
 
+# ---------------------------------------------------------------------------
+# build_per_loop_cost — model_regime_changed (#11280)
+# ---------------------------------------------------------------------------
+
+
+def test_model_regime_changed_true_when_dominant_model_switches(tmp_path) -> None:
+    """The exact #11280 scenario: a loop dispatched on claude in the prior
+    period and glm-5.2 in the current one. The blended $/tick average shifts
+    on its own from the pricing-regime change — model_regime_changed must be
+    set so the client doesn't read that shift as a genuine cost spike."""
+    from datetime import UTC, datetime, timedelta
+
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    config = ConfigFactory.create(repo_root=tmp_path / "repo")
+
+    now = datetime(2026, 4, 22, 12, tzinfo=UTC)
+    since = now - timedelta(hours=1)
+    prev_since = since - timedelta(hours=1)
+
+    _write_inference(
+        config,
+        timestamp=(prev_since + timedelta(minutes=5)).isoformat(),
+        source="implementer",
+        model="claude-opus-4-7",
+        input_tokens=1_000,
+        output_tokens=200,
+    )
+    _write_inference(
+        config,
+        timestamp=(since + timedelta(minutes=5)).isoformat(),
+        source="implementer",
+        model="glm-5.2",
+        input_tokens=1_000,
+        output_tokens=200,
+    )
+
+    rows = build_per_loop_cost(config, since=since, until=now)
+
+    assert len(rows) == 1
+    assert rows[0]["model_regime_changed"] is True
+
+
+def test_model_regime_changed_false_when_dominant_model_is_stable(tmp_path) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    config = ConfigFactory.create(repo_root=tmp_path / "repo")
+
+    now = datetime(2026, 4, 22, 12, tzinfo=UTC)
+    since = now - timedelta(hours=1)
+    prev_since = since - timedelta(hours=1)
+
+    for ts in (prev_since + timedelta(minutes=5), since + timedelta(minutes=5)):
+        _write_inference(
+            config,
+            timestamp=ts.isoformat(),
+            source="implementer",
+            model="claude-opus-4-7",
+            input_tokens=1_000,
+            output_tokens=200,
+        )
+
+    rows = build_per_loop_cost(config, since=since, until=now)
+
+    assert rows[0]["model_regime_changed"] is False
+
+
+def test_model_regime_changed_false_when_prior_period_has_no_data(tmp_path) -> None:
+    """No prior-period evidence => not enough to compare => never guessed as
+    a regime change (mirrors tick_cost_avg_usd_prev_period's `prev > 0`
+    spike gate — an empty prior period must not manufacture a signal)."""
+    from datetime import UTC, datetime, timedelta
+
+    (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
+    config = ConfigFactory.create(repo_root=tmp_path / "repo")
+
+    now = datetime(2026, 4, 22, 12, tzinfo=UTC)
+    since = now - timedelta(hours=1)
+    _write_inference(
+        config,
+        timestamp=(since + timedelta(minutes=5)).isoformat(),
+        source="implementer",
+        model="glm-5.2",
+        input_tokens=1_000,
+        output_tokens=200,
+    )
+
+    rows = build_per_loop_cost(config, since=since, until=now)
+
+    assert rows[0]["model_regime_changed"] is False
+
+
 def test_per_loop_cost_existing_fields_unchanged(tmp_path) -> None:
     """Regression: adding model_breakdown does not change existing field values."""
     from datetime import UTC, datetime, timedelta
@@ -713,6 +805,7 @@ def test_per_loop_cost_existing_fields_unchanged(tmp_path) -> None:
         "last_tick_at",
         "tick_cost_avg_usd_prev_period",
         "model_breakdown",
+        "model_regime_changed",
     }
     assert set(row.keys()) == expected_keys
     assert row["tokens_in"] == 1_000

@@ -510,11 +510,19 @@ class _FakeTelemetry:
     """Minimal `PromptTelemetry.get_source_totals()` double — deterministic
     totals without going through the real cost-estimation/pricing pipeline."""
 
-    def __init__(self, totals: dict[str, dict[str, int]]) -> None:
+    def __init__(
+        self,
+        totals: dict[str, dict[str, int]],
+        regimes: dict[str, str] | None = None,
+    ) -> None:
         self._totals = totals
+        self._regimes = regimes or {}
 
     def get_source_totals(self) -> dict[str, dict[str, int]]:
         return self._totals
+
+    def get_source_regimes(self) -> dict[str, str]:
+        return self._regimes
 
 
 def _steady_case(case_id: str = "steady-case") -> dict[str, object]:

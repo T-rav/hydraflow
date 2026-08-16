@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T04:41:05.557541+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2971
+superseded_by: 3238
 ---
 
 # Relaunch factory via detached spawn, not subprocess.run(timeout=30)

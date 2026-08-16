@@ -116,6 +116,78 @@ def test_trend_is_none_when_delta_calls_is_zero() -> None:
     assert rows[0].cost_per_call == 0.3
 
 
+# --- #11280: model-regime change nulls the trend, like a counter reset -------
+
+
+def test_regime_change_nulls_trend_and_window() -> None:
+    """The exact issue #11280 FP class: a baseline built in the sonnet era
+    compared against a glm-5.2 window would otherwise read as a huge fake
+    'improvement' (or a fake regression on the eventual switch-back). A
+    regime mismatch must be treated exactly like a fresh source — no
+    baseline entry — not diluted into the trend math."""
+    # $1000/100k calls baseline built under claude; current cumulative total
+    # is the same always-blended lifetime counter (the pre-existing
+    # blending this fix does NOT restructure — see module docstring), now
+    # under glm-5.2.
+    baseline = {"diff-sanity": _totals(1_000_000_000, 100_000)}
+    current = {"diff-sanity": _totals(100_000, 100_100)}
+    rows = compute_skill_efficiency(
+        current,
+        baseline=baseline,
+        current_regimes={"diff-sanity": "glm-5.2"},
+        baseline_regimes={"diff-sanity": "claude-sonnet-4-5"},
+    )
+    row = rows[0]
+    assert row.regime_changed is True
+    assert row.trend_vs_baseline is None
+    assert row.window_calls is None
+    assert row.base_cost_per_call is None
+    # Falls back to the cumulative lifetime average, same as "no baseline".
+    assert row.cost_per_call == pytest.approx(100_000 / 1_000_000 / 100_100)
+
+
+def test_same_regime_computes_trend_normally() -> None:
+    """Sanity check: when the regime matches, behavior is unchanged from the
+    pre-#11280 baseline math (genuine 99x regression still fires)."""
+    baseline = {"diff-sanity": _totals(1_000_000_000, 100_000)}
+    current = {"diff-sanity": _totals(1_100_000_000, 100_100)}
+    rows = compute_skill_efficiency(
+        current,
+        baseline=baseline,
+        current_regimes={"diff-sanity": "claude-sonnet-4-5"},
+        baseline_regimes={"diff-sanity": "claude-sonnet-4-5"},
+    )
+    row = rows[0]
+    assert row.regime_changed is False
+    assert row.trend_vs_baseline == 99.0
+
+
+def test_unknown_regime_does_not_null_trend() -> None:
+    """Missing/empty regime info (older baseline snapshots pre-#11280, or a
+    source with no recorded model yet) must NOT be treated as a mismatch —
+    only a genuine (non-empty, differing) pair nulls the trend. Back-compat:
+    the feature is additive, not a forced reset for every existing baseline."""
+    baseline = {"diff-sanity": _totals(1_000_000_000, 100_000)}
+    current = {"diff-sanity": _totals(1_100_000_000, 100_100)}
+    rows = compute_skill_efficiency(current, baseline=baseline)
+    row = rows[0]
+    assert row.regime_changed is False
+    assert row.trend_vs_baseline == 99.0
+
+
+def test_scorecard_labels_regime_reset_distinctly_from_no_baseline() -> None:
+    changed = compute_skill_efficiency(
+        {"a": _totals(100_000, 10_100)},
+        baseline={"a": _totals(1_000_000_000, 10_000)},
+        current_regimes={"a": "glm-5.2"},
+        baseline_regimes={"a": "claude"},
+    )
+    fresh = compute_skill_efficiency({"b": _totals(100_000, 10)}, baseline=None)
+    assert "n/a (regime reset)" in format_scorecard(changed)
+    assert "n/a (regime reset)" not in format_scorecard(fresh)
+    assert "| n/a |" in format_scorecard(fresh)
+
+
 def test_trend_is_none_when_delta_calls_is_negative() -> None:
     """A negative delta (counter reset / file rotation dropping the lifetime
     total below the stored baseline) must not be read as a window — treat

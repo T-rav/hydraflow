@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T04:41:05.622784+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2978
+superseded_by: 3245
 ---
 
 # Content-word overlap zero cliff marks safe orphan restore set

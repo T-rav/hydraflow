@@ -474,6 +474,11 @@ class TestComplexityRank:
         assert phase._complexity_rank(threshold) == "high"
         assert phase._complexity_rank(threshold + 1) == "high"
 
+    def test_none_ranks_unscored_not_trivial(self, config: HydraFlowConfig) -> None:
+        """#11298 audit: an unscored issue must not masquerade as trivial."""
+        phase, *_ = make_triage_phase(config)
+        assert phase._complexity_rank(None) == "unscored"
+
     def test_score_below_high_threshold_is_medium(
         self, config: HydraFlowConfig
     ) -> None:
