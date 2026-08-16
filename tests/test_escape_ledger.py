@@ -831,7 +831,15 @@ def test_render_report_confirmed_rate_not_inflated_by_low_confidence() -> None:
 
 
 def _table_cells(line: str) -> list[str]:
-    """Split a markdown table row into cells, treating ``\\|`` as literal."""
+    """Split a markdown table row into cells, treating ``\\|`` as literal.
+
+    Mirrors GFM's left-to-right backslash-escape scanning (#11242): a
+    backslash pairs with the very next ``\\`` or ``|`` and the pair is
+    consumed together, so ``\\|`` (escaped backslash) leaves the following
+    ``|`` live, while ``\\|`` (escaped pipe) does not. A version that only
+    recognized a lone ``\\`` immediately before ``|`` was blind to that
+    doubled-backslash case and would under-count delimiters.
+    """
     body = line.strip()
     assert body.startswith("|") and body.endswith("|"), line
     body = body[1:-1]
@@ -840,8 +848,8 @@ def _table_cells(line: str) -> list[str]:
     i = 0
     while i < len(body):
         ch = body[i]
-        if ch == "\\" and i + 1 < len(body) and body[i + 1] == "|":
-            current.append("\\|")
+        if ch == "\\" and i + 1 < len(body) and body[i + 1] in "\\|":
+            current.append(ch + body[i + 1])
             i += 2
             continue
         if ch == "|":
@@ -942,6 +950,26 @@ def test_render_report_recent_escapes_evidence_escapes_pipe_characters() -> None
     cells = _table_cells(rows[0])
     assert len(cells) == 9
     assert cells[-1] == "ADR-0367 \\| see also #10367"
+
+
+def test_render_report_recent_escapes_evidence_escapes_backslash_before_pipe() -> None:
+    """Regression pin for #11242.
+
+    A pre-existing backslash directly before a pipe (regex alternation,
+    a Windows path, already-escaped text pasted into notes) must not be
+    left for the pipe-escape pass to turn into a live, unescaped ``|``.
+    """
+    now = datetime(2026, 2, 1, tzinfo=UTC)
+    raw_notes = "regex alternation foo" + "\\" + "|" + "bar in notes"
+    recs = [
+        _record("revert:a", detected_at="2026-01-20T00:00:00+00:00", notes=raw_notes)
+    ]
+    md = render_escape_ledger_markdown(recs, now=now, merge_count_30d=200)
+    _, _, rows = _recent_escapes_table(md)
+    cells = _table_cells(rows[0])
+    assert len(cells) == 9
+    expected = "regex alternation foo" + "\\" * 3 + "|" + "bar in notes"
+    assert cells[-1] == expected
 
 
 def test_render_report_recent_escapes_evidence_truncates_and_preserves_leading_path() -> (

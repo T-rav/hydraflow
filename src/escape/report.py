@@ -38,13 +38,22 @@ def _sanitize_evidence_cell(notes: str) -> str:
     ``\\|`` pair in half at the length boundary, corrupting the row's
     column count. Truncating raw text first means there's no escape
     sequence yet to split.
+
+    Escapes ``\\`` before ``|`` — never the reverse (#11242). Notes may
+    already contain a literal backslash immediately before a pipe (a regex
+    alternation, a Windows path, pre-escaped text pasted in). Escaping ``|``
+    first turns that pre-existing ``\\|`` into ``\\\\|``: GFM reads the
+    doubled backslash as one escaped literal backslash, which leaves the
+    trailing ``|`` unescaped and live, splitting the row. Escaping the
+    backslash first means every ``|`` — original or newly doubled — is still
+    unescaped when the pipe pass runs, so the pipe pass catches all of them.
     """
     collapsed = " ".join(notes.split())
     if not collapsed:
         return "—"
     if len(collapsed) > EVIDENCE_MAX_CHARS:
         collapsed = collapsed[:EVIDENCE_MAX_CHARS] + "…"
-    return collapsed.replace("|", "\\|")
+    return collapsed.replace("\\", "\\\\").replace("|", "\\|")
 
 
 def render_escape_ledger_markdown(
