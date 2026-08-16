@@ -376,7 +376,9 @@ async def test_consume_telemetry_appends_baseline_history(
     entry = _json.loads(lines[0])
     assert entry["totals_by_source"] == totals
     assert entry["recorded_at"]
-    state.set_prompt_efficiency_baseline.assert_called_with(totals)
+    # #11280: the current tick's model-regime snapshot is persisted alongside
+    # the totals so the next tick can detect a regime change.
+    state.set_prompt_efficiency_baseline.assert_called_with(totals, regimes={})
 
 
 async def test_consume_telemetry_files_zero_usage_alert(loop_env, monkeypatch) -> None:

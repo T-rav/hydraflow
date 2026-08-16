@@ -10,6 +10,7 @@ NEVER propagates into the review pipeline.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,7 @@ from judge_calibration import (
     JudgeCalibrationLedger,
     Verdict,
     judge_verdict_ledger_path,
+    score_all,
     subject_for_issue,
     subject_for_pr,
 )
@@ -69,8 +71,11 @@ def test_records_pass_verdict_with_confidence(tmp_path: Path) -> None:
     records = JudgeCalibrationLedger(path).read_all()
     assert len(records) == 1
     rec = records[0]
-    assert rec.judge_id == "post_verify:correctness"
-    assert rec.judge_family == "review_advisor"
+    # #11280: judge_id/judge_family carry the ACTUAL dispatched model family
+    # (default advisor_model "opus" -> "claude"), not a constant string — a
+    # judge-model change must not pool into the same calibration row.
+    assert rec.judge_id == "post_verify:correctness:claude"
+    assert rec.judge_family == "claude"
     assert rec.subject_id == "pr:42"
     assert rec.verdict is Verdict.PASS
     assert rec.confidence == 0.9
@@ -97,7 +102,7 @@ def test_records_raw_veto_even_when_downgraded(tmp_path: Path) -> None:
     assert result.verdict == "APPROVE"  # downgraded on return
     rec = JudgeCalibrationLedger(path).read_all()[0]
     assert rec.verdict is Verdict.FAIL  # raw call recorded
-    assert rec.judge_id == "post_verify"  # no lens
+    assert rec.judge_id == "post_verify:claude"  # no lens, family appended
     assert rec.confidence == 0.75
 
 
@@ -193,8 +198,8 @@ def test_preflight_records_forecast(tmp_path: Path) -> None:
     records = JudgeCalibrationLedger(path).read_all()
     assert len(records) == 1
     rec = records[0]
-    assert rec.judge_id == "pre_flight"
-    assert rec.judge_family == "review_advisor"
+    assert rec.judge_id == "pre_flight:claude"
+    assert rec.judge_family == "claude"
     assert rec.subject_id == "pr:42"
     assert rec.verdict is Verdict.FAIL
     assert rec.confidence == 0.8
@@ -244,6 +249,91 @@ def test_preflight_without_ledger_wiring_is_noop(tmp_path: Path) -> None:
 
     assert plan is not None
     assert not judge_verdict_ledger_path(tmp_path).exists()
+
+
+# --- #11280: judge-model regime segmentation -------------------------------
+
+
+def test_post_verify_model_switch_segments_calibration_rows(tmp_path: Path) -> None:
+    """A judge-model change (e.g. the claude -> glm switch) must not pool.
+
+    Two verdicts on the same lens but dispatched to different model families
+    land as two distinct ``judge_id`` rows, so `score_all()`'s Brier/ECE never
+    blends a claude-judge score with a glm-judge score into one meaningless
+    number.
+    """
+    path = judge_verdict_ledger_path(tmp_path)
+    claude_cfg = SURFACE_ADVISOR_CONFIGS["pr_review"]
+    glm_cfg = dataclasses.replace(claude_cfg, advisor_model="glm-5.2")
+    inp = PostVerifyInput(
+        surface="pr_review",
+        diff=_unclassed_diff(),
+        executor_verdict_summary="approved",
+        lens="correctness",
+    )
+
+    for cfg in (claude_cfg, glm_cfg):
+        advisor = PostVerifyAdvisor(
+            runner=_StubRunner(_APPROVE),
+            surface_config=cfg,
+            pr_number=42,
+            judge_verdict_ledger_path=path,
+        )
+        asyncio.run(advisor.run(inp))
+
+    records = JudgeCalibrationLedger(path).read_all()
+    judge_ids = {rec.judge_id for rec in records}
+    assert judge_ids == {
+        "post_verify:correctness:claude",
+        "post_verify:correctness:zhipu",
+    }
+
+    scores = score_all(records, outcomes=[])
+    assert {s.judge_id for s in scores} == judge_ids
+
+
+def test_preflight_model_switch_segments_calibration_rows(tmp_path: Path) -> None:
+    path = judge_verdict_ledger_path(tmp_path)
+    claude_cfg = SURFACE_ADVISOR_CONFIGS["pr_review"]
+    glm_cfg = dataclasses.replace(claude_cfg, advisor_model="glm-5.2")
+
+    for cfg in (claude_cfg, glm_cfg):
+        advisor = PreFlightAdvisor(
+            runner=_StubRunner(_PLAN_WITH_FORECAST),
+            surface_config=cfg,
+            pr_number=42,
+            judge_verdict_ledger_path=path,
+            calibration_subject_id=subject_for_pr(42),
+        )
+        asyncio.run(advisor.run(_preflight_input()))
+
+    records = JudgeCalibrationLedger(path).read_all()
+    assert {rec.judge_id for rec in records} == {
+        "pre_flight:claude",
+        "pre_flight:zhipu",
+    }
+
+
+def test_preflight_empty_advisor_model_gets_unknown_segment(tmp_path: Path) -> None:
+    """An unset advisor_model resolves to an empty family — the judge_id must
+    still carry the ``:unknown`` segment (matching the recorded judge_family)
+    rather than falling back to the legacy suffix-less ``pre_flight`` id,
+    which would pool new unknown-family verdicts with pre-#11280 rows."""
+    path = judge_verdict_ledger_path(tmp_path)
+    advisor = PreFlightAdvisor(
+        runner=_StubRunner(_PLAN_WITH_FORECAST),
+        surface_config=dataclasses.replace(
+            SURFACE_ADVISOR_CONFIGS["pr_review"], advisor_model=""
+        ),
+        pr_number=42,
+        judge_verdict_ledger_path=path,
+        calibration_subject_id=subject_for_pr(42),
+    )
+    asyncio.run(advisor.run(_preflight_input()))
+
+    rec = JudgeCalibrationLedger(path).read_all()[0]
+    assert rec.judge_id == "pre_flight:unknown"
+    assert rec.judge_family == "unknown"
 
 
 def test_preflight_prompt_elicits_forecast() -> None:

@@ -2253,6 +2253,12 @@ class StateData(BaseModel):
     # get_source_totals()` snapshot, compared against the current tick's
     # snapshot to compute per-source cost trend before being overwritten.
     prompt_efficiency_baseline: dict[str, dict[str, int]] = Field(default_factory=dict)
+    # #11280: the model regime (`PromptTelemetry.get_source_regimes()`) each
+    # `prompt_efficiency_baseline` source was snapshotted under. A source
+    # whose CURRENT regime differs from this stored one gets its trend nulled
+    # instead of comparing cost-per-call across a pricing-regime change (e.g.
+    # claude -> glm-5.2) — see `prompt_efficiency.compute_skill_efficiency`.
+    prompt_efficiency_baseline_regime: dict[str, str] = Field(default_factory=dict)
     fake_coverage_last_known: dict[str, list[str]] = Field(default_factory=dict)
     fake_coverage_attempts: dict[str, int] = Field(default_factory=dict)
     # #8986 — rollup issue tracking: maps "{Fake}:{gap_kind}" → open GH issue
