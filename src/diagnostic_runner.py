@@ -207,12 +207,21 @@ class DiagnosticRunner(BaseRunner):
                     resume_at=parse_credit_resume_time(transcript),
                     authoritative=True,
                 )
+            # #11370: on the failover lane the harness model's format
+            # compliance is weaker — a parse failure there is an INFRA
+            # signal about the lane, not evidence about the issue. Mark it
+            # so the loop parks/retries instead of escalating to HITL
+            # (observed live: false 'diagnose-failed' escalations while GLM
+            # served the fleet).
+            from credit_failover import is_active as _failover_active
+
             return DiagnosisResult(
                 root_cause=transcript[:500] if transcript else "No output",
                 severity=Severity.P2_FUNCTIONAL,
                 fixable=False,
                 fix_plan="",
                 human_guidance="Agent did not produce structured output. Manual review required.",
+                infra_failure=_failover_active(),
             )
 
         try:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
@@ -101,9 +101,30 @@ class DiagnosticLoop(BaseBackgroundLoop):
             "diagnostic_hitl_comments",
             config.data_root / "dedup" / "diagnostic_hitl_comments.json",
         )
+        # #11370 infra-park cooldowns: issue -> parked-at. An infra-classed
+        # diagnosis failure (failover-lane parse attrition) must NOT respawn
+        # on every poll while the issue still carries hydraflow-diagnose —
+        # that is the 2026-07-22 triage retry-storm shape. In-memory is
+        # deliberate: a restart forgiving one extra attempt is acceptable;
+        # a stuck park surviving restarts is not.
+        self._infra_parked: dict[int, datetime] = {}
 
     def _get_default_interval(self) -> int:
         return self._config.diagnostic_interval
+
+    def _infra_park_active(self, issue_number: int) -> bool:
+        """True while *issue_number*'s #11370 infra-park cooldown holds.
+
+        Expired parks are dropped so the dict cannot grow unboundedly.
+        """
+        parked_at = self._infra_parked.get(issue_number)
+        if parked_at is None:
+            return False
+        cooldown = timedelta(minutes=self._config.credit_failover_cooldown_minutes)
+        if datetime.now(UTC) - parked_at >= cooldown:
+            del self._infra_parked[issue_number]
+            return False
+        return True
 
     async def _do_work(self) -> dict[str, Any] | None:
         """Poll for diagnosed issues and run the diagnostic pipeline."""
@@ -130,6 +151,8 @@ class DiagnosticLoop(BaseBackgroundLoop):
                 break
             issue_number = raw_issue.get("number", 0)
             if not issue_number:
+                continue
+            if self._infra_park_active(int(issue_number)):
                 continue
             issue_title = raw_issue.get("title", "")
             issue_body = raw_issue.get("body", "") or ""
@@ -262,6 +285,28 @@ class DiagnosticLoop(BaseBackgroundLoop):
         Returns ``"escalated"`` if a gate fired (and HITL escalation happened),
         otherwise ``None`` to signal the fix stage should proceed.
         """
+        # ``is True`` (not truthiness): test harnesses feed MagicMock
+        # diagnoses whose auto-attributes are truthy — the guard must only
+        # fire on the real bool (the MagicMock-truthy-guard incident class).
+        if diagnosis.infra_failure is True:
+            # #11370: the diagnosis spawn failed for lane/infra reasons
+            # (failover-lane structured-output attrition) — the verdict says
+            # nothing about the issue. Park with a cooldown instead of
+            # escalating; no attempt is recorded, so budget is preserved for
+            # runs that actually reached the issue. The cooldown dequeues
+            # the issue from every poll until it elapses — without it this
+            # respawns a two-stage diagnose per poll for the whole failover
+            # window (the 2026-07-22 triage retry-storm shape).
+            self._infra_parked[issue_number] = datetime.now(UTC)
+            logger.warning(
+                "Diagnostic: issue #%d diagnosis failed on infra "
+                "(failover-lane parse failure) — parked for %d min, "
+                "not escalating (#11370)",
+                issue_number,
+                self._config.credit_failover_cooldown_minutes,
+            )
+            return "retry"
+
         if not diagnosis.fixable:
             logger.info(
                 "Diagnostic: issue #%d not fixable (severity=%s) — escalating to HITL",
