@@ -320,3 +320,48 @@ class TestS3StillBlockingAfterExpansion:
             f["description"] == "still failing after enrichment"
             for f in captured["findings"]
         )
+
+
+# ---------------------------------------------------------------------------
+# Scenario 4: #11298 size tiering — low-complexity issue skips the review
+# spawn entirely but still writes the review_stored record the READY-stage
+# gate requires.
+# ---------------------------------------------------------------------------
+
+
+class TestS4LightTierSkipsReview:
+    """Triage-scored simple issue plans to READY with zero reviewer spawns."""
+
+    async def test_low_complexity_skips_review_spawn(self, mock_world) -> None:
+        world = mock_world
+        world.add_issue(
+            304,
+            "Fix typo in operator panel label",
+            "One-line copy fix.",
+            labels=["hydraflow-plan"],
+        )
+        harness = world.harness
+        phase = harness.plan_phase
+
+        reviewer = _ScriptedReviewer([])  # any call would raise: no scripts
+        phase._plan_reviewer = reviewer
+        captured = _wire_issue_cache(phase)
+
+        class _Classified:
+            payload = {"complexity_score": 2}
+
+        phase._issue_cache.latest_classification = lambda _id: _Classified()
+
+        _setup_planner(harness, 304)
+        issue = TaskFactory.create(id=304, tags=["hydraflow-plan"])
+        harness.store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        # No reviewer spawn — the whole point of the tier gate.
+        assert reviewer.calls == []
+        # READY-gate invariant: a review_stored record still lands, clean.
+        assert captured["issue_id"] == 304
+        assert captured["has_blocking"] is False
+        assert "light-tier" in captured["review_text"]
+        assert captured["findings"] == []

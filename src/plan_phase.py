@@ -517,6 +517,48 @@ class PlanPhase(PlanWikiIngestMixin):
             bool(record.payload.get("needs_discovery", False)),
         )
 
+    def _issue_complexity(self, issue: Task) -> int:
+        """Triage's complexity_score for *issue*; 10 (max) when unknown.
+
+        Conservative default: an unclassified issue reads as maximally
+        complex so it is never denied a plan review by the #11298 tier gate.
+        """
+        if self._issue_cache is None:
+            return 10
+        try:
+            record = self._issue_cache.latest_classification(issue.id)
+        except (AttributeError, TypeError, ValueError):
+            return 10
+        payload = getattr(record, "payload", None)
+        if not isinstance(payload, dict):
+            return 10
+        try:
+            return int(payload.get("complexity_score", 10))
+        except (TypeError, ValueError):
+            return 10
+
+    def _skip_plan_review(self, issue: Task) -> tuple[bool, int]:
+        """#11298 size tiering: does this issue skip the adversarial review?
+
+        Returns ``(skip, complexity)``. Skip only when ALL hold: tiering is
+        enabled (threshold > 0), triage scored the issue at or below the
+        threshold, the issue has never been routed back (a cycled plan is
+        evidence the cheap path failed), and it carries no escalation label.
+        The implement-side skill gauntlet still reviews the CODE either way —
+        this trades plan-stage ceremony, not merge safety.
+        """
+        complexity = self._issue_complexity(issue)
+        threshold = int(getattr(self._config, "plan_review_min_complexity", 0))
+        if threshold <= 0:
+            return False, complexity
+        if complexity > threshold:
+            return False, complexity
+        if self._state.get_route_back_count(issue.id) > 0:
+            return False, complexity
+        if self._has_escalation_label(issue):
+            return False, complexity
+        return True, complexity
+
     def _should_discover_helper(self, issue: Task) -> bool:
         """ADR-0107 planner decision gate: run the discover helper before planning?
 
@@ -1017,6 +1059,27 @@ class PlanPhase(PlanWikiIngestMixin):
         )
 
         if self._plan_reviewer is None:
+            return plan_version
+
+        # #11298 size tiering: low-complexity, never-cycled, unescalated
+        # issues skip the agentic review spawn. A review_stored record is
+        # still written (has_blocking=False) so the READY-stage gate's
+        # "no review_stored record" route-back never fires for the light
+        # tier — the skip is an explicit, audited verdict, not a gap.
+        skip, complexity = self._skip_plan_review(issue)
+        if skip:
+            threshold = self._config.plan_review_min_complexity
+            summary = (
+                f"light-tier: adversarial plan review skipped "
+                f"(complexity {complexity} <= {threshold}; #11298)"
+            )
+            logger.info("Plan review skipped for issue #%d — %s", issue.id, summary)
+            self._issue_cache.record_review_stored(
+                issue.id,
+                review_text=summary,
+                has_blocking=False,
+                findings=[],
+            )
             return plan_version
 
         try:
