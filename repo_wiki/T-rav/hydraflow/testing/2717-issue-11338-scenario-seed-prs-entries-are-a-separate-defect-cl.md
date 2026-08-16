@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11338
 source_phase: plan
 created_at: 2026-08-16T12:34:38.645165+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Scenario seed prs=[] entries are a separate defect class from scripts[]

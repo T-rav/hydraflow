@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T13:50:50.435362+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3600
+superseded_by: 3890
 ---
 
 # merge_assets plan/apply/diff must share one write code path

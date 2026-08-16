@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T13:50:50.610610+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3608
+superseded_by: 3898
 ---
 
 # Place loop safety checks before early-return paths in _do_work
