@@ -148,6 +148,53 @@ async def test_tick_three_rediscovering_tick_one_site_is_idempotent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_site_aware_rediscovery_of_pre_11328_title_only_roster_line_is_idempotent() -> (
+    None
+):
+    """Legacy issues (filed before #11328) roster sites by title text alone.
+
+    A later, site-aware rediscovery of that SAME finding (identical title,
+    now with an explicit ``--site``) must recognize the title-only line as
+    already folded instead of appending a second, site-tagged line for the
+    same site -- the duplicate-roster-line bug caught in review: the
+    site-aware lookup only ever checked the site identifier, which a
+    pre-#11328 line never carries.
+    """
+    prs = _RecordingPRPort()
+    title = "branch_gc_scan misses agent/auto-agent-<N>"
+    class_key = compute_class_key(_SOURCE, _NEEDLE)
+    legacy_body = (
+        "## Finding\n\nsrc/branch_gc_scan.py:39 misses agent/auto-agent-<N>\n\n"
+        "## Folded sites\n"
+        f"- {title}\n\n"
+        f"{render_marker(class_key)}\n"
+    )
+    prs._issues[30000] = {
+        "number": 30000,
+        "title": title,
+        "body": legacy_body,
+    }
+    prs._next_number = 30001
+
+    result_number = await file_or_fold(
+        prs,
+        _SOURCE,
+        _NEEDLE,
+        title,
+        "## Finding\n\nsrc/branch_gc_scan.py:39 misses agent/auto-agent-<N>",
+        ["hydraflow-find"],
+        site="src/branch_gc_scan.py:39",
+    )
+
+    assert result_number == 30000
+    assert len(prs._issues) == 1
+    assert prs._issues[30000]["body"] == legacy_body
+    assert extract_folded_sites(legacy_body) == [title]
+    assert len(prs.comment_calls) == 0
+    assert len(prs.update_calls) == 0
+
+
+@pytest.mark.asyncio
 async def test_no_matching_open_class_issue_files_new_issue() -> None:
     """Acceptance bullet 3: no open class issue -> a new one is filed."""
     prs = _RecordingPRPort()

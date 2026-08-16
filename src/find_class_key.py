@@ -23,13 +23,15 @@ Marker convention mirrors the existing ``log_ingest_loop`` /
 ADR-0041 — no new state file, so lost local state can't re-spawn siblings).
 Marker equality is the primary fold signal; because the key embeds a
 *truncated* SHA1 digest, marker-equal candidates are also required to share
-at least one needle token with the matched issue's own title/body, so a
-truncation collision between two genuinely unrelated needles can never
-silently merge them (the test-adequacy gap that stalled the first
-implementation attempt on this issue). Issues filed before this layer
-existed carry no marker; those fold only on title-similarity AND
-shared-needle-tokens together — title similarity alone is never sufficient
-(over-collapse is the dangerous failure per the design pre-mortem).
+at least one needle token with the matched issue's own title/body AND clear
+a title-affinity floor (``CLASS_MARKER_TITLE_FLOOR``) against that issue's
+title, so a truncation collision between two genuinely unrelated needles can
+never silently merge them on a single coincidental shared word (the
+test-adequacy gap that stalled the first implementation attempt on this
+issue). Issues filed before this layer existed carry no marker; those fold
+only on title-similarity AND shared-needle-tokens together — title
+similarity alone is never sufficient (over-collapse is the dangerous
+failure per the design pre-mortem).
 
 Cross-tick idempotency (#11328) keys off an explicit *site* identifier
 (e.g. ``file:line``) rather than the site's title text: ``file_or_fold``
@@ -72,6 +74,17 @@ CLASS_OVERLAP_THRESHOLD = 0.5
 #: realistic board size; ``match_class``'s needle-token backstop (see module
 #: docstring) is the defense-in-depth for the case where one occurs anyway.
 DEFAULT_DIGEST_LEN = 12
+
+#: Title-token-overlap floor for the marker-equality fold path. A shared
+#: needle token alone is not sufficient evidence two issues are the same
+#: class (a single common word is easy to hit by chance); the marker path
+#: also requires the candidate's title to clear this floor against the
+#: matched issue's title. Calibrated below the tightest real same-class pair
+#: in ``tests/regressions/test_issue_11292.py`` (~0.07 title-token overlap
+#: between that family's first and last sibling titles) so real folds are
+#: unaffected, while a title that shares no meaningful content with the
+#: matched issue's title is refused even if one needle token collides.
+CLASS_MARKER_TITLE_FLOOR = 0.05
 
 _STOPWORDS = frozenset(
     {
@@ -194,12 +207,14 @@ def match_class(
     """Return the open issue number *class_key* folds into, or ``0``.
 
     Marker equality is the primary signal: an open issue whose body carries
-    the identical class-key marker is the fold target, GUARDED by a
+    the identical class-key marker is the fold target, GUARDED by BOTH a
     needle-token backstop (see module docstring) against a truncated-digest
-    collision between two genuinely unrelated needles. Marker-less legacy
-    issues fold only when title similarity clears ``CLASS_OVERLAP_THRESHOLD``
-    AND the candidate's own needle tokens appear in the issue body — title
-    similarity alone is never sufficient.
+    collision between two genuinely unrelated needles AND a title-affinity
+    floor (``CLASS_MARKER_TITLE_FLOOR``) — a single shared needle token is
+    not sufficient evidence of class membership on its own. Marker-less
+    legacy issues fold only when title similarity clears
+    ``CLASS_OVERLAP_THRESHOLD`` AND the candidate's own needle tokens appear
+    in the issue body — title similarity alone is never sufficient.
     """
     needle_tokens = normalize_needle(needle)
     for issue in open_issues:
@@ -211,7 +226,9 @@ def match_class(
             candidate_tokens = normalize_needle(
                 issue.get("title", "")
             ) | normalize_needle(body)
-            if not needle_tokens or (needle_tokens & candidate_tokens):
+            needle_backstop = not needle_tokens or (needle_tokens & candidate_tokens)
+            title_affinity = title_token_overlap(title, issue.get("title", ""))
+            if needle_backstop and title_affinity >= CLASS_MARKER_TITLE_FLOOR:
                 return int(issue["number"])
             continue
         overlap = title_token_overlap(title, issue.get("title", ""))
@@ -265,9 +282,18 @@ def _append_site(body: str, title: str, site: str | None = None) -> str:
     *site*, *title*) is already rostered — the idempotency guard so a
     re-offered site posts no second comment, even if the finder reworded
     the title text between ticks (#11328).
+
+    Also a no-op when *title* itself already appears as a legacy, untagged
+    roster line. Issues filed before per-site identifiers existed roster
+    sites by title text alone (:func:`extract_folded_sites` yields that
+    title as the entry's identifier); a site-aware rediscovery of that same
+    finding never matches on *site* (the legacy line carries none), so
+    without this fallback every live legacy class issue grows a duplicate
+    roster line the first time it's rediscovered by a site-aware caller.
     """
     effective_site = site if site is not None else title
-    if effective_site in extract_folded_sites(body):
+    existing_sites = extract_folded_sites(body)
+    if effective_site in existing_sites or title in existing_sites:
         return body
     line = _site_line(title, site)
     if _SITES_HEADING not in body:

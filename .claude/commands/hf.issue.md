@@ -72,6 +72,34 @@ gh issue list --repo $REPO --label hydraflow-find --state open --search "<key te
 
 If a matching open issue already exists, tell the user and show the link instead of creating a duplicate.
 
+**Pattern-shaped findings (#11292):** If the finding's needle is a PATTERN — a
+regex/AST shape that could recur at more than one site (e.g. "this branch
+parser is missing a namespace", "this test hard-codes an ADR filename") —
+do NOT file one issue per site. Sweep ALL sites in one pass first, then run
+the mechanical class-key check instead of a keyword search:
+
+```bash
+python scripts/find_class_check.py --check \
+  --source "<short finder/pattern id, e.g. branch-namespace-parser>" \
+  --needle "<one stable description of the pattern — same text every time \
+this pattern is swept, do NOT reword it per site>" \
+  --title "<the issue title you're about to create>"
+```
+
+- Exit `0` → stdout prints `FOLD <number>`. Do not create a new issue; post
+  a comment on `<number>` listing the newly discovered site(s) instead.
+- Exit `1` → stdout prints `FILE-NEW`. Create ONE issue whose body lists
+  every site the sweep found, and append the marker line from:
+  `python scripts/find_class_check.py --emit-marker --source "<source>" --needle "<needle>"`
+- Exit `2` → the check itself failed (gh auth/network/rate-limit). Do NOT
+  treat this as `FILE-NEW` — a transient failure misread as "no matches"
+  files an avoidable duplicate. Retry, or stop and report the failure.
+
+This is a mechanical decision, not a judgment call — never skip the check
+because the sites "seem different enough" to you. A finding that is a single
+concrete bug at a single site (not a recurring pattern) is unaffected and
+follows the normal duplicate-search flow above.
+
 ### Phase 4: Create the Issue
 
 **CRITICAL RULES:**

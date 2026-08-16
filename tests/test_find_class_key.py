@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 
 from find_class_key import (
+    CLASS_MARKER_TITLE_FLOOR,
     CLASS_OVERLAP_THRESHOLD,
     compute_class_key,
     extract_class_key,
@@ -228,7 +229,55 @@ class TestMatchClass:
             }
         ]
         target = match_class(
-            key, "branch namespace missing", "another site title", issues
+            key,
+            "branch namespace missing",
+            "branch namespace parser gap at another site",
+            issues,
+        )
+        assert target == 11188
+
+    def test_marker_equal_needle_shared_but_title_unrelated_does_not_fold(
+        self,
+    ) -> None:
+        # The needle-token backstop alone is not sufficient: 'branch' is a
+        # coincidental shared word, but the candidate's title has nothing to
+        # do with the matched issue's title -- the title-affinity floor
+        # must refuse this fold even though the needle backstop would pass.
+        key = compute_class_key("branch-parser", "branch namespace missing")
+        issues = [
+            {
+                "number": 11188,
+                "title": "branch namespace parser gap",
+                "body": f"details\n\n{render_marker(key)}\n",
+            }
+        ]
+        target = match_class(
+            key, "branch namespace missing", "totally unrelated finding", issues
+        )
+        assert target == 0
+
+    def test_marker_equal_title_affinity_at_floor_boundary_folds(self) -> None:
+        key = compute_class_key("branch-parser", "branch namespace missing")
+        issues = [
+            {
+                "number": 11188,
+                "title": "branch namespace parser gap",
+                "body": f"details\n\n{render_marker(key)}\n",
+            }
+        ]
+        # {branch} shared of {branch, namespace, parser, gap, unrelated,
+        # finding, extra, words, padded, out} -- engineered to sit at
+        # CLASS_MARKER_TITLE_FLOOR exactly.
+        overlap = title_token_overlap(
+            "branch unrelated finding extra words padded out more",
+            "branch namespace parser gap",
+        )
+        assert overlap >= CLASS_MARKER_TITLE_FLOOR
+        target = match_class(
+            key,
+            "branch namespace missing",
+            "branch unrelated finding extra words padded out more",
+            issues,
         )
         assert target == 11188
 

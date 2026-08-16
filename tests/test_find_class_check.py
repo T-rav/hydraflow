@@ -102,13 +102,17 @@ class TestRunCheck:
             cli,
             "list_open_issues",
             lambda *_a, **_kw: [
-                {"number": 11188, "title": "x", "body": render_marker(key)}
+                {
+                    "number": 11188,
+                    "title": "branch namespace parser gap",
+                    "body": render_marker(key),
+                }
             ],
         )
         code, message = cli.run_check(
             source="branch-parser",
             needle="branch namespace missing",
-            title="sibling site",
+            title="branch namespace parser gap at another site",
             repo="owner/repo",
             label="hydraflow-find",
         )
@@ -136,12 +140,18 @@ class TestRunCheck:
         monkeypatch.setattr(
             cli,
             "list_open_issues",
-            lambda *_a, **_kw: [{"number": 11188, "title": "x", "body": body}],
+            lambda *_a, **_kw: [
+                {
+                    "number": 11188,
+                    "title": "branch namespace parser gap",
+                    "body": body,
+                }
+            ],
         )
         code, message = cli.run_check(
             source="branch-parser",
             needle="branch namespace missing",
-            title="sibling site",
+            title="branch namespace parser gap at another site",
             repo="owner/repo",
             label="hydraflow-find",
             site="src/foo.py:39",
@@ -159,12 +169,18 @@ class TestRunCheck:
         monkeypatch.setattr(
             cli,
             "list_open_issues",
-            lambda *_a, **_kw: [{"number": 11188, "title": "x", "body": body}],
+            lambda *_a, **_kw: [
+                {
+                    "number": 11188,
+                    "title": "branch namespace parser gap",
+                    "body": body,
+                }
+            ],
         )
         code, message = cli.run_check(
             source="branch-parser",
             needle="branch namespace missing",
-            title="sibling site",
+            title="branch namespace parser gap at another site",
             repo="owner/repo",
             label="hydraflow-find",
             site="src/bar.py:10",
@@ -182,12 +198,18 @@ class TestRunCheck:
         monkeypatch.setattr(
             cli,
             "list_open_issues",
-            lambda *_a, **_kw: [{"number": 11188, "title": "x", "body": body}],
+            lambda *_a, **_kw: [
+                {
+                    "number": 11188,
+                    "title": "branch namespace parser gap",
+                    "body": body,
+                }
+            ],
         )
         code, message = cli.run_check(
             source="branch-parser",
             needle="branch namespace missing",
-            title="sibling site",
+            title="branch namespace parser gap at another site",
             repo="owner/repo",
             label="hydraflow-find",
         )
