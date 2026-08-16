@@ -62,3 +62,41 @@ async def test_full_tier_still_runs_council() -> None:
     phase = _phase(HydraFlowConfig(), complexity=8)
     await phase._flow_council(_state())
     phase._run_plan_council.assert_awaited()
+
+
+class TestThresholdTenSentinelCollapse:
+    """#11314 (audit-upheld): at threshold=10, the old sentinel-10 for an
+    UNCLASSIFIED issue collapsed into the skip path (10 > 10 is False),
+    silently skipping the review for never-classified issues. Unknown
+    complexity must be ineligible at EVERY threshold."""
+
+    def _phase(self, config: HydraFlowConfig, *, record: object):
+        phase = object.__new__(PlanPhase)
+        phase._config = config
+        phase._issue_cache = SimpleNamespace(latest_classification=lambda _id: record)
+        phase._state = SimpleNamespace(get_route_back_count=lambda _id: 0)
+        phase._has_escalation_label = lambda _issue: False
+        return phase
+
+    def test_unclassified_never_skips_even_at_threshold_ten(self) -> None:
+        config = HydraFlowConfig(plan_review_min_complexity=10)
+        phase = self._phase(config, record=None)
+        skip, complexity = phase._skip_plan_review(SimpleNamespace(id=1))
+        assert skip is False
+        assert complexity == 10  # reported for logging only
+
+    def test_honest_ten_skips_at_threshold_ten(self) -> None:
+        """A genuinely-scored 10 at threshold 10 follows the config's plain
+        meaning — only UNKNOWN is unconditionally ineligible."""
+        config = HydraFlowConfig(plan_review_min_complexity=10)
+        record = SimpleNamespace(payload={"complexity_score": 10})
+        phase = self._phase(config, record=record)
+        skip, _ = phase._skip_plan_review(SimpleNamespace(id=1))
+        assert skip is True
+
+    def test_none_payload_never_skips_at_threshold_ten(self) -> None:
+        config = HydraFlowConfig(plan_review_min_complexity=10)
+        record = SimpleNamespace(payload={"complexity_score": None})
+        phase = self._phase(config, record=record)
+        skip, _ = phase._skip_plan_review(SimpleNamespace(id=1))
+        assert skip is False
