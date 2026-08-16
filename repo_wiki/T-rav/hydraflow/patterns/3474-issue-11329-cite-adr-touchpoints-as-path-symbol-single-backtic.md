@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11329
 source_phase: plan
 created_at: 2026-08-16T09:40:01.182582+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3490
 ---
 
 # Cite ADR touchpoints as path:Symbol single backtick spans

@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11316
 source_phase: plan
 created_at: 2026-08-16T07:49:06.673197+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3614
 ---
 
 # Scrub anthropic routing keys, not native auth keys

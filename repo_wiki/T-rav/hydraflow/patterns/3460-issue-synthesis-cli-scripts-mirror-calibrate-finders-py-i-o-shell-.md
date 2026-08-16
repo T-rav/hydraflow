@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:58.252313+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3323
+superseded_by: 3607
 ---
 
 # CLI scripts mirror calibrate_finders.py I/O-shell convention

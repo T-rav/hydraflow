@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11326
 source_phase: plan
 created_at: 2026-08-16T09:29:42.917658+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Target staging and Skip-ADR for pure additive epic helpers
