@@ -129,6 +129,8 @@ export function DiagnosticsTab() {
         <FactoryCostTab range={range} />
       ) : (
         <>
+          <FactoryHealthSection />
+
           <HeadlineCards data={overview} loading={loading} />
 
           <div style={styles.gridTwo}>
@@ -149,8 +151,6 @@ export function DiagnosticsTab() {
           </div>
 
           <CacheHitChart data={cache} />
-
-          <FactoryHealthSection />
 
           <AutoAgentStats />
 

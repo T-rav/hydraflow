@@ -47,6 +47,19 @@ global.fetch = vi.fn((url) => {
   if (url.includes('/issue/')) {
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ summary: {}, subprocesses: [] }) })
   }
+  if (url.includes('/factory-health/summary')) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        rolling_averages: {
+          plan_accuracy_pct: [{ value: 80, window_start: 0, window_end: 0 }],
+        },
+        cohorts: { memory_available: { count: 0 }, memory_unavailable: { count: 0 } },
+        regressions: [],
+        metric_metadata: {},
+      }),
+    })
+  }
   return Promise.resolve({ ok: true, json: () => Promise.resolve([]) })
 })
 
@@ -79,6 +92,17 @@ describe('DiagnosticsTab', () => {
   it('renders range filter dropdown', async () => {
     render(<DiagnosticsTab />)
     expect(await screen.findByLabelText(/Range/i)).toBeInTheDocument()
+  })
+
+  it('renders Factory Health Trends above the headline summary cards (glanceable top-of-page placement)', async () => {
+    render(<DiagnosticsTab />)
+    await screen.findByText('Factory Health Trends')
+    const headline = await screen.findByText(/247K/)
+    const health = screen.getByText('Factory Health Trends')
+    // DOCUMENT_POSITION_FOLLOWING on `headline` means it comes AFTER
+    // `health` in the DOM — i.e. the health strip renders first.
+    // eslint-disable-next-line no-bitwise
+    expect(health.compareDocumentPosition(headline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('routes diagnostics through the repo-aware fetcher', async () => {
