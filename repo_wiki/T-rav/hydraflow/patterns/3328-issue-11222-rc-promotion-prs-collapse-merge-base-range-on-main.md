@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11222
 source_phase: plan
 created_at: 2026-08-16T05:46:03.674980+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3464
 ---
 
 # RC promotion PRs collapse merge-base range on main (ADR-0042)

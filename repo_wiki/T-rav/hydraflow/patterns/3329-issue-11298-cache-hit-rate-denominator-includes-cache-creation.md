@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11298
 source_phase: plan
 created_at: 2026-08-16T05:49:45.238826+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3465
 ---
 
 # Cache hit rate denominator includes cache_creation in token_report

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:49.043726+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3184
+superseded_by: 3454
 ---
 
 # ADR-0049 kill-switch scope: BaseBackgroundLoop or subprocess runners only

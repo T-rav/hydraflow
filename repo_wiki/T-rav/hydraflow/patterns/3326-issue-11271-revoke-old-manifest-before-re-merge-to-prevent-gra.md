@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11271
 source_phase: plan
 created_at: 2026-08-16T05:09:28.497224+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3463
 ---
 
 # Revoke old manifest before re-merge to prevent grant stacking

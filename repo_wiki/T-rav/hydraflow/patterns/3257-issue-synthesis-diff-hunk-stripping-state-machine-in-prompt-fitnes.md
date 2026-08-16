@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:47.705570+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3124
+superseded_by: 3394
 ---
 
 # Diff hunk stripping state machine in prompt_fitness.py

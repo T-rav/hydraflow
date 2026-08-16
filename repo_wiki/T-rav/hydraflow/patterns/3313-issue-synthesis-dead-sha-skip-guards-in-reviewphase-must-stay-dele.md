@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:48.870873+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3180
+superseded_by: 3450
 ---
 
 # Dead SHA skip guards in ReviewPhase must stay deleted

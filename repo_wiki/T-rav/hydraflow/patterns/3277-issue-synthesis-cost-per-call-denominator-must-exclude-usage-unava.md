@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:48.032998+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3144
+superseded_by: 3414
 ---
 
 # Cost-per-call denominator must exclude usage_unavailable_calls

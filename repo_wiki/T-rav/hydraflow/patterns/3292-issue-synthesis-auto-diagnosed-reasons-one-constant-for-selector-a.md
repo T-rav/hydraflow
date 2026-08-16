@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:48.349482+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3159
+superseded_by: 3429
 ---
 
 # AUTO_DIAGNOSED_REASONS: one constant for selector and _auto_diagnose

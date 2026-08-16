@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:48.850202+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3178
+superseded_by: 3448
 ---
 
 # Host-wide flock mutex for full quality suites
