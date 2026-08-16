@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T15:30:58.203075+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3755
+superseded_by: 4047
 ---
 
 # Revoke old manifest before re-merge to prevent grant stacking

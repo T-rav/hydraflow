@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T15:30:57.179304+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3701
+superseded_by: 3993
 ---
 
 # ADR-0055 enumerates spans.py symbols — update list on additions

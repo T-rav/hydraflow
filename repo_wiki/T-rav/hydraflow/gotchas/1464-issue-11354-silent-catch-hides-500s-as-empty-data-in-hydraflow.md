@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11354
 source_phase: plan
 created_at: 2026-08-16T15:20:51.560122+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Silent .catch(() => {}) hides 500s as empty data in HydraFlowContext fetchers

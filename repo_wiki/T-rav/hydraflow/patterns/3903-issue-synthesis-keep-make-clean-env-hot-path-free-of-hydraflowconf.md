@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T15:30:58.230695+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3758
+superseded_by: 4050
 ---
 
 # Keep make_clean_env hot-path free of HydraFlowConfig

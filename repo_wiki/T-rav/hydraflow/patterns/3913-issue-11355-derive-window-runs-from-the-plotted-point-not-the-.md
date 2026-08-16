@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11355
 source_phase: plan
 created_at: 2026-08-16T15:26:00.442009+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 4059
 ---
 
 # Derive window_runs from the plotted point, not the nominal constant
