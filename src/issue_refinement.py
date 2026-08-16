@@ -487,6 +487,7 @@ _ACTIVE_PIPELINE_PHASE_LABELS: frozenset[str] = frozenset(
         "hydraflow-hitl",  # hitl_label (config.py)
         "hydraflow-hitl-active",  # hitl_active_label (config.py)
         "hydraflow-hitl-autofix",  # hitl_autofix_label (config.py)
+        "hydraflow-auto-light",  # light_autofix_label (config.py, #11298)
         "hydraflow-fixed",  # fixed_label (config.py)
         "hydraflow-verify",  # verify_label (config.py)
         # Orthogonal to the phase machine, but ``all_pipeline_labels``

@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `4610eb2` — fix(diagnostic): opt DiagnosticLoop into the LLM watchdog bound (#11262) (#11369) (#11369) *(2026-08-16)*
+- `a08bf72` — feat(find-filing): class-key fold layer for pattern-shaped find-issues (#11292) (#11324) (#11324) *(2026-08-16)*
 - `9d7bf33` — feat(providers): ZAI_CODING_PLAN_KEY — plan vs API billing lane split (#11267) (#11267) *(2026-08-15)*
 - `66b3cff` — Fixes #11208: make factory should auto-start the orchestrator (#11257) (#11257) *(2026-08-15)*
 - `0434348` — Fixes #11211: Per-project model/harness selection: run claude and g... (#11233) (#11233) *(2026-08-15)*
@@ -521,72 +523,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `60c556b` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `a0fd1b9` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `57291d2` — fix(arch): functional_areas.yml module paths + add CI validation *(2026-05-18)*
-- `0c8243a` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `84b64fd` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `b714ab0` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `dc79b3f` — chore(arch): regen arch artifacts from rebased staging tip *(2026-05-18)*
-- `f202e6e` — feat(arch): regenerable coverage_matrix generator for arch-regen (closes advisor-bpl parent bead) *(2026-05-18)*
-- `7f7792d` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `672680d` — fix(format): ruff format *(2026-05-18)*
-- `ebe1710` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `d0635fe` — fix(format): ruff format *(2026-05-18)*
-- `ea0e084` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `469d933` — fix(format): ruff format *(2026-05-18)*
-- `73a1a7f` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `6811034` — fix(format): ruff format *(2026-05-18)*
-- `ea0e457` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `6b7e670` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `f50f9d7` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `8f2ece5` — fix(format): ruff format *(2026-05-18)*
-- `77b63eb` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `2997071` — fix(arch): populate Tick + Kill columns in loops.md generator (closes audit gap) *(2026-05-18)*
-- `e3822b1` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `8d259e3` — Merge branch 'staging' into cleanup/ci-integrity-trio *(2026-05-18)*
-- `5f913e6` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `a5e7c4a` — fix(adr): reformat ADR-0031 enforcement (commas + bare paths for parser) *(2026-05-18)*
-- `d75c5e3` — Merge branch 'staging' into cleanup/ci-integrity-trio *(2026-05-18)*
-- `3cf70d6` — fix(adr): add Enforced by line to ADR-0031 (unblocks Tests on staging) *(2026-05-18)*
-- `f9ad184` — Merge pull request #8738 from T-rav/worktree-audit+coverage-matrix-baseline *(2026-05-18)*
-- `c17ffe4` — Merge pull request #8841 from T-rav/docs/wiki-backfill-seven *(2026-05-18)*
-- `1bc107e` — Merge pull request #8817 from T-rav/audit/area-auto-agent *(2026-05-18)*
-- `0550ced` — Merge pull request #8811 from T-rav/audit/area-hexagonal *(2026-05-18)*
-- `6a38b76` — Merge pull request #8805 from T-rav/audit/area-quality-gates *(2026-05-18)*
-- `e9480be` — Merge pull request #8803 from T-rav/audit/area-mockworld *(2026-05-18)*
-- `7d69454` — Merge pull request #8801 from T-rav/audit/area-state-persistence *(2026-05-18)*
-- `8ad91b1` — Merge pull request #8795 from T-rav/audit/area-goal-driven *(2026-05-18)*
-- `e07431b` — Merge pull request #8794 from T-rav/audit/area-arch-knowledge *(2026-05-18)*
-- `4b44c0f` — Merge pull request #8793 from T-rav/audit/area-trust-fleet *(2026-05-18)*
-- `08994cf` — Merge pull request #8789 from T-rav/audit/area-orchestration *(2026-05-18)*
-- `ef8979f` — Merge pull request #8787 from T-rav/audit/area-dashboard *(2026-05-18)*
-- `423f2dc` — Merge pull request #8782 from T-rav/audit/area-caretaking *(2026-05-18)*
-- `94a0c81` — Merge pull request #8757 from T-rav/audit/factory-phase-drift *(2026-05-18)*
-- `5d2da98` — chore(arch): regen after rebase onto staging *(2026-05-18)*
-- `ff2e21e` — docs(audit): post-review fixups — bead bodies, header SHA, Ports criteria *(2026-05-18)*
-- `b14d242` — docs(audit): coverage matrix — gap beads filed and cross-linked *(2026-05-18)*
-- `76a89f8` — docs(audit): coverage matrix — parent automation bead advisor-bpl linked *(2026-05-18)*
-- `8581fca` — docs(audit): coverage matrix — sampling + counts reconciliation *(2026-05-18)*
-- `cfea975` — docs(audit): coverage matrix — aliases + excluded_refs lists *(2026-05-18)*
-- `bec174c` — docs(audit): coverage matrix — Phases section populated (8 rows × 6 cols) *(2026-05-18)*
-- `10122ba` — docs(audit): coverage matrix — fix Ports section fake/cassette/contract logic *(2026-05-18)*
-- `826355b` — docs(audit): coverage matrix — Ports section populated (9 rows × 7 cols) *(2026-05-18)*
-- `98872f2` — docs(audit): coverage matrix — Loops section populated (41 rows × 7 cols) *(2026-05-18)*
-- `8b43af9` — docs(audit): coverage matrix baseline skeleton (slice 1 of 5) *(2026-05-18)*
-- `586b727` — cleanup: CI integrity fixes — ubiquitous-language guard + 3 misc (slices 5.5 + 5.10) *(2026-05-18)*
-- `6e74dcf` — Merge branch 'staging' into docs/wiki-backfill-seven *(2026-05-18)*
-- `127d4ae` — Merge branch 'staging' into audit/area-auto-agent *(2026-05-18)*
-- `7ac00f7` — Merge branch 'staging' into audit/area-hexagonal *(2026-05-18)*
-- `86f5c3a` — Merge branch 'staging' into audit/area-quality-gates *(2026-05-18)*
-- `55bb1f3` — Merge branch 'staging' into audit/area-mockworld *(2026-05-18)*
-- `507446a` — Merge branch 'staging' into audit/area-state-persistence *(2026-05-18)*
-- `d5e9f09` — Merge branch 'staging' into audit/area-goal-driven *(2026-05-18)*
-- `0428ce8` — Merge branch 'staging' into audit/area-arch-knowledge *(2026-05-18)*
-- `ed9e629` — Merge branch 'staging' into audit/area-trust-fleet *(2026-05-18)*
-- `9486027` — Merge branch 'staging' into audit/area-orchestration *(2026-05-18)*
-- `e638d27` — Merge branch 'staging' into audit/area-dashboard *(2026-05-18)*
-- `69a3235` — Merge branch 'staging' into audit/area-caretaking *(2026-05-18)*
-- `d8257f4` — Merge branch 'staging' into audit/factory-phase-drift *(2026-05-18)*
-- `e8aff97` — Merge branch 'staging' into audit/dark-factory-compat *(2026-05-18)*
-- `c0c7aab` — Merge pull request #8824 from T-rav/docs/promote-adrs-31-47 *(2026-05-18)*
 
 
 <!-- arch:generated -->
