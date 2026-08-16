@@ -25,6 +25,15 @@ from event_loop_watchdog import (
     read_stall_marker,
 )
 from events import EventType, HydraFlowEvent
+from fleet_vitals import (
+    ChangeEvent,
+    FleetBands,
+    FleetReading,
+    FleetVitalsState,
+)
+from fleet_vitals import (
+    evaluate as evaluate_fleet_vitals,
+)
 from git_revision import get_commits_behind
 from repo_existence_prober import DefaultRepoProber
 from rollup_issue_manager import RollupIssueManager
@@ -633,7 +642,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         # cascade ran — the fleet had no verdict function. Fail-soft.
         try:
             await self._run_fleet_vitals(metrics)
-        except Exception:  # noqa: BLE001
+        except (OSError, RuntimeError, TypeError, ValueError, KeyError):
             logger.debug("fleet-vitals evaluation failed", exc_info=True)
 
         self._verify_pending_adjustments(metrics)
@@ -1190,12 +1199,6 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         Never actuates. State (hysteresis, one-alarm-per-episode) persists
         under the data path so restarts don't re-alarm an active episode.
         """
-        from fleet_vitals import (  # noqa: PLC0415
-            FleetBands,
-            FleetReading,
-            FleetVitalsState,
-            evaluate,
-        )
 
         if not self._config.fleet_vitals_enabled:
             return
@@ -1209,8 +1212,11 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             ts=datetime.now(UTC),
             hitl_rate=float(metrics.hitl_escalation_rate),
             first_pass_rate=float(metrics.first_pass_rate),
+            # Idle gate (review BLOCKING): zero-outcome windows read
+            # first_pass_rate=0.0 — quiet, not sick.
+            run_count=int(getattr(metrics, "total_outcomes", 0)),
         )
-        alarms = evaluate(
+        alarms = evaluate_fleet_vitals(
             state,
             reading,
             bands=FleetBands(
@@ -1247,6 +1253,18 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                         data={
                             "kind": "fleet_vitals_alarm",
                             "source": "health_monitor",
+                            # Banner convention (#11306 gotcha): severity
+                            # 'warning' = advisory styling; message is the
+                            # rendered body. Omitting both renders a blank
+                            # CRITICAL banner.
+                            "severity": "warning",
+                            "message": (
+                                f"Fleet vitals [{alarm.band}]: "
+                                f"hitl_rate={alarm.reading.hitl_rate:.2f} "
+                                f"first_pass_rate="
+                                f"{alarm.reading.first_pass_rate:.2f}. "
+                                f"{alarm.shadow_proposal}"
+                            ),
                             "band": alarm.band,
                             "hitl_rate": alarm.reading.hitl_rate,
                             "first_pass_rate": alarm.reading.first_pass_rate,
@@ -1263,8 +1281,6 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         events join the ledger in a later rung; merges alone named the
         founding incident's culprit. Fail-soft to an empty ledger.
         """
-        from fleet_vitals import ChangeEvent  # noqa: PLC0415
-
         try:
             out = await run_subprocess(
                 "git",

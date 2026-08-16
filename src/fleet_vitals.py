@@ -29,6 +29,12 @@ from typing import Any
 SUSPECT_LOOKBACK_HOURS = 24
 
 
+#: Minimum real runs in the trend window before rate bands are trusted —
+#: an IDLE factory reads first_pass_rate=0.0 with zero outcomes, which is
+#: quiet, not sick (the cold-boot-noisy FP class; review BLOCKING).
+MIN_RUNS_FOR_RATES = 5
+
+
 @dataclass(frozen=True)
 class FleetReading:
     """One health-monitor cycle's fleet-level metrics."""
@@ -36,6 +42,7 @@ class FleetReading:
     ts: datetime
     hitl_rate: float
     first_pass_rate: float
+    run_count: int = MIN_RUNS_FOR_RATES  # callers SHOULD pass the real count
 
 
 @dataclass(frozen=True)
@@ -149,6 +156,15 @@ def evaluate(
     suspect pass on the alarming reading only.
     """
     alarms: list[FleetAlarm] = []
+
+    if reading.run_count < MIN_RUNS_FOR_RATES:
+        # Too few real runs to trust any rate: reset streaks (a quiet
+        # window is evidence of quiet, not of sickness) and never alarm.
+        for name in ("hitl_rate", "first_pass_rate"):
+            band = state.band(name)
+            if not band.alarm_active:
+                band.consecutive_breaches = 0
+        return alarms
 
     hitl_band = state.band("hitl_rate")
     if _evaluate_band(

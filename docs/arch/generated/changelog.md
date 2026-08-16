@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `49df312` — feat(light-lane): route simple issues to the single-session auto-agent — one spawn, issue to PR (#11298) (#11389) (#11389) *(2026-08-16)*
 - `4610eb2` — fix(diagnostic): opt DiagnosticLoop into the LLM watchdog bound (#11262) (#11369) (#11369) *(2026-08-16)*
 - `a08bf72` — feat(find-filing): class-key fold layer for pattern-shaped find-issues (#11292) (#11324) (#11324) *(2026-08-16)*
 - `9d7bf33` — feat(providers): ZAI_CODING_PLAN_KEY — plan vs API billing lane split (#11267) (#11267) *(2026-08-15)*
@@ -510,19 +511,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `47d4138` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `95b28e1` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `ff38501` — fix: ruff auto-fixes (unused imports + import sort) *(2026-05-18)*
-- `280478c` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `b6e104d` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `bcc0b25` — fix(contracts): widen Cassette._validate_adapter to accept all 9 known fakes (closes slice 5.7) *(2026-05-18)*
-- `a06faa7` — fix(format): ruff format *(2026-05-18)*
-- `0a5dcad` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `11b4807` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `899d7aa` — fix: ruff auto-fixes (unused imports + import sort) *(2026-05-18)*
-- `3d724e9` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `bf90023` — fix(format): ruff format *(2026-05-18)*
-- `2ff5ebd` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `60c556b` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `a0fd1b9` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `57291d2` — fix(arch): functional_areas.yml module paths + add CI validation *(2026-05-18)*
 
 
 <!-- arch:generated -->

@@ -139,7 +139,9 @@ class TestLoopWiring:
     async def _metrics(self):
         from types import SimpleNamespace
 
-        return SimpleNamespace(hitl_escalation_rate=0.74, first_pass_rate=0.0)
+        return SimpleNamespace(
+            hitl_escalation_rate=0.74, first_pass_rate=0.0, total_outcomes=25
+        )
 
     import pytest as _pytest
 
@@ -151,6 +153,10 @@ class TestLoopWiring:
         payload = loop._bus.publish.await_args_list[0].args[0].data
         assert payload["kind"] == "fleet_vitals_alarm"
         assert "SHADOW" in payload["shadow_proposal"]
+        # Banner convention (#11306 review finding): advisory severity +
+        # a rendered message — omitting both pops a blank CRITICAL banner.
+        assert payload["severity"] == "warning"
+        assert "Fleet vitals" in payload["message"]
         assert (tmp_path / "fleet_vitals_state.json").exists()
 
     @_pytest.mark.asyncio
@@ -168,3 +174,36 @@ class TestLoopWiring:
         fresh = self._loop(tmp_path)
         await fresh._run_fleet_vitals(await self._metrics())
         fresh._bus.publish.assert_not_awaited()
+
+
+class TestIdleGate:
+    """Review BLOCKING: an idle factory must never alarm (zero outcomes
+    reads first_pass_rate=0.0 — quiet, not sick)."""
+
+    def test_zero_runs_never_alarms_first_pass_floor(self) -> None:
+        state = FleetVitalsState()
+        idle = FleetReading(ts=NOW, hitl_rate=0.0, first_pass_rate=0.0, run_count=0)
+        for _ in range(5):
+            assert evaluate(state, idle, bands=BANDS) == []
+
+    def test_quiet_window_resets_breach_streak(self) -> None:
+        state = FleetVitalsState()
+        busy_breach = FleetReading(
+            ts=NOW, hitl_rate=0.9, first_pass_rate=0.8, run_count=20
+        )
+        idle = FleetReading(ts=NOW, hitl_rate=0.0, first_pass_rate=0.0, run_count=0)
+        evaluate(state, busy_breach, bands=BANDS)  # streak 1
+        evaluate(state, idle, bands=BANDS)  # quiet resets
+        assert evaluate(state, busy_breach, bands=BANDS) == []  # streak 1 again
+
+    def test_active_episode_survives_a_quiet_window(self) -> None:
+        state = FleetVitalsState()
+        busy_breach = FleetReading(
+            ts=NOW, hitl_rate=0.9, first_pass_rate=0.8, run_count=20
+        )
+        idle = FleetReading(ts=NOW, hitl_rate=0.0, first_pass_rate=0.0, run_count=0)
+        evaluate(state, busy_breach, bands=BANDS)
+        assert evaluate(state, busy_breach, bands=BANDS)  # alarm fires
+        evaluate(state, idle, bands=BANDS)
+        # Episode still active — no spurious re-alarm on the next breach.
+        assert evaluate(state, busy_breach, bands=BANDS) == []

@@ -24,7 +24,7 @@ from fleet_vitals import (
 )
 
 ONSET = datetime(2026, 8, 16, 16, 0, 0, tzinfo=UTC)
-INCIDENT = FleetReading(ts=ONSET, hitl_rate=0.74, first_pass_rate=0.0)
+INCIDENT = FleetReading(ts=ONSET, hitl_rate=0.74, first_pass_rate=0.0, run_count=25)
 LEDGER = [
     ChangeEvent(
         ONSET - timedelta(hours=8, minutes=25),
