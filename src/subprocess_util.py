@@ -884,6 +884,16 @@ def make_clean_env(gh_token: str = "") -> dict[str, str]:
     env.pop("CLAUDECODE", None)
     env.pop("GIT_WORK_TREE", None)
     env.pop("GIT_DIR", None)
+    # #11302/#11316: native spawns must be pristine — a host shell carrying
+    # the z.ai redirect pair (or raw ZAI keys, e.g. from a sourced .env)
+    # would silently reroute/bill native Claude spawns against the wrong
+    # lane. Harness-routed spawns re-inject these explicitly per-spawn via
+    # resolve_harness_env(), so stripping here never breaks failover.
+    # ANTHROPIC_API_KEY is kept: it is a legitimate native auth path.
+    env.pop("ANTHROPIC_BASE_URL", None)
+    env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    env.pop("ZAI_API_KEY", None)
+    env.pop("ZAI_CODING_PLAN_KEY", None)
     if gh_token:
         env["GH_TOKEN"] = gh_token
     return env
