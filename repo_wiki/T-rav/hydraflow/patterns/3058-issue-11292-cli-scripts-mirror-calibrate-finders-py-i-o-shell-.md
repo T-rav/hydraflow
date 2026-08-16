@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11292
 source_phase: plan
 created_at: 2026-08-16T01:48:07.890791+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3190
 ---
 
 # CLI scripts mirror calibrate_finders.py I/O-shell convention

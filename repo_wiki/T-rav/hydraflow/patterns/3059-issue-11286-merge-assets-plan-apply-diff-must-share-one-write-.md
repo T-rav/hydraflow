@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11286
 source_phase: plan
 created_at: 2026-08-16T01:54:47.585490+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3183
 ---
 
 # merge_assets plan/apply/diff must share one write code path

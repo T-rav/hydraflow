@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11286
 source_phase: plan
 created_at: 2026-08-16T01:54:47.585510+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Cross-check fixable ID sets against registry.all_registered()

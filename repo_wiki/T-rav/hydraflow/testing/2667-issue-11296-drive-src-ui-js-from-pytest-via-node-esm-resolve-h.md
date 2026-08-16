@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11296
 source_phase: plan
 created_at: 2026-08-16T02:48:52.749398+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Drive src/ui JS from pytest via node ESM resolve hook

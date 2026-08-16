@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11281
 source_phase: plan
 created_at: 2026-08-16T01:24:32.227579+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3188
 ---
 
 # Redrive TTL > branch GC stale days: accept overlap, don't gate
