@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11320
 source_phase: plan
 created_at: 2026-08-16T08:37:33.480320+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3615
 ---
 
 # Do not override BaseRunner._build_command with a partial copy

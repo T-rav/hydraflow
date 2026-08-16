@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:57.459534+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3222
+superseded_by: 3506
 ---
 
 # Shutdown-timeout config fields must stay under 30s ceiling

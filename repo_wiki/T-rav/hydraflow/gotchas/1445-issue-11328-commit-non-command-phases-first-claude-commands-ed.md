@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11328
 source_phase: plan
 created_at: 2026-08-16T09:56:55.839276+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Commit non-command phases first; .claude/commands edits hit permission gate

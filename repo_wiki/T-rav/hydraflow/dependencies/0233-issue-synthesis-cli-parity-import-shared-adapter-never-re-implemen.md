@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:27:56.455493+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0218
+superseded_by: 0249
 ---
 
 # CLI parity: import shared adapter, never re-implement

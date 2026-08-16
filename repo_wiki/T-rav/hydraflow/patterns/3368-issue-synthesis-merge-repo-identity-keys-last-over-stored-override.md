@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:57.525601+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3231
+superseded_by: 3515
 ---
 
 # Merge repo identity keys last over stored overrides

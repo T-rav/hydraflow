@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:58.284511+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3328
+superseded_by: 3611
 ---
 
 # RC promotion PRs collapse merge-base range on main (ADR-0042)
