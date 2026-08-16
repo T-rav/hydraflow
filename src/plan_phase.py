@@ -519,25 +519,29 @@ class PlanPhase(PlanWikiIngestMixin):
             bool(record.payload.get("needs_discovery", False)),
         )
 
-    def _issue_complexity(self, issue: Task) -> int:
-        """Triage's complexity_score for *issue*; 10 (max) when unknown.
+    def _issue_complexity(self, issue: Task) -> int | None:
+        """Triage's complexity_score for *issue*; ``None`` when unknown.
 
-        Conservative default: an unclassified issue reads as maximally
-        complex so it is never denied a plan review by the #11298 tier gate.
+        ``None`` (not a sentinel int) marks an unclassified/unreadable
+        score so the tier guard can refuse eligibility at EVERY threshold.
+        The prior sentinel-10 collapsed 'unknown' into 'confirmed maximal'
+        at ``threshold=10`` (a valid config value), silently skipping the
+        review for never-classified issues — found by the sampled re-audit
+        on #11304 (#11314, audit-upheld).
         """
         if self._issue_cache is None:
-            return 10
+            return None
         try:
             record = self._issue_cache.latest_classification(issue.id)
         except (AttributeError, TypeError, ValueError):
-            return 10
+            return None
         payload = getattr(record, "payload", None)
         if not isinstance(payload, dict):
-            return 10
+            return None
         try:
-            return int(payload.get("complexity_score", 10))
-        except (TypeError, ValueError):
-            return 10
+            return int(payload["complexity_score"])
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def _skip_plan_review(self, issue: Task) -> tuple[bool, int]:
         """#11298 size tiering: does this issue skip the adversarial review?
@@ -556,11 +560,15 @@ class PlanPhase(PlanWikiIngestMixin):
         """Shared #11298 tier guard: is *issue* simple enough for a light path?
 
         Returns ``(eligible, complexity)``. Eligible only when ALL hold:
-        the threshold is enabled (> 0), triage scored the issue at or below
-        it, the issue has never been routed back (a cycled plan is evidence
-        the cheap path failed), and it carries no escalation label.
+        the threshold is enabled (> 0), triage actually scored the issue
+        (an unknown score is ineligible at EVERY threshold — #11314) at or
+        below it, the issue has never been routed back (a cycled plan is
+        evidence the cheap path failed), and it carries no escalation
+        label. An unknown score reports as 10 for logging.
         """
         complexity = self._issue_complexity(issue)
+        if complexity is None:
+            return False, 10
         if threshold <= 0:
             return False, complexity
         if complexity > threshold:
@@ -1818,6 +1826,24 @@ class PlanPhase(PlanWikiIngestMixin):
         issue = state["issue"]
         adv = state["adv"]
         result = state["result"]
+        skip, complexity = self._skip_plan_review(issue)
+        if skip:
+            # #11298 light tier skips the council too: the council critiques
+            # a deliberately-short LITE plan against full-scale expectations,
+            # raising design-decision concerns that no reviewer stage will
+            # resolve — observed live 2026-08-16 as a mass HITL cascade
+            # (every light-tier issue routed to human-required at the
+            # ready-swap design gate). The gate itself stays armed: concerns
+            # raised by earlier stages still route genuinely ambiguous
+            # issues to HITL, and cycled issues get the full stack again.
+            logger.info(
+                "PlanCouncil skipped for issue #%d — light-tier "
+                "(complexity %d; #11298)",
+                issue.id,
+                complexity,
+            )
+            state["result"] = result
+            return state
         if self._council_agents is not None and result.success and result.plan:
             try:
                 await self._run_plan_council(issue, adv, result.plan)
