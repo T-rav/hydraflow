@@ -22,6 +22,7 @@ from models import (
     EpicGapReview,
     IssueOutcomeType,
     PipelineStage,
+    PlanFinding,
     PlanResult,
     PlanReview,
     ShapeConversation,
@@ -37,6 +38,7 @@ from phase_utils import (
     run_refilling_pool,
     store_lifecycle,
 )
+from plan_constants import PlanScale
 from plan_phase_wiki_ingest import PlanWikiIngestMixin
 from planner import PlannerRunner
 from repo_wiki import RepoWikiStore
@@ -516,6 +518,89 @@ class PlanPhase(PlanWikiIngestMixin):
             int(record.payload.get("clarity_score", 10)),
             bool(record.payload.get("needs_discovery", False)),
         )
+
+    def _issue_complexity(self, issue: Task) -> int | None:
+        """Triage's complexity_score for *issue*; ``None`` when unknown.
+
+        ``None`` (not a sentinel int) marks an unclassified/unreadable
+        score so the tier guard can refuse eligibility at EVERY threshold.
+        The prior sentinel-10 collapsed 'unknown' into 'confirmed maximal'
+        at ``threshold=10`` (a valid config value), silently skipping the
+        review for never-classified issues — found by the sampled re-audit
+        on #11304 (#11314, audit-upheld).
+        """
+        if self._issue_cache is None:
+            return None
+        try:
+            record = self._issue_cache.latest_classification(issue.id)
+        except (AttributeError, TypeError, ValueError):
+            return None
+        payload = getattr(record, "payload", None)
+        if not isinstance(payload, dict):
+            return None
+        try:
+            return int(payload["complexity_score"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _skip_plan_review(self, issue: Task) -> tuple[bool, int]:
+        """#11298 size tiering: does this issue skip the adversarial review?
+
+        Returns ``(skip, complexity)``. Skip only when ALL hold: tiering is
+        enabled (threshold > 0), triage scored the issue at or below the
+        threshold, the issue has never been routed back (a cycled plan is
+        evidence the cheap path failed), and it carries no escalation label.
+        The implement-side skill gauntlet still reviews the CODE either way —
+        this trades plan-stage ceremony, not merge safety.
+        """
+        threshold = int(getattr(self._config, "plan_review_min_complexity", 0))
+        return self._tier_eligible(issue, threshold)
+
+    def _tier_eligible(self, issue: Task, threshold: int) -> tuple[bool, int]:
+        """Shared #11298 tier guard: is *issue* simple enough for a light path?
+
+        Returns ``(eligible, complexity)``. Eligible only when ALL hold:
+        the threshold is enabled (> 0), triage actually scored the issue
+        (an unknown score is ineligible at EVERY threshold — #11314) at or
+        below it, the issue has never been routed back (a cycled plan is
+        evidence the cheap path failed), and it carries no escalation
+        label. An unknown score reports as 10 for logging.
+        """
+        complexity = self._issue_complexity(issue)
+        if complexity is None:
+            return False, 10
+        if threshold <= 0:
+            return False, complexity
+        if complexity > threshold:
+            return False, complexity
+        if self._state.get_route_back_count(issue.id) > 0:
+            return False, complexity
+        if self._has_escalation_label(issue):
+            return False, complexity
+        return True, complexity
+
+    def _forced_plan_scale(self, issue: Task) -> PlanScale | None:
+        """#11298 size tiering, planner side: force the lite plan scale?
+
+        Returns ``"lite"`` when the issue passes the shared tier guard
+        against ``config.planner_lite_min_complexity``, else ``None`` (the
+        planner falls back to its own heuristic scale detection). Rides the
+        existing lite-plan prompt/validation machinery — no new prompt
+        branch. Self-healing escape valve: a lite plan that fails review
+        routes back, and the route-back count then disqualifies the issue
+        from tiering, so the next round plans at full scale.
+        """
+        threshold = int(getattr(self._config, "planner_lite_min_complexity", 0))
+        eligible, complexity = self._tier_eligible(issue, threshold)
+        if eligible:
+            logger.info(
+                "Issue #%d complexity %d <= %d — forcing lite plan scale (#11298)",
+                issue.id,
+                complexity,
+                threshold,
+            )
+            return "lite"
+        return None
 
     def _should_discover_helper(self, issue: Task) -> bool:
         """ADR-0107 planner decision gate: run the discover helper before planning?
@@ -1019,9 +1104,39 @@ class PlanPhase(PlanWikiIngestMixin):
         if self._plan_reviewer is None:
             return plan_version
 
+        # #11298 size tiering: low-complexity, never-cycled, unescalated
+        # issues skip the agentic review spawn. A review_stored record is
+        # still written (has_blocking=False) so the READY-stage gate's
+        # "no review_stored record" route-back never fires for the light
+        # tier — the skip is an explicit, audited verdict, not a gap.
+        skip, complexity = self._skip_plan_review(issue)
+        if skip:
+            threshold = self._config.plan_review_min_complexity
+            summary = (
+                f"light-tier: adversarial plan review skipped "
+                f"(complexity {complexity} <= {threshold}; #11298)"
+            )
+            logger.info("Plan review skipped for issue #%d — %s", issue.id, summary)
+            self._issue_cache.record_review_stored(
+                issue.id,
+                review_text=summary,
+                has_blocking=False,
+                findings=[],
+            )
+            return plan_version
+
         try:
+            # #11298 delta re-review: after a route-back this is round >= 2 —
+            # feed the prior round's cached findings so the reviewer verifies
+            # fixes instead of re-exploring the repo (plan_reviewer measured
+            # at 42% of all factory tokens, dominated by re-exploration).
+            prior_summary, prior_findings = self._prior_review_context(issue.id)
             review = await self._plan_reviewer.review(
-                issue, result, plan_version=plan_version
+                issue,
+                result,
+                plan_version=plan_version,
+                prior_summary=prior_summary,
+                prior_findings=prior_findings,
             )
             # ADR-0063 W3b: on the FIRST blocking review, dispatch the
             # touchpoint-expander (if wired) and re-run the reviewer
@@ -1062,6 +1177,37 @@ class PlanPhase(PlanWikiIngestMixin):
             )
 
         return plan_version
+
+    def _prior_review_context(
+        self, issue_id: int
+    ) -> tuple[str | None, list[PlanFinding] | None]:
+        """Prior round's cached review (summary, findings) for issue_id.
+
+        (None, None) on round 1 (no cached review) or when the cache is
+        unavailable/malformed — the reviewer then runs a normal full
+        first-round review (#11298 delta re-review is fail-open).
+        """
+        if self._issue_cache is None:
+            return None, None
+        try:
+            record = self._issue_cache.latest_review(issue_id)
+            payload = getattr(record, "payload", None)
+            if not isinstance(payload, dict):
+                return None, None
+            summary = payload.get("review_text") or None
+            findings: list[PlanFinding] = []
+            for raw in payload.get("findings") or []:
+                try:
+                    findings.append(PlanFinding.model_validate(raw))
+                except (ValueError, TypeError):
+                    continue  # one bad row never blocks review
+            if not isinstance(summary, str):
+                summary = None
+            return summary, (findings or None)
+        except (AttributeError, TypeError, ValueError):
+            # Malformed cache (or a test double with a different shape) —
+            # degrade to a normal full first-round review.
+            return None, None
 
     async def _maybe_expand_touchpoints(
         self,
@@ -1122,7 +1268,11 @@ class PlanPhase(PlanWikiIngestMixin):
 
         try:
             second_review = await self._plan_reviewer.review(
-                issue, enriched_result, plan_version=plan_version
+                issue,
+                enriched_result,
+                plan_version=plan_version,
+                prior_summary=first_review.summary,
+                prior_findings=list(first_review.findings),
             )
         except Exception:  # noqa: BLE001
             logger.warning(
@@ -1645,6 +1795,7 @@ class PlanPhase(PlanWikiIngestMixin):
                 worker_id=idx,
                 research_context=research_context,
                 guidance=human_guidance,
+                force_scale=self._forced_plan_scale(issue),
             )
         finally:
             self._planners.clear_tracing_context()
@@ -1675,6 +1826,24 @@ class PlanPhase(PlanWikiIngestMixin):
         issue = state["issue"]
         adv = state["adv"]
         result = state["result"]
+        skip, complexity = self._skip_plan_review(issue)
+        if skip:
+            # #11298 light tier skips the council too: the council critiques
+            # a deliberately-short LITE plan against full-scale expectations,
+            # raising design-decision concerns that no reviewer stage will
+            # resolve — observed live 2026-08-16 as a mass HITL cascade
+            # (every light-tier issue routed to human-required at the
+            # ready-swap design gate). The gate itself stays armed: concerns
+            # raised by earlier stages still route genuinely ambiguous
+            # issues to HITL, and cycled issues get the full stack again.
+            logger.info(
+                "PlanCouncil skipped for issue #%d — light-tier "
+                "(complexity %d; #11298)",
+                issue.id,
+                complexity,
+            )
+            state["result"] = result
+            return state
         if self._council_agents is not None and result.success and result.plan:
             try:
                 await self._run_plan_council(issue, adv, result.plan)

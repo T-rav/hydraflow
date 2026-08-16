@@ -717,7 +717,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         wt_path = self._config.workspace_path_for_issue(issue_number)
         if wt_path.exists():
             return str(wt_path)
-        branch = f"agent/auto-agent-{issue_number}"
+        branch = self._config.auto_agent_branch_for_issue(issue_number)
         try:
             created = await self._workspaces.create(issue_number, branch)
             return str(created)

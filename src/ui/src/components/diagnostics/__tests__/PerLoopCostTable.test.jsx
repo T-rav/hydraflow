@@ -120,3 +120,68 @@ describe('PerLoopCostTable model_breakdown expansion', () => {
     expect(onRowClick).not.toHaveBeenCalled()
   })
 })
+
+describe('PerLoopCostTable model_regime_changed (#11280)', () => {
+  it('suppresses the spike highlight when the model regime changed', () => {
+    // Cur 0.3471 vs prev 0.1 would normally flag as a >=2x spike (see the
+    // base describe block above) — model_regime_changed must override that.
+    const rows = [
+      {
+        loop: 'implementer',
+        cost_usd: 3.1234,
+        llm_calls: 42,
+        ticks: 9,
+        tick_cost_avg_usd: 0.3471,
+        tick_cost_avg_usd_prev_period: 0.1,
+        wall_clock_seconds: 600,
+        sparkline_points: [],
+        model_regime_changed: true,
+      },
+    ]
+    render(<PerLoopCostTable rows={rows} />)
+    const row = screen.getByText('implementer').closest('tr')
+    expect(row).toHaveAttribute('data-spike', 'false')
+    expect(screen.getByTestId('model-changed-badge-implementer')).toBeInTheDocument()
+  })
+
+  it('still flags a genuine spike when the model regime is unchanged', () => {
+    const rows = [
+      {
+        loop: 'implementer',
+        cost_usd: 3.1234,
+        llm_calls: 42,
+        ticks: 9,
+        tick_cost_avg_usd: 0.3471,
+        tick_cost_avg_usd_prev_period: 0.1,
+        wall_clock_seconds: 600,
+        sparkline_points: [],
+        model_regime_changed: false,
+      },
+    ]
+    render(<PerLoopCostTable rows={rows} />)
+    const row = screen.getByText('implementer').closest('tr')
+    expect(row).toHaveAttribute('data-spike', 'true')
+    expect(
+      screen.queryByTestId('model-changed-badge-implementer'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('omits the badge when model_regime_changed is absent (backward compat)', () => {
+    const rows = [
+      {
+        loop: 'implementer',
+        cost_usd: 3.1234,
+        llm_calls: 42,
+        ticks: 9,
+        tick_cost_avg_usd: 0.3471,
+        tick_cost_avg_usd_prev_period: 0.1,
+        wall_clock_seconds: 600,
+        sparkline_points: [],
+      },
+    ]
+    render(<PerLoopCostTable rows={rows} />)
+    expect(
+      screen.queryByTestId('model-changed-badge-implementer'),
+    ).not.toBeInTheDocument()
+  })
+})

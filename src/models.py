@@ -345,8 +345,17 @@ class TriageResult(BaseModel):
     reasons: list[str] = Field(
         default_factory=list, description="Reasons for the readiness decision"
     )
-    complexity_score: int = Field(
-        default=0, ge=0, le=10, description="Complexity score 0-10"
+    complexity_score: int | None = Field(
+        default=None,
+        ge=0,
+        le=10,
+        description=(
+            "Complexity score 0-10; None when triage did not score the "
+            "issue. Absence must stay distinguishable from 0: consumers "
+            "fail toward their own conservative default (tier gates treat "
+            "unscored as maximally complex, epic decomposition skips it) "
+            "— #11298 audit."
+        ),
     )
     issue_type: IssueType = Field(
         default=IssueType.FEATURE, description="Classified issue type"
@@ -2244,6 +2253,12 @@ class StateData(BaseModel):
     # get_source_totals()` snapshot, compared against the current tick's
     # snapshot to compute per-source cost trend before being overwritten.
     prompt_efficiency_baseline: dict[str, dict[str, int]] = Field(default_factory=dict)
+    # #11280: the model regime (`PromptTelemetry.get_source_regimes()`) each
+    # `prompt_efficiency_baseline` source was snapshotted under. A source
+    # whose CURRENT regime differs from this stored one gets its trend nulled
+    # instead of comparing cost-per-call across a pricing-regime change (e.g.
+    # claude -> glm-5.2) — see `prompt_efficiency.compute_skill_efficiency`.
+    prompt_efficiency_baseline_regime: dict[str, str] = Field(default_factory=dict)
     fake_coverage_last_known: dict[str, list[str]] = Field(default_factory=dict)
     fake_coverage_attempts: dict[str, int] = Field(default_factory=dict)
     # #8986 — rollup issue tracking: maps "{Fake}:{gap_kind}" → open GH issue

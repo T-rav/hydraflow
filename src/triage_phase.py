@@ -187,7 +187,7 @@ class TriagePhase:
         if parents:
             issue.parent_epic = parents[0]
 
-    def _complexity_rank(self, score: int) -> str:
+    def _complexity_rank(self, score: int | None) -> str:
         """Convert a 0-10 complexity score into a coarse rank label.
 
         The ``"high"`` boundary is tied to
@@ -197,6 +197,8 @@ class TriagePhase:
         level will be marked ``"high"`` in the cache, matching the
         decomposition behavior instead of drifting out of sync.
         """
+        if score is None:
+            return "unscored"
         high_threshold = self._config.epic_decompose_complexity_threshold
         if score >= high_threshold:
             return "high"
@@ -746,6 +748,10 @@ class TriagePhase:
         if (
             self._epic_manager is None
             or not isinstance(result, TriageResult)
+            # Unscored (None) never auto-decomposes: absence of a score is
+            # not evidence of epic scale, and historically an absent score
+            # read as 0 here — preserve that never-fired behavior (#11298).
+            or result.complexity_score is None
             or result.complexity_score
             < self._config.epic_decompose_complexity_threshold
         ):

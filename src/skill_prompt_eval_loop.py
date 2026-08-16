@@ -694,8 +694,15 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         next tick's window is relative to what this tick just measured.
         """
         totals_by_source = self._telemetry.get_source_totals()
+        current_regimes = self._telemetry.get_source_regimes()
         baseline = self._state.get_prompt_efficiency_baseline()
-        rows = compute_skill_efficiency(totals_by_source, baseline)
+        baseline_regimes = self._state.get_prompt_efficiency_baseline_regime()
+        rows = compute_skill_efficiency(
+            totals_by_source,
+            baseline,
+            current_regimes=current_regimes,
+            baseline_regimes=baseline_regimes,
+        )
         scorecard = format_scorecard(rows)
         ordered_cases = pick_refine_order(cases, rows)
         for row in rows:
@@ -710,7 +717,9 @@ class SkillPromptEvalLoop(BaseBackgroundLoop):
         # append this tick's snapshot to the history ledger FIRST so every
         # baseline any filing was ever computed against stays re-derivable.
         self._append_baseline_history(totals_by_source)
-        self._state.set_prompt_efficiency_baseline(totals_by_source)
+        self._state.set_prompt_efficiency_baseline(
+            totals_by_source, regimes=current_regimes
+        )
         return ordered_cases, scorecard
 
     def _append_baseline_history(self, snapshot: dict[str, dict[str, int]]) -> None:

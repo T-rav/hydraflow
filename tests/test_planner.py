@@ -2467,3 +2467,86 @@ class TestDiagramHelpers:
             f"{method_name} should use 'issue_number' not 'issue_id'"
         )
         assert "issue_id" not in param_names, f"{method_name} still uses 'issue_id'"
+
+
+# ---------------------------------------------------------------------------
+# plan - #11298 force_scale tiering
+# ---------------------------------------------------------------------------
+
+
+def _valid_lite_plan() -> str:
+    """A plan satisfying only LITE_REQUIRED_SECTIONS (no full-scale sections)."""
+    padding = " ".join(["word"] * 120)
+    return (
+        "## Intent\n\n"
+        "Correct the mislabeled operator panel button so the control matches "
+        "the documented action and stops confusing operators.\n\n"
+        "## Files to Modify\n\n"
+        "- src/ui/panel.tsx — correct the button label string\n"
+        "- src/ui/panel.test.tsx — update the snapshot expectation\n\n"
+        "## Implementation Steps\n\n"
+        "1. Update the label string constant in src/ui/panel.tsx\n"
+        "2. Regenerate the component snapshot in src/ui/panel.test.tsx\n"
+        "3. Run the panel test suite to confirm the new snapshot\n\n"
+        "## Testing Strategy\n\n"
+        "- src/ui/panel.test.tsx — snapshot pins the corrected label\n"
+        f"- {padding}\n"
+    )
+
+
+def _lite_transcript() -> str:
+    return (
+        "Analysis complete.\n"
+        f"PLAN_START\n{_valid_lite_plan()}\nPLAN_END\n"
+        "SUMMARY: Lite plan for the label fix"
+    )
+
+
+@pytest.mark.asyncio
+async def test_plan_force_scale_lite_validates_against_lite_schema(
+    config, event_bus, tmp_path
+):
+    """#11298: force_scale='lite' wins over the heuristic — a task the
+    heuristic scores as 'full' is validated against LITE_REQUIRED_SECTIONS."""
+    runner = _make_runner(config, event_bus)
+    task = TaskFactory.create(
+        id=1,
+        title="Add authentication system",
+        body="A" * 600,
+        tags=["feature"],
+    )
+    assert runner._detect_plan_scale(task) == "full"
+
+    with (
+        patch.object(runner, "_execute", AsyncMock(return_value=_lite_transcript())),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.plan(task, worker_id=0, force_scale="lite")
+
+    assert result.success is True
+    assert result.validation_errors == []
+
+
+@pytest.mark.asyncio
+async def test_plan_without_force_scale_keeps_heuristic_schema(
+    config, event_bus, tmp_path
+):
+    """Control for the test above: the same lite-only transcript FAILS full
+    validation when force_scale is omitted, proving the override is what
+    changed the schema (force_scale=None is pre-#11298 behavior)."""
+    runner = _make_runner(config, event_bus)
+    task = TaskFactory.create(
+        id=1,
+        title="Add authentication system",
+        body="A" * 600,
+        tags=["feature"],
+    )
+
+    with (
+        patch.object(runner, "_execute", AsyncMock(return_value=_lite_transcript())),
+        patch.object(runner, "_save_transcript"),
+    ):
+        result = await runner.plan(task, worker_id=0)
+
+    assert result.success is False
+    assert result.validation_errors

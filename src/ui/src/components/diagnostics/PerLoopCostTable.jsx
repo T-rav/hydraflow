@@ -7,9 +7,13 @@ import { theme } from '../../theme'
  * Consumes rows from `/api/diagnostics/loops/cost?range=<r>`. Columns are
  * sortable — click a header to toggle ascending/descending on that key.
  * Rows whose `tick_cost_avg_usd` is ≥ 2× the prior period's average are
- * highlighted in red, surfacing cost spikes at a glance. An inline-SVG
- * sparkline visualises recent per-tick cost trend when the payload
- * includes `sparkline_points`.
+ * highlighted in red, surfacing cost spikes at a glance — UNLESS the row's
+ * `model_regime_changed` flag is set (#11280): a loop switching models (e.g.
+ * the fleet moving on/off glm-5.2) shifts the blended $/tick average on its
+ * own, and that is not the same signal as "this loop got expensive". Such
+ * rows show a "model changed" badge instead of the red spike highlight. An
+ * inline-SVG sparkline visualises recent per-tick cost trend when the
+ * payload includes `sparkline_points`.
  */
 
 const COLUMNS = [
@@ -22,6 +26,7 @@ const COLUMNS = [
 ]
 
 function isSpike(row) {
+  if (row && row.model_regime_changed) return false
   const cur = Number(row && row.tick_cost_avg_usd) || 0
   const prev = Number(row && row.tick_cost_avg_usd_prev_period) || 0
   return prev > 0 && cur >= 2 * prev
@@ -194,6 +199,7 @@ export function PerLoopCostTable({ rows, onRowClick }) {
         <tbody>
           {sorted.map((row) => {
             const spike = isSpike(row)
+            const regimeChanged = !!(row && row.model_regime_changed)
             const hasBreakdown = row.model_breakdown
               && typeof row.model_breakdown === 'object'
               && Object.keys(row.model_breakdown).length > 0
@@ -240,6 +246,15 @@ export function PerLoopCostTable({ rows, onRowClick }) {
                         ) : (
                           fmtCell(row[c.key], c)
                         )}
+                        {c.key === 'tick_cost_avg_usd' && regimeChanged ? (
+                          <span
+                            data-testid={`model-changed-badge-${row.loop}`}
+                            style={styles.regimeBadge}
+                            title="Dominant model changed vs. the prior period — cost shift may reflect the model switch, not a spike"
+                          >
+                            model changed
+                          </span>
+                        ) : null}
                       </td>
                     )
                   })}
@@ -314,6 +329,19 @@ const styles = {
   tdSpike: {
     color: theme.red,
     fontWeight: 600,
+  },
+  regimeBadge: {
+    display: 'inline-block',
+    marginLeft: 6,
+    padding: '1px 6px',
+    borderRadius: 4,
+    fontSize: 9,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+    color: theme.textMuted,
+    background: theme.surfaceInset,
+    border: `1px solid ${theme.border}`,
   },
   empty: {
     padding: 40,

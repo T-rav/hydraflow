@@ -51,9 +51,17 @@ class _ScriptedReviewer:
         self.calls: list[tuple[Task, PlanResult]] = []
 
     async def review(
-        self, task: Task, plan_result: PlanResult, *, plan_version: int = 1
+        self,
+        task: Task,
+        plan_result: PlanResult,
+        *,
+        plan_version: int = 1,
+        prior_summary: str | None = None,
+        prior_findings: list | None = None,
     ) -> PlanReview:
         self.calls.append((task, plan_result))
+        self.prior_contexts = getattr(self, "prior_contexts", [])
+        self.prior_contexts.append((prior_summary, prior_findings))
         if not self._reviews:
             raise AssertionError("ran out of scripted reviews")
         return self._reviews.pop(0)
@@ -320,3 +328,103 @@ class TestS3StillBlockingAfterExpansion:
             f["description"] == "still failing after enrichment"
             for f in captured["findings"]
         )
+
+
+# ---------------------------------------------------------------------------
+# Scenario 4: #11298 size tiering — low-complexity issue skips the review
+# spawn entirely but still writes the review_stored record the READY-stage
+# gate requires.
+# ---------------------------------------------------------------------------
+
+
+class TestS4LightTierSkipsReview:
+    """Triage-scored simple issue plans to READY with zero reviewer spawns."""
+
+    async def test_low_complexity_skips_review_spawn(self, mock_world) -> None:
+        world = mock_world
+        world.add_issue(
+            304,
+            "Fix typo in operator panel label",
+            "One-line copy fix.",
+            labels=["hydraflow-plan"],
+        )
+        harness = world.harness
+        phase = harness.plan_phase
+
+        reviewer = _ScriptedReviewer([])  # any call would raise: no scripts
+        phase._plan_reviewer = reviewer
+        captured = _wire_issue_cache(phase)
+
+        class _Classified:
+            payload = {"complexity_score": 2}
+
+        phase._issue_cache.latest_classification = lambda _id: _Classified()
+
+        _setup_planner(harness, 304)
+        issue = TaskFactory.create(id=304, tags=["hydraflow-plan"])
+        harness.store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        # No reviewer spawn — the whole point of the tier gate.
+        assert reviewer.calls == []
+        # READY-gate invariant: a review_stored record still lands, clean.
+        assert captured["issue_id"] == 304
+        assert captured["has_blocking"] is False
+        assert "light-tier" in captured["review_text"]
+        assert captured["findings"] == []
+
+
+# ---------------------------------------------------------------------------
+# Scenario 5: #11298 planner-side tiering — a triage-scored simple issue
+# plans at forced-lite scale AND skips the review spawn (both tiers firing
+# on the same light path).
+# ---------------------------------------------------------------------------
+
+
+class TestS5LightTierForcesLitePlan:
+    """Simple issue: planner receives force_scale='lite', reviewer never spawns."""
+
+    async def test_lite_scale_forced_and_review_skipped(self, mock_world) -> None:
+        world = mock_world
+        world.add_issue(
+            305,
+            "Fix typo in operator panel label",
+            "One-line copy fix.",
+            labels=["hydraflow-plan"],
+        )
+        harness = world.harness
+        phase = harness.plan_phase
+
+        reviewer = _ScriptedReviewer([])  # any call would raise: no scripts
+        phase._plan_reviewer = reviewer
+        captured = _wire_issue_cache(phase)
+
+        class _Classified:
+            payload = {"complexity_score": 2}
+
+        phase._issue_cache.latest_classification = lambda _id: _Classified()
+
+        plan_kwargs: list[dict] = []
+
+        async def _planner_plan(*_args: Any, **kwargs: Any) -> PlanResult:
+            plan_kwargs.append(kwargs)
+            return PlanResultFactory.create(
+                issue_number=305,
+                success=True,
+                plan="Step 1: fix the label",
+                summary="Done",
+                use_defaults=True,
+            )
+
+        harness.planners.plan = _planner_plan
+        issue = TaskFactory.create(id=305, tags=["hydraflow-plan"])
+        harness.store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        # Planner-side tier: the spawn was asked for a lite-scale plan.
+        assert plan_kwargs and plan_kwargs[0].get("force_scale") == "lite"
+        # Review-side tier: no reviewer spawn, READY-gate record intact.
+        assert reviewer.calls == []
+        assert captured["has_blocking"] is False

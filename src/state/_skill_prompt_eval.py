@@ -77,16 +77,34 @@ class SkillPromptEvalStateMixin:
         """Return last tick's `PromptTelemetry.get_source_totals()` snapshot."""
         return {k: dict(v) for k, v in self._data.prompt_efficiency_baseline.items()}
 
+    def get_prompt_efficiency_baseline_regime(self) -> dict[str, str]:
+        """Return the model regime each baseline source was snapshotted under.
+
+        #11280: sibling to `get_prompt_efficiency_baseline()` — sourced from
+        `PromptTelemetry.get_source_regimes()` at the same tick the baseline
+        was captured, so a caller can null the trend when the source's
+        CURRENT regime no longer matches.
+        """
+        return dict(self._data.prompt_efficiency_baseline_regime)
+
     def set_prompt_efficiency_baseline(
-        self, snapshot: dict[str, dict[str, int]]
+        self,
+        snapshot: dict[str, dict[str, int]],
+        *,
+        regimes: dict[str, str] | None = None,
     ) -> None:
         """Overwrite the stored baseline with *snapshot* (this tick's totals).
 
         Call AFTER computing trend vs. the previous baseline — this is a
         trailing-window comparison (current tick vs. the immediately
-        preceding tick), not a multi-week rolling average.
+        preceding tick), not a multi-week rolling average. *regimes*
+        (#11280), when given, overwrites the stored per-source model regime
+        alongside the totals in the same save — omit it to leave the stored
+        regimes untouched (back-compat for callers that don't track regime).
         """
         self._data.prompt_efficiency_baseline = {
             k: dict(v) for k, v in snapshot.items()
         }
+        if regimes is not None:
+            self._data.prompt_efficiency_baseline_regime = dict(regimes)
         self.save()

@@ -35,6 +35,18 @@ Rate the issue's specificity on a 0-10 scale:
 Issues scoring below 7 will be routed to a product discovery track
 for competitive research and direction shaping before planning.
 
+## Complexity score
+
+Separately from clarity, rate the *implementation* complexity on a 0-10 scale
+(`"complexity_score"`). This gates how much planning/review ceremony the
+issue receives, so score the work, not the writing:
+- **0-2**: Trivial — copy/config/label changes, one-line fixes
+- **3-5**: Small bounded change — one or two files, existing patterns, low risk
+- **6-8**: Substantial — multi-file feature, new tests/wiring, moderate risk
+- **9-10**: Cross-cutting — architectural change, migrations, epics, program-scale work
+
+Always include `"complexity_score"` in your response.
+
 ## Instructions
 
 - **Default to passing issues through.** Most issues have enough intent to begin planning.
@@ -46,25 +58,25 @@ for competitive research and direction shaping before planning.
 Return ONLY a JSON object in this exact format, with no other text:
 
 ```json
-{"ready": true, "reasons": [], "issue_type": "feature", "clarity_score": 9, "needs_discovery": false, "enrichment": "## Triage Enrichment\n\n**Interpreted intent:** ...\n**Affected area:** ...\n**Acceptance criteria:**\n- ...", "already_addressed": false, "claim_verified": null}
+{"ready": true, "reasons": [], "issue_type": "feature", "clarity_score": 9, "complexity_score": 4, "needs_discovery": false, "enrichment": "## Triage Enrichment\n\n**Interpreted intent:** ...\n**Affected area:** ...\n**Acceptance criteria:**\n- ...", "already_addressed": false, "claim_verified": null}
 ```
 
 or for vague product ideas needing discovery:
 
 ```json
-{"ready": true, "reasons": [], "issue_type": "feature", "clarity_score": 3, "needs_discovery": true, "enrichment": ""}
+{"ready": true, "reasons": [], "issue_type": "feature", "clarity_score": 3, "complexity_score": 8, "needs_discovery": true, "enrichment": ""}
 ```
 
 or for truly insufficient issues:
 
 ```json
-{"ready": false, "reasons": ["Specific reason why this cannot proceed"], "issue_type": "bug", "clarity_score": 0, "needs_discovery": false, "enrichment": "", "already_addressed": false, "claim_verified": null}
+{"ready": false, "reasons": ["Specific reason why this cannot proceed"], "issue_type": "bug", "clarity_score": 0, "complexity_score": 5, "needs_discovery": false, "enrichment": "", "already_addressed": false, "claim_verified": null}
 ```
 
 or for a claim that is demonstrably false / already implemented (the described problem no longer exists at HEAD):
 
 ```json
-{"ready": false, "reasons": ["Claim not reproducible: <evidence>"], "issue_type": "bug", "clarity_score": 5, "needs_discovery": false, "enrichment": "", "already_addressed": true, "claim_verified": false}
+{"ready": false, "reasons": ["Claim not reproducible: <evidence>"], "issue_type": "bug", "clarity_score": 5, "complexity_score": 3, "needs_discovery": false, "enrichment": "", "already_addressed": true, "claim_verified": false}
 ```
 
 

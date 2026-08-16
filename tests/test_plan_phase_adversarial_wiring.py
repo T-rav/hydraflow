@@ -590,3 +590,129 @@ class TestPlanPhaseCreditExhaustionPropagates:
 # Avoid pytest collection warning by referencing asyncio so the
 # `from asyncio` import does not appear unused on some pytest versions.
 _ = asyncio
+
+
+@pytest.mark.asyncio
+class TestPlanReviewTiering:
+    """#11298 size tiering: low-complexity issues skip the agentic review."""
+
+    def _wire(self, config, *, complexity, route_backs=0, labels=None):
+        from types import SimpleNamespace
+
+        phase, state, _planners, _prs, _store, _stop = make_plan_phase(config)
+        reviewer = AsyncMock()
+        reviewer.review = AsyncMock()
+        phase._plan_reviewer = reviewer
+
+        record = SimpleNamespace(payload={"complexity_score": complexity})
+        cache = AsyncMock()
+        cache.record_plan_stored = lambda *_a, **_kw: 1
+        stored: list[dict] = []
+        cache.record_review_stored = lambda *_a, **kw: stored.append(kw) or None
+        cache.latest_classification = lambda _id: record
+        cache.latest_review = lambda _id: None
+        phase._issue_cache = cache
+        state.get_route_back_count = lambda _id: route_backs
+        task = TaskFactory.create(id=77)
+        if labels is not None:
+            task = task.model_copy(update={"tags": labels})
+        return phase, reviewer, stored, task
+
+    async def test_low_complexity_skips_review_but_records_verdict(
+        self, config
+    ) -> None:
+        config = config.model_copy(update={"plan_review_min_complexity": 5})
+        phase, reviewer, stored, task = self._wire(config, complexity=2)
+        await phase._write_plan_records(task, PlanResultFactory.create(issue_number=77))
+        reviewer.review.assert_not_awaited()
+        assert stored and stored[0]["has_blocking"] is False
+        assert "light-tier" in stored[0]["review_text"]
+
+    async def test_high_complexity_gets_full_review(self, config) -> None:
+        config = config.model_copy(update={"plan_review_min_complexity": 5})
+        phase, reviewer, stored, task = self._wire(config, complexity=8)
+        await phase._write_plan_records(task, PlanResultFactory.create(issue_number=77))
+        reviewer.review.assert_awaited()
+
+    async def test_cycled_issue_always_reviewed(self, config) -> None:
+        config = config.model_copy(update={"plan_review_min_complexity": 5})
+        phase, reviewer, _stored, task = self._wire(config, complexity=2, route_backs=1)
+        await phase._write_plan_records(task, PlanResultFactory.create(issue_number=77))
+        reviewer.review.assert_awaited()
+
+    async def test_unclassified_issue_always_reviewed(self, config) -> None:
+        config = config.model_copy(update={"plan_review_min_complexity": 5})
+        phase, reviewer, _stored, task = self._wire(config, complexity=2)
+        phase._issue_cache.latest_classification = lambda _id: None
+        await phase._write_plan_records(task, PlanResultFactory.create(issue_number=77))
+        reviewer.review.assert_awaited()
+
+    async def test_zero_threshold_disables_tiering(self, config) -> None:
+        config = config.model_copy(update={"plan_review_min_complexity": 0})
+        phase, reviewer, _stored, task = self._wire(config, complexity=1)
+        await phase._write_plan_records(task, PlanResultFactory.create(issue_number=77))
+        reviewer.review.assert_awaited()
+
+    async def test_escalation_labeled_issue_always_reviewed(self, config) -> None:
+        config = config.model_copy(update={"plan_review_min_complexity": 5})
+        phase, reviewer, _stored, task = self._wire(
+            config, complexity=2, labels=["hydraflow-plan", "hitl-escalation"]
+        )
+        await phase._write_plan_records(task, PlanResultFactory.create(issue_number=77))
+        reviewer.review.assert_awaited()
+
+
+class TestPlannerLiteTier:
+    """#11298 planner-side tiering: _forced_plan_scale gate matrix."""
+
+    def _phase(self, config, *, complexity, route_backs=0, escalated=False):
+        from types import SimpleNamespace
+
+        from plan_phase import PlanPhase
+
+        phase = object.__new__(PlanPhase)
+        phase._config = config
+        record = (
+            SimpleNamespace(payload={"complexity_score": complexity})
+            if complexity is not None
+            else None
+        )
+        phase._issue_cache = SimpleNamespace(latest_classification=lambda _id: record)
+        phase._state = SimpleNamespace(get_route_back_count=lambda _id: route_backs)
+        phase._has_escalation_label = lambda _issue: escalated
+        return phase
+
+    def _issue(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(id=88)
+
+    def test_simple_issue_forces_lite(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 5})
+        phase = self._phase(config, complexity=3)
+        assert phase._forced_plan_scale(self._issue()) == "lite"
+
+    def test_complex_issue_keeps_heuristics(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 5})
+        phase = self._phase(config, complexity=8)
+        assert phase._forced_plan_scale(self._issue()) is None
+
+    def test_cycled_issue_keeps_heuristics(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 5})
+        phase = self._phase(config, complexity=2, route_backs=1)
+        assert phase._forced_plan_scale(self._issue()) is None
+
+    def test_escalated_issue_keeps_heuristics(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 5})
+        phase = self._phase(config, complexity=2, escalated=True)
+        assert phase._forced_plan_scale(self._issue()) is None
+
+    def test_unclassified_issue_keeps_heuristics(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 5})
+        phase = self._phase(config, complexity=None)
+        assert phase._forced_plan_scale(self._issue()) is None
+
+    def test_zero_threshold_disables_forcing(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 0})
+        phase = self._phase(config, complexity=1)
+        assert phase._forced_plan_scale(self._issue()) is None

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
-from config import Credentials, HydraFlowConfig
+from config import AUTO_AGENT_BRANCH_PREFIX, Credentials, HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
 from state import StateTracker
 from subprocess_util import run_subprocess
@@ -109,7 +109,8 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             )
             collected += orphan_count
 
-        # Phase 3: delete orphaned agent/issue-* local branches
+        # Phase 3: delete orphaned local branches across every issue-branch
+        # namespace (agent/issue-*, agent/auto-agent-*, fix|feat|.../*-N)
         if not self._stop_event.is_set():
             branch_count = await self._collect_orphaned_branches(
                 _MAX_GC_PER_CYCLE - collected
@@ -341,11 +342,15 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         return collected
 
     # Real branch namespaces the pipeline and sub-agents create. Matches
-    # ``issue-<N>`` / ``agent/issue-<N>`` and the trailing ``-<N>`` suffix on
-    # ``fix|feat|refactor|chore|test|docs/<slug>-<N>`` branches (#10698).
+    # ``issue-<N>`` / ``agent/issue-<N>``, the trailing ``-<N>`` suffix on
+    # ``fix|feat|refactor|chore|test|docs/<slug>-<N>`` branches (#10698), and
+    # Auto-Agent (preflight) session branches, ``agent/auto-agent-<N>``
+    # (#11182) — minted by ``AutoAgentPreflightLoop._resolve_worktree`` via
+    # ``HydraFlowConfig.auto_agent_branch_for_issue``.
     _ISSUE_BRANCH_RES: tuple[re.Pattern[str], ...] = (
         re.compile(r"^(?:agent/)?issue-(\d+)$"),
         re.compile(r"^(?:fix|feat|refactor|chore|test|docs)/.*-(\d+)$"),
+        re.compile(rf"^{re.escape(AUTO_AGENT_BRANCH_PREFIX)}(\d+)$"),
     )
 
     @classmethod
@@ -367,7 +372,8 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
     async def _collect_orphaned_branches(self, budget: int = _MAX_GC_PER_CYCLE) -> int:
         """Delete local orphaned branches with no corresponding worktree.
 
-        Covers every real branch namespace (``agent/issue-<N>`` plus
+        Covers every real branch namespace (``agent/issue-<N>``,
+        ``agent/auto-agent-<N>`` (#11182), and
         ``fix|feat|refactor|chore|test|docs/<slug>-<N>``) — not just
         ``agent/issue-*`` (#10698) — with the same skip guards as before.
         """
@@ -386,6 +392,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
 
         active_workspaces = self._state.get_active_workspaces()
         active_issues = set(self._state.get_active_issue_numbers())
+        active_branches = self._state.get_active_branches()
 
         for line in output.strip().splitlines():
             if collected >= budget:
@@ -413,7 +420,14 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                     cwd=self._config.repo_root,
                     gh_token=self._credentials.gh_token,
                 )
-                self._state.remove_branch(issue_number)
+                # Multiple branch namespaces (agent/issue-<N>,
+                # agent/auto-agent-<N>, fix|feat|.../*-N) can share one issue
+                # number (#11182). Only clear the tracked ``active_branches``
+                # entry when the branch just deleted is the one it points at
+                # — otherwise deleting a stale namespace's branch would evict
+                # a live entry for a different, still-existing branch.
+                if active_branches.get(issue_number) == branch:
+                    self._state.remove_branch(issue_number)
                 collected += 1
                 logger.info("GC: deleted orphaned branch %s", branch)
             except Exception as exc:  # noqa: BLE001
@@ -696,5 +710,12 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 )
         if issue_number is not None:
             self._state.remove_workspace(issue_number)
-            self._state.remove_branch(issue_number)
+            # Cross-namespace aliasing guard (same as phase 3, #11182): the
+            # tracked ``active_branches`` entry may name a *different*,
+            # still-live branch for this issue — only evict it when it
+            # matches the branch just deleted.
+            if branch and (
+                self._state.get_active_branches().get(issue_number) == branch
+            ):
+                self._state.remove_branch(issue_number)
         logger.info("GC: reaped orphan worktree %s (branch %s)", path, branch)

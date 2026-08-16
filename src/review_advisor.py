@@ -701,7 +701,9 @@ class PostVerifyAdvisor:
         )
         # #10836: best-effort proper-scoring record of the raw verdict. Fail-soft
         # by construction — never affects the verdict returned above.
-        self._record_calibration_verdict(inp, raw_verdict, raw_confidence)
+        self._record_calibration_verdict(
+            inp, raw_verdict, raw_confidence, judge_family=judge_family
+        )
         return result
 
     def _record_calibration_verdict(
@@ -709,6 +711,8 @@ class PostVerifyAdvisor:
         inp: PostVerifyInput,
         verdict: Literal["APPROVE", "VETO"],
         confidence: float | None,
+        *,
+        judge_family: str,
     ) -> None:
         """Best-effort append of this verdict to the judge-calibration ledger.
 
@@ -716,9 +720,15 @@ class PostVerifyAdvisor:
         confidence (we never fabricate one — an absent confidence is honestly
         skipped). The subject is keyed by PR number so it joins the escape ledger
         (:func:`judge_calibration.subject_for_pr`), falling back to the issue when
-        no PR is known. ``judge_id`` distinguishes the per-lens judges; the whole
-        call is wrapped fail-soft so a recording error can never reach the review
-        pipeline.
+        no PR is known. ``judge_family`` is the model family actually dispatched
+        for THIS verdict (``ji.model_family(dispatch_model)``, resolved by
+        `_resolve_independence` — the same value already used for the classed-
+        verdict ledger). Folding it into ``judge_id`` (issue #11280: a Brier/ECE
+        pool blending e.g. claude-judge and glm-judge scores is meaningless
+        across a judge-model change) gives `score_all()` a distinct row per
+        (lens, model family) — it groups purely by `judge_id`, so this is the
+        only place that needs to change. The whole call is wrapped fail-soft so
+        a recording error can never reach the review pipeline.
         """
         if self._judge_verdict_ledger_path is None or confidence is None:
             return
@@ -728,11 +738,15 @@ class PostVerifyAdvisor:
             subject_id = jc.subject_for_issue(inp.issue_number)
         else:
             return
-        judge_id = f"post_verify:{inp.lens}" if inp.lens else "post_verify"
+        lens_id = f"post_verify:{inp.lens}" if inp.lens else "post_verify"
+        # Always append a family segment (empty family -> "unknown", matching
+        # the judge_family written below) — a suffix-less id would pool new
+        # unknown-family records with legacy pre-#11280 rows (#11280 review).
+        judge_id = f"{lens_id}:{judge_family or 'unknown'}"
         jc.record_verdict(
             self._judge_verdict_ledger_path,
             judge_id=judge_id,
-            judge_family="review_advisor",
+            judge_family=judge_family or "unknown",
             subject_id=subject_id,
             verdict=jc.Verdict.PASS if verdict == "APPROVE" else jc.Verdict.FAIL,
             confidence=confidence,
@@ -1120,7 +1134,12 @@ class PreFlightAdvisor:
         :func:`judge_calibration.record_verdict` never raises, so a recording
         failure can never degrade pre-flight planning (mirrors
         PostVerifyAdvisor's recorder; judges never see their own scores
-        in-loop, per the #10836 Goodhart caveat).
+        in-loop, per the #10836 Goodhart caveat). ``judge_family`` is derived
+        from the model this advisor actually dispatches to
+        (``self._cfg.advisor_model``) and folded into ``judge_id`` so a
+        model-regime change (issue #11280) starts a fresh calibration row
+        instead of pooling into the same one — `score_all()` groups purely by
+        `judge_id`.
         """
         if (
             self._judge_verdict_ledger_path is None
@@ -1129,10 +1148,15 @@ class PreFlightAdvisor:
             or plan.confidence is None
         ):
             return
+        judge_family = ji.model_family(self._cfg.advisor_model)
+        # Always append a family segment (empty family -> "unknown", matching
+        # the judge_family written below) — a suffix-less id would pool new
+        # unknown-family records with legacy pre-#11280 rows (#11280 review).
+        judge_id = f"pre_flight:{judge_family or 'unknown'}"
         jc.record_verdict(
             self._judge_verdict_ledger_path,
-            judge_id="pre_flight",
-            judge_family="review_advisor",
+            judge_id=judge_id,
+            judge_family=judge_family or "unknown",
             subject_id=self._calibration_subject_id,
             verdict=(
                 jc.Verdict.PASS if plan.defect_verdict == "PASS" else jc.Verdict.FAIL

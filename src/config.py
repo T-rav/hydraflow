@@ -26,6 +26,14 @@ from queue_strategy import BandWeights, QueueStrategy
 
 logger = logging.getLogger("hydraflow.config")
 
+# Branch prefix minted for Auto-Agent (preflight) sessions — see
+# ``HydraFlowConfig.auto_agent_branch_for_issue``. Public (no leading
+# underscore) so every module that mints or parses this namespace
+# (``auto_agent_preflight_loop``, ``dependabot_merge_loop``,
+# ``workspace_gc_loop``) shares one definition instead of duplicating the
+# literal (#11182).
+AUTO_AGENT_BRANCH_PREFIX = "agent/auto-agent-"
+
 
 class Credentials(BaseModel):
     """Infrastructure credentials — separated from domain config.
@@ -2629,6 +2637,34 @@ class HydraFlowConfig(BaseModel):
             "flagged to the planner's on-demand discover/shape decision gate "
             "(plan_phase.py:_should_discover_helper) as a discovery hint, rather "
             "than routed to a standalone Discover phase at triage time."
+        ),
+    )
+    plan_review_min_complexity: int = Field(
+        default=5,
+        ge=0,
+        le=10,
+        description=(
+            "Skip the adversarial plan review for issues triaged at or below "
+            "this complexity (#11298 size tiering: the token report measured "
+            "plan_reviewer at 42% of all factory tokens, and a one-file fix "
+            "does not need a full agentic repo exploration of its plan — the "
+            "implement-side skill gauntlet still guards the code). Cycled, "
+            "escalated, or unclassified issues are ALWAYS reviewed. 0 "
+            "disables tiering (every plan reviewed, pre-#11298 behavior)."
+        ),
+    )
+    planner_lite_min_complexity: int = Field(
+        default=5,
+        ge=0,
+        le=10,
+        description=(
+            "Force the lite plan scale for issues triaged at or below this "
+            "complexity (#11298 size tiering, planner side: the token report "
+            "measured the planner at 44% of all factory tokens; a simple "
+            "issue gets the existing lite-plan prompt instead of the full "
+            "exploration treatment). Cycled, escalated, or unclassified "
+            "issues always fall back to heuristic scale detection, and a "
+            "routed-back issue replans at full scale. 0 disables forcing."
         ),
     )
     max_shape_turns: int = Field(
@@ -6172,6 +6208,10 @@ class HydraFlowConfig(BaseModel):
     def branch_for_issue(self, issue_number: int) -> str:
         """Return the canonical branch name for a given issue number."""
         return f"agent/issue-{issue_number}"
+
+    def auto_agent_branch_for_issue(self, issue_number: int) -> str:
+        """Return the Auto-Agent (preflight) session branch name for an issue."""
+        return f"{AUTO_AGENT_BRANCH_PREFIX}{issue_number}"
 
     def regulated_label_set(self) -> frozenset[str]:
         """Parse ``regulated_labels`` CSV into a label set (CH-5).
