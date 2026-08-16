@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
+- `0dae3ca` — fix(fleet-vitals): review + ratchet findings — idle gate, banner payload, hoisted imports, sandbox seam (#11391) (#11391) *(2026-08-16)*
 - `49df312` — feat(light-lane): route simple issues to the single-session auto-agent — one spawn, issue to PR (#11298) (#11389) (#11389) *(2026-08-16)*
 - `4610eb2` — fix(diagnostic): opt DiagnosticLoop into the LLM watchdog bound (#11262) (#11369) (#11369) *(2026-08-16)*
 - `a08bf72` — feat(find-filing): class-key fold layer for pattern-shaped find-issues (#11292) (#11324) (#11324) *(2026-08-16)*
@@ -507,10 +508,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `6badaf2` — fix(format): ruff format *(2026-05-18)*
 - `e80d302` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
 - `d67e2b4` — fix: ruff auto-fixes (unused imports + import sort) *(2026-05-18)*
-- `990441b` — fix(format): ruff format *(2026-05-18)*
-- `47d4138` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `95b28e1` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `ff38501` — fix: ruff auto-fixes (unused imports + import sort) *(2026-05-18)*
 
 
 <!-- arch:generated -->

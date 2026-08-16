@@ -1215,6 +1215,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             # Idle gate (review BLOCKING): zero-outcome windows read
             # first_pass_rate=0.0 — quiet, not sick.
             run_count=int(getattr(metrics, "total_outcomes", 0)),
+            open_issues=await self._fleet_open_issue_count(),
         )
         alarms = evaluate_fleet_vitals(
             state,
@@ -1223,6 +1224,7 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                 hitl_rate_alarm=self._config.fleet_hitl_rate_alarm,
                 hitl_rate_rearm=self._config.fleet_hitl_rate_rearm,
                 first_pass_floor=self._config.fleet_first_pass_floor,
+                board_growth_alarm=self._config.fleet_board_growth_alarm,
                 confirm_windows=self._config.fleet_alarm_confirm_windows,
             ),
             changes=await self._fleet_change_ledger(),
@@ -1273,6 +1275,20 @@ class HealthMonitorLoop(BaseBackgroundLoop):
                         },
                     )
                 )
+
+    async def _fleet_open_issue_count(self) -> int | None:
+        """Open-issue gauge for the board_growth band. Fail-soft to None
+        (the band simply skips a cycle — it can only under-alarm)."""
+        if self._prs is None:
+            return None
+        try:
+            # Typed Port primitive (#9905's keep-set reader) — identity only,
+            # no body/label projection, so the gauge stays cheap.
+            numbers = await self._prs.list_open_issue_numbers()
+        except (RuntimeError, ValueError, AttributeError) as exc:
+            logger.debug("fleet open-issue gauge failed: %s", exc)
+            return None
+        return len(numbers) if isinstance(numbers, list) else None
 
     async def _fleet_change_ledger(self) -> list[Any]:
         """Mechanical suspect input: staging merges in the last 24h.

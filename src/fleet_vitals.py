@@ -43,6 +43,11 @@ class FleetReading:
     hitl_rate: float
     first_pass_rate: float
     run_count: int = MIN_RUNS_FOR_RATES  # callers SHOULD pass the real count
+    #: Open-issue count gauge (None = unavailable this cycle). Feeds the
+    #: board_growth band — the 88-issue churn class (#11390's valve bounds
+    #: the LEVEL; this band alarms on the RATE so a new generator is
+    #: caught in hours, not at 88).
+    open_issues: int | None = None
 
 
 @dataclass(frozen=True)
@@ -75,17 +80,21 @@ class FleetVitalsState:
     """Per-band hysteresis state. Serializable via ``to_dict``/``from_dict``."""
 
     bands: dict[str, BandState] = field(default_factory=dict)
+    gauges: dict[str, float] = field(default_factory=dict)
 
     def band(self, name: str) -> BandState:
         return self.bands.setdefault(name, BandState())
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            name: {
-                "consecutive_breaches": b.consecutive_breaches,
-                "alarm_active": b.alarm_active,
-            }
-            for name, b in self.bands.items()
+            "bands": {
+                name: {
+                    "consecutive_breaches": b.consecutive_breaches,
+                    "alarm_active": b.alarm_active,
+                }
+                for name, b in self.bands.items()
+            },
+            "gauges": dict(self.gauges),
         }
 
     @classmethod
@@ -93,7 +102,17 @@ class FleetVitalsState:
         state = cls()
         if not isinstance(raw, dict):
             return state
-        for name, entry in raw.items():
+        gauges = raw.get("gauges")
+        if isinstance(gauges, dict):
+            for key, value in gauges.items():
+                try:
+                    state.gauges[str(key)] = float(value)
+                except (TypeError, ValueError):
+                    continue
+        bands_raw = raw.get("bands")
+        # Back-compat: the pre-gauge layout stored bands at top level.
+        entries = bands_raw if isinstance(bands_raw, dict) else raw
+        for name, entry in entries.items():
             if not isinstance(entry, dict):
                 continue
             band = state.band(str(name))
@@ -112,6 +131,7 @@ class FleetBands:
     hitl_rate_alarm: float = 0.5
     hitl_rate_rearm: float = 0.3
     first_pass_floor: float = 0.05
+    board_growth_alarm: int = 8
     confirm_windows: int = 2
 
 
@@ -156,6 +176,32 @@ def evaluate(
     suspect pass on the alarming reading only.
     """
     alarms: list[FleetAlarm] = []
+
+    # board_growth: net open-issue delta between consecutive readings.
+    # Evaluated OUTSIDE the run-count gate — a runaway generator can grow
+    # the board while the build pipeline itself is quiet.
+    if reading.open_issues is not None:
+        prev = state.gauges.get("open_issues")
+        state.gauges["open_issues"] = float(reading.open_issues)
+        if prev is not None:
+            delta = float(reading.open_issues) - prev
+            growth_band = state.band("board_growth")
+            if _evaluate_band(
+                growth_band,
+                breached=delta >= bands.board_growth_alarm,
+                cleared=delta <= 0,
+                confirm_windows=bands.confirm_windows,
+            ):
+                suspects = rank_suspects(reading.ts, changes or [])
+                alarms.append(
+                    FleetAlarm(
+                        band="board_growth",
+                        reading=reading,
+                        consecutive_breaches=growth_band.consecutive_breaches,
+                        suspects=suspects,
+                        shadow_proposal=shadow_proposal("board_growth", suspects),
+                    )
+                )
 
     if reading.run_count < MIN_RUNS_FOR_RATES:
         # Too few real runs to trust any rate: reset streaks (a quiet

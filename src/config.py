@@ -4246,6 +4246,16 @@ class HydraFlowConfig(BaseModel):
             "clears above 2x the floor."
         ),
     )
+    fleet_board_growth_alarm: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "Net open-issue growth per health-monitor cycle (~2h) that "
+            "breaches the board_growth band (#11391) — the 88-issue churn "
+            "class: the #11390 valve bounds the LEVEL, this band alarms on "
+            "the RATE so a new generator is caught in hours."
+        ),
+    )
     fleet_alarm_confirm_windows: int = Field(
         default=2,
         ge=1,

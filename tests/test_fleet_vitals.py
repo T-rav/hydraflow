@@ -128,12 +128,14 @@ class TestLoopWiring:
             fleet_hitl_rate_alarm=0.5,
             fleet_hitl_rate_rearm=0.3,
             fleet_first_pass_floor=0.05,
+            fleet_board_growth_alarm=8,
             fleet_alarm_confirm_windows=1,
             data_root=tmp_path,
             repo_root=tmp_path,
         )
         loop._bus = SimpleNamespace(publish=AsyncMock())
         loop._fleet_change_ledger = AsyncMock(return_value=[])
+        loop._fleet_open_issue_count = AsyncMock(return_value=None)
         return loop
 
     async def _metrics(self):
@@ -207,3 +209,67 @@ class TestIdleGate:
         evaluate(state, idle, bands=BANDS)
         # Episode still active — no spurious re-alarm on the next breach.
         assert evaluate(state, busy_breach, bands=BANDS) == []
+
+
+class TestBoardGrowthBand:
+    """The 88-issue churn class: alarm on the RATE of board growth."""
+
+    def _reading(self, open_issues: int) -> FleetReading:
+        return FleetReading(
+            ts=NOW,
+            hitl_rate=0.1,
+            first_pass_rate=0.8,
+            run_count=20,
+            open_issues=open_issues,
+        )
+
+    def test_sustained_growth_alarms(self) -> None:
+        state = FleetVitalsState()
+        evaluate(state, self._reading(30), bands=BANDS)  # baseline gauge
+        evaluate(state, self._reading(40), bands=BANDS)  # +10 breach 1
+        alarms = evaluate(state, self._reading(50), bands=BANDS)  # +10 breach 2
+        assert [a.band for a in alarms] == ["board_growth"]
+
+    def test_first_reading_never_alarms(self) -> None:
+        state = FleetVitalsState()
+        assert evaluate(state, self._reading(88), bands=BANDS) == []
+
+    def test_flat_or_shrinking_board_resets(self) -> None:
+        state = FleetVitalsState()
+        evaluate(state, self._reading(30), bands=BANDS)
+        evaluate(state, self._reading(40), bands=BANDS)  # breach 1
+        evaluate(state, self._reading(40), bands=BANDS)  # flat: clears streak
+        assert evaluate(state, self._reading(50), bands=BANDS) == []
+
+    def test_none_gauge_skips_cycle(self) -> None:
+        state = FleetVitalsState()
+        evaluate(state, self._reading(30), bands=BANDS)
+        no_gauge = FleetReading(
+            ts=NOW, hitl_rate=0.1, first_pass_rate=0.8, run_count=20
+        )
+        assert evaluate(state, no_gauge, bands=BANDS) == []
+        # Gauge preserved: the next real reading diffs against 30, not None.
+        evaluate(state, self._reading(40), bands=BANDS)
+        alarms = evaluate(state, self._reading(50), bands=BANDS)
+        assert [a.band for a in alarms] == ["board_growth"]
+
+    def test_growth_evaluates_even_when_pipeline_idle(self) -> None:
+        """A runaway generator can grow the board while builds are quiet."""
+        state = FleetVitalsState()
+        idle = lambda n: FleetReading(  # noqa: E731
+            ts=NOW,
+            hitl_rate=0.0,
+            first_pass_rate=0.0,
+            run_count=0,
+            open_issues=n,
+        )
+        evaluate(state, idle(30), bands=BANDS)
+        evaluate(state, idle(40), bands=BANDS)
+        alarms = evaluate(state, idle(50), bands=BANDS)
+        assert [a.band for a in alarms] == ["board_growth"]
+
+    def test_gauge_round_trips_through_state(self) -> None:
+        state = FleetVitalsState()
+        evaluate(state, self._reading(30), bands=BANDS)
+        restored = FleetVitalsState.from_dict(state.to_dict())
+        assert restored.gauges["open_issues"] == 30.0

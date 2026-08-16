@@ -54,3 +54,25 @@ def test_founding_incident_alarms_names_suspect_and_proposes() -> None:
         assert "SHADOW" in alarm.shadow_proposal
         assert "d2aaa1daf" in alarm.shadow_proposal
         assert "kill-switch" in alarm.shadow_proposal
+
+
+def test_board_churn_incident_alarms_on_rate() -> None:
+    """The second founding incident: the board grew ~44 -> 88 in a day
+    while every run looked healthy. Sustained growth >= 8/cycle must
+    alarm the board_growth band long before the level hits 88."""
+    state = FleetVitalsState()
+    bands = FleetBands()
+    counts = [44, 54, 64, 74]
+    fired: list[str] = []
+    for count in counts:
+        reading = FleetReading(
+            ts=ONSET,
+            hitl_rate=0.2,
+            first_pass_rate=0.6,
+            run_count=25,
+            open_issues=count,
+        )
+        fired.extend(
+            a.band for a in evaluate(state, reading, bands=bands, changes=LEDGER)
+        )
+    assert fired == ["board_growth"]  # once, at the confirm window — not at 88
