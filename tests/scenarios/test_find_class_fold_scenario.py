@@ -133,6 +133,56 @@ async def test_tick_three_rediscovering_tick_one_site_is_idempotent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_closed_class_issue_is_never_reopened_or_commented_on() -> None:
+    """A closed class issue is not a fold target (#11328 P3 acceptance bullet).
+
+    Once the tick-one issue is closed, a later sibling site must file a
+    FRESH issue rather than folding into (and implicitly reopening) the
+    closed one -- ``list_issues_by_label`` only ever returns open issues,
+    so ``match_class`` can't see it, but this pins the end-to-end behavior:
+    no comment, no body edit, and the closed issue's state/body untouched.
+    """
+    gh = FakeGitHub()
+    source = "branch-namespace-parser"
+    needle = (
+        "branch-to-issue parser recognizes agent/issue- but drops the "
+        "agent/auto-agent-<N> namespace"
+    )
+
+    first_number = await file_or_fold(
+        gh,
+        source,
+        needle,
+        "StaleIssueLoop remote branch GC is blind to the agent/auto-agent-N namespace",
+        "## Finding\n\nsrc/branch_gc_scan.py:39 misses agent/auto-agent-<N>",
+        ["hydraflow-find"],
+        site="src/branch_gc_scan.py:39",
+    )
+    body_before_close = gh._issues[first_number].body
+    await gh.close_issue(first_number)
+
+    second_number = await file_or_fold(
+        gh,
+        source,
+        needle,
+        "hydraflow-find: sibling branch parsers still drop the agent/auto-agent-<N> "
+        "namespace (branch_gc_scan, pr_manager)",
+        "## Finding\n\nsrc/pr_manager.py:3360 drops agent/auto-agent-<N> too",
+        ["hydraflow-find"],
+        site="src/pr_manager.py:3360",
+    )
+
+    assert second_number != first_number
+    assert len(gh._comments) == 0
+    assert gh._issues[first_number].state == "closed"
+    assert gh._issues[first_number].body == body_before_close
+
+    board = await gh.list_issues_by_label("hydraflow-find")
+    assert len(board) == 1
+    assert board[0]["number"] == second_number
+
+
+@pytest.mark.asyncio
 async def test_distinct_needle_in_same_tick_still_files_its_own_issue() -> None:
     gh = FakeGitHub()
     await file_or_fold(
