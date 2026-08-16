@@ -557,6 +557,84 @@ class TestFileOrFold:
             "src/pr_manager.py:3360",
         ]
 
+    async def test_title_with_embedded_newline_does_not_truncate_roster(
+        self,
+    ) -> None:
+        # A title containing a raw newline must not corrupt the rendered
+        # roster line into two physical lines -- extract_folded_sites stops
+        # at the first non-"- " line, so an unescaped newline would drop
+        # every site folded in after it (#11328 round-trip regression).
+        prs = _FakePRPort()
+        first = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan misses\nagent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site="src/branch_gc_scan.py:39",
+        )
+        second = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "pr_manager misses agent/auto-agent-<N>",
+            "## Problem\n\nsibling details",
+            ["hydraflow-find"],
+            site="src/pr_manager.py:3360",
+        )
+        assert second == first
+        folded_body = prs.update_calls[-1][1]
+        assert extract_folded_sites(folded_body) == [
+            "src/branch_gc_scan.py:39",
+            "src/pr_manager.py:3360",
+        ]
+
+        # The newline-titled site rediscovered on a later tick is still a
+        # true no-op -- proves the roster and the dedup check agree on the
+        # same (sanitized) identifier.
+        third = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan misses\nagent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site="src/branch_gc_scan.py:39",
+        )
+        assert third == first
+        assert len(prs.comment_calls) == 1
+        assert len(prs.update_calls) == 1
+
+    async def test_site_identifier_with_backtick_round_trips(self) -> None:
+        # A site identifier containing a backtick must not break the
+        # ``(site: `X`)`` delimiter -- a corrupted round trip would make the
+        # site permanently unrecognizable, re-folding (and re-commenting)
+        # every tick (#11328 round-trip regression).
+        prs = _FakePRPort()
+        site = "src/foo.py:39 (in `bar()`)"
+        first = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan misses agent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site=site,
+        )
+        second = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan.py line 39 still misses agent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site=site,
+        )
+        assert second == first
+        assert len(prs.comment_calls) == 0
+        assert len(prs.update_calls) == 0
+
     async def test_site_omitted_falls_back_to_title_identity(self) -> None:
         # No explicit site passed -- behavior must match pre-#11328 title-only
         # idempotency exactly (backward compatibility for existing callers).

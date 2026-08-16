@@ -269,9 +269,24 @@ def extract_folded_sites(body: str) -> list[str]:
     return sites
 
 
+def _single_line(text: str) -> str:
+    """Collapse *text* to one line with no backticks.
+
+    ``_site_line`` renders *title*/*site* into a single ``- ...`` markdown
+    bullet that :data:`_SITE_LINE_RE` must parse back out; an embedded
+    newline splits it across lines (truncating every later roster entry,
+    since :func:`extract_folded_sites` stops at the first non-bullet line)
+    and an embedded backtick breaks the ``` `site` ``` delimiter match. Both
+    are stripped here so a title/site can never corrupt the roster it's
+    rendered into.
+    """
+    return " ".join(text.replace("`", "'").split())
+
+
 def _site_line(title: str, site: str | None = None) -> str:
+    title = _single_line(title)
     if site is not None and site != title:
-        return f"- {title} (site: `{site}`)"
+        return f"- {title} (site: `{_single_line(site)}`)"
     return f"- {title}"
 
 
@@ -291,7 +306,8 @@ def _append_site(body: str, title: str, site: str | None = None) -> str:
     without this fallback every live legacy class issue grows a duplicate
     roster line the first time it's rediscovered by a site-aware caller.
     """
-    effective_site = site if site is not None else title
+    title = _single_line(title)
+    effective_site = _single_line(site) if site is not None else title
     existing_sites = extract_folded_sites(body)
     if effective_site in existing_sites or title in existing_sites:
         return body
