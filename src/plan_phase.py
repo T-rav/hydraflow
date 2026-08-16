@@ -1536,6 +1536,47 @@ class PlanPhase(PlanWikiIngestMixin):
 
     # -- flow nodes ---------------------------------------------------------
 
+    async def _route_light_lane(self, issue: Task, state: FlowState) -> bool:
+        """#11298 light lane: route a triage-scored simple issue to the
+        single-session auto-agent (one spawn: read issue -> implement ->
+        test -> PR) instead of the staged plan/review pipeline.
+
+        The claim-label swap removes the issue from every plan-stage
+        queue; AutoAgentPreflightLoop polls the claim label for intake and
+        crash recovery. Shared _tier_eligible guard: cycled, escalated, or
+        unscored issues never route here, and an auto-agent exhaustion
+        falls BACK to this pipeline (never to a human). Returns True when
+        routed (the flow stops); mutates *state* accordingly.
+        """
+        if not self._config.auto_agent_light_intake_enabled:
+            return False
+        eligible, complexity = self._tier_eligible(
+            issue, self._config.auto_agent_light_max_complexity
+        )
+        if not eligible:
+            return False
+        logger.info(
+            "Issue #%d complexity %d <= %d — routing to the "
+            "auto-agent light lane (#11298)",
+            issue.id,
+            complexity,
+            self._config.auto_agent_light_max_complexity,
+        )
+        await self._prs.swap_pipeline_labels(
+            issue.id, self._config.light_autofix_label[0]
+        )
+        state["result"] = PlanResult(
+            issue_number=issue.id,
+            success=True,
+            summary=(
+                f"light-lane: routed to single-session auto-agent "
+                f"(complexity {complexity}; #11298)"
+            ),
+        )
+        state["_stop"] = True
+        state["_skip_tail"] = True
+        return True
+
     async def _flow_prepass(self, state: FlowState) -> FlowState:
         """Research / discover / shape gates (ADR-0107) before drafting.
 
@@ -1546,6 +1587,10 @@ class PlanPhase(PlanWikiIngestMixin):
         ``return``s (which posted no transcript / verdict).
         """
         issue = state["issue"]
+
+        if await self._route_light_lane(issue, state):
+            return state
+
         human_guidance = self._state.get_human_steering(str(issue.id)).guidance or ""
         research_context = ""
         if self._should_research(issue):

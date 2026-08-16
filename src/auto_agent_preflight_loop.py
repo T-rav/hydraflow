@@ -381,7 +381,38 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             seen.add(int(issue.get("number", 0)))
         if self._config.auto_agent_hitl_intake_enabled:
             eligible.extend(await self._poll_widened_hitl_issues(seen))
+        if self._config.auto_agent_light_intake_enabled:
+            eligible.extend(await self._poll_light_issues(seen))
         return eligible
+
+    async def _poll_light_issues(self, seen: set[int]) -> list[dict[str, Any]]:
+        """#11298 light lane: poll issues PlanPhase routed to the
+        single-session auto-agent.
+
+        Issues arrive ALREADY claimed (PlanPhase swapped them to the
+        ``light_autofix_label`` at routing time), so polling the claim
+        label doubles as crash recovery — an attempt interrupted mid-flight
+        is re-attempted rather than orphaned. ``human-required`` and
+        active-HITL carriers are skipped defensively.
+        """
+        cfg = self._config
+        active = set(cfg.hitl_active_label)
+        light: list[dict[str, Any]] = []
+        try:
+            raw = await self._prs.list_issues_by_label(cfg.light_autofix_label[0])
+        except Exception as exc:
+            logger.warning("Light-lane intake poll failed: %s", exc)
+            return light
+        for issue in raw:
+            number = int(issue.get("number", 0))
+            if number <= 0 or number in seen:
+                continue
+            names = {lbl.get("name", "") for lbl in issue.get("labels", [])}
+            if "human-required" in names or names & active:
+                continue
+            seen.add(number)
+            light.append({**issue, "_intake": "light"})
+        return light
 
     async def _poll_widened_hitl_issues(self, seen: set[int]) -> list[dict[str, Any]]:
         """#9721: poll idle pipeline-origin ``hydraflow-hitl`` issues.
@@ -464,6 +495,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         issue_body = str(issue.get("body", "") or "")
         labels = {lbl.get("name", "") for lbl in issue.get("labels", [])}
         widened = str(issue.get("_intake", "")) == "hitl_widened"
+        light = str(issue.get("_intake", "")) == "light"
         origin: str | None = None
         # Deterministic sub-label selection — set iteration is hash-randomised
         # in CPython, so an issue with multiple sub-labels would otherwise pick
@@ -544,6 +576,21 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
                     prs=self._prs,
                 )
             if outcome == "human-required":
+                if light:
+                    # #11298 light lane: exhaustion falls BACK to the staged
+                    # plan pipeline, never to a human — the route-back count
+                    # this records also disqualifies the issue from every
+                    # tier gate, so the full plan/review stack runs next.
+                    logger.info(
+                        "Light-lane auto-agent exhausted for issue #%d — "
+                        "falling back to the staged pipeline (#11298)",
+                        issue_number,
+                    )
+                    self._state.increment_route_back_count(issue_number)
+                    await self._prs.swap_pipeline_labels(
+                        issue_number, self._config.planner_label[0]
+                    )
+                    return {"status": "light_fallback_to_pipeline"}
                 if widened:
                     await self._return_widened_claim(issue_number, labels)
                 await self._prs.add_labels(

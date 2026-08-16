@@ -852,6 +852,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
+        "auto_agent_light_intake_enabled",
+        "HYDRAFLOW_AUTO_AGENT_LIGHT_INTAKE_ENABLED",
+        False,
+    ),
+    (
         "auto_pr_preflight_gate_enabled",
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
         True,
@@ -1770,6 +1775,15 @@ class HydraFlowConfig(BaseModel):
     hitl_autofix_label: list[str] = Field(
         default=["hydraflow-hitl-autofix"],
         description="Labels for HITL items undergoing automatic fix attempt (OR logic)",
+    )
+    light_autofix_label: list[str] = Field(
+        default=["hydraflow-auto-light"],
+        description=(
+            "Claim label for #11298 light-lane issues being built by the "
+            "single-session auto-agent (OR logic). Swapped on by PlanPhase "
+            "at routing time; polled by AutoAgentPreflightLoop for intake "
+            "and crash recovery."
+        ),
     )
     fixed_label: list[str] = Field(
         default=["hydraflow-fixed"],
@@ -5169,6 +5183,26 @@ class HydraFlowConfig(BaseModel):
             "(attempt-cap exhaustion, quality-gate/zero-diff bails) in "
             "addition to hitl-escalation. Distinct from "
             "auto_agent_preflight_enabled, which gates the whole loop."
+        ),
+    )
+    auto_agent_light_intake_enabled: bool = Field(
+        default=False,
+        description=(
+            "#11298 light lane: PlanPhase routes issues triaged at or below "
+            "auto_agent_light_max_complexity to the single-session auto-agent "
+            "(one spawn: read issue -> implement -> test -> PR) instead of the "
+            "staged plan/review pipeline. Exhaustion falls back to the staged "
+            "pipeline, never to a human. Default OFF - the operator flips it."
+        ),
+    )
+    auto_agent_light_max_complexity: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description=(
+            "Complexity ceiling for the #11298 light lane - a conservative "
+            "subset of the plan-tier band. Cycled, escalated, or unscored "
+            "issues never route here (shared _tier_eligible guard)."
         ),
     )
     auto_pr_preflight_gate_enabled: bool = Field(
