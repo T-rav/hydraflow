@@ -27,6 +27,24 @@ _NUMERIC_METRICS: tuple[str, ...] = (
     "duration_seconds",
 )
 
+# Rolling-average window, in retrospective runs. Named (not just a default
+# arg) so `metric_metadata()` can describe the calculation it backs without
+# hand-copying the number — the #11118 falsifiability convention applied to
+# UI metrics: a dashboard tile's info popover cannot say something the
+# calculation doesn't actually do.
+ROLLING_WINDOW_RUNS = 10
+
+# `detect_regressions` baseline/recent comparison windows, in retrospective
+# runs. NOTE: this is a *different* baseline from a tile's own delta (latest
+# vs. earliest point in its rolling-average series) — it only backs the
+# separate "Regression Alerts" section.
+REGRESSION_BASELINE_RUNS = 20
+REGRESSION_RECENT_RUNS = 5
+
+# The append-only store every rolling-average and regression metric below is
+# computed from.
+RETROSPECTIVES_SOURCE = "retrospectives.jsonl"
+
 
 def _extract_metric(entry: dict[str, Any], metric: str) -> float | None:
     """Extract a numeric metric value from a retrospective entry dict."""
@@ -44,7 +62,7 @@ def _extract_metric(entry: dict[str, Any], metric: str) -> float | None:
 
 def compute_rolling_averages(
     entries: list[dict[str, Any]],
-    window_size: int = 10,
+    window_size: int = ROLLING_WINDOW_RUNS,
 ) -> dict[str, list[dict[str, Any]]]:
     """Compute rolling averages for key metrics over a sliding window.
 
@@ -156,8 +174,8 @@ def _cohort_stats(entries: list[dict[str, Any]]) -> dict[str, Any]:
 
 def detect_regressions(
     entries: list[dict[str, Any]],
-    baseline_window: int = 20,
-    recent_window: int = 5,
+    baseline_window: int = REGRESSION_BASELINE_RUNS,
+    recent_window: int = REGRESSION_RECENT_RUNS,
 ) -> list[dict[str, Any]]:
     """Detect metric regressions comparing recent entries to a baseline.
 
@@ -219,6 +237,62 @@ def detect_regressions(
     return regressions
 
 
+# Per-metric numerator/denominator prose for the dashboard's info popovers.
+# Keyed exactly like the rolling-average series (`_NUMERIC_METRICS` plus
+# "first_pass_rate"), so every tile has a matching description.
+_METRIC_DESCRIPTIONS: dict[str, dict[str, str]] = {
+    "plan_accuracy_pct": {
+        "label": "Plan Accuracy %",
+        "numerator": "sum of each run's plan-accuracy score (planned vs. actual touchpoints)",
+        "denominator": "runs in the window with a recorded plan_accuracy_pct",
+    },
+    "first_pass_rate": {
+        "label": "First-Pass Rate",
+        "numerator": "runs approved with no reviewer-applied fixes",
+        "denominator": "runs in the window with a recorded review verdict",
+    },
+    "quality_fix_rounds": {
+        "label": "Fix Rounds",
+        "numerator": "sum of quality-gate fix rounds per run",
+        "denominator": "runs in the window with a recorded quality_fix_rounds",
+    },
+    "ci_fix_rounds": {
+        "label": "CI Fix Rounds",
+        "numerator": "sum of CI fix rounds per run",
+        "denominator": "runs in the window with a recorded ci_fix_rounds",
+    },
+    "duration_seconds": {
+        "label": "Duration (s)",
+        "numerator": "sum of run durations in seconds",
+        "denominator": "runs in the window with a recorded duration_seconds",
+    },
+}
+
+
+def metric_metadata() -> dict[str, dict[str, Any]]:
+    """Self-describing calc metadata for each rolling-average tile.
+
+    Built from the same constants ``compute_rolling_averages`` uses, so a
+    dashboard tile's info popover cannot say something the calculation
+    doesn't actually do (the #11118 falsifiability convention, applied to
+    UI metrics). Consumed by ``FactoryHealthSection``'s per-tile popovers —
+    do not hand-write a copy of this prose in the frontend.
+    """
+    return {
+        key: {
+            **desc,
+            "window_runs": ROLLING_WINDOW_RUNS,
+            "delta_baseline": (
+                "earliest rolling-average point in the currently loaded series "
+                "(not a fixed calendar window — it shrinks toward a single "
+                "point as the retrospective log grows past one window)"
+            ),
+            "data_source": RETROSPECTIVES_SOURCE,
+        }
+        for key, desc in _METRIC_DESCRIPTIONS.items()
+    }
+
+
 def compute_summary(
     retro_entries: list[dict[str, Any]],
     telemetry_entries: list[dict[str, Any]],
@@ -228,4 +302,5 @@ def compute_summary(
         "rolling_averages": compute_rolling_averages(retro_entries),
         "cohorts": compute_cohorts(retro_entries, telemetry_entries),
         "regressions": detect_regressions(retro_entries),
+        "metric_metadata": metric_metadata(),
     }
