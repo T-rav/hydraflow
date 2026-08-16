@@ -183,6 +183,19 @@ class IssueStore:
         self._last_poll_ts: str | None = None
         self._lock = asyncio.Lock()
 
+        # True once the first refresh() has successfully routed a fetch into
+        # _queues. Before that, _queues holds every stage key mapped to an
+        # empty deque — byte-identical in shape to a genuinely empty pipeline.
+        # Callers (the /api/pipeline route) use this to distinguish "haven't
+        # polled GitHub yet" from "polled and there's nothing" during the
+        # boot window right after a restart (#11279).
+        self._has_completed_initial_refresh = False
+
+    @property
+    def has_completed_initial_refresh(self) -> bool:
+        """True once the first background refresh() cycle has completed."""
+        return self._has_completed_initial_refresh
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -224,6 +237,7 @@ class IssueStore:
             self._route_issues(issues)
 
         self._last_poll_ts = datetime.now(UTC).isoformat()
+        self._has_completed_initial_refresh = True
 
         # Publish queue update event
         stats = self.get_queue_stats()

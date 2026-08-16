@@ -9,7 +9,7 @@ concrete-only methods the orchestrator dispatches via
 ``cast("IssueStore", self._svc.store)`` (``start``, ``clear_active``,
 ``get_active_issues``, ``get_queue_stats``, ``get_pipeline_snapshot``,
 ``is_in_pipeline``, ``get_merged_numbers``, ``get_cached``,
-``get_hitl_issues``).
+``get_hitl_issues``, ``has_completed_initial_refresh``).
 
 Implementation strategy:
 
@@ -103,6 +103,13 @@ class FakeIssueStore:
     def __init__(self, github: FakeGitHub, event_bus: EventBus) -> None:
         self._github = github
         self._bus = event_bus
+        # Unlike the real IssueStore, the Fake computes every read straight
+        # from FakeGitHub's live issue state — there is no polling gap to
+        # model, so a freshly-constructed Fake is immediately authoritative.
+        # Defaults True; a scenario simulating the #11279 boot-window race
+        # can flip it False and call refresh() to flip it back, mirroring
+        # the real store's lifecycle.
+        self._has_completed_initial_refresh = True
 
         # Active issue tracking: issue_number -> stage
         self._active: dict[int, str] = {}
@@ -137,6 +144,11 @@ class FakeIssueStore:
 
         github = FakeGitHub.from_seed(seed)
         return cls(github=github, event_bus=event_bus)
+
+    @property
+    def has_completed_initial_refresh(self) -> bool:
+        """Mirrors ``IssueStore.has_completed_initial_refresh`` (#11279)."""
+        return self._has_completed_initial_refresh
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -215,6 +227,7 @@ class FakeIssueStore:
     async def refresh(self) -> None:
         """Publish a queue-update event to keep the dashboard in sync."""
         self._last_poll_ts = datetime.now(UTC).isoformat()
+        self._has_completed_initial_refresh = True
         try:
             stats = self.get_queue_stats()
             await self._bus.publish(

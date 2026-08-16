@@ -133,7 +133,7 @@ function PendingIntentCard({ intent }) {
   )
 }
 
-function PipelineFlow({ stageGroups, queueStrategy }) {
+function PipelineFlow({ stageGroups, queueStrategy, resyncing }) {
   // Per-region and pipeline-wide issue counts for the flow badges (#10488;
   // PR count dropped in #10593).
   const counts = useMemo(() => countPipeline(stageGroups), [stageGroups])
@@ -217,6 +217,15 @@ function PipelineFlow({ stageGroups, queueStrategy }) {
           title={`work-queue strategy: ${queueStrategy} — the algorithm choosing which issue the factory works next`}
         >
           ⚡ {QUEUE_STRATEGY_LABELS[queueStrategy] || queueStrategy}
+        </span>
+      )}
+      {resyncing && (
+        <span
+          style={styles.resyncingBadge}
+          data-testid="pipeline-resyncing-badge"
+          title="Waiting for the backend to finish its post-restart refresh — the rail is holding its last known state rather than showing a possibly-stale empty view."
+        >
+          ⟳ resyncing
         </span>
       )}
       <div style={styles.flowConnector} />
@@ -385,7 +394,7 @@ export function findWorkerTranscript(workers, prs, stageKey, issueNumber, repo =
 }
 
 export function StreamView({ intents, expandedStages, onToggleStage, onRequestChanges }) {
-  const { pipelineIssues, prs, stageStatus, workers, config } = useHydraFlow()
+  const { pipelineIssues, prs, stageStatus, workers, config, pipelineSnapshotReady } = useHydraFlow()
 
   // Match intents to issues by issueNumber
   const intentMap = useMemo(() => {
@@ -436,7 +445,7 @@ export function StreamView({ intents, expandedStages, onToggleStage, onRequestCh
         <PendingIntentCard key={`pending-${i}`} intent={intent} />
       ))}
 
-      <PipelineFlow stageGroups={stageGroups} queueStrategy={config?.queue_strategy} />
+      <PipelineFlow stageGroups={stageGroups} queueStrategy={config?.queue_strategy} resyncing={pipelineSnapshotReady === false} />
 
       {stageGroups.map(({ stage, issues: stageIssues }) => {
         const status = stageStatus[stage.key] || {}
@@ -665,6 +674,16 @@ const styles = {
     fontWeight: 600,
     color: theme.accent,
     background: theme.accentSubtle,
+    padding: '1px 6px',
+    borderRadius: 8,
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+  },
+  resyncingBadge: {
+    fontSize: 9,
+    fontWeight: 600,
+    color: theme.yellow,
+    background: theme.yellowSubtle,
     padding: '1px 6px',
     borderRadius: 8,
     flexShrink: 0,

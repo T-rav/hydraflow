@@ -2599,6 +2599,11 @@ class PipelineSnapshot(BaseModel):
     """Snapshot of all pipeline stages with their issues."""
 
     stages: dict[str, list[PipelineIssue]] = Field(default_factory=dict)
+    # False when one or more contributing repos hadn't completed their first
+    # background refresh yet — the client should keep its existing rail
+    # state instead of treating the (necessarily incomplete) stages as
+    # authoritative (#11279).
+    ready: bool = True
 
 
 class IntentRequest(BaseModel):

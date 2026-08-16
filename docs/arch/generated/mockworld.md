@@ -18,7 +18,7 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_find_class_fold_scenario.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
 | **FakeHTTP** | `HTTPPort` | `tests/scenarios/fakes/test_fake_http.py` |
 | **FakeIssueFetcher** | `IssueFetcherPort` | — |
-| **FakeIssueStore** | `IssueStorePort` | `tests/scenarios/test_pipeline_snapshot_terminal_status_scenario.py` |
+| **FakeIssueStore** | `IssueStorePort` | `tests/scenarios/test_pipeline_boot_readiness_scenario.py`<br>`tests/scenarios/test_pipeline_snapshot_terminal_status_scenario.py` |
 | **FakeLLM** | `LLMPort` | `tests/scenarios/behaviors/test_quota.py`<br>`tests/scenarios/fakes/test_fake_llm.py`<br>`tests/scenarios/fakes/test_fake_llm_streaming.py`<br>`tests/scenarios/fakes/test_prior_failure_propagation.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakeObservability** | `ObservabilityPort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
 | **FakeReviewInsightStore** | `ReviewInsightStorePort` | — |
@@ -58,6 +58,7 @@ graph LR
     tests_scenarios_fakes_test_fake_http_py([tests/scenarios/fakes/test_fake_http.py]) --> FakeHTTP
     FakeIssueFetcher -.-> IssueFetcherPort
     FakeIssueStore -.-> IssueStorePort
+    tests_scenarios_test_pipeline_boot_readiness_scenario_py([tests/scenarios/test_pipeline_boot_readiness_scenario.py]) --> FakeIssueStore
     tests_scenarios_test_pipeline_snapshot_terminal_status_scenario_py([tests/scenarios/test_pipeline_snapshot_terminal_status_scenario.py]) --> FakeIssueStore
     FakeLLM -.-> LLMPort
     tests_scenarios_behaviors_test_quota_py([tests/scenarios/behaviors/test_quota.py]) --> FakeLLM

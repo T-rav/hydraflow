@@ -39,6 +39,7 @@ const initialState = {
   pipelineIssues: { ...emptyPipeline },
   pipelineStats: null,
   pipelinePollerLastRun: null,
+  pipelineSnapshotReady: true,
   sessions: [],
   currentSessionId: null,
   selectedRepoSlug: null,
@@ -603,6 +604,54 @@ describe('Merged state from backend', () => {
     // When backend omits merged key, preserve session state (WS events)
     expect(next.pipelineIssues.merged).toHaveLength(1)
     expect(next.pipelineIssues.merged[0].issue_number).toBe(10)
+  })
+
+  // #11279: right after a restart, /api/pipeline can be hit before the
+  // backend's first refresh() completes. That response carries
+  // ready: false and an empty stages map — it must not be treated as
+  // authoritative, or the rail wipes cards that are actually just
+  // not-yet-fetched (not gone).
+  it('ready: false does not evict existing rail cards', () => {
+    const state = {
+      ...initialState,
+      pipelineIssues: {
+        ...emptyPipeline,
+        triage: [{ issue_number: 1, title: 'Pre-restart card', url: '', status: 'queued' }],
+      },
+    }
+    const next = reducer(state, {
+      type: 'PIPELINE_SNAPSHOT',
+      data: {},
+      ready: false,
+    })
+    expect(next.pipelineIssues.triage).toHaveLength(1)
+    expect(next.pipelineIssues.triage[0].issue_number).toBe(1)
+  })
+
+  it('ready: false marks pipelineSnapshotReady false', () => {
+    const next = reducer(initialState, { type: 'PIPELINE_SNAPSHOT', data: {}, ready: false })
+    expect(next.pipelineSnapshotReady).toBe(false)
+  })
+
+  it('a subsequent ready snapshot clears pipelineSnapshotReady and reconciles normally', () => {
+    const notReady = reducer(initialState, { type: 'PIPELINE_SNAPSHOT', data: {}, ready: false })
+    const next = reducer(notReady, {
+      type: 'PIPELINE_SNAPSHOT',
+      data: { triage: [{ issue_number: 2, title: 'Real', url: '', status: 'queued' }] },
+      ready: true,
+    })
+    expect(next.pipelineSnapshotReady).toBe(true)
+    expect(next.pipelineIssues.triage).toHaveLength(1)
+    expect(next.pipelineIssues.triage[0].issue_number).toBe(2)
+  })
+
+  it('omitting ready (WS frames) reconciles as before and stays marked ready', () => {
+    const next = reducer(initialState, {
+      type: 'pipeline_snapshot',
+      data: { seq: 1, stages: { triage: [{ issue_number: 3, title: 'WS', url: '', status: 'queued' }] } },
+    })
+    expect(next.pipelineSnapshotReady).toBe(true)
+    expect(next.pipelineIssues.triage).toHaveLength(1)
   })
 
   it('EXISTING_PRS replaces PRs with server data only', () => {

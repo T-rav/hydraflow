@@ -40,6 +40,11 @@ export const initialState = {
   pipelineIssues: { ...emptyPipeline },
   pipelineStats: null,
   pipelinePollerLastRun: null,
+  // False when the most recent /api/pipeline response reported a
+  // contributing repo hadn't completed its post-restart boot refresh yet
+  // (#11279). Drives a "resyncing" indicator instead of trusting a
+  // necessarily-partial snapshot as an authoritative empty rail.
+  pipelineSnapshotReady: true,
   sessions: [],
   currentSessionId: null,
   selectedRepoSlug: null,
@@ -693,6 +698,19 @@ export function reducer(state, action) {
 
     case 'pipeline_snapshot':
     case 'PIPELINE_SNAPSHOT': {
+      // action.ready is only set on the REST /api/pipeline dispatch (see
+      // fetchPipeline below) — false means a contributing repo hasn't
+      // completed its first post-restart refresh yet, so the (necessarily
+      // partial/empty) snapshot is not authoritative. Skip the reconcile
+      // entirely rather than evicting rail cards for a repo that just
+      // hasn't reported in yet (#11279); the next ready poll catches up.
+      // WS pushes never carry this flag — they only fire after a mutation,
+      // which can't happen before that repo's first refresh completes — so
+      // they're implicitly always ready.
+      if (action.ready === false) {
+        return { ...state, pipelineSnapshotReady: false }
+      }
+
       // WS frame carries {seq, stages}; REST dispatch passes stages already
       // unwrapped. Normalize both to the bare stage map.
       const incoming = action.data?.stages ?? action.data ?? {}
@@ -717,6 +735,7 @@ export function reducer(state, action) {
       return {
         ...state,
         pipelineIssues: nextStages,
+        pipelineSnapshotReady: true,
         pipelinePollerLastRun: new Date().toISOString(),
       }
     }
@@ -1061,7 +1080,7 @@ export function HydraFlowProvider({ children }) {
   const fetchPipeline = useCallback(() => {
     fetchWithRepo('/api/pipeline')
       .then(r => r.json())
-      .then(data => dispatch({ type: 'PIPELINE_SNAPSHOT', data: data.stages || {} }))
+      .then(data => dispatch({ type: 'PIPELINE_SNAPSHOT', data: data.stages || {}, ready: data.ready }))
       .catch(() => {})
   }, [fetchWithRepo])
 
