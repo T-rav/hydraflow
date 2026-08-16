@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:57.940456+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3281
+superseded_by: 3565
 ---
 
 # Immutability check needs merge-base range AND per-record ls-tree set

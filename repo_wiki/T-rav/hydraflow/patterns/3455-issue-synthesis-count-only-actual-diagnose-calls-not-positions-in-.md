@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:58.215139+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3318
+superseded_by: 3602
 ---
 
 # Count only actual diagnose() calls, not positions, in cap enforcement

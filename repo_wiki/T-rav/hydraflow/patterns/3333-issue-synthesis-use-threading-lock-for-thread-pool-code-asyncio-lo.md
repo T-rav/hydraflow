@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:57.271722+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3196
+superseded_by: 3480
 ---
 
 # Use threading.Lock for thread-pool code; asyncio.Lock for coroutines

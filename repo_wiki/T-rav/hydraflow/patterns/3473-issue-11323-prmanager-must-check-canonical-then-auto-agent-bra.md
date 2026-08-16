@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11323
 source_phase: plan
 created_at: 2026-08-16T09:14:32.110017+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3619
 ---
 
 # PRManager must check canonical then Auto-Agent branch for PRs

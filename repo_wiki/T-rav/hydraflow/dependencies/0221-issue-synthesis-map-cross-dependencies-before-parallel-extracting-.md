@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:27:56.448858+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0206
+superseded_by: 0237
 ---
 
 # Map cross-dependencies before parallel-extracting a god class

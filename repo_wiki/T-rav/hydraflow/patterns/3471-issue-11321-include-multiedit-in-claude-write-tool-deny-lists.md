@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11321
 source_phase: plan
 created_at: 2026-08-16T09:00:03.766484+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3617
 ---
 
 # Include MultiEdit in Claude write-tool deny-lists

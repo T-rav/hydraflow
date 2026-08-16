@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11331
 source_phase: plan
 created_at: 2026-08-16T09:57:29.108959+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3490
 ---
 
 # ADR citations must be symbol-anchored to avoid drift false-positives
