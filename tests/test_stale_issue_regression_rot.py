@@ -88,7 +88,7 @@ class TestNoRegressionsDirIsANoOp:
         """No `tests/regressions/` dir -> the subsystem never touches PRPort."""
         loop, prs, _ = _make_loop(tmp_path)
         result = await loop._do_work()
-        assert result == {"scanned": 0, "closed": 0, "skipped": 0}
+        assert result == {"scanned": 0, "closed": 0, "skipped": 0, "retired": 0}
         prs.get_issue_state.assert_not_called()
         prs.create_issue.assert_not_called()
 

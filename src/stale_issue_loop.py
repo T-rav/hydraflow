@@ -516,7 +516,10 @@ class StaleIssueLoop(BaseBackgroundLoop):
         """
         stats = {"retired": 0}
         budget = self._config.backlog_budget
-        if budget <= 0:
+        # isinstance (not truthiness/comparison): MagicMock configs in the
+        # test suite auto-attribute a truthy budget — the valve must only
+        # arm on a real int (the MagicMock-truthy-guard incident class).
+        if not isinstance(budget, int) or budget <= 0:
             return stats
         try:
             raw = await self._prs._run_gh(
