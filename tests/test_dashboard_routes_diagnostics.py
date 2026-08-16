@@ -287,3 +287,61 @@ class TestSupervisorAckEndpoint:
         obs = after["observations"][0]
         assert obs["acked_escalations"] == ["force_push [main] — RC wedged"]
         assert len(obs["escalations"]) == 2
+
+
+class TestTokenReportEndpoint:
+    """#11298 measurement layer: /api/diagnostics/token-report."""
+
+    def _app(self, tmp_path: Path, rows: list[dict] | None) -> FastAPI:
+        config = MagicMock()
+        config.data_root = tmp_path
+        config.diagnostics_dir = tmp_path / "diagnostics"
+        config.factory_metrics_path = tmp_path / "diagnostics" / "m.jsonl"
+        prompt_dir = tmp_path / "metrics" / "prompt"
+        config.cost_inferences_path = prompt_dir / "inferences.jsonl"
+        config.pr_stats_path = prompt_dir / "pr_stats.json"
+        if rows is not None:
+            prompt_dir.mkdir(parents=True, exist_ok=True)
+            with open(config.cost_inferences_path, "w") as f:
+                for row in rows:
+                    f.write(json.dumps(row) + "\n")
+        fastapi_app = FastAPI()
+        fastapi_app.include_router(build_diagnostics_router(config))
+        return fastapi_app
+
+    def test_report_rolls_up_real_rows(self, tmp_path: Path) -> None:
+        rows = [
+            {
+                "issue_number": 42,
+                "source": "implementer",
+                "total_tokens": 90_000,
+                "input_tokens": 10_000,
+                "cache_read_input_tokens": 30_000,
+                "estimated_cost_usd": 0.9,
+            },
+            {
+                "issue_number": 42,
+                "source": "planner",
+                "total_tokens": 30_000,
+                "estimated_cost_usd": 0.3,
+            },
+        ]
+        client = TestClient(self._app(tmp_path, rows))
+        response = client.get("/api/diagnostics/token-report")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["fleet"]["issues_counted"] == 1
+        entry = payload["issues"][0]
+        assert entry["issue"] == 42
+        assert entry["tokens"] == 120_000
+        assert entry["phases"][0]["source"] == "implementer"
+        assert entry["cache_hit_rate"] == 0.75
+        assert "generated_at" in payload
+
+    def test_missing_telemetry_fails_soft(self, tmp_path: Path) -> None:
+        client = TestClient(self._app(tmp_path, None))
+        response = client.get("/api/diagnostics/token-report")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["issues"] == []
+        assert payload["fleet"]["issues_counted"] == 0
