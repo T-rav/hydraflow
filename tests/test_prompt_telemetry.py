@@ -306,6 +306,68 @@ class TestPromptTelemetry:
         assert telemetry.get_issue_totals()[2]["total_tokens"] == 70
         assert telemetry.get_source_totals()["reviewer"]["total_tokens"] == 70
 
+
+class TestGetSourceRegimes:
+    """#11280: `get_source_regimes()` tracks each source's most-recently
+    recorded model, so `prompt_efficiency` can null a trend across a
+    pricing-regime change instead of blending claude and glm windows."""
+
+    def test_empty_before_any_records(self, telemetry):
+        assert telemetry.get_source_regimes() == {}
+
+    def test_returns_latest_model_per_source(self, telemetry):
+        telemetry.record(
+            source="diff-sanity",
+            tool="claude",
+            model="claude-sonnet-4-5",
+            issue_number=1,
+            pr_number=0,
+            session_id="sess-1",
+            prompt_chars=100,
+            transcript_chars=50,
+            duration_seconds=0.1,
+            success=True,
+            stats={"total_tokens": 10},
+        )
+        assert telemetry.get_source_regimes() == {"diff-sanity": "claude-sonnet-4-5"}
+
+    def test_model_switch_overwrites_not_blends(self, telemetry):
+        """The GLM-switch scenario: the source's regime tracks the LATEST
+        call's model, not a history of every model it has ever seen."""
+        for model in ("claude-sonnet-4-5", "claude-sonnet-4-5", "glm-5.2"):
+            telemetry.record(
+                source="diff-sanity",
+                tool="claude",
+                model=model,
+                issue_number=1,
+                pr_number=0,
+                session_id="sess-1",
+                prompt_chars=100,
+                transcript_chars=50,
+                duration_seconds=0.1,
+                success=True,
+                stats={"total_tokens": 10},
+            )
+        assert telemetry.get_source_regimes() == {"diff-sanity": "glm-5.2"}
+
+    def test_source_totals_unaffected_by_regime_tracking(self, telemetry):
+        """`get_source_totals()`'s int-only filter still drops the new
+        `last_model` string field — no shape change to the existing surface."""
+        telemetry.record(
+            source="diff-sanity",
+            tool="claude",
+            model="glm-5.2",
+            issue_number=1,
+            pr_number=0,
+            session_id="sess-1",
+            prompt_chars=100,
+            transcript_chars=50,
+            duration_seconds=0.1,
+            success=True,
+            stats={"total_tokens": 10},
+        )
+        assert "last_model" not in telemetry.get_source_totals()["diff-sanity"]
+
     def test_load_inferences_reads_recent_rows(self, telemetry):
         telemetry.record(
             source="planner",

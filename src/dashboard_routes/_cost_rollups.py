@@ -495,6 +495,19 @@ def _worker_for_cost_source(source: str) -> str | None:
     return source_to_phase(normalized)
 
 
+def _dominant_model(cost_by_model: dict[str, float]) -> str | None:
+    """Return the highest-cost model key, or ``None`` for an empty/all-zero map.
+
+    ``"unknown"`` is a valid dominant model (an unpriced-but-real regime); an
+    empty period (no calls at all) has no dominant model to compare, which is
+    the honest "not enough evidence" case — never guessed as a match OR a
+    mismatch.
+    """
+    if not cost_by_model or not any(cost_by_model.values()):
+        return None
+    return max(cost_by_model, key=lambda m: cost_by_model[m])
+
+
 def build_per_loop_cost(
     config: HydraFlowConfig,
     *,
@@ -507,7 +520,8 @@ def build_per_loop_cost(
 
     Per-row fields: loop, cost_usd, tokens_in, tokens_out, llm_calls,
     issues_filed, issues_closed, escalations, ticks, tick_cost_avg_usd,
-    wall_clock_seconds, tick_cost_avg_usd_prev_period, model_breakdown.
+    wall_clock_seconds, tick_cost_avg_usd_prev_period, model_breakdown,
+    model_regime_changed.
 
     Cost / tokens / llm_calls / model_breakdown are attributed to a loop by the
     inference ``source`` field (see :func:`_worker_for_cost_source`), **not** by
@@ -522,6 +536,13 @@ def build_per_loop_cost(
     ``model_breakdown`` is a dict keyed by model name (or "unknown" for
     records missing the field), with nested {cost_usd, calls, input_tokens,
     output_tokens, cache_read_tokens, cache_write_tokens}.
+
+    ``model_regime_changed`` (#11280) is ``True`` when this period's highest-
+    cost model differs from the prior period's (see :func:`_dominant_model`)
+    — the signal the client uses to distinguish a genuine cost spike from a
+    loop simply switching models (e.g. the fleet moving off/onto glm-5.2),
+    which shifts the blended ``tick_cost_avg_usd`` on its own. ``False`` when
+    either period lacks enough evidence (no priced calls) to compare.
     """
     pricing = pricing or load_pricing()
 
@@ -570,6 +591,14 @@ def build_per_loop_cost(
     prev_since = since - (until - since)
 
     prev_loop_cost: dict[str, float] = defaultdict(float)
+    # #11280: per-model cost in the PRIOR period too, mirrored from
+    # ``per_loop_model`` above — lets the dominant-model comparison below
+    # tell a genuine cost spike apart from a plain model-regime swap (e.g.
+    # the fleet moving from claude to glm-5.2 mid-loop), which shifts the
+    # blended $/tick average without the loop having gotten more expensive.
+    prev_per_loop_model: dict[str, dict[str, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
     for rec in iter_priced_inferences(
         config, since=prev_since, until=since, pricing=pricing
     ):
@@ -577,6 +606,8 @@ def build_per_loop_cost(
         if worker is None:
             continue
         prev_loop_cost[worker] += rec["cost_usd"]
+        model_key = str(rec.get("model") or "").strip() or "unknown"
+        prev_per_loop_model[worker][model_key] += float(rec["cost_usd"])
 
     prev_loop_ticks: dict[str, int] = defaultdict(int)
     for tr in iter_loop_traces(config, since=prev_since, until=since):
@@ -627,6 +658,22 @@ def build_per_loop_cost(
             }
             for model, b in breakdown_raw.items()
         }
+        # #11280: does this period's dominant model differ from the prior
+        # period's? A model-regime swap (claude -> glm-5.2 or back) shifts
+        # the blended tick_cost_avg_usd on its own — the client's >2x spike
+        # highlight (PerLoopCostTable.isSpike) must not read that shift as
+        # "this loop got expensive" the same way it reads a same-model spike.
+        # ``None`` (not-enough-evidence on either side) never counts as a
+        # change.
+        current_dominant = _dominant_model(
+            {m: float(b["cost_usd"]) for m, b in breakdown_raw.items()}
+        )
+        prev_dominant = _dominant_model(dict(prev_per_loop_model.get(worker, {})))
+        model_regime_changed = (
+            current_dominant is not None
+            and prev_dominant is not None
+            and current_dominant != prev_dominant
+        )
         rows.append(
             {
                 "loop": worker,
@@ -646,6 +693,7 @@ def build_per_loop_cost(
                 # highlight (PerLoopCostTable.isSpike, gated on prev > 0).
                 "tick_cost_avg_usd_prev_period": prev_avg,
                 "model_breakdown": model_breakdown,
+                "model_regime_changed": model_regime_changed,
             }
         )
     return rows

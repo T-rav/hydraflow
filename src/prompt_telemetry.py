@@ -421,6 +421,16 @@ class PromptTelemetry:
         target["pruned_chars_total"] = _as_int(
             target.get("pruned_chars_total", 0)
         ) + _as_int(record.get("pruned_chars_total", 0))
+        # #11280: track the most-recently-seen model per aggregate so
+        # `get_source_regimes()` can tell a prompt-efficiency baseline "this
+        # source was last measured under a different (provider, model)
+        # regime" — a pricing-regime change (e.g. claude -> glm) must not
+        # trend as a cost improvement/regression against a stale baseline.
+        # `_accumulate_counter` runs in record-append order (single file lock
+        # in `record()`), so the last write here is always the latest model.
+        incoming_model = str(record.get("model", "")).strip()
+        if incoming_model:
+            target["last_model"] = incoming_model
         record_cost = record.get("estimated_cost_usd")
         if isinstance(record_cost, int | float) and record_cost > 0:
             target["estimated_cost_usd"] = round(
@@ -516,6 +526,30 @@ class PromptTelemetry:
             }
         return result
 
+    def get_source_regimes(self) -> dict[str, str]:
+        """Return each source's most-recently-recorded model (#11280).
+
+        Sibling to :meth:`get_source_totals`, reading the same ``sources``
+        aggregate but pulling the string ``last_model`` field the totals'
+        int-only filter drops. Consumed by `prompt_efficiency.compute_skill_
+        efficiency` to null a trend when the current regime doesn't match the
+        baseline's — a pricing-regime change (e.g. claude -> glm) must start a
+        fresh baseline, not read as a cost improvement/regression.
+        """
+        data = self._load_pr_stats()
+        sources = data.get("sources", {})
+        if not isinstance(sources, dict):
+            return {}
+        result: dict[str, str] = {}
+        for key, payload in sources.items():
+            source = str(key).strip()
+            if not source or not isinstance(payload, dict):
+                continue
+            model = str(payload.get("last_model", "")).strip()
+            if model:
+                result[source] = model
+        return result
+
 
 def parse_command_tool_model(cmd: list[str]) -> tuple[str, str]:
     """Extract ``(tool, model)`` from an agent command list."""
@@ -561,6 +595,7 @@ def _new_counter() -> dict[str, object]:
         "pruned_chars_total": 0,
         "estimated_cost_microusd": 0,
         "last_updated": "",
+        "last_model": "",
     }
 
 
