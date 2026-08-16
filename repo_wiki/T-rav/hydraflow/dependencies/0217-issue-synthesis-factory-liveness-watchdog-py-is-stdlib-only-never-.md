@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T04:51:57.146208+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0202
+superseded_by: 0232
 ---
 
 # factory_liveness_watchdog.py is stdlib-only, never imports src/

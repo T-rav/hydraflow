@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T04:41:05.829470+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2999
+superseded_by: 3266
 ---
 
 # list_runs_for_workflow keys on file name; list_workflow_runs on display

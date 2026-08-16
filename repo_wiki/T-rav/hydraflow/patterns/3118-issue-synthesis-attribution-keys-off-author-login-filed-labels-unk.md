@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T04:41:05.678006+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2984
+superseded_by: 3251
 ---
 
 # Attribution keys off author login + filed_labels; unknown is reported

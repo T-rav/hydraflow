@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11303
 source_phase: plan
 created_at: 2026-08-16T04:31:48.836041+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3325
 ---
 
 # DedupStore key shape: <loop>:<check>:<entity>:<ISO-year>-W<week>

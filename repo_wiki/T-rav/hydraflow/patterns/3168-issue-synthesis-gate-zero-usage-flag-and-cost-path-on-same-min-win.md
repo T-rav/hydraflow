@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T04:41:06.154120+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3034
+superseded_by: 3301
 ---
 
 # Gate zero-usage flag and cost path on same min_window_calls floor
