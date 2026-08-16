@@ -18,6 +18,7 @@ from find_class_key import (
     CLASS_OVERLAP_THRESHOLD,
     compute_class_key,
     extract_class_key,
+    extract_folded_sites,
     file_or_fold,
     match_class,
     normalize_needle,
@@ -162,6 +163,41 @@ class TestTitleTokenOverlap:
         # {alpha, bravo} vs {alpha, bravo, charlie, delta, echo} -> 2/5 == 0.4
         overlap = title_token_overlap("alpha bravo", "alpha bravo charlie delta echo")
         assert overlap < CLASS_OVERLAP_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
+# extract_folded_sites
+# ---------------------------------------------------------------------------
+
+
+class TestExtractFoldedSites:
+    def test_empty_body_returns_empty_list(self) -> None:
+        assert extract_folded_sites("") == []
+
+    def test_body_without_heading_returns_empty_list(self) -> None:
+        assert extract_folded_sites("## Problem\n\nno sites section here\n") == []
+
+    def test_legacy_lines_without_site_tag_use_title_text_as_identifier(self) -> None:
+        body = (
+            "## Problem\n\ndetails\n\n## Folded sites\n"
+            "- first site title\n"
+            "- second site title\n"
+        )
+        assert extract_folded_sites(body) == [
+            "first site title",
+            "second site title",
+        ]
+
+    def test_lines_with_explicit_site_tag_return_the_tagged_identifier(self) -> None:
+        body = (
+            "## Problem\n\ndetails\n\n## Folded sites\n"
+            "- Human title A (site: `src/foo.py:39`)\n"
+            "- Human title B (site: `src/bar.py:10`)\n"
+        )
+        assert extract_folded_sites(body) == [
+            "src/foo.py:39",
+            "src/bar.py:10",
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +415,86 @@ class TestFileOrFold:
         )
         assert number == 9001
         assert len(prs.create_calls) == 1
+
+    async def test_site_identifier_dedupes_across_reworded_titles(self) -> None:
+        # A finder rediscovers the SAME site (file:line) on a later tick but
+        # reworded the finding title -- idempotency must key off the site
+        # identifier, not the exact title text (#11328).
+        prs = _FakePRPort()
+        first = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan misses agent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site="src/branch_gc_scan.py:39",
+        )
+        second = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan.py line 39 still misses agent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site="src/branch_gc_scan.py:39",
+        )
+        assert second == first
+        assert len(prs.comment_calls) == 0
+        assert len(prs.update_calls) == 0
+
+    async def test_distinct_site_same_class_appends_new_roster_entry(self) -> None:
+        prs = _FakePRPort()
+        first = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan misses agent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site="src/branch_gc_scan.py:39",
+        )
+        second = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "pr_manager misses agent/auto-agent-<N>",
+            "## Problem\n\nsibling details",
+            ["hydraflow-find"],
+            site="src/pr_manager.py:3360",
+        )
+        assert second == first
+        assert len(prs.comment_calls) == 1
+        folded_body = prs.update_calls[-1][1]
+        assert extract_folded_sites(folded_body) == [
+            "src/branch_gc_scan.py:39",
+            "src/pr_manager.py:3360",
+        ]
+
+    async def test_site_omitted_falls_back_to_title_identity(self) -> None:
+        # No explicit site passed -- behavior must match pre-#11328 title-only
+        # idempotency exactly (backward compatibility for existing callers).
+        prs = _FakePRPort()
+        title = "branch_gc_scan misses agent/auto-agent-<N>"
+        first = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            title,
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+        )
+        second = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            title,
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+        )
+        assert second == first
+        assert len(prs.comment_calls) == 0
+        assert len(prs.update_calls) == 0
 
     async def test_create_issue_zero_sentinel_propagates(self) -> None:
         class _ZeroCreatePRPort(_FakePRPort):

@@ -125,6 +125,88 @@ class TestRunCheck:
         )
         assert (code, message) == (1, "FILE-NEW")
 
+    def test_site_already_listed_on_matched_issue_returns_already_listed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        key = compute_class_key("branch-parser", "branch namespace missing")
+        body = (
+            f"{render_marker(key)}\n\n## Folded sites\n"
+            "- first site (site: `src/foo.py:39`)\n"
+        )
+        monkeypatch.setattr(
+            cli,
+            "list_open_issues",
+            lambda *_a, **_kw: [{"number": 11188, "title": "x", "body": body}],
+        )
+        code, message = cli.run_check(
+            source="branch-parser",
+            needle="branch namespace missing",
+            title="sibling site",
+            repo="owner/repo",
+            label="hydraflow-find",
+            site="src/foo.py:39",
+        )
+        assert (code, message) == (3, "ALREADY-LISTED 11188")
+
+    def test_new_site_on_matched_issue_still_returns_fold(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        key = compute_class_key("branch-parser", "branch namespace missing")
+        body = (
+            f"{render_marker(key)}\n\n## Folded sites\n"
+            "- first site (site: `src/foo.py:39`)\n"
+        )
+        monkeypatch.setattr(
+            cli,
+            "list_open_issues",
+            lambda *_a, **_kw: [{"number": 11188, "title": "x", "body": body}],
+        )
+        code, message = cli.run_check(
+            source="branch-parser",
+            needle="branch namespace missing",
+            title="sibling site",
+            repo="owner/repo",
+            label="hydraflow-find",
+            site="src/bar.py:10",
+        )
+        assert (code, message) == (0, "FOLD 11188")
+
+    def test_site_omitted_returns_plain_fold_unaffected_by_roster(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        key = compute_class_key("branch-parser", "branch namespace missing")
+        body = (
+            f"{render_marker(key)}\n\n## Folded sites\n"
+            "- first site (site: `src/foo.py:39`)\n"
+        )
+        monkeypatch.setattr(
+            cli,
+            "list_open_issues",
+            lambda *_a, **_kw: [{"number": 11188, "title": "x", "body": body}],
+        )
+        code, message = cli.run_check(
+            source="branch-parser",
+            needle="branch namespace missing",
+            title="sibling site",
+            repo="owner/repo",
+            label="hydraflow-find",
+        )
+        assert (code, message) == (0, "FOLD 11188")
+
+    def test_site_given_but_no_match_still_returns_file_new(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(cli, "list_open_issues", lambda *_a, **_kw: [])
+        code, message = cli.run_check(
+            source="branch-parser",
+            needle="branch namespace missing",
+            title="site",
+            repo="owner/repo",
+            label="hydraflow-find",
+            site="src/foo.py:39",
+        )
+        assert (code, message) == (1, "FILE-NEW")
+
 
 class TestMain:
     def test_emit_marker_prints_marker_and_exits_zero(
@@ -174,6 +256,67 @@ class TestMain:
         )
         assert exit_code == 1
         assert capsys.readouterr().out.strip() == "FILE-NEW"
+
+    def test_check_already_listed_exits_three(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setattr(cli, "_resolve_repo", lambda _explicit: "owner/repo")
+        monkeypatch.setattr(cli, "run_check", lambda **_kw: (3, "ALREADY-LISTED 42"))
+        exit_code = cli.main(
+            [
+                "--check",
+                "--source",
+                "branch-parser",
+                "--needle",
+                "gap",
+                "--title",
+                "site title",
+                "--site",
+                "src/foo.py:39",
+            ]
+        )
+        assert exit_code == 3
+        assert capsys.readouterr().out.strip() == "ALREADY-LISTED 42"
+
+    def test_site_flag_is_passed_through_to_run_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_run_check(**kwargs):
+            captured.update(kwargs)
+            return (0, "FOLD 1")
+
+        monkeypatch.setattr(cli, "_resolve_repo", lambda _explicit: "owner/repo")
+        monkeypatch.setattr(cli, "run_check", _fake_run_check)
+        cli.main(
+            [
+                "--check",
+                "--source",
+                "s",
+                "--needle",
+                "n",
+                "--title",
+                "t",
+                "--site",
+                "src/foo.py:39",
+            ]
+        )
+        assert captured["site"] == "src/foo.py:39"
+
+    def test_site_omitted_passes_none_to_run_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_run_check(**kwargs):
+            captured.update(kwargs)
+            return (1, "FILE-NEW")
+
+        monkeypatch.setattr(cli, "_resolve_repo", lambda _explicit: "owner/repo")
+        monkeypatch.setattr(cli, "run_check", _fake_run_check)
+        cli.main(["--check", "--source", "s", "--needle", "n", "--title", "t"])
+        assert captured["site"] is None
 
     def test_gh_failure_exits_two_never_file_new(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

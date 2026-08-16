@@ -14,11 +14,17 @@ marker/token match), not an agent's own keyword-search judgment call.
     python scripts/find_class_check.py --emit-marker --source branch-parser \\
         --needle "branch-name parser missing agent/auto-agent-<N>"
 
+Pass ``--site`` (a stable per-discovery identifier, e.g. ``file:line``) to
+also check whether THIS site is already rostered on the matched issue —
+the cross-tick idempotency case (#11328): a site rediscovered on a later
+run must produce no body/comment change, even if its title was reworded.
+
 Exit codes for ``--check``:
 
-* ``0`` — an open class issue was found; its number is printed as
-  ``FOLD <number>`` on stdout. The caller folds into it (comment + site
-  line) instead of filing a new issue.
+* ``0`` — an open class issue was found and (if ``--site`` was given) the
+  site is not yet listed on it; its number is printed as ``FOLD <number>``
+  on stdout. The caller folds into it (comment + site line) instead of
+  filing a new issue.
 * ``1`` — no open class issue matches; ``FILE-NEW`` is printed on stdout.
   The caller proceeds to create a new issue, embedding
   ``--emit-marker``'s output in its body.
@@ -26,6 +32,9 @@ Exit codes for ``--check``:
   treated as ``FILE-NEW`` — a transient ``gh`` failure misread as "no
   matches" would file an avoidable duplicate. The caller must retry or
   escalate, not fall back to filing.
+* ``3`` — an open class issue was found AND ``--site`` is already listed
+  on it; ``ALREADY-LISTED <number>`` is printed on stdout. The caller makes
+  no changes — this is the idempotent re-discovery case.
 """
 
 from __future__ import annotations
@@ -44,6 +53,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from find_class_key import (  # noqa: E402
     DEFAULT_FIND_LABEL,
     compute_class_key,
+    extract_folded_sites,
     match_class,
     render_marker,
 )
@@ -119,15 +129,33 @@ def list_open_issues(repo: str, label: str) -> list[GitHubIssueSummary]:
 
 
 def run_check(
-    *, source: str, needle: str, title: str, repo: str, label: str
+    *,
+    source: str,
+    needle: str,
+    title: str,
+    repo: str,
+    label: str,
+    site: str | None = None,
 ) -> tuple[int, str]:
-    """Return ``(exit_code, message)`` for the ``--check`` outcome."""
+    """Return ``(exit_code, message)`` for the ``--check`` outcome.
+
+    When *site* is given and already rostered on the matched issue, returns
+    the idempotent ``ALREADY-LISTED`` outcome (exit ``3``) instead of
+    ``FOLD`` — the cross-tick re-discovery case (#11328).
+    """
     class_key = compute_class_key(source, needle)
     open_issues = list_open_issues(repo, label)
     target = match_class(class_key, needle, title, open_issues)
-    if target:
-        return 0, f"FOLD {target}"
-    return 1, "FILE-NEW"
+    if not target:
+        return 1, "FILE-NEW"
+    if site is not None:
+        matched = next(
+            (issue for issue in open_issues if issue.get("number") == target), None
+        )
+        body = (matched or {}).get("body") or ""
+        if site in extract_folded_sites(body):
+            return 3, f"ALREADY-LISTED {target}"
+    return 0, f"FOLD {target}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -151,6 +179,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--repo", default=None, help="owner/repo (default: origin)")
     parser.add_argument("--label", default=DEFAULT_FIND_LABEL)
+    parser.add_argument(
+        "--site",
+        default=None,
+        help=(
+            "stable per-discovery identifier (e.g. file:line); with --check, "
+            "detects an already-rostered site (exit 3, ALREADY-LISTED) on "
+            "the matched issue"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if not args.check and not args.emit_marker:
@@ -176,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
             title=args.title,
             repo=repo,
             label=args.label,
+            site=args.site,
         )
     except GhCommandError as exc:
         print(f"error: {exc}", file=sys.stderr)

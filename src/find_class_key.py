@@ -30,6 +30,14 @@ implementation attempt on this issue). Issues filed before this layer
 existed carry no marker; those fold only on title-similarity AND
 shared-needle-tokens together — title similarity alone is never sufficient
 (over-collapse is the dangerous failure per the design pre-mortem).
+
+Cross-tick idempotency (#11328) keys off an explicit *site* identifier
+(e.g. ``file:line``) rather than the site's title text: ``file_or_fold``
+and ``_append_site`` accept an optional ``site`` kwarg, and
+``extract_folded_sites`` reads the current roster back out of an issue
+body. A rediscovered site is then a true no-op even if the finder reworded
+its title between ticks; callers that omit ``site`` keep the pre-#11328
+title-keyed behavior unchanged.
 """
 
 from __future__ import annotations
@@ -107,6 +115,7 @@ _STOPWORDS = frozenset(
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _MARKER_RE = re.compile(r"<!--\s*hydraflow-class:\s*(findclass:\S+?)\s*-->")
 _SITES_HEADING = "## Folded sites"
+_SITE_LINE_RE = re.compile(r"^- (.*?)(?: \(site: `([^`]+)`\))?$")
 
 
 def normalize_needle(text: str) -> frozenset[str]:
@@ -215,22 +224,66 @@ def match_class(
     return 0
 
 
-def _site_line(title: str) -> str:
+def extract_folded_sites(body: str) -> list[str]:
+    """Return the site identifiers already folded into *body*, in order.
+
+    Reads the ``## Folded sites`` section rendered by :func:`_append_site`.
+    A line rendered with an explicit site identifier (``- title (site:
+    `X`)``) yields ``X``; a legacy line with no tag (``- title``, from
+    before per-site identifiers existed, or from a caller that never passed
+    one) yields its own title text as the identifier — the pre-#11328
+    fold behavior, preserved so old and new lines dedupe consistently.
+    """
+    if not body or _SITES_HEADING not in body:
+        return []
+    _, _, section = body.partition(_SITES_HEADING)
+    sites = []
+    for raw_line in section.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if sites:
+                break
+            continue
+        match = _SITE_LINE_RE.match(line)
+        if not match:
+            break
+        title, site = match.group(1), match.group(2)
+        sites.append(site if site is not None else title)
+    return sites
+
+
+def _site_line(title: str, site: str | None = None) -> str:
+    if site is not None and site != title:
+        return f"- {title} (site: `{site}`)"
     return f"- {title}"
 
 
-def _append_site(body: str, title: str) -> str:
-    """Return *body* with *title* appended under the folded-sites section.
+def _append_site(body: str, title: str, site: str | None = None) -> str:
+    """Return *body* with *title*/*site* appended under the folded-sites section.
 
-    A no-op (returns *body* unchanged) when *title* is already listed — the
-    idempotency guard so a re-offered site posts no second comment.
+    A no-op (returns *body* unchanged) when *site* (or, absent an explicit
+    *site*, *title*) is already rostered — the idempotency guard so a
+    re-offered site posts no second comment, even if the finder reworded
+    the title text between ticks (#11328).
     """
-    line = _site_line(title)
-    if line in body:
+    effective_site = site if site is not None else title
+    if effective_site in extract_folded_sites(body):
         return body
-    if _SITES_HEADING in body:
-        return body.rstrip() + "\n" + line + "\n"
-    return body.rstrip() + "\n\n" + _SITES_HEADING + "\n" + line + "\n"
+    line = _site_line(title, site)
+    if _SITES_HEADING not in body:
+        return body.rstrip() + "\n\n" + _SITES_HEADING + "\n" + line + "\n"
+
+    # Insert right after the last existing site line, NOT at the end of the
+    # whole body — content can follow the sites section (e.g. the class-key
+    # marker rendered by file_or_fold on the seeding call), and appending
+    # past it would break the contiguous list extract_folded_sites expects.
+    head, _, rest = body.partition(_SITES_HEADING)
+    section_lines = rest.split("\n")
+    insert_at = 1
+    while insert_at < len(section_lines) and section_lines[insert_at].startswith("- "):
+        insert_at += 1
+    section_lines.insert(insert_at, line)
+    return head + _SITES_HEADING + "\n".join(section_lines)
 
 
 async def file_or_fold(
@@ -241,9 +294,16 @@ async def file_or_fold(
     body: str,
     labels: list[str],
     *,
+    site: str | None = None,
     search_label: str = DEFAULT_FIND_LABEL,
 ) -> int:
     """File a new class issue, or fold *title*/*body* into the open one.
+
+    *site* is a stable per-discovery identifier (e.g. ``file:line``) used
+    for idempotency instead of *title* text, so a re-discovered site folds
+    as a no-op even when the finder reworded its title between ticks
+    (#11328). When omitted, idempotency falls back to *title* itself —
+    identical to the pre-#11328 behavior.
 
     Returns the issue number folded into or newly created (``0`` on
     ``create_issue`` failure — the existing 0-sentinel contract callers
@@ -270,7 +330,7 @@ async def file_or_fold(
             (issue for issue in open_issues if issue.get("number") == target), None
         )
         existing_body = (matched or {}).get("body") or ""
-        new_body = _append_site(existing_body, title)
+        new_body = _append_site(existing_body, title, site)
         if new_body == existing_body:
             logger.debug(
                 "find_class_key: site already folded into #%d, skipping", target
@@ -279,10 +339,10 @@ async def file_or_fold(
         await prs.update_issue_body(target, new_body)
         await prs.post_comment(
             target,
-            f"Folded a new site into this class issue:\n\n{_site_line(title)}",
+            f"Folded a new site into this class issue:\n\n{_site_line(title, site)}",
         )
         return target
 
-    seeded_body = _append_site(body, title)
+    seeded_body = _append_site(body, title, site)
     new_body = seeded_body.rstrip() + "\n\n" + render_marker(class_key) + "\n"
     return await prs.create_issue(title, new_body, labels)
