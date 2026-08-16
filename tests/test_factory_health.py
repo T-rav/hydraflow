@@ -311,9 +311,13 @@ class TestMetricMetadata:
         for key, entry in meta.items():
             assert entry["numerator"], key
             assert entry["denominator"], key
-            assert entry["delta_baseline"], key
             assert entry["window_runs"] == ROLLING_WINDOW_RUNS
             assert entry["data_source"] == RETROSPECTIVES_SOURCE
+            # The tile delta's baseline description is intentionally NOT
+            # here — it's generated in the frontend from the same `values`
+            # array the delta itself is computed from (see
+            # FactoryHealthSection.jsx's MetricCard), not hand-copied here.
+            assert "delta_baseline" not in entry, key
 
     def test_window_runs_matches_the_rolling_average_calculation(self):
         # The claim a tile's popover makes ("window: last N runs") must be

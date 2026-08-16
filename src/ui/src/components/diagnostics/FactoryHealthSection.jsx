@@ -62,12 +62,18 @@ function Sparkline({ values, width = 120, height = 32, color = theme.accent, hov
 
 /**
  * Info affordance for a metric tile — a small button that toggles a popover
- * stating exactly how the tile's number is computed. The popover text is
- * `info` verbatim from the backend's `metric_metadata` (see
- * `factory_health.metric_metadata`), never hand-written here, so it cannot
- * drift from the calculation (#11118 falsifiability convention).
+ * stating exactly how the tile's number is computed. `numerator`/
+ * `denominator`/`window_runs`/`data_source` come from `info`, the backend's
+ * `metric_metadata` (see `factory_health.metric_metadata`) verbatim, never
+ * hand-written here, so they cannot drift from the calculation (#11118
+ * falsifiability convention). `deltaBaseline` is deliberately NOT part of
+ * that backend payload: the delta it describes (`latest - first`) is
+ * computed in `MetricCard` below, over `MetricCard`'s own `values` array —
+ * so its description is generated right there, from that same array,
+ * instead of being duplicated as backend prose that could go stale the
+ * moment the delta formula changes without the description changing too.
  */
-function MetricInfo({ info }) {
+function MetricInfo({ info, deltaBaseline }) {
   const [open, setOpen] = useState(false)
   if (!info) return null
   return (
@@ -90,7 +96,7 @@ function MetricInfo({ info }) {
             {info.numerator} ÷ {info.denominator}
           </div>
           <div style={styles.infoRow}>Window: last {info.window_runs} runs</div>
-          <div style={styles.infoRow}>Δ compares to: {info.delta_baseline}</div>
+          {deltaBaseline && <div style={styles.infoRow}>Δ compares to: {deltaBaseline}</div>}
           <div style={styles.infoRow}>Source: {info.data_source}</div>
         </div>
       )}
@@ -116,12 +122,16 @@ function MetricCard({ label, points, color, lowerIsBetter, info }) {
   const delta = latest - first
   const improving = lowerIsBetter ? delta < 0 : delta > 0
   const trendColor = delta === 0 ? theme.textMuted : improving ? theme.green : theme.red
+  // Describes the SAME `values` array `delta` is computed from two lines up
+  // — not a second, independently-maintained claim about it.
+  const deltaBaseline =
+    values.length > 1 ? `earliest of the ${values.length} rolling-average points currently loaded` : null
 
   return (
     <div style={styles.card}>
       <div style={styles.cardHeader}>
         <div style={styles.cardLabel}>{label}</div>
-        <MetricInfo info={info} />
+        <MetricInfo info={info} deltaBaseline={deltaBaseline} />
       </div>
       <div style={styles.cardValue}>{formatValue(label, latest)}</div>
       <Sparkline values={values} color={color} />
@@ -136,17 +146,23 @@ function MetricCard({ label, points, color, lowerIsBetter, info }) {
 }
 
 /**
- * Companion graph row — one aligned sparkline per tile, all truncated to the
- * shortest series so the same index means "the same window offset" across
- * metrics, with a shared hover cursor (moving over any one sparkline moves
- * the cursor on all of them). Reuses `Sparkline`; no new charting dep.
+ * Companion graph row — one aligned sparkline per tile, truncated to the
+ * shortest series among tiles that actually have a trend to show, so the
+ * same index means "the same window offset" across metrics. A tile with
+ * fewer than 2 points (e.g. a metric just wired up, with only one
+ * retrospective entry recording it) sits out of the alignment computation
+ * and renders "No data" instead of dragging every other tile — a full tile
+ * with 16 points of history must not go blank because one other tile has 1.
+ * Shares one hover cursor across every rendered sparkline. Reuses
+ * `Sparkline`; no new charting dep.
  */
 function CompanionGraphs({ metricConfigs, ra }) {
   const [hoverIndex, setHoverIndex] = useState(null)
   const seriesByKey = metricConfigs.map(({ key }) => (ra[key] || []).map((p) => p.value))
-  const minLen = Math.min(...seriesByKey.map((s) => s.length))
-  if (!Number.isFinite(minLen) || minLen < 2) return null
-  const aligned = seriesByKey.map((s) => s.slice(s.length - minLen))
+  const qualifyingLengths = seriesByKey.map((s) => s.length).filter((n) => n >= 2)
+  if (qualifyingLengths.length === 0) return null
+  const minLen = Math.min(...qualifyingLengths)
+  const aligned = seriesByKey.map((s) => (s.length >= 2 ? s.slice(s.length - minLen) : null))
 
   return (
     <div style={styles.companionSection}>
@@ -155,19 +171,25 @@ function CompanionGraphs({ metricConfigs, ra }) {
         {metricConfigs.map(({ key, label, color }, i) => (
           <div key={key} style={styles.companionCell}>
             <div style={styles.companionLabel}>{label}</div>
-            <Sparkline
-              values={aligned[i]}
-              color={color}
-              width={140}
-              height={36}
-              hoverIndex={hoverIndex}
-              onHover={setHoverIndex}
-            />
-            <div style={styles.companionHoverValue}>
-              {hoverIndex != null && aligned[i][hoverIndex] != null
-                ? formatValue(label, aligned[i][hoverIndex])
-                : ' '}
-            </div>
+            {aligned[i] ? (
+              <>
+                <Sparkline
+                  values={aligned[i]}
+                  color={color}
+                  width={140}
+                  height={36}
+                  hoverIndex={hoverIndex}
+                  onHover={setHoverIndex}
+                />
+                <div style={styles.companionHoverValue}>
+                  {hoverIndex != null && aligned[i][hoverIndex] != null
+                    ? formatValue(label, aligned[i][hoverIndex])
+                    : ' '}
+                </div>
+              </>
+            ) : (
+              <div style={styles.noData}>No data</div>
+            )}
           </div>
         ))}
       </div>

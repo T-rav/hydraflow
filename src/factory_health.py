@@ -277,16 +277,20 @@ def metric_metadata() -> dict[str, dict[str, Any]]:
     doesn't actually do (the #11118 falsifiability convention, applied to
     UI metrics). Consumed by ``FactoryHealthSection``'s per-tile popovers —
     do not hand-write a copy of this prose in the frontend.
+
+    Deliberately does NOT describe a tile's delta (latest vs. earliest
+    rolling-average point) — that comparison is computed in
+    ``FactoryHealthSection.jsx``'s ``MetricCard``, over ``MetricCard``'s own
+    ``values`` array, and *that* code generates its own description from
+    that same array. A backend string describing frontend arithmetic this
+    module has no view into would be exactly the kind of two-places-that-
+    happen-to-currently-match duplication the falsifiability convention
+    exists to prevent.
     """
     return {
         key: {
             **desc,
             "window_runs": ROLLING_WINDOW_RUNS,
-            "delta_baseline": (
-                "earliest rolling-average point in the currently loaded series "
-                "(not a fixed calendar window — it shrinks toward a single "
-                "point as the retrospective log grows past one window)"
-            ),
             "data_source": RETROSPECTIVES_SOURCE,
         }
         for key, desc in _METRIC_DESCRIPTIONS.items()
