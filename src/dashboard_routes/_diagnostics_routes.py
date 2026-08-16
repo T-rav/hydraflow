@@ -60,7 +60,9 @@ from finder_faceplate import (
     build_faceplates,
 )
 from loop_faceplate import build_loop_faceplates
+from prompt_telemetry import PromptTelemetry
 from route_types import REPO_ALL, RepoSlugParam
+from token_report import build_token_report
 from vitals.report import latest_verdict_payload
 
 if TYPE_CHECKING:
@@ -426,6 +428,25 @@ def build_diagnostics_router(
             "counts": counts,
             "generated_at": now.isoformat(),
         }
+
+    @router.get("/token-report")
+    def token_report(repo: RepoSlugParam = None) -> dict[str, Any]:
+        """Tokens-per-issue-by-phase report (#11298 measurement layer).
+
+        Pure rollup over the inference telemetry: per-issue phase breakdown,
+        fleet medians, and per-source cache hit rate (the #11132 columns) —
+        the instrument every token-efficiency lever proves its delta
+        against. Fail-soft: unreadable telemetry yields an empty report.
+        """
+        cfg = _config_for(repo) if repo is not None else config
+        try:
+            rows = PromptTelemetry(cfg).load_inferences(limit=5000)
+        except (OSError, ValueError) as exc:
+            logger.warning("token-report: telemetry unreadable: %s", exc)
+            rows = []
+        report = build_token_report(rows)
+        report["generated_at"] = datetime.now(UTC).isoformat()
+        return report
 
     @router.get("/judge-calibration")
     def judge_calibration_route(repo: RepoSlugParam = None) -> dict[str, Any]:
