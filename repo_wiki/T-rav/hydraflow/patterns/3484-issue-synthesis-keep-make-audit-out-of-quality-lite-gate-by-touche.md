@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T12:13:21.773768+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3337
+superseded_by: 3629
 ---
 
 # Keep make audit out of quality-lite; gate by touched-path

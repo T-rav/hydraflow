@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T12:13:22.101294+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3363
+superseded_by: 3655
 ---
 
 # Escape ledger resolutions append via replace(), never rewrite
