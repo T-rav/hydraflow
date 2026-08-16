@@ -314,6 +314,28 @@ def test_preflight_model_switch_segments_calibration_rows(tmp_path: Path) -> Non
     }
 
 
+def test_preflight_empty_advisor_model_gets_unknown_segment(tmp_path: Path) -> None:
+    """An unset advisor_model resolves to an empty family — the judge_id must
+    still carry the ``:unknown`` segment (matching the recorded judge_family)
+    rather than falling back to the legacy suffix-less ``pre_flight`` id,
+    which would pool new unknown-family verdicts with pre-#11280 rows."""
+    path = judge_verdict_ledger_path(tmp_path)
+    advisor = PreFlightAdvisor(
+        runner=_StubRunner(_PLAN_WITH_FORECAST),
+        surface_config=dataclasses.replace(
+            SURFACE_ADVISOR_CONFIGS["pr_review"], advisor_model=""
+        ),
+        pr_number=42,
+        judge_verdict_ledger_path=path,
+        calibration_subject_id=subject_for_pr(42),
+    )
+    asyncio.run(advisor.run(_preflight_input()))
+
+    rec = JudgeCalibrationLedger(path).read_all()[0]
+    assert rec.judge_id == "pre_flight:unknown"
+    assert rec.judge_family == "unknown"
+
+
 def test_preflight_prompt_elicits_forecast() -> None:
     advisor = PreFlightAdvisor(
         runner=_StubRunner(_PLAN_WITH_FORECAST),

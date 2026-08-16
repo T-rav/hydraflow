@@ -739,7 +739,10 @@ class PostVerifyAdvisor:
         else:
             return
         lens_id = f"post_verify:{inp.lens}" if inp.lens else "post_verify"
-        judge_id = f"{lens_id}:{judge_family}" if judge_family else lens_id
+        # Always append a family segment (empty family -> "unknown", matching
+        # the judge_family written below) — a suffix-less id would pool new
+        # unknown-family records with legacy pre-#11280 rows (#11280 review).
+        judge_id = f"{lens_id}:{judge_family or 'unknown'}"
         jc.record_verdict(
             self._judge_verdict_ledger_path,
             judge_id=judge_id,
@@ -1146,7 +1149,10 @@ class PreFlightAdvisor:
         ):
             return
         judge_family = ji.model_family(self._cfg.advisor_model)
-        judge_id = f"pre_flight:{judge_family}" if judge_family else "pre_flight"
+        # Always append a family segment (empty family -> "unknown", matching
+        # the judge_family written below) — a suffix-less id would pool new
+        # unknown-family records with legacy pre-#11280 rows (#11280 review).
+        judge_id = f"pre_flight:{judge_family or 'unknown'}"
         jc.record_verdict(
             self._judge_verdict_ledger_path,
             judge_id=judge_id,
