@@ -615,6 +615,12 @@ async def test_A15_epic_decomposition_creates_children(tmp_path) -> None:
     world = MockWorld(tmp_path, use_real_agent_runner=True)
     world.add_issue(100, "big epic", "", labels=["hydraflow-find"])
 
+    # #11298: intake decomposition defaults OFF; this scenario exercises the
+    # decompose MECHANISM end-to-end, so enable it on the harness config.
+    world.harness.triage_phase._config = world.harness.triage_phase._config.model_copy(
+        update={"epic_decompose_on_intake_enabled": True}
+    )
+
     # Inject a minimal EpicManager stub so _maybe_decompose does not
     # short-circuit at "self._epic_manager is None".
     # find_parent_epics is called synchronously in _enrich_parent_epic so

@@ -746,7 +746,8 @@ class TriagePhase:
         """
 
         if (
-            self._epic_manager is None
+            not self._config.epic_decompose_on_intake_enabled
+            or self._epic_manager is None
             or not isinstance(result, TriageResult)
             # Unscored (None) never auto-decomposes: absence of a score is
             # not evidence of epic scale, and historically an absent score
