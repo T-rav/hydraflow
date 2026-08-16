@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11277
 source_phase: plan
 created_at: 2026-08-15T21:08:01.026775+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # toRailsHealth is the single view-model seam for Rails health

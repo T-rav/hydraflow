@@ -1,13 +1,12 @@
 ---
-id: 0180
+id: 0195
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-15T07:06:05.818663+00:00
-status: superseded
+created_at: 2026-08-16T02:51:17.450976+00:00
+status: active
 corroborations: 1
-supersedes: 0168
-superseded_by: 0195
+supersedes: 0180
 ---
 
 # Choose JsonlLedger tier: AppendOnly vs Identified by dedup need

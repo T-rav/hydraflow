@@ -1,13 +1,12 @@
 ---
-id: 0187
+id: 0202
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-15T07:06:05.821155+00:00
-status: superseded
+created_at: 2026-08-16T02:51:17.453265+00:00
+status: active
 corroborations: 1
-supersedes: 0175
-superseded_by: 0202
+supersedes: 0187
 ---
 
 # factory_liveness_watchdog.py is stdlib-only, never imports src/

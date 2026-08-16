@@ -1,13 +1,12 @@
 ---
-id: 0183
+id: 0198
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-15T07:06:05.819752+00:00
-status: superseded
+created_at: 2026-08-16T02:51:17.451952+00:00
+status: active
 corroborations: 1
-supersedes: 0171
-superseded_by: 0198
+supersedes: 0183
 ---
 
 # Placeholder stripping pipeline order in prompt_fitness.py
