@@ -15,7 +15,7 @@ def seed() -> MockWorldSeed:
         ],
         scripts={
             "plan": {1: [{"success": True}]},
-            "implement": {1: [{"success": True, "branch": "hf/issue-1"}] * 4},
+            "implement": {1: [{"success": True, "branch": "agent/issue-1"}] * 4},
             "review": {
                 1: [
                     {"verdict": "request-changes", "comments": ["bad 1"]},

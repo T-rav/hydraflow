@@ -25,7 +25,7 @@ def seed() -> MockWorldSeed:
         scripts={
             "plan": {n: [{"success": True}] for n in (1, 2, 3)},
             "implement": {
-                n: [{"success": True, "branch": f"hf/issue-{n}"}] for n in (1, 2, 3)
+                n: [{"success": True, "branch": f"agent/issue-{n}"}] for n in (1, 2, 3)
             },
             "review": {n: [{"verdict": "approve"}] for n in (1, 2, 3)},
         },

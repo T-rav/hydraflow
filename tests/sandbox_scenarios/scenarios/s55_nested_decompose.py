@@ -111,10 +111,10 @@ def seed() -> MockWorldSeed:
                 7: [{"success": True}],
             },
             "implement": {
-                3: [{"success": True, "branch": "hf/issue-3"}] * 4,
-                4: [{"success": True, "branch": "hf/issue-4"}],
-                6: [{"success": True, "branch": "hf/issue-6"}],
-                7: [{"success": True, "branch": "hf/issue-7"}],
+                3: [{"success": True, "branch": "agent/issue-3"}] * 4,
+                4: [{"success": True, "branch": "agent/issue-4"}],
+                6: [{"success": True, "branch": "agent/issue-6"}],
+                7: [{"success": True, "branch": "agent/issue-7"}],
             },
             # #3 fails review 3× → review-fix-cap → diagnostic → hitl-escalation.
             # #4, #6, #7 pass → merge/close.

@@ -36,7 +36,7 @@ def seed() -> MockWorldSeed:
         ],
         scripts={
             "plan": {2: [{"success": True, "task_count": 1}]},
-            "implement": {2: [{"success": True, "branch": "hf/issue-2"}]},
+            "implement": {2: [{"success": True, "branch": "agent/issue-2"}]},
             "review": {2: [{"verdict": "approve", "comments": []}]},
         },
         # ADR-0063 W3b: drive PlanReviewer's two-call sequence inside

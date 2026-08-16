@@ -33,7 +33,7 @@ def seed() -> MockWorldSeed:
         ],
         scripts={
             "plan": {1: [{"success": True, "task_count": 1}]},
-            "implement": {1: [{"success": True, "branch": "hf/issue-1"}]},
+            "implement": {1: [{"success": True, "branch": "agent/issue-1"}]},
             "review": {1: [{"verdict": "approve", "comments": []}]},
         },
         cycles_to_run=4,

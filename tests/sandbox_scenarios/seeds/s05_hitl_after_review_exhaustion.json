@@ -24,19 +24,19 @@
       "1": [
         {
           "success": true,
-          "branch": "hf/issue-1"
+          "branch": "agent/issue-1"
         },
         {
           "success": true,
-          "branch": "hf/issue-1"
+          "branch": "agent/issue-1"
         },
         {
           "success": true,
-          "branch": "hf/issue-1"
+          "branch": "agent/issue-1"
         },
         {
           "success": true,
-          "branch": "hf/issue-1"
+          "branch": "agent/issue-1"
         }
       ]
     },

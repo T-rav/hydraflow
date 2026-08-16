@@ -44,11 +44,11 @@ def seed() -> MockWorldSeed:
                 4: [
                     {
                         "success": False,
-                        "branch": "hf/issue-4",
+                        "branch": "agent/issue-4",
                         "commits": 0,
                         "error": "No commits found on branch",
                     },
-                    {"success": True, "branch": "hf/issue-4", "commits": 1},
+                    {"success": True, "branch": "agent/issue-4", "commits": 1},
                 ],
             },
             "review": {4: [{"verdict": "approve", "comments": []}]},

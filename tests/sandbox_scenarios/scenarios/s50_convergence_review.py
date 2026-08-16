@@ -80,9 +80,9 @@ def seed() -> MockWorldSeed:
             "implement": {
                 1: [
                     # First pass (before review loop-back)
-                    {"success": True, "branch": "hf/issue-1"},
+                    {"success": True, "branch": "agent/issue-1"},
                     # Second pass (after loop-back to ready, re-implementation)
-                    {"success": True, "branch": "hf/issue-1"},
+                    {"success": True, "branch": "agent/issue-1"},
                 ]
             },
             "review": {

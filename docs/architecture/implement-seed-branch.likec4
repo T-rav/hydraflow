@@ -1,0 +1,72 @@
+// Issue #11338 — where a sandbox implement seed's "branch" value actually lands.
+// The seeded string is NOT inert: it replaces the canonical branch on the
+// WorkerResult and becomes the branch of the PR the fake world records.
+
+specification {
+  element system
+  element component
+  element datastore
+}
+
+model {
+  seeds = system 'Sandbox scenario seeds' {
+    scenarioPy = component 'scenarios/sNN_*.py' {
+      description 'seed() -> MockWorldSeed.scripts["implement"]'
+    }
+    goldenJson = datastore 'seeds/<NAME>.json' {
+      description 'Golden artifact; must equal scenario.seed().to_json()'
+    }
+    scenarioPy -> goldenJson 'scripts/sandbox_scenario.py seed <name>'
+  }
+
+  fakes = system 'MockWorld fakes' {
+    coerce = component 'FakeLLM._coerce_implement' {
+      description 'src/mockworld/fakes/fake_llm.py — forwards branch into the factory'
+    }
+    factory = component 'WorkerResultFactory.create' {
+      description 'src/mockworld/fakes/_factories.py — default branch="agent/issue-42"'
+    }
+    agentRunner = component '_FakeAgentRunner.run(task, wt, branch)' {
+      description 'Receives the canonical branch, returns the SCRIPTED WorkerResult'
+    }
+    fakeGithub = component 'FakeGitHub.create_pr' {
+      description 'Records FakePR(branch=<result.branch>)'
+    }
+    fakeFetcher = component 'FakeIssueFetcher.fetch_reviewable_prs' {
+      description 'Docstring claims agent/issue-{N} branch match; matches issue_number'
+    }
+    coerce -> factory
+    agentRunner -> coerce 'pops pre-coerced result'
+  }
+
+  phase = system 'ImplementPhase (production)' {
+    worker = component '_worker' {
+      description 'branch = config.branch_for_issue(issue.id) -> agent/issue-N'
+    }
+    runImpl = component '_run_implementation'
+    openPr = component '_flow_open_pr'
+    resolvePr = component '_resolve_pr' {
+      description 'create_pr(gh_issue, result.branch)  <-- reads the SCRIPTED value'
+    }
+    state = datastore 'StateTracker.set_branch' {
+      description 'Records agent/issue-N — diverges from the PR record'
+    }
+    worker -> state 'canonical branch'
+    worker -> runImpl 'branch=agent/issue-N'
+    runImpl -> openPr 'WorkerResult'
+    openPr -> resolvePr
+  }
+
+  scenarioPy -> coerce 'script_implement(issue, [{"branch": ...}])'
+  runImpl -> agentRunner 'agents.run(issue, wt, branch)'
+  resolvePr -> fakeGithub 'branch = result.branch (hf/issue-N today)'
+  fakeGithub -> fakeFetcher 'FakePR read back for review handoff'
+}
+
+views {
+  view seedBranchFlow {
+    title 'Seeded implement branch -> fake PR record (#11338)'
+    include *
+    autoLayout TopBottom
+  }
+}

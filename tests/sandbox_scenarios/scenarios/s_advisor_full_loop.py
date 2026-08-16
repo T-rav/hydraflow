@@ -79,7 +79,7 @@ def seed() -> MockWorldSeed:
         ],
         scripts={
             "plan": {7: [{"success": True, "task_count": 1}]},
-            "implement": {7: [{"success": True, "branch": "hf/issue-7"}]},
+            "implement": {7: [{"success": True, "branch": "agent/issue-7"}]},
             "review": {7: [{"verdict": "approve", "comments": []}]},
         },
         advisor_scripts={

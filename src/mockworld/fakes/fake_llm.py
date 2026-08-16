@@ -704,6 +704,11 @@ class FakeLLM:
     def _coerce_implement(cls, issue_number: int, raw: Any) -> Any:
         if isinstance(raw, dict):
             kw = cls._filter_kwargs(WorkerResultFactory.create, raw)
+            # An omitted branch must default to the real pipeline's
+            # f"agent/issue-{issue.id}" convention (implement_phase.py's
+            # _worker), not WorkerResultFactory.create's issue-agnostic
+            # hardcoded "agent/issue-42" (#11338).
+            kw.setdefault("branch", f"agent/issue-{issue_number}")
             return WorkerResultFactory.create(issue_number=issue_number, **kw)
         return raw
 

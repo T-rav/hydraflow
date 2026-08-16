@@ -72,37 +72,37 @@
       "3": [
         {
           "success": true,
-          "branch": "hf/issue-3"
+          "branch": "agent/issue-3"
         },
         {
           "success": true,
-          "branch": "hf/issue-3"
+          "branch": "agent/issue-3"
         },
         {
           "success": true,
-          "branch": "hf/issue-3"
+          "branch": "agent/issue-3"
         },
         {
           "success": true,
-          "branch": "hf/issue-3"
+          "branch": "agent/issue-3"
         }
       ],
       "4": [
         {
           "success": true,
-          "branch": "hf/issue-4"
+          "branch": "agent/issue-4"
         }
       ],
       "6": [
         {
           "success": true,
-          "branch": "hf/issue-6"
+          "branch": "agent/issue-6"
         }
       ],
       "7": [
         {
           "success": true,
-          "branch": "hf/issue-7"
+          "branch": "agent/issue-7"
         }
       ]
     },

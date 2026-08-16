@@ -17,8 +17,8 @@ def seed() -> MockWorldSeed:
             "plan": {1: [{"success": True}]},
             "implement": {
                 1: [
-                    {"success": True, "branch": "hf/issue-1"},
-                    {"success": True, "branch": "hf/issue-1"},
+                    {"success": True, "branch": "agent/issue-1"},
+                    {"success": True, "branch": "agent/issue-1"},
                 ]
             },
             "review": {

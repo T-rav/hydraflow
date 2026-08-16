@@ -25,7 +25,7 @@ def seed() -> MockWorldSeed:
         ],
         scripts={
             "plan": {1: [{"success": True}]},
-            "implement": {1: [{"success": True, "branch": "hf/issue-1"}]},
+            "implement": {1: [{"success": True, "branch": "agent/issue-1"}]},
             "fix_ci": {1: [{"success": True, "ci_status_after": "pass"}]},
             "review": {1: [{"verdict": "approve"}]},
         },
