@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11312
 source_phase: plan
 created_at: 2026-08-16T07:21:09.104042+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Counter-pin to block reverting credential expansions
