@@ -9,7 +9,7 @@ import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from config import Credentials, HydraFlowConfig
+from config import AUTO_AGENT_BRANCH_PREFIX, Credentials, HydraFlowConfig
 from models import GitHubIssue, PRInfo, Task
 from subprocess_util import run_subprocess
 
@@ -583,8 +583,20 @@ class IssueFetcher:
 
         pr_infos: list[PRInfo] = []
         for issue in issues:
+            # Manual dispatch mints ``agent/issue-{N}``; Auto-Agent preflight
+            # mints ``agent/auto-agent-{N}`` (``AUTO_AGENT_BRANCH_PREFIX``).
+            # A PR can live under either — check both so Auto-Agent PRs are
+            # discoverable by the review/fix-forward loop too (#11282: an
+            # undiscovered PR's CI failures never feed back into a new
+            # commit). The manual branch wins if both somehow have open PRs
+            # for the same issue.
             branch = f"agent/issue-{issue.number}"
             pr_data = pr_by_branch.get(branch)
+            if not pr_data:
+                auto_agent_branch = f"{AUTO_AGENT_BRANCH_PREFIX}{issue.number}"
+                pr_data = pr_by_branch.get(auto_agent_branch)
+                if pr_data:
+                    branch = auto_agent_branch
             if pr_data:
                 try:
                     pr_infos.append(

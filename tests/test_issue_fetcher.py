@@ -386,6 +386,73 @@ class TestFetchReviewablePrs:
         assert issues[0].number == 42
 
     @pytest.mark.asyncio
+    async def test_picks_up_pr_under_auto_agent_branch(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A PR opened from an Auto-Agent branch (``agent/auto-agent-{N}``,
+        ``AUTO_AGENT_BRANCH_PREFIX`` in config.py) must resolve too — not
+        only the ``agent/issue-{N}`` pattern minted by the manual dispatch
+        path. Without this, the review/fix-forward loop never discovers
+        Auto-Agent PRs, so CI failures on them never feed back into a new
+        commit (#11282).
+        """
+        fetcher = IssueFetcher(config)
+
+        batch_json = _batch_pr_json(
+            [
+                {
+                    "number": 200,
+                    "url": "https://github.com/o/r/pull/200",
+                    "branch": "agent/auto-agent-42",
+                }
+            ]
+        )
+
+        with patch(
+            "issue_fetcher.run_subprocess", side_effect=make_pr_fake_run(batch_json)
+        ):
+            prs, issues = await fetcher.fetch_reviewable_prs(set())
+
+        assert len(prs) == 1
+        assert prs[0].number == 200
+        assert prs[0].issue_number == 42
+        assert prs[0].branch == "agent/auto-agent-42"
+        assert len(issues) == 1
+
+    @pytest.mark.asyncio
+    async def test_prefers_issue_branch_over_auto_agent_branch_when_both_open(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """If both branch conventions somehow have open PRs for the same
+        issue, the manual ``agent/issue-{N}`` PR wins — it's the primary
+        dispatch path; Auto-Agent is the fallback lookup."""
+        fetcher = IssueFetcher(config)
+
+        batch_json = _batch_pr_json(
+            [
+                {
+                    "number": 200,
+                    "url": "https://github.com/o/r/pull/200",
+                    "branch": "agent/issue-42",
+                },
+                {
+                    "number": 201,
+                    "url": "https://github.com/o/r/pull/201",
+                    "branch": "agent/auto-agent-42",
+                },
+            ]
+        )
+
+        with patch(
+            "issue_fetcher.run_subprocess", side_effect=make_pr_fake_run(batch_json)
+        ):
+            prs, _issues = await fetcher.fetch_reviewable_prs(set())
+
+        assert len(prs) == 1
+        assert prs[0].number == 200
+        assert prs[0].branch == "agent/issue-42"
+
+    @pytest.mark.asyncio
     async def test_batch_pr_fetch_uses_get(self, config: HydraFlowConfig) -> None:
         """The batch PR fetch should use GET method."""
         fetcher = IssueFetcher(config)
