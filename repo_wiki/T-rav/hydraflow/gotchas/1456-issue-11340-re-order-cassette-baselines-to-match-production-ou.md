@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11340
 source_phase: plan
 created_at: 2026-08-16T11:56:57.838118+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Re-order cassette baselines to match production output order

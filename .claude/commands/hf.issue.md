@@ -72,6 +72,60 @@ gh issue list --repo $REPO --label hydraflow-find --state open --search "<key te
 
 If a matching open issue already exists, tell the user and show the link instead of creating a duplicate.
 
+**Pattern-shaped findings (#11292):** If the finding's needle is a PATTERN — a
+regex/AST shape that could recur at more than one site (e.g. "this branch
+parser is missing a namespace", "this test hard-codes an ADR filename") —
+do NOT file one issue per site. Sweep ALL sites in one pass first, then run
+the mechanical class-key check instead of a keyword search:
+
+```bash
+python scripts/find_class_check.py --check \
+  --source "<short finder/pattern id, e.g. branch-namespace-parser>" \
+  --needle "<one stable description of the pattern — same text every time \
+this pattern is swept, do NOT reword it per site>" \
+  --title "<the issue title you're about to create>"
+```
+
+Give every discovered site a stable identifier `<file>:<line>` — this is
+what idempotency is tracked against across ticks, so it must stay identical
+even if you reword a site's description later.
+
+- Exit `0` → stdout prints `FOLD <number>`. Do not create a new issue. For
+  EACH swept site, re-run the same command with `--site "<file:line>"`
+  added:
+  - Exit `3` (`ALREADY-LISTED <number>`) → this exact site is already on
+    the issue. Make no changes for it.
+  - Exit `0` (`FOLD <number>`) → this site is new.
+  If every site came back `ALREADY-LISTED`, stop here — no body edit, no
+  comment (this is the expected outcome when a sweep rediscovers only
+  already-known sites; posting a comment anyway is the duplicate-comment
+  bug #11328 exists to prevent). Otherwise fetch the current body
+  (`gh issue view <number> --json body -q .body`) and, immediately above
+  the `<!-- hydraflow-class: ... -->` marker line, insert one line per new
+  site directly below the LAST existing `- ` line under the `## Folded
+  sites` heading (create that heading, right above the marker, if the
+  issue predates it) in the exact form:
+  `- <short site description> (site: \`<file:line>\`)`
+  Write it back with `gh issue edit <number> --body-file <tmpfile>`, THEN
+  post ONE comment listing only the newly added site(s).
+- Exit `1` → stdout prints `FILE-NEW`. Create ONE issue whose body lists
+  every site the sweep found under a `## Folded sites` heading, one line
+  per site in the same `- <description> (site: \`<file:line>\`)` form, and
+  append the marker line immediately after that section from:
+  `python scripts/find_class_check.py --emit-marker --source "<source>" --needle "<needle>"`
+  Skipping the `## Folded sites` section on the seeding issue, or using any
+  other line shape, makes every site on it permanently unrecognizable to
+  `--site` on later ticks — silently defeating idempotency from creation.
+- Exit `2` → the check itself failed (gh auth/network/rate-limit). Do NOT
+  treat this as `FILE-NEW` — a transient failure misread as "no matches"
+  files an avoidable duplicate. Retry, or stop and report the failure.
+
+This is a mechanical decision, not a judgment call — never skip the check
+because the sites "seem different enough" to you, and never skip `--site`
+because there's only one site this time. A finding that is a single
+concrete bug at a single site (not a recurring pattern) is unaffected and
+follows the normal duplicate-search flow above.
+
 ### Phase 4: Create the Issue
 
 **CRITICAL RULES:**

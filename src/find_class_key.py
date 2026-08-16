@@ -23,13 +23,23 @@ Marker convention mirrors the existing ``log_ingest_loop`` /
 ADR-0041 — no new state file, so lost local state can't re-spawn siblings).
 Marker equality is the primary fold signal; because the key embeds a
 *truncated* SHA1 digest, marker-equal candidates are also required to share
-at least one needle token with the matched issue's own title/body, so a
-truncation collision between two genuinely unrelated needles can never
-silently merge them (the test-adequacy gap that stalled the first
-implementation attempt on this issue). Issues filed before this layer
-existed carry no marker; those fold only on title-similarity AND
-shared-needle-tokens together — title similarity alone is never sufficient
-(over-collapse is the dangerous failure per the design pre-mortem).
+at least one needle token with the matched issue's own title/body AND clear
+a title-affinity floor (``CLASS_MARKER_TITLE_FLOOR``) against that issue's
+title, so a truncation collision between two genuinely unrelated needles can
+never silently merge them on a single coincidental shared word (the
+test-adequacy gap that stalled the first implementation attempt on this
+issue). Issues filed before this layer existed carry no marker; those fold
+only on title-similarity AND shared-needle-tokens together — title
+similarity alone is never sufficient (over-collapse is the dangerous
+failure per the design pre-mortem).
+
+Cross-tick idempotency (#11328) keys off an explicit *site* identifier
+(e.g. ``file:line``) rather than the site's title text: ``file_or_fold``
+and ``_append_site`` accept an optional ``site`` kwarg, and
+``extract_folded_sites`` reads the current roster back out of an issue
+body. A rediscovered site is then a true no-op even if the finder reworded
+its title between ticks; callers that omit ``site`` keep the pre-#11328
+title-keyed behavior unchanged.
 """
 
 from __future__ import annotations
@@ -64,6 +74,17 @@ CLASS_OVERLAP_THRESHOLD = 0.5
 #: realistic board size; ``match_class``'s needle-token backstop (see module
 #: docstring) is the defense-in-depth for the case where one occurs anyway.
 DEFAULT_DIGEST_LEN = 12
+
+#: Title-token-overlap floor for the marker-equality fold path. A shared
+#: needle token alone is not sufficient evidence two issues are the same
+#: class (a single common word is easy to hit by chance); the marker path
+#: also requires the candidate's title to clear this floor against the
+#: matched issue's title. Calibrated below the tightest real same-class pair
+#: in ``tests/regressions/test_issue_11292.py`` (~0.07 title-token overlap
+#: between that family's first and last sibling titles) so real folds are
+#: unaffected, while a title that shares no meaningful content with the
+#: matched issue's title is refused even if one needle token collides.
+CLASS_MARKER_TITLE_FLOOR = 0.05
 
 _STOPWORDS = frozenset(
     {
@@ -107,6 +128,7 @@ _STOPWORDS = frozenset(
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _MARKER_RE = re.compile(r"<!--\s*hydraflow-class:\s*(findclass:\S+?)\s*-->")
 _SITES_HEADING = "## Folded sites"
+_SITE_LINE_RE = re.compile(r"^- (.*?)(?: \(site: `([^`]+)`\))?$")
 
 
 def normalize_needle(text: str) -> frozenset[str]:
@@ -185,12 +207,14 @@ def match_class(
     """Return the open issue number *class_key* folds into, or ``0``.
 
     Marker equality is the primary signal: an open issue whose body carries
-    the identical class-key marker is the fold target, GUARDED by a
+    the identical class-key marker is the fold target, GUARDED by BOTH a
     needle-token backstop (see module docstring) against a truncated-digest
-    collision between two genuinely unrelated needles. Marker-less legacy
-    issues fold only when title similarity clears ``CLASS_OVERLAP_THRESHOLD``
-    AND the candidate's own needle tokens appear in the issue body — title
-    similarity alone is never sufficient.
+    collision between two genuinely unrelated needles AND a title-affinity
+    floor (``CLASS_MARKER_TITLE_FLOOR``) — a single shared needle token is
+    not sufficient evidence of class membership on its own. Marker-less
+    legacy issues fold only when title similarity clears
+    ``CLASS_OVERLAP_THRESHOLD`` AND the candidate's own needle tokens appear
+    in the issue body — title similarity alone is never sufficient.
     """
     needle_tokens = normalize_needle(needle)
     for issue in open_issues:
@@ -202,7 +226,9 @@ def match_class(
             candidate_tokens = normalize_needle(
                 issue.get("title", "")
             ) | normalize_needle(body)
-            if not needle_tokens or (needle_tokens & candidate_tokens):
+            needle_backstop = not needle_tokens or (needle_tokens & candidate_tokens)
+            title_affinity = title_token_overlap(title, issue.get("title", ""))
+            if needle_backstop and title_affinity >= CLASS_MARKER_TITLE_FLOOR:
                 return int(issue["number"])
             continue
         overlap = title_token_overlap(title, issue.get("title", ""))
@@ -215,22 +241,91 @@ def match_class(
     return 0
 
 
-def _site_line(title: str) -> str:
+def extract_folded_sites(body: str) -> list[str]:
+    """Return the site identifiers already folded into *body*, in order.
+
+    Reads the ``## Folded sites`` section rendered by :func:`_append_site`.
+    A line rendered with an explicit site identifier (``- title (site:
+    `X`)``) yields ``X``; a legacy line with no tag (``- title``, from
+    before per-site identifiers existed, or from a caller that never passed
+    one) yields its own title text as the identifier — the pre-#11328
+    fold behavior, preserved so old and new lines dedupe consistently.
+    """
+    if not body or _SITES_HEADING not in body:
+        return []
+    _, _, section = body.partition(_SITES_HEADING)
+    sites = []
+    for raw_line in section.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if sites:
+                break
+            continue
+        match = _SITE_LINE_RE.match(line)
+        if not match:
+            break
+        title, site = match.group(1), match.group(2)
+        sites.append(site if site is not None else title)
+    return sites
+
+
+def _single_line(text: str) -> str:
+    """Collapse *text* to one line with no backticks.
+
+    ``_site_line`` renders *title*/*site* into a single ``- ...`` markdown
+    bullet that :data:`_SITE_LINE_RE` must parse back out; an embedded
+    newline splits it across lines (truncating every later roster entry,
+    since :func:`extract_folded_sites` stops at the first non-bullet line)
+    and an embedded backtick breaks the ``` `site` ``` delimiter match. Both
+    are stripped here so a title/site can never corrupt the roster it's
+    rendered into.
+    """
+    return " ".join(text.replace("`", "'").split())
+
+
+def _site_line(title: str, site: str | None = None) -> str:
+    title = _single_line(title)
+    if site is not None and site != title:
+        return f"- {title} (site: `{_single_line(site)}`)"
     return f"- {title}"
 
 
-def _append_site(body: str, title: str) -> str:
-    """Return *body* with *title* appended under the folded-sites section.
+def _append_site(body: str, title: str, site: str | None = None) -> str:
+    """Return *body* with *title*/*site* appended under the folded-sites section.
 
-    A no-op (returns *body* unchanged) when *title* is already listed — the
-    idempotency guard so a re-offered site posts no second comment.
+    A no-op (returns *body* unchanged) when *site* (or, absent an explicit
+    *site*, *title*) is already rostered — the idempotency guard so a
+    re-offered site posts no second comment, even if the finder reworded
+    the title text between ticks (#11328).
+
+    Also a no-op when *title* itself already appears as a legacy, untagged
+    roster line. Issues filed before per-site identifiers existed roster
+    sites by title text alone (:func:`extract_folded_sites` yields that
+    title as the entry's identifier); a site-aware rediscovery of that same
+    finding never matches on *site* (the legacy line carries none), so
+    without this fallback every live legacy class issue grows a duplicate
+    roster line the first time it's rediscovered by a site-aware caller.
     """
-    line = _site_line(title)
-    if line in body:
+    title = _single_line(title)
+    effective_site = _single_line(site) if site is not None else title
+    existing_sites = extract_folded_sites(body)
+    if effective_site in existing_sites or title in existing_sites:
         return body
-    if _SITES_HEADING in body:
-        return body.rstrip() + "\n" + line + "\n"
-    return body.rstrip() + "\n\n" + _SITES_HEADING + "\n" + line + "\n"
+    line = _site_line(title, site)
+    if _SITES_HEADING not in body:
+        return body.rstrip() + "\n\n" + _SITES_HEADING + "\n" + line + "\n"
+
+    # Insert right after the last existing site line, NOT at the end of the
+    # whole body — content can follow the sites section (e.g. the class-key
+    # marker rendered by file_or_fold on the seeding call), and appending
+    # past it would break the contiguous list extract_folded_sites expects.
+    head, _, rest = body.partition(_SITES_HEADING)
+    section_lines = rest.split("\n")
+    insert_at = 1
+    while insert_at < len(section_lines) and section_lines[insert_at].startswith("- "):
+        insert_at += 1
+    section_lines.insert(insert_at, line)
+    return head + _SITES_HEADING + "\n".join(section_lines)
 
 
 async def file_or_fold(
@@ -241,9 +336,22 @@ async def file_or_fold(
     body: str,
     labels: list[str],
     *,
+    site: str | None = None,
     search_label: str = DEFAULT_FIND_LABEL,
 ) -> int:
     """File a new class issue, or fold *title*/*body* into the open one.
+
+    *site* is a stable per-discovery identifier (e.g. ``file:line``) used
+    for idempotency instead of *title* text, so a re-discovered site folds
+    as a no-op even when the finder reworded its title between ticks
+    (#11328). When omitted, idempotency falls back to *title* itself —
+    identical to the pre-#11328 behavior.
+
+    A legacy (pre-#11292) issue folded into via the marker-less
+    title-overlap path gets the class-key marker stamped onto it here, so
+    the NEXT tick matches it via the stronger, more reliable marker-equality
+    path in :func:`match_class` instead of re-clearing
+    ``CLASS_OVERLAP_THRESHOLD`` every time.
 
     Returns the issue number folded into or newly created (``0`` on
     ``create_issue`` failure — the existing 0-sentinel contract callers
@@ -270,19 +378,25 @@ async def file_or_fold(
             (issue for issue in open_issues if issue.get("number") == target), None
         )
         existing_body = (matched or {}).get("body") or ""
-        new_body = _append_site(existing_body, title)
+        new_body = _append_site(existing_body, title, site)
         if new_body == existing_body:
             logger.debug(
                 "find_class_key: site already folded into #%d, skipping", target
             )
             return target
+        if not extract_class_key(new_body):
+            # Legacy (pre-#11292) issue matched via the marker-less
+            # title-overlap path -- stamp the marker now so future ticks
+            # fold via marker equality instead of re-clearing the overlap
+            # threshold every time.
+            new_body = new_body.rstrip() + "\n\n" + render_marker(class_key) + "\n"
         await prs.update_issue_body(target, new_body)
         await prs.post_comment(
             target,
-            f"Folded a new site into this class issue:\n\n{_site_line(title)}",
+            f"Folded a new site into this class issue:\n\n{_site_line(title, site)}",
         )
         return target
 
-    seeded_body = _append_site(body, title)
+    seeded_body = _append_site(body, title, site)
     new_body = seeded_body.rstrip() + "\n\n" + render_marker(class_key) + "\n"
     return await prs.create_issue(title, new_body, labels)

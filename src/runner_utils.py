@@ -843,6 +843,21 @@ _HARNESS_BACKENDS: dict[str, _OpenAICompatBackend] = {
 }
 
 
+def provider_api_key_envs() -> frozenset[str]:
+    """Every environment variable name any registered backend — one-shot
+    (``_OPENAI_COMPAT_BACKENDS``) or harness (``_HARNESS_BACKENDS``) — reads
+    for its API key. The single source of truth for the provider-credential
+    scrub surface: test fixtures union this in instead of hand-listing names,
+    so an ambient developer/CI shell export (e.g. ``ZAI_CODING_PLAN_KEY``) of
+    a bare, non-``HYDRAFLOW_``-prefixed provider key can't leak into a test
+    session and silently defeat a ``*_without_zai_key``-style precondition."""
+    return frozenset(
+        env
+        for backend in (*_OPENAI_COMPAT_BACKENDS.values(), *_HARNESS_BACKENDS.values())
+        for env in backend.api_key_envs
+    )
+
+
 def harness_base_url(provider: str, config: HydraFlowConfig) -> str:
     """Anthropic-compatible base URL for a *harness* backend, or "" if none.
 

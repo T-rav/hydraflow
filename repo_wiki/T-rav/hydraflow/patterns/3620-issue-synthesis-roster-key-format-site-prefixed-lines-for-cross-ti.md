@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T12:13:23.483659+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3475
+superseded_by: 3765
 ---
 
 # Roster key format: site-prefixed lines for cross-tick idempotency
