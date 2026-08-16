@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11314
 source_phase: plan
 created_at: 2026-08-16T07:29:20.234670+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Verify operator semantics before classifying default threshold bugs
