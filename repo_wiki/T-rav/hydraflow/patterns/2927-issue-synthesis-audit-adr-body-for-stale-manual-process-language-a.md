@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T20:34:47.531466+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2800
+superseded_by: 3061
 ---
 
 # Audit ADR body for stale manual-process language after enforced header

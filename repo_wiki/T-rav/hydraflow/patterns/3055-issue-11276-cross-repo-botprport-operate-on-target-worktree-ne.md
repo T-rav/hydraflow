@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11276
 source_phase: plan
 created_at: 2026-08-15T21:04:18.934614+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3187
 ---
 
 # Cross-repo BotPRPort: operate on target worktree, never HydraFlow tree

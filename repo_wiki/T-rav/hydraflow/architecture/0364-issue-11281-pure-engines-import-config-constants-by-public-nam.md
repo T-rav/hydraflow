@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11281
 source_phase: plan
 created_at: 2026-08-16T01:24:32.227592+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Pure engines import config constants by public name only

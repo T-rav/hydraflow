@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11286
 source_phase: plan
 created_at: 2026-08-16T01:54:47.585529+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Verify referenced PR/issue numbers exist before building on them
