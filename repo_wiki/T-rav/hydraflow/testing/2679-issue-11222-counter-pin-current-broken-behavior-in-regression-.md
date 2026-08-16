@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11222
 source_phase: plan
 created_at: 2026-08-16T05:46:03.675045+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Counter-pin current broken behavior in regression tests

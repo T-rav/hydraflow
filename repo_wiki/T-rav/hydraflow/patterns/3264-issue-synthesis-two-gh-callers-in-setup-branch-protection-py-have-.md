@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:47.860159+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3131
+superseded_by: 3401
 ---
 
 # Two gh callers in setup_branch_protection.py have divergent 404 handling

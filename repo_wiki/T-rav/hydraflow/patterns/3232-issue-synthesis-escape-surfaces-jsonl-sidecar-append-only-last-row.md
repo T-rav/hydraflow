@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:47.030345+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3099
+superseded_by: 3369
 ---
 
 # escape_surfaces.jsonl sidecar: append-only, last-row-wins

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:47.896636+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3134
+superseded_by: 3404
 ---
 
 # Track repo_root provenance with PrivateAttr, not a public field

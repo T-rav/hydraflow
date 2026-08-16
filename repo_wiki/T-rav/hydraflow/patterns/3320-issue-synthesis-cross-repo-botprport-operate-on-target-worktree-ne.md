@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:49.084560+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3187
+superseded_by: 3457
 ---
 
 # Cross-repo BotPRPort: operate on target worktree, never HydraFlow tree

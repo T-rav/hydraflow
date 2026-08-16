@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:48.559216+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3166
+superseded_by: 3436
 ---
 
 # hitl_escalation_label ≠ bare hitl-escalation literal

@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11306
 source_phase: plan
 created_at: 2026-08-16T05:13:33.717449+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Split advisory alerts from systemAlert but keep addEvent on both branches

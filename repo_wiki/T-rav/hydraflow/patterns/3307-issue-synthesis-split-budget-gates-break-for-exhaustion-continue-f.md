@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T06:16:48.798220+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3174
+superseded_by: 3444
 ---
 
 # Split budget gates: break for exhaustion, continue for per-item skip

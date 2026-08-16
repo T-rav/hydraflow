@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11235
 source_phase: plan
 created_at: 2026-08-16T05:30:59.489423+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Regression pins assert observed spawn, not helper invocations
