@@ -428,3 +428,62 @@ class TestS5LightTierForcesLitePlan:
         # Review-side tier: no reviewer spawn, READY-gate record intact.
         assert reviewer.calls == []
         assert captured["has_blocking"] is False
+
+
+# ---------------------------------------------------------------------------
+# Scenario 6: #11298 light lane — a triage-scored simple issue routes to the
+# single-session auto-agent claim label without any planner/reviewer spawn.
+# ---------------------------------------------------------------------------
+
+
+class TestS6LightLaneRoutesToAutoAgent:
+    """Flag on + simple issue: claim-label swap, zero plan-stage spawns."""
+
+    async def test_light_lane_swaps_claim_label(self, mock_world) -> None:
+        world = mock_world
+        world.add_issue(
+            306,
+            "Fix typo in operator panel label",
+            "One-line copy fix.",
+            labels=["hydraflow-plan"],
+        )
+        harness = world.harness
+        phase = harness.plan_phase
+        phase._config = phase._config.model_copy(
+            update={"auto_agent_light_intake_enabled": True}
+        )
+
+        planned: list[int] = []
+
+        async def _planner_plan(task: Task, *_args: Any, **_kw: Any) -> PlanResult:
+            planned.append(task.id)
+            return PlanResultFactory.create(issue_number=task.id, use_defaults=True)
+
+        harness.planners.plan = _planner_plan
+        reviewer = _ScriptedReviewer([])
+        phase._plan_reviewer = reviewer
+
+        class _Classified:
+            payload = {"complexity_score": 2}
+
+        _wire_issue_cache(phase)
+        phase._issue_cache.latest_classification = lambda _id: _Classified()
+
+        swaps: list[tuple[int, str]] = []
+        original_swap = phase._prs.swap_pipeline_labels
+
+        async def _record_swap(issue_id: int, label: str, *a: Any, **kw: Any):
+            swaps.append((issue_id, label))
+            return await original_swap(issue_id, label, *a, **kw)
+
+        phase._prs.swap_pipeline_labels = _record_swap
+
+        issue = TaskFactory.create(id=306, tags=["hydraflow-plan"])
+        harness.store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        # Routed: claim label swapped, no planner spawn, no reviewer spawn.
+        assert (306, "hydraflow-auto-light") in swaps
+        assert planned == []
+        assert reviewer.calls == []

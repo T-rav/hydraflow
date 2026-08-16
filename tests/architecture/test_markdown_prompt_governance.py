@@ -41,6 +41,10 @@ _MEASURED = frozenset(
 #: ratchet forbids this set from growing.
 _GRANDFATHERED = frozenset(
     {
+        # #11298 light-lane builder — declared at introduction; burn-down:
+        # register a preflight_auto_agent-style fixture rendering the
+        # auto-light template and move to _MEASURED.
+        "prompts/auto_agent/auto-light.md",
         # prompts/auto_agent specialist sub-label templates
         "prompts/auto_agent/discover-stuck.md",
         "prompts/auto_agent/fake-coverage-stuck.md",
