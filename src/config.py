@@ -4213,6 +4213,48 @@ class HydraFlowConfig(BaseModel):
         le=86400,
         description="Health monitor cycle interval in seconds",
     )
+    fleet_vitals_enabled: bool = Field(
+        default=True,
+        description=(
+            "#11391 fleet-vitals shadow supervisor: bands over the health "
+            "monitor's fleet metrics (hitl_rate, first_pass_rate) with "
+            "hysteresis; on alarm, attaches a mechanical change-ledger "
+            "diagnosis and a SHADOW intervention proposal (never actuates)."
+        ),
+    )
+    fleet_hitl_rate_alarm: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "hitl_rate alarm threshold (#11391). Founding incident of "
+            "record: 0.74 logged at INFO while the light-tier cascade ran."
+        ),
+    )
+    fleet_hitl_rate_rearm: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="hitl_rate must settle below this to re-arm the alarm.",
+    )
+    fleet_first_pass_floor: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "first_pass_rate at or below this floor breaches (#11391); "
+            "clears above 2x the floor."
+        ),
+    )
+    fleet_alarm_confirm_windows: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Consecutive breaching health-monitor cycles required before a "
+            "fleet alarm fires (ISA-18.2 confirm discipline)."
+        ),
+    )
     wiki_freshness_stale_days: int = Field(
         default=7,
         ge=1,

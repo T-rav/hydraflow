@@ -627,6 +627,15 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             metrics.stale_item_count,
         )
 
+        # #11391 fleet vitals (SHADOW): bands + hysteresis over the fleet
+        # metrics just logged. Founding incident: hitl_rate=0.74 /
+        # first_pass_rate=0.00 went out at INFO while the light-tier
+        # cascade ran — the fleet had no verdict function. Fail-soft.
+        try:
+            await self._run_fleet_vitals(metrics)
+        except Exception:  # noqa: BLE001
+            logger.debug("fleet-vitals evaluation failed", exc_info=True)
+
         self._verify_pending_adjustments(metrics)
         adjustments_made = self._apply_adjustments(metrics)
         await self._file_hitl_recommendations(metrics)
@@ -1173,6 +1182,120 @@ class HealthMonitorLoop(BaseBackgroundLoop):
     # ------------------------------------------------------------------
     # Sentry metrics
     # ------------------------------------------------------------------
+
+    async def _run_fleet_vitals(self, metrics: Any) -> None:
+        """#11391 rungs 1-3 in SHADOW: evaluate bands, attach the mechanical
+        change-ledger diagnosis, log + SYSTEM_ALERT the shadow proposal.
+
+        Never actuates. State (hysteresis, one-alarm-per-episode) persists
+        under the data path so restarts don't re-alarm an active episode.
+        """
+        from fleet_vitals import (  # noqa: PLC0415
+            FleetBands,
+            FleetReading,
+            FleetVitalsState,
+            evaluate,
+        )
+
+        if not self._config.fleet_vitals_enabled:
+            return
+        state_path = self._config.data_root / "fleet_vitals_state.json"
+        try:
+            raw = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            raw = {}
+        state = FleetVitalsState.from_dict(raw)
+        reading = FleetReading(
+            ts=datetime.now(UTC),
+            hitl_rate=float(metrics.hitl_escalation_rate),
+            first_pass_rate=float(metrics.first_pass_rate),
+        )
+        alarms = evaluate(
+            state,
+            reading,
+            bands=FleetBands(
+                hitl_rate_alarm=self._config.fleet_hitl_rate_alarm,
+                hitl_rate_rearm=self._config.fleet_hitl_rate_rearm,
+                first_pass_floor=self._config.fleet_first_pass_floor,
+                confirm_windows=self._config.fleet_alarm_confirm_windows,
+            ),
+            changes=await self._fleet_change_ledger(),
+        )
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(
+                json.dumps(state.to_dict(), indent=2), encoding="utf-8"
+            )
+        except OSError:
+            logger.warning("fleet-vitals state save failed", exc_info=True)
+        for alarm in alarms:
+            logger.warning(
+                "FLEET ALARM [%s]: hitl_rate=%.2f first_pass_rate=%.2f "
+                "(confirmed over %d windows). Suspects: %s. %s",
+                alarm.band,
+                alarm.reading.hitl_rate,
+                alarm.reading.first_pass_rate,
+                alarm.consecutive_breaches,
+                "; ".join(f"{s.kind}:{s.ref} ({s.description})" for s in alarm.suspects)
+                or "none in lookback",
+                alarm.shadow_proposal,
+            )
+            if self._bus is not None:
+                await self._bus.publish(
+                    HydraFlowEvent(
+                        type=EventType.SYSTEM_ALERT,
+                        data={
+                            "kind": "fleet_vitals_alarm",
+                            "source": "health_monitor",
+                            "band": alarm.band,
+                            "hitl_rate": alarm.reading.hitl_rate,
+                            "first_pass_rate": alarm.reading.first_pass_rate,
+                            "suspects": [f"{s.kind}:{s.ref}" for s in alarm.suspects],
+                            "shadow_proposal": alarm.shadow_proposal,
+                        },
+                    )
+                )
+
+    async def _fleet_change_ledger(self) -> list[Any]:
+        """Mechanical suspect input: staging merges in the last 24h.
+
+        Zero LLM tokens — `git log` on the repo root. Config flips and boot
+        events join the ledger in a later rung; merges alone named the
+        founding incident's culprit. Fail-soft to an empty ledger.
+        """
+        from fleet_vitals import ChangeEvent  # noqa: PLC0415
+
+        try:
+            out = await run_subprocess(
+                "git",
+                "log",
+                "--since=24 hours ago",
+                "--format=%H|%ct|%s",
+                "--no-merges",
+                "-n",
+                "40",
+                cwd=Path(self._config.repo_root),
+                timeout=30,
+            )
+        except RuntimeError as exc:
+            # Includes SubprocessTimeoutError — degrade to an empty ledger;
+            # the alarm still fires, just without a mechanical suspect.
+            logger.debug("fleet change-ledger fetch failed: %s", exc)
+            return []
+        changes = []
+        for line in (out or "").splitlines():
+            parts = line.split("|", 2)
+            if len(parts) != 3:
+                continue
+            sha, epoch, subject = parts
+            try:
+                ts = datetime.fromtimestamp(int(epoch), tz=UTC)
+            except (TypeError, ValueError):
+                continue
+            changes.append(
+                ChangeEvent(ts=ts, kind="merge", ref=sha[:9], description=subject[:80])
+            )
+        return changes
 
     def _emit_sentry_metrics(
         self,
