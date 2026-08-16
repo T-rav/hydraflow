@@ -183,6 +183,20 @@ class TaskLink(BaseModel):
     target_url: HttpUrl = ""
 
 
+# A "Prerequisites" declaration (issue-splitter convention, #11277) lists
+# issue numbers that must merge before this one can be worked — e.g.
+# "**Prerequisites (both must merge first):** - #11210 ... - #11276". This
+# captures everything from that heading line up to the next Markdown heading
+# (or end of body) so every ``#N`` reference inside counts as BLOCKED_BY,
+# regardless of how the bullet list itself is punctuated.
+_PREREQUISITES_SECTION = re.compile(
+    r"^\s*(?:#{1,6}\s*|\*\*)\s*prerequisites\b[^\n]*\n"
+    r"(?P<body>.*?)"
+    r"(?=^#{1,6}\s|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
+_PREREQUISITE_ISSUE_REF = re.compile(r"#(\d+)")
+
 # Compiled patterns: (pattern, kind). Order matters — first match per target_id wins.
 _LINK_PATTERNS: list[tuple[re.Pattern[str], TaskLinkKind]] = [
     (re.compile(r"\brelates?\s+to\s+#(\d+)", re.IGNORECASE), TaskLinkKind.RELATES_TO),
@@ -214,10 +228,21 @@ def parse_task_links(body: str) -> list[TaskLink]:
     """Extract structured cross-task links from a task body.
 
     Scans *body* for Markdown prose patterns (e.g. "relates to #12",
-    "duplicate of #5") and returns a deduplicated list of
-    :class:`TaskLink` objects.  First match wins per *target_id*.
+    "duplicate of #5") and a "Prerequisites" section (e.g. "**Prerequisites
+    (both must merge first):** - #11210 ... - #11276"), returning a
+    deduplicated list of :class:`TaskLink` objects. First match wins per
+    *target_id* — the Prerequisites section is checked first, so it takes
+    priority over a looser inline mention of the same issue.
     """
     seen: dict[int, TaskLink] = {}
+    section_match = _PREREQUISITES_SECTION.search(body)
+    if section_match:
+        for ref in _PREREQUISITE_ISSUE_REF.finditer(section_match.group("body")):
+            target_id = int(ref.group(1))
+            if target_id not in seen:
+                seen[target_id] = TaskLink(
+                    kind=TaskLinkKind.BLOCKED_BY, target_id=target_id
+                )
     for pattern, kind in _LINK_PATTERNS:
         for match in pattern.finditer(body):
             target_id = int(match.group(1))

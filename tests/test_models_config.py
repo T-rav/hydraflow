@@ -473,6 +473,56 @@ class TestParseTaskLinks:
         assert len(links) == 1
         assert links[0].kind == TaskLinkKind.REPLIES_TO
 
+    # --- Prerequisites section (#11277) ---
+
+    def test_prerequisites_section_bold_heading_with_bullets(self) -> None:
+        body = (
+            "## Problem\n"
+            "Some intro text.\n\n"
+            "**Prerequisites (both must merge first):**\n"
+            "- #11210 — creates the panel\n"
+            "- #11276 — creates the adapter\n\n"
+            "## Current State\n"
+            "Already landed: nothing relevant.\n"
+        )
+        links = parse_task_links(body)
+
+        by_id = {lnk.target_id: lnk for lnk in links}
+        assert by_id[11210].kind == TaskLinkKind.BLOCKED_BY
+        assert by_id[11276].kind == TaskLinkKind.BLOCKED_BY
+        assert set(by_id) == {11210, 11276}
+
+    def test_prerequisites_section_markdown_heading(self) -> None:
+        body = "## Prerequisites\n- #5\n- #6\n## Scope\nmore text #999\n"
+        links = parse_task_links(body)
+
+        by_id = {lnk.target_id: lnk for lnk in links}
+        assert set(by_id) == {5, 6}
+        assert all(lnk.kind == TaskLinkKind.BLOCKED_BY for lnk in links)
+
+    def test_prerequisites_section_at_end_of_body(self) -> None:
+        body = "**Prerequisites:**\n- #42\n"
+        links = parse_task_links(body)
+
+        assert len(links) == 1
+        assert links[0].target_id == 42
+        assert links[0].kind == TaskLinkKind.BLOCKED_BY
+
+    def test_no_prerequisites_section_no_blocked_by_links(self) -> None:
+        body = "## Problem\nJust a normal issue mentioning #123 in prose.\n"
+        links = parse_task_links(body)
+
+        assert links == []
+
+    def test_prerequisites_section_wins_over_inline_pattern_for_same_target(
+        self,
+    ) -> None:
+        body = "**Prerequisites:**\n- #11210\n\n## Notes\nThis relates to #11210.\n"
+        links = parse_task_links(body)
+
+        assert len(links) == 1
+        assert links[0].kind == TaskLinkKind.BLOCKED_BY
+
     # --- Multiple links ---
 
     def test_multiple_links_different_targets(self) -> None:

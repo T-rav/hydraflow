@@ -17,6 +17,7 @@ from issue_store import (
     STAGE_REVIEW,
     IssueStore,
 )
+from models import TaskLink, TaskLinkKind
 from tests.conftest import IssueFactory, TaskFactory
 from tests.helpers import ConfigFactory
 
@@ -306,6 +307,43 @@ class TestQueueAccessors:
         cleared = _make_store()
         cleared._route_issues([TaskFactory.create(id=33, tags=["test-label"])])
         assert [t.id for t in cleared.get_implementable(10)] == [33]
+
+    def test_get_implementable_skips_unmet_prerequisite(self) -> None:
+        # #11277: an issue whose "Prerequisites" section names another issue
+        # that hasn't merged must not be dispatched — an implementer would
+        # just burn its attempt budget rediscovering the missing anchor files.
+        store = _make_store()
+        blocked = TaskFactory.create(
+            id=40,
+            tags=["test-label"],
+            links=[TaskLink(kind=TaskLinkKind.BLOCKED_BY, target_id=11210)],
+        )
+        store._route_issues([blocked])
+        assert store.get_implementable(10) == []
+
+    def test_unmet_prerequisite_skipped_but_clean_sibling_returned(self) -> None:
+        store = _make_store()
+        blocked = TaskFactory.create(
+            id=41,
+            tags=["test-label"],
+            links=[TaskLink(kind=TaskLinkKind.BLOCKED_BY, target_id=11210)],
+        )
+        clean = TaskFactory.create(id=42, tags=["test-label"])
+        store._route_issues([blocked, clean])
+        assert [t.id for t in store.get_implementable(10)] == [42]
+
+    def test_prerequisite_becomes_eligible_once_marked_merged(self) -> None:
+        store = _make_store()
+        blocked = TaskFactory.create(
+            id=43,
+            tags=["test-label"],
+            links=[TaskLink(kind=TaskLinkKind.BLOCKED_BY, target_id=11210)],
+        )
+        store._route_issues([blocked])
+        assert store.get_implementable(10) == []
+
+        store.mark_merged(11210)
+        assert [t.id for t in store.get_implementable(10)] == [43]
 
     def test_get_implementable_excludes_active_issues(self) -> None:
         store = _make_store()

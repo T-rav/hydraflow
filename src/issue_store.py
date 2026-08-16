@@ -14,7 +14,13 @@ from enum import StrEnum
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
-from models import PipelineIssueStatus, PipelineSnapshotEntry, QueueStats, Task
+from models import (
+    PipelineIssueStatus,
+    PipelineSnapshotEntry,
+    QueueStats,
+    Task,
+    TaskLinkKind,
+)
 from queue_strategy import band_of, order_queue
 from subprocess_util import AuthenticationError
 from task_source import TaskFetcher
@@ -514,6 +520,14 @@ class IssueStore:
         # queue clean (ADR-0084, pillar C).
         if "human-required" in task.tags:
             return False
+        # Unmet prerequisite (#11277): a "Prerequisites" declaration or inline
+        # "blocked by #N" mention names another issue that has not merged yet.
+        # Dispatching this issue anyway burns an implementer's attempt budget
+        # discovering the same missing anchor files every time — deferring
+        # here is free, re-dispatching is not. Ineligible tasks keep their
+        # place in the queue and are re-checked on the next tick.
+        if self._has_unmet_prerequisite(task):
+            return False
         # Durable cross-actor build claim (#10168): an issue carrying the
         # in-progress claim marker is already being built — possibly by another
         # factory instance, a parallel operator session, or an out-of-band
@@ -524,6 +538,20 @@ class IssueStore:
         # suspenders with the in-process guard (ADR-0002).
         in_progress = {lbl.lower() for lbl in self._config.in_progress_label}
         return not (in_progress & {t.lower() for t in task.tags})
+
+    def _has_unmet_prerequisite(self, task: Task) -> bool:
+        """Whether *task* declares a prerequisite issue not yet in ``_merged_numbers``.
+
+        Merged-ness is tracked only for the current process lifetime (the same
+        limitation the pipeline snapshot's "merged" column already has) — a
+        prerequisite that merged in a prior process run reads as unmet after a
+        restart until ``mark_merged`` fires again for it in this process.
+        """
+        return any(
+            link.kind == TaskLinkKind.BLOCKED_BY
+            and link.target_id not in self._merged_numbers
+            for link in task.links
+        )
 
     def _take_from_queue(self, stage: IssueStoreStage, max_count: int) -> list[Task]:
         """Take up to *max_count* eligible tasks from the *stage* queue.
