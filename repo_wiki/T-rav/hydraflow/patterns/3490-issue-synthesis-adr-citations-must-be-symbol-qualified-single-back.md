@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T12:13:21.827489+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3343,3474,3476
+superseded_by: 3635
 ---
 
 # ADR citations must be symbol-qualified single backtick spans

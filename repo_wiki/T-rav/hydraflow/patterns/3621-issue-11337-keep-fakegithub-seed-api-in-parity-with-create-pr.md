@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11337
 source_phase: plan
 created_at: 2026-08-16T11:25:49.892505+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3766
 ---
 
 # Keep FakeGitHub seed API in parity with create_pr
