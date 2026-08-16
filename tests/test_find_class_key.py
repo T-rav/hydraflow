@@ -256,6 +256,18 @@ class TestMatchClass:
         )
         assert target == 0
 
+    # {branch} shared of {branch, namespace, parser, gap} union 16 unique
+    # filler tokens -- 1 / (4 + 17 - 1) == 0.05, CLASS_MARKER_TITLE_FLOOR
+    # exactly. One fewer filler word (17 unique, union 21) drops just below
+    # it. Both titles are asserted against a live `title_token_overlap` call
+    # rather than a hard-coded literal, so a floor-arithmetic typo here
+    # can't silently drift from what CLASS_MARKER_TITLE_FLOOR actually is.
+    _TITLE_AT_FLOOR = (
+        "branch alpha bravo charlie delta echo foxtrot golf hotel india "
+        "juliett kilo lima mike november oscar papa"
+    )
+    _TITLE_JUST_BELOW_FLOOR = _TITLE_AT_FLOOR + " quebec"
+
     def test_marker_equal_title_affinity_at_floor_boundary_folds(self) -> None:
         key = compute_class_key("branch-parser", "branch namespace missing")
         issues = [
@@ -265,21 +277,34 @@ class TestMatchClass:
                 "body": f"details\n\n{render_marker(key)}\n",
             }
         ]
-        # {branch} shared of {branch, namespace, parser, gap, unrelated,
-        # finding, extra, words, padded, out} -- engineered to sit at
-        # CLASS_MARKER_TITLE_FLOOR exactly.
         overlap = title_token_overlap(
-            "branch unrelated finding extra words padded out more",
-            "branch namespace parser gap",
+            self._TITLE_AT_FLOOR, "branch namespace parser gap"
         )
-        assert overlap >= CLASS_MARKER_TITLE_FLOOR
+        assert overlap == pytest.approx(CLASS_MARKER_TITLE_FLOOR)
         target = match_class(
-            key,
-            "branch namespace missing",
-            "branch unrelated finding extra words padded out more",
-            issues,
+            key, "branch namespace missing", self._TITLE_AT_FLOOR, issues
         )
         assert target == 11188
+
+    def test_marker_equal_title_affinity_just_below_floor_does_not_fold(
+        self,
+    ) -> None:
+        key = compute_class_key("branch-parser", "branch namespace missing")
+        issues = [
+            {
+                "number": 11188,
+                "title": "branch namespace parser gap",
+                "body": f"details\n\n{render_marker(key)}\n",
+            }
+        ]
+        overlap = title_token_overlap(
+            self._TITLE_JUST_BELOW_FLOOR, "branch namespace parser gap"
+        )
+        assert overlap < CLASS_MARKER_TITLE_FLOOR
+        target = match_class(
+            key, "branch namespace missing", self._TITLE_JUST_BELOW_FLOOR, issues
+        )
+        assert target == 0
 
     def test_marker_present_but_different_key_does_not_fold(self) -> None:
         other_key = compute_class_key("adr-pin", "non-self-retiring adr pin")
