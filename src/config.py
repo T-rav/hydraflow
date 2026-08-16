@@ -2639,6 +2639,20 @@ class HydraFlowConfig(BaseModel):
             "than routed to a standalone Discover phase at triage time."
         ),
     )
+    plan_review_min_complexity: int = Field(
+        default=5,
+        ge=0,
+        le=10,
+        description=(
+            "Skip the adversarial plan review for issues triaged at or below "
+            "this complexity (#11298 size tiering: the token report measured "
+            "plan_reviewer at 42% of all factory tokens, and a one-file fix "
+            "does not need a full agentic repo exploration of its plan — the "
+            "implement-side skill gauntlet still guards the code). Cycled, "
+            "escalated, or unclassified issues are ALWAYS reviewed. 0 "
+            "disables tiering (every plan reviewed, pre-#11298 behavior)."
+        ),
+    )
     max_shape_turns: int = Field(
         default=10,
         ge=2,
