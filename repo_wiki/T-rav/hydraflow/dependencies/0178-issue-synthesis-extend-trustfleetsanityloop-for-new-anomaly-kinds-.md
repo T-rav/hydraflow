@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T07:06:05.817859+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0166
+superseded_by: 0193
 ---
 
 # Extend TrustFleetSanityLoop for new anomaly kinds, not a new loop

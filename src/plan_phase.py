@@ -22,6 +22,7 @@ from models import (
     EpicGapReview,
     IssueOutcomeType,
     PipelineStage,
+    PlanFinding,
     PlanResult,
     PlanReview,
     ShapeConversation,
@@ -1083,8 +1084,17 @@ class PlanPhase(PlanWikiIngestMixin):
             return plan_version
 
         try:
+            # #11298 delta re-review: after a route-back this is round >= 2 —
+            # feed the prior round's cached findings so the reviewer verifies
+            # fixes instead of re-exploring the repo (plan_reviewer measured
+            # at 42% of all factory tokens, dominated by re-exploration).
+            prior_summary, prior_findings = self._prior_review_context(issue.id)
             review = await self._plan_reviewer.review(
-                issue, result, plan_version=plan_version
+                issue,
+                result,
+                plan_version=plan_version,
+                prior_summary=prior_summary,
+                prior_findings=prior_findings,
             )
             # ADR-0063 W3b: on the FIRST blocking review, dispatch the
             # touchpoint-expander (if wired) and re-run the reviewer
@@ -1125,6 +1135,37 @@ class PlanPhase(PlanWikiIngestMixin):
             )
 
         return plan_version
+
+    def _prior_review_context(
+        self, issue_id: int
+    ) -> tuple[str | None, list[PlanFinding] | None]:
+        """Prior round's cached review (summary, findings) for issue_id.
+
+        (None, None) on round 1 (no cached review) or when the cache is
+        unavailable/malformed — the reviewer then runs a normal full
+        first-round review (#11298 delta re-review is fail-open).
+        """
+        if self._issue_cache is None:
+            return None, None
+        try:
+            record = self._issue_cache.latest_review(issue_id)
+            payload = getattr(record, "payload", None)
+            if not isinstance(payload, dict):
+                return None, None
+            summary = payload.get("review_text") or None
+            findings: list[PlanFinding] = []
+            for raw in payload.get("findings") or []:
+                try:
+                    findings.append(PlanFinding.model_validate(raw))
+                except (ValueError, TypeError):
+                    continue  # one bad row never blocks review
+            if not isinstance(summary, str):
+                summary = None
+            return summary, (findings or None)
+        except (AttributeError, TypeError, ValueError):
+            # Malformed cache (or a test double with a different shape) —
+            # degrade to a normal full first-round review.
+            return None, None
 
     async def _maybe_expand_touchpoints(
         self,
@@ -1185,7 +1226,11 @@ class PlanPhase(PlanWikiIngestMixin):
 
         try:
             second_review = await self._plan_reviewer.review(
-                issue, enriched_result, plan_version=plan_version
+                issue,
+                enriched_result,
+                plan_version=plan_version,
+                prior_summary=first_review.summary,
+                prior_findings=list(first_review.findings),
             )
         except Exception:  # noqa: BLE001
             logger.warning(

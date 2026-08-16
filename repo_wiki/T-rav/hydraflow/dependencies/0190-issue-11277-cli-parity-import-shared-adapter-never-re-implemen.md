@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 11277
 source_phase: plan
 created_at: 2026-08-15T21:08:01.026740+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0203
 ---
 
 # CLI parity: import shared adapter, never re-implement

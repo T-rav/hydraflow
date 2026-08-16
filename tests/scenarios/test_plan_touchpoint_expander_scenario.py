@@ -51,9 +51,17 @@ class _ScriptedReviewer:
         self.calls: list[tuple[Task, PlanResult]] = []
 
     async def review(
-        self, task: Task, plan_result: PlanResult, *, plan_version: int = 1
+        self,
+        task: Task,
+        plan_result: PlanResult,
+        *,
+        plan_version: int = 1,
+        prior_summary: str | None = None,
+        prior_findings: list | None = None,
     ) -> PlanReview:
         self.calls.append((task, plan_result))
+        self.prior_contexts = getattr(self, "prior_contexts", [])
+        self.prior_contexts.append((prior_summary, prior_findings))
         if not self._reviews:
             raise AssertionError("ran out of scripted reviews")
         return self._reviews.pop(0)

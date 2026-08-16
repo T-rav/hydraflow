@@ -76,6 +76,16 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Plan",
         "src/plan_reviewer.py:233",
     ),
+    # #11301: the RE-REVIEW branch (prior_block set) is the shape every
+    # route-back review takes — without its own target the branch would
+    # never be scored (the #10872 dead-branch class).
+    AuditTarget(
+        "plan_reviewer_rereview",
+        "plan_reviewer.PlanReviewer._build_prompt",
+        "tests/fixtures/prompts/plan_reviewer_rereview.json",
+        "Plan",
+        "src/plan_reviewer.py:233",
+    ),
     # Implement
     AuditTarget(
         "agent_build_prompt_first_attempt",

@@ -48,9 +48,17 @@ class _StubReviewer:
         self.calls: list[tuple[Task, PlanResult]] = []
 
     async def review(
-        self, task: Task, plan_result: PlanResult, *, plan_version: int = 1
+        self,
+        task: Task,
+        plan_result: PlanResult,
+        *,
+        plan_version: int = 1,
+        prior_summary: str | None = None,
+        prior_findings: list | None = None,
     ) -> PlanReview:
         self.calls.append((task, plan_result))
+        self.prior_contexts = getattr(self, "prior_contexts", [])
+        self.prior_contexts.append((prior_summary, prior_findings))
         if not self._reviews:
             raise AssertionError("ran out of scripted reviews")
         return self._reviews.pop(0)
@@ -278,3 +286,92 @@ class TestExpanderWiring:
 
         assert recorded["has_blocking"] is False
         assert recorded["findings"] == []
+
+
+class TestPriorReviewContext:
+    """#11298 delta re-review: the cache-backed prior-round reader."""
+
+    def _phase(self):
+        from plan_phase import PlanPhase
+
+        phase = PlanPhase.__new__(PlanPhase)
+        phase._issue_cache = None  # type: ignore[attr-defined]
+        return phase
+
+    def test_none_without_cache(self) -> None:
+        phase = self._phase()
+        assert phase._prior_review_context(1) == (None, None)
+
+    def test_reads_summary_and_findings_from_record(self) -> None:
+        from types import SimpleNamespace
+
+        phase = self._phase()
+        record = SimpleNamespace(
+            payload={
+                "review_text": "2 blocking findings",
+                "has_blocking": True,
+                "findings": [
+                    {
+                        "severity": "high",
+                        "dimension": "correctness",
+                        "description": "claims Foo exists",
+                    },
+                    {"not": "a finding"},  # malformed row skipped
+                ],
+            }
+        )
+        cache = SimpleNamespace(latest_review=lambda _id: record)
+        phase._issue_cache = cache  # type: ignore[attr-defined]
+        summary, findings = phase._prior_review_context(1)
+        assert summary == "2 blocking findings"
+        assert findings is not None and len(findings) == 1
+        assert findings[0].dimension == "correctness"
+
+    def test_malformed_cache_degrades_to_full_review(self) -> None:
+        from types import SimpleNamespace
+
+        phase = self._phase()
+        # AsyncMock-style cache whose latest_review returns a coroutine-ish
+        # object with no payload — the exact shape that broke round 1 of
+        # this feature in the wiring tests.
+        cache = SimpleNamespace(latest_review=lambda _id: object())
+        phase._issue_cache = cache  # type: ignore[attr-defined]
+        assert phase._prior_review_context(1) == (None, None)
+
+
+@pytest.mark.asyncio
+class TestPrimaryReviewThreading:
+    """#11301 review find: the PRIMARY review call must receive the cached
+    prior round — both halves were unit-tested but the glue was not."""
+
+    async def test_primary_review_receives_cached_prior_round(self, config) -> None:
+        from types import SimpleNamespace
+
+        phase, _state, _planners, _prs, _store, _stop = make_plan_phase(config)
+        reviewer = _StubReviewer([_clean_review(303)])
+        phase._plan_reviewer = reviewer  # type: ignore[assignment]
+
+        record = SimpleNamespace(
+            payload={
+                "review_text": "1 blocking finding",
+                "findings": [
+                    {
+                        "severity": "critical",
+                        "dimension": "test_strategy",
+                        "description": "no failing test named",
+                    }
+                ],
+            }
+        )
+        cache = AsyncMock()
+        cache.record_plan_stored = lambda *_a, **_kw: 2
+        cache.record_review_stored = lambda *_a, **_kw: None
+        cache.latest_review = lambda _id: record
+        phase._issue_cache = cache  # type: ignore[assignment]
+
+        await phase._write_plan_records(_task(), _result())
+
+        assert reviewer.prior_contexts, "review() was never called"
+        summary, findings = reviewer.prior_contexts[0]
+        assert summary == "1 blocking finding"
+        assert findings is not None and findings[0].dimension == "test_strategy"
