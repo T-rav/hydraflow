@@ -285,7 +285,10 @@ class DiagnosticLoop(BaseBackgroundLoop):
         Returns ``"escalated"`` if a gate fired (and HITL escalation happened),
         otherwise ``None`` to signal the fix stage should proceed.
         """
-        if diagnosis.infra_failure:
+        # ``is True`` (not truthiness): test harnesses feed MagicMock
+        # diagnoses whose auto-attributes are truthy — the guard must only
+        # fire on the real bool (the MagicMock-truthy-guard incident class).
+        if diagnosis.infra_failure is True:
             # #11370: the diagnosis spawn failed for lane/infra reasons
             # (failover-lane structured-output attrition) — the verdict says
             # nothing about the issue. Park with a cooldown instead of
