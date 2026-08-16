@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:58.238923+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3321
+superseded_by: 3605
 ---
 
 # Redrive TTL > branch GC stale days: accept overlap, don't gate

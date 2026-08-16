@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:57.537331+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3233
+superseded_by: 3517
 ---
 
 # Sweep-only cycles must return distinct compact stats, not zeroed

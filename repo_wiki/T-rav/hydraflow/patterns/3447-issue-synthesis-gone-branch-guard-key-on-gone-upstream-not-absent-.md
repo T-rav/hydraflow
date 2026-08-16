@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:58.156743+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3310
+superseded_by: 3594
 ---
 
 # Gone-branch guard: key on [gone] upstream, not absent origin ref

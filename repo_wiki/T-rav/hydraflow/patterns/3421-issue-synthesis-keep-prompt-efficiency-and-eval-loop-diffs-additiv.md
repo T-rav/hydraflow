@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:57.958450+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3284
+superseded_by: 3568
 ---
 
 # Keep prompt_efficiency and eval_loop diffs additive for concurrent PRs
