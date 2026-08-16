@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T15:30:58.004415+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3744
+superseded_by: 4036
 ---
 
 # Provider classification resolves role dial > repo_provider > claude

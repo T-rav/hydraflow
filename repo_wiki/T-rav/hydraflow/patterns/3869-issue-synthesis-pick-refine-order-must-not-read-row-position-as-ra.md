@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T15:30:57.690692+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3724
+superseded_by: 4016
 ---
 
 # pick_refine_order must not read row position as rank

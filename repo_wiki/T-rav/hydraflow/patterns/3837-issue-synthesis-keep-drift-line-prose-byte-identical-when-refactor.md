@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T15:30:56.957173+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3692
+superseded_by: 3984
 ---
 
 # Keep drift-line prose byte-identical when refactoring audit output

@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 11353
 source_phase: plan
 created_at: 2026-08-16T14:57:57.978729+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0271
 ---
 
 # connect() onopen re-polls /api/pipeline for final-state rail reconciliation

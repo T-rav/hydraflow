@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11353
 source_phase: plan
 created_at: 2026-08-16T14:57:57.978705+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Build injected wire payloads from PipelineSnapshot.model_dump(), not literals

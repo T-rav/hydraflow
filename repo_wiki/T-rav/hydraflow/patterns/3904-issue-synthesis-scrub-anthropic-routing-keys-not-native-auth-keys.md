@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T15:30:58.239386+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3759
+superseded_by: 4051
 ---
 
 # Scrub anthropic routing keys, not native auth keys

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T15:30:58.086402+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3748
+superseded_by: 4040
 ---
 
 # Truncate free-text before escaping for GFM table cells (#11185)

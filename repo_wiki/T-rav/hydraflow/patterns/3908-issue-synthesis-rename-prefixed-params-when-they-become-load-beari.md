@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T15:30:58.346009+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3763
+superseded_by: 4055
 ---
 
 # Rename _-prefixed params when they become load-bearing branches
