@@ -46,3 +46,46 @@ def test_retirement_valve_defaults() -> None:
     config = HydraFlowConfig()
     assert config.backlog_budget == 25
     assert config.backlog_budget_min_age_days == 2
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_valve_dry_run_closes_nothing() -> None:
+    """BLOCKING review finding: dry-run (global or loop-level) must log
+    picks and close nothing — _run_gh has no dry-run awareness of its own."""
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import AsyncMock
+
+    from stale_issue_loop import StaleIssueLoop
+
+    loop = object.__new__(StaleIssueLoop)
+    config = HydraFlowConfig(dry_run=True, backlog_budget=1)
+    loop._config = config
+    created = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+    issues = [
+        {
+            "number": n,
+            "title": f"i{n}",
+            "createdAt": created,
+            "labels": [{"name": "hydraflow-find"}],
+        }
+        for n in (1, 2, 3)
+    ]
+    import json as _json
+
+    loop._prs = SimpleNamespace(
+        _repo="o/r",
+        _run_gh=AsyncMock(return_value=_json.dumps(issues)),
+        post_comment=AsyncMock(),
+    )
+    loop._state = SimpleNamespace(
+        get_stale_issue_settings=lambda: SimpleNamespace(dry_run=False)
+    )
+    stats = await loop._scan_backlog_budget()
+    assert stats["retired"] == 0
+    loop._prs.post_comment.assert_not_awaited()
+    # Only the LIST call happened — never a close.
+    for call in loop._prs._run_gh.await_args_list:
+        assert "close" not in call.args

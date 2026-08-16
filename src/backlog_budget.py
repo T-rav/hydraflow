@@ -106,6 +106,8 @@ def retirement_picks(
     min_age_days: int,
     now: datetime,
     max_per_cycle: int = 10,
+    advisory_labels: frozenset[str] | None = None,
+    protected_labels: frozenset[str] | None = None,
 ) -> list[RetirementPick]:
     """Oldest advisory issues beyond *budget*, capped at *max_per_cycle*.
 
@@ -115,12 +117,16 @@ def retirement_picks(
     """
     if budget <= 0:
         return []
+    advisory_set = advisory_labels or ADVISORY_STAGE_LABELS
+    protected_set = (
+        protected_labels if protected_labels is not None else PROTECTED_LABELS
+    )
     advisory: list[tuple[datetime, dict[str, Any]]] = []
     for issue in open_issues:
         labels = _labels_of(issue)
-        if not labels & ADVISORY_STAGE_LABELS:
+        if not labels & advisory_set:
             continue
-        if labels & PROTECTED_LABELS:
+        if labels & protected_set:
             continue
         created = _created_at(issue)
         if created is None:

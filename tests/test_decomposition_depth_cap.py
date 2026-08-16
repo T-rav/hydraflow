@@ -326,6 +326,7 @@ class TestMaybeDecomposeIntakeGuard:
             repo_root=tmp_path / "repo",
             state_file=tmp_path / "state.json",
             epic_decompose_complexity_threshold=8,
+            epic_decompose_on_intake_enabled=True,
         )
         mgr = AsyncMock()
         phase, _state, prs, triage = self._make_phase(config, epic_manager=mgr)

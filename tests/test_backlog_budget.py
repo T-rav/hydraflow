@@ -78,3 +78,43 @@ def test_malformed_created_at_skipped() -> None:
     }
     assert retirement_picks([bad], budget=0, min_age_days=0, now=NOW) == []
     assert retirement_picks([bad] * 30, budget=1, min_age_days=0, now=NOW) == []
+
+
+def test_module_literals_match_config_defaults() -> None:
+    """Guard (review MAJOR): the module literal sets must track the config
+    defaults so an operator label rename can't silently drop protection —
+    the caller sources from config, but the literals are the test-time and
+    fallback truth and must not drift."""
+    from backlog_budget import ADVISORY_STAGE_LABELS, PROTECTED_LABELS
+    from config import HydraFlowConfig
+
+    config = HydraFlowConfig()
+    assert (
+        frozenset(
+            [
+                *config.find_label,
+                *config.planner_label,
+                *config.diagnose_label,
+                *config.parked_label,
+            ]
+        )
+        == ADVISORY_STAGE_LABELS
+    )
+    expected_protected = frozenset(
+        [
+            *config.ready_label,
+            *config.review_label,
+            *config.in_progress_label,
+            *config.hitl_label,
+            *config.hitl_active_label,
+            *config.hitl_autofix_label,
+            *config.light_autofix_label,
+            "human-required",
+            "hydraflow-epic",
+            "hydraflow-epic-child",
+            "hydraflow-refinement-digest",
+            "P1",
+            "P2",
+        ]
+    )
+    assert expected_protected == PROTECTED_LABELS

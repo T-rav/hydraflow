@@ -540,13 +540,55 @@ class StaleIssueLoop(BaseBackgroundLoop):
             reraise_on_credit_or_bug(exc)
             logger.warning("Backlog-budget fetch failed", exc_info=True)
             return stats
+        cfg = self._config
         picks = retirement_picks(
             issues,
             budget=budget,
-            min_age_days=self._config.backlog_budget_min_age_days,
+            min_age_days=cfg.backlog_budget_min_age_days,
             now=datetime.now(UTC),
+            # Config-sourced (never the module literals): an operator label
+            # rename must keep protection intact — drifting the protected
+            # set silently would retire LIVE work, the dangerous direction.
+            advisory_labels=frozenset(
+                [
+                    *cfg.find_label,
+                    *cfg.planner_label,
+                    *cfg.diagnose_label,
+                    *cfg.parked_label,
+                ]
+            ),
+            protected_labels=frozenset(
+                [
+                    *cfg.ready_label,
+                    *cfg.review_label,
+                    *cfg.in_progress_label,
+                    *cfg.hitl_label,
+                    *cfg.hitl_active_label,
+                    *cfg.hitl_autofix_label,
+                    *cfg.light_autofix_label,
+                    "human-required",
+                    "hydraflow-epic",
+                    "hydraflow-epic-child",
+                    "hydraflow-refinement-digest",
+                    "P1",
+                    "P2",
+                ]
+            ),
         )
+        settings = self._state.get_stale_issue_settings()
+        dry_run = bool(self._config.dry_run) or bool(settings.dry_run)
         for pick in picks:
+            if dry_run:
+                # Mirrors the stale-close path 40 lines below: dry-run
+                # logs the decision, closes nothing (review BLOCKING —
+                # _run_gh has no dry-run awareness of its own).
+                logger.info(
+                    "[dry-run] Backlog valve would retire #%d (%.1fd): %s",
+                    pick.number,
+                    pick.age_days,
+                    pick.title,
+                )
+                continue
             try:
                 await self._prs.post_comment(pick.number, RETIREMENT_COMMENT)
                 await self._prs._run_gh(
