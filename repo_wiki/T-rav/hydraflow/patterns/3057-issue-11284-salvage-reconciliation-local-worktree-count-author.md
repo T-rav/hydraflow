@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11284
 source_phase: plan
 created_at: 2026-08-16T01:29:44.315655+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 3189
 ---
 
 # Salvage reconciliation: local worktree count authoritative, origin only when unreadable

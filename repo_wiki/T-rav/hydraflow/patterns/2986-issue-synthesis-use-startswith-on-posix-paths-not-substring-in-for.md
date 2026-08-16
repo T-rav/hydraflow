@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T20:34:48.014178+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2859
+superseded_by: 3120
 ---
 
 # Use startswith on posix paths, not substring in, for scope checks

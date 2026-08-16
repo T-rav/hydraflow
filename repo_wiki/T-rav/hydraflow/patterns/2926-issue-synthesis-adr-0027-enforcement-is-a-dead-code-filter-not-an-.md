@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T20:34:47.520061+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2799
+superseded_by: 3060
 ---
 
 # ADR-0027 enforcement is a dead-code filter, not an allow-list

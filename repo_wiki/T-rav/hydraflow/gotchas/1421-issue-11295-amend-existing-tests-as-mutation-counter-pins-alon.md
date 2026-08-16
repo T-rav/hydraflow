@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11295
 source_phase: plan
 created_at: 2026-08-16T02:40:08.127288+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Amend existing tests as mutation counter-pins alongside new regression files

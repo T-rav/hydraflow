@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11284
 source_phase: plan
 created_at: 2026-08-16T01:29:44.315661+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Git-dependent regression tests must shell to real git in temp repos, not mock _run_git
