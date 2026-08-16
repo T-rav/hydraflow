@@ -70,6 +70,13 @@ def test_cycled_issue_never_skips() -> None:
     assert skip is False
 
 
+def test_escalation_labeled_issue_never_skips() -> None:
+    phase = _gate(HydraFlowConfig(), record=_classified(1))
+    phase._has_escalation_label = lambda _issue: True
+    skip, _complexity = phase._skip_plan_review(SimpleNamespace(id=1))
+    assert skip is False
+
+
 def test_zero_threshold_disables_tiering() -> None:
     config = HydraFlowConfig(plan_review_min_complexity=0)
     phase = _gate(config, record=_classified(1))

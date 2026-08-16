@@ -652,3 +652,11 @@ class TestPlanReviewTiering:
         phase, reviewer, _stored, task = self._wire(config, complexity=1)
         await phase._write_plan_records(task, PlanResultFactory.create(issue_number=77))
         reviewer.review.assert_awaited()
+
+    async def test_escalation_labeled_issue_always_reviewed(self, config) -> None:
+        config = config.model_copy(update={"plan_review_min_complexity": 5})
+        phase, reviewer, _stored, task = self._wire(
+            config, complexity=2, labels=["hydraflow-plan", "hitl-escalation"]
+        )
+        await phase._write_plan_records(task, PlanResultFactory.create(issue_number=77))
+        reviewer.review.assert_awaited()
