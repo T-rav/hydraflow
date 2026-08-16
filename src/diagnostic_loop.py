@@ -71,6 +71,10 @@ class DiagnosticLoop(BaseBackgroundLoop):
     to ``hydraflow-hitl`` with the full diagnosis as a comment.
     """
 
+    # Longer watchdog: each cycle spawns a two-stage (diagnose + fix) LLM
+    # subprocess per queued issue, serially (#11262).
+    LONG_LLM_CYCLE = True
+
     def __init__(
         self,
         config: HydraFlowConfig,
