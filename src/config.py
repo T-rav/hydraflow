@@ -857,6 +857,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         False,
     ),
     (
+        "epic_decompose_on_intake_enabled",
+        "HYDRAFLOW_EPIC_DECOMPOSE_ON_INTAKE_ENABLED",
+        False,
+    ),
+    (
         "auto_pr_preflight_gate_enabled",
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
         True,
@@ -1889,6 +1894,39 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=10,
         description="Minimum triage complexity score to trigger decomposition",
+    )
+    epic_decompose_on_intake_enabled: bool = Field(
+        default=False,
+        description=(
+            "#11298 board-churn root cause: intake auto-decomposition minted "
+            "epics + parked children at classification time (push), re-"
+            "expanding consolidated work before anyone could build it — one "
+            "class canonical became 6 open issues in a day. Default OFF: "
+            "complex issues plan WHOLE, and the demand-driven ADR-0105 "
+            "stall path (non-convergence -> decompose) remains the "
+            "decomposition mechanism. Flip on only if whole-planning of "
+            "epics measurably thrashes."
+        ),
+    )
+    backlog_budget: int = Field(
+        default=25,
+        ge=0,
+        description=(
+            "#11298 retirement valve: cap on open advisory factory-generated "
+            "issues (find/plan/diagnose/parked labels, minus protected "
+            "classes). Beyond the budget, StaleIssueLoop retires the oldest "
+            "with a class-key comment — recurrence refiles via cross-tick "
+            "folding (#11341), so retirement is cheap and reversible. "
+            "0 disables the valve."
+        ),
+    )
+    backlog_budget_min_age_days: int = Field(
+        default=2,
+        ge=0,
+        description=(
+            "Grace period before an advisory issue is retirement-eligible "
+            "under backlog_budget — fresh filings get a chance to be worked."
+        ),
     )
     epic_monitor_interval: int = Field(
         default=1800,

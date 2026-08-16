@@ -33,6 +33,10 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from backlog_budget import (
+    RETIREMENT_COMMENT,
+    retirement_picks,
+)
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from branch_gc_scan import (
     build_truth_comment,
@@ -386,6 +390,11 @@ class StaleIssueLoop(BaseBackgroundLoop):
         settings = self._state.get_stale_issue_settings()
         already_closed = self._state.get_stale_issue_closed()
 
+        # #11298 retirement valve — rides this loop per its own ride-along
+        # precedent (regression-rot #9597, branch-GC #10011): a daily,
+        # issue-closing sweep is exactly the shape the valve needs.
+        budget_stats = await self._scan_backlog_budget()
+
         stats: dict[str, int] = {"scanned": 0, "closed": 0, "skipped": 0}
 
         # Fetch open issues that don't have HydraFlow lifecycle labels
@@ -492,4 +501,69 @@ class StaleIssueLoop(BaseBackgroundLoop):
                 **dict(stats.items()),
             )
 
+        stats["retired"] = budget_stats.get("retired", 0)
+        return stats
+
+    async def _scan_backlog_budget(self) -> dict[str, int]:
+        """#11298 retirement valve: close the oldest advisory issues beyond
+        ``config.backlog_budget``.
+
+        Selection is delegated to the pure ``backlog_budget`` engine
+        (advisory labels only, protected classes exempt, grace period,
+        oldest-first, capped per cycle). Fail-soft: any fetch/close error
+        logs and returns — the valve can only under-retire, never block
+        the stale sweep.
+        """
+        stats = {"retired": 0}
+        budget = self._config.backlog_budget
+        if budget <= 0:
+            return stats
+        try:
+            raw = await self._prs._run_gh(
+                "gh",
+                "issue",
+                "list",
+                "--repo",
+                self._prs._repo,
+                "--state",
+                "open",
+                "--limit",
+                "200",
+                "--json",
+                "number,title,createdAt,labels",
+            )
+            issues = json.loads(raw) if raw else []
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning("Backlog-budget fetch failed", exc_info=True)
+            return stats
+        picks = retirement_picks(
+            issues,
+            budget=budget,
+            min_age_days=self._config.backlog_budget_min_age_days,
+            now=datetime.now(UTC),
+        )
+        for pick in picks:
+            try:
+                await self._prs.post_comment(pick.number, RETIREMENT_COMMENT)
+                await self._prs._run_gh(
+                    "gh",
+                    "issue",
+                    "close",
+                    "--repo",
+                    self._prs._repo,
+                    str(pick.number),
+                )
+                stats["retired"] += 1
+                logger.info(
+                    "Backlog valve retired #%d (%.1fd old): %s",
+                    pick.number,
+                    pick.age_days,
+                    pick.title,
+                )
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "Backlog valve failed to retire #%d", pick.number, exc_info=True
+                )
         return stats

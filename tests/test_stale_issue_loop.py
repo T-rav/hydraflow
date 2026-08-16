@@ -104,7 +104,7 @@ class TestStaleIssueLoopDoWork:
         """When there are no open issues, all counters are zero."""
         loop, *_ = _make_loop(tmp_path, gh_issues=[])
         result = await loop._do_work()
-        assert result == {"scanned": 0, "closed": 0, "skipped": 0}
+        assert result == {"scanned": 0, "closed": 0, "skipped": 0, "retired": 0}
 
     @pytest.mark.asyncio
     async def test_stale_issue_gets_closed(self, tmp_path: Path) -> None:
