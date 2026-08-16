@@ -229,7 +229,7 @@ class IssueCache:
         issue_id: int,
         *,
         issue_type: str,
-        complexity_score: float | int,
+        complexity_score: float | int | None,
         complexity_rank: str,
         routing_outcome: str,
         reasoning: str = "",

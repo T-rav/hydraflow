@@ -345,8 +345,17 @@ class TriageResult(BaseModel):
     reasons: list[str] = Field(
         default_factory=list, description="Reasons for the readiness decision"
     )
-    complexity_score: int = Field(
-        default=0, ge=0, le=10, description="Complexity score 0-10"
+    complexity_score: int | None = Field(
+        default=None,
+        ge=0,
+        le=10,
+        description=(
+            "Complexity score 0-10; None when triage did not score the "
+            "issue. Absence must stay distinguishable from 0: consumers "
+            "fail toward their own conservative default (tier gates treat "
+            "unscored as maximally complex, epic decomposition skips it) "
+            "— #11298 audit."
+        ),
     )
     issue_type: IssueType = Field(
         default=IssueType.FEATURE, description="Classified issue type"
