@@ -28,11 +28,14 @@ from __future__ import annotations
 import pytest
 
 from find_class_key import (
+    CLASS_OVERLAP_THRESHOLD,
     compute_class_key,
+    extract_class_key,
     extract_folded_sites,
     file_or_fold,
     match_class,
     render_marker,
+    title_token_overlap,
 )
 
 
@@ -235,3 +238,69 @@ async def test_title_token_overlap_guard_prevents_hash_collision_fold() -> None:
     # Same class key, but 'whiskey' shares no needle token with the matched
     # issue's title/body -- the overlap guard must refuse the fold.
     assert match_class(key_b, "whiskey", "whiskey finding", issues) == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_marker_less_fold_stamps_the_marker() -> None:
+    """P3 acceptance: a marker-less legacy fold stamps the marker, and a
+    LATER tick matches via it.
+
+    A legacy (pre-#11292) issue is only ever found via the weaker
+    title-overlap-and-needle-in-body path in ``match_class`` -- unless
+    ``file_or_fold`` stamps the class-key marker onto it the first time a
+    site-aware caller folds into it. Once stamped, a later site whose title
+    shares too little with the ORIGINAL issue title to clear
+    ``CLASS_OVERLAP_THRESHOLD`` (0.5) must still fold, because marker
+    equality plus the (lower) ``CLASS_MARKER_TITLE_FLOOR`` now applies.
+    """
+    source = "branch-parser"
+    needle = "branch namespace missing"
+    legacy_title = "sibling branch parsers still drop namespace"
+    legacy_body = "branch namespace missing everywhere, no marker here"
+    prs = _RecordingPRPort()
+    prs._issues[11275] = {
+        "number": 11275,
+        "title": legacy_title,
+        "body": legacy_body,
+    }
+    prs._next_number = 11276
+    assert extract_class_key(legacy_body) == ""
+
+    # First fold: matches via the legacy overlap path (0.6 >= 0.5).
+    first_result = await file_or_fold(
+        prs,
+        source,
+        needle,
+        "sibling branch parsers namespace gap",
+        "## Finding\n\ndetails",
+        ["hydraflow-find"],
+        site="src/sibling_one.py:1",
+    )
+    assert first_result == 11275
+    stamped_body = prs._issues[11275]["body"]
+    assert extract_class_key(stamped_body) == compute_class_key(source, needle)
+
+    # Second fold: this title only clears the marker-affinity floor
+    # (~0.083), not the legacy overlap threshold (0.5) -- it can ONLY match
+    # now via marker equality, proving the stamp took effect.
+    second_title = (
+        "a totally different site discovered later mentions branch parsing "
+        "somewhere"
+    )
+    assert (
+        title_token_overlap(second_title, legacy_title) < CLASS_OVERLAP_THRESHOLD
+    )
+    second_result = await file_or_fold(
+        prs,
+        source,
+        needle,
+        second_title,
+        "## Finding\n\nmore details",
+        ["hydraflow-find"],
+        site="src/sibling_two.py:2",
+    )
+    assert second_result == 11275
+    assert extract_folded_sites(prs._issues[11275]["body"]) == [
+        "src/sibling_one.py:1",
+        "src/sibling_two.py:2",
+    ]

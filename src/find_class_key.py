@@ -347,6 +347,12 @@ async def file_or_fold(
     (#11328). When omitted, idempotency falls back to *title* itself —
     identical to the pre-#11328 behavior.
 
+    A legacy (pre-#11292) issue folded into via the marker-less
+    title-overlap path gets the class-key marker stamped onto it here, so
+    the NEXT tick matches it via the stronger, more reliable marker-equality
+    path in :func:`match_class` instead of re-clearing
+    ``CLASS_OVERLAP_THRESHOLD`` every time.
+
     Returns the issue number folded into or newly created (``0`` on
     ``create_issue`` failure — the existing 0-sentinel contract callers
     already handle). Listing failures (network/credit) fall through to
@@ -378,6 +384,12 @@ async def file_or_fold(
                 "find_class_key: site already folded into #%d, skipping", target
             )
             return target
+        if not extract_class_key(new_body):
+            # Legacy (pre-#11292) issue matched via the marker-less
+            # title-overlap path -- stamp the marker now so future ticks
+            # fold via marker equality instead of re-clearing the overlap
+            # threshold every time.
+            new_body = new_body.rstrip() + "\n\n" + render_marker(class_key) + "\n"
         await prs.update_issue_body(target, new_body)
         await prs.post_comment(
             target,
