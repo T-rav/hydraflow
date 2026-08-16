@@ -262,6 +262,20 @@ class DiagnosticLoop(BaseBackgroundLoop):
         Returns ``"escalated"`` if a gate fired (and HITL escalation happened),
         otherwise ``None`` to signal the fix stage should proceed.
         """
+        if diagnosis.infra_failure:
+            # #11370: the diagnosis spawn failed for lane/infra reasons
+            # (failover-lane structured-output attrition) — the verdict says
+            # nothing about the issue. Park for the next cycle instead of
+            # escalating; no attempt is recorded, so budget is preserved for
+            # runs that actually reached the issue.
+            logger.warning(
+                "Diagnostic: issue #%d diagnosis failed on infra "
+                "(failover-lane parse failure) — parking for retry, "
+                "not escalating (#11370)",
+                issue_number,
+            )
+            return "retry"
+
         if not diagnosis.fixable:
             logger.info(
                 "Diagnostic: issue #%d not fixable (severity=%s) — escalating to HITL",
