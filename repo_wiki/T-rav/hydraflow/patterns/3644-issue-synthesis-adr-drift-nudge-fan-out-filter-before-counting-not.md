@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T13:50:48.508633+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3499
+superseded_by: 3789
 ---
 
 # adr_drift nudge fan-out: filter before counting, not just emitting

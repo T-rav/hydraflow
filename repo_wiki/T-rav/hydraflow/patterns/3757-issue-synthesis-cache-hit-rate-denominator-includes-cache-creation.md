@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T13:50:50.699366+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3612
+superseded_by: 3902
 ---
 
 # Cache hit rate denominator includes cache_creation in token_report

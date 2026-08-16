@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T13:50:50.793521+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3617
+superseded_by: 3907
 ---
 
 # Include MultiEdit in Claude write-tool deny-lists

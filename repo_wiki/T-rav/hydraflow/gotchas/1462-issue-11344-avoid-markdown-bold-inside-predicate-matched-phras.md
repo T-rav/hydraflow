@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11344
 source_phase: plan
 created_at: 2026-08-16T13:29:50.590354+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Avoid markdown bold inside predicate-matched phrases in docstrings

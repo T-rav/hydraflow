@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T13:50:50.572865+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3606
+superseded_by: 3896
 ---
 
 # Salvage: local worktree count authoritative, origin only if unreadable

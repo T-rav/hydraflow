@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T13:50:48.586207+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3503
+superseded_by: 3793
 ---
 
 # Guard wiki synthesis with a content-equivalence no-op check
