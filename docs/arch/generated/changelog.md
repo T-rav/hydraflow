@@ -6,7 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
-- `9d7bf33` — feat(providers): ZAI_CODING_PLAN_KEY — plan vs API billing lane split (#11267) (#11267) *(2026-08-15)*
+- `2228982` — chore(rc): merge origin/main into rc/2026-08-16-0923 to clear DIRTY promotion state *(2026-08-16)*
+- `a08bf72` — feat(find-filing): class-key fold layer for pattern-shaped find-issues (#11292) (#11324) (#11324) *(2026-08-16)*
+- `27f42fe` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-15)*
 - `1a381ff` — rc: merge main back into rc/2026-08-15-2032 (#11216 manual bridge) *(2026-08-15)*
 - `4718776` — chore(arch): refresh generated artifacts after main merge-back *(2026-08-15)*
 - `25dc931` — rc: merge main back into rc/2026-08-15-1628 (#11216 manual bridge) *(2026-08-15)*
