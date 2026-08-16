@@ -660,3 +660,59 @@ class TestPlanReviewTiering:
         )
         await phase._write_plan_records(task, PlanResultFactory.create(issue_number=77))
         reviewer.review.assert_awaited()
+
+
+class TestPlannerLiteTier:
+    """#11298 planner-side tiering: _forced_plan_scale gate matrix."""
+
+    def _phase(self, config, *, complexity, route_backs=0, escalated=False):
+        from types import SimpleNamespace
+
+        from plan_phase import PlanPhase
+
+        phase = object.__new__(PlanPhase)
+        phase._config = config
+        record = (
+            SimpleNamespace(payload={"complexity_score": complexity})
+            if complexity is not None
+            else None
+        )
+        phase._issue_cache = SimpleNamespace(latest_classification=lambda _id: record)
+        phase._state = SimpleNamespace(get_route_back_count=lambda _id: route_backs)
+        phase._has_escalation_label = lambda _issue: escalated
+        return phase
+
+    def _issue(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(id=88)
+
+    def test_simple_issue_forces_lite(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 5})
+        phase = self._phase(config, complexity=3)
+        assert phase._forced_plan_scale(self._issue()) == "lite"
+
+    def test_complex_issue_keeps_heuristics(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 5})
+        phase = self._phase(config, complexity=8)
+        assert phase._forced_plan_scale(self._issue()) is None
+
+    def test_cycled_issue_keeps_heuristics(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 5})
+        phase = self._phase(config, complexity=2, route_backs=1)
+        assert phase._forced_plan_scale(self._issue()) is None
+
+    def test_escalated_issue_keeps_heuristics(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 5})
+        phase = self._phase(config, complexity=2, escalated=True)
+        assert phase._forced_plan_scale(self._issue()) is None
+
+    def test_unclassified_issue_keeps_heuristics(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 5})
+        phase = self._phase(config, complexity=None)
+        assert phase._forced_plan_scale(self._issue()) is None
+
+    def test_zero_threshold_disables_forcing(self, config) -> None:
+        config = config.model_copy(update={"planner_lite_min_complexity": 0})
+        phase = self._phase(config, complexity=1)
+        assert phase._forced_plan_scale(self._issue()) is None

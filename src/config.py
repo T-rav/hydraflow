@@ -2653,6 +2653,20 @@ class HydraFlowConfig(BaseModel):
             "disables tiering (every plan reviewed, pre-#11298 behavior)."
         ),
     )
+    planner_lite_min_complexity: int = Field(
+        default=5,
+        ge=0,
+        le=10,
+        description=(
+            "Force the lite plan scale for issues triaged at or below this "
+            "complexity (#11298 size tiering, planner side: the token report "
+            "measured the planner at 44% of all factory tokens; a simple "
+            "issue gets the existing lite-plan prompt instead of the full "
+            "exploration treatment). Cycled, escalated, or unclassified "
+            "issues always fall back to heuristic scale detection, and a "
+            "routed-back issue replans at full scale. 0 disables forcing."
+        ),
+    )
     max_shape_turns: int = Field(
         default=10,
         ge=2,

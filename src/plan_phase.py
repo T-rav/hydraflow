@@ -38,6 +38,7 @@ from phase_utils import (
     run_refilling_pool,
     store_lifecycle,
 )
+from plan_constants import PlanScale
 from plan_phase_wiki_ingest import PlanWikiIngestMixin
 from planner import PlannerRunner
 from repo_wiki import RepoWikiStore
@@ -548,8 +549,18 @@ class PlanPhase(PlanWikiIngestMixin):
         The implement-side skill gauntlet still reviews the CODE either way —
         this trades plan-stage ceremony, not merge safety.
         """
-        complexity = self._issue_complexity(issue)
         threshold = int(getattr(self._config, "plan_review_min_complexity", 0))
+        return self._tier_eligible(issue, threshold)
+
+    def _tier_eligible(self, issue: Task, threshold: int) -> tuple[bool, int]:
+        """Shared #11298 tier guard: is *issue* simple enough for a light path?
+
+        Returns ``(eligible, complexity)``. Eligible only when ALL hold:
+        the threshold is enabled (> 0), triage scored the issue at or below
+        it, the issue has never been routed back (a cycled plan is evidence
+        the cheap path failed), and it carries no escalation label.
+        """
+        complexity = self._issue_complexity(issue)
         if threshold <= 0:
             return False, complexity
         if complexity > threshold:
@@ -559,6 +570,29 @@ class PlanPhase(PlanWikiIngestMixin):
         if self._has_escalation_label(issue):
             return False, complexity
         return True, complexity
+
+    def _forced_plan_scale(self, issue: Task) -> PlanScale | None:
+        """#11298 size tiering, planner side: force the lite plan scale?
+
+        Returns ``"lite"`` when the issue passes the shared tier guard
+        against ``config.planner_lite_min_complexity``, else ``None`` (the
+        planner falls back to its own heuristic scale detection). Rides the
+        existing lite-plan prompt/validation machinery — no new prompt
+        branch. Self-healing escape valve: a lite plan that fails review
+        routes back, and the route-back count then disqualifies the issue
+        from tiering, so the next round plans at full scale.
+        """
+        threshold = int(getattr(self._config, "planner_lite_min_complexity", 0))
+        eligible, complexity = self._tier_eligible(issue, threshold)
+        if eligible:
+            logger.info(
+                "Issue #%d complexity %d <= %d — forcing lite plan scale (#11298)",
+                issue.id,
+                complexity,
+                threshold,
+            )
+            return "lite"
+        return None
 
     def _should_discover_helper(self, issue: Task) -> bool:
         """ADR-0107 planner decision gate: run the discover helper before planning?
@@ -1753,6 +1787,7 @@ class PlanPhase(PlanWikiIngestMixin):
                 worker_id=idx,
                 research_context=research_context,
                 guidance=human_guidance,
+                force_scale=self._forced_plan_scale(issue),
             )
         finally:
             self._planners.clear_tracing_context()
