@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T12:13:22.958726+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3427
+superseded_by: 3719
 ---
 
 # Agent-asset roots force full suite, not dependent mapping

@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11337
 source_phase: plan
 created_at: 2026-08-16T11:25:49.892531+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Regression pins are contracts — implement, don't rewrite
