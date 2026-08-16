@@ -6015,6 +6015,12 @@ class HydraFlowConfig(BaseModel):
             self.hitl_label,
             self.hitl_active_label,
             self.hitl_autofix_label,
+            # #11298 light-lane claim label — omitted here it would never be
+            # cleared by swap_pipeline_labels (the #10785 stuck-stage-label
+            # class): the exhaustion fallback's swap to planner_label would
+            # leave the claim on forever, re-polled every tick while the plan
+            # queue races the same issue.
+            self.light_autofix_label,
             # ``diagnose`` and ``parked`` are route-back STAGES (the docstring
             # for ``in_progress_label`` below enumerates "hitl/diagnose/parked/
             # ready" as the swap targets) — but were omitted here, so

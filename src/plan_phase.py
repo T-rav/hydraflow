@@ -1550,6 +1550,11 @@ class PlanPhase(PlanWikiIngestMixin):
         """
         if not self._config.auto_agent_light_intake_enabled:
             return False
+        if not self._config.auto_agent_preflight_enabled:
+            # Stranding guard: routing claims the issue out of every queue,
+            # so never route when the consuming loop is config-disabled —
+            # the claim label has no TTL redrive of its own.
+            return False
         eligible, complexity = self._tier_eligible(
             issue, self._config.auto_agent_light_max_complexity
         )

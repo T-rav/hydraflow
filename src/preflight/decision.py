@@ -86,6 +86,7 @@ async def apply_decision(
     config: Any | None = None,
     ctx: Any | None = None,
     hitl_widened: bool = False,
+    light_lane: bool = False,
     origin_label: str | None = None,
 ) -> dict[str, Any]:
     """Apply labels + comment for a single attempt's result.
@@ -189,6 +190,16 @@ async def apply_decision(
             "decomposed": True,
             "hitl_widened": hitl_widened,
         }
+
+    if light_lane and result.status == "resolved":
+        # #11298 light lane, success path: the agent minted a PR — route the
+        # issue to the review stage so ReviewPhase discovers it (the review
+        # queue is review_label-driven; without this swap the PR is
+        # orphaned). The swap also drops the light claim label
+        # (light_autofix_label rides in all_pipeline_labels).
+        review = config.review_label[0] if config is not None else "hydraflow-review"
+        await pr_port.swap_pipeline_labels(issue_number, review)
+        state.reset_issue_attempts(issue_number)
 
     if hitl_widened:
         hitl_return = config.hitl_label[0] if config is not None else "hydraflow-hitl"

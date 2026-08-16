@@ -513,6 +513,13 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             sub_labels = sorted(labels - {"hitl-escalation"} - hitl_family)
             origin = self._state.get_hitl_origin(issue_number)
             sub_label = self._playbook_stem_for_origin(origin)
+        elif light:
+            # #11298: a light-lane issue is a fresh BUILD task, not an
+            # escalation — route to the build-framed playbook and keep the
+            # claim label out of the sub-label pool (it would otherwise be
+            # picked as sub_label and remove_label'd on resolve).
+            sub_labels = sorted(labels - set(self._config.light_autofix_label))
+            sub_label = "auto-light"
         else:
             sub_labels = sorted(labels - {"hitl-escalation"})
             sub_label = sub_labels[0] if sub_labels else "_default"
@@ -672,6 +679,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             config=self._config,
             ctx=ctx,
             hitl_widened=widened,
+            light_lane=light,
             origin_label=origin,
         )
 

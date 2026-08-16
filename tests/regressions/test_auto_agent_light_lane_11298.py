@@ -102,3 +102,70 @@ async def test_unscored_issue_never_routes() -> None:
     state = _state_for()
     assert await phase._route_light_lane(state["issue"], state) is False
     phase._prs.swap_pipeline_labels.assert_not_awaited()
+
+
+def test_claim_label_rides_all_pipeline_labels() -> None:
+    """BLOCKING review finding (the #10785 stuck-stage-label class): the
+    claim label must be cleared by every swap_pipeline_labels call."""
+    config = HydraFlowConfig()
+    assert "hydraflow-auto-light" in config.all_pipeline_labels
+
+
+@pytest.mark.asyncio
+async def test_resolved_light_issue_routes_to_review() -> None:
+    """BLOCKING review finding: the success path must land the issue on
+    review_label so ReviewPhase discovers the minted PR."""
+    from unittest.mock import MagicMock
+
+    from preflight.decision import apply_decision
+
+    pr_port = SimpleNamespace(
+        swap_pipeline_labels=AsyncMock(),
+        add_labels=AsyncMock(),
+        remove_label=AsyncMock(),
+        post_comment=AsyncMock(),
+    )
+    state = MagicMock()
+    from preflight.decision import PreflightResult
+
+    result = PreflightResult(
+        status="resolved",
+        pr_url="https://x/pr/1",
+        diagnosis="done",
+        cost_usd=0.1,
+        wall_clock_s=10.0,
+        tokens=1000,
+    )
+    config = HydraFlowConfig()
+    await apply_decision(
+        issue_number=42,
+        sub_label="auto-light",
+        result=result,
+        pr_port=pr_port,
+        state=state,
+        max_attempts=3,
+        config=config,
+        light_lane=True,
+    )
+    pr_port.swap_pipeline_labels.assert_any_await(42, config.review_label[0])
+
+
+@pytest.mark.asyncio
+async def test_stranding_guard_blocks_when_loop_disabled() -> None:
+    config = HydraFlowConfig(
+        auto_agent_light_intake_enabled=True, auto_agent_preflight_enabled=False
+    )
+    phase = _phase(config, complexity=1)
+    state = _state_for()
+    assert await phase._route_light_lane(state["issue"], state) is False
+    phase._prs.swap_pipeline_labels.assert_not_awaited()
+
+
+def test_light_playbook_registered_with_build_framing() -> None:
+    """MAJOR review finding: light issues must get build framing, not the
+    escalation-remediation default."""
+    from preflight.playbooks import get_playbook
+
+    playbook = get_playbook("auto-light")
+    assert playbook.name == "auto-light"
+    assert "not an escalation" in playbook.persona
