@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-15T11:44:52.171360+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 2748
+superseded_by: 3004
 ---
 
 # OTel ProxyTracer lru_cache silently swallows spans against dead providers

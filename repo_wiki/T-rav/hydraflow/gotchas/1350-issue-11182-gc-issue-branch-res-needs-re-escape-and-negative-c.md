@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11182
 source_phase: plan
 created_at: 2026-08-14T23:30:09.293989+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11182 closed
 ---
 
 # GC _ISSUE_BRANCH_RES needs re.escape and negative-case pins

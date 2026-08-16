@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from comment_formatter import SelfReviewError
-from config import HydraFlowConfig
+from config import AUTO_AGENT_BRANCH_PREFIX, HydraFlowConfig
 from dedup_store import DedupStore
 from events import EventType, HydraFlowEvent
 from merge_policy import (
@@ -30,14 +30,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.dependabot_merge_loop")
 
-# Factory-owned branch prefix for Auto-Agent (preflight) PRs. These are opened
-# by the auto-agent subprocess under the ambient gh token (the owner account),
-# so they are NOT in ``settings.authors`` and the review→merge pipeline ignores
-# them (it keys on ``hydraflow-review`` + ``agent/issue-N``). Without this they
-# never land — they only get rebased by MergeStateWatcher — and pile up. The
-# prefix is exact and never used by a human or by the normal pipeline
-# (``agent/issue-N``), so matching on it is safe.
-_AUTO_AGENT_BRANCH_PREFIX = "agent/auto-agent-"
+# Auto-Agent (preflight) PRs are opened by the auto-agent subprocess under the
+# ambient gh token (the owner account), so they are NOT in ``settings.authors``
+# and the review→merge pipeline ignores them (it keys on ``hydraflow-review``
+# + ``agent/issue-N``). Without this they never land — they only get rebased
+# by MergeStateWatcher — and pile up. ``AUTO_AGENT_BRANCH_PREFIX`` (imported
+# from ``config``, shared with the loop that mints it and the GC loop that
+# reaps stale ones — #11182) is exact and never used by a human or by the
+# normal pipeline (``agent/issue-N``), so matching on it is safe.
 
 # Factory-owned branch prefixes for the UL + pricing maintenance loops. Like the
 # auto-agent PRs above, these are opened under the ambient factory token
@@ -322,7 +322,7 @@ class DependabotMergeLoop(BaseBackgroundLoop):
                 or _normalize_author(pr.author) in bot_authors
                 # Factory PRs opened under a *user* token (is_bot=False):
                 # auto-agent preflight + the UL/pricing/wiki maintenance loops.
-                or pr.branch.startswith(_AUTO_AGENT_BRANCH_PREFIX)
+                or pr.branch.startswith(AUTO_AGENT_BRANCH_PREFIX)
                 or pr.branch.startswith(_FACTORY_MAINTENANCE_BRANCH_PREFIXES)
                 # Class 5 (#9889): human-prefix branches, kill-switch gated.
                 or self._is_human_shepherd_pr(pr)
