@@ -1818,6 +1818,24 @@ class PlanPhase(PlanWikiIngestMixin):
         issue = state["issue"]
         adv = state["adv"]
         result = state["result"]
+        skip, complexity = self._skip_plan_review(issue)
+        if skip:
+            # #11298 light tier skips the council too: the council critiques
+            # a deliberately-short LITE plan against full-scale expectations,
+            # raising design-decision concerns that no reviewer stage will
+            # resolve — observed live 2026-08-16 as a mass HITL cascade
+            # (every light-tier issue routed to human-required at the
+            # ready-swap design gate). The gate itself stays armed: concerns
+            # raised by earlier stages still route genuinely ambiguous
+            # issues to HITL, and cycled issues get the full stack again.
+            logger.info(
+                "PlanCouncil skipped for issue #%d — light-tier "
+                "(complexity %d; #11298)",
+                issue.id,
+                complexity,
+            )
+            state["result"] = result
+            return state
         if self._council_agents is not None and result.success and result.plan:
             try:
                 await self._run_plan_council(issue, adv, result.plan)
