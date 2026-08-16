@@ -281,8 +281,64 @@ class TestComputeSummary:
         assert "rolling_averages" in result
         assert "cohorts" in result
         assert "regressions" in result
+        assert "metric_metadata" in result
         assert "memory_available" in result["cohorts"]
         assert "memory_unavailable" in result["cohorts"]
+
+
+# ---------------------------------------------------------------------------
+# metric_metadata — the #11118 falsifiability convention for UI tiles
+# ---------------------------------------------------------------------------
+
+
+class TestMetricMetadata:
+    def test_covers_every_rolling_average_metric(self):
+        from factory_health import (
+            RETROSPECTIVES_SOURCE,
+            ROLLING_WINDOW_RUNS,
+            metric_metadata,
+        )
+
+        meta = metric_metadata()
+        expected_keys = {
+            "plan_accuracy_pct",
+            "first_pass_rate",
+            "quality_fix_rounds",
+            "ci_fix_rounds",
+            "duration_seconds",
+        }
+        assert set(meta.keys()) == expected_keys
+        for key, entry in meta.items():
+            assert entry["numerator"], key
+            assert entry["denominator"], key
+            assert entry["window_runs"] == ROLLING_WINDOW_RUNS
+            assert entry["data_source"] == RETROSPECTIVES_SOURCE
+            # The tile delta's baseline description is intentionally NOT
+            # here — it's generated in the frontend from the same `values`
+            # array the delta itself is computed from (see
+            # FactoryHealthSection.jsx's MetricCard), not hand-copied here.
+            assert "delta_baseline" not in entry, key
+
+    def test_window_runs_matches_the_rolling_average_calculation(self):
+        # The claim a tile's popover makes ("window: last N runs") must be
+        # the literal same constant the calculation uses — not a second
+        # number a future edit could let drift out of sync.
+        from factory_health import (
+            ROLLING_WINDOW_RUNS,
+            compute_rolling_averages,
+            metric_metadata,
+        )
+
+        entries = [
+            _make_entry(issue_number=i) for i in range(1, ROLLING_WINDOW_RUNS + 6)
+        ]
+        result = compute_rolling_averages(entries)
+        assert (
+            len(result["plan_accuracy_pct"]) == len(entries) - ROLLING_WINDOW_RUNS + 1
+        )
+        assert (
+            metric_metadata()["plan_accuracy_pct"]["window_runs"] == ROLLING_WINDOW_RUNS
+        )
 
 
 # ---------------------------------------------------------------------------

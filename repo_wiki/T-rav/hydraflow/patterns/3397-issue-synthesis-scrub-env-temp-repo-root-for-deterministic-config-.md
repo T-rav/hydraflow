@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T08:05:57.760185+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3260
+superseded_by: 3544
 ---
 
 # Scrub env + temp repo_root for deterministic config baselines
