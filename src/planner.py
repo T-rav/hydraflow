@@ -54,6 +54,7 @@ class PlannerRunner(BaseRunner):
         worker_id: int = 0,
         research_context: str = "",
         guidance: str = "",
+        force_scale: PlanScale | None = None,
     ) -> PlanResult:
         """Run the planning agent for *task*.
 
@@ -69,6 +70,12 @@ class PlannerRunner(BaseRunner):
         folded into the prompt fenced via :func:`fenced_steering_guidance`.
         Empty string when the feature is off or no guidance was posted —
         behavior is then unchanged.
+
+        ``force_scale`` (#11298 size tiering) overrides heuristic scale
+        detection when the caller already knows the issue is simple —
+        :class:`PlanPhase` passes ``"lite"`` for issues triaged at or below
+        ``config.planner_lite_min_complexity``. ``None`` keeps the existing
+        :meth:`_detect_plan_scale` behavior unchanged.
         """
         start = time.monotonic()
         result = PlanResult(issue_number=task.id)
@@ -84,8 +91,13 @@ class PlannerRunner(BaseRunner):
             return result
 
         try:
-            scale = self._detect_plan_scale(task)
-            logger.info("Issue #%d classified as %s plan", task.id, scale)
+            scale = force_scale or self._detect_plan_scale(task)
+            logger.info(
+                "Issue #%d classified as %s plan%s",
+                task.id,
+                scale,
+                " (forced by complexity tier)" if force_scale else "",
+            )
 
             cmd = self._build_command()
             prompt, prompt_stats = await self._build_prompt_with_stats(

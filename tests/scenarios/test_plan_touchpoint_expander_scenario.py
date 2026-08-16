@@ -373,3 +373,58 @@ class TestS4LightTierSkipsReview:
         assert captured["has_blocking"] is False
         assert "light-tier" in captured["review_text"]
         assert captured["findings"] == []
+
+
+# ---------------------------------------------------------------------------
+# Scenario 5: #11298 planner-side tiering — a triage-scored simple issue
+# plans at forced-lite scale AND skips the review spawn (both tiers firing
+# on the same light path).
+# ---------------------------------------------------------------------------
+
+
+class TestS5LightTierForcesLitePlan:
+    """Simple issue: planner receives force_scale='lite', reviewer never spawns."""
+
+    async def test_lite_scale_forced_and_review_skipped(self, mock_world) -> None:
+        world = mock_world
+        world.add_issue(
+            305,
+            "Fix typo in operator panel label",
+            "One-line copy fix.",
+            labels=["hydraflow-plan"],
+        )
+        harness = world.harness
+        phase = harness.plan_phase
+
+        reviewer = _ScriptedReviewer([])  # any call would raise: no scripts
+        phase._plan_reviewer = reviewer
+        captured = _wire_issue_cache(phase)
+
+        class _Classified:
+            payload = {"complexity_score": 2}
+
+        phase._issue_cache.latest_classification = lambda _id: _Classified()
+
+        plan_kwargs: list[dict] = []
+
+        async def _planner_plan(*_args: Any, **kwargs: Any) -> PlanResult:
+            plan_kwargs.append(kwargs)
+            return PlanResultFactory.create(
+                issue_number=305,
+                success=True,
+                plan="Step 1: fix the label",
+                summary="Done",
+                use_defaults=True,
+            )
+
+        harness.planners.plan = _planner_plan
+        issue = TaskFactory.create(id=305, tags=["hydraflow-plan"])
+        harness.store.get_plannable = supply_once([issue])
+
+        await phase.plan_issues()
+
+        # Planner-side tier: the spawn was asked for a lite-scale plan.
+        assert plan_kwargs and plan_kwargs[0].get("force_scale") == "lite"
+        # Review-side tier: no reviewer spawn, READY-gate record intact.
+        assert reviewer.calls == []
+        assert captured["has_blocking"] is False
