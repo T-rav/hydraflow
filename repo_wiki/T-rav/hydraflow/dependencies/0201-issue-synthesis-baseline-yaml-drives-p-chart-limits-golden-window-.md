@@ -1,13 +1,12 @@
 ---
-id: 0186
+id: 0201
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-15T07:06:05.820816+00:00
-status: superseded
+created_at: 2026-08-16T02:51:17.452933+00:00
+status: active
 corroborations: 1
-supersedes: 0174
-superseded_by: 0201
+supersedes: 0186
 ---
 
 # Baseline YAML drives p-chart limits; golden-window mean is centerline

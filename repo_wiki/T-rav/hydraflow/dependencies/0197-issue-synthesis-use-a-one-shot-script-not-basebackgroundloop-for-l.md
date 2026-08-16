@@ -1,13 +1,12 @@
 ---
-id: 0182
+id: 0197
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-15T07:06:05.819405+00:00
-status: superseded
+created_at: 2026-08-16T02:51:17.451623+00:00
+status: active
 corroborations: 1
-supersedes: 0170
-superseded_by: 0197
+supersedes: 0182
 ---
 
 # Use a one-shot script, not BaseBackgroundLoop, for loop analysis

@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11276
 source_phase: plan
 created_at: 2026-08-15T21:04:18.934656+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Cross-repo gh defaults: labels=[], origin/HEAD, docs-only preflight
