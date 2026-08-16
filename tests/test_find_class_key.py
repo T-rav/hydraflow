@@ -199,6 +199,18 @@ class TestExtractFoldedSites:
             "src/bar.py:10",
         ]
 
+    def test_stops_at_first_non_list_line_in_the_section(self) -> None:
+        # A line under the heading that isn't a "- ..." bullet ends the
+        # roster scan there -- fail-closed rather than skip over it and
+        # risk picking up an unrelated bullet list further down the body.
+        body = (
+            "## Problem\n\ndetails\n\n## Folded sites\n"
+            "- first site (site: `src/foo.py:39`)\n"
+            "not a bullet line\n"
+            "- never reached (site: `src/bar.py:10`)\n"
+        )
+        assert extract_folded_sites(body) == ["src/foo.py:39"]
+
 
 # ---------------------------------------------------------------------------
 # match_class
