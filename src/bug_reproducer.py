@@ -189,6 +189,9 @@ class BugReproducer(BaseRunner):
             tool=self._config.planner_tool,
             model=self._config.planner_model,
             disallowed_tools="NotebookEdit",
+            # ADR-0092: the reproduction prompt carries the reporter's issue
+            # body verbatim — untrusted text driving a repo-touching spawn.
+            restricted=True,
         )
 
     # ------------------------------------------------------------------

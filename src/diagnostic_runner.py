@@ -117,6 +117,9 @@ class DiagnosticRunner(BaseRunner):
         return build_agent_command(
             tool=self._config.implementation_tool,
             model=self._config.model,
+            # ADR-0092: the diagnose/fix prompts interpolate the issue body,
+            # its comments, and CI logs — all attacker-influencable text.
+            restricted=True,
         )
 
     def _mockworld_diagnosis(self) -> DiagnosisResult | None:
