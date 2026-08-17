@@ -32,6 +32,8 @@ export const initialState = {
   adrDrafts: [],
   metrics: null,
   systemAlert: null,
+  //: #11306 advisory notices (severity==='warning') — bell, not banner.
+  advisoryNotices: [],
   intents: [],
   epics: [],
   epicReleasing: null, // { epicNumber, progress, total } or null
@@ -667,11 +669,37 @@ export function reducer(state, action) {
       }
     }
 
-    case 'system_alert':
-      return { ...addEvent(state, action), systemAlert: action.data }
+    case 'system_alert': {
+      // #11306: severity routes the destination. ADVISORY notices (an epic
+      // gone stale, a fleet-vitals shadow alarm) accumulate in the notice
+      // list behind the bell; BLOCKING ones (credit pause, factory fault,
+      // HITL) claim the banner. Unclassified defaults to BLOCKING —
+      // fail-loud: a new alert kind must be demoted deliberately, never by
+      // omission.
+      const advisory = action.data?.severity === 'warning'
+      if (!advisory) {
+        return { ...addEvent(state, action), systemAlert: action.data }
+      }
+      const notice = { ...action.data, id: `${action.data?.kind || 'notice'}:${action.data?.message || ''}` }
+      const withoutDup = state.advisoryNotices.filter(n => n.id !== notice.id)
+      return {
+        ...addEvent(state, action),
+        // Newest first, capped — the bell is a digest, not a log.
+        advisoryNotices: [notice, ...withoutDup].slice(0, 50),
+      }
+    }
 
     case 'CLEAR_SYSTEM_ALERT':
       return { ...state, systemAlert: null }
+
+    case 'DISMISS_ADVISORY_NOTICE':
+      return {
+        ...state,
+        advisoryNotices: state.advisoryNotices.filter(n => n.id !== action.id),
+      }
+
+    case 'DISMISS_ALL_ADVISORY_NOTICES':
+      return { ...state, advisoryNotices: [] }
 
     case 'error':
       return addEvent(state, action)
@@ -1964,6 +1992,8 @@ export function HydraFlowProvider({ children }) {
     updateBgWorkerInterval,
     updateBgWorkerWatchdogTimeout,
     dismissSystemAlert: useCallback(() => dispatch({ type: 'CLEAR_SYSTEM_ALERT' }), [dispatch]),
+    dismissAdvisoryNotice: useCallback(id => dispatch({ type: 'DISMISS_ADVISORY_NOTICE', id }), [dispatch]),
+    dismissAllAdvisoryNotices: useCallback(() => dispatch({ type: 'DISMISS_ALL_ADVISORY_NOTICES' }), [dispatch]),
     refreshCreditStatus,
     clearCreditPause,
     refreshHitl: fetchHitlItems,

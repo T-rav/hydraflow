@@ -1283,6 +1283,11 @@ class EpicManager:
                             message=f"Epic #{epic.epic_number} is stale "
                             f"(no activity for {self._config.epic_stale_days} days)",
                             source="epic_monitor",
+                            # #11306: ADVISORY — routes to the notice bell,
+                            # not the banner. A stale epic is information;
+                            # the banner is reserved for things the operator
+                            # must act on now (credit pause, fault, HITL).
+                            severity="warning",
                             epic_number=epic.epic_number,
                         ),
                     )
