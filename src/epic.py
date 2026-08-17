@@ -1251,6 +1251,21 @@ class EpicManager:
         finally:
             self._release_jobs.pop(epic_number, None)
 
+    async def _is_closed_on_github(self, epic_number: int) -> bool:
+        """True when the epic issue is closed on GitHub (#11371).
+
+        Fail-soft: an unreadable state returns False, so a transient API
+        failure degrades to today's behaviour (alert) rather than
+        silently suppressing a real stale epic.
+        """
+        try:
+            state = await self._prs.get_issue_state(epic_number)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.debug("Epic #%d GitHub state unreadable: %s", epic_number, exc)
+            return False
+        return str(state).upper() in {"CLOSED", "COMPLETED", "NOT_PLANNED"}
+
     async def check_stale_epics(self) -> list[int]:
         """Find epics with no recent activity and post a warning comment."""
         stale: list[int] = []
@@ -1258,6 +1273,19 @@ class EpicManager:
             if epic.closed:
                 continue
             if not self._is_stale(epic):
+                continue
+            # #11371: local ``closed`` is a cache, GitHub is the source of
+            # truth (ADR-0041). An epic closed on GitHub but still open in
+            # state re-emitted its stale alert EVERY cycle forever — the
+            # banner resurrected after every dismiss. Reconcile before
+            # alerting and heal the flag; only a genuinely-open epic alarms.
+            if await self._is_closed_on_github(epic.epic_number):
+                logger.info(
+                    "Epic #%d closed on GitHub — healing stale local state "
+                    "instead of alerting (#11371)",
+                    epic.epic_number,
+                )
+                self._state.close_epic(epic.epic_number)
                 continue
             stale.append(epic.epic_number)
             try:
