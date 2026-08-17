@@ -44,7 +44,7 @@ def _manager(*, issue_state: str | Exception, epic_number: int = 10914):
     closed: list[int] = []
     mgr._state = SimpleNamespace(
         get_all_epic_states=lambda: {str(epic_number): epic},
-        close_epic=lambda n: closed.append(n),
+        close_epic=closed.append,
     )
     get_state = (
         AsyncMock(side_effect=issue_state)
