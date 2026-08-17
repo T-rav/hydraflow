@@ -15,9 +15,11 @@ from __future__ import annotations
 import pytest
 
 from find_class_key import (
+    CLASS_MARKER_TITLE_FLOOR,
     CLASS_OVERLAP_THRESHOLD,
     compute_class_key,
     extract_class_key,
+    extract_folded_sites,
     file_or_fold,
     match_class,
     normalize_needle,
@@ -165,6 +167,53 @@ class TestTitleTokenOverlap:
 
 
 # ---------------------------------------------------------------------------
+# extract_folded_sites
+# ---------------------------------------------------------------------------
+
+
+class TestExtractFoldedSites:
+    def test_empty_body_returns_empty_list(self) -> None:
+        assert extract_folded_sites("") == []
+
+    def test_body_without_heading_returns_empty_list(self) -> None:
+        assert extract_folded_sites("## Problem\n\nno sites section here\n") == []
+
+    def test_legacy_lines_without_site_tag_use_title_text_as_identifier(self) -> None:
+        body = (
+            "## Problem\n\ndetails\n\n## Folded sites\n"
+            "- first site title\n"
+            "- second site title\n"
+        )
+        assert extract_folded_sites(body) == [
+            "first site title",
+            "second site title",
+        ]
+
+    def test_lines_with_explicit_site_tag_return_the_tagged_identifier(self) -> None:
+        body = (
+            "## Problem\n\ndetails\n\n## Folded sites\n"
+            "- Human title A (site: `src/foo.py:39`)\n"
+            "- Human title B (site: `src/bar.py:10`)\n"
+        )
+        assert extract_folded_sites(body) == [
+            "src/foo.py:39",
+            "src/bar.py:10",
+        ]
+
+    def test_stops_at_first_non_list_line_in_the_section(self) -> None:
+        # A line under the heading that isn't a "- ..." bullet ends the
+        # roster scan there -- fail-closed rather than skip over it and
+        # risk picking up an unrelated bullet list further down the body.
+        body = (
+            "## Problem\n\ndetails\n\n## Folded sites\n"
+            "- first site (site: `src/foo.py:39`)\n"
+            "not a bullet line\n"
+            "- never reached (site: `src/bar.py:10`)\n"
+        )
+        assert extract_folded_sites(body) == ["src/foo.py:39"]
+
+
+# ---------------------------------------------------------------------------
 # match_class
 # ---------------------------------------------------------------------------
 
@@ -180,9 +229,82 @@ class TestMatchClass:
             }
         ]
         target = match_class(
-            key, "branch namespace missing", "another site title", issues
+            key,
+            "branch namespace missing",
+            "branch namespace parser gap at another site",
+            issues,
         )
         assert target == 11188
+
+    def test_marker_equal_needle_shared_but_title_unrelated_does_not_fold(
+        self,
+    ) -> None:
+        # The needle-token backstop alone is not sufficient: 'branch' is a
+        # coincidental shared word, but the candidate's title has nothing to
+        # do with the matched issue's title -- the title-affinity floor
+        # must refuse this fold even though the needle backstop would pass.
+        key = compute_class_key("branch-parser", "branch namespace missing")
+        issues = [
+            {
+                "number": 11188,
+                "title": "branch namespace parser gap",
+                "body": f"details\n\n{render_marker(key)}\n",
+            }
+        ]
+        target = match_class(
+            key, "branch namespace missing", "totally unrelated finding", issues
+        )
+        assert target == 0
+
+    # {branch} shared of {branch, namespace, parser, gap} union 16 unique
+    # filler tokens -- 1 / (4 + 17 - 1) == 0.05, CLASS_MARKER_TITLE_FLOOR
+    # exactly. One fewer filler word (17 unique, union 21) drops just below
+    # it. Both titles are asserted against a live `title_token_overlap` call
+    # rather than a hard-coded literal, so a floor-arithmetic typo here
+    # can't silently drift from what CLASS_MARKER_TITLE_FLOOR actually is.
+    _TITLE_AT_FLOOR = (
+        "branch alpha bravo charlie delta echo foxtrot golf hotel india "
+        "juliett kilo lima mike november oscar papa"
+    )
+    _TITLE_JUST_BELOW_FLOOR = _TITLE_AT_FLOOR + " quebec"
+
+    def test_marker_equal_title_affinity_at_floor_boundary_folds(self) -> None:
+        key = compute_class_key("branch-parser", "branch namespace missing")
+        issues = [
+            {
+                "number": 11188,
+                "title": "branch namespace parser gap",
+                "body": f"details\n\n{render_marker(key)}\n",
+            }
+        ]
+        overlap = title_token_overlap(
+            self._TITLE_AT_FLOOR, "branch namespace parser gap"
+        )
+        assert overlap == pytest.approx(CLASS_MARKER_TITLE_FLOOR)
+        target = match_class(
+            key, "branch namespace missing", self._TITLE_AT_FLOOR, issues
+        )
+        assert target == 11188
+
+    def test_marker_equal_title_affinity_just_below_floor_does_not_fold(
+        self,
+    ) -> None:
+        key = compute_class_key("branch-parser", "branch namespace missing")
+        issues = [
+            {
+                "number": 11188,
+                "title": "branch namespace parser gap",
+                "body": f"details\n\n{render_marker(key)}\n",
+            }
+        ]
+        overlap = title_token_overlap(
+            self._TITLE_JUST_BELOW_FLOOR, "branch namespace parser gap"
+        )
+        assert overlap < CLASS_MARKER_TITLE_FLOOR
+        target = match_class(
+            key, "branch namespace missing", self._TITLE_JUST_BELOW_FLOOR, issues
+        )
+        assert target == 0
 
     def test_marker_present_but_different_key_does_not_fold(self) -> None:
         other_key = compute_class_key("adr-pin", "non-self-retiring adr pin")
@@ -379,6 +501,164 @@ class TestFileOrFold:
         )
         assert number == 9001
         assert len(prs.create_calls) == 1
+
+    async def test_site_identifier_dedupes_across_reworded_titles(self) -> None:
+        # A finder rediscovers the SAME site (file:line) on a later tick but
+        # reworded the finding title -- idempotency must key off the site
+        # identifier, not the exact title text (#11328).
+        prs = _FakePRPort()
+        first = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan misses agent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site="src/branch_gc_scan.py:39",
+        )
+        second = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan.py line 39 still misses agent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site="src/branch_gc_scan.py:39",
+        )
+        assert second == first
+        assert len(prs.comment_calls) == 0
+        assert len(prs.update_calls) == 0
+
+    async def test_distinct_site_same_class_appends_new_roster_entry(self) -> None:
+        prs = _FakePRPort()
+        first = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan misses agent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site="src/branch_gc_scan.py:39",
+        )
+        second = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "pr_manager misses agent/auto-agent-<N>",
+            "## Problem\n\nsibling details",
+            ["hydraflow-find"],
+            site="src/pr_manager.py:3360",
+        )
+        assert second == first
+        assert len(prs.comment_calls) == 1
+        folded_body = prs.update_calls[-1][1]
+        assert extract_folded_sites(folded_body) == [
+            "src/branch_gc_scan.py:39",
+            "src/pr_manager.py:3360",
+        ]
+
+    async def test_title_with_embedded_newline_does_not_truncate_roster(
+        self,
+    ) -> None:
+        # A title containing a raw newline must not corrupt the rendered
+        # roster line into two physical lines -- extract_folded_sites stops
+        # at the first non-"- " line, so an unescaped newline would drop
+        # every site folded in after it (#11328 round-trip regression).
+        prs = _FakePRPort()
+        first = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan misses\nagent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site="src/branch_gc_scan.py:39",
+        )
+        second = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "pr_manager misses agent/auto-agent-<N>",
+            "## Problem\n\nsibling details",
+            ["hydraflow-find"],
+            site="src/pr_manager.py:3360",
+        )
+        assert second == first
+        folded_body = prs.update_calls[-1][1]
+        assert extract_folded_sites(folded_body) == [
+            "src/branch_gc_scan.py:39",
+            "src/pr_manager.py:3360",
+        ]
+
+        # The newline-titled site rediscovered on a later tick is still a
+        # true no-op -- proves the roster and the dedup check agree on the
+        # same (sanitized) identifier.
+        third = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan misses\nagent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site="src/branch_gc_scan.py:39",
+        )
+        assert third == first
+        assert len(prs.comment_calls) == 1
+        assert len(prs.update_calls) == 1
+
+    async def test_site_identifier_with_backtick_round_trips(self) -> None:
+        # A site identifier containing a backtick must not break the
+        # ``(site: `X`)`` delimiter -- a corrupted round trip would make the
+        # site permanently unrecognizable, re-folding (and re-commenting)
+        # every tick (#11328 round-trip regression).
+        prs = _FakePRPort()
+        site = "src/foo.py:39 (in `bar()`)"
+        first = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan misses agent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site=site,
+        )
+        second = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "branch_gc_scan.py line 39 still misses agent/auto-agent-<N>",
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+            site=site,
+        )
+        assert second == first
+        assert len(prs.comment_calls) == 0
+        assert len(prs.update_calls) == 0
+
+    async def test_site_omitted_falls_back_to_title_identity(self) -> None:
+        # No explicit site passed -- behavior must match pre-#11328 title-only
+        # idempotency exactly (backward compatibility for existing callers).
+        prs = _FakePRPort()
+        title = "branch_gc_scan misses agent/auto-agent-<N>"
+        first = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            title,
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+        )
+        second = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            title,
+            "## Problem\n\ndetails",
+            ["hydraflow-find"],
+        )
+        assert second == first
+        assert len(prs.comment_calls) == 0
+        assert len(prs.update_calls) == 0
 
     async def test_create_issue_zero_sentinel_propagates(self) -> None:
         class _ZeroCreatePRPort(_FakePRPort):

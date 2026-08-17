@@ -43,6 +43,19 @@ class StagingBisectStateMixin:
         self._data.last_green_rc_sha = sha
         self.save()
 
+    # --- rc_conflict_heal_attempts (DIRTY RC self-heal, #11216) ---
+
+    def get_rc_conflict_heal_attempts(self, rc_branch: str) -> int:
+        """Heal attempts already spent on *rc_branch*."""
+        return int(self._data.rc_conflict_heal_attempts.get(rc_branch, 0))
+
+    def bump_rc_conflict_heal_attempts(self, rc_branch: str) -> int:
+        """Record one heal attempt for *rc_branch*; return the new count."""
+        current = self.get_rc_conflict_heal_attempts(rc_branch) + 1
+        self._data.rc_conflict_heal_attempts[rc_branch] = current
+        self.save()
+        return current
+
     # --- consecutive_rc_failures (repeated-failure escalation, #9359) ---
 
     def get_consecutive_rc_failures(self) -> int:

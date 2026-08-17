@@ -30,6 +30,7 @@ from repo_wiki import (
 from staleness import evaluate as evaluate_staleness
 from subprocess_util import run_subprocess
 from wiki_anchor_gate import config_field_vocabulary
+from wiki_compile_state import WikiCompileState, topic_fingerprint
 from wiki_drift_detector import (
     apply_drift_markers,
     detect_drift,
@@ -317,6 +318,13 @@ class RepoWikiLoop(BaseBackgroundLoop):
         # this tick (#9954).
         anchor_vocab = config_field_vocabulary()
 
+        # #11373: last-compiled fingerprints live under the persistent data
+        # path — the wiki tree itself is an ephemeral worktree, so state
+        # kept there would vanish (and mtimes churn) every tick.
+        compile_state = WikiCompileState(
+            Path(self._config.data_path("wiki_compile_state.json"))
+        )
+
         for slug in repos:
             # Phase 1: Active lint — self-healing pass
             result = store.active_lint(slug, closed_issues=closed_issues)
@@ -371,12 +379,33 @@ class RepoWikiLoop(BaseBackgroundLoop):
                     # Compile at 5+ entries (not 2) to avoid burning LLM
                     # calls on small topics where synthesis adds little value.
                     if len(entries) >= 5:
+                        # #11373 fingerprint gate: an unchanged topic never
+                        # re-pays the synthesis spawn. A topic pinned over
+                        # the threshold by uncompilable entries used to
+                        # respawn every tick — 23% of all factory tokens.
+                        gate_key = f"{slug}:{topic}:legacy"
+                        fingerprint = topic_fingerprint(
+                            [topic_path.read_bytes()] if topic_path.exists() else []
+                        )
+                        if not compile_state.should_compile(gate_key, fingerprint):
+                            continue
                         try:
                             after = await self._wiki_compiler.compile_topic(
                                 store, slug, topic
                             )
                             if after < len(entries):
                                 total_compiled += len(entries) - after
+                            # Record the POST-compile content: synthesis
+                            # mutates the topic, so the pre-compile hash
+                            # would re-trigger next tick.
+                            compile_state.record(
+                                gate_key,
+                                topic_fingerprint(
+                                    [topic_path.read_bytes()]
+                                    if topic_path.exists()
+                                    else []
+                                ),
+                            )
                         except Exception as exc:  # noqa: BLE001
                             reraise_on_credit_or_bug(exc)
                             logger.warning(
@@ -395,10 +424,17 @@ class RepoWikiLoop(BaseBackgroundLoop):
                 if tracked_root is not None:
                     for topic in DEFAULT_TOPICS:
                         topic_dir = tracked_root / slug / topic
-                        active_count = sum(
-                            1 for _ in _iter_tracked_active_files(topic_dir)
+                        active_files = list(_iter_tracked_active_files(topic_dir))
+                        if len(active_files) < 5:
+                            continue
+                        # #11373 fingerprint gate (tracked layout): hash the
+                        # active per-entry files; unchanged content skips
+                        # the synthesis spawn entirely.
+                        gate_key = f"{slug}:{topic}:tracked"
+                        fingerprint = topic_fingerprint(
+                            [p.read_bytes() for p in active_files]
                         )
-                        if active_count < 5:
+                        if not compile_state.should_compile(gate_key, fingerprint):
                             continue
                         try:
                             synthesized = (
@@ -415,6 +451,15 @@ class RepoWikiLoop(BaseBackgroundLoop):
                             # collapses many entries into one or two.
                             if synthesized:
                                 total_compiled += synthesized
+                            compile_state.record(
+                                gate_key,
+                                topic_fingerprint(
+                                    [
+                                        p.read_bytes()
+                                        for p in _iter_tracked_active_files(topic_dir)
+                                    ]
+                                ),
+                            )
                         except Exception as exc:  # noqa: BLE001
                             reraise_on_credit_or_bug(exc)
                             logger.warning(
@@ -423,6 +468,8 @@ class RepoWikiLoop(BaseBackgroundLoop):
                                 topic,
                                 exc_info=True,
                             )
+
+        compile_state.save()
 
         stats = {
             "repos": len(repos),

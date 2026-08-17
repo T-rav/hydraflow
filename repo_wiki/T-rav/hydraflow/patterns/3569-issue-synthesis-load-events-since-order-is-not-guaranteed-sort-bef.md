@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T12:13:22.905771+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3422
+superseded_by: 3714
 ---
 
 # load_events_since order is not guaranteed — sort before streak math

@@ -85,7 +85,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
+.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -513,7 +513,16 @@ test-ui:
 # spending time on tests, and guarantees the same verdict as `make lint-check`.
 # pyright, bandit, pytest, and the UI vitest suite are parallelised after lint
 # passes.
+# #11219: the suite runs under a host-wide advisory lock. Two concurrent
+# full suites on one box oversubscribe it — workers get killed mid-run and
+# the survivor reports failures that pass in isolation (observed
+# repeatedly on 2026-08-16). The second run WAITS instead of racing;
+# waiting costs minutes, a contaminated red costs a debugging session.
+# Bypass with HYDRAFLOW_QUALITY_LOCK_DISABLE=1 (CI is one-suite-per-box).
 quality: deps lint-ul
+	@$(UV) python scripts/quality_host_lock.py -- $(MAKE) quality-unlocked
+
+quality-unlocked:
 	@echo "$(BLUE)Running quality checks in parallel...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && $(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]"
 	@cd $(HYDRAFLOW_DIR) && ( \

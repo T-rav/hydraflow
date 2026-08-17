@@ -1091,6 +1091,15 @@ class DiagnosisResult(BaseModel):
     fix_plan: str
     human_guidance: str
     affected_files: list[str] = Field(default_factory=list)
+    infra_failure: bool = Field(
+        default=False,
+        description=(
+            "True when the diagnosis itself failed for infrastructure "
+            "reasons (e.g. a failover-lane spawn broke the structured-"
+            "output contract, #11370) — the loop parks/retries instead of "
+            "escalating to HITL; the failure says nothing about the issue."
+        ),
+    )
 
 
 # --- Reviews ---
@@ -2329,6 +2338,10 @@ class StateData(BaseModel):
     # ``rc_consecutive_failure_escalation_threshold`` files one HITL escalation
     # so a multi-day pipeline stall can't pass unnoticed (#9359 hardening).
     consecutive_rc_failures: int = 0
+    #: #11216 per-RC-branch self-heal attempt counts (branch -> attempts).
+    #: Bounded by ``rc_conflict_heal_max_attempts``; a fresh RC branch
+    #: starts clean, so the map self-prunes as branches are promoted.
+    rc_conflict_heal_attempts: dict[str, int] = Field(default_factory=dict)
     # G1 (#10353): high-water mark of the newest merged rc/* promotion PR the
     # loop has observed advancing ``main``. Lets StagingPromotionLoop close the
     # RC-stuck trackers on ANY observed main advance (a manual/operator promotion

@@ -519,25 +519,29 @@ class PlanPhase(PlanWikiIngestMixin):
             bool(record.payload.get("needs_discovery", False)),
         )
 
-    def _issue_complexity(self, issue: Task) -> int:
-        """Triage's complexity_score for *issue*; 10 (max) when unknown.
+    def _issue_complexity(self, issue: Task) -> int | None:
+        """Triage's complexity_score for *issue*; ``None`` when unknown.
 
-        Conservative default: an unclassified issue reads as maximally
-        complex so it is never denied a plan review by the #11298 tier gate.
+        ``None`` (not a sentinel int) marks an unclassified/unreadable
+        score so the tier guard can refuse eligibility at EVERY threshold.
+        The prior sentinel-10 collapsed 'unknown' into 'confirmed maximal'
+        at ``threshold=10`` (a valid config value), silently skipping the
+        review for never-classified issues — found by the sampled re-audit
+        on #11304 (#11314, audit-upheld).
         """
         if self._issue_cache is None:
-            return 10
+            return None
         try:
             record = self._issue_cache.latest_classification(issue.id)
         except (AttributeError, TypeError, ValueError):
-            return 10
+            return None
         payload = getattr(record, "payload", None)
         if not isinstance(payload, dict):
-            return 10
+            return None
         try:
-            return int(payload.get("complexity_score", 10))
-        except (TypeError, ValueError):
-            return 10
+            return int(payload["complexity_score"])
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def _skip_plan_review(self, issue: Task) -> tuple[bool, int]:
         """#11298 size tiering: does this issue skip the adversarial review?
@@ -556,11 +560,15 @@ class PlanPhase(PlanWikiIngestMixin):
         """Shared #11298 tier guard: is *issue* simple enough for a light path?
 
         Returns ``(eligible, complexity)``. Eligible only when ALL hold:
-        the threshold is enabled (> 0), triage scored the issue at or below
-        it, the issue has never been routed back (a cycled plan is evidence
-        the cheap path failed), and it carries no escalation label.
+        the threshold is enabled (> 0), triage actually scored the issue
+        (an unknown score is ineligible at EVERY threshold — #11314) at or
+        below it, the issue has never been routed back (a cycled plan is
+        evidence the cheap path failed), and it carries no escalation
+        label. An unknown score reports as 10 for logging.
         """
         complexity = self._issue_complexity(issue)
+        if complexity is None:
+            return False, 10
         if threshold <= 0:
             return False, complexity
         if complexity > threshold:
@@ -1528,6 +1536,52 @@ class PlanPhase(PlanWikiIngestMixin):
 
     # -- flow nodes ---------------------------------------------------------
 
+    async def _route_light_lane(self, issue: Task, state: FlowState) -> bool:
+        """#11298 light lane: route a triage-scored simple issue to the
+        single-session auto-agent (one spawn: read issue -> implement ->
+        test -> PR) instead of the staged plan/review pipeline.
+
+        The claim-label swap removes the issue from every plan-stage
+        queue; AutoAgentPreflightLoop polls the claim label for intake and
+        crash recovery. Shared _tier_eligible guard: cycled, escalated, or
+        unscored issues never route here, and an auto-agent exhaustion
+        falls BACK to this pipeline (never to a human). Returns True when
+        routed (the flow stops); mutates *state* accordingly.
+        """
+        if not self._config.auto_agent_light_intake_enabled:
+            return False
+        if not self._config.auto_agent_preflight_enabled:
+            # Stranding guard: routing claims the issue out of every queue,
+            # so never route when the consuming loop is config-disabled —
+            # the claim label has no TTL redrive of its own.
+            return False
+        eligible, complexity = self._tier_eligible(
+            issue, self._config.auto_agent_light_max_complexity
+        )
+        if not eligible:
+            return False
+        logger.info(
+            "Issue #%d complexity %d <= %d — routing to the "
+            "auto-agent light lane (#11298)",
+            issue.id,
+            complexity,
+            self._config.auto_agent_light_max_complexity,
+        )
+        await self._prs.swap_pipeline_labels(
+            issue.id, self._config.light_autofix_label[0]
+        )
+        state["result"] = PlanResult(
+            issue_number=issue.id,
+            success=True,
+            summary=(
+                f"light-lane: routed to single-session auto-agent "
+                f"(complexity {complexity}; #11298)"
+            ),
+        )
+        state["_stop"] = True
+        state["_skip_tail"] = True
+        return True
+
     async def _flow_prepass(self, state: FlowState) -> FlowState:
         """Research / discover / shape gates (ADR-0107) before drafting.
 
@@ -1538,6 +1592,10 @@ class PlanPhase(PlanWikiIngestMixin):
         ``return``s (which posted no transcript / verdict).
         """
         issue = state["issue"]
+
+        if await self._route_light_lane(issue, state):
+            return state
+
         human_guidance = self._state.get_human_steering(str(issue.id)).guidance or ""
         research_context = ""
         if self._should_research(issue):
@@ -1818,6 +1876,24 @@ class PlanPhase(PlanWikiIngestMixin):
         issue = state["issue"]
         adv = state["adv"]
         result = state["result"]
+        skip, complexity = self._skip_plan_review(issue)
+        if skip:
+            # #11298 light tier skips the council too: the council critiques
+            # a deliberately-short LITE plan against full-scale expectations,
+            # raising design-decision concerns that no reviewer stage will
+            # resolve — observed live 2026-08-16 as a mass HITL cascade
+            # (every light-tier issue routed to human-required at the
+            # ready-swap design gate). The gate itself stays armed: concerns
+            # raised by earlier stages still route genuinely ambiguous
+            # issues to HITL, and cycled issues get the full stack again.
+            logger.info(
+                "PlanCouncil skipped for issue #%d — light-tier "
+                "(complexity %d; #11298)",
+                issue.id,
+                complexity,
+            )
+            state["result"] = result
+            return state
         if self._council_agents is not None and result.success and result.plan:
             try:
                 await self._run_plan_council(issue, adv, result.plan)

@@ -298,6 +298,11 @@ def setup_test_environment():
     seeded below — but a test that deletes ``GH_TOKEN`` to probe that
     fallback path must not fall through to the host's real token.
     """
+    # Imported lazily (not at module scope) to keep runner_utils' heavier
+    # import chain (execution/subprocess_util/process_group/...) out of
+    # conftest's own top-level imports.
+    from runner_utils import provider_api_key_envs
+
     test_env = {
         "HOME": "/tmp/hydraflow-test",
         "GH_TOKEN": "test-token",
@@ -317,6 +322,13 @@ def setup_test_environment():
         # the exported registry instead of hand-listing GITHUB_TOKEN. GH_TOKEN is
         # re-seeded to "test-token" via test_env below.
         | CREDENTIAL_ENV_KEYS
+        # Bare (non-HYDRAFLOW_-prefixed) provider API key envs — ZAI_API_KEY,
+        # ZAI_CODING_PLAN_KEY, OPENROUTER_API_KEY, MOONSHOT_API_KEY, ... —
+        # carry no prefix and live in neither declared_env_keys() nor
+        # CREDENTIAL_ENV_KEYS, so an ambient developer/CI shell export leaks
+        # into every test session and defeats "*_without_zai_key"-style
+        # preconditions unless swept up here too.
+        | provider_api_key_envs()
         | {
             "GIT_DIR",
             "GIT_WORK_TREE",
@@ -359,6 +371,26 @@ def _reset_gh_semaphore():
     subprocess_util._gh_semaphore = None
     subprocess_util._rate_limit_until = None
     subprocess_util.reset_gh_circuit_breaker()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_credentials(monkeypatch):
+    """Strip live provider credentials from every test's environment (#11302).
+
+    A live checkout's shell (or a sourced .env) carries the z.ai key pair and
+    the ANTHROPIC redirect pair; tests asserting 'no key configured' behavior
+    silently pass/fail depending on the HOST's billing setup — 15+ tests broke
+    under make quality on machines with ZAI_CODING_PLAN_KEY set (#11302,
+    #11317, #11368 class). Tests that need a credential set it explicitly via
+    monkeypatch.setenv, which layers on top of this deletion.
+    """
+    for key in (
+        "ZAI_API_KEY",
+        "ZAI_CODING_PLAN_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
 
 @pytest.fixture(autouse=True)

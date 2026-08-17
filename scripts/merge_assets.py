@@ -226,8 +226,16 @@ def merge_settings_file(source_path: Path, target_path: Path) -> None:
                     h for h in tgt_entry["hooks"] if not h.get("_hydraflow")
                 ] + list(src_hf_hooks)
 
-        # Also add any source entries for matchers not in src_by_matcher
-        # (non-HF entries from source are not merged — only HF-tagged ones)
+        # NOTE (#11248): untagged source entries are deliberately NOT
+        # merged. The ``_hydraflow`` tag marks the entries HydraFlow OWNS —
+        # merging untagged ones would make them unidentifiable on a later
+        # upgrade or uninstall (orphaned in the user's settings forever).
+        # The fresh-install path copies the file wholesale, so the two
+        # paths agreed only because every shipped hook IS tagged; the
+        # guard test ``test_shipped_hooks_are_hydraflow_tagged`` enforces
+        # that invariant instead of leaving it to luck. The dead
+        # "also add any source entries" comment that used to sit here
+        # described a loop that never existed.
 
     # Merge permissions
     src_perms = source.get("permissions", {})

@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T12:13:22.562659+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3395
+superseded_by: 3687
 ---
 
 # Sync ADR measurement contracts with detector logic

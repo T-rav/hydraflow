@@ -1,0 +1,19 @@
+---
+id: 3908
+topic: patterns
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-08-16T15:30:58.346009+00:00
+status: superseded
+corroborations: 1
+supersedes: 3763
+superseded_by: 4055
+---
+
+# Rename _-prefixed params when they become load-bearing branches
+
+Rename a `_`-prefixed parameter when it becomes a branching condition; keep it positional-compatible with the base-class signature.
+
+Example: `DiagnosticRunner._build_command` renamed `_worktree` to `worktree` once it branched read-only vs edit-capable, staying positional-compatible with `BaseRunner._build_command`.
+
+**Why:** A `_` prefix signals "unused" — callers would ignore a load-bearing argument.

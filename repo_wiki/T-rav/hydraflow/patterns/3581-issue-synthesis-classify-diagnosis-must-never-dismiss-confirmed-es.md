@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T12:13:23.069877+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3434
+superseded_by: 3726
 ---
 
 # classify_diagnosis must never dismiss CONFIRMED escape rows
