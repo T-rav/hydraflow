@@ -36,7 +36,12 @@ _FIXES_RE = re.compile(r"(?:fixes|closes|resolves)\s+#(\d+)", re.IGNORECASE)
 # `agent/issue-1234` encodes its issue number in the branch name — the
 # canonical namespace also parsed by
 # ``WorkspaceGCLoop._parse_issue_from_branch``.
-_AGENT_BRANCH_RE = re.compile(r"^agent/issue-(\d+)$")
+# #11281: BOTH mint patterns — manual dispatch (``agent/issue-{N}``)
+# and Auto-Agent preflight (``agent/auto-agent-{N}``). Matching only
+# the first made StaleIssueLoop treat live auto-agent branches as
+# unrecognised, so their issues never got the truth comment and the
+# branches were candidates for deletion while work was in flight.
+_AGENT_BRANCH_RE = re.compile(r"^agent/(?:issue|auto-agent)-(\d+)$")
 
 
 def extract_issue_number(branch: str, commit_messages: list[str]) -> int:
