@@ -6,7 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W33
 
-- `0dae3ca` — fix(fleet-vitals): review + ratchet findings — idle gate, banner payload, hoisted imports, sandbox seam (#11391) (#11391) *(2026-08-16)*
+- `9bbae16` — feat(supervisor): fleet-vitals shadow alarms — bands, mechanical diagnosis, closed-menu proposals (#11391) (#11392) (#11392) *(2026-08-16)*
 - `49df312` — feat(light-lane): route simple issues to the single-session auto-agent — one spawn, issue to PR (#11298) (#11389) (#11389) *(2026-08-16)*
 - `4610eb2` — fix(diagnostic): opt DiagnosticLoop into the LLM watchdog bound (#11262) (#11369) (#11369) *(2026-08-16)*
 - `a08bf72` — feat(find-filing): class-key fold layer for pattern-shaped find-issues (#11292) (#11324) (#11324) *(2026-08-16)*
@@ -485,29 +485,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `1a5b156` — test(contracts): FakeHoneycomb contract test (closes ADR-0047 gap for fake #5 of 11) *(2026-05-19)*
 - `d5f127d` — fix(tests): import AgentPort + FakeAgent in conformance test *(2026-05-19)*
 - `d566f5d` — feat(triage): TriageRetryLoop (ADR-0063 W2, closes advisor-vz1l) *(2026-05-19)*
-- `7a958b0` — feat(mockworld): FakeReviewInsightStore satisfies ReviewInsightStorePort (ADR-0047, closes advisor-luab) *(2026-05-19)*
-- `4cd8a62` — feat(mockworld): FakeObservability satisfies ObservabilityPort (ADR-0047, closes advisor-ddje) *(2026-05-19)*
-- `0546b35` — style(tests): ruff format test_fake_bot_pr.py — collapse short kwarg calls *(2026-05-19)*
-- `1c2daf7` — feat(mockworld): FakeBotPR satisfies BotPRPort Protocol (ADR-0047, closes advisor-25fr) *(2026-05-19)*
-- `c4e5906` — chore(arch): refresh generated artifacts against b688225 *(2026-05-19)*
-- `66440b0` — refactor(mockworld): move InMemoryRouteBackCounter → FakeRouteBackCounter under src/mockworld/fakes/ (ADR-0047) *(2026-05-19)*
-- `3d939a9` — feat(mockworld): FakeAgent satisfies AgentPort Protocol (ADR-0047, closes advisor-ayw5) *(2026-05-19)*
-- `dc49678` — fix(fake-coverage-auditor): roll up to 1 issue per (fake, gap_kind) (#8986) (#8994) (#8994) *(2026-05-19)*
-- `ce53f28` — fix(adr_touchpoint_auditor): roll up to 1 issue per ADR (#8987) (#8993) (#8993) *(2026-05-19)*
-- `1e70cc0` — fix(retrospective): dedup [HITL] Stale review insight filings (#8988) (#8992) (#8992) *(2026-05-19)*
-- `dbe6f17` — feat(loops): remove CodeGroomingLoop (#8984) (#8995) (#8995) *(2026-05-19)*
-- `6d7319a` — feat(adversarial): earlier-adversarial pipeline — Discovery + Shape + Plan dissent stages (#8953) (#8953) *(2026-05-19)*
-- `35d0308` — test(sandbox): bump scenario timeouts past observed pipeline duration (#8989) (#8989) *(2026-05-19)*
-- `8c85c14` — fix(sandbox): wire FakeSubprocessRunner — the actual claude bypass (#8965) (#8965) *(2026-05-18)*
-- `5f762b0` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `119279f` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `0d3d203` — fix(persistence): ADR-0021 data layout + metrics path slug-doubling (closes slice 5.6 advisor-0ca7) *(2026-05-18)*
-- `4a5caa1` — fix(sandbox): also disable ResearchRunner — second claude-spawning caller (#8966) (#8966) *(2026-05-18)*
-- `6d35133` — fix(lint): ruff auto-fixes after staging rebase *(2026-05-18)*
-- `7ad3209` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `6badaf2` — fix(format): ruff format *(2026-05-18)*
-- `e80d302` — chore(arch): regenerate arch docs after rebase *(2026-05-18)*
-- `d67e2b4` — fix: ruff auto-fixes (unused imports + import sort) *(2026-05-18)*
 
 
 <!-- arch:generated -->
