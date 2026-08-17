@@ -119,6 +119,7 @@ class TestInitialization:
             "last_green_rc_sha",
             "last_rc_red_sha",
             "consecutive_rc_failures",
+            "rc_conflict_heal_attempts",
             "last_observed_promotion_pr",
             "last_successful_promotion_at",
             "managed_repos_onboarding_status",

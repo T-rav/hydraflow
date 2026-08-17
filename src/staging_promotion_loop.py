@@ -191,6 +191,79 @@ class StagingPromotionLoop(BaseBackgroundLoop):
             result = {**result, "promotion_health": health}
         return result
 
+    async def _maybe_heal_dirty_promotion(self, pr_number: int, rc_branch: str) -> bool:
+        """#11216: self-heal a DIRTY RC promotion PR (base merged into it).
+
+        Only acts when ``get_pr_mergeable`` corroborates a genuine content
+        conflict (``False`` maps to GitHub's CONFLICTING; ``True``/``None``
+        is transient/unknown and keeps the legacy give-up path — the same
+        corroboration rule as the #9889 dependabot heal).
+
+        Bounded and idempotent: at most
+        ``rc_conflict_heal_max_attempts`` per RC branch, counted in state,
+        so a genuinely unresolvable conflict escalates to the human
+        instead of looping. Returns True when a heal was attempted.
+        """
+        if not self._config.rc_conflict_heal_enabled:
+            return False
+        # Corroborate a GENUINE content conflict before touching the
+        # branch: False maps to GitHub's CONFLICTING; True/None (and any
+        # unreadable double or transport error) means transient/unknown,
+        # which keeps the legacy give-up path. Never heal on a guess.
+        try:
+            mergeable = await self._prs.get_pr_mergeable(pr_number)
+        except (AttributeError, TypeError, RuntimeError) as exc:
+            logger.debug(
+                "RC heal: mergeable state unreadable for PR #%d: %s",
+                pr_number,
+                exc,
+            )
+            return False
+        if mergeable is not False:
+            return False
+        attempts = 0
+        if self._state is not None:
+            attempts = self._state.get_rc_conflict_heal_attempts(rc_branch)
+        if attempts >= self._config.rc_conflict_heal_max_attempts:
+            logger.warning(
+                "RC PR #%d still conflicting after %d heal attempt(s) — "
+                "leaving for the operator (#11216)",
+                pr_number,
+                attempts,
+            )
+            return False
+        if self._state is not None:
+            self._state.bump_rc_conflict_heal_attempts(rc_branch)
+        logger.info(
+            "RC PR #%d is DIRTY — self-healing (attempt %d of %d): merging "
+            "the base branch into %s (#11216)",
+            pr_number,
+            attempts + 1,
+            self._config.rc_conflict_heal_max_attempts,
+            rc_branch,
+        )
+        try:
+            # MERGE, never rebase: rebasing an RC rewrites the promotion
+            # commits and diverges the branch from the staging history the
+            # RC was cut from (the #11045 rebase-divergence lesson). The
+            # manual recipe merges base INTO the rc branch.
+            ok = await self._prs.update_pr_branch(pr_number, method="merge")
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning("RC heal failed for PR #%d", pr_number, exc_info=True)
+            return False
+        if ok:
+            await self._prs.post_comment(
+                pr_number,
+                "**RC auto-heal (#11216):** this promotion PR was DIRTY "
+                "against its base, so the base branch was merged into the "
+                "RC branch. CI re-runs on the merge commit; the promotion "
+                "retries on the next cadence tick. No action needed unless "
+                "the conflict persists past "
+                f"{self._config.rc_conflict_heal_max_attempts} attempts.",
+            )
+        return bool(ok)
+
     async def _handle_open_promotion(
         self, pr_number: int, rc_branch: str
     ) -> dict[str, Any]:
@@ -321,7 +394,15 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                 await self._compile_evidence_pack(pr_number, rc_branch)
                 return {"status": "promoted", "pr": pr_number}
             logger.warning("Promotion merge failed for PR #%d", pr_number)
-            return {"status": "merge_failed", "pr": pr_number}
+            # #11216: a DIRTY RC PR used to sit here until a human ran the
+            # heal by hand (performed 3x on 2026-08-15/16). Corroborate a
+            # genuine content conflict and self-heal by merging base into
+            # the RC branch — the same shape dependabot_merge_loop's #9889
+            # heal uses, and exactly the manual recipe: merge origin/main
+            # into the rc branch, let CI re-run, promote next tick.
+            healed = await self._maybe_heal_dirty_promotion(pr_number, rc_branch)
+            status = "conflict_healed" if healed else "merge_failed"
+            return {"status": status, "pr": pr_number}
 
         # wait_for_ci can return WITHOUT a CI verdict: a timeout (the poll window
         # elapsed while CI was still running) or "Stopped" (kill-switch fired
