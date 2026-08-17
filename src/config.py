@@ -3850,6 +3850,24 @@ class HydraFlowConfig(BaseModel):
             "(agent PRs target main directly)."
         ),
     )
+    rc_conflict_heal_enabled: bool = Field(
+        default=True,
+        description=(
+            "#11216: self-heal a DIRTY rc/* promotion PR by merging its "
+            "base branch in (the manual recipe a human ran 3x on "
+            "2026-08-15/16) instead of leaving it for an operator. Merge, "
+            "never rebase — rebasing diverges the RC (#11045)."
+        ),
+    )
+    rc_conflict_heal_max_attempts: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Per-RC-branch cap on #11216 self-heal attempts; beyond it the "
+            "conflict is genuinely unresolvable and escalates to the human."
+        ),
+    )
     rc_cadence_hours: int = Field(
         default=4,
         ge=1,
