@@ -6343,6 +6343,21 @@ class HydraFlowConfig(BaseModel):
         """Return the Auto-Agent (preflight) session branch name for an issue."""
         return f"{AUTO_AGENT_BRANCH_PREFIX}{issue_number}"
 
+    def agent_branches_for_issue(self, issue_number: int) -> tuple[str, str]:
+        """Both branch names an issue's work can live on (#11281).
+
+        Manual dispatch mints ``agent/issue-{N}``; Auto-Agent preflight
+        mints ``agent/auto-agent-{N}``. Consumers that resolve "the branch
+        for this issue" must consider BOTH — knowing only the first is the
+        defect class behind #11282 (review loop blind to auto-agent PRs)
+        and #11281 (branch GC deleting live auto-agent work). Manual-first
+        ordering matches the resolution precedence those consumers use.
+        """
+        return (
+            self.branch_for_issue(issue_number),
+            self.auto_agent_branch_for_issue(issue_number),
+        )
+
     def regulated_label_set(self) -> frozenset[str]:
         """Parse ``regulated_labels`` CSV into a label set (CH-5).
 
