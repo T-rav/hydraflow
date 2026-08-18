@@ -519,8 +519,29 @@ test-ui:
 # repeatedly on 2026-08-16). The second run WAITS instead of racing;
 # waiting costs minutes, a contaminated red costs a debugging session.
 # Bypass with HYDRAFLOW_QUALITY_LOCK_DISABLE=1 (CI is one-suite-per-box).
+#
+# GNU Make force-executes any recipe line containing the literal text
+# "$(MAKE)" even under `-n` (dry-run) — that's how a nested `make -n`
+# shows the full recursive plan. Routed through the lock wrapper, that
+# means a plain `make -n quality` doesn't just print: it really invokes
+# scripts/quality_host_lock.py, which does a real fcntl.flock. On a host
+# already running a real `make quality` (e.g. this file's own regression
+# test, tests/regressions/test_issue_9875_quality_ui_vitest.py, invoking
+# `make -n quality` as PART OF a real `make quality` run) that self-
+# deadlocks: the dry run blocks waiting for a lock the outer real run is
+# still holding, up to HYDRAFLOW_QUALITY_LOCK_TIMEOUT (3600s default).
+# DRY_RUN_QUALITY detects `-n` at parse time and skips the wrapper
+# entirely in that case, calling quality-unlocked directly — side-effect
+# free, and the nested plan still shows in full.
+DRY_RUN_QUALITY := $(filter n%,$(MAKEFLAGS))
+
+ifeq ($(DRY_RUN_QUALITY),)
 quality: deps lint-ul
 	@$(UV) python scripts/quality_host_lock.py -- $(MAKE) quality-unlocked
+else
+quality: deps lint-ul
+	@$(MAKE) quality-unlocked
+endif
 
 quality-unlocked:
 	@echo "$(BLUE)Running quality checks in parallel...$(RESET)"
