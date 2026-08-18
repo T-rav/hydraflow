@@ -62,6 +62,36 @@ class TestDetectorCalibrationScenario:
         assert stats2["autoclosed"] == 1
         assert await gh.list_issues_by_label("detector-calibration") == []
 
+    async def test_distinct_entities_do_not_fabricate_churn(self, tmp_path):
+        """#11405 — three distinct PRs escalating once each is not churn.
+
+        Each closed escalation names a different PR via a ``#N`` reference
+        in the title; normalize must keep that identity distinct so three
+        one-time escalations don't mine into one fabricated "churn" finding.
+        """
+        world = MockWorld(tmp_path)
+        gh = world.github
+
+        async def _closed_escalation(title: str, age_days: int) -> int:
+            number = await gh.create_issue(title, "body", ["hitl-escalation"])
+            await gh.close_issue(number)
+            stamp = (datetime.now(UTC) - timedelta(days=age_days)).isoformat()
+            gh.issue(number).updated_at = stamp
+            return number
+
+        for pr_number, age_days in ((10817, 20), (11241, 10), (11242, 1)):
+            await _closed_escalation(
+                f"Sampled re-audit disagreement: PR #{pr_number} (gauntlet) — "
+                "adversarial re-review flags a possible silent escape",
+                age_days=age_days,
+            )
+
+        stats = (await world.run_with_loops(["detector_calibration"], cycles=1))[
+            "detector_calibration"
+        ]
+        assert stats["filed"] == 0
+        assert await gh.list_issues_by_label("detector-calibration") == []
+
     async def test_scans_served_from_cache_without_subprocess(
         self, tmp_path, monkeypatch
     ) -> None:

@@ -73,6 +73,35 @@ def test_disable_flag_bypasses_the_lock(tmp_path: Path) -> None:
     assert elapsed < 1.5  # did not wait
 
 
+def test_make_dry_run_bypasses_the_lock_even_while_held(tmp_path: Path) -> None:
+    """`make -n quality` reaches this script for real (GNU Make always runs a
+    recipe line containing $(MAKE), even under -n) with MAKEFLAGS=n in its
+    environment. #11405: when this script is itself running INSIDE a real
+    `make quality` invocation — which already holds the lock — a nested
+    `make -n quality` dry-run subprocess call (e.g. from
+    tests/regressions/test_issue_9875_quality_ui_vitest.py) must not block
+    waiting on that same lock. A dry run does no real suite work, so there
+    is nothing to serialize against; it must run immediately regardless of
+    who holds the lock.
+    """
+    env = {"TMPDIR": str(tmp_path)}
+    holder = subprocess.Popen(  # nosec B603
+        [sys.executable, str(_SCRIPT), "--", "sleep", "3"],
+        env={**os.environ, **env},
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    time.sleep(0.8)  # let the holder acquire
+    started = time.monotonic()
+    result = _run("echo", "dry-run", env={**env, "MAKEFLAGS": "n"})
+    elapsed = time.monotonic() - started
+    holder.wait(timeout=30)
+    assert result.returncode == 0
+    assert "dry-run" in result.stdout
+    assert elapsed < 1.5  # did not wait on the held lock
+    assert "waiting" not in result.stdout
+
+
 def test_timeout_runs_anyway_rather_than_failing(tmp_path: Path) -> None:
     """The lock is advisory: a stuck holder must not block work forever."""
     env = {"TMPDIR": str(tmp_path), "HYDRAFLOW_QUALITY_LOCK_TIMEOUT": "1"}
