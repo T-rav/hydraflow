@@ -126,7 +126,7 @@ def test_kills_whole_process_group_when_parent_dies_while_running(
 
     log_path = _launch_orphaned(tmp_path, command, env=env)
 
-    assert _wait_for(lambda: heartbeat.exists(), timeout=8), "suite tree never started"
+    assert _wait_for(heartbeat.exists, timeout=8), "suite tree never started"
     count_at_orphan = len(heartbeat.read_text().splitlines())
 
     # Give the wrapper's poll loop (2s cadence) time to notice and reap.
@@ -180,9 +180,7 @@ def test_forwards_sigterm_to_the_running_process_group(tmp_path: Path) -> None:
         env={**os.environ, **env},
     )
     try:
-        assert _wait_for(lambda: heartbeat.exists(), timeout=8), (
-            "suite tree never started"
-        )
+        assert _wait_for(heartbeat.exists, timeout=8), "suite tree never started"
         count_before = len(heartbeat.read_text().splitlines())
 
         wrapper.send_signal(15)  # SIGTERM
