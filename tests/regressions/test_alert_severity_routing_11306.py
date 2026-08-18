@@ -43,7 +43,14 @@ async def test_stale_epic_alert_is_advisory_severity() -> None:
     mgr._state = SimpleNamespace(
         get_all_epic_states=lambda: {"10914": _stale_epic(10914)}
     )
-    mgr._prs = SimpleNamespace(post_comment=AsyncMock())
+    # #11396 landed alongside this pin: check_stale_epics now reconciles
+    # with GitHub before alerting, so the fake MUST answer get_issue_state
+    # (an AttributeError here is correctly treated as a BUG by
+    # reraise_on_credit_or_bug, not swallowed as transient).
+    mgr._prs = SimpleNamespace(
+        post_comment=AsyncMock(),
+        get_issue_state=AsyncMock(return_value="OPEN"),
+    )
     mgr._bus = SimpleNamespace(publish=AsyncMock())
     mgr._is_stale = lambda _e: True
 
