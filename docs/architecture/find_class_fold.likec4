@@ -1,0 +1,81 @@
+specification {
+  element system
+  element component
+  element klass
+  relationship calls
+  relationship reads
+}
+
+model {
+  finder = system 'Pattern-shaped finder' {
+    description 'Agent/skill that discovers one site per call (hf.issue Phase 3)'
+  }
+
+  foldLayer = system 'find_class_key fold layer' {
+    description 'src/find_class_key.py — class-key matching + roster orchestration'
+
+    fileOrFold = component 'file_or_fold' {
+      description 'Match open class issue, roster the site, comment once per NEW site'
+    }
+    matchClass = component 'match_class' {
+      description 'Marker equality + needle tokens + title affinity'
+    }
+    appendSite = component '_append_site' {
+      description 'Roster idempotency guard — SITE OF DEFECT #11407'
+    }
+    extractSites = component 'extract_folded_sites' {
+      description 'Untagged legacy line yields its TITLE TEXT as identifier'
+    }
+    siteLine = component '_site_line' {
+      description 'Renders "- title (site: `X`)" or bare "- title"'
+    }
+  }
+
+  checkScript = system 'scripts/find_class_check.py' {
+    description 'Agent-facing --check CLI; site membership only, no title fallback'
+  }
+
+  prPort = system 'PRPort' {
+    description 'list_issues_by_label / update_issue_body / post_comment / create_issue'
+  }
+
+  finder -> fileOrFold 'file_or_fold(source, needle, title, body, site=...)'
+  finder -> checkScript '--check --site'
+  checkScript -> extractSites 'reads roster'
+  checkScript -> matchClass 'resolve target issue'
+  fileOrFold -> prPort 'list / update / comment / create'
+  fileOrFold -> matchClass 'resolve target issue'
+  fileOrFold -> appendSite 'roster the site'
+  appendSite -> extractSites 'current roster identifiers'
+  appendSite -> siteLine 'render new/bound line'
+}
+
+views {
+  view fold_components {
+    title 'Class-key fold layer — components'
+    include finder, foldLayer, fileOrFold, matchClass, appendSite,
+            extractSites, siteLine, checkScript, prPort
+  }
+
+  dynamic view silent_drop {
+    title 'Defect #11407 — distinct site silently dropped on a legacy roster line'
+
+    finder -> fileOrFold 'site=src/bar.py:99, title="Missing null check"'
+    fileOrFold -> matchClass 'marker equality → #N'
+    fileOrFold -> appendSite '_append_site(body, title, site)'
+    appendSite -> extractSites 'roster = ["Missing null check"] (untagged legacy line)'
+    appendSite -> fileOrFold 'title in roster → return body UNCHANGED'
+    fileOrFold -> finder 'returns #N as if already folded — site never rostered, no comment'
+  }
+
+  dynamic view bound_then_appended {
+    title 'Remedy — bind the untagged legacy line once, then append distinct sites'
+
+    finder -> fileOrFold 'site A (first rediscovery)'
+    fileOrFold -> appendSite 'bind untagged "- title" → "- title (site: `A`)"'
+    appendSite -> fileOrFold 'roster length unchanged → update body, NO comment'
+    finder -> fileOrFold 'site B (genuinely distinct, same title)'
+    fileOrFold -> appendSite 'title no longer in roster → append tagged line'
+    appendSite -> fileOrFold 'roster grew → update body AND post fold comment'
+  }
+}
