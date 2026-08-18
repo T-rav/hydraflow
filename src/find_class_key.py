@@ -40,6 +40,16 @@ and ``_append_site`` accept an optional ``site`` kwarg, and
 body. A rediscovered site is then a true no-op even if the finder reworded
 its title between ticks; callers that omit ``site`` keep the pre-#11328
 title-keyed behavior unchanged.
+
+A site-aware call can still land on a legacy, untagged roster line whose
+title text happens to match (title uniqueness per site was never
+guaranteed). ``_append_site`` resolves that by BINDING the legacy line to
+the current call's site (#11407) rather than either no-op'ing outright
+(which could silently drop a genuinely different, same-titled site forever)
+or appending a duplicate entry (which would break the intended #11328
+same-site idempotency). Binding changes the issue body but leaves the
+roster's entry count unchanged, which ``file_or_fold`` uses to decide
+whether the fold warrants a "new site" comment.
 """
 
 from __future__ import annotations
@@ -298,19 +308,30 @@ def _append_site(body: str, title: str, site: str | None = None) -> str:
     re-offered site posts no second comment, even if the finder reworded
     the title text between ticks (#11328).
 
-    Also a no-op when *title* itself already appears as a legacy, untagged
-    roster line. Issues filed before per-site identifiers existed roster
-    sites by title text alone (:func:`extract_folded_sites` yields that
-    title as the entry's identifier); a site-aware rediscovery of that same
-    finding never matches on *site* (the legacy line carries none), so
-    without this fallback every live legacy class issue grows a duplicate
-    roster line the first time it's rediscovered by a site-aware caller.
+    When *title* matches a legacy, untagged roster line instead (issues
+    filed before per-site identifiers existed roster sites by title text
+    alone — :func:`extract_folded_sites` yields that title as the entry's
+    identifier), the call is BOUND to that line rather than either
+    no-op'd outright or appended as a second entry (#11407): title text
+    alone can't prove the current *site* is the one that originally
+    created the legacy line, since a templated/generic finder can produce
+    the same title for a genuinely different site. Binding rewrites the
+    legacy line to carry *site*'s tag, so the site is never silently
+    dropped from tracking even in the collision case, while a true
+    same-site rediscovery still leaves the roster's entry COUNT unchanged
+    (:func:`file_or_fold` uses that to decide whether a "new site" comment
+    is warranted).
     """
     title = _single_line(title)
     effective_site = _single_line(site) if site is not None else title
     existing_sites = extract_folded_sites(body)
-    if effective_site in existing_sites or title in existing_sites:
+    if effective_site in existing_sites:
         return body
+    if site is not None and title in existing_sites:
+        bound = _bind_bare_line(body, title, effective_site)
+        if bound is not None:
+            return bound
+
     line = _site_line(title, site)
     if _SITES_HEADING not in body:
         return body.rstrip() + "\n\n" + _SITES_HEADING + "\n" + line + "\n"
@@ -326,6 +347,26 @@ def _append_site(body: str, title: str, site: str | None = None) -> str:
         insert_at += 1
     section_lines.insert(insert_at, line)
     return head + _SITES_HEADING + "\n".join(section_lines)
+
+
+def _bind_bare_line(body: str, title: str, effective_site: str) -> str | None:
+    """Rewrite the bare ``- {title}`` roster line to carry *effective_site*.
+
+    Returns ``None`` if no literal bare line matches *title* — defensive
+    fallback so a caller (:func:`_append_site`) falls through to appending
+    a fresh line rather than silently discarding the site when the
+    membership check that routed here (``title in existing_sites``) was
+    satisfied by something other than an actual bare line (e.g. a tagged
+    line whose own site value happens to equal *title*).
+    """
+    bare_line = f"- {title}"
+    head, _, rest = body.partition(_SITES_HEADING)
+    section_lines = rest.split("\n")
+    for i, raw_line in enumerate(section_lines):
+        if raw_line.strip() == bare_line:
+            section_lines[i] = _site_line(title, effective_site)
+            return head + _SITES_HEADING + "\n".join(section_lines)
+    return None
 
 
 async def file_or_fold(
@@ -384,6 +425,13 @@ async def file_or_fold(
                 "find_class_key: site already folded into #%d, skipping", target
             )
             return target
+        # A legacy bare-line bind (#11407) changes the body but leaves the
+        # roster's entry COUNT unchanged -- it's resolving an existing
+        # entry's identifier, not adding a new one, so it shouldn't post a
+        # "new site" comment. Only an actual roster growth warrants one.
+        is_new_site = len(extract_folded_sites(new_body)) > len(
+            extract_folded_sites(existing_body)
+        )
         if not extract_class_key(new_body):
             # Legacy (pre-#11292) issue matched via the marker-less
             # title-overlap path -- stamp the marker now so future ticks
@@ -391,10 +439,11 @@ async def file_or_fold(
             # threshold every time.
             new_body = new_body.rstrip() + "\n\n" + render_marker(class_key) + "\n"
         await prs.update_issue_body(target, new_body)
-        await prs.post_comment(
-            target,
-            f"Folded a new site into this class issue:\n\n{_site_line(title, site)}",
-        )
+        if is_new_site:
+            await prs.post_comment(
+                target,
+                f"Folded a new site into this class issue:\n\n{_site_line(title, site)}",
+            )
         return target
 
     seeded_body = _append_site(body, title, site)

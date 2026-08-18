@@ -660,6 +660,46 @@ class TestFileOrFold:
         assert len(prs.comment_calls) == 0
         assert len(prs.update_calls) == 0
 
+    async def test_bind_fallback_appends_fresh_line_when_no_bare_line_matches(
+        self,
+    ) -> None:
+        # `title in existing_sites` can also be satisfied by an unrelated
+        # TAGGED line whose SITE value happens to equal the current call's
+        # title text -- not a bare/untagged line at all. The bind attempt
+        # must not silently drop the new site in that case: it falls
+        # through to appending a fresh roster entry instead (#11407
+        # defensive fallback in ``_bind_bare_line``).
+        prs = _FakePRPort()
+        class_key = compute_class_key("branch-parser", "branch namespace missing")
+        body = (
+            "## Problem\n\ndetails\n\n## Folded sites\n"
+            "- Some Other Title (site: `Missing null check`)\n\n"
+            f"{render_marker(class_key)}\n"
+        )
+        prs._issues[7001] = {
+            "number": 7001,
+            "title": "Missing null check duplicate finding",
+            "body": body,
+        }
+        prs._next_number = 7002
+
+        result = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "Missing null check",
+            "## Problem\n\nunrelated",
+            ["hydraflow-find"],
+            site="src/foo.py:12",
+        )
+
+        assert result == 7001
+        updated_body = prs._issues[7001]["body"]
+        assert extract_folded_sites(updated_body) == [
+            "Missing null check",
+            "src/foo.py:12",
+        ]
+
     async def test_create_issue_zero_sentinel_propagates(self) -> None:
         class _ZeroCreatePRPort(_FakePRPort):
             async def create_issue(

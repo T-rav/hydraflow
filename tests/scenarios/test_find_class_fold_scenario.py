@@ -183,6 +183,50 @@ async def test_closed_class_issue_is_never_reopened_or_commented_on() -> None:
 
 
 @pytest.mark.asyncio
+async def test_legacy_untagged_line_collision_binds_instead_of_dropping_site() -> None:
+    """A genuinely new site colliding on title with a pre-#11328 legacy
+    (untagged) roster line must still end up tracked (#11407), driven
+    through a real ``FakeGitHub`` port end-to-end rather than a scripted
+    double.
+    """
+    gh = FakeGitHub()
+    source = "generic-null-check-finder"
+    needle = "missing null check before dereference"
+    colliding_title = "Missing null check"
+
+    # Tick 1: a legacy-shaped issue -- filed and folded before per-site
+    # identifiers existed, so its roster line carries no site tag.
+    first_number = await file_or_fold(
+        gh,
+        source,
+        needle,
+        colliding_title,
+        "## Finding\n\nsrc/original_site.py:5 missing null check",
+        ["hydraflow-find"],
+    )
+    board_after_tick_one = await gh.list_issues_by_label("hydraflow-find")
+    assert extract_folded_sites(board_after_tick_one[0]["body"]) == [colliding_title]
+
+    # Tick 2: a site-aware caller reports a DIFFERENT site whose
+    # finder-generated title happens to collide with the legacy line.
+    second_number = await file_or_fold(
+        gh,
+        source,
+        needle,
+        colliding_title,
+        "## Finding\n\nsrc/foo.py:12 missing null check",
+        ["hydraflow-find"],
+        site="src/foo.py:12",
+    )
+
+    assert second_number == first_number
+    board_after_tick_two = await gh.list_issues_by_label("hydraflow-find")
+    assert len(board_after_tick_two) == 1
+    # The new site is now tracked in the roster -- not silently dropped.
+    assert "src/foo.py:12" in extract_folded_sites(board_after_tick_two[0]["body"])
+
+
+@pytest.mark.asyncio
 async def test_distinct_needle_in_same_tick_still_files_its_own_issue() -> None:
     gh = FakeGitHub()
     await file_or_fold(
