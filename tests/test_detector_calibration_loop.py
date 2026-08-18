@@ -103,6 +103,13 @@ def test_template_key_rejects_degenerate_short_phrase() -> None:
     assert template_key(_normalize("escalation #12345")) is None
 
 
+def test_template_key_rejects_placeholder_padded_short_phrase() -> None:
+    # Two real words + one entity ref must still reject: the "#n"
+    # placeholder's own letters must not pad the alpha-token count up to
+    # the 3-token floor (#11427).
+    assert template_key(_normalize("escalation for #12345")) is None
+
+
 def test_template_key_collapses_same_template_across_distinct_entities() -> None:
     a = template_key(_normalize("HITL: convergence oscillation detected for #9001"))
     b = template_key(_normalize("HITL: convergence oscillation detected for #9042"))

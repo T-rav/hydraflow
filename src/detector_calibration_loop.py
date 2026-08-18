@@ -99,15 +99,17 @@ def template_key(norm: str) -> str | None:
 
     - No ``#N`` reference survives at all — nothing was stripped, so this
       title carries no per-entity identity to generalize over.
-    - Fewer than :data:`_TEMPLATE_MIN_ALPHA_TOKENS` alphabetic tokens
+    - Fewer than :data:`_TEMPLATE_MIN_ALPHA_TOKENS` real alphabetic tokens
       remain after stripping — too generic a phrase to be a meaningful
       template; a bare phrase like ``"escalation #n"`` would otherwise
-      flag unrelated escalations as one spray.
+      flag unrelated escalations as one spray. Counted on *norm* (before
+      the placeholder substitution) so the placeholder's own letters
+      don't pad the count.
     """
     templated, count = _ENTITY_REF_RE.subn(_TEMPLATE_PLACEHOLDER, norm)
     if count == 0:
         return None
-    if len(re.findall(r"[a-z]+", templated)) < _TEMPLATE_MIN_ALPHA_TOKENS:
+    if len(re.findall(r"[a-z]+", norm)) < _TEMPLATE_MIN_ALPHA_TOKENS:
         return None
     return templated
 
