@@ -91,7 +91,15 @@ def _run_command(command: list[str], parent_pid: int) -> int:
             # ignored, so this is what actually guarantees no orphan.
             with contextlib.suppress(ProcessLookupError, OSError):
                 os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
+            # Bounded, not proc.wait(): an unbounded wait() takes
+            # Popen._waitpid_lock via a *blocking* acquire, and this
+            # handler can fire while the interrupted outer proc.wait()
+            # call (POLL_INTERVAL_S loop, below) holds that same
+            # non-reentrant lock — a blocking re-acquire on the same
+            # thread would self-deadlock the wrapper. SIGKILL guarantees
+            # the group dies regardless of whether we personally reap it.
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=5)
         sys.exit(128 + signum)
 
     previous_handlers = {
