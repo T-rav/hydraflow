@@ -573,7 +573,11 @@ class TestDotenvLoading:
         with (
             patch.dict(sys.modules, {"dotenv": fake_dotenv}),
             patch("server.load_runtime_config", return_value=mock_config),
-            patch("server.asyncio.run"),
+            # main() calls asyncio.run(_run(config)); _run(config) is a real
+            # coroutine even though asyncio.run itself is mocked out, so the
+            # mock must close it or it leaks until GC, tripping an unawaited-
+            # coroutine RuntimeWarning attributed to some unrelated later test.
+            patch("server.asyncio.run", side_effect=lambda coro: coro.close()),
             patch("server.setup_logging"),
             patch.dict("os.environ", {}, clear=False),
         ):

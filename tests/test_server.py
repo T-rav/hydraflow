@@ -30,7 +30,13 @@ class TestServerMain:
         with (
             patch("server.setup_logging") as mock_logging,
             patch("server.load_runtime_config", return_value=mock_config),
-            patch("server.asyncio.run") as mock_run,
+            # main() calls asyncio.run(_run(config)); _run(config) is a real
+            # coroutine even though asyncio.run itself is mocked out, so the
+            # mock must close it or it leaks until GC, tripping an unawaited-
+            # coroutine RuntimeWarning attributed to some unrelated later test.
+            patch(
+                "server.asyncio.run", side_effect=lambda coro: coro.close()
+            ) as mock_run,
             patch.dict("sys.modules", {"dotenv": MagicMock()}),
             patch.dict("os.environ", {}, clear=False),
         ):
@@ -50,7 +56,9 @@ class TestServerMain:
         with (
             patch("server.setup_logging") as mock_logging,
             patch("server.load_runtime_config", return_value=mock_config),
-            patch("server.asyncio.run"),
+            # See test_main_loads_config_and_runs: must close the real _run(config)
+            # coroutine or it leaks past this test and warns during a later one.
+            patch("server.asyncio.run", side_effect=lambda coro: coro.close()),
             patch.dict("sys.modules", {"dotenv": MagicMock()}),
             patch.dict("os.environ", {"HYDRAFLOW_VERBOSE_LOGS": "1"}, clear=False),
         ):
