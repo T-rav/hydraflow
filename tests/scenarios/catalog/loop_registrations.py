@@ -631,7 +631,14 @@ def _build_repo_wiki(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 
     wiki_store = ports.get("wiki_store") or MagicMock()
     ports.setdefault("wiki_store", wiki_store)
-    return RepoWikiLoop(config=config, wiki_store=wiki_store, deps=deps)
+    return RepoWikiLoop(
+        config=config,
+        wiki_store=wiki_store,
+        deps=deps,
+        wiki_compiler=ports.get("wiki_compiler"),
+        state=ports.get("state"),
+        tribal_store=ports.get("tribal_store"),
+    )
 
 
 def _build_log_ingest(ports: dict[str, Any], config: Any, deps: Any) -> Any:
