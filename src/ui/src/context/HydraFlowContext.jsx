@@ -1911,8 +1911,16 @@ export function HydraFlowProvider({ children }) {
   useEffect(() => {
     connect()
     return () => {
-      if (wsRef.current) wsRef.current.close()
+      // Null wsRef.current BEFORE closing so the onclose handler's stale-socket
+      // guard (`wsRef.current !== ws`) trips even for the socket we're closing
+      // right now. Without this, close() closing on unmount/re-run can still
+      // fire onclose afterward, see wsRef.current still === ws, and schedule a
+      // reconnect timer that outlives this effect instance and is never
+      // cleared — a leaked setTimeout(connect, delay) call.
+      const ws = wsRef.current
+      wsRef.current = null
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+      if (ws) ws.close()
     }
   }, [connect])
 

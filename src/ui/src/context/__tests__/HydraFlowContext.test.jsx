@@ -2756,4 +2756,24 @@ describe('WebSocket reconnect backoff (PR5)', () => {
     act(() => { vi.advanceTimersByTime(WS_RECONNECT_MAX_MS) })
     expect(wsInstances.length).toBe(countBefore + 1)
   })
+
+  it('does not schedule a reconnect when onclose fires on the socket after unmount', async () => {
+    const { HydraFlowProvider } = await import('../HydraFlowContext')
+    const { WS_RECONNECT_MAX_MS } = await import('../../constants')
+
+    const { unmount } = render(<HydraFlowProvider><div /></HydraFlowProvider>)
+    expect(wsInstances.length).toBe(1)
+    const ws = wsInstances[wsInstances.length - 1]
+    const countBefore = wsInstances.length
+
+    // Real close() calls fire onclose asynchronously, so it can land after the
+    // cleanup effect already ran. Simulate that ordering: unmount first, then
+    // let the (now-stale) socket's onclose fire.
+    act(() => { unmount() })
+    expect(() => { act(() => { ws.onclose({ code: 1006 }) }) }).not.toThrow()
+
+    // No reconnect timer should have been armed for the unmounted provider.
+    act(() => { vi.advanceTimersByTime(WS_RECONNECT_MAX_MS) })
+    expect(wsInstances.length).toBe(countBefore)
+  })
 })

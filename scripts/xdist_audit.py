@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess  # nosec B404 — invokes pytest with a fixed, non-shell argv
+import subprocess  # nosec B404  # invokes pytest with a fixed, non-shell argv
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -41,7 +41,7 @@ def parse_outcomes(xml_bytes: bytes) -> dict[str, str]:
     ``<error>`` child; ``skipped`` counts as ``pass`` (a skip is not a flake).
     """
     outcomes: dict[str, str] = {}
-    root = ET.fromstring(xml_bytes)  # nosec B314 — JUnit from our own CI run
+    root = ET.fromstring(xml_bytes)  # nosec B314  # JUnit from our own CI run
     for case in root.iter("testcase"):
         cls = case.get("classname") or ""
         name = case.get("name") or ""
@@ -110,7 +110,7 @@ def render_summary(report: dict) -> str:
 
 def _run_pytest(args: list[str]) -> None:
     """Run pytest, tolerating a non-zero exit (failures are the whole point)."""
-    subprocess.run(  # nosec B603 — fixed argv, no shell
+    subprocess.run(  # nosec B603  # fixed argv, no shell
         [sys.executable, "-m", "pytest", *args],
         check=False,
     )
