@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `cfa3338` — Fixes #11420: FakeLLM's nested runner stand-ins have drifted from t... (#11445) (#11445) *(2026-08-17)*
 - `7cba8c3` — Fixes #11416: MockWorld repo_wiki loop registration never wires a w... (#11428) (#11428) *(2026-08-17)*
 - `b0aa945` — feat(quality): host-wide advisory lock so concurrent suites queue, not race (#11219) (#11400) (#11400) *(2026-08-17)*
 

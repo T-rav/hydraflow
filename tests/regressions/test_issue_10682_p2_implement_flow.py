@@ -359,3 +359,36 @@ async def test_abort_disabled_when_threshold_zero(tmp_path: Path) -> None:
 
     assert agent_called is True
     assert result.success is True
+
+
+# ---------------------------------------------------------------------------
+# 5. Issue-state gate placement (#11457)
+# ---------------------------------------------------------------------------
+
+
+async def test_issue_state_gate_is_the_last_gate_before_build(config) -> None:
+    """The #11457 re-check sits between ``no-progress-abort`` and ``build``.
+
+    Deliberate placement: ``decompose``'s existing-PR shortcut and attempt
+    cap, then the no-progress abort, must all run BEFORE the GitHub state
+    re-read — and the re-read must be the final gate before the actuator, so
+    the selection→branch-cut window (#11443/#11451) is closed as late as
+    possible without re-ordering admission control.
+    """
+    issue = TaskFactory.create()
+    phase, _, _ = make_implement_phase(
+        config, [issue], create_pr_return=PRInfoFactory.create()
+    )
+
+    recorded: list[str] = []
+    flow = phase._build_implement_flow(
+        checkpoint=lambda name, _state: recorded.append(name)
+    )
+    await flow.run(phase._initial_flow_state(0, issue, "agent/issue-42"))
+
+    assert _is_subsequence(
+        ["decompose", "no-progress-abort", "issue-state", "build"], recorded
+    )
+    # Adjacency in the happy-path walk: nothing may be interleaved between
+    # the re-check and the build it guards.
+    assert recorded.index("issue-state") == recorded.index("build") - 1

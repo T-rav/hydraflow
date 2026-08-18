@@ -345,6 +345,11 @@ class MockWorld:
             "wait_for_ci",
             "fetch_ci_failure_logs",
             "merge_pr",
+            # Issue-state read (OPEN/COMPLETED/NOT_PLANNED). Wired so the
+            # implement phase's #11457 branch-cut re-check reads the fake
+            # board instead of the unwired PRManager method (a real ``gh``
+            # subprocess).
+            "get_issue_state",
         ):
             setattr(prs, method, getattr(gh, method))
 
@@ -594,6 +599,10 @@ class MockWorld:
     @property
     def fs(self) -> FakeFS:
         return self._fs
+
+    @property
+    def workspace(self) -> FakeWorkspace:
+        return self._workspace
 
     @property
     def http(self) -> FakeHTTP:

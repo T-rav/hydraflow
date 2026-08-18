@@ -1274,3 +1274,59 @@ class TestCollectBatchResults:
         results = await _collect_batch_results([], stop)
 
         assert results == []
+
+
+class TestIssueStateIsResolved:
+    """``issue_state_is_resolved`` — the resolved-state predicate (#11457).
+
+    True ONLY for the two GitHub ``stateReason`` values that mean "this issue
+    is done" (``COMPLETED`` / ``NOT_PLANNED``). Everything else — ``OPEN``,
+    ``UNKNOWN``, empty, and arbitrary objects — must read as NOT resolved so
+    the branch-cut re-check fails open (an unreadable issue never blocks a
+    build). Existing tests pass a bare ``AsyncMock`` PRPort whose return is a
+    ``MagicMock``; that must fail open too, which the ``str()`` coercion
+    guarantees.
+    """
+
+    def test_completed_is_resolved(self) -> None:
+        from phase_utils import issue_state_is_resolved
+
+        assert issue_state_is_resolved("COMPLETED") is True
+
+    def test_not_planned_is_resolved(self) -> None:
+        """A duplicate/wontfix close (``not planned``) is just as done (#10025)."""
+        from phase_utils import issue_state_is_resolved
+
+        assert issue_state_is_resolved("NOT_PLANNED") is True
+
+    def test_open_is_not_resolved(self) -> None:
+        from phase_utils import issue_state_is_resolved
+
+        assert issue_state_is_resolved("OPEN") is False
+
+    def test_unknown_is_not_resolved(self) -> None:
+        """``PRManager.get_issue_state`` fail-closes with ``UNKNOWN`` on error."""
+        from phase_utils import issue_state_is_resolved
+
+        assert issue_state_is_resolved("UNKNOWN") is False
+
+    def test_none_and_empty_fail_open(self) -> None:
+        from phase_utils import issue_state_is_resolved
+
+        assert issue_state_is_resolved(None) is False
+        assert issue_state_is_resolved("") is False
+
+    def test_lowercase_state_is_coerced(self) -> None:
+        """``gh``/JSON casing must not decide whether an issue counts as done."""
+        from phase_utils import issue_state_is_resolved
+
+        assert issue_state_is_resolved("completed") is True
+        assert issue_state_is_resolved("not_planned") is True
+
+    def test_arbitrary_object_fails_open(self) -> None:
+        """A bare ``AsyncMock`` PRPort returns a ``MagicMock`` — never resolved."""
+        from unittest.mock import MagicMock
+
+        from phase_utils import issue_state_is_resolved
+
+        assert issue_state_is_resolved(MagicMock()) is False  # type: ignore[arg-type]
