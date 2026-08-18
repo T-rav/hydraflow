@@ -34,6 +34,16 @@ class TestExtractJson:
         text = '```\n{"key": "value"}\n```'
         assert _extract_json(text) == {"key": "value"}
 
+    def test_returns_none_for_valid_non_object_json(self) -> None:
+        """A fenced JSON array/scalar is valid JSON but not a DiagnosisResult
+        candidate — treat it as unparseable rather than let a non-dict reach
+        the validate-failure fallback's ``parsed.get(...)`` calls."""
+        from diagnostic_runner import _extract_json
+
+        assert _extract_json("```json\n[1, 2, 3]\n```") is None
+        assert _extract_json("```json\n42\n```") is None
+        assert _extract_json("```json\ntrue\n```") is None
+
 
 class TestBuildDiagnosisPrompt:
     def test_includes_cause_and_phase(self) -> None:

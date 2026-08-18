@@ -32,9 +32,14 @@ def _extract_json(text: str) -> dict[str, object] | None:
     match = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
     raw = match.group(1).strip() if match else text.strip()
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         return None
+    # json.loads happily returns a list/str/int/bool for valid non-object
+    # JSON (e.g. a failover-lane agent emitting a bare `[...]`). Treat that
+    # the same as "no JSON" rather than letting a non-dict reach the
+    # `parsed.get(...)` calls in diagnose()'s validate-failure fallback.
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _failover_infra() -> bool:
