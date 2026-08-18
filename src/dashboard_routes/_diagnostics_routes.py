@@ -62,6 +62,7 @@ from finder_faceplate import (
 from loop_faceplate import build_loop_faceplates
 from prompt_telemetry import PromptTelemetry
 from route_types import REPO_ALL, RepoSlugParam
+from token_drift import load_and_check_drift
 from token_report import build_token_report
 from vitals.report import latest_verdict_payload
 
@@ -437,6 +438,13 @@ def build_diagnostics_router(
         fleet medians, and per-source cache hit rate (the #11132 columns) —
         the instrument every token-efficiency lever proves its delta
         against. Fail-soft: unreadable telemetry yields an empty report.
+
+        Carries a read-only ``drift`` block (#11441): the pinned baseline's
+        per-source-share and median-tokens-per-issue verdicts for the latest
+        trailing complete ISO week, via :func:`token_drift.load_and_check_drift`.
+        An unpinned or corrupt baseline degrades to ``{"status": "no_baseline",
+        ...}`` — this endpoint never 500s on drift the way it never 500s on
+        telemetry.
         """
         cfg = _config_for(repo) if repo is not None else config
         try:
@@ -446,6 +454,7 @@ def build_diagnostics_router(
             rows = []
         report = build_token_report(rows)
         report["generated_at"] = datetime.now(UTC).isoformat()
+        report["drift"] = load_and_check_drift(cfg).to_json_dict()
         return report
 
     @router.get("/judge-calibration")

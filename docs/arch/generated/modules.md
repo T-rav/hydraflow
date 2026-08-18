@@ -49,7 +49,7 @@ graph LR
     src -- "1" --> src_runners
     src -- "1" --> src_signal_control
     src -- "62" --> src_state
-    src -- "4" --> src_vitals
+    src -- "6" --> src_vitals
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "14" --> src_arch
