@@ -117,6 +117,51 @@ class TestL15DiagnosticLoop:
         assert result["escalated"] == 1
         assert result["fixed"] == 0
 
+    async def test_fix_stage_creates_workspace_via_wired_collaborator(self, tmp_path):
+        """#11424: DiagnosticLoop's fix stage reaches FakeWorkspace.create().
+
+        Before #11424, ``_build_diagnostic`` never forwarded the ``workspace``
+        port to ``DiagnosticLoop(workspaces=...)``, so ``self._workspaces``
+        stayed ``None`` and ``_prepare_fix_workspace`` silently skipped
+        worktree creation entirely (no fallback — a dead phase). Wiring the
+        collaborator makes this MockWorld-visible: FakeWorkspace records the
+        issue number it was asked to create.
+        """
+        from models import DiagnosisResult, EscalationContext, Severity  # noqa: PLC0415
+
+        world = MockWorld(tmp_path)
+
+        world.github.add_issue(
+            77, "Broken widget", "Widget crashes on load", labels=["hydraflow-diagnose"]
+        )
+
+        diag_state = MagicMock()
+        diag_state.get_escalation_context.return_value = EscalationContext(
+            cause="NPE in widget renderer", origin_phase="review"
+        )
+        diag_state.get_diagnostic_attempts.return_value = []
+
+        diagnostic_runner = AsyncMock()
+        diagnostic_runner.diagnose.return_value = DiagnosisResult(
+            root_cause="Null widget config",
+            severity=Severity.P2_FUNCTIONAL,
+            fixable=True,
+            fix_plan="Guard against missing config",
+            human_guidance="",
+        )
+        diagnostic_runner.fix.return_value = (True, "fix transcript")
+
+        _seed_ports(
+            world, diagnostic_state=diag_state, diagnostic_runner=diagnostic_runner
+        )
+
+        stats = await world.run_with_loops(["diagnostic"], cycles=1)
+
+        result = stats["diagnostic"]
+        assert result is not None
+        assert result["fixed"] == 1
+        assert world._workspace.created == [77]
+
 
 # ---------------------------------------------------------------------------
 # L16: epic_monitor — delegates to EpicManager
