@@ -39,6 +39,23 @@ LOCK_PATH = Path(os.environ.get("TMPDIR", "/tmp")) / "hydraflow-quality.lock"  #
 DEFAULT_TIMEOUT_S = 3600
 
 
+def _is_make_dry_run() -> bool:
+    """True when reached via `make -n/-t/-q` rather than a real build.
+
+    GNU Make always executes a recipe line that references $(MAKE), even
+    under -n/-t/-q (so recursive dry-runs can still print sub-make plans;
+    see the `quality` Makefile target and #9875's regression test, which
+    relies on this to inspect the `quality-unlocked` recipe). MAKEFLAGS
+    carries the short-flag bundle through to this process's environment
+    regardless. A dry run does no real suite work, so acquiring the lock
+    would only risk deadlocking against an actual `make quality` run that
+    already holds it — e.g. a nested `make -n quality` subprocess call
+    made by a test while it itself runs under a real `make quality` (#11405).
+    """
+    first_token = os.environ.get("MAKEFLAGS", "").split(" ", 1)[0].lstrip("-")
+    return any(flag in first_token for flag in "ntq")
+
+
 def _acquire(handle, timeout_s: int) -> bool:
     """Block until the lock is held or *timeout_s* elapses. True if held."""
     deadline = time.monotonic() + timeout_s
@@ -70,7 +87,7 @@ def main(argv: list[str]) -> int:
         print("usage: quality_host_lock.py -- <command...>", file=sys.stderr)
         return 2
 
-    if os.environ.get("HYDRAFLOW_QUALITY_LOCK_DISABLE") == "1":
+    if os.environ.get("HYDRAFLOW_QUALITY_LOCK_DISABLE") == "1" or _is_make_dry_run():
         return subprocess.call(command)  # nosec B603
 
     try:
