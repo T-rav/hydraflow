@@ -154,3 +154,48 @@ class TestErosionMetricsScenario:
 
         assert second["status"] == "no_new_commits"
         assert len(github._issues) == 1  # unchanged — not refiled
+
+    async def test_catalog_default_dedup_prevents_refiling_on_cursor_reset(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression guard for #11446.
+
+        Builds the loop through ``LoopCatalog`` without seeding
+        ``erosion_metrics_dedup``, so the catalog's own default dedup port
+        is exercised (not this file's hand-rolled stateful ``_make_dedup``
+        fake). A cursor reset (restart / state loss) makes the loop re-scan
+        the same erosive commit range on the second tick; dedup — not the
+        SHA cursor — is what must prevent the duplicate filing.
+        """
+        from tests.helpers import make_bg_loop_deps
+        from tests.scenarios.catalog import LoopCatalog
+        from tests.scenarios.catalog.loop_registrations import ensure_registered
+
+        ensure_registered()
+
+        world = MockWorld(tmp_path)
+        github = world.github
+        repo = _init_repo(tmp_path)
+        base_sha, _erosive_sha = _seed_scattered_symbol(repo)
+
+        state = _make_state(base_sha)
+
+        bg = make_bg_loop_deps(tmp_path)
+        object.__setattr__(bg.config, "repo_root", repo)
+        object.__setattr__(bg.config, "erosion_metrics_loop_enabled", True)
+
+        ports: dict = {"github": github, "erosion_metrics_state": state}
+        loop = LoopCatalog.instantiate(
+            "erosion_metrics", ports=ports, config=bg.config, deps=bg.loop_deps
+        )
+
+        first = await loop._do_work()
+        assert first["filed"] == 1
+        assert len(github._issues) == 1
+
+        state._cursor["sha"] = base_sha  # simulate a cursor reset
+
+        second = await loop._do_work()
+
+        assert second["filed"] == 0
+        assert len(github._issues) == 1  # dedup — not refiled
