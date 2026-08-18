@@ -28,6 +28,7 @@ from typing import Any
 
 import pytest
 
+from agent import AgentRunner
 from mockworld.fakes.fake_agent import FakeAgent
 from mockworld.fakes.fake_bot_pr import FakeBotPR
 from mockworld.fakes.fake_docker import FakeDocker
@@ -37,21 +38,29 @@ from mockworld.fakes.fake_github import FakeGitHub
 from mockworld.fakes.fake_http import FakeHTTP
 from mockworld.fakes.fake_issue_fetcher import FakeIssueFetcher
 from mockworld.fakes.fake_issue_store import FakeIssueStore
+from mockworld.fakes.fake_llm import FakeLLM
 from mockworld.fakes.fake_observability import FakeObservability
 from mockworld.fakes.fake_workspace import FakeWorkspace
+from planner import PlannerRunner
 from ports import AgentPort
+from reviewer import ReviewRunner
 from term_proposer_loop import BotPRPort
 from tests.scenarios.ports import (
+    AgentRunnerPort,
     DockerPort,
     FSPort,
     GitPort,
     HTTPPort,
     IssueFetcherPort,
     IssueStorePort,
+    PlannerRunnerPort,
     PRPort,
+    ReviewRunnerPort,
     SentryPort,
+    TriageRunnerPort,
     WorkspacePort,
 )
+from triage import TriageRunner
 
 # Hand-maintained Port↔Fake pair list. Add new pairs as Fakes are
 # introduced. (Auto-discovery via convention ``Fake<PortStem>`` is YAGNI
@@ -210,4 +219,138 @@ def test_fake_signatures_match_port(port_cls: type, fake_cls: type) -> None:
         + "\n".join(failures)
         + "\n\nEither rename the Fake method/param to match the Port, "
         "or use a **kwargs catch-all for intentional absorb patterns."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Nested runner stand-ins vs the REAL runner classes (#11420)
+#
+# FakeLLM's ``triage_runner`` / ``planners`` / ``agents`` / ``reviewers``
+# attributes are the classes MockWorld actually substitutes for
+# ``triage.TriageRunner``, ``planner.PlannerRunner``, ``agent.AgentRunner``
+# and ``reviewer.ReviewRunner``. They are module-level private classes, so
+# the public-fake sweep above never reaches them — and the test-side Ports
+# in ``tests/scenarios/ports/llm_port.py`` mirror the FAKES, so pairing
+# against those would be near-tautological. The real ``src/`` runners are
+# the reference. The fakes are resolved off a ``FakeLLM()`` instance's
+# attributes; the ``_Fake*`` names are never imported cross-module.
+# ---------------------------------------------------------------------------
+
+_REAL_RUNNER_FAKE_ATTRS: list[tuple[type, str]] = [
+    (TriageRunner, "triage_runner"),
+    (PlannerRunner, "planners"),
+    (AgentRunner, "agents"),
+    (ReviewRunner, "reviewers"),
+]
+
+
+def _param_spec(sig: inspect.Signature) -> list[tuple[str, str, bool]]:
+    """(name, kind, required) triplets for every non-self parameter.
+
+    Annotations and return types are deliberately ignored — the fakes
+    annotate with ``Any`` to stay import-light. Names, kinds, and
+    required-vs-default status ARE the conformance surface: a positional
+    call site or a ``worker_id=`` kwarg must behave identically against
+    the real runner and its fake.
+    """
+    return [
+        (name, str(p.kind), p.default is inspect.Parameter.empty)
+        for name, p in sig.parameters.items()
+        if name != "self"
+    ]
+
+
+@pytest.mark.parametrize(
+    "real_cls,fake_attr",
+    _REAL_RUNNER_FAKE_ATTRS,
+    ids=[f"{r.__name__}-{a}" for r, a in _REAL_RUNNER_FAKE_ATTRS],
+)
+def test_nested_runner_fakes_match_real_runner_signatures(
+    real_cls: type, fake_attr: str
+) -> None:
+    """Every method shared by a real runner and its FakeLLM stand-in must
+    declare an identical parameter list — same names in the same order,
+    same POSITIONAL_OR_KEYWORD vs KEYWORD_ONLY kinds, same
+    required-vs-default status.
+
+    This is the #11409/#11415 failure class: a fake whose positional
+    params were redeclared keyword-only (or renamed with a leading
+    underscore) raises TypeError at call sites that work fine against the
+    real runner.
+    """
+    fake_cls = type(getattr(FakeLLM(), fake_attr))
+
+    real_methods = _public_methods(real_cls)
+    fake_methods = _public_methods(fake_cls)
+
+    shared = sorted(set(real_methods) & set(fake_methods))
+    assert shared, (
+        f"No shared public methods between {real_cls.__name__} and its "
+        f"FakeLLM stand-in — the pairing is miswired."
+    )
+
+    failures: list[str] = []
+    for name in shared:
+        real_sig = inspect.signature(real_methods[name])
+        fake_sig = inspect.signature(fake_methods[name])
+        if _param_spec(real_sig) != _param_spec(fake_sig):
+            failures.append(f"  {name}:\n    Real: {real_sig}\n    Fake: {fake_sig}")
+
+    assert not failures, (
+        f"FakeLLM.{fake_attr} ({fake_cls.__name__}) has drifted from "
+        f"{real_cls.__name__}:\n" + "\n".join(failures) + "\n\n"
+        "Copy the real runner's parameter list verbatim (names, order, "
+        "kinds, required-vs-default); annotate params as Any when "
+        "importing the real types would be too heavy."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Runner Ports vs the REAL runner classes
+#
+# The test-side Ports in tests/scenarios/ports/llm_port.py once mirrored the
+# FAKES, so a fake↔Port conformance sweep could validate the very drift it
+# was meant to catch (pairing fake against a fake-shaped Port is
+# near-tautological). Pinning each Port to its real runner keeps every
+# future sweep meaningful in both directions.
+# ---------------------------------------------------------------------------
+
+_REAL_RUNNER_PORT_PAIRS: list[tuple[type, type]] = [
+    (TriageRunner, TriageRunnerPort),
+    (PlannerRunner, PlannerRunnerPort),
+    (AgentRunner, AgentRunnerPort),
+    (ReviewRunner, ReviewRunnerPort),
+]
+
+
+@pytest.mark.parametrize(
+    "real_cls,port_cls",
+    _REAL_RUNNER_PORT_PAIRS,
+    ids=[f"{r.__name__}-{p.__name__}" for r, p in _REAL_RUNNER_PORT_PAIRS],
+)
+def test_runner_ports_match_real_runner_signatures(
+    real_cls: type, port_cls: type
+) -> None:
+    """Every method a ``*RunnerPort`` declares must exist on its real runner
+    with an identical parameter list (names, order, kinds,
+    required-vs-default)."""
+    port_methods = _public_methods(port_cls)
+    assert port_methods, f"{port_cls.__name__} declares no public methods?"
+
+    failures: list[str] = []
+    for name in sorted(port_methods):
+        real_method = getattr(real_cls, name, None)
+        if not callable(real_method):
+            failures.append(f"  {name}: not a public method on {real_cls.__name__}")
+            continue
+        real_sig = inspect.signature(real_method)
+        port_sig = inspect.signature(port_methods[name])
+        if _param_spec(real_sig) != _param_spec(port_sig):
+            failures.append(f"  {name}:\n    Real: {real_sig}\n    Port: {port_sig}")
+
+    assert not failures, (
+        f"{port_cls.__name__} has drifted from {real_cls.__name__}:\n"
+        + "\n".join(failures)
+        + "\n\nThe Port must mirror the real runner's parameter list "
+        "(names, order, kinds, required-vs-default)."
     )
