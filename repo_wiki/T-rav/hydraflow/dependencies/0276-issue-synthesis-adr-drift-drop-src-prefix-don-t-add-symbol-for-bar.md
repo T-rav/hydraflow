@@ -1,13 +1,12 @@
 ---
-id: 0258
+id: 0276
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-16T17:52:50.697009+00:00
-status: superseded
+created_at: 2026-08-18T13:47:37.723437+00:00
+status: active
 corroborations: 1
-supersedes: 0240
-superseded_by: 0276
+supersedes: 0258
 ---
 
 # ADR drift: drop src/ prefix, don't add :Symbol, for bare citations

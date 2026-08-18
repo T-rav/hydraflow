@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11457
 source_phase: plan
 created_at: 2026-08-18T12:04:53.781973+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Place issue-state recheck as last gate before actuator in _build_implement_flow

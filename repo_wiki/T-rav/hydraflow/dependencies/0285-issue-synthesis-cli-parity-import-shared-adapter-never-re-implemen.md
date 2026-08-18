@@ -1,13 +1,12 @@
 ---
-id: 0267
+id: 0285
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-16T17:52:50.702008+00:00
-status: superseded
+created_at: 2026-08-18T13:47:37.727114+00:00
+status: active
 corroborations: 1
-supersedes: 0249
-superseded_by: 0285
+supersedes: 0267
 ---
 
 # CLI parity: import shared adapter, never re-implement

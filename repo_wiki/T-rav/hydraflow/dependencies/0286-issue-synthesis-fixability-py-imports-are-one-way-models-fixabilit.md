@@ -1,13 +1,12 @@
 ---
-id: 0268
+id: 0286
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-16T17:52:50.702576+00:00
-status: superseded
+created_at: 2026-08-18T13:47:37.727519+00:00
+status: active
 corroborations: 1
-supersedes: 0250
-superseded_by: 0286
+supersedes: 0268
 ---
 
 # fixability.py imports are one-way: models→fixability, never reverse
