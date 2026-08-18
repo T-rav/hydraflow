@@ -490,3 +490,19 @@ Expose a deep multi-reviewer "ultra" pass as an opt-in review-phase option (#105
 ```json:entry
 {"id":"01KYEF98BHWVZEC1S5YEBDJPK3","title":"Opt-in ultra deep-review tier (ADR-0109)","topic":null,"source_type":"compiled","source_issue":10555,"source_repo":null,"created_at":"2026-07-25T00:00:00.000000+00:00","updated_at":"2026-07-25T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+
+## Token-drift filing actuator — weekly dedup key, hosted actuator not a loop (#11442)
+
+`token_drift_filing.check_token_drift` files ONE `hydraflow-find` issue per drifting token-share source per ISO week. The dedup key is `token_drift:<source>:<ISO year>-W<ISO week>`, built from `when.isocalendar()` — never `when.year` — so a timestamp landing in ISO week 53 spanning a Dec 31 / Jan 1 calendar boundary keys to the SAME week regardless of which side of midnight it falls on (a bare `.year` would silently split one sustained-drift episode into two issues).
+
+The actuator is hosted on `ErosionMetricsLoop`'s existing daily tick (`run_token_drift_check` called from `_do_work`, before `_resolve_range` so the erosion sensors' own early-exit paths never skip it) rather than standing up a new caretaker loop — the dormant-engine pile-up this repo has been warned against. It reuses the host's `config`/`pr_manager`/`dedup`/event-bus wholesale, including the `erosion_metrics_loop_enabled` kill-switch and `dry_run` gate, and deliberately makes no config change or automatic prompt pruning of its own: filing IS the actuator (stillness principles, ADR-0120) — a human decides what to do about a drifting source.
+
+`src/token_drift.py`'s verdict engine — the minimal, contract-conforming `{source, before_share, after_share, sigma, verdict}` stand-in for #11441's salvage engine — derives its drift/stable boundary from `vitals_methodology.widened_sigma_multiplier(n)`, never a hardcoded `3.0`. This is the exact regression class that stalled the parent issue (#11303/#11307, 3 failed implementation attempts): hardcoding the sigma multiplier silently overrides the ADR-0133 widened-limit policy. Pin any control-band boundary with a test that patches the multiplier function and asserts the classification flips — a literal `3.0` in the diff will not.
+
+**Why:** Weekly-not-daily dedup means a sustained drift generates exactly one triage item, not a fresh issue every tick; keying off `isocalendar()` end-to-end avoids a subtle re-filing bug at year boundaries. Hosting on an existing caretaker cadence instead of a new loop keeps the loop fleet from growing for every new sensor→actuator pairing.
+
+
+```json:entry
+{"id":"01KZTKNDRIFT2026B0FILE0001","title":"Token-drift filing actuator — weekly dedup key, hosted actuator not a loop (#11442)","topic":null,"source_type":"compiled","source_issue":11442,"source_repo":null,"created_at":"2026-08-18T00:00:00.000000+00:00","updated_at":"2026-08-18T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

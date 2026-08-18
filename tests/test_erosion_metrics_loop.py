@@ -241,7 +241,7 @@ class TestKillSwitch:
 
         result = await loop._do_work()
 
-        assert result == {"status": "disabled"}
+        assert result == {"status": "disabled", "token_drift_filed": 0}
 
     async def test_disabled_via_config_flag(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
@@ -258,7 +258,7 @@ class TestKillSwitch:
 
         result = await loop._do_work()
 
-        assert result == {"status": "config_disabled"}
+        assert result == {"status": "config_disabled", "token_drift_filed": 0}
 
     async def test_dry_run_returns_none(self, tmp_path: Path) -> None:
         repo = _init_repo(tmp_path)
@@ -267,6 +267,76 @@ class TestKillSwitch:
         result = await loop._do_work()
 
         assert result is None
+
+    async def test_dry_run_skips_token_drift_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        loop = _make_loop(tmp_path, repo, dry_run=True)
+        called = AsyncMock()
+        monkeypatch.setattr("erosion_metrics_loop.run_token_drift_check", called)
+
+        await loop._do_work()
+
+        called.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Token-drift filing actuator wiring (#11442)
+# ---------------------------------------------------------------------------
+
+
+class TestTokenDriftWiring:
+    async def test_host_calls_run_token_drift_check_and_folds_result(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        head = _current_head_sha(repo)
+        assert head is not None
+        state = _make_state(initial_sha=head)  # no_new_commits: simplest early-exit
+        dedup = _make_dedup()
+        pr_manager = MagicMock()
+        loop = _make_loop(
+            tmp_path, repo, state=state, dedup=dedup, pr_manager=pr_manager
+        )
+        stub = AsyncMock(return_value=7)
+        monkeypatch.setattr("erosion_metrics_loop.run_token_drift_check", stub)
+
+        result = await loop._do_work()
+
+        stub.assert_awaited_once_with(
+            loop._config,
+            pr_manager=pr_manager,
+            dedup=dedup,
+            event_bus=loop._bus,
+        )
+        assert result == {
+            "status": "no_new_commits",
+            "sha": head,
+            "token_drift_filed": 7,
+        }
+
+    async def test_disabled_via_enabled_cb_skips_token_drift_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        bg = make_bg_loop_deps(tmp_path, enabled=False)
+        object.__setattr__(bg.config, "repo_root", repo)
+        object.__setattr__(bg.config, "erosion_metrics_loop_enabled", True)
+        loop = ErosionMetricsLoop(
+            config=bg.config,
+            pr_manager=MagicMock(),
+            state=_make_state(),
+            dedup=_make_dedup(),
+            deps=bg.loop_deps,
+        )
+        called = AsyncMock()
+        monkeypatch.setattr("erosion_metrics_loop.run_token_drift_check", called)
+
+        result = await loop._do_work()
+
+        called.assert_not_awaited()
+        assert result == {"status": "disabled", "token_drift_filed": 0}
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +366,11 @@ class TestCursor:
 
         result = await loop._do_work()
 
-        assert result == {"status": "no_new_commits", "sha": head}
+        assert result == {
+            "status": "no_new_commits",
+            "sha": head,
+            "token_drift_filed": 0,
+        }
 
     async def test_scattered_symbol_is_filed_then_not_refiled_on_no_new_commits(
         self, tmp_path: Path
@@ -337,7 +411,11 @@ class TestCursor:
         # Second tick: cursor already at HEAD -> dedup by SHA, no re-analysis.
         result_2 = await loop._do_work()
 
-        assert result_2 == {"status": "no_new_commits", "sha": erosive_sha}
+        assert result_2 == {
+            "status": "no_new_commits",
+            "sha": erosive_sha,
+            "token_drift_filed": 0,
+        }
         assert pr_manager.create_issue.await_count == 1
 
     async def test_diff_unavailable_leaves_cursor_untouched(

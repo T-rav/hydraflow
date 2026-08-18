@@ -92,14 +92,18 @@ def _build_erosion_metrics(ports: dict[str, Any], config: Any, deps: Any) -> Any
     ``state`` defaults to a MagicMock whose last-processed-SHA cursor is a
     simple in-memory string starting empty (clean slate — the first tick
     primes the baseline, matching production's fresh-install behavior).
-    ``dedup`` defaults to a clean-slate MagicMock (no prior filed
-    fingerprints), mirroring GateActivatorLoop's builder. Both this
-    loop's git-range analysis (``changed_files_for_range`` /
-    ``added_symbols_for_range``) run against ``config.repo_root`` on disk,
-    not through the ``github`` port, so scenarios exercising the
-    threshold/dedup path need a real git repo fixture there rather than
-    seeded FakeGitHub state — see ``tests/scenarios/test_erosion_metrics_scenario.py``.
+    ``dedup`` defaults to a REAL ``DedupStore`` under ``config.data_root``
+    (not a MagicMock): this loop also hosts the token-drift filing actuator
+    (#11442), whose weekly dedup a MagicMock ``dedup.get.return_value = set()``
+    cannot exercise — every call would silently no-op ``add()`` and pass a
+    dedup scenario for the wrong reason. Both this loop's git-range analysis
+    (``changed_files_for_range`` / ``added_symbols_for_range``) run against
+    ``config.repo_root`` on disk, not through the ``github`` port, so
+    scenarios exercising the threshold/dedup path need a real git repo
+    fixture there rather than seeded FakeGitHub state — see
+    ``tests/scenarios/test_erosion_metrics_scenario.py``.
     """
+    from dedup_store import DedupStore  # noqa: PLC0415
     from erosion_metrics_loop import ErosionMetricsLoop  # noqa: PLC0415
 
     state = ports.get("erosion_metrics_state")
@@ -119,8 +123,10 @@ def _build_erosion_metrics(ports: dict[str, Any], config: Any, deps: Any) -> Any
 
     dedup = ports.get("erosion_metrics_dedup")
     if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
+        dedup = DedupStore(
+            "erosion_metrics_filed_findings",
+            config.data_root / "dedup" / "erosion_metrics_filed.json",
+        )
         ports["erosion_metrics_dedup"] = dedup
 
     return ErosionMetricsLoop(

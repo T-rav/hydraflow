@@ -1,0 +1,63 @@
+// Issue #11442 — filing actuator: token-share drift -> one hydraflow-find issue per source per ISO week
+specification {
+  element system
+  element component
+  element store
+}
+
+model {
+  factory = system 'HydraFlow Factory' {
+
+    telemetry = component 'PromptTelemetry' {
+      description 'src/prompt_telemetry.py — load_inferences(limit=5000) over metrics/prompt/inferences.jsonl'
+    }
+    engine = component 'Drift engine (#11441, frozen at src/token_drift.py)' {
+      description 'baseline pin + compute drift -> [{source, before_share, after_share, sigma, verdict}]; band from vitals_methodology.widened_sigma_multiplier'
+    }
+    actuator = component 'Token-drift filing actuator (NEW)' {
+      description 'src/token_drift_filing.py — weekly_dedup_key / render_drift_issue / check_token_drift / run_token_drift_check'
+    }
+    host = component 'ErosionMetricsLoop (host cadence)' {
+      description 'src/erosion_metrics_loop.py — daily (86400s) ADR-0029 caretaker; already holds config + PRPort + DedupStore + EventBus'
+    }
+    dedup = store 'DedupStore' {
+      description 'keys token_drift:<source>:<ISO-year>-W<ww> from datetime.isocalendar()'
+    }
+    prport = component 'PRPort.create_issue' {
+      description 'src/pr_manager.py in prod, FakeGitHub in scenarios'
+    }
+    bus = component 'EventBus' {
+      description 'SYSTEM_ALERT publish, mirrors cost_budget_alerts'
+    }
+    api = component 'GET /api/diagnostics/token-report' {
+      description 'src/dashboard_routes/_diagnostics_routes.py — read-only drift block, owned by #11441'
+    }
+
+    host -> actuator 'run_token_drift_check() once per daily tick, before _resolve_range'
+    actuator -> telemetry 'load_inferences'
+    actuator -> engine 'compute drift verdicts'
+    actuator -> dedup 'get() / add() weekly key'
+    actuator -> prport 'create_issue(hydraflow-find, token-drift)'
+    actuator -> bus 'SYSTEM_ALERT token_drift_detected'
+    api -> engine 'same verdicts, read-only, no filing'
+  }
+}
+
+views {
+  view component_view of factory {
+    title 'Token-drift filing actuator — component view'
+    include *
+    autoLayout TopBottom
+  }
+
+  dynamic view drift_filing_flow {
+    title 'Daily tick: drift verdict -> one issue per source per ISO week'
+    host -> actuator 'daily tick (after enabled/config/dry_run gates)'
+    actuator -> telemetry 'rows'
+    actuator -> engine 'verdicts'
+    actuator -> dedup 'key present? -> skip (second daily run dedupes)'
+    actuator -> prport 'file ONE issue per newly drifting source'
+    actuator -> dedup 'add key ONLY after create_issue returns > 0'
+    actuator -> bus 'SYSTEM_ALERT'
+  }
+}

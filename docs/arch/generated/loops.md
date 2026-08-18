@@ -27,7 +27,7 @@ All `BaseBackgroundLoop` subclasses discovered in `src/`. Generated from AST (no
 | **EntryEvidenceLoop** | `src.entry_evidence_loop` | 86400 | — | — | ADR-0062 |
 | **EpicMonitorLoop** | `src.epic_monitor_loop` | 1800 | — | — | — |
 | **EpicSweeperLoop** | `src.epic_sweeper_loop` | 3600 | — | — | — |
-| **ErosionMetricsLoop** | `src.erosion_metrics_loop` | 86400 | — | — | — |
+| **ErosionMetricsLoop** | `src.erosion_metrics_loop` | 86400 | — | — | ADR-0049 |
 | **EscapeLedgerLoop** | `src.escape_ledger_loop` | 14400 | — | — | — |
 | **FailOpenMonitorLoop** | `src.fail_open_monitor_loop` | 14400 | — | — | — |
 | **FakeCoverageAuditorLoop** | `src.fake_coverage_auditor_loop` | 604800 | — | — | — |

@@ -100,6 +100,7 @@ from erosion.spread import compute as spread_compute
 from exception_classify import reraise_on_credit_or_bug
 from git_timeouts import GIT_READONLY_TIMEOUT_S
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
+from token_drift_filing import run_token_drift_check
 
 if TYPE_CHECKING:
     from arch._models import ModuleGraph
@@ -168,6 +169,15 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
     v1: analyzes ``last_processed_sha..HEAD`` as a single range per tick
     (see module docstring for the cursor/dedup/baseline design). Read +
     issue-filing only — this loop never edits code or opens a PR.
+
+    Also hosts the token-drift filing actuator (#11442): each daily tick
+    calls ``token_drift_filing.run_token_drift_check`` before analyzing the
+    commit range, reusing this loop's own ``config``/``pr_manager``/
+    ``dedup``/event-bus rather than standing up a new caretaker loop (the
+    dormant-engine pile-up this repo has been warned against). The actuator
+    inherits this loop's ``erosion_metrics_loop_enabled`` kill-switch and
+    ``dry_run`` gate — deliberate, since it adds no new loop for ADR-0049 to
+    separately gate.
     """
 
     def __init__(
@@ -198,15 +208,26 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
 
     async def _do_work(self) -> dict[str, Any] | None:
         if not self._enabled_cb(self._worker_name):
-            return {"status": "disabled"}
+            return {"status": "disabled", "token_drift_filed": 0}
         if not self._config.erosion_metrics_loop_enabled:
-            return {"status": "config_disabled"}
+            return {"status": "config_disabled", "token_drift_filed": 0}
         if self._config.dry_run:
             return None
 
+        # Token-drift filing actuator (#11442), hosted on this loop's daily
+        # cadence rather than a new caretaker loop. Runs before the range
+        # resolution below so `_resolve_range`'s early-exit paths
+        # (no_new_commits, baseline priming, diff-unavailable) never skip it.
+        token_drift_filed = await run_token_drift_check(
+            self._config,
+            pr_manager=self._prs,
+            dedup=self._dedup,
+            event_bus=self._bus,
+        )
+
         resolved = self._resolve_range()
         if isinstance(resolved, dict):
-            return resolved
+            return {**resolved, "token_drift_filed": token_drift_filed}
         repo_root, commit_range, changed_files, added_symbols, current_sha = resolved
 
         module_graph = extract_module_graph(repo_root / "src")
@@ -226,6 +247,7 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
             "candidates": len(candidates),
             "filed": filed,
             "capped": capped,
+            "token_drift_filed": token_drift_filed,
         }
 
     def _resolve_range(
