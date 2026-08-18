@@ -36,17 +36,42 @@ from mode_mismatch import (  # noqa: E402
     DEFAULT_CHURN_THRESHOLD,
     IssueTrace,
     classify,
+    discriminating,
     render_report,
     summarize,
     write_ledger,
 )
 
-#: Event types whose payload naming an issue proves the pipeline worked on it.
-_WORK_EVENT_TYPES = frozenset(
-    {"phase_change", "worker_update", "pr_created", "planner_update"}
+#: Event types that name an issue WITHOUT proving the pipeline worked it —
+#: fleet-wide telemetry that happens to carry an issue field. Everything
+#: else naming an issue counts as work evidence.
+#:
+#: v1 shipped an ALLOW-list (``phase_change``/``worker_update``/
+#: ``pr_created``/``planner_update``) that contradicted its own docstring
+#: ("any worker/phase/PR event naming the issue"). Three of those four types
+#: are not emitted by this factory at all, so the runner classified ZERO
+#: issues against a 19k-event log and reported "INSUFFICIENT EVIDENCE" — an
+#: instrument reading empty because it was miswired, not because the
+#: factory is young. A DENY-list fails the safe way: a new event type
+#: counts as work by default, so the wrong-DAG rate can only be
+#: under-attributed, never silently zero.
+_NON_WORK_EVENT_TYPES = frozenset(
+    {
+        "pipeline_stats",
+        "queue_update",
+        "background_worker_status",
+        "orchestrator_status",
+        "system_alert",
+        "metrics_update",
+        "cost_update",
+    }
 )
 
-_HITL_EVENT_TYPE = "hitl_escalation"
+#: HITL surfacing is recorded as an escalation event where one exists, and
+#: otherwise inferred from the issue carrying a HITL stage in its exhaust.
+_HITL_EVENT_TYPES = frozenset(
+    {"hitl_escalation", "hitl_update", "hitl_item", "human_input_request"}
+)
 
 #: gh `stateReason` values that mean "closed without landing the work".
 _UNMERGED_REASONS = frozenset({"NOT_PLANNED", "DUPLICATE"})
@@ -54,7 +79,7 @@ _UNMERGED_REASONS = frozenset({"NOT_PLANNED", "DUPLICATE"})
 
 def _payload_issue(payload: dict[str, object]) -> int | None:
     """The issue an event payload names, under either historical key."""
-    for key in ("issue", "issue_number"):
+    for key in ("issue", "issue_number", "issue_id"):
         value = payload.get(key)
         if isinstance(value, int):
             return value
@@ -82,16 +107,22 @@ def load_traces(
             continue  # a JSON scalar line is noise, not an event
         scanned += 1
         etype = str(event.get("type", ""))
-        payload = event.get("payload")
+        # The bus writes the body under "data"; "payload" was the historical
+        # key. Reading only "payload" silently matched NOTHING in the live
+        # log — the second half of the miswiring that made this instrument
+        # report an empty ledger.
+        payload = event.get("data")
+        if not isinstance(payload, dict):
+            payload = event.get("payload")
         if not isinstance(payload, dict):
             continue
         issue = _payload_issue(payload)
         if issue is None:
             continue
-        if etype in _WORK_EVENT_TYPES:
-            worked.add(issue)
-        elif etype == _HITL_EVENT_TYPE:
+        if etype in _HITL_EVENT_TYPES:
             hitl[issue] += 1
+            worked.add(issue)
+        elif etype not in _NON_WORK_EVENT_TYPES:
             worked.add(issue)
 
     issues = json.loads(issues_json.read_text(encoding="utf-8"))
@@ -150,7 +181,12 @@ def main() -> int:
         "  pending signals (default 0/False): route_backs, gave_up, "
         "decomposed_after_attempt\n"
     )
-    print(render_report(summarize(verdicts)))
+    print(
+        render_report(
+            summarize(verdicts),
+            discriminating_signals=discriminating(traces),
+        )
+    )
     if args.ledger_out is not None:
         written = write_ledger(args.ledger_out, verdicts)
         print(f"ledger: appended {written} rows to {args.ledger_out}")
