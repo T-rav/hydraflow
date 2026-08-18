@@ -40,6 +40,10 @@ export const initialState = {
   githubMetrics: null,
   metricsHistory: null,
   pipelineIssues: { ...emptyPipeline },
+  //: #11350 — epoch ms of the last AUTHORITATIVE pipeline snapshot. The
+  //: rail derives from four surfaces on four cadences; this is the one
+  //: that reconciles them back to GitHub labels. null = never snapshotted.
+  pipelineSnapshotAt: null,
   pipelineStats: null,
   pipelinePollerLastRun: null,
   // False when the most recent /api/pipeline response reported a
@@ -765,6 +769,11 @@ export function reducer(state, action) {
         pipelineIssues: nextStages,
         pipelineSnapshotReady: true,
         pipelinePollerLastRun: new Date().toISOString(),
+        // #11350: an authoritative snapshot just reconciled the rail —
+        // restart the staleness clock. Delta frames (issue_moved etc.)
+        // deliberately do NOT reset it: a stream of deltas onto a stale
+        // baseline is exactly the failure this tripwire detects.
+        pipelineSnapshotAt: action.at ?? Date.now(),
       }
     }
 

@@ -1,0 +1,43 @@
+// Issue #11405 — where fabricated churn enters the calibration miner.
+specification {
+  element system
+  element component
+  element store
+}
+
+model {
+  churnMinerFactory = system 'HydraFlow factory' {
+    sampled = component 'SampledAuditLoop' {
+      description 'Files one hitl-escalation per re-audit disagreement; title carries PR #N (entity identity)'
+    }
+    calib = component 'DetectorCalibrationLoop' {
+      description 'Mines closed hitl-escalation issues for repeat subjects'
+    }
+    norm = component '_normalize' {
+      description 'Preserves #N-prefixed digit runs as entity identity; collapses other bare digit runs (attempt counts, elapsed seconds) to "#". HISTORICAL: before the #11405 fix, a blanket \d+ -> "#" also collapsed PR #N identity — no longer current.'
+    }
+    cache = component 'GitHubDataCache' {
+      description 'get_issues_by_label("hitl-escalation", state=closed, limit=500)'
+    }
+    dedup = store 'DedupStore detector_calibration.json' {
+      description 'sha256(norm-key)[:12]; cleared by _autoclose_recovered'
+    }
+    gh = component 'PRPort / GitHub' {
+      description 'create_issue(hydraflow-find + detector-calibration)'
+    }
+
+    sampled -> gh 'escalation: "Sampled re-audit disagreement: PR #10809 (gauntlet) — ..."'
+    calib -> cache 'closed escalation scan (30d window on closed_at)'
+    calib -> norm 'title -> subject key'
+    norm -> calib 'key keeps PR #N distinct — 3 PRs stay 3 subjects (HISTORICAL bug, fixed by #11405: previously collapsed to 1)'
+    calib -> dedup 'read/write norm digest'
+    calib -> gh 'files a churn finding only for a genuinely repeated subject'
+  }
+}
+
+views {
+  view churn of calib {
+    title 'Calibration miner subject-identity path — HISTORICAL fabricated-churn defect fixed by #11405'
+    include *
+  }
+}

@@ -24,7 +24,7 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeReviewInsightStore** | `ReviewInsightStorePort` | — |
 | **FakeRouteBackCounter** | `RouteBackCounterPort` | — |
 | **FakeSubprocessRunner** | `SubprocessRunnerPort` | `tests/scenarios/fakes/test_fake_subprocess_runner.py` |
-| **FakeWikiCompiler** | `WikiCompilerPort` | — |
+| **FakeWikiCompiler** | `WikiCompilerPort` | `tests/scenarios/test_repo_wiki_compile_scenario.py` |
 | **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
 
 ## Wiring
@@ -71,6 +71,7 @@ graph LR
     FakeSubprocessRunner -.-> SubprocessRunnerPort
     tests_scenarios_fakes_test_fake_subprocess_runner_py([tests/scenarios/fakes/test_fake_subprocess_runner.py]) --> FakeSubprocessRunner
     FakeWikiCompiler -.-> WikiCompilerPort
+    tests_scenarios_test_repo_wiki_compile_scenario_py([tests/scenarios/test_repo_wiki_compile_scenario.py]) --> FakeWikiCompiler
     FakeWorkspace -.-> WorkspacePort
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeWorkspace
 ```

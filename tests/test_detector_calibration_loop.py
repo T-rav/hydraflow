@@ -3,9 +3,11 @@
 The ADR-drift and fake-coverage FP campaigns each ran for weeks before a
 human noticed the pattern: the same subject escalating repeatedly means the
 DETECTOR is miscalibrated, not the code. This loop mines closed
-``hitl-escalation`` issues, normalizes titles (digit runs → ``#`` so attempt
-counts and elapsed times collapse), and files one ``detector-calibration``
-find issue per subject that escalated >= 2 times inside the window.
+``hitl-escalation`` issues, normalizes titles (``#N`` digit runs are entity
+identity and stay verbatim; other bare digit runs like attempt counts and
+elapsed times collapse to ``#`` — see #11405), and files one
+``detector-calibration`` find issue per subject that escalated >= 2 times
+inside the window.
 Recursion stays bounded at one meta-layer (ADR-0045 §12.1): find issues
 only, no escalation tier.
 """
@@ -81,6 +83,12 @@ def test_normalize_collapses_volatile_numbers() -> None:
     assert a == b
     c = _normalize("HITL: flaky test tests.a.test_x unresolved after 3 attempts")
     assert a != c
+
+
+def test_normalize_keeps_hash_prefixed_numbers_as_identity() -> None:
+    a = _normalize("Sampled re-audit disagreement: PR #10817 (gauntlet)")
+    b = _normalize("Sampled re-audit disagreement: PR #11241 (gauntlet)")
+    assert a != b
 
 
 async def test_repeat_churn_files_calibration_issue(loop_env) -> None:
