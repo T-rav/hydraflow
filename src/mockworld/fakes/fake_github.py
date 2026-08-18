@@ -1063,7 +1063,6 @@ class FakeGitHub:
     async def list_closed_issues_by_label(
         self,
         label: str,
-        *,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """Return closed issues carrying *label* (most recent up to *limit*).
@@ -1073,6 +1072,11 @@ class FakeGitHub:
         fake and the real port. ``labels`` (#8996) reuses ``_issue_summary``
         so ``escalation_reconcile.is_bot_close`` sees the same gh-wire-shape
         label list under the fake as under the real adapter.
+
+        ``limit`` stays positional-or-keyword (#11423) — matching
+        ``PRPort.list_closed_issues_by_label`` and the ``PRManager``
+        adapter, both of which permit ``list_closed_issues_by_label(label,
+        limit)`` as a fully positional call.
         """
         self._maybe_rate_limit()
         rows = [
