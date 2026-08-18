@@ -633,3 +633,65 @@ class TestAutoTightenGhClosures:
 
         probe = make_gh_open_pr_exists(config, runner=fake_runner)
         assert probe("auto-tighten/coverage-77.0") is False
+
+
+class TestFitnessIssueFetcher:
+    """``_make_fitness_issue_fetcher`` reads via list_all_issues/list_all_prs (#11418)."""
+
+    async def test_maps_issues_and_prs_to_issue_records(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        from service_registry import _make_fitness_issue_fetcher
+
+        prs = MagicMock()
+        prs.list_all_issues = AsyncMock(
+            return_value=[
+                {
+                    "number": 1,
+                    "state": "OPEN",
+                    "labels": [{"name": "bug"}],
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "closedAt": None,
+                }
+            ]
+        )
+        prs.list_all_prs = AsyncMock(
+            return_value=[
+                {
+                    "number": 2,
+                    "state": "MERGED",
+                    "labels": [],
+                    "createdAt": "2026-01-02T00:00:00Z",
+                    "closedAt": "2026-01-03T00:00:00Z",
+                    "mergedAt": "2026-01-03T00:00:00Z",
+                }
+            ]
+        )
+
+        fetcher = _make_fitness_issue_fetcher(prs)
+        records = await fetcher()
+
+        prs.list_all_issues.assert_awaited_once_with(state="all", limit=1000)
+        prs.list_all_prs.assert_awaited_once_with(state="all", limit=1000)
+        assert len(records) == 2
+        issue_record = next(r for r in records if r.number == 1)
+        assert issue_record.is_pr is False
+        assert issue_record.labels == ["bug"]
+        assert issue_record.state == "open"
+        assert issue_record.merged is False
+        pr_record = next(r for r in records if r.number == 2)
+        assert pr_record.is_pr is True
+        assert pr_record.state == "merged"
+        assert pr_record.merged is True
+
+    async def test_empty_reads_produce_no_records(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        from service_registry import _make_fitness_issue_fetcher
+
+        prs = MagicMock()
+        prs.list_all_issues = AsyncMock(return_value=[])
+        prs.list_all_prs = AsyncMock(return_value=[])
+
+        fetcher = _make_fitness_issue_fetcher(prs)
+        assert await fetcher() == []

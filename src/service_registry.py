@@ -177,11 +177,10 @@ _PR_LIMIT = 1000
 def _make_fitness_issue_fetcher(prs: PRManager):
     """Return an async closure that fetches issues + PRs and maps them to IssueRecord.
 
-    Uses two ``gh`` CLI calls via ``prs._run_gh`` (the same low-level seam
-    used by StaleIssueLoop). If either call returns exactly the --limit count,
-    a warning is logged so the caller knows results may be capped.
+    Uses the ``list_all_issues``/``list_all_prs`` PRPort methods (#11418).
+    If either call returns exactly the --limit count, a warning is logged
+    so the caller knows results may be capped.
     """
-    import json as _json
     from datetime import datetime as _datetime
 
     def _parse_dt(s: str | None) -> _datetime | None:
@@ -193,20 +192,7 @@ def _make_fitness_issue_fetcher(prs: PRManager):
         records: list[_IssueRecord] = []
 
         # -- issues --
-        raw_issues = await prs._run_gh(
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            prs._repo,
-            "--state",
-            "all",
-            "--limit",
-            str(_ISSUE_LIMIT),
-            "--json",
-            "number,state,labels,createdAt,closedAt",
-        )
-        issues: list[dict] = _json.loads(raw_issues) if raw_issues else []
+        issues = await prs.list_all_issues(state="all", limit=_ISSUE_LIMIT)
         if len(issues) == _ISSUE_LIMIT:
             logger.warning(
                 "fitness_issue_fetcher: issue results capped at %d; "
@@ -227,20 +213,7 @@ def _make_fitness_issue_fetcher(prs: PRManager):
             )
 
         # -- pull requests --
-        raw_prs = await prs._run_gh(
-            "gh",
-            "pr",
-            "list",
-            "--repo",
-            prs._repo,
-            "--state",
-            "all",
-            "--limit",
-            str(_PR_LIMIT),
-            "--json",
-            "number,state,labels,createdAt,closedAt,mergedAt",
-        )
-        pull_requests: list[dict] = _json.loads(raw_prs) if raw_prs else []
+        pull_requests = await prs.list_all_prs(state="all", limit=_PR_LIMIT)
         if len(pull_requests) == _PR_LIMIT:
             logger.warning(
                 "fitness_issue_fetcher: PR results capped at %d; "

@@ -919,6 +919,42 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         )
         return FakeOutput(exit_code=0, stdout=f"{pr_number}\n", stderr="")
 
+    if method == "list_branch_refs":
+        import json as _json
+
+        prefix = str(args[0])
+        refs = await fake.list_branch_refs(prefix)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(refs) + "\n", stderr="")
+
+    if method == "list_branch_commits":
+        import json as _json
+
+        branch = str(args[0])
+        commits = await fake.list_branch_commits(branch)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(commits) + "\n", stderr="")
+
+    if method == "get_issue_body":
+        import json as _json
+
+        issue_number = int(args[0])
+        fake.add_issue(issue_number, "Test issue", "Example issue body text.")
+        body = await fake.get_issue_body(issue_number)
+        return FakeOutput(
+            exit_code=0, stdout=_json.dumps({"body": body}) + "\n", stderr=""
+        )
+
+    if method == "list_all_issues":
+        import json as _json
+
+        issues = await fake.list_all_issues()
+        return FakeOutput(exit_code=0, stdout=_json.dumps(issues) + "\n", stderr="")
+
+    if method == "list_all_prs":
+        import json as _json
+
+        prs = await fake.list_all_prs()
+        return FakeOutput(exit_code=0, stdout=_json.dumps(prs) + "\n", stderr="")
+
     msg = f"FakeGitHub has no contract-tested method {method!r}"
     raise NotImplementedError(msg)
 

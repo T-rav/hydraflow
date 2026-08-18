@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_all_prs returns PRs in the requested state as raw gh-wire dicts
+# (number/state/labels/createdAt/closedAt/mergedAt), mirroring
+# `gh pr list --state <state> --json ...`. Used by the fitness issue fetcher
+# (service_registry, #11418). A fresh fake has no PRs, so the contract pins
+# the empty-list shape.
+adapter: github
+interaction: list_all_prs
+recorded_at: "2026-08-18T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_all_prs
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "[]\n"
+  stderr: ""
+normalizers: []
+baseline_only: true
