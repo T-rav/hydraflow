@@ -403,6 +403,20 @@ class PRPort(Protocol):
         """Return whether *branch* has commits ahead of configured main branch."""
         ...
 
+    async def list_branch_refs(self, prefix: str) -> list[str]:
+        """Return remote branch names (without ``refs/heads/``) under *prefix*.
+
+        Matches ``pr_manager.PRManager.list_branch_refs`` exactly.
+        """
+        ...
+
+    async def list_branch_commits(self, branch: str) -> list[dict[str, str]]:
+        """Return ``[{"date": ..., "message": ...}, ...]`` for *branch*, newest first.
+
+        Matches ``pr_manager.PRManager.list_branch_commits`` exactly.
+        """
+        ...
+
     @staticmethod
     def expected_pr_title(issue_number: int, issue_title: str) -> str:
         """Return the canonical PR title for an issue: ``Fixes #N: <title>``."""
@@ -491,6 +505,22 @@ class PRPort(Protocol):
 
         Used by the state-prune sweep (#9905) as the keep-set: per-issue
         state entries whose issue is no longer open are garbage.
+        """
+        ...
+
+    async def list_all_issues_for_fitness(
+        self, limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """Return ALL issues (every state) with fields the fitness window needs.
+
+        Matches ``pr_manager.PRManager.list_all_issues_for_fitness`` exactly.
+        """
+        ...
+
+    async def list_all_prs_for_fitness(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Return ALL pull requests (every state) with fitness-window fields.
+
+        Matches ``pr_manager.PRManager.list_all_prs_for_fitness`` exactly.
         """
         ...
 
@@ -613,6 +643,13 @@ class PRPort(Protocol):
         ``WorkspaceGCLoop._issue_has_pipeline_label`` can fail-closed on
         error rather than mistaking an unreadable issue for an unlabelled
         one (#9575).
+        """
+        ...
+
+    async def get_issue_body(self, issue_number: int) -> str:
+        """Return the body text of a GitHub issue.
+
+        Matches ``pr_manager.PRManager.get_issue_body`` exactly.
         """
         ...
 

@@ -3336,7 +3336,9 @@ class GitHubIssueSummary(TypedDict):
     needs labels on CLOSED rows to tell a programmatic close from a human one.
     ``closed_at`` is populated by ``list_closed_issues_by_label`` only (#9727
     — the detector-calibration churn window keys on close time, since
-    ``updated_at`` moves on ANY issue activity).
+    ``updated_at`` moves on ANY issue activity). ``created_at`` is populated
+    by ``list_open_issues`` only (#11418 — the backlog-budget retirement
+    valve keys age off creation time, not last activity).
     """
 
     number: int
@@ -3345,6 +3347,7 @@ class GitHubIssueSummary(TypedDict):
     updated_at: str
     labels: NotRequired[list[dict[str, str]]]
     closed_at: NotRequired[str]
+    created_at: NotRequired[str]
 
 
 class PipelineSnapshotEntry(TypedDict):

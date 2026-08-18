@@ -1,0 +1,26 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_branch_commits returns [{"date": ..., "message": ...}, ...] for a
+# branch, newest first, mirroring `gh api repos/.../commits --method GET
+# --field sha=<branch> --field per_page=30 --jq '[.[] | {date: ...,
+# message: ...}]'` (#11418). The dispatcher seeds two commits so the
+# newest-first shape and the Fixes-#N message-scan path are both covered.
+adapter: github
+interaction: list_branch_commits
+recorded_at: "2026-08-18T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_branch_commits
+  args:
+    - "agent/issue-9553"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"date": "2026-01-02T00:00:00Z", "message": "Fixes #42: thing"}, {"date":
+    "2026-01-01T00:00:00Z", "message": "wip"}]
+
+    '
+  stderr: ""
+normalizers: []
+baseline_only: true

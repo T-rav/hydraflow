@@ -1,17 +1,18 @@
 """Unit tests for the issue_fetcher closure built in build_services.
 
-The fetcher is extracted and tested in isolation by monkeypatching the
-_run_gh seam on a stub PRManager-like object.
+The fetcher is extracted and tested in isolation by stubbing PRPort's
+``list_all_issues_for_fitness``/``list_all_prs_for_fitness`` methods (#11418)
+on a stub PRManager-like object — the fetcher no longer reaches around the
+Port via a raw ``_run_gh``/``_repo`` seam.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -57,19 +58,10 @@ PR_OPEN = {
 
 @pytest.fixture()
 def fake_prs():
-    """Stub with _run_gh that returns canned JSON for issue and PR calls."""
+    """Stub with PRPort fitness-listing methods returning canned rows."""
     prs = MagicMock()
-    prs._repo = "owner/repo"
-
-    async def _run_gh(*args):
-        args_str = " ".join(args)
-        if "gh issue list" in args_str or ("issue" in args_str and "list" in args_str):
-            return json.dumps([ISSUE_OPEN, ISSUE_CLOSED])
-        if "gh pr list" in args_str or ("pr" in args_str and "list" in args_str):
-            return json.dumps([PR_MERGED, PR_OPEN])
-        return "[]"
-
-    prs._run_gh = _run_gh
+    prs.list_all_issues_for_fitness = AsyncMock(return_value=[ISSUE_OPEN, ISSUE_CLOSED])
+    prs.list_all_prs_for_fitness = AsyncMock(return_value=[PR_MERGED, PR_OPEN])
     return prs
 
 
@@ -128,3 +120,13 @@ def test_timestamps_are_datetimes(fake_prs):
         assert isinstance(record.created_at, datetime)
         if record.closed_at is not None:
             assert isinstance(record.closed_at, datetime)
+
+
+def test_reads_through_prport_fitness_listings(fake_prs):
+    """#11418: the fetcher calls the Port methods directly — no raw
+    ``_run_gh``/``_repo`` reach-around remains."""
+    fetcher = _make_fitness_issue_fetcher(fake_prs)
+    asyncio.run(fetcher())
+
+    fake_prs.list_all_issues_for_fitness.assert_awaited_once()
+    fake_prs.list_all_prs_for_fitness.assert_awaited_once()

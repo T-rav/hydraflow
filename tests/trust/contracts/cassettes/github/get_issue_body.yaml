@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_issue_body returns the body text of a GitHub issue, mirroring
+# `gh issue view <n> --json body --jq '.body'` (#11418). Promoted off
+# ReportIssueLoop._verify_issue, which previously read the body via a raw
+# self._pr_manager._run_gh(...) bypass.
+adapter: github
+interaction: get_issue_body
+recorded_at: "2026-08-18T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_issue_body
+  args:
+    - "42"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "The full body text.\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

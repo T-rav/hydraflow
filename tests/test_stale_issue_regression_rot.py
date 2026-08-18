@@ -13,7 +13,6 @@ this issue would be immediately self-flagged by the very detector it adds.
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -66,8 +65,8 @@ def _make_loop(
     (tmp_path / "repo").mkdir(parents=True, exist_ok=True)
 
     prs = MagicMock()
-    prs._repo = "owner/repo"
-    prs._run_gh = AsyncMock(return_value=json.dumps([]))
+    prs.list_open_issues = AsyncMock(return_value=[])
+    prs.list_branch_refs = AsyncMock(return_value=[])
     prs.post_comment = AsyncMock()
     prs.get_issue_state = AsyncMock(return_value="UNKNOWN")
     prs.create_issue = AsyncMock(return_value=555)

@@ -159,6 +159,7 @@ class GhIssueListItem(BaseModel):
     updated_at: str | None = Field(default=None, alias="updatedAt")
     labels: list[GhLabel] = Field(default_factory=list)
     closed_at: str | None = Field(default=None, alias="closedAt")
+    created_at: str | None = Field(default=None, alias="createdAt")
 
 
 class GhPromotionPR(BaseModel):

@@ -919,6 +919,53 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         )
         return FakeOutput(exit_code=0, stdout=f"{pr_number}\n", stderr="")
 
+    if method == "list_branch_refs":
+        import json as _json
+
+        prefix = str(args[0])
+        # Seed one matching branch (via a PR record) and one non-matching
+        # branch so the prefix filter is actually exercised, not vacuous.
+        fake.add_pr(number=4200, issue_number=9553, branch=f"{prefix}9553")
+        fake.add_pr(number=4201, issue_number=1, branch="unrelated/branch")
+        refs = await fake.list_branch_refs(prefix)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(refs) + "\n", stderr="")
+
+    if method == "list_branch_commits":
+        import json as _json
+
+        branch = str(args[0])
+        fake.add_branch_commits(
+            branch,
+            [
+                {"date": "2026-01-02T00:00:00Z", "message": "Fixes #42: thing"},
+                {"date": "2026-01-01T00:00:00Z", "message": "wip"},
+            ],
+        )
+        commits = await fake.list_branch_commits(branch)
+        return FakeOutput(exit_code=0, stdout=_json.dumps(commits) + "\n", stderr="")
+
+    if method == "get_issue_body":
+        issue_number = int(args[0])
+        fake.add_issue(issue_number, "Issue with a body", "The full body text.")
+        body = await fake.get_issue_body(issue_number)
+        return FakeOutput(exit_code=0, stdout=f"{body}\n", stderr="")
+
+    if method == "list_all_issues_for_fitness":
+        import json as _json
+
+        fake.add_issue(201, "Open advisory", "", labels=["hydraflow-find"])
+        fake.add_issue(202, "Closed one", "", state="closed")
+        rows = await fake.list_all_issues_for_fitness()
+        return FakeOutput(exit_code=0, stdout=_json.dumps(rows) + "\n", stderr="")
+
+    if method == "list_all_prs_for_fitness":
+        import json as _json
+
+        fake.add_pr(number=301, issue_number=201, branch="agent/issue-201")
+        fake.add_pr(number=302, issue_number=202, branch="agent/issue-202", merged=True)
+        rows = await fake.list_all_prs_for_fitness()
+        return FakeOutput(exit_code=0, stdout=_json.dumps(rows) + "\n", stderr="")
+
     msg = f"FakeGitHub has no contract-tested method {method!r}"
     raise NotImplementedError(msg)
 

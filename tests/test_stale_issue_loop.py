@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,14 +22,15 @@ def _gh_issue_json(
     updated_at: str | None = None,
     labels: list[str] | None = None,
 ) -> dict:
-    """Build a dict matching `gh issue list --json` output."""
+    """Build a dict matching ``PRPort.list_open_issues`` output (#11418)."""
     if updated_at is None:
         updated_at = (datetime.now(UTC) - timedelta(days=60)).isoformat()
     label_objs = [{"name": lbl} for lbl in (labels or [])]
     return {
         "number": number,
         "title": title,
-        "updatedAt": updated_at,
+        "body": "",
+        "updated_at": updated_at,
         "labels": label_objs,
     }
 
@@ -71,10 +71,12 @@ def _make_loop(
     """
     deps = make_bg_loop_deps(tmp_path, enabled=enabled, stale_issue_interval=interval)
 
-    prs = MagicMock()
-    prs._repo = "owner/repo"
-    prs._run_gh = AsyncMock(return_value=json.dumps(gh_issues) if gh_issues else "[]")
+    prs = AsyncMock()
+    prs.list_open_issues = AsyncMock(return_value=gh_issues or [])
+    prs.close_issue = AsyncMock(return_value=True)
     prs.post_comment = AsyncMock()
+    prs.list_branch_refs = AsyncMock(return_value=[])
+    prs.list_branch_commits = AsyncMock(return_value=[])
 
     state = _make_state(
         staleness_days=staleness_days,
@@ -119,9 +121,7 @@ class TestStaleIssueLoopDoWork:
         assert result["closed"] == 1
         assert result["scanned"] == 1
         prs.post_comment.assert_awaited_once()
-        # Verify close was called via _run_gh
-        close_calls = [c for c in prs._run_gh.await_args_list if "close" in c.args]
-        assert len(close_calls) == 1
+        prs.close_issue.assert_awaited_once_with(42)
         state.add_stale_issue_closed.assert_called_once_with(42)
 
     @pytest.mark.asyncio
@@ -191,8 +191,7 @@ class TestStaleIssueLoopDoWork:
         assert result["scanned"] == 1
         # Should NOT have called post_comment or close
         prs.post_comment.assert_not_awaited()
-        close_calls = [c for c in prs._run_gh.await_args_list if "close" in c.args]
-        assert len(close_calls) == 0
+        prs.close_issue.assert_not_awaited()
         state.add_stale_issue_closed.assert_not_called()
 
     @pytest.mark.asyncio
@@ -217,11 +216,57 @@ class TestStaleIssueLoopDoWork:
     async def test_gh_fetch_failure_returns_stats(self, tmp_path: Path) -> None:
         """If fetching issues fails, stats are returned with zeroes."""
         loop, prs, state = _make_loop(tmp_path)
-        prs._run_gh = AsyncMock(side_effect=RuntimeError("network error"))
+        prs.list_open_issues = AsyncMock(side_effect=RuntimeError("network error"))
 
         result = await loop._do_work()
 
         assert result == {"scanned": 0, "closed": 0, "skipped": 0}
+
+    @pytest.mark.asyncio
+    async def test_backlog_budget_uses_list_open_issues(self, tmp_path: Path) -> None:
+        """#11418: the retirement valve reads through PRPort.list_open_issues,
+        not a raw ``_run_gh`` reach-around, and its issue-close goes through
+        PRPort.close_issue."""
+        older = (datetime.now(UTC) - timedelta(days=200)).isoformat()
+        newer = (datetime.now(UTC) - timedelta(days=100)).isoformat()
+        issues = [
+            {
+                "number": 77,
+                "title": "old advisory",
+                "body": "",
+                "updated_at": older,
+                "created_at": older,
+                "labels": [{"name": "hydraflow-find"}],
+            },
+            {
+                "number": 78,
+                "title": "newer advisory",
+                "body": "",
+                "updated_at": newer,
+                "created_at": newer,
+                "labels": [{"name": "hydraflow-find"}],
+            },
+        ]
+        loop, prs, state = _make_loop(tmp_path)
+        prs.list_open_issues = AsyncMock(return_value=issues)
+        loop._config.backlog_budget = 1  # 2 advisory issues > budget of 1
+        loop._config.backlog_budget_min_age_days = 7
+
+        result = await loop._scan_backlog_budget()
+
+        assert result["retired"] == 1
+        prs.close_issue.assert_awaited_once_with(77)
+
+    @pytest.mark.asyncio
+    async def test_backlog_budget_disabled_skips_fetch(self, tmp_path: Path) -> None:
+        """budget <= 0 disables the valve without ever calling list_open_issues."""
+        loop, prs, state = _make_loop(tmp_path)
+        loop._config.backlog_budget = 0
+
+        result = await loop._scan_backlog_budget()
+
+        assert result == {"retired": 0}
+        prs.list_open_issues.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_lifecycle_labels_excluded_by_default(
@@ -240,3 +285,110 @@ class TestStaleIssueLoopDoWork:
         assert result is not None
         assert result["skipped"] == 1
         assert result["closed"] == 0
+
+
+class TestBranchGcPortWiring:
+    """#11418: branch-GC reads through PRPort.list_branch_refs /
+    list_branch_commits instead of the raw ``self._prs._run_gh``/``_repo``
+    reach-around — so a fake backing PRPort can model both calls."""
+
+    @pytest.mark.asyncio
+    async def test_candidate_branches_queries_each_configured_prefix(
+        self, tmp_path: Path
+    ) -> None:
+        loop, prs, _ = _make_loop(tmp_path)
+        prs.list_branch_refs = AsyncMock(
+            side_effect=lambda prefix: (
+                [f"{prefix}1"] if prefix == "agent/issue-" else []
+            )
+        )
+
+        branches = await loop._branch_gc_candidate_branches()
+
+        assert branches == ["agent/issue-1"]
+        prs.list_branch_refs.assert_any_await("agent/issue-")
+        prs.list_branch_refs.assert_any_await("fix/")
+
+    @pytest.mark.asyncio
+    async def test_candidate_branches_swallows_transient_error(
+        self, tmp_path: Path
+    ) -> None:
+        """A plain RuntimeError on one prefix is logged and skipped, not raised."""
+        loop, prs, _ = _make_loop(tmp_path)
+
+        async def _flaky(prefix: str) -> list[str]:
+            if prefix == "agent/issue-":
+                raise RuntimeError("gh api boom")
+            return ["fix/1"]
+
+        prs.list_branch_refs = AsyncMock(side_effect=_flaky)
+
+        branches = await loop._branch_gc_candidate_branches()
+
+        assert branches == ["fix/1"]
+
+    @pytest.mark.asyncio
+    async def test_candidate_branches_propagates_credit_exhaustion(
+        self, tmp_path: Path
+    ) -> None:
+        """A CreditExhaustedError must NOT be swallowed (#11418 defensive branch)."""
+        from subprocess_util import CreditExhaustedError
+
+        loop, prs, _ = _make_loop(tmp_path)
+        prs.list_branch_refs = AsyncMock(side_effect=CreditExhaustedError("no credits"))
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._branch_gc_candidate_branches()
+
+    @pytest.mark.asyncio
+    async def test_commit_info_derives_last_date_and_messages(
+        self, tmp_path: Path
+    ) -> None:
+        loop, prs, _ = _make_loop(tmp_path)
+        prs.list_branch_commits = AsyncMock(
+            return_value=[
+                {"date": "2026-01-02T00:00:00Z", "message": "Fixes #42: thing"},
+                {"date": "2026-01-01T00:00:00Z", "message": "wip"},
+            ]
+        )
+
+        info = await loop._branch_gc_commit_info("agent/issue-42")
+
+        assert info == (
+            "2026-01-02T00:00:00Z",
+            ["Fixes #42: thing", "wip"],
+        )
+
+    @pytest.mark.asyncio
+    async def test_commit_info_returns_none_on_empty_commits(
+        self, tmp_path: Path
+    ) -> None:
+        loop, prs, _ = _make_loop(tmp_path)
+        prs.list_branch_commits = AsyncMock(return_value=[])
+
+        info = await loop._branch_gc_commit_info("agent/issue-42")
+
+        assert info is None
+
+    @pytest.mark.asyncio
+    async def test_commit_info_swallows_transient_error(self, tmp_path: Path) -> None:
+        loop, prs, _ = _make_loop(tmp_path)
+        prs.list_branch_commits = AsyncMock(side_effect=RuntimeError("gh api boom"))
+
+        info = await loop._branch_gc_commit_info("agent/issue-42")
+
+        assert info is None
+
+    @pytest.mark.asyncio
+    async def test_commit_info_propagates_credit_exhaustion(
+        self, tmp_path: Path
+    ) -> None:
+        from subprocess_util import CreditExhaustedError
+
+        loop, prs, _ = _make_loop(tmp_path)
+        prs.list_branch_commits = AsyncMock(
+            side_effect=CreditExhaustedError("no credits")
+        )
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._branch_gc_commit_info("agent/issue-42")

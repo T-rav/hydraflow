@@ -8,7 +8,6 @@ that phases call via PipelineHarness.
 from __future__ import annotations
 
 import copy
-import json
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -108,6 +107,10 @@ class FakeIssue:
     # reason — get_issue_state falls back to "COMPLETED", matching gh's
     # default close reason (#10025).
     state_reason: str = ""
+    # gh's createdAt (#11418) — read by list_all_issues_for_fitness so the
+    # backlog-budget retirement valve and fitness window can age issues off
+    # creation time, not last activity.
+    created_at: str = "2026-01-01T00:00:00Z"
 
 
 # RC promotion naming (#10309). Matches config's ``rc_branch_prefix`` default —
@@ -145,6 +148,8 @@ class FakePR:
     # zero-commit PRs from real ones. Defaults to 1 so seeded PRs look
     # "real" without explicit setup.
     commits: int = 1
+    # gh's createdAt (#11418) — read by list_all_prs_for_fitness.
+    created_at: str = "2026-01-01T00:00:00Z"
 
 
 class FakeGitHubUnmodelledCommand(RuntimeError):
@@ -224,10 +229,6 @@ class FakeGitHub:
         # defaults to True (a successful refresh) and enqueues green.
         self._arch_refresh_calls: dict[int, int] = {}
         self._arch_refresh_outcome: dict[int, bool] = {}
-        # Mirrors PRManager._repo. Some loops (StaleIssueLoop) read this
-        # attribute directly when constructing `gh` CLI args via _run_gh.
-        # The value never reaches a real GitHub API in the sandbox.
-        self._repo: str = "owner/repo"
         # Branch-protection rulesets keyed by name, served by fetch_rulesets
         # (ADR-0082, #9644). Mirrors the shape gh_fetch_rulesets returns:
         # {name: {name, target, enforcement, conditions, rules, ...}}.
@@ -239,6 +240,12 @@ class FakeGitHub:
         # every branch, matching the raw ``gh api`` 404 case, so existing
         # ruleset-only seeds see no new drift from this seam.
         self._legacy_protection: dict[str, dict[str, Any]] = {}
+        # Per-branch commit history (date/message rows, newest first) for
+        # list_branch_commits (#11418). Unseeded branches read back empty —
+        # the honest "no commits recorded" default. Seed via
+        # add_branch_commits() so branch-GC scenarios can exercise the
+        # ``Fixes #N`` commit-message reconciliation path with real fidelity.
+        self._branch_commits: dict[str, list[dict[str, str]]] = {}
 
     @classmethod
     def from_seed(cls, seed: MockWorldSeed) -> FakeGitHub:
@@ -710,6 +717,35 @@ class FakeGitHub:
         self._maybe_rate_limit()
         return True
 
+    async def list_branch_refs(self, prefix: str) -> list[str]:
+        """Return seeded PR branch names starting with *prefix* (#11418).
+
+        Mirrors ``PRManager.list_branch_refs``'s matching-refs read. Branch
+        names come from seeded ``FakePR.branch`` values — the same source
+        the old ``_modelled_api_payload`` matching-refs shape used before
+        promotion to a real Port method.
+        """
+        self._maybe_rate_limit()
+        return [
+            pr.branch
+            for pr in self._prs.values()
+            if pr.branch and pr.branch.startswith(prefix)
+        ]
+
+    def add_branch_commits(self, branch: str, commits: list[dict[str, str]]) -> None:
+        """Seed-API helper: set commit history (date/message, newest first)
+        for *branch*, read back by :meth:`list_branch_commits` (#11418)."""
+        self._branch_commits[branch] = list(commits)
+
+    async def list_branch_commits(self, branch: str) -> list[dict[str, str]]:
+        """Return seeded commit history for *branch*, newest first (#11418).
+
+        Unseeded branches read back empty — the honest "no commits
+        recorded" default, mirroring a real ``gh api .../commits`` 404.
+        """
+        self._maybe_rate_limit()
+        return list(self._branch_commits.get(branch, []))
+
     async def add_pr_labels(self, pr_number: int, labels: list[str]) -> None:
         """Mirror PRManager.add_pr_labels — append each label idempotently."""
         self._maybe_rate_limit()
@@ -923,10 +959,16 @@ class FakeGitHub:
         """Return ALL open issues (no label filter), mirroring the gh projection.
 
         Used by IssueRefinementLoop's backlog-wide sweep (#9957).
+        ``created_at`` (#11418) is added ON TOP of ``_issue_summary`` rather
+        than baked into it — only ``list_open_issues``'s real ``gh issue
+        list`` invocation requests ``createdAt``; ``list_issues_by_label``/
+        ``list_closed_issues_by_label`` don't, so baking it into the shared
+        helper would give the fake more fidelity than the real adapter for
+        those two methods (the same class of gap #11418 exists to close).
         """
         self._maybe_rate_limit()
         return [
-            self._issue_summary(issue)
+            {**self._issue_summary(issue), "created_at": issue.created_at}
             for issue in self._issues.values()
             if issue.state == "open"
         ]
@@ -938,6 +980,41 @@ class FakeGitHub:
             issue.number for issue in self._issues.values() if issue.state == "open"
         ]
         return sorted(numbers)[:limit]
+
+    async def list_all_issues_for_fitness(
+        self, limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """Return ALL issues (every state), raw ``gh issue list`` row shape (#11418)."""
+        self._maybe_rate_limit()
+        rows = [
+            {
+                "number": issue.number,
+                "state": issue.state.upper(),
+                "labels": [{"name": name} for name in issue.labels],
+                "createdAt": issue.created_at,
+                "closedAt": issue.closed_at or None,
+            }
+            for issue in self._issues.values()
+        ]
+        return rows[:limit]
+
+    async def list_all_prs_for_fitness(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Return ALL PRs (every state), raw ``gh pr list`` row shape (#11418)."""
+        self._maybe_rate_limit()
+        rows = []
+        for pr in self._prs.values():
+            state = "MERGED" if pr.merged else ("CLOSED" if pr.closed else "OPEN")
+            rows.append(
+                {
+                    "number": pr.number,
+                    "state": state,
+                    "labels": [{"name": name} for name in pr.labels],
+                    "createdAt": pr.created_at,
+                    "closedAt": pr.created_at if (pr.closed or pr.merged) else None,
+                    "mergedAt": pr.created_at if pr.merged else None,
+                }
+            )
+        return rows[:limit]
 
     def add_workflow_run(
         self,
@@ -1261,6 +1338,12 @@ class FakeGitHub:
                 self._issues[issue_number], "updated_at", "2026-01-01T00:00:00Z"
             )
         return ""
+
+    async def get_issue_body(self, issue_number: int) -> str:
+        """Return the body text of a GitHub issue (#11418)."""
+        self._maybe_rate_limit()
+        issue = self._issues.get(issue_number)
+        return issue.body if issue is not None else ""
 
     async def get_issue_state(self, issue_number: int) -> str:
         """Return issue state as GitHub GraphQL style (OPEN/COMPLETED/NOT_PLANNED).
@@ -1644,29 +1727,21 @@ class FakeGitHub:
             if not pr.merged
         ]
 
-    def _modelled_api_payload(self, path: str) -> str | None:
-        """Payloads for the ``gh api`` shapes real loops call (#11413).
+    async def _handle_issue_edit(self, args: list[str]) -> None:
+        """Model ``gh issue edit <n> --repo <repo> --body <text>`` (#11419).
 
-        StaleIssueLoop's branch-GC makes both of these live — the sampled
-        re-audit of #11372 falsified that PR's "no loop relied on the
-        silent empty answer" claim by finding them. They are MODELLED, not
-        allowlisted quiet: allowlisting would reintroduce exactly the blind
-        spot fail-loud exists to remove. ``None`` means "not modelled here".
+        Best-effort: extracts the issue number (first digit-only positional)
+        and the value immediately after ``--body``, then delegates to
+        :meth:`update_issue_body` so both routes end up in the same place.
         """
-        if "/git/matching-refs/heads/" in path:
-            prefix = path.rsplit("/heads/", 1)[-1]
-            return json.dumps(
-                [
-                    f"refs/heads/{pr.branch}"
-                    for pr in self._prs.values()
-                    if pr.branch and pr.branch.startswith(prefix)
-                ]
-            )
-        if path.endswith("/commits"):
-            # The loop reads only the newest commit's date/sha to age a
-            # branch; an empty list is the honest "no commits recorded".
-            return json.dumps([])
-        return None
+        number = next((int(a) for a in args[2:] if a.isdigit()), None)
+        body = None
+        if "--body" in args:
+            idx = args.index("--body")
+            if idx + 1 < len(args):
+                body = args[idx + 1]
+        if number is not None and body is not None:
+            await self.update_issue_body(number, body)
 
     async def _run_gh(self, *cmd: str, cwd: Any = None) -> str:
         """Generic ``gh`` CLI passthrough — returns minimal-shape JSON.
@@ -1717,15 +1792,18 @@ class FakeGitHub:
                     if issue.state == "open"
                 ]
                 return _json.dumps(payload)
-            if sub == "close":
-                # Best-effort: extract issue number from positional args.
-                for a in args[2:]:
-                    if a.isdigit():
-                        await self.close_issue(int(a))
-                        break
-                return ""
             if sub == "view":
                 return _json.dumps({"comments": []})
+            if sub in ("close", "edit"):
+                if sub == "close":
+                    # Best-effort: extract issue number from positional args.
+                    for a in args[2:]:
+                        if a.isdigit():
+                            await self.close_issue(int(a))
+                            break
+                else:
+                    await self._handle_issue_edit(args)
+                return ""
 
         if verb == "pr" and len(args) > 1:
             sub = args[1]
@@ -1745,17 +1823,10 @@ class FakeGitHub:
         # Unknown shape: FAIL LOUD (#11372). Quiet shapes are allowlisted
         # above; anything else is a fidelity gap the scenario would
         # otherwise paper over with a plausible empty answer.
-        # Modelled `gh api` shapes (#11413) and the quiet allowlist share one
-        # exit so the dispatcher keeps a single fall-through.
-        modelled = (
-            self._modelled_api_payload(args[1])
-            if verb == "api" and len(args) > 1
-            else None
-        )
         shape = " ".join(args[:3])
         quiet = any(shape.startswith(prefix) for prefix in _QUIET_UNKNOWN_GH_SHAPES)
-        if modelled is not None or quiet:
-            return modelled if modelled is not None else "[]"
+        if quiet:
+            return "[]"
         raise FakeGitHubUnmodelledCommand(
             f"FakeGitHub has no model for `gh {' '.join(args)}`. Either model "
             "the command (preferred — that is the fidelity fix) or, if the "

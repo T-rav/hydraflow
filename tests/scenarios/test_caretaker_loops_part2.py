@@ -955,35 +955,34 @@ class TestL22StagingPromotionLoop:
 
 
 # ---------------------------------------------------------------------------
-# L23: stale_issue — needs _run_gh; use direct instantiation (Pattern B)
+# L23: stale_issue — real FakeGitHub (Pattern A), since #11418 promoted the
+# loop's raw _run_gh/_repo reach-around to real PRPort methods
+# (list_open_issues / close_issue) that FakeGitHub implements directly.
 # ---------------------------------------------------------------------------
 
 
 class TestL23StaleIssueLoop:
-    """L23: StaleIssueLoop auto-closes stale issues with no recent activity.
+    """L23: StaleIssueLoop auto-closes stale issues with no recent activity."""
 
-    StaleIssueLoop calls prs._run_gh() and prs._repo directly, which
-    FakeGitHub does not implement.  We use Pattern B (direct instantiation)
-    and pass a MagicMock that has _run_gh and _repo stubbed appropriately.
-    """
+    def _make_prs(self, issues: list[dict], *, fail_fetch: bool = False):
+        """Return a real FakeGitHub seeded with *issues* (#11418 Pattern A)."""
+        from mockworld.fakes.fake_github import FakeGitHub  # noqa: PLC0415
 
-    def _make_prs_mock(
-        self, issues: list[dict], *, fail_fetch: bool = False
-    ) -> MagicMock:
-        """Return a MagicMock prs with _run_gh and _repo configured."""
-        import json
-
-        prs = MagicMock()
-        prs._repo = "test-org/test-repo"
+        prs = FakeGitHub()
+        for issue in issues:
+            prs.add_issue(
+                number=issue["number"],
+                title=issue["title"],
+                body="",
+                labels=[lbl["name"] for lbl in issue.get("labels", [])],
+                updated_at=issue.get("updatedAt"),
+            )
         if fail_fetch:
-            prs._run_gh = AsyncMock(side_effect=RuntimeError("gh failed"))
-        else:
-            prs._run_gh = AsyncMock(return_value=json.dumps(issues))
-        prs.post_comment = AsyncMock(return_value=None)
+            prs.list_open_issues = AsyncMock(side_effect=RuntimeError("gh failed"))
         return prs
 
     def _make_loop(self, tmp_path, prs, state):
-        """Build a StaleIssueLoop with Pattern B (direct instantiation)."""
+        """Build a StaleIssueLoop with direct instantiation (Pattern B config)."""
         from stale_issue_loop import StaleIssueLoop  # noqa: PLC0415
 
         config, deps = _make_loop_deps(tmp_path)
@@ -991,7 +990,7 @@ class TestL23StaleIssueLoop:
 
     async def test_no_issues_returns_zero_stats(self, tmp_path):
         """When gh returns an empty issue list, all counters are zero."""
-        prs = self._make_prs_mock([])
+        prs = self._make_prs([])
         state = MagicMock()
         state.get_stale_issue_settings.return_value = _stale_settings()
         state.get_stale_issue_closed.return_value = set()
@@ -1015,7 +1014,7 @@ class TestL23StaleIssueLoop:
             }
         ]
 
-        prs = self._make_prs_mock(issues)
+        prs = self._make_prs(issues)
         state = MagicMock()
         state.get_stale_issue_settings.return_value = _stale_settings(staleness_days=30)
         state.get_stale_issue_closed.return_value = set()
@@ -1040,7 +1039,7 @@ class TestL23StaleIssueLoop:
             }
         ]
 
-        prs = self._make_prs_mock(issues)
+        prs = self._make_prs(issues)
         state = MagicMock()
         state.get_stale_issue_settings.return_value = _stale_settings(
             staleness_days=30, dry_run=True
@@ -1051,12 +1050,13 @@ class TestL23StaleIssueLoop:
         result = await loop._do_work()
 
         assert result["closed"] == 1
-        # In dry_run mode, post_comment is NOT called
-        prs.post_comment.assert_not_awaited()
+        # In dry_run mode, the issue is NOT actually closed or commented on.
+        assert (await prs.get_issue_state(88)) == "OPEN"
+        assert prs._issues[88].comments == []
 
     async def test_fetch_failure_returns_zero_stats(self, tmp_path):
         """When gh fetch raises, loop handles it gracefully and returns zeroed stats."""
-        prs = self._make_prs_mock([], fail_fetch=True)
+        prs = self._make_prs([], fail_fetch=True)
         state = MagicMock()
         state.get_stale_issue_settings.return_value = _stale_settings()
         state.get_stale_issue_closed.return_value = set()
@@ -1132,10 +1132,10 @@ class TestL23bRegressionRot:
 
 # ---------------------------------------------------------------------------
 # L23c: stale_issue's branch-GC reconciler (#10011) — hosted, not a new loop.
-# Uses Pattern B (MagicMock prs) for the same reason as L23/L23b: the
-# reconciler calls prs._run_gh()/prs._repo directly for the gh api
-# matching-refs/commits reads (composed rather than adding a new PRPort
-# method), which FakeGitHub's generic _run_gh dispatcher doesn't special-case.
+# Real FakeGitHub (Pattern A), since #11418 promoted the reconciler's raw
+# gh api matching-refs/commits reads to real PRPort methods
+# (list_branch_refs / list_branch_commits) that FakeGitHub implements
+# directly instead of a MagicMock-shaped _run_gh dispatcher stand-in.
 # ---------------------------------------------------------------------------
 
 _BRANCH_GC_REPO = "test-org/test-repo"
@@ -1143,55 +1143,50 @@ _BRANCH_GC_BRANCH = "agent/issue-9553"
 
 
 class TestL23cBranchGC:
-    """StaleIssueLoop's branch-GC reconciler: false 'fix applied' claims end to end.
+    """StaleIssueLoop's branch-GC reconciler: false 'fix applied' claims end to end."""
 
-    Uses Pattern B (direct instantiation) for the same reason as L23/L23b:
-    the reconciler calls ``prs._run_gh()``/``prs._repo`` directly for the
-    ``gh api`` matching-refs/commits reads, which FakeGitHub's generic
-    ``_run_gh`` dispatcher doesn't special-case.
-    """
-
-    def _make_prs_mock(
+    def _make_prs(
         self,
         *,
         commit_age_days: int = 30,
         has_open_pr: bool = False,
         issue_state: str = "OPEN",
         branch: str = _BRANCH_GC_BRANCH,
-    ) -> MagicMock:
+    ):
+        """Return a real FakeGitHub seeded for branch-GC scenarios (#11418)."""
+        from mockworld.fakes.fake_github import FakeGitHub  # noqa: PLC0415
+
         commit_iso = (
             (datetime.now(UTC) - timedelta(days=commit_age_days))
             .isoformat()
             .replace("+00:00", "Z")
         )
 
-        async def _run_gh(*cmd: str, cwd=None) -> str:
-            joined = " ".join(cmd)
-            if "issue" in cmd and "list" in cmd:
-                return json.dumps([])  # no unrelated open issues to scan
-            if "matching-refs/heads/agent/issue-" in joined:
-                return json.dumps([f"refs/heads/{branch}"])
-            if "matching-refs/heads/fix/" in joined:
-                return json.dumps([])
-            if "/commits" in joined and branch in joined:
-                return json.dumps(
-                    [{"date": commit_iso, "message": "auto-agent commit"}]
-                )
-            return json.dumps([])
-
-        prs = MagicMock()
-        prs._repo = _BRANCH_GC_REPO
-        prs._run_gh = AsyncMock(side_effect=_run_gh)
-        prs.post_comment = AsyncMock(return_value=None)
+        prs = FakeGitHub()
+        # updated_at must be FRESH so the main stale-issue scan (which also
+        # runs during _do_work) doesn't sweep #9553 up as a stale general
+        # issue before branch-GC gets to evaluate it — this test seeds #9553
+        # purely as the branch-GC reconciler's referenced-issue lookup.
+        prs.add_issue(
+            9553,
+            "issue for branch",
+            "",
+            state="open" if issue_state == "OPEN" else "closed",
+            updated_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        )
+        prs.add_pr(number=4200, issue_number=9553, branch=branch)
+        if not has_open_pr:
+            # A closed (non-open, non-merged) PR still registers the branch
+            # ref (list_branch_refs doesn't care about PR lifecycle, mirroring
+            # a real `git/matching-refs` read), but find_open_pr_for_branch
+            # correctly reports "no open PR" — the false-claim shape this
+            # reconciler exists to catch.
+            prs._prs[4200].closed = True
+        prs.add_branch_commits(
+            branch, [{"date": commit_iso, "message": "auto-agent commit"}]
+        )
+        prs.post_comment = AsyncMock(wraps=prs.post_comment)
         prs.delete_branch = AsyncMock(return_value=True)
-        if has_open_pr:
-            from models import PRInfo  # noqa: PLC0415
-
-            pr_info = PRInfo(number=42, issue_number=9553, branch=branch)
-            prs.find_open_pr_for_branch = AsyncMock(return_value=pr_info)
-        else:
-            prs.find_open_pr_for_branch = AsyncMock(return_value=None)
-        prs.get_issue_state = AsyncMock(return_value=issue_state)
         return prs
 
     def _make_loop(self, tmp_path, prs, *, delete_enabled: bool = False):
@@ -1213,7 +1208,7 @@ class TestL23cBranchGC:
     async def test_stale_unmerged_branch_gets_one_truth_comment(self, tmp_path):
         """An old agent/issue-* branch with no open PR on a still-OPEN issue
         gets exactly one truth comment posted."""
-        prs = self._make_prs_mock()
+        prs = self._make_prs()
         loop = self._make_loop(tmp_path, prs)
 
         result = await loop._do_work()
@@ -1229,7 +1224,7 @@ class TestL23cBranchGC:
     async def test_second_tick_is_deduped_no_new_comment(self, tmp_path):
         """A branch already commented on doesn't get a second truth comment,
         but IS re-evaluated for the delete-or-escalate phase."""
-        prs = self._make_prs_mock()
+        prs = self._make_prs()
         loop = self._make_loop(tmp_path, prs)
 
         await loop._do_work()
@@ -1246,7 +1241,7 @@ class TestL23cBranchGC:
     async def test_delete_enabled_and_already_commented_deletes_branch(self, tmp_path):
         """Once delete_enabled + past the min-delete-age floor + already
         commented (a prior tick's dedup), the branch is actually deleted."""
-        prs = self._make_prs_mock(commit_age_days=30)
+        prs = self._make_prs(commit_age_days=30)
         loop = self._make_loop(tmp_path, prs, delete_enabled=True)
         # Simulate the truth comment having been posted on a prior tick —
         # the spec never comments and deletes in the same cycle.
@@ -1261,7 +1256,7 @@ class TestL23cBranchGC:
 
     async def test_open_pr_skips_entirely(self, tmp_path):
         """A branch with an open PR is still in flight — no comment, no dedup."""
-        prs = self._make_prs_mock(has_open_pr=True)
+        prs = self._make_prs(has_open_pr=True)
         loop = self._make_loop(tmp_path, prs)
 
         result = await loop._do_work()
@@ -1272,7 +1267,7 @@ class TestL23cBranchGC:
 
     async def test_young_branch_skips(self, tmp_path):
         """A branch younger than branch_gc_stale_days is not yet flagged."""
-        prs = self._make_prs_mock(commit_age_days=0)
+        prs = self._make_prs(commit_age_days=0)
         loop = self._make_loop(tmp_path, prs)
 
         result = await loop._do_work()
@@ -1282,7 +1277,7 @@ class TestL23cBranchGC:
 
     async def test_resolved_issue_skips(self, tmp_path):
         """A branch referencing an already-resolved issue is not a false claim."""
-        prs = self._make_prs_mock(issue_state="COMPLETED")
+        prs = self._make_prs(issue_state="COMPLETED")
         loop = self._make_loop(tmp_path, prs)
 
         result = await loop._do_work()

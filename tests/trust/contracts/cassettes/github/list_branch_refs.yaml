@@ -1,0 +1,23 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_branch_refs returns remote branch names (without refs/heads/) that
+# start with *prefix*, mirroring `gh api repos/.../git/matching-refs/heads/
+# <prefix> --jq '[.[].ref]'` with the refs/heads/ prefix already stripped
+# (#11418). The dispatcher seeds one matching branch and one non-matching
+# branch so the prefix filter is actually exercised.
+adapter: github
+interaction: list_branch_refs
+recorded_at: "2026-08-18T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_branch_refs
+  args:
+    - "agent/issue-"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "[\"agent/issue-9553\"]\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

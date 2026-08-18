@@ -41,8 +41,9 @@ def _make_loop(
     )
     pr_manager.create_issue = AsyncMock(return_value=123)
     pr_manager.add_labels = AsyncMock()
-    pr_manager._run_gh = AsyncMock(return_value='{"labels":[],"body":""}')
-    pr_manager._repo = "owner/repo"
+    pr_manager.get_issue_labels = AsyncMock(return_value=[])
+    pr_manager.get_issue_body = AsyncMock(return_value="")
+    pr_manager.update_issue_body = AsyncMock()
     runner = MagicMock()
 
     loop = ReportIssueLoop(
@@ -1711,3 +1712,77 @@ class TestReportEventPublishing:
         assert len(closed) == 1
         assert closed[0]["report_id"] == report.id
         assert closed[0]["detail"] == "stale"
+
+
+class TestVerifyIssue:
+    """#11418: _verify_issue reads/writes through PRPort (get_issue_labels /
+    get_issue_body / update_issue_body) instead of a raw
+    ``self._pr_manager._run_gh``/``_repo`` reach-around."""
+
+    @pytest.mark.asyncio
+    async def test_adds_missing_label(self, tmp_path: Path) -> None:
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        pr.get_issue_labels = AsyncMock(return_value=[])
+        pr.get_issue_body = AsyncMock(return_value="body text")
+
+        await loop._verify_issue(42, "hydraflow-find", "")
+
+        pr.add_labels.assert_awaited_once_with(42, ["hydraflow-find"])
+
+    @pytest.mark.asyncio
+    async def test_label_already_present_not_readded(self, tmp_path: Path) -> None:
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        pr.get_issue_labels = AsyncMock(return_value=["hydraflow-find"])
+        pr.get_issue_body = AsyncMock(return_value="body text")
+
+        await loop._verify_issue(42, "hydraflow-find", "")
+
+        pr.add_labels.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_appends_missing_screenshot_url(self, tmp_path: Path) -> None:
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        pr.get_issue_labels = AsyncMock(return_value=["hydraflow-find"])
+        pr.get_issue_body = AsyncMock(return_value="body text")
+
+        await loop._verify_issue(
+            42, "hydraflow-find", "https://gist.example.com/screenshot.png"
+        )
+
+        pr.update_issue_body.assert_awaited_once()
+        call_args = pr.update_issue_body.await_args.args
+        assert call_args[0] == 42
+        assert "body text" in call_args[1]
+        assert "https://gist.example.com/screenshot.png" in call_args[1]
+
+    @pytest.mark.asyncio
+    async def test_screenshot_already_in_body_not_reappended(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        url = "https://gist.example.com/screenshot.png"
+        pr.get_issue_labels = AsyncMock(return_value=["hydraflow-find"])
+        pr.get_issue_body = AsyncMock(return_value=f"body text\n\n{url}\n")
+
+        await loop._verify_issue(42, "hydraflow-find", url)
+
+        pr.update_issue_body.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_transient_read_failure_is_swallowed(self, tmp_path: Path) -> None:
+        """A plain RuntimeError is logged, not raised — the issue still exists."""
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        pr.get_issue_labels = AsyncMock(side_effect=RuntimeError("gh boom"))
+
+        await loop._verify_issue(42, "hydraflow-find", "")  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_credit_exhaustion_propagates(self, tmp_path: Path) -> None:
+        """A CreditExhaustedError must NOT be swallowed (#11418 defensive branch)."""
+        from subprocess_util import CreditExhaustedError
+
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        pr.get_issue_labels = AsyncMock(side_effect=CreditExhaustedError("no credits"))
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._verify_issue(42, "hydraflow-find", "")

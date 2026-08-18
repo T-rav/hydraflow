@@ -1,0 +1,27 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_all_issues_for_fitness returns ALL issues (every state) with fields
+# the fitness window needs, mirroring `gh issue list --state all --json
+# number,state,labels,createdAt,closedAt` (#11418). Promoted off
+# service_registry._make_fitness_issue_fetcher, which previously read
+# issues via a raw prs._run_gh(...)/prs._repo bypass. The dispatcher seeds
+# one open and one closed issue so both states appear in the row set.
+adapter: github
+interaction: list_all_issues_for_fitness
+recorded_at: '2026-08-18T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_all_issues_for_fitness
+  args: []
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '[{"number": 201, "state": "OPEN", "labels": [{"name": "hydraflow-find"}],
+    "createdAt": "2026-01-01T00:00:00Z", "closedAt": null}, {"number": 202, "state":
+    "CLOSED", "labels": [], "createdAt": "2026-01-01T00:00:00Z", "closedAt": null}]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

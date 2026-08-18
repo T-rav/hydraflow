@@ -99,6 +99,7 @@ def _project_issue_summaries(
                 "body": field_or(r, "body", ""),
                 "updated_at": field_or(r, "updated_at", "", dict_key="updatedAt"),
                 "labels": _gh_wire_labels(r),
+                "created_at": field_or(r, "created_at", "", dict_key="createdAt"),
             }
         )
     return summaries
@@ -574,6 +575,53 @@ class PRManager(PRManagerPromotionMixin):
             )
         return True
 
+    async def list_branch_refs(self, prefix: str) -> list[str]:
+        """Return remote branch names (without ``refs/heads/``) under *prefix*.
+
+        Wraps ``gh api repos/.../git/matching-refs/heads/<prefix>``. Promoted
+        off ``StaleIssueLoop._branch_gc_candidate_branches`` (#11418) so the
+        branch-GC scan reads through PRPort instead of the raw ``_run_gh``/
+        ``_repo`` seam — a call that never crosses the Port can never be
+        modelled by FakeGitHub.
+        """
+        self._assert_repo()
+        raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/matching-refs/heads/{prefix}",
+            "--jq",
+            "[.[].ref]",
+        )
+        refs = json.loads(raw) if raw.strip() else []
+        return [
+            str(ref).removeprefix("refs/heads/") for ref in refs if isinstance(ref, str)
+        ]
+
+    async def list_branch_commits(self, branch: str) -> list[dict[str, str]]:
+        """Return ``[{"date": ..., "message": ...}, ...]`` for *branch*, newest first.
+
+        Wraps one ``gh api .../commits`` call (``--method GET`` alongside
+        ``--field`` — ``gh api`` defaults to POST once any ``--field`` is
+        present). Promoted off ``StaleIssueLoop._branch_gc_commit_info``
+        (#11418) for the same reason as :meth:`list_branch_refs`.
+        """
+        self._assert_repo()
+        raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/commits",
+            "--method",
+            "GET",
+            "--field",
+            f"sha={branch}",
+            "--field",
+            "per_page=30",
+            "--jq",
+            "[.[] | {date: .commit.committer.date, message: .commit.message}]",
+        )
+        commits = json.loads(raw) if raw.strip() else []
+        return [c for c in commits if isinstance(c, dict)]
+
     async def merge_pr(self, pr_number: int, *, auto_rebase: bool = False) -> bool:
         """Merge PR immediately via squash merge with branch deletion.
 
@@ -1027,7 +1075,7 @@ class PRManager(PRManagerPromotionMixin):
             "--state",
             "open",
             "--json",
-            "number,title,body,labels,updatedAt",
+            "number,title,body,labels,updatedAt,createdAt",
             "--limit",
             "500",
         )
@@ -1039,6 +1087,71 @@ class PRManager(PRManagerPromotionMixin):
                 " truncated; raise the limit"
             )
         return summaries
+
+    async def list_all_issues_for_fitness(
+        self, limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """Return ALL issues (every state) with fields the fitness window needs.
+
+        Raw ``gh issue list --state all`` rows (``number,state,labels,
+        createdAt,closedAt``) — unlike :meth:`list_open_issues` this is
+        unprojected (no ``GitHubIssueSummary`` shape) since ``ServiceRegistry``'s
+        fitness fetcher reads ``state``/``closedAt`` fields that summary
+        doesn't carry. Promoted off ``_make_fitness_issue_fetcher`` (#11418),
+        which previously read issues via a raw ``prs._run_gh(...)`` bypass.
+        """
+        self._assert_repo()
+        raw = await self._run_gh(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            "all",
+            "--limit",
+            str(limit),
+            "--json",
+            "number,state,labels,createdAt,closedAt",
+        )
+        issues: list[dict[str, Any]] = json.loads(raw) if raw else []
+        if len(issues) == limit:
+            logger.warning(
+                "list_all_issues_for_fitness returned exactly %d rows; "
+                "results may be capped",
+                limit,
+            )
+        return issues
+
+    async def list_all_prs_for_fitness(self, limit: int = 1000) -> list[dict[str, Any]]:
+        """Return ALL pull requests (every state) with fitness-window fields.
+
+        Raw ``gh pr list --state all`` rows (``number,state,labels,createdAt,
+        closedAt,mergedAt``). Promoted off ``_make_fitness_issue_fetcher``
+        (#11418), same reasoning as :meth:`list_all_issues_for_fitness`.
+        """
+        self._assert_repo()
+        raw = await self._run_gh(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            "all",
+            "--limit",
+            str(limit),
+            "--json",
+            "number,state,labels,createdAt,closedAt,mergedAt",
+        )
+        pull_requests: list[dict[str, Any]] = json.loads(raw) if raw else []
+        if len(pull_requests) == limit:
+            logger.warning(
+                "list_all_prs_for_fitness returned exactly %d rows; "
+                "results may be capped",
+                limit,
+            )
+        return pull_requests
 
     async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
         """Return the numbers of ALL open issues (no label filter). #9905.
@@ -1367,6 +1480,28 @@ class PRManager(PRManagerPromotionMixin):
             ".labels[].name",
         )
         return [line.strip() for line in output.splitlines() if line.strip()]
+
+    async def get_issue_body(self, issue_number: int) -> str:
+        """Return the body text of a GitHub issue.
+
+        Delegates to ``gh issue view <n> --json body --jq '.body'``. Promoted
+        off ``ReportIssueLoop._verify_issue`` (#11418), which previously read
+        the body via a raw ``self._pr_manager._run_gh(...)`` bypass.
+        """
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            self._repo,
+            "--json",
+            "body",
+            "--jq",
+            ".body",
+        )
+        return output.rstrip("\n")
 
     async def get_pr_labels(self, pr_number: int) -> list[str]:
         """Return the label names carried by a GitHub pull request.

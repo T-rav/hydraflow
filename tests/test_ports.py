@@ -183,6 +183,12 @@ class TestPRPortMethods:
         "find_open_resolving_pr",
         # Closed-issue stale stage-label caretaker (#10394)
         "find_closed_stage_labeled_issues",
+        # PRPort-boundary promotion of _run_gh/_repo reach-arounds (#11418)
+        "list_branch_refs",
+        "list_branch_commits",
+        "get_issue_body",
+        "list_all_issues_for_fitness",
+        "list_all_prs_for_fitness",
     ]
 
     @pytest.mark.parametrize("method", _REQUIRED_METHODS)
@@ -327,6 +333,12 @@ class TestPRPortSignatures:
         "find_open_resolving_pr",
         # Closed-issue stale stage-label caretaker (#10394)
         "find_closed_stage_labeled_issues",
+        # PRPort-boundary promotion of _run_gh/_repo reach-arounds (#11418)
+        "list_branch_refs",
+        "list_branch_commits",
+        "get_issue_body",
+        "list_all_issues_for_fitness",
+        "list_all_prs_for_fitness",
     ]
 
     @pytest.mark.parametrize("method", _SIGNED_METHODS)

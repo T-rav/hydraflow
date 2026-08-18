@@ -25,6 +25,7 @@ the same identity.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -76,7 +77,7 @@ class RetirementPick:
     age_days: float
 
 
-def _labels_of(issue: dict[str, Any]) -> set[str]:
+def _labels_of(issue: Mapping[str, Any]) -> set[str]:
     raw = issue.get("labels") or []
     out: set[str] = set()
     for label in raw:
@@ -89,7 +90,7 @@ def _labels_of(issue: dict[str, Any]) -> set[str]:
     return out
 
 
-def _created_at(issue: dict[str, Any]) -> datetime | None:
+def _created_at(issue: Mapping[str, Any]) -> datetime | None:
     raw = issue.get("created_at") or issue.get("createdAt")
     if not raw:
         return None
@@ -100,7 +101,7 @@ def _created_at(issue: dict[str, Any]) -> datetime | None:
 
 
 def retirement_picks(
-    open_issues: list[dict[str, Any]],
+    open_issues: Sequence[Mapping[str, Any]],
     *,
     budget: int,
     min_age_days: int,
@@ -132,7 +133,7 @@ def retirement_picks(
     protected_set = (
         protected_labels if protected_labels is not None else PROTECTED_LABELS
     )
-    advisory: list[tuple[datetime, dict[str, Any]]] = []
+    advisory: list[tuple[datetime, Mapping[str, Any]]] = []
     for issue in open_issues:
         labels = _labels_of(issue)
         if not labels & advisory_set:

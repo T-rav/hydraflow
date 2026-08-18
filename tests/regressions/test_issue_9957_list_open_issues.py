@@ -87,7 +87,9 @@ class TestAdapterProjectsAllOpenIssues:
         assert run_gh.await_args is not None
         argv = run_gh.await_args.args
         assert "--label" not in argv
-        assert "number,title,body,labels,updatedAt" in argv
+        # #11418: createdAt is also requested — the backlog-budget retirement
+        # valve keys age off creation time via this same listing.
+        assert "number,title,body,labels,updatedAt,createdAt" in argv
         assert "--limit" in argv
         assert argv[argv.index("--limit") + 1] == "500"
         assert len(issues) == 2

@@ -4,8 +4,10 @@
 # issues — one carrying a label, one with none — plus a closed issue that
 # must be excluded, so the contract covers both the label-flattening path
 # (gh wire shape, [{"name": ...}]) and the "no labels" empty-list path.
-# The updated_at field is normalised with timestamps.ISO8601 so replay is
-# stable across time zones.
+# The updated_at/created_at fields are normalised with timestamps.ISO8601 so
+# replay is stable across time zones. created_at (#11418) is projected here
+# only — list_issues_by_label / list_closed_issues_by_label don't request
+# createdAt from gh, so their cassettes correctly omit it.
 adapter: github
 interaction: list_open_issues
 recorded_at: "2026-07-19T00:00:00Z"
@@ -20,8 +22,8 @@ output:
   exit_code: 0
   stdout: "[{\"number\": 101, \"title\": \"Stale doc gap\", \"body\": \"docs drifted\",
     \"updated_at\": \"2026-01-01T00:00:00Z\", \"labels\": [{\"name\":
-    \"hydraflow-find\"}]}, {\"number\": 102, \"title\": \"Needs triage\", \"body\":
-    \"no labels yet\", \"updated_at\": \"2026-01-01T00:00:00Z\", \"labels\": []}]\n"
+    \"hydraflow-find\"}], \"created_at\": \"2026-01-01T00:00:00Z\"}, {\"number\": 102, \"title\": \"Needs triage\", \"body\":
+    \"no labels yet\", \"updated_at\": \"2026-01-01T00:00:00Z\", \"labels\": [], \"created_at\": \"2026-01-01T00:00:00Z\"}]\n"
   stderr: ""
 normalizers:
   - timestamps.ISO8601
