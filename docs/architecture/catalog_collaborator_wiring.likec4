@@ -19,13 +19,13 @@ model {
     fakes = container 'Scenario Fakes' {
       description 'no real subprocess / git / GitHub'
       fakeWs   = component 'FakeWorkspace'  { description 'src/mockworld/fakes/fake_workspace.py — records created/destroyed' }
-      seeded   = component 'Seeded MagicMock collaborators' { description 'ports["auto_diagnoser"], ports["refine_llm"]' }
+      seeded   = component 'Seeded MagicMock collaborators' { description 'ports["escape_ledger_auto_diagnoser"], ports["skill_prompt_refine_llm"]' }
     }
     catalog = container 'LoopCatalog' {
       description 'tests/scenarios/catalog/loop_catalog.py — instantiate(name, ports, config, deps)'
-      bEscape = component '_build_escape_ledger'    { description 'loop_registrations.py:155 — forwards auto_diagnoser' }
-      bSkill  = component '_build_skill_prompt_eval'{ description 'loop_registrations.py:859 — forwards refine_llm' }
-      bDiag   = component '_build_diagnostic'       { description 'loop_registrations.py:675 — forwards workspaces' }
+      bEscape = component '_build_escape_ledger'    { description 'loop_registrations.py:161 — forwards auto_diagnoser' }
+      bSkill  = component '_build_skill_prompt_eval'{ description 'loop_registrations.py:882 — forwards refine_llm' }
+      bDiag   = component '_build_diagnostic'       { description 'loop_registrations.py:692 — forwards workspaces' }
     }
   }
 
@@ -41,7 +41,7 @@ model {
     diag = container 'DiagnosticLoop' {
       description 'src/diagnostic_loop.py:85 — workspaces: WorkspaceManager | None = None'
       dgGate = component '_prepare_fix_workspace / _run_fix' {
-        description 'src/diagnostic_loop.py:386,445 — guarded on self._workspaces is not None; NO fallback → dead phase'
+        description 'src/diagnostic_loop.py:376,398 — guarded on self._workspaces is not None; NO fallback → dead phase'
       }
     }
   }
@@ -56,9 +56,10 @@ model {
   catalog.bSkill  -> skill   'builds (config, state, pr_manager, dedup, deps)'
   catalog.bDiag   -> diag    'builds (config, runner, prs, state, deps)'
 
-  // The three edges this issue ADDS.
-  seeded -> catalog.bEscape 'FIX: auto_diagnoser=ports.get("auto_diagnoser")'
-  seeded -> catalog.bSkill  'FIX: refine_llm=ports.get("refine_llm")'
+  // The three edges #11424 pins (shipped via #11416/#11428 before this PR opened —
+  // see tests/regressions/test_issue_11424.py and repo_wiki pattern 4069).
+  seeded -> catalog.bEscape 'FIX: auto_diagnoser=ports.get("escape_ledger_auto_diagnoser")'
+  seeded -> catalog.bSkill  'FIX: refine_llm=ports.get("skill_prompt_refine_llm")'
   fakeWs -> catalog.bDiag   'FIX: workspaces=ports.get("workspace")'
 
   // The hazard the missing edges used to create — fixed by the FIX edges above.
