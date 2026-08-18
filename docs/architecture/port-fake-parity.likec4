@@ -1,0 +1,61 @@
+// #11423 — FakeGitHub narrows PRPort's positional `limit` to keyword-only.
+specification {
+  element system
+  element component
+  element contract
+  element guard
+}
+
+model {
+  hydraflow = system 'HydraFlow' {
+
+    port = contract 'PRPort.list_closed_issues_by_label' {
+      description 'src/ports.py:497 — (self, label, limit=100). limit is POSITIONAL_OR_KEYWORD.'
+    }
+
+    adapter = component 'PRManager (real adapter)' {
+      description 'src/pr_manager.py:1234 — mirrors the Port exactly; shells out to gh.'
+    }
+
+    fake = component 'FakeGitHub (MockWorld stand-in)' {
+      description 'src/mockworld/fakes/fake_github.py:1063 — (self, label, *, limit=100). DEFECT: limit is KEYWORD_ONLY.'
+    }
+
+    callers = component 'PRPort callers (8 loops)' {
+      description 'escalation_reconcile, github_cache_loop, corpus_learning_loop, rc_budget_loop, principles_audit_loop, auto_agent_preflight_loop, wiki_rot_detector_loop, adr_conformance_loop'
+    }
+
+    conformance = guard 'test_mockworld_fakes_conformance' {
+      description '_signatures_compatible compares names + required/optional only. Blind to Parameter.kind, so this pair passes.'
+    }
+
+    pin = guard 'tests/regressions/test_issue_11423.py' {
+      description 'Call-shape pin + structural kind pin + registry-wide kind sweep over _PORT_FAKE_PAIRS.'
+    }
+
+    callers -> port 'declared contract permits positional limit'
+    port -> adapter 'implemented by'
+    port -> fake 'implemented by (NARROWED)'
+    conformance -> port 'reads signature'
+    conformance -> fake 'reads signature — misses the narrowing'
+    pin -> fake 'asserts limit stays POSITIONAL_OR_KEYWORD'
+    pin -> port 'liveness guard: contract unchanged'
+    pin -> adapter 'liveness guard: adapter binds positionally'
+  }
+}
+
+views {
+  view parity of hydraflow {
+    title 'PRPort / adapter / fake three-layer parity (#11423)'
+    include *
+    autoLayout TopBottom
+  }
+
+  dynamic view positionalCallBreak {
+    title 'The break: a positional call site under MockWorld'
+    callers -> port 'list_closed_issues_by_label("hydraflow-find", 50)'
+    port -> fake 'MockWorld substitutes FakeGitHub'
+    fake -> callers 'TypeError: takes 2 positional args but 3 given'
+    callers -> conformance 'TypeError is in LIKELY_BUG_EXCEPTIONS -> reraise_on_credit_or_bug -> tick aborts'
+  }
+}
