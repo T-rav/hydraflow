@@ -62,7 +62,7 @@ class _ScriptedRunner:
             return self._last_scripted[issue_number]
         return default_factory()
 
-    def set_tracing_context(self, _context: Any) -> None:
+    def set_tracing_context(self, ctx: Any) -> None:
         pass
 
     def clear_tracing_context(self) -> None:
@@ -99,7 +99,7 @@ class _FakeTriageRunner(_ScriptedRunner):
         """Script the EpicDecompResult returned for the given issue."""
         self._decomposition_scripts[issue_number] = result
 
-    async def evaluate(self, issue: Any, _worker_id: int = 0) -> Any:
+    async def evaluate(self, issue: Any, worker_id: int = 0) -> Any:
         issue_number = getattr(issue, "id", getattr(issue, "number", 0))
         return self._pop(
             issue_number,
@@ -135,12 +135,11 @@ class _FakePlannerRunner(_ScriptedRunner):
     async def plan(
         self,
         task: Any,
-        *,
         worker_id: int = 0,
         research_context: str = "",
-        **_unused: Any,
+        guidance: str = "",
+        force_scale: Any | None = None,
     ) -> Any:
-        _ = (worker_id, research_context)
         if self._parent.plan_hold_seconds:
             await asyncio.sleep(self._parent.plan_hold_seconds)
         issue_number = getattr(task, "id", getattr(task, "number", 0))
@@ -163,9 +162,9 @@ class _FakePlannerRunner(_ScriptedRunner):
 
     async def run_gap_review(
         self,
-        _epic_number: int,
-        _child_plans: dict[Any, Any],
-        _child_titles: dict[Any, Any],
+        epic_number: int,
+        child_plans: dict[Any, Any],
+        child_titles: dict[Any, Any],
         *,
         issue_labels: Sequence[str] = (),
     ) -> str:
@@ -183,14 +182,14 @@ class _FakeAgentRunner(_ScriptedRunner):
         task: Any,
         worktree_path: Path,
         branch: str,
-        *,
         worker_id: int = 0,
         review_feedback: str = "",
         prior_failure: str = "",
         bead_mapping: dict[str, str] | None = None,
-        **_unused: Any,
+        human_guidance: str = "",
+        attempt_number: int = 0,
+        known_traps: str = "",
     ) -> Any:
-        _ = (worker_id, review_feedback, bead_mapping)
         issue_number = getattr(task, "id", getattr(task, "number", 0))
         if prior_failure:
             self._prior_failures.setdefault(issue_number, []).append(prior_failure)
@@ -225,15 +224,15 @@ class _FakeReviewRunner(_ScriptedRunner):
         self,
         pr: Any,
         issue: Any,
-        _worktree_path: Path,
-        _diff: str,
-        *,
+        worktree_path: Path,
+        diff: str,
         worker_id: int = 0,
         code_scanning_alerts: list[Any] | None = None,
         bead_tasks: list[Any] | None = None,
-        **_unused: Any,
+        pre_flight_plan: Any | None = None,
+        surface: str = "pr_review",
+        human_guidance: str = "",
     ) -> Any:
-        _ = (worker_id, bead_tasks)
         issue_number = getattr(issue, "id", getattr(issue, "number", 0))
         self._last_alerts_received[issue_number] = list(code_scanning_alerts or [])
         pr_number = getattr(pr, "number", 0)
@@ -261,9 +260,12 @@ class _FakeReviewRunner(_ScriptedRunner):
         self,
         pr: Any,
         issue: Any,
-        _worktree_path: Path,
-        _failure_summary: str,
-        **_kwargs: Any,
+        worktree_path: Path,
+        failure_summary: str,
+        attempt: int = 1,
+        worker_id: int = 0,
+        ci_logs: str = "",
+        code_scanning_alerts: list[Any] | None = None,
     ) -> Any:
         issue_number = getattr(issue, "id", getattr(issue, "number", 0))
         pr_number = getattr(pr, "number", 0)
@@ -282,9 +284,11 @@ class _FakeReviewRunner(_ScriptedRunner):
         self,
         pr: Any,
         issue: Any,
-        _worktree_path: Path,
-        _review_summary: str,
-        **_kwargs: Any,
+        worktree_path: Path,
+        review_summary: str,
+        worker_id: int = 0,
+        advisor_transcript: str | None = None,
+        suggested_fix_direction: str | None = None,
     ) -> Any:
         """Default fake: report fixes_made=True so the retry loop re-reviews.
 

@@ -1,0 +1,75 @@
+specification {
+  element system
+  element container
+  element component
+  relationship substitutes
+}
+
+model {
+  hydraflow = system 'HydraFlow' {
+
+    prod = container 'Production runners (src/)' {
+      triageRunner   = component 'triage.TriageRunner' 'evaluate(issue, worker_id)'
+      plannerRunner  = component 'planner.PlannerRunner' 'plan(task, worker_id, research_context, guidance, force_scale)'
+      agentRunner    = component 'agent.AgentRunner' 'run(task, worktree_path, branch, worker_id, ...)'
+      reviewRunner   = component 'reviewer.ReviewRunner' 'review / fix_ci / fix_review_findings'
+      baseRunner     = component 'base_runner.BaseRunner' 'set_tracing_context(ctx)'
+    }
+
+    phases = container 'Pipeline phases (src/)' {
+      triagePhase    = component 'triage_phase.py'
+      planPhase      = component 'plan_phase.py'
+      implementPhase = component 'implement_phase.py'
+      reviewPhase    = component 'review_phase/_phase.py'
+    }
+
+    registry = container 'src/service_registry.py' 'Swaps real runners for FakeLLM attrs when runners is not None'
+
+    fakes = container 'src/mockworld/fakes/fake_llm.py' {
+      fakeLLM        = component 'FakeLLM' 'container of the four stand-ins'
+      scriptedBase   = component '_ScriptedRunner' 'shared base: set_tracing_context / terminate'
+      fakeTriage     = component '_FakeTriageRunner'
+      fakePlanner    = component '_FakePlannerRunner'
+      fakeAgent      = component '_FakeAgentRunner'
+      fakeReview     = component '_FakeReviewRunner'
+    }
+
+    guards = container 'Conformance guards (tests/)' {
+      conformance = component 'tests/test_mockworld_fakes_conformance.py' 'pair registry + strict name/kind/default sweep'
+      llmPort     = component 'tests/scenarios/ports/llm_port.py' 'test-side Protocols (mirror the real runners)'
+    }
+
+    triagePhase -> triageRunner 'evaluate(issue)'
+    planPhase -> plannerRunner 'plan(...) / run_gap_review(...)'
+    implementPhase -> agentRunner 'run(...)'
+    reviewPhase -> reviewRunner 'review / fix_ci / fix_review_findings'
+
+    registry -> fakeLLM 'rebinds triage/planners/agents/reviewers'
+    fakeLLM -> fakeTriage
+    fakeLLM -> fakePlanner
+    fakeLLM -> fakeAgent
+    fakeLLM -> fakeReview
+    scriptedBase -> fakeTriage 'base of'
+    scriptedBase -> fakePlanner 'base of'
+    scriptedBase -> fakeAgent 'base of'
+    scriptedBase -> fakeReview 'base of'
+
+    fakeTriage -> triageRunner 'substitutes (signature-pinned)'
+    fakePlanner -> plannerRunner 'substitutes (signature-pinned)'
+    fakeAgent -> agentRunner 'substitutes (signature-pinned)'
+    fakeReview -> reviewRunner 'substitutes (signature-pinned)'
+    scriptedBase -> baseRunner 'substitutes (signature-pinned: ctx)'
+
+    conformance -> fakeLLM 'resolves stand-ins via FakeLLM() attrs; strict param-spec parity'
+    conformance -> triageRunner 'reference type for both guards'
+    conformance -> llmPort 'Port methods pinned to the same real-runner signatures'
+  }
+}
+
+views {
+  view runnerConformance {
+    title 'FakeLLM nested runner stand-ins vs real runners (#11420)'
+    include *
+    autoLayout TopBottom
+  }
+}
