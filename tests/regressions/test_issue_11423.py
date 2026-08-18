@@ -74,13 +74,40 @@ def test_port_fake_and_adapter_agree_on_limit_kind() -> None:
     assert port_kind == fake_kind == adapter_kind
 
 
+# Calling conventions each kind grants to a caller. A Fake narrows the
+# Port's contract only when its allowed styles are NOT a superset of what
+# the Port declares (e.g. Port permits positional-or-keyword but Fake
+# demands keyword-only). The reverse — a Fake accepting a strictly larger
+# set than the Port requires — is the documented safe-fix direction (see
+# repo wiki: "widen fake signatures, never narrow them", #11415) and must
+# not be flagged.
+_CALL_STYLES: dict[inspect._ParameterKind, frozenset[str]] = {
+    inspect.Parameter.POSITIONAL_ONLY: frozenset({"positional"}),
+    inspect.Parameter.POSITIONAL_OR_KEYWORD: frozenset({"positional", "keyword"}),
+    inspect.Parameter.KEYWORD_ONLY: frozenset({"keyword"}),
+}
+
+
+def _narrows(port_kind: inspect._ParameterKind, fake_kind: inspect._ParameterKind) -> bool:
+    """True if *fake_kind* accepts a strictly smaller set of call styles
+    than *port_kind* promises callers. VAR_POSITIONAL/VAR_KEYWORD kinds
+    fall back to exact match — this sweep doesn't attempt to model
+    catch-all absorption semantics (that's ``_signatures_compatible``'s
+    job, #11415)."""
+    port_styles = _CALL_STYLES.get(port_kind)
+    fake_styles = _CALL_STYLES.get(fake_kind)
+    if port_styles is None or fake_styles is None:
+        return port_kind != fake_kind
+    return not port_styles <= fake_styles
+
+
 def _kind_violations(port_cls: type, fake_cls: type) -> list[str]:
     """Kind-aware structural check: for every named param present on both
-    the Port and the Fake, ``Parameter.kind`` must match. This is the
-    comparator the issue describes as missing from
-    ``_signatures_compatible`` — reimplemented locally here as a regression
-    sweep rather than folded into the shared conformance test, so this pin
-    doesn't couple to that module's evolution.
+    the Port and the Fake, the Fake must accept at least the call styles
+    the Port promises. This is the comparator the issue describes as
+    missing from ``_signatures_compatible`` — reimplemented locally here
+    as a regression sweep rather than folded into the shared conformance
+    test, so this pin doesn't couple to that module's evolution.
     """
     violations: list[str] = []
     for name in dir(port_cls):
@@ -105,7 +132,7 @@ def _kind_violations(port_cls: type, fake_cls: type) -> list[str]:
             fake_param = fake_params.get(param_name)
             if fake_param is None:
                 continue
-            if port_param.kind != fake_param.kind:
+            if _narrows(port_param.kind, fake_param.kind):
                 violations.append(
                     f"{fake_cls.__name__}.{name}({param_name}): "
                     f"Port kind={port_param.kind} Fake kind={fake_param.kind}"
@@ -129,6 +156,23 @@ def test_kind_aware_comparator_flags_keyword_only_narrowing() -> None:
         "_NarrowingFake.m(limit): "
         "Port kind=POSITIONAL_OR_KEYWORD Fake kind=KEYWORD_ONLY"
     ]
+
+
+def test_kind_aware_comparator_ignores_safe_widening() -> None:
+    """A Fake that accepts a *larger* set of call styles than the Port
+    requires (e.g. Port declares ``limit`` keyword-only, Fake widens it to
+    positional-or-keyword) is the documented safe-fix direction for this
+    exact defect class (repo wiki, #11415) and must not be flagged —
+    otherwise this sweep would reject the very fix pattern it exists to
+    encourage."""
+
+    class _StrictPort:
+        async def m(self, *, limit: int = 100) -> list: ...
+
+    class _WidenedFake:
+        async def m(self, limit: int = 100) -> list: ...
+
+    assert _kind_violations(_StrictPort, _WidenedFake) == []
 
 
 def test_registry_sweep_finds_zero_kind_violations() -> None:
