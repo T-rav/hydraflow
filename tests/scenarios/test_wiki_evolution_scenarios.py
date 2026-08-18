@@ -11,6 +11,12 @@ Covers the session's runtime-affecting PRs:
 - **P4 #8401 + B2 #8403** — ``RepoWikiLoop`` runs ``detect_drift``
   every tick, then ``apply_drift_markers`` flips entries citing
   missing files to ``status: stale``.
+- **#11373 fingerprint gate (audit finding #11409)** — the multi-tick
+  MockWorld proof that unchanged tracked topics skip re-synthesis lives in
+  ``tests/scenarios/test_repo_wiki_compile_scenario.py`` (added by #11432),
+  not here, since it needs the real ``HydraFlowConfig`` persistence seam
+  (``config.data_path("wiki_compile_state.json")``) that ``MockWorld``'s
+  default construction already provides.
 
 These scenarios use ``FakeWikiCompiler`` (in-memory call recorder)
 and real tracked-layout filesystem state — the on-disk wiki format

@@ -38,6 +38,7 @@ from mockworld.fakes.fake_http import FakeHTTP
 from mockworld.fakes.fake_issue_fetcher import FakeIssueFetcher
 from mockworld.fakes.fake_issue_store import FakeIssueStore
 from mockworld.fakes.fake_observability import FakeObservability
+from mockworld.fakes.fake_wiki_compiler import FakeWikiCompiler
 from mockworld.fakes.fake_workspace import FakeWorkspace
 from ports import AgentPort
 from term_proposer_loop import BotPRPort
@@ -52,6 +53,7 @@ from tests.scenarios.ports import (
     SentryPort,
     WorkspacePort,
 )
+from wiki_compiler import WikiCompiler
 
 # Hand-maintained Port↔Fake pair list. Add new pairs as Fakes are
 # introduced. (Auto-discovery via convention ``Fake<PortStem>`` is YAGNI
@@ -68,6 +70,14 @@ _PORT_FAKE_PAIRS: list[tuple[type, type]] = [
     (PRPort, FakeGitHub),
     (SentryPort, FakeObservability),
     (WorkspacePort, FakeWorkspace),
+]
+
+# Reference↔Fake pairs where the "reference" is a concrete class (not a
+# Port Protocol) that the Fake only partially stands in for by design —
+# checked over the intersection of declared methods only, never "no
+# missing methods" (see test_fake_signatures_match_reference_intersection).
+_REFERENCE_FAKE_PAIRS: list[tuple[type, type]] = [
+    (WikiCompiler, FakeWikiCompiler),
 ]
 
 
@@ -159,8 +169,39 @@ def _signatures_compatible(
                 f"Fake required={fake_required}.  They must agree on "
                 f"required-vs-optional status."
             )
+        if (
+            port_pinfo.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+            and fake_pinfo.kind is inspect.Parameter.KEYWORD_ONLY
+        ):
+            return False, (
+                f"Param '{name}': Port accepts it positional-or-keyword but "
+                f"Fake made it keyword-only.  A caller passing it "
+                f"positionally (valid against the Port) would raise "
+                f"TypeError against the Fake — the Fake must stay at least "
+                f"as permissive as the reference."
+            )
 
     return True, ""
+
+
+def test_signatures_compatible_flags_kind_narrowed_from_positional_to_keyword_only() -> (
+    None
+):
+    """A param that's POSITIONAL_OR_KEYWORD on the reference must not become
+    KEYWORD_ONLY on the Fake — a caller passing it positionally (valid
+    against the reference) would raise TypeError against the Fake (#11409:
+    FakeWikiCompiler.compile_topic_tracked missed WikiCompiler's
+    other_topics param entirely, which this rule now catches)."""
+
+    def reference_method(self, topic: str, other_topics: list | None = None) -> int: ...
+    def fake_method(self, topic: str, *, other_topics: list | None = None) -> int: ...
+
+    ok, reason = _signatures_compatible(
+        inspect.signature(reference_method), inspect.signature(fake_method)
+    )
+
+    assert not ok
+    assert "other_topics" in reason
 
 
 @pytest.mark.parametrize(
@@ -210,4 +251,47 @@ def test_fake_signatures_match_port(port_cls: type, fake_cls: type) -> None:
         + "\n".join(failures)
         + "\n\nEither rename the Fake method/param to match the Port, "
         "or use a **kwargs catch-all for intentional absorb patterns."
+    )
+
+
+@pytest.mark.parametrize(
+    "reference_cls,fake_cls",
+    _REFERENCE_FAKE_PAIRS,
+    ids=[f"{r.__name__}-{f.__name__}" for r, f in _REFERENCE_FAKE_PAIRS],
+)
+def test_fake_signatures_match_reference_intersection(
+    reference_cls: type, fake_cls: type
+) -> None:
+    """Unlike ``test_fake_signatures_match_port``, a concrete reference
+    class is checked over the intersection of declared methods only — the
+    Fake is a deliberately partial stand-in (#11409: FakeWikiCompiler omits
+    ~10 of WikiCompiler's public methods by design), so "no missing
+    methods" would be the wrong bar. Shared methods still must have
+    compatible signatures.
+    """
+    reference_methods = _public_methods(reference_cls)
+    fake_methods = _public_methods(fake_cls)
+    shared = reference_methods.keys() & fake_methods.keys()
+
+    failures: list[str] = []
+    for name in sorted(shared):
+        try:
+            reference_sig = inspect.signature(reference_methods[name])
+            fake_sig = inspect.signature(fake_methods[name])
+        except (ValueError, TypeError) as exc:
+            failures.append(f"  {name}: could not inspect signature — {exc}")
+            continue
+
+        ok, reason = _signatures_compatible(reference_sig, fake_sig)
+        if not ok:
+            failures.append(
+                f"  {name}:\n"
+                f"    Reference: {reference_sig}\n"
+                f"    Fake: {fake_sig}\n"
+                f"    Reason: {reason}"
+            )
+
+    assert not failures, (
+        f"Signature mismatches on {fake_cls.__name__} vs {reference_cls.__name__} "
+        f"(intersection of declared methods only):\n" + "\n".join(failures)
     )

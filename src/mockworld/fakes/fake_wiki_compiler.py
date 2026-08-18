@@ -44,6 +44,7 @@ class FakeWikiCompiler:
         tracked_root: Path,
         repo: str,
         topic: str,
+        other_topics: list[str] | None = None,
     ) -> int:
         self.compile_calls.append(
             CompileCall(tracked_root=tracked_root, repo=repo, topic=topic)
