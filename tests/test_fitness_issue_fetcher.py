@@ -1,17 +1,17 @@
 """Unit tests for the issue_fetcher closure built in build_services.
 
-The fetcher is extracted and tested in isolation by monkeypatching the
-_run_gh seam on a stub PRManager-like object.
+The fetcher is extracted and tested in isolation by stubbing the
+list_all_issues/list_all_prs PRPort methods on a stub PRManager-like
+object (#11418 — the fetcher no longer reaches through _run_gh).
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -57,19 +57,10 @@ PR_OPEN = {
 
 @pytest.fixture()
 def fake_prs():
-    """Stub with _run_gh that returns canned JSON for issue and PR calls."""
+    """Stub with list_all_issues/list_all_prs returning canned records."""
     prs = MagicMock()
-    prs._repo = "owner/repo"
-
-    async def _run_gh(*args):
-        args_str = " ".join(args)
-        if "gh issue list" in args_str or ("issue" in args_str and "list" in args_str):
-            return json.dumps([ISSUE_OPEN, ISSUE_CLOSED])
-        if "gh pr list" in args_str or ("pr" in args_str and "list" in args_str):
-            return json.dumps([PR_MERGED, PR_OPEN])
-        return "[]"
-
-    prs._run_gh = _run_gh
+    prs.list_all_issues = AsyncMock(return_value=[ISSUE_OPEN, ISSUE_CLOSED])
+    prs.list_all_prs = AsyncMock(return_value=[PR_MERGED, PR_OPEN])
     return prs
 
 

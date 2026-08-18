@@ -86,7 +86,9 @@ def _make_report_loop(
     pr_manager = MagicMock()
     pr_manager.get_issue_state = AsyncMock(return_value="OPEN")
     pr_manager.create_issue = AsyncMock(return_value=123)
-    pr_manager._repo = "owner/repo"
+    pr_manager.get_issue_labels = AsyncMock(return_value=[])
+    pr_manager.get_issue_body = AsyncMock(return_value="")
+    pr_manager.update_issue_body = AsyncMock()
 
     runner = MagicMock()
 

@@ -99,6 +99,10 @@ class FakeIssue:
     # because FakeComment *is* a str.
     comments: list[FakeComment] = field(default_factory=list)
     updated_at: str = "2026-01-01T00:00:00Z"
+    # gh's createdAt (#11418) — the fitness fetcher and StaleIssueLoop's
+    # backlog-budget valve key issue age off this field. Defaults alongside
+    # updated_at so pre-#11418 seeds are unaffected.
+    created_at: str = "2026-01-01T00:00:00Z"
     # Only meaningful once state == "closed"; mirrors gh's closedAt (#9727).
     # Empty = "not explicitly seeded": the closed listing falls back to
     # updated_at, mirroring GitHub (closing an issue touches both).
@@ -194,6 +198,11 @@ class FakeGitHub:
         # own RC end-to-end against the fake (previously the reads were
         # hard-coded None/[] stubs).
         self._rc_branches: dict[str, str] = {}
+        # #11418: seeded remote branches for StaleIssueLoop's branch-GC scan
+        # (agent/issue-*, fix/* by default) — branch name → commit history,
+        # newest first. Distinct from _rc_branches (rc/* has its own
+        # lifecycle via create_rc_branch/delete_branch).
+        self._branch_commits: dict[str, list[dict[str, str]]] = {}
         self._ci_scripts: dict[int, deque[tuple[bool, str]]] = {}
         self._comments: list[tuple[int, str]] = []
         self._ci_main_status: tuple[str, str] = ("success", "")
@@ -252,6 +261,7 @@ class FakeGitHub:
                 labels=list(issue_dict.get("labels", [])),
                 state=issue_dict.get("state", "open"),
                 updated_at=issue_dict.get("updated_at"),
+                created_at=issue_dict.get("created_at"),
             )
         for issue_number, comment_dicts in seed.comments.items():
             for comment_dict in comment_dicts:
@@ -292,6 +302,7 @@ class FakeGitHub:
         labels: list[str] | None = None,
         state: str = "open",
         updated_at: str | None = None,
+        created_at: str | None = None,
     ) -> None:
         """Seed an issue. ``state`` accepts ``"open"`` (default) or ``"closed"``.
 
@@ -316,6 +327,8 @@ class FakeGitHub:
         )
         if updated_at:
             issue.updated_at = updated_at
+        if created_at:
+            issue.created_at = created_at
         self._issues[number] = issue
 
     def add_seeded_comment(
@@ -376,6 +389,21 @@ class FakeGitHub:
         pr = self._prs[pr_number]
         if label not in pr.labels:
             pr.labels.append(label)
+
+    def add_gc_branch(
+        self, branch: str, commits: list[dict[str, str]] | None = None
+    ) -> None:
+        """Seed-API helper: register a remote branch for branch-GC scenarios (#11418).
+
+        *commits* is ``[{"date": iso, "message": msg}, ...]`` newest first.
+        Defaults to one synthetic commit dated 2026-01-01 — enough for
+        ``StaleIssueLoop``'s branch-GC to age the branch and (if *branch*
+        follows the ``agent/issue-<n>`` naming convention) resolve the
+        issue it references.
+        """
+        self._branch_commits[branch] = commits or [
+            {"date": "2026-01-01T00:00:00Z", "message": f"chore: seed {branch}"}
+        ]
 
     def add_alerts(self, *, branch: str, alerts: list[Any]) -> None:
         """Script code-scanning alerts returned by fetch_code_scanning_alerts."""
@@ -1287,6 +1315,72 @@ class FakeGitHub:
             return list(self._issues[issue_number].labels)
         return []
 
+    async def get_issue_body(self, issue_number: int) -> str:
+        """Return the body text of an issue (empty string when unknown)."""
+        self._maybe_rate_limit()
+        issue = self._issues.get(issue_number)
+        return issue.body if issue is not None else ""
+
+    async def list_all_issues(
+        self, *, state: str = "all", limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """Return issues in *state* as raw gh-wire dicts (#11418).
+
+        Mirrors ``PRManager.list_all_issues``' field shape: number, title,
+        state, labels, createdAt, updatedAt, closedAt.
+        """
+        self._maybe_rate_limit()
+        wanted = {"open", "closed"} if state == "all" else {state.lower()}
+        items = [
+            {
+                "number": issue.number,
+                "title": issue.title,
+                "state": issue.state.upper(),
+                "labels": [{"name": lbl} for lbl in issue.labels],
+                "createdAt": issue.created_at,
+                "updatedAt": issue.updated_at,
+                "closedAt": issue.closed_at or None,
+            }
+            for issue in self._issues.values()
+            if issue.state in wanted
+        ]
+        return items[:limit]
+
+    async def list_all_prs(
+        self, *, state: str = "all", limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """Return PRs in *state* as raw gh-wire dicts (#11418).
+
+        Mirrors ``PRManager.list_all_prs``' field shape: number, state,
+        labels, createdAt, closedAt, mergedAt.
+        """
+        self._maybe_rate_limit()
+
+        def _pr_state(pr: FakePR) -> str:
+            if pr.merged:
+                return "merged"
+            if pr.closed:
+                return "closed"
+            return "open"
+
+        wanted = None if state == "all" else state.lower()
+        items = []
+        for pr in self._prs.values():
+            pr_state = _pr_state(pr)
+            if wanted is not None and pr_state != wanted:
+                continue
+            items.append(
+                {
+                    "number": pr.number,
+                    "state": pr_state.upper(),
+                    "labels": [{"name": lbl} for lbl in pr.labels],
+                    "createdAt": _RC_FIXED_DATE,
+                    "closedAt": _RC_FIXED_DATE if pr_state != "open" else None,
+                    "mergedAt": _RC_FIXED_DATE if pr.merged else None,
+                }
+            )
+        return items[:limit]
+
     async def list_hitl_items(
         self, hitl_labels: list[str], *, concurrency: int = 10
     ) -> list[Any]:
@@ -1463,8 +1557,46 @@ class FakeGitHub:
     async def list_rc_branches(self) -> list[tuple[str, str]]:
         return list(self._rc_branches.items())
 
+    async def list_branch_refs(self, prefix: str) -> list[tuple[str, str]]:
+        """Return ``[(branch_name, sha), ...]`` for ``refs/heads/<prefix>*`` (#11418).
+
+        Searches every branch namespace the fake tracks — seeded GC
+        branches (``add_gc_branch``), rc/* branches, and open PR head
+        branches — mirroring the real ``matching-refs`` API, which is not
+        scoped to any one branch lifecycle. The sha is synthetic
+        (``sha-<branch>``); nothing in the fake resolves it back to a real
+        commit — :meth:`list_branch_commits` looks commits up by branch
+        name directly.
+        """
+        self._maybe_rate_limit()
+        branch_names = (
+            set(self._branch_commits)
+            | set(self._rc_branches)
+            | {pr.branch for pr in self._prs.values() if pr.branch}
+        )
+        return [
+            (branch, f"sha-{branch}")
+            for branch in sorted(branch_names)
+            if branch.startswith(prefix)
+        ]
+
+    async def list_branch_commits(
+        self, branch: str, *, limit: int = 30
+    ) -> list[dict[str, str]]:
+        """Return seeded commit history for *branch*, newest first (#11418).
+
+        Empty when *branch* was never seeded via :meth:`add_gc_branch` —
+        a scenario must explicitly seed the commit history it wants
+        StaleIssueLoop's branch-GC to discover, mirroring the
+        ``add_issue``/``add_pr`` seed-explicitly convention.
+        """
+        self._maybe_rate_limit()
+        commits = self._branch_commits.get(branch, [])
+        return [dict(c) for c in commits[:limit]]
+
     async def delete_branch(self, branch: str) -> bool:
         self._rc_branches.pop(branch, None)
+        self._branch_commits.pop(branch, None)
         return True
 
     async def list_recent_promotion_prs(self, days: int = 7) -> list[dict[str, Any]]:

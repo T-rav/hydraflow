@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_issue_body returns the body text of an issue, mirroring
+# `gh issue view <n> --json body`. Propagates read failures rather than
+# swallowing them (mirrors get_issue_labels's fail-closed contract, #9575) —
+# see ReportIssueLoop._verify_issue (#11418).
+adapter: github
+interaction: get_issue_body
+recorded_at: "2026-08-18T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_issue_body
+  args:
+    - "42"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "{\"body\": \"Example issue body text.\"}\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

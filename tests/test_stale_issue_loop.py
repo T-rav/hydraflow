@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -72,9 +71,11 @@ def _make_loop(
     deps = make_bg_loop_deps(tmp_path, enabled=enabled, stale_issue_interval=interval)
 
     prs = MagicMock()
-    prs._repo = "owner/repo"
-    prs._run_gh = AsyncMock(return_value=json.dumps(gh_issues) if gh_issues else "[]")
+    prs.list_all_issues = AsyncMock(return_value=gh_issues or [])
+    prs.close_issue = AsyncMock(return_value=True)
     prs.post_comment = AsyncMock()
+    prs.list_branch_refs = AsyncMock(return_value=[])
+    prs.list_branch_commits = AsyncMock(return_value=[])
 
     state = _make_state(
         staleness_days=staleness_days,
@@ -119,9 +120,7 @@ class TestStaleIssueLoopDoWork:
         assert result["closed"] == 1
         assert result["scanned"] == 1
         prs.post_comment.assert_awaited_once()
-        # Verify close was called via _run_gh
-        close_calls = [c for c in prs._run_gh.await_args_list if "close" in c.args]
-        assert len(close_calls) == 1
+        prs.close_issue.assert_awaited_once_with(42)
         state.add_stale_issue_closed.assert_called_once_with(42)
 
     @pytest.mark.asyncio
@@ -191,8 +190,7 @@ class TestStaleIssueLoopDoWork:
         assert result["scanned"] == 1
         # Should NOT have called post_comment or close
         prs.post_comment.assert_not_awaited()
-        close_calls = [c for c in prs._run_gh.await_args_list if "close" in c.args]
-        assert len(close_calls) == 0
+        prs.close_issue.assert_not_awaited()
         state.add_stale_issue_closed.assert_not_called()
 
     @pytest.mark.asyncio
@@ -217,7 +215,7 @@ class TestStaleIssueLoopDoWork:
     async def test_gh_fetch_failure_returns_stats(self, tmp_path: Path) -> None:
         """If fetching issues fails, stats are returned with zeroes."""
         loop, prs, state = _make_loop(tmp_path)
-        prs._run_gh = AsyncMock(side_effect=RuntimeError("network error"))
+        prs.list_all_issues = AsyncMock(side_effect=RuntimeError("network error"))
 
         result = await loop._do_work()
 

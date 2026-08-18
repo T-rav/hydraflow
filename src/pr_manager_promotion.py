@@ -79,6 +79,10 @@ class PRManagerPromotionMixin:
         self, pr_number: int
     ) -> PRDiffStats: ...  # provided by PRManager
 
+    async def list_branch_refs(
+        self, prefix: str
+    ) -> list[tuple[str, str]]: ...  # provided by PRManager
+
     # ------------------------------------------------------------------
     # Promotion / RC lifecycle (moved verbatim from pr_manager.py)
     # ------------------------------------------------------------------
@@ -476,24 +480,13 @@ class PRManagerPromotionMixin:
             return []
         prefix = self._config.rc_branch_prefix
         try:
-            raw = await self._run_gh(
-                "gh",
-                "api",
-                f"repos/{self._repo}/git/matching-refs/heads/{prefix}",
-                "--jq",
-                "[.[] | {ref: .ref, sha: .object.sha}]",
-            )
-            refs = json.loads(raw) if raw.strip() else []
+            refs = await self.list_branch_refs(prefix)
         except (RuntimeError, ValueError, json.JSONDecodeError):
             logger.debug("Could not list rc/* refs", exc_info=True)
             return []
 
         results: list[tuple[str, str]] = []
-        for ref in refs:
-            branch = str(ref.get("ref", "")).removeprefix("refs/heads/")
-            sha = str(ref.get("sha", ""))
-            if not branch or not sha:
-                continue
+        for branch, sha in refs:
             try:
                 commit_raw = await self._run_gh(
                     "gh",

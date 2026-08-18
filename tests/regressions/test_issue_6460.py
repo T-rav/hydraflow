@@ -14,7 +14,6 @@ loop supervisor can shut down or pause the loop.
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -41,11 +40,12 @@ def _make_stale_loop(
     deps = make_bg_loop_deps(tmp_path, enabled=True)
 
     pr_manager = MagicMock()
-    pr_manager._repo = "test-org/test-repo"
     # Default: return empty issue list
-    pr_manager._run_gh = AsyncMock(return_value="[]")
+    pr_manager.list_all_issues = AsyncMock(return_value=[])
     pr_manager.post_comment = AsyncMock()
     pr_manager.close_issue = AsyncMock()
+    pr_manager.list_branch_refs = AsyncMock(return_value=[])
+    pr_manager.list_branch_commits = AsyncMock(return_value=[])
 
     state = MagicMock()
     state.get_stale_issue_settings.return_value = MagicMock(
@@ -65,19 +65,17 @@ def _make_stale_loop(
     return loop, deps.stop_event, pr_manager, state
 
 
-def _stale_issue_json(number: int = 42, days_old: int = 60) -> str:
-    """Return JSON for an issue that is stale (updated `days_old` days ago)."""
+def _stale_issue_list(number: int = 42, days_old: int = 60) -> list[dict]:
+    """Return a list_all_issues-shaped list with one stale issue."""
     updated = (datetime.now(UTC) - timedelta(days=days_old)).isoformat()
-    return json.dumps(
-        [
-            {
-                "number": number,
-                "title": f"Stale issue #{number}",
-                "updatedAt": updated,
-                "labels": [],
-            }
-        ]
-    )
+    return [
+        {
+            "number": number,
+            "title": f"Stale issue #{number}",
+            "updatedAt": updated,
+            "labels": [],
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -117,9 +115,9 @@ class TestStaleIssueLoopAuthError:
 
     @pytest.mark.asyncio
     async def test_auth_error_on_issue_fetch_propagates(self, tmp_path: Path) -> None:
-        """AuthenticationError from _run_gh (issue list) must not be caught."""
+        """AuthenticationError from list_all_issues (issue list) must not be caught."""
         loop, _stop, pr, _state = _make_stale_loop(tmp_path)
-        pr._run_gh.side_effect = AuthenticationError("Bad credentials")
+        pr.list_all_issues.side_effect = AuthenticationError("Bad credentials")
 
         with pytest.raises(AuthenticationError):
             await loop._do_work()
@@ -128,11 +126,7 @@ class TestStaleIssueLoopAuthError:
     async def test_auth_error_on_issue_close_propagates(self, tmp_path: Path) -> None:
         """AuthenticationError from post_comment (per-issue close) must not be caught."""
         loop, _stop, pr, _state = _make_stale_loop(tmp_path)
-        # First call returns a stale issue; second call (close) raises
-        pr._run_gh.side_effect = [
-            _stale_issue_json(),
-            AuthenticationError("Bad credentials"),
-        ]
+        pr.list_all_issues.return_value = _stale_issue_list()
         pr.post_comment.side_effect = AuthenticationError("Bad credentials")
 
         with pytest.raises(AuthenticationError):
@@ -151,9 +145,9 @@ class TestStaleIssueLoopCreditExhausted:
     async def test_credit_exhausted_on_issue_fetch_propagates(
         self, tmp_path: Path
     ) -> None:
-        """CreditExhaustedError from _run_gh (issue list) must not be caught."""
+        """CreditExhaustedError from list_all_issues (issue list) must not be caught."""
         loop, _stop, pr, _state = _make_stale_loop(tmp_path)
-        pr._run_gh.side_effect = CreditExhaustedError("Credits exhausted")
+        pr.list_all_issues.side_effect = CreditExhaustedError("Credits exhausted")
 
         with pytest.raises(CreditExhaustedError):
             await loop._do_work()
@@ -164,10 +158,7 @@ class TestStaleIssueLoopCreditExhausted:
     ) -> None:
         """CreditExhaustedError from post_comment (per-issue close) must not be caught."""
         loop, _stop, pr, _state = _make_stale_loop(tmp_path)
-        pr._run_gh.side_effect = [
-            _stale_issue_json(),
-            CreditExhaustedError("Credits exhausted"),
-        ]
+        pr.list_all_issues.return_value = _stale_issue_list()
         pr.post_comment.side_effect = CreditExhaustedError("Credits exhausted")
 
         with pytest.raises(CreditExhaustedError):
@@ -251,7 +242,7 @@ class TestTransientErrorsStillCaught:
     ) -> None:
         """Transient RuntimeError on issue fetch is handled gracefully."""
         loop, _stop, pr, _state = _make_stale_loop(tmp_path)
-        pr._run_gh.side_effect = RuntimeError("API timeout")
+        pr.list_all_issues.side_effect = RuntimeError("API timeout")
 
         # Should NOT raise
         result = await loop._do_work()
