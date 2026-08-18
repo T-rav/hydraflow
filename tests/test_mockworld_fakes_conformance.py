@@ -189,9 +189,11 @@ def test_signatures_compatible_flags_kind_narrowed_from_positional_to_keyword_on
 ):
     """A param that's POSITIONAL_OR_KEYWORD on the reference must not become
     KEYWORD_ONLY on the Fake — a caller passing it positionally (valid
-    against the reference) would raise TypeError against the Fake (#11409:
-    FakeWikiCompiler.compile_topic_tracked missed WikiCompiler's
-    other_topics param entirely, which this rule now catches)."""
+    against the reference) would raise TypeError against the Fake. (#11409:
+    FakeWikiCompiler.compile_topic_tracked omitted WikiCompiler's
+    other_topics param outright, which the pre-existing "uncovered param"
+    rule above already catches; this rule guards the narrower case where
+    the param is present but marked keyword-only.)"""
 
     def reference_method(self, topic: str, other_topics: list | None = None) -> int: ...
     def fake_method(self, topic: str, *, other_topics: list | None = None) -> int: ...
