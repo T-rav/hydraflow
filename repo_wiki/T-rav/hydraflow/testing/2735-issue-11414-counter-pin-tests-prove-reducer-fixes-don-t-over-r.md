@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11414
 source_phase: plan
 created_at: 2026-08-18T03:10:06.299887+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Counter-pin tests prove reducer fixes don't over-reach unchanged paths
