@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11427
 source_phase: plan
 created_at: 2026-08-18T04:40:50.671747+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Folding findings: skip filing only, never record dedup key

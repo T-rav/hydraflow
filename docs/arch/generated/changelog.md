@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `5280a46` — chore(arch): refresh generated artifacts after the main merge *(2026-08-18)*
 - `194befa` — chore(rc): merge main into rc/2026-08-18-0649 to clear the DIRTY promotion *(2026-08-18)*
 - `a3eef8b` — chore(arch): refresh generated artifacts after the main merge *(2026-08-18)*
 - `9ef92ab` — chore(rc): merge main into rc/2026-08-18-0220 to clear the DIRTY promotion *(2026-08-18)*

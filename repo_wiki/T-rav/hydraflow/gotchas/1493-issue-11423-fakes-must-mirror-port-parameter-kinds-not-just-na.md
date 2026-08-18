@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11423
 source_phase: plan
 created_at: 2026-08-18T04:02:35.358180+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11423 closed
 ---
 
 # Fakes must mirror Port parameter kinds, not just names

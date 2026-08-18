@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11416
 source_phase: plan
 created_at: 2026-08-18T03:21:19.601636+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11416 closed
 ---
 
 # Catalog builders must thread collaborator ports to loop constructors

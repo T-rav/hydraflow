@@ -1,26 +1,40 @@
-"""Class-level recurrence guard for #11416's silent-omission shape.
+"""Recurrence guard for the #11416/#11424 silent-omission shape.
 
 A catalog builder that accepts a port key but never forwards it to the loop
 constructor leaves an *optional* collaborator permanently ``None`` — the
 loop instantiates fine (so ``test_loop_instantiation.py`` stays green) but a
 whole phase gated on ``self._collaborator is not None`` goes quietly
 unreachable in every MockWorld scenario. ``_build_repo_wiki`` had exactly
-this shape for ``wiki_compiler`` (silently gating Phase 2/8 compilation).
+this shape for ``wiki_compiler`` (#11416); ``_build_escape_ledger``,
+``_build_skill_prompt_eval``, and ``_build_diagnostic`` had it independently
+(#11424).
 
-Rather than a hardcoded table of (loop, collaborators) rows — which only
-guards whatever a human happened to enumerate — this derives the universe
-of checks from the loop classes themselves:
+Two complementary guards live here:
 
-1. Every builder in ``_BUILDERS`` is AST-read to find the ``Call`` that
-   constructs and returns its loop, and which kwargs that call passes.
-2. ``inspect.signature`` on the resolved loop class finds every
-   constructor param whose default is ``None`` (an *optional* collaborator).
-3. A param missing from the builder's forwarded kwargs is a violation
-   unless ``(loop_name, param_name)`` is in ``_ALLOWLIST`` with a reason.
+1. A STRUCTURAL guard, derived from the loop classes themselves rather than
+   a hand-maintained list — only guards whatever a human happened to
+   enumerate otherwise. Every builder in ``_BUILDERS`` is AST-read to find
+   the ``Call`` that constructs and returns its loop and which kwargs that
+   call passes; ``inspect.signature`` on the resolved loop class finds
+   every constructor param whose default is ``None`` (an *optional*
+   collaborator). A param missing from the builder's forwarded kwargs is a
+   violation unless ``(loop_name, param_name)`` is in ``_ALLOWLIST`` with a
+   reason. The allowlist is self-retiring:
+   ``test_allowlist_entries_are_still_needed`` fails if a builder starts
+   forwarding a param (or a loop drops it), so a listed entry doesn't
+   quietly outlive its reason.
 
-The allowlist is self-retiring: ``test_allowlist_entries_are_still_needed``
-fails if a builder starts forwarding a param (or a loop drops it), so a
-listed entry doesn't quietly outlive its reason.
+2. A BEHAVIORAL guard, a small table of ``(loop_name, port_key,
+   attr_name)`` rows: each seeds a sentinel on the port, builds via the
+   catalog, and asserts the sentinel lands on the instance's private attr.
+   This catches a builder that forwards the *right kwarg* from the *wrong*
+   port key (or onto the wrong attr) — a shape the structural guard above
+   can't see, since it only checks kwarg names in the AST, not port-key
+   plumbing or the resulting instance attribute.
+
+Add a row to (1)'s ``_ALLOWLIST`` when a None-default param is
+intentionally left unforwarded, and a row to (2)'s
+``_COLLABORATOR_WIRING_TABLE`` for any site worth pinning behaviorally.
 """
 
 from __future__ import annotations
@@ -28,12 +42,52 @@ from __future__ import annotations
 import ast
 import importlib
 import inspect
+from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-from tests.scenarios.catalog import loop_registrations
-from tests.scenarios.catalog.loop_registrations import _BUILDERS
+from tests.scenarios.catalog import LoopCatalog, loop_registrations
+from tests.scenarios.catalog.loop_registrations import _BUILDERS, ensure_registered
+
+# (loop_name, port_key, attr_name) — sentinel seeded at ports[port_key] must
+# land on instance.attr_name after LoopCatalog.instantiate(loop_name, ...).
+_COLLABORATOR_WIRING_TABLE = [
+    ("escape_ledger", "escape_ledger_auto_diagnoser", "_auto_diagnoser"),
+    ("skill_prompt_eval", "skill_prompt_refine_llm", "_refine_llm"),
+    ("diagnostic", "workspace", "_workspaces"),
+]
+
+
+@pytest.fixture(autouse=True)
+def _ensure_registered() -> Iterator[None]:
+    ensure_registered()
+    yield
+
+
+@pytest.mark.parametrize(
+    ("loop_name", "port_key", "attr_name"), _COLLABORATOR_WIRING_TABLE
+)
+def test_builder_forwards_optional_collaborator(
+    tmp_path: Path, loop_name: str, port_key: str, attr_name: str
+) -> None:
+    """A sentinel seeded at ports[port_key] must land on instance.attr_name."""
+    from tests.helpers import make_bg_loop_deps  # noqa: PLC0415
+
+    bg = make_bg_loop_deps(tmp_path)
+    sentinel = MagicMock(name=f"sentinel-{port_key}")
+    ports: dict = {"github": MagicMock(), port_key: sentinel}
+
+    instance = LoopCatalog.instantiate(
+        loop_name, ports=ports, config=bg.config, deps=bg.loop_deps
+    )
+
+    assert getattr(instance, attr_name) is sentinel, (
+        f"{loop_name!r} builder did not forward ports[{port_key!r}] onto "
+        f"instance.{attr_name} — see #11424"
+    )
+
 
 # (loop_name, param_name) -> why this None-default constructor param is
 # intentionally left unforwarded by its builder. Every entry was audited
