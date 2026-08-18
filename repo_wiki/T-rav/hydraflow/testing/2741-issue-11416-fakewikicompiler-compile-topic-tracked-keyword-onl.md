@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11416
 source_phase: plan
 created_at: 2026-08-18T03:21:19.601687+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11416 closed
 ---
 
 # FakeWikiCompiler.compile_topic_tracked keyword-only vs positional call
