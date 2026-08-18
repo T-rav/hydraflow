@@ -8,6 +8,7 @@ that phases call via PipelineHarness.
 from __future__ import annotations
 
 import copy
+import json
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -1648,11 +1649,9 @@ class FakeGitHub:
         allowlisted quiet: allowlisting would reintroduce exactly the blind
         spot fail-loud exists to remove. ``None`` means "not modelled here".
         """
-        import json as _json  # noqa: PLC0415 - local to the fake's helpers
-
         if "/git/matching-refs/heads/" in path:
             prefix = path.rsplit("/heads/", 1)[-1]
-            return _json.dumps(
+            return json.dumps(
                 [
                     f"refs/heads/{pr.branch}"
                     for pr in self._prs.values()
@@ -1662,7 +1661,7 @@ class FakeGitHub:
         if path.endswith("/commits"):
             # The loop reads only the newest commit's date/sha to age a
             # branch; an empty list is the honest "no commits recorded".
-            return _json.dumps([])
+            return json.dumps([])
         return None
 
     async def _run_gh(self, *cmd: str, cwd: Any = None) -> str:
