@@ -458,6 +458,11 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_DETECTOR_CALIBRATION_MAX_ISSUES_PER_TICK",
         3,
     ),
+    (
+        "detector_calibration_spray_min_entities",
+        "HYDRAFLOW_DETECTOR_CALIBRATION_SPRAY_MIN_ENTITIES",
+        5,
+    ),
     ("auto_agent_preflight_interval", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_INTERVAL", 120),
     ("auto_agent_max_attempts", "HYDRAFLOW_AUTO_AGENT_MAX_ATTEMPTS", 3),
     (
@@ -5277,6 +5282,18 @@ class HydraFlowConfig(BaseModel):
             "one tick (#10777). Churning subjects are mined from up to 500 "
             "closed escalations; over-cap subjects are folded into a single "
             "summary issue instead of one issue each."
+        ),
+    )
+    detector_calibration_spray_min_entities: int = Field(
+        default=5,
+        ge=3,
+        le=100,
+        description=(
+            "Minimum distinct #N entities one escalation template must hit "
+            "inside the window before DetectorCalibrationLoop files a spray "
+            "finding (#11427) — the compensating breadth signal for "
+            "identity-preserving normalize (#11405). Floor of 3 stays above "
+            "the 3-PR shape that produced #11405's fabricated churn."
         ),
     )
     auto_agent_preflight_enabled: bool = Field(
