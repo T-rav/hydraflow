@@ -208,6 +208,61 @@ class TestFakeGitHubMutations:
         assert comments[1]["created_at"] == "2026-07-01T00:05:00Z"
 
 
+class TestFakeGitHubRunGhIssueEdit:
+    """#11419: FakeGitHub models ``gh issue edit <n> --body-file <path>``.
+
+    The only real issuer is ``PRManager.update_issue_body``, which routes
+    the body through a temp ``--body-file`` (``_run_with_body_file``), so
+    the fake reads the file — exactly what the real gh CLI would consume.
+    """
+
+    async def test_edit_updates_body_via_run_gh(self, tmp_path):
+        gh = FakeGitHub()
+        gh.add_issue(42, "title", "old body")
+        body_file = tmp_path / "body.md"
+        body_file.write_text("new body", encoding="utf-8")
+
+        await gh._run_gh(
+            "gh",
+            "issue",
+            "edit",
+            "42",
+            "--repo",
+            "o/r",
+            "--body-file",
+            str(body_file),
+        )
+
+        assert await gh.get_issue_body(42) == "new body"
+
+    async def test_edit_without_body_flag_is_a_noop(self):
+        gh = FakeGitHub()
+        gh.add_issue(42, "title", "old body")
+
+        await gh._run_gh("gh", "issue", "edit", "42", "--repo", "o/r")
+
+        assert await gh.get_issue_body(42) == "old body"
+
+    async def test_edit_with_missing_body_file_is_a_noop(self, tmp_path):
+        """_run_with_body_file unlinks its temp file in a finally — a path
+        that no longer resolves must not raise out of the fake."""
+        gh = FakeGitHub()
+        gh.add_issue(42, "title", "old body")
+
+        await gh._run_gh(
+            "gh",
+            "issue",
+            "edit",
+            "42",
+            "--repo",
+            "o/r",
+            "--body-file",
+            str(tmp_path / "gone.md"),
+        )
+
+        assert await gh.get_issue_body(42) == "old body"
+
+
 class TestFakeGitHubRateLimit:
     async def test_rate_limit_zero_remaining_raises(self) -> None:
         gh = FakeGitHub()
