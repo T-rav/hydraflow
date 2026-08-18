@@ -53,7 +53,9 @@ def _build_pr_red_repair(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     slate rather than a truthy unstubbed MagicMock. Attempt-count reads/
     bumps default to a simple in-memory counter so bounded-rerun scenarios
     (settle red → rerun → re-settle red → escalate) work without a real
-    ``StateTracker``.
+    ``StateTracker``. ``workspaces`` forwards the shared ``workspace`` port
+    (same ``FakeWorkspace`` as ``_build_workspace_gc``) so worktree-branch
+    scenarios aren't silently dead (#11416).
     """
     from pr_red_repair_loop import PrRedRepairLoop  # noqa: PLC0415
 
@@ -76,7 +78,11 @@ def _build_pr_red_repair(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         state.bump_pr_red_rerun_attempts.side_effect = _bump_attempts
         ports["pr_red_repair_state"] = state
     return PrRedRepairLoop(
-        config=config, pr_manager=ports["github"], state=state, deps=deps
+        config=config,
+        pr_manager=ports["github"],
+        state=state,
+        deps=deps,
+        workspaces=ports.get("workspace"),
     )
 
 
@@ -162,10 +168,14 @@ def _build_escape_ledger(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     escape detection (``commits_for_range``) and erosion trend datapoints run
     against ``config.repo_root`` on disk, not through the ``github`` port, so
     scenarios exercising detection need a real git repo fixture there — see
-    ``tests/scenarios/test_escape_ledger_scenario.py``.
+    ``tests/scenarios/test_escape_ledger_scenario.py``. ``auto_diagnoser``
+    forwards the ``escape_ledger_auto_diagnoser`` port so scenarios can
+    inject a fake instead of silently building a real ``EscapeAutoDiagnoser``
+    that does live git reads (#11416).
     """
     from escape_ledger_loop import EscapeLedgerLoop  # noqa: PLC0415
 
+    auto_diagnoser = ports.get("escape_ledger_auto_diagnoser")
     state = ports.get("escape_ledger_state")
     if state is None:
         state = MagicMock()
@@ -193,6 +203,7 @@ def _build_escape_ledger(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         state=state,
         dedup=dedup,
         deps=deps,
+        auto_diagnoser=auto_diagnoser,
     )
 
 
@@ -631,7 +642,14 @@ def _build_repo_wiki(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 
     wiki_store = ports.get("wiki_store") or MagicMock()
     ports.setdefault("wiki_store", wiki_store)
-    return RepoWikiLoop(config=config, wiki_store=wiki_store, deps=deps)
+    return RepoWikiLoop(
+        config=config,
+        wiki_store=wiki_store,
+        deps=deps,
+        wiki_compiler=ports.get("wiki_compiler"),
+        state=ports.get("state"),
+        tribal_store=ports.get("tribal_store"),
+    )
 
 
 def _build_log_ingest(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -672,6 +690,12 @@ def _build_live_corpus_replay(ports: dict[str, Any], config: Any, deps: Any) -> 
 
 
 def _build_diagnostic(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build DiagnosticLoop for scenarios.
+
+    ``workspaces`` forwards the shared ``workspace`` port (same
+    ``FakeWorkspace`` as ``_build_workspace_gc``) so scenarios exercising
+    worktree creation aren't silently dead-branched to ``repo_root`` (#11416).
+    """
     from diagnostic_loop import DiagnosticLoop  # noqa: PLC0415
 
     runner = ports.get("diagnostic_runner") or MagicMock()
@@ -684,6 +708,7 @@ def _build_diagnostic(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         prs=ports["github"],
         state=state,
         deps=deps,
+        workspaces=ports.get("workspace"),
     )
 
 
@@ -869,7 +894,9 @@ def _build_skill_prompt_eval(ports: dict[str, Any], config: Any, deps: Any) -> A
     clean slate (empty last-green snapshot, zero attempts, no prior
     dedup keys). Tests may override by seeding ``skill_prompt_state`` /
     ``skill_prompt_dedup`` explicitly — mirrors the F7 FlakeTracker
-    pattern.
+    pattern. ``refine_llm`` forwards the ``skill_prompt_refine_llm`` port
+    so scenarios can inject a fake instead of silently building a real
+    ``_CLIRefineLLM`` that spawns a ``claude`` subprocess (#11416).
     """
     from skill_prompt_eval_loop import SkillPromptEvalLoop  # noqa: PLC0415
 
@@ -895,6 +922,7 @@ def _build_skill_prompt_eval(ports: dict[str, Any], config: Any, deps: Any) -> A
         pr_manager=pr_manager,
         dedup=dedup,
         deps=deps,
+        refine_llm=ports.get("skill_prompt_refine_llm"),
     )
 
     # Rewire external I/O to seeded async callables (if provided).
@@ -1546,7 +1574,10 @@ def _build_sandbox_failure_fixer(ports: dict[str, Any], config: Any, deps: Any) 
     (FakeGitHub satisfies the PRPort contract) and ``ports['auto_agent_runner']``
     (an AsyncMock-style object whose ``run`` returns a ``PreflightSpawn``-like
     namespace). Scenarios that only need scaffold-wiring smoke can omit both;
-    the loop falls back to a no-op tick.
+    the loop falls back to a no-op tick. ``workspaces`` forwards the shared
+    ``workspace`` port (same ``FakeWorkspace`` as ``_build_workspace_gc``),
+    a sibling of the ``_build_diagnostic``/``_build_pr_red_repair`` gap
+    (#11416).
     """
     from sandbox_failure_fixer_loop import SandboxFailureFixerLoop  # noqa: PLC0415
 
@@ -1558,6 +1589,7 @@ def _build_sandbox_failure_fixer(ports: dict[str, Any], config: Any, deps: Any) 
         deps=deps,
         prs=ports.get("github"),
         runner=ports.get("auto_agent_runner"),
+        workspaces=ports.get("workspace"),
     )
 
 

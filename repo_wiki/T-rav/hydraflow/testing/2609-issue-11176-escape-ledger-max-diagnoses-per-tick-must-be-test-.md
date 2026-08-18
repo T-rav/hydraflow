@@ -5,7 +5,7 @@ source_issue: 11176
 source_phase: plan
 created_at: 2026-08-14T22:35:54.596968+00:00
 status: active
-corroborations: 1
+corroborations: 2
 ---
 
 # escape_ledger_max_diagnoses_per_tick must be test-pinned, not just configured
