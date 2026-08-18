@@ -1639,6 +1639,32 @@ class FakeGitHub:
             if not pr.merged
         ]
 
+    def _modelled_api_payload(self, path: str) -> str | None:
+        """Payloads for the ``gh api`` shapes real loops call (#11413).
+
+        StaleIssueLoop's branch-GC makes both of these live — the sampled
+        re-audit of #11372 falsified that PR's "no loop relied on the
+        silent empty answer" claim by finding them. They are MODELLED, not
+        allowlisted quiet: allowlisting would reintroduce exactly the blind
+        spot fail-loud exists to remove. ``None`` means "not modelled here".
+        """
+        import json as _json  # noqa: PLC0415 - local to the fake's helpers
+
+        if "/git/matching-refs/heads/" in path:
+            prefix = path.rsplit("/heads/", 1)[-1]
+            return _json.dumps(
+                [
+                    f"refs/heads/{pr.branch}"
+                    for pr in self._prs.values()
+                    if pr.branch and pr.branch.startswith(prefix)
+                ]
+            )
+        if path.endswith("/commits"):
+            # The loop reads only the newest commit's date/sha to age a
+            # branch; an empty list is the honest "no commits recorded".
+            return _json.dumps([])
+        return None
+
     async def _run_gh(self, *cmd: str, cwd: Any = None) -> str:
         """Generic ``gh`` CLI passthrough — returns minimal-shape JSON.
 
@@ -1716,9 +1742,17 @@ class FakeGitHub:
         # Unknown shape: FAIL LOUD (#11372). Quiet shapes are allowlisted
         # above; anything else is a fidelity gap the scenario would
         # otherwise paper over with a plausible empty answer.
+        # Modelled `gh api` shapes (#11413) and the quiet allowlist share one
+        # exit so the dispatcher keeps a single fall-through.
+        modelled = (
+            self._modelled_api_payload(args[1])
+            if verb == "api" and len(args) > 1
+            else None
+        )
         shape = " ".join(args[:3])
-        if any(shape.startswith(quiet) for quiet in _QUIET_UNKNOWN_GH_SHAPES):
-            return "[]"
+        quiet = any(shape.startswith(prefix) for prefix in _QUIET_UNKNOWN_GH_SHAPES)
+        if modelled is not None or quiet:
+            return modelled if modelled is not None else "[]"
         raise FakeGitHubUnmodelledCommand(
             f"FakeGitHub has no model for `gh {' '.join(args)}`. Either model "
             "the command (preferred — that is the fidelity fix) or, if the "
