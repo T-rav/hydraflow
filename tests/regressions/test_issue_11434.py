@@ -27,7 +27,7 @@ _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "quality_host_lock.p
 
 def _launch_orphaned(
     tmp_path: Path, command: list[str], env: dict[str, str] | None = None
-) -> Path:
+) -> tuple[Path, int]:
     """Run *command* under quality_host_lock.py, then orphan the wrapper.
 
     A "launcher" process Popen's the wrapper (capturing its stdout/stderr
@@ -38,14 +38,19 @@ def _launch_orphaned(
     the wrapper has even finished interpreter startup, so the wrapper's
     *first* ``os.getppid()`` read (the one it records as "home") already
     observes the post-orphan value and no change is ever seen. Returns the
-    log file path; the log is flushed to disk by the wrapper itself
-    regardless of whether the orphan has been reaped yet, so reading it
-    never races on pid liveness/zombie semantics.
+    log file path and the launcher's own pid — the pid the wrapper records
+    as its parent, so callers can confirm the abandonment message names the
+    actual dead parent rather than just matching generic wording. The log
+    is flushed to disk by the wrapper itself regardless of whether the
+    orphan has been reaped yet, so reading it never races on pid
+    liveness/zombie semantics.
     """
     log_path = tmp_path / "wrapper.log"
+    pid_path = tmp_path / "launcher.pid"
     full_env = {**os.environ, **(env or {})}
     launcher = (
         "import os, subprocess, sys, time\n"
+        f"open({str(pid_path)!r}, 'w').write(str(os.getpid()))\n"
         f"log = open({str(log_path)!r}, 'w')\n"
         "subprocess.Popen(\n"
         f"    [sys.executable, {str(_SCRIPT)!r}, '--', *{command!r}],\n"
@@ -56,7 +61,7 @@ def _launch_orphaned(
     subprocess.run(  # nosec B603
         [sys.executable, "-c", launcher], env=full_env, check=True, timeout=15
     )
-    return log_path
+    return log_path, int(pid_path.read_text())
 
 
 def _wait_for(predicate, timeout: float, interval: float = 0.1) -> bool:
@@ -81,7 +86,7 @@ def test_abandons_while_queueing_when_parent_dies(tmp_path: Path) -> None:
 
     marker = tmp_path / "ran.marker"
     command = [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('ran')"]
-    log_path = _launch_orphaned(tmp_path, command, env=env)
+    log_path, launcher_pid = _launch_orphaned(tmp_path, command, env=env)
 
     try:
         assert _wait_for(
@@ -95,6 +100,10 @@ def test_abandons_while_queueing_when_parent_dies(tmp_path: Path) -> None:
         assert not marker.exists(), (
             "wrapper ran the queued command after its parent died instead "
             "of leaving the queue"
+        )
+        assert str(launcher_pid) in log_path.read_text(), (
+            "abandonment message did not name the dead parent pid "
+            f"({launcher_pid}) — not diagnosable on a live host"
         )
     finally:
         holder.wait(timeout=30)
@@ -124,7 +133,7 @@ def test_kills_whole_process_group_when_parent_dies_while_running(
     )
     command = [sys.executable, "-c", make_src]
 
-    log_path = _launch_orphaned(tmp_path, command, env=env)
+    log_path, launcher_pid = _launch_orphaned(tmp_path, command, env=env)
 
     assert _wait_for(heartbeat.exists, timeout=8), "suite tree never started"
     count_at_orphan = len(heartbeat.read_text().splitlines())
@@ -136,6 +145,10 @@ def test_kills_whole_process_group_when_parent_dies_while_running(
         ),
         timeout=10,
     ), log_path.read_text() if log_path.exists() else "<no log>"
+    assert str(launcher_pid) in log_path.read_text(), (
+        "abandonment message did not name the dead parent pid "
+        f"({launcher_pid}) — not diagnosable on a live host"
+    )
 
     count_after_kill = len(heartbeat.read_text().splitlines())
     time.sleep(1.0)

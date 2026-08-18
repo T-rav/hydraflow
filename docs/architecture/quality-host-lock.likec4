@@ -20,7 +20,7 @@ model {
     }
     wrapper = container 'quality_host_lock.py' {
       description 'scripts/quality_host_lock.py — host-wide advisory lock wrapper (#11219/#11400)'
-      parentWatch = component 'parent-liveness guard (NEW)' {
+      parentWatch = component 'parent-liveness guard' {
         description 'records os.getppid() at startup; abandons queue or SIGKILLs the suite group when it changes'
       }
       acquire = component '_acquire' {
