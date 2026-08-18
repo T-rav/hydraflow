@@ -243,18 +243,42 @@ _REAL_RUNNER_FAKE_ATTRS: list[tuple[type, str]] = [
     (ReviewRunner, "reviewers"),
 ]
 
+# Required-method floor (plan for #11420): the substitution surface MockWorld
+# actually relies on. ``shared`` being merely non-empty would still pass if a
+# future refactor silently dropped e.g. ``review`` from the fake while other
+# incidental methods stayed shared — this floor makes that shrinkage fail
+# loudly instead.
+_REQUIRED_METHOD_FLOOR: frozenset[str] = frozenset(
+    {
+        "evaluate",
+        "run_decomposition",
+        "plan",
+        "run_gap_review",
+        "run",
+        "review",
+        "fix_ci",
+        "fix_review_findings",
+        "set_tracing_context",
+        "clear_tracing_context",
+        "terminate",
+    }
+)
 
-def _param_spec(sig: inspect.Signature) -> list[tuple[str, str, bool]]:
-    """(name, kind, required) triplets for every non-self parameter.
+
+def _param_spec(sig: inspect.Signature) -> list[tuple[str, str, bool, Any]]:
+    """(name, kind, required, default) tuples for every non-self parameter.
 
     Annotations and return types are deliberately ignored — the fakes
-    annotate with ``Any`` to stay import-light. Names, kinds, and
-    required-vs-default status ARE the conformance surface: a positional
-    call site or a ``worker_id=`` kwarg must behave identically against
-    the real runner and its fake.
+    annotate with ``Any`` to stay import-light. Names, kinds, and default
+    values ARE the conformance surface: a positional call site or a
+    ``worker_id=`` kwarg must behave identically against the real runner
+    and its fake, and a caller relying on an implicit default (e.g.
+    ``fix_ci``'s ``attempt=1``) must observe the same value from both —
+    matching required-vs-optional status alone would let a silently wrong
+    default (``attempt=0``) pass undetected.
     """
     return [
-        (name, str(p.kind), p.default is inspect.Parameter.empty)
+        (name, str(p.kind), p.default is inspect.Parameter.empty, p.default)
         for name, p in sig.parameters.items()
         if name != "self"
     ]
@@ -287,6 +311,15 @@ def test_nested_runner_fakes_match_real_runner_signatures(
     assert shared, (
         f"No shared public methods between {real_cls.__name__} and its "
         f"FakeLLM stand-in — the pairing is miswired."
+    )
+
+    expected_floor = _REQUIRED_METHOD_FLOOR & set(real_methods)
+    missing_floor = expected_floor - set(shared)
+    assert not missing_floor, (
+        f"{real_cls.__name__} vs FakeLLM.{fake_attr} ({fake_cls.__name__}): "
+        f"required methods missing from the shared surface: "
+        f"{sorted(missing_floor)} — MockWorld's substitution parity has "
+        "silently shrunk."
     )
 
     failures: list[str] = []
