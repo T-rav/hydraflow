@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11423
 source_phase: review
 created_at: 2026-08-18T05:56:04.202006+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11423 closed
 ---
 
 # All production callers must pass `limit` by keyword across _PORT_FAKE_PAIRS
