@@ -110,3 +110,78 @@ async def test_repo_wiki_scenario_reaches_tracked_compile_when_compiler_wired(
     )
     assert compiler.compile_calls[0].topic == topic
     assert compiler.compile_calls[0].repo == _SLUG
+
+
+async def test_fingerprint_gate_skips_unchanged_topic_across_ticks(
+    tmp_path: Path,
+) -> None:
+    """Multi-tick gate behaviour (#11373, audit finding #11409).
+
+    The unit tests in ``tests/test_wiki_compile_state.py`` cover
+    ``topic_fingerprint``/``WikiCompileState`` as pure functions, and
+    ``tests/regressions/test_wiki_compile_churn_11373.py`` drives a
+    MagicMock-wired loop. Neither exercises the gate the way production
+    runs it: across separate ``_do_work()`` ticks, with the fingerprint
+    computed from real on-disk entries and the decision round-tripped
+    through ``wiki_compile_state.json`` on the config's data_root.
+
+    Tick 1 compiles, tick 2 finds the topic byte-identical and skips the
+    synthesis spawn, tick 3 sees mutated content and pays for it again.
+    """
+    from repo_wiki import RepoWikiStore
+
+    topic = DEFAULT_TOPICS[0]
+    tracked_root = tmp_path / "tracked_wiki"
+    entries = [
+        _write_active_tracked_entry(
+            tracked_root, _SLUG, topic, entry_id=f"e{i}", source_issue=i
+        )
+        for i in range(5)
+    ]
+    store = RepoWikiStore(
+        wiki_root=tmp_path / "wiki_root_unused",
+        tracked_root=tracked_root,
+        self_slug=None,
+    )
+
+    wiki_store = MagicMock()
+    wiki_store.list_repos.return_value = [_SLUG]
+
+    compiler = FakeWikiCompiler()
+    world = MockWorld(tmp_path)
+    seed_ports(world, wiki_store=wiki_store, wiki_compiler=compiler)
+
+    ticks = {"n": 0}
+    calls_after_tick: list[int] = []
+
+    async def _heal(self, closed_issues, stats):
+        ticks["n"] += 1
+        if ticks["n"] == 3:
+            # Change the topic's content before the third tick's compile
+            # phase — the gate must notice and re-spawn synthesis.
+            entries[0].write_text(
+                entries[0].read_text(encoding="utf-8")
+                + "\nLater evidence: `src/foo.py:Baz`.\n",
+                encoding="utf-8",
+            )
+        result = await self._lint_and_compile_repos(
+            [_SLUG], tracked_root, closed_issues, store=store
+        )
+        stats.update(result)
+        calls_after_tick.append(len(compiler.compile_calls))
+
+    with patch("repo_wiki_loop.RepoWikiLoop._heal_and_open_maintenance_pr", _heal):
+        await world.run_with_loops(["repo_wiki"], cycles=3)
+
+    # Guard the instrument before reading it: a tick that never reached the
+    # compile phase is indistinguishable from a tick the gate skipped, so a
+    # throttled loop would make the assertion below vacuously green.
+    assert ticks["n"] == 3, (
+        f"only {ticks['n']} of 3 ticks reached the compile phase — the "
+        "call-count assertion below cannot distinguish 'gate skipped it' "
+        "from 'the tick never ran'"
+    )
+    assert calls_after_tick == [1, 1, 2], (
+        "expected compile → skip → recompile across ticks, got cumulative "
+        f"compile_topic_tracked counts {calls_after_tick}"
+    )
