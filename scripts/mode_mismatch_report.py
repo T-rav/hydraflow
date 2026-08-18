@@ -64,6 +64,14 @@ _NON_WORK_EVENT_TYPES = frozenset(
         "system_alert",
         "metrics_update",
         "cost_update",
+        # 71k occurrences in the live log — the second most common type, and
+        # emitted by EVERY agent phase (triage, review, planner), not just
+        # the build lane. Counting it as work would make ``work_started``
+        # true for essentially any issue an agent ever touched, which
+        # collapses the very distinction this instrument measures. A
+        # transcript line proves an agent spoke about the issue, not that
+        # the pipeline built it.
+        "transcript_line",
     }
 )
 
