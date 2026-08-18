@@ -19,7 +19,7 @@ Pins:
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -95,3 +95,50 @@ async def test_kill_switch_disables_the_heal() -> None:
     loop = _loop(mergeable=False, enabled=False)
     assert await loop._maybe_heal_dirty_promotion(500, RC) is False
     loop._prs.get_pr_mergeable.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dirty_pr_heals_before_waiting_on_ci() -> None:
+    """PLACEMENT pin (live validation on PR #11404): a DIRTY RC must heal
+    BEFORE the CI wait.
+
+    The first cut healed only after a merge attempt failed, which requires
+    CI to have gone green — but a conflicted RC often never gets there, so
+    the loop sat on a DIRTY promotion PR doing nothing. That is the exact
+    state a human hand-healed three times, i.e. the bug this feature was
+    supposed to remove.
+    """
+    loop = _loop(mergeable=False)
+    loop._prs.wait_for_ci = AsyncMock(return_value=(False, "pending"))
+    loop._stop_event = SimpleNamespace(is_set=lambda: False)
+
+    result = await loop._heal_then_handle_open_promotion(500, RC)
+
+    assert result["status"] == "conflict_healed"
+    loop._prs.update_pr_branch.assert_awaited_once_with(500, method="merge")
+    # The CI wait must not even be reached: healing first means CI re-runs
+    # on the merge commit, which is the verdict that gates promotion.
+    loop._prs.wait_for_ci.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_clean_pr_is_not_diverted_by_the_new_heal_step() -> None:
+    """The hoisted heal must be a no-op on a healthy PR: it neither touches
+    the branch nor short-circuits the promotion path."""
+    from unittest.mock import AsyncMock as _AsyncMock
+
+    loop = _loop(mergeable=True)
+    loop._prs = _AsyncMock()
+    loop._prs.get_pr_mergeable = _AsyncMock(return_value=True)
+    loop._prs.wait_for_ci = _AsyncMock(return_value=(False, "pending"))
+    loop._stop_event = SimpleNamespace(is_set=lambda: False)
+    loop._rollups = lambda: None
+    state = MagicMock()
+    state.get_rc_conflict_heal_attempts.return_value = 0
+    loop._state = state
+
+    result = await loop._heal_then_handle_open_promotion(500, RC)
+
+    assert result["status"] != "conflict_healed"
+    loop._prs.update_pr_branch.assert_not_awaited()
+    loop._prs.wait_for_ci.assert_awaited()

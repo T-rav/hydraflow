@@ -162,6 +162,15 @@ async def test_site_aware_rediscovery_of_pre_11328_title_only_roster_line_is_ide
     same site -- the duplicate-roster-line bug caught in review: the
     site-aware lookup only ever checked the site identifier, which a
     pre-#11328 line never carries.
+
+    Since #11407, recognizing the title-only line BINDS it to the current
+    call's site identifier (title text alone can't prove it's the same
+    physical site, so leaving the identifier unresolved would let a later,
+    genuinely different site silently vanish under the same title -- see
+    ``tests/regressions/test_issue_11407.py``). The body therefore DOES
+    change here (the legacy line gains a site tag) and is persisted, but
+    the roster's entry count is unchanged and no "new site" comment is
+    posted -- that's the idempotency this test still pins.
     """
     prs = _RecordingPRPort()
     title = "branch_gc_scan misses agent/auto-agent-<N>"
@@ -191,10 +200,14 @@ async def test_site_aware_rediscovery_of_pre_11328_title_only_roster_line_is_ide
 
     assert result_number == 30000
     assert len(prs._issues) == 1
-    assert prs._issues[30000]["body"] == legacy_body
-    assert extract_folded_sites(legacy_body) == [title]
+    # The originally-untagged line is now bound to the calling site -- the
+    # roster still has exactly one entry, just resolved to a real
+    # identifier instead of the ambiguous title text.
+    updated_body = prs._issues[30000]["body"]
+    assert updated_body != legacy_body
+    assert extract_folded_sites(updated_body) == ["src/branch_gc_scan.py:39"]
     assert len(prs.comment_calls) == 0
-    assert len(prs.update_calls) == 0
+    assert len(prs.update_calls) == 1
 
 
 @pytest.mark.asyncio

@@ -153,7 +153,9 @@ class StagingPromotionLoop(BaseBackgroundLoop):
 
         existing = await self._prs.find_open_promotion_pr()
         if existing is not None:
-            result = await self._handle_open_promotion(existing.number, existing.branch)
+            result = await self._heal_then_handle_open_promotion(
+                existing.number, existing.branch
+            )
         elif self._cadence_elapsed():
             result = await self._cut_new_rc()
         else:
@@ -263,6 +265,24 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                 f"{self._config.rc_conflict_heal_max_attempts} attempts.",
             )
         return bool(ok)
+
+    async def _heal_then_handle_open_promotion(
+        self, pr_number: int, rc_branch: str
+    ) -> dict[str, Any]:
+        """#11216 PLACEMENT FIX, found in live validation on PR #11404.
+
+        Heal a DIRTY RC *before* the CI wait. The first cut healed only
+        after a merge attempt failed — which requires CI to have gone GREEN
+        first. A conflicted RC frequently never gets there (its CI is stale
+        or red against a base it cannot merge), so the heal was unreachable
+        in the very case it was written for, and the loop sat on the DIRTY
+        PR exactly as a human found it three times. Healing first also means
+        CI re-runs on the merge commit — the only verdict that gates
+        promotion. One heal site, one attempt counter, no double-bump.
+        """
+        if await self._maybe_heal_dirty_promotion(pr_number, rc_branch):
+            return {"status": "conflict_healed", "pr": pr_number}
+        return await self._handle_open_promotion(pr_number, rc_branch)
 
     async def _handle_open_promotion(
         self, pr_number: int, rc_branch: str
@@ -393,16 +413,13 @@ class StagingPromotionLoop(BaseBackgroundLoop):
                 # pack is report-only and must never affect the result.
                 await self._compile_evidence_pack(pr_number, rc_branch)
                 return {"status": "promoted", "pr": pr_number}
+            # #11216: a merge failure here leaves the PR DIRTY; the heal at
+            # the TOP of this handler catches it on the next cadence tick
+            # (healing before the CI wait is the placement that actually
+            # reaches a conflicted RC — see the header comment). No second
+            # heal call: one heal site, one attempt counter, no double-bump.
             logger.warning("Promotion merge failed for PR #%d", pr_number)
-            # #11216: a DIRTY RC PR used to sit here until a human ran the
-            # heal by hand (performed 3x on 2026-08-15/16). Corroborate a
-            # genuine content conflict and self-heal by merging base into
-            # the RC branch — the same shape dependabot_merge_loop's #9889
-            # heal uses, and exactly the manual recipe: merge origin/main
-            # into the rc branch, let CI re-run, promote next tick.
-            healed = await self._maybe_heal_dirty_promotion(pr_number, rc_branch)
-            status = "conflict_healed" if healed else "merge_failed"
-            return {"status": status, "pr": pr_number}
+            return {"status": "merge_failed", "pr": pr_number}
 
         # wait_for_ci can return WITHOUT a CI verdict: a timeout (the poll window
         # elapsed while CI was still running) or "Stopped" (kill-switch fired
