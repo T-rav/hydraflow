@@ -30,6 +30,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import os
+import signal
 import subprocess  # nosec B404 - runs the caller's own quality command
 import sys
 import time
@@ -37,6 +38,13 @@ from pathlib import Path
 
 LOCK_PATH = Path(os.environ.get("TMPDIR", "/tmp")) / "hydraflow-quality.lock"  # nosec B108
 DEFAULT_TIMEOUT_S = 3600
+# Distinct from any suite exit code: the suite did not run to completion,
+# it was abandoned because the caller went away (#11434).
+ORPHANED_EXIT = 75
+
+
+class _Orphaned(Exception):
+    """Raised when our parent exits while we are queueing for the lock."""
 
 
 def _is_make_dry_run() -> bool:
@@ -56,9 +64,64 @@ def _is_make_dry_run() -> bool:
     return any(flag in first_token for flag in "ntq")
 
 
+def _parent_pid_changed(initial_ppid: int) -> bool:
+    """True once our parent has exited and we've been reparented (#11434).
+
+    A wrapper whose parent is gone has no one left to read its exit code,
+    so any work it goes on to do — waiting for the lock or running the
+    suite — is pure waste on a shared host. Comparing against the pid we
+    started with (rather than testing ``== 1``) also does the right thing
+    under a subreaper, where an orphan is reparented to something else.
+    """
+    return os.getppid() != initial_ppid
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the child's whole group.
+
+    The child is ``make``, which spawns pytest, which spawns xdist workers.
+    Signalling ``make`` alone re-creates this very bug one level down, and
+    SIGTERM is not enough — the observed orphans ignored it and had to be
+    SIGKILLed.
+    """
+    with contextlib.suppress(OSError, ProcessLookupError):
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+
+
+def _run(command: list[str]) -> int:
+    """Run *command*, abandoning it if our parent exits first (#11434)."""
+    initial_ppid = os.getppid()
+    try:
+        poll_s = float(os.environ.get("HYDRAFLOW_QUALITY_LOCK_ORPHAN_POLL", "2"))
+    except ValueError:
+        poll_s = 2.0
+
+    # start_new_session so the child leads its own process group and can be
+    # killed as a unit without signalling ourselves.
+    proc = subprocess.Popen(command, start_new_session=True)  # nosec B603
+    try:
+        while True:
+            try:
+                return proc.wait(timeout=poll_s)
+            except subprocess.TimeoutExpired:
+                pass
+            if _parent_pid_changed(initial_ppid):
+                print(
+                    "[quality-lock] parent exited — abandoning the suite; "
+                    "nobody is left to read the result (#11434)",
+                    flush=True,
+                )
+                _kill_process_group(proc)
+                return ORPHANED_EXIT
+    finally:
+        if proc.poll() is None:
+            _kill_process_group(proc)
+
+
 def _acquire(handle, timeout_s: int) -> bool:
     """Block until the lock is held or *timeout_s* elapses. True if held."""
     deadline = time.monotonic() + timeout_s
+    initial_ppid = os.getppid()
     announced = False
     while True:
         try:
@@ -73,6 +136,17 @@ def _acquire(handle, timeout_s: int) -> bool:
                     flush=True,
                 )
                 announced = True
+            if _parent_pid_changed(initial_ppid):
+                # Orphaned while queueing. The run that spawned us has
+                # already given up (and may have deleted the worktree we
+                # were going to test in), so take the slot out of the
+                # queue instead of draining it for a result nobody wants.
+                print(
+                    "[quality-lock] parent exited while waiting — leaving the "
+                    "queue (#11434)",
+                    flush=True,
+                )
+                raise _Orphaned from None
             if time.monotonic() >= deadline:
                 return False
             time.sleep(2)
@@ -88,7 +162,7 @@ def main(argv: list[str]) -> int:
         return 2
 
     if os.environ.get("HYDRAFLOW_QUALITY_LOCK_DISABLE") == "1" or _is_make_dry_run():
-        return subprocess.call(command)  # nosec B603
+        return _run(command)
 
     try:
         timeout_s = int(
@@ -101,17 +175,21 @@ def main(argv: list[str]) -> int:
         handle = LOCK_PATH.open("w")
     except OSError:
         # Unwritable lock path is never a reason to block a developer.
-        return subprocess.call(command)  # nosec B603
+        return _run(command)
 
     with handle:
-        if not _acquire(handle, timeout_s):
+        try:
+            held = _acquire(handle, timeout_s)
+        except _Orphaned:
+            return ORPHANED_EXIT
+        if not held:
             print(
                 f"[quality-lock] wait exceeded {timeout_s}s — running anyway; "
                 "results may be contaminated by the concurrent suite (#11219)",
                 flush=True,
             )
         try:
-            return subprocess.call(command)  # nosec B603
+            return _run(command)
         finally:
             with contextlib.suppress(OSError):
                 fcntl.flock(handle, fcntl.LOCK_UN)
