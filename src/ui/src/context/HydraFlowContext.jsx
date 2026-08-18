@@ -40,6 +40,11 @@ export const initialState = {
   githubMetrics: null,
   metricsHistory: null,
   pipelineIssues: { ...emptyPipeline },
+      // #11414: clearing the rail outside the authoritative-snapshot path
+      // must also clear its freshness stamp — otherwise the console shows a
+      // FRESH clock over an EMPTY rail (repo switch / session reset), the
+      // exact confidently-empty lie #11350 exists to prevent.
+      pipelineSnapshotAt: null,
   //: #11350 — epoch ms of the last AUTHORITATIVE pipeline snapshot. The
   //: rail derives from four surfaces on four cadences; this is the one
   //: that reconciles them back to GitHub labels. null = never snapshotted.
@@ -205,6 +210,11 @@ export function reducer(state, action) {
           lastSeenId: -1,
           sessions: [],
           pipelineIssues: { ...emptyPipeline },
+      // #11414: clearing the rail outside the authoritative-snapshot path
+      // must also clear its freshness stamp — otherwise the console shows a
+      // FRESH clock over an EMPTY rail (repo switch / session reset), the
+      // exact confidently-empty lie #11350 exists to prevent.
+      pipelineSnapshotAt: null,
           intents: [],
           humanInputRequests: {},
         } : {}),
@@ -788,6 +798,11 @@ export function reducer(state, action) {
         humanInputRequests: {},
         lastSeenId: -1,
         pipelineIssues: { ...emptyPipeline },
+      // #11414: clearing the rail outside the authoritative-snapshot path
+      // must also clear its freshness stamp — otherwise the console shows a
+      // FRESH clock over an EMPTY rail (repo switch / session reset), the
+      // exact confidently-empty lie #11350 exists to prevent.
+      pipelineSnapshotAt: null,
         intents: [],
       }
     }
@@ -889,6 +904,11 @@ export function reducer(state, action) {
         selectedRepoSlugRaw: action.data.slug ?? null,
         ...(changed && {
           pipelineIssues: { ...emptyPipeline },
+      // #11414: clearing the rail outside the authoritative-snapshot path
+      // must also clear its freshness stamp — otherwise the console shows a
+      // FRESH clock over an EMPTY rail (repo switch / session reset), the
+      // exact confidently-empty lie #11350 exists to prevent.
+      pipelineSnapshotAt: null,
           hitlItems: [],
           workers: {},
           prs: [],
