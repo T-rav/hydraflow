@@ -1,0 +1,48 @@
+specification {
+  element system
+  element component
+  element klass
+  relationship calls
+}
+
+model {
+  hf = system 'HydraFlow diagnostic lane' {
+
+    loop = component 'DiagnosticLoop' {
+      description 'src/diagnostic_loop.py — _diagnose + _check_diagnosis_gates'
+    }
+    runner = component 'DiagnosticRunner.diagnose' {
+      description 'src/diagnostic_runner.py — Stage 1 spawn + parse'
+    }
+    extract = component '_extract_json' {
+      description 'regex-fenced block -> json.loads, or None'
+    }
+    validate = component 'DiagnosisResult.model_validate' {
+      description 'pydantic schema check (src/models.py)'
+    }
+    failover = component 'credit_failover.is_active' {
+      description 'ADR-0119 GLM lane engaged?'
+    }
+    hitl = component 'HITL escalation' {
+      description 'loop._escalate_to_hitl — human queue'
+    }
+    park = component 'infra park + cooldown' {
+      description 'loop._infra_parked, credit_failover_cooldown_minutes'
+    }
+
+    loop -> runner 'Stage 1 diagnose'
+    runner -> extract 'parse transcript'
+    extract -> failover 'branch A: parsed is None -> infra_failure=is_active()  [#11370, WIRED]'
+    runner -> validate 'branch B: parsed dict'
+    validate -> failover 'branch B fallback on ValidationError -> infra_failure MISSING  [#11412, THE DEFECT]'
+    loop -> park 'infra_failure is True -> "retry"'
+    loop -> hitl 'not fixable -> "escalated"  (branch B lands here today)'
+  }
+}
+
+views {
+  view parse_fallbacks {
+    title 'Issue #11412 — the second parse-failure fallback skips INFRA classification'
+    include *
+  }
+}

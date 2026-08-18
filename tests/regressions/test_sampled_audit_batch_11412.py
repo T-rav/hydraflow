@@ -27,22 +27,28 @@ import pytest
 
 import credit_failover
 from backlog_budget import retirement_picks
+from diagnostic_runner import DiagnosticRunner
 from mockworld.fakes.fake_github import FakeGitHub
 from models import EscalationContext
+
+# Parses as JSON, violates DiagnosisResult's schema (no root_cause etc).
+_SCHEMA_VIOLATING = '```json\n{"unexpected": true}\n```'
+
+
+def _diagnose_runner(tmp_path, transcript: str) -> DiagnosticRunner:
+    runner = DiagnosticRunner.__new__(DiagnosticRunner)
+    runner._config = MagicMock(repo_root=tmp_path)
+    runner._mockworld_diagnosis = lambda: None
+    runner._build_command = lambda: ["fake-agent"]
+    runner._execute = AsyncMock(return_value=transcript)
+    return runner
 
 
 @pytest.mark.asyncio
 async def test_schema_violation_fallback_is_infra_under_failover(tmp_path) -> None:
     """#11412: a JSON block that parses but fails validation is the SECOND
     reachable weak-compliance path and must classify as infra too."""
-    from diagnostic_runner import DiagnosticRunner
-
-    runner = DiagnosticRunner.__new__(DiagnosticRunner)
-    runner._config = MagicMock(repo_root=tmp_path)
-    runner._mockworld_diagnosis = lambda: None
-    runner._build_command = lambda: ["fake-agent"]
-    # Parses as JSON, violates DiagnosisResult's schema (no root_cause etc).
-    runner._execute = AsyncMock(return_value='```json\n{"unexpected": true}\n```')
+    runner = _diagnose_runner(tmp_path, _SCHEMA_VIOLATING)
     ctx = EscalationContext(cause="build failure", origin_phase="implement")
 
     credit_failover.engage(now=datetime.now(UTC), resume_at=None, cooldown_minutes=15)
@@ -55,6 +61,20 @@ async def test_schema_violation_fallback_is_infra_under_failover(tmp_path) -> No
         "a schema-violating diagnosis under failover must park, not escalate "
         "— otherwise #11370's live incident reproduces (#11412)"
     )
+
+
+@pytest.mark.asyncio
+async def test_schema_violation_fallback_not_infra_when_failover_inactive(
+    tmp_path,
+) -> None:
+    """#11412, other lane: failover OFF → the schema violation is a genuine
+    agent-quality failure (ordinary HITL escalation), not an infra park."""
+    credit_failover.reset_for_tests()
+    runner = _diagnose_runner(tmp_path, _SCHEMA_VIOLATING)
+    ctx = EscalationContext(cause="build failure", origin_phase="implement")
+    result = await runner.diagnose(1, "t", "b", ctx)
+    assert result.infra_failure is False
+    assert result.fixable is False
 
 
 @pytest.mark.asyncio

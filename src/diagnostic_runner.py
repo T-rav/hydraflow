@@ -37,6 +37,21 @@ def _extract_json(text: str) -> dict[str, object] | None:
         return None
 
 
+def _failover_infra() -> bool:
+    """Whether the credit-failover lane is actively serving agent spawns.
+
+    Both parse-failure fallbacks in ``DiagnosticRunner.diagnose`` classify
+    through this one predicate: a transcript with no JSON at all and a JSON
+    block that violates the ``DiagnosisResult`` schema are the same failure
+    class — weak structured-output compliance on the failover lane
+    (#11370, #11412) — and must not drift apart again. The import stays
+    deferred inside the body, as it was at the inline call sites.
+    """
+    from credit_failover import is_active
+
+    return is_active()
+
+
 def _build_diagnosis_prompt(
     issue_number: int,
     issue_title: str,
@@ -216,15 +231,13 @@ class DiagnosticRunner(BaseRunner):
             # so the loop parks/retries instead of escalating to HITL
             # (observed live: false 'diagnose-failed' escalations while GLM
             # served the fleet).
-            from credit_failover import is_active as _failover_active
-
             return DiagnosisResult(
                 root_cause=transcript[:500] if transcript else "No output",
                 severity=Severity.P2_FUNCTIONAL,
                 fixable=False,
                 fix_plan="",
                 human_guidance="Agent did not produce structured output. Manual review required.",
-                infra_failure=_failover_active(),
+                infra_failure=_failover_infra(),
             )
 
         try:
@@ -242,12 +255,14 @@ class DiagnosticRunner(BaseRunner):
             )
             # #11412 (sampled re-audit of #11370): this is the SECOND,
             # equally-reachable parse-failure path — a JSON block that
-            # parses but violates the schema, which is exactly the weak
+            # parses but violates the schema, exactly the weak
             # structured-output compliance the failover lane exhibits.
-            # Without the same infra classification it escalates to HITL
-            # just as before the fix, reproducing the live incident.
-            from credit_failover import is_active as _failover_active
-
+            # Same failure class as the no-JSON fallback above, so both
+            # classify through the one _failover_infra() predicate — do
+            # not re-split them: when only one path carried the
+            # classification, this one still escalated tractable issues
+            # to HITL under failover, reproducing the live incident the
+            # #11370 fix claimed to close.
             return DiagnosisResult(
                 root_cause=str(
                     parsed.get("root_cause", transcript[:500] if transcript else "")
@@ -256,7 +271,7 @@ class DiagnosticRunner(BaseRunner):
                 fixable=False,
                 fix_plan=str(parsed.get("fix_plan", "")),
                 human_guidance="Agent output did not validate. Manual review required.",
-                infra_failure=_failover_active(),
+                infra_failure=_failover_infra(),
             )
 
     async def fix(
