@@ -149,6 +149,17 @@ class FakePR:
     # zero-commit PRs from real ones. Defaults to 1 so seeded PRs look
     # "real" without explicit setup.
     commits: int = 1
+    # gh's createdAt (#11418) — list_all_prs / the fitness fetcher key PR
+    # age off this field. Defaults to the same fixed date as before #11418
+    # (list_all_prs stamped every PR with it unconditionally) so unseeded
+    # PRs are unaffected; add_pr(created_at=...) lets a scenario seed
+    # distinct ages for window-boundary testing.
+    created_at: str = _RC_FIXED_DATE
+    # Only meaningful once closed/merged; mirrors gh's closedAt/mergedAt.
+    # Empty = "not explicitly seeded" — list_all_prs falls back to
+    # created_at, mirroring FakeIssue.closed_at's convention (#9727).
+    closed_at: str = ""
+    merged_at: str = ""
 
 
 class FakeGitHubUnmodelledCommand(RuntimeError):
@@ -363,6 +374,9 @@ class FakeGitHub:
         author: str = "fake-author",
         is_bot: bool = False,
         mergeable: bool = True,
+        created_at: str | None = None,
+        closed_at: str | None = None,
+        merged_at: str | None = None,
     ) -> None:
         """Directly insert a PR record (sync helper for test seeding).
 
@@ -370,8 +384,11 @@ class FakeGitHub:
         exists so scenario seeds can set up a fully-populated world
         synchronously. ``mergeable=False`` seeds a CONFLICTING PR that
         ``list_conflicting_prs`` surfaces to merge_state_watcher (#9543).
+        ``created_at``/``closed_at``/``merged_at`` let a scenario give
+        distinct PRs distinct ages for fitness-window boundary testing
+        (#11418) — unset, they fall back to FakePR's fixed defaults.
         """
-        self._prs[number] = FakePR(
+        pr = FakePR(
             number=number,
             issue_number=issue_number,
             branch=branch,
@@ -381,6 +398,13 @@ class FakeGitHub:
             is_bot=is_bot,
             mergeable=mergeable,
         )
+        if created_at:
+            pr.created_at = created_at
+        if closed_at:
+            pr.closed_at = closed_at
+        if merged_at:
+            pr.merged_at = merged_at
+        self._prs[number] = pr
 
     def add_pr_label(self, pr_number: int, label: str) -> None:
         """Seed-API helper: attach a label to a fake PR."""
@@ -1374,9 +1398,11 @@ class FakeGitHub:
                     "number": pr.number,
                     "state": pr_state.upper(),
                     "labels": [{"name": lbl} for lbl in pr.labels],
-                    "createdAt": _RC_FIXED_DATE,
-                    "closedAt": _RC_FIXED_DATE if pr_state != "open" else None,
-                    "mergedAt": _RC_FIXED_DATE if pr.merged else None,
+                    "createdAt": pr.created_at,
+                    "closedAt": (pr.closed_at or pr.created_at)
+                    if pr_state != "open"
+                    else None,
+                    "mergedAt": (pr.merged_at or pr.created_at) if pr.merged else None,
                 }
             )
         return items[:limit]

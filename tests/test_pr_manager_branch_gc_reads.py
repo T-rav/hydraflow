@@ -132,6 +132,15 @@ class TestGetIssueBody:
         with pytest.raises(RuntimeError, match="no such issue"):
             await pm.get_issue_body(42)
 
+    async def test_json_null_body_returns_empty_string_not_the_string_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """gh returns {"body": null} for issues with no description — must
+        map to "", not str(None) == "None" (#11418 review finding)."""
+        pm = _build(tmp_path)
+        monkeypatch.setattr(pm, "_run_gh", AsyncMock(return_value='{"body": null}'))
+        assert await pm.get_issue_body(42) == ""
+
 
 class TestListAllIssues:
     async def test_returns_parsed_issue_dicts(

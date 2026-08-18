@@ -1476,7 +1476,7 @@ class PRManager(PRManagerPromotionMixin):
             "body",
         )
         data = json.loads(output)
-        return str(data.get("body", ""))
+        return str(data.get("body") or "")
 
     async def get_pr_labels(self, pr_number: int) -> list[str]:
         """Return the label names carried by a GitHub pull request.
