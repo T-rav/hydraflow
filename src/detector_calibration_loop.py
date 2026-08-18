@@ -5,8 +5,10 @@ fake-coverage FP campaigns) and each time ran for WEEKS before a human
 noticed that the same subject kept escalating — the detector was
 miscalibrated, not the code. This caretaker watches the factory's own
 sensors: it mines closed ``hitl-escalation`` issues, normalizes titles
-(digit runs collapse to ``#`` so attempt counts and elapsed-seconds
-differences don't split subjects), and files one ``hydraflow-find`` +
+(``#N`` digit runs are entity identity — an issue/PR reference — and are
+kept verbatim; other bare digit runs are volatile, e.g. attempt counts and
+elapsed seconds, and collapse to ``#`` so they don't split one subject
+into many — see #11405), and files one ``hydraflow-find`` +
 ``detector-calibration`` issue per subject that escalated at least
 ``_REPEAT_THRESHOLD`` times inside ``_WINDOW_DAYS``.
 
@@ -54,12 +56,23 @@ _SCAN_LIMIT = 500
 _ISSUE_LABELS = ("hydraflow-find", "detector-calibration")
 _NORM_KEY_PREFIX = "Norm-Key:"
 
-_NUM_RE = re.compile(r"\d+")
+_NUM_RE = re.compile(r"#\d+|\d+")
 
 
 def _normalize(title: str) -> str:
-    """Collapse volatile numerics so retries of one subject share a key."""
-    return _NUM_RE.sub("#", title.strip().lower())
+    """Collapse volatile numerics so retries of one subject share a key.
+
+    A ``#``-prefixed digit run is entity identity (an issue/PR reference)
+    and is preserved verbatim — collapsing it would fold distinct PRs into
+    one fabricated "churn" subject (#11405). Any other digit run (attempt
+    counts, elapsed seconds) is volatile and collapses to ``#``.
+    """
+
+    def _collapse(match: re.Match[str]) -> str:
+        text = match.group(0)
+        return text if text.startswith("#") else "#"
+
+    return _NUM_RE.sub(_collapse, title.strip().lower())
 
 
 def _parse_ts(value: str) -> datetime | None:

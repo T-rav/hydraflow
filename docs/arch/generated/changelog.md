@@ -6,7 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `194befa` — chore(rc): merge main into rc/2026-08-18-0649 to clear the DIRTY promotion *(2026-08-18)*
+- `a3eef8b` — chore(arch): refresh generated artifacts after the main merge *(2026-08-18)*
 - `9ef92ab` — chore(rc): merge main into rc/2026-08-18-0220 to clear the DIRTY promotion *(2026-08-18)*
+- `7cba8c3` — Fixes #11416: MockWorld repo_wiki loop registration never wires a w... (#11428) (#11428) *(2026-08-17)*
 - `b0aa945` — feat(quality): host-wide advisory lock so concurrent suites queue, not race (#11219) (#11400) (#11400) *(2026-08-17)*
 
 ## 2026-W33

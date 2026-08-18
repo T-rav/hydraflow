@@ -660,6 +660,101 @@ class TestFileOrFold:
         assert len(prs.comment_calls) == 0
         assert len(prs.update_calls) == 0
 
+    async def test_bind_fallback_appends_fresh_line_when_no_bare_line_matches(
+        self,
+    ) -> None:
+        # `title in existing_sites` can also be satisfied by an unrelated
+        # TAGGED line whose SITE value happens to equal the current call's
+        # title text -- not a bare/untagged line at all. The bind attempt
+        # must not silently drop the new site in that case: it falls
+        # through to appending a fresh roster entry instead (#11407
+        # defensive fallback in ``_bind_bare_line``).
+        prs = _FakePRPort()
+        class_key = compute_class_key("branch-parser", "branch namespace missing")
+        body = (
+            "## Problem\n\ndetails\n\n## Folded sites\n"
+            "- Some Other Title (site: `Missing null check`)\n\n"
+            f"{render_marker(class_key)}\n"
+        )
+        prs._issues[7001] = {
+            "number": 7001,
+            "title": "Missing null check duplicate finding",
+            "body": body,
+        }
+        prs._next_number = 7002
+
+        result = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "Missing null check",
+            "## Problem\n\nunrelated",
+            ["hydraflow-find"],
+            site="src/foo.py:12",
+        )
+
+        assert result == 7001
+        updated_body = prs._issues[7001]["body"]
+        assert extract_folded_sites(updated_body) == [
+            "Missing null check",
+            "src/foo.py:12",
+        ]
+        # The fallback appends a genuinely new roster entry -- roster grew,
+        # so the fold comment fires and the body change is persisted.
+        assert len(prs.comment_calls) == 1
+        assert len(prs.update_calls) == 1
+
+    async def test_bind_does_not_rewrite_a_bare_line_outside_the_roster_block(
+        self,
+    ) -> None:
+        # `_bind_bare_line`'s scan must stop at the roster's contiguous
+        # block boundary, exactly like `_append_site`'s own insert loop --
+        # a bare `- {title}` bullet appearing in a LATER section (after the
+        # roster ends) must never be mistaken for the legacy roster line
+        # and rewritten, even when the ambiguous-collision fallback path
+        # (a tagged roster line whose SITE value equals *title*) is what
+        # routed the call here. Silently rewriting unrelated body content
+        # would also mean the new site is never rostered at all.
+        prs = _FakePRPort()
+        class_key = compute_class_key("branch-parser", "branch namespace missing")
+        body = (
+            "## Problem\n\ndetails\n\n## Folded sites\n"
+            "- Some Other Title (site: `Missing null check`)\n\n"
+            "## Notes\n"
+            "- Missing null check\n"
+            "- something unrelated\n\n"
+            f"{render_marker(class_key)}\n"
+        )
+        prs._issues[7101] = {
+            "number": 7101,
+            "title": "Missing null check duplicate finding",
+            "body": body,
+        }
+        prs._next_number = 7102
+
+        result = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "Missing null check",
+            "## Problem\n\nunrelated",
+            ["hydraflow-find"],
+            site="src/foo.py:12",
+        )
+
+        assert result == 7101
+        updated_body = prs._issues[7101]["body"]
+        # The unrelated "## Notes" bullet must survive untouched.
+        assert "- Missing null check\n" in updated_body
+        # The new site must land in the roster via a fresh appended line,
+        # not be lost by binding to the unrelated later bullet.
+        assert extract_folded_sites(updated_body) == [
+            "Missing null check",
+            "src/foo.py:12",
+        ]
+        assert len(prs.comment_calls) == 1
+        assert len(prs.update_calls) == 1
+
     async def test_create_issue_zero_sentinel_propagates(self) -> None:
         class _ZeroCreatePRPort(_FakePRPort):
             async def create_issue(

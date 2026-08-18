@@ -41,7 +41,6 @@ class FakeWikiCompiler:
 
     async def compile_topic_tracked(
         self,
-        *,
         tracked_root: Path,
         repo: str,
         topic: str,

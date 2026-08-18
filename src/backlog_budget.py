@@ -114,10 +114,21 @@ def retirement_picks(
     ``budget <= 0`` disables the valve (returns ``[]``). The budget is
     measured against the ADVISORY population only — protected issues
     neither count toward the budget nor are ever picked.
+
+    Both ``advisory_labels`` and ``protected_labels`` share the same
+    null-vs-empty contract: ``None``/omitted falls back to the module
+    literals (``ADVISORY_STAGE_LABELS`` / ``PROTECTED_LABELS``); an
+    explicit empty set is honoured as-is (empty advisory means zero
+    candidates, empty protected means nothing is protected).
     """
     if budget <= 0:
         return []
-    advisory_set = advisory_labels or ADVISORY_STAGE_LABELS
+    # ``is not None`` (not truthiness): an explicitly-empty advisory set
+    # means "retire nothing", and a truthy check would silently substitute
+    # the module default — retiring issues the caller excluded (#11408).
+    advisory_set = (
+        advisory_labels if advisory_labels is not None else ADVISORY_STAGE_LABELS
+    )
     protected_set = (
         protected_labels if protected_labels is not None else PROTECTED_LABELS
     )
