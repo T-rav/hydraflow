@@ -4,8 +4,9 @@ topic: testing
 source_issue: 11424
 source_phase: review
 created_at: 2026-08-18T09:01:27.985887+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11424 closed
 ---
 
 # Extend staging's allowlist for loop constructor checks, don't recreate
