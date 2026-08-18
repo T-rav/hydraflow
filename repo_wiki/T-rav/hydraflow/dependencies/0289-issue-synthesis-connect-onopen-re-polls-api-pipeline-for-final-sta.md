@@ -1,13 +1,12 @@
 ---
-id: 0271
+id: 0289
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-16T17:52:50.710562+00:00
-status: superseded
+created_at: 2026-08-18T13:47:37.728768+00:00
+status: active
 corroborations: 1
-supersedes: 0254
-superseded_by: 0289
+supersedes: 0271
 ---
 
 # connect() onopen re-polls /api/pipeline for final-state rail reconciliation

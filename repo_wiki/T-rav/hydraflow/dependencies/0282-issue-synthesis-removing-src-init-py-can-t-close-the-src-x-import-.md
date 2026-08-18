@@ -1,13 +1,12 @@
 ---
-id: 0264
+id: 0282
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-16T17:52:50.700340+00:00
-status: superseded
+created_at: 2026-08-18T13:47:37.725895+00:00
+status: active
 corroborations: 1
-supersedes: 0246
-superseded_by: 0282
+supersedes: 0264
 ---
 
 # Removing src/__init__.py can't close the src.X import alias

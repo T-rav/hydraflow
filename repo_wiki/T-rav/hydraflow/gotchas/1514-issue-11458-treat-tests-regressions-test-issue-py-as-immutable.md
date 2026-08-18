@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11458
 source_phase: plan
 created_at: 2026-08-18T12:25:44.377234+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Treat tests/regressions/test_issue_*.py as immutable contracts
