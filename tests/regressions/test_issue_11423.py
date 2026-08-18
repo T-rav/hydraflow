@@ -25,17 +25,30 @@ import inspect
 from mockworld.fakes.fake_github import FakeGitHub
 from pr_manager import PRManager
 from tests.scenarios.ports import PRPort
-from tests.test_mockworld_fakes_conformance import _PORT_FAKE_PAIRS
+from tests.test_mockworld_fakes_conformance import (
+    _PORT_FAKE_PAIRS,
+    _signatures_compatible,
+)
 
 
 async def test_fake_serves_the_positional_call_shape_the_port_permits() -> None:
     """The Port permits ``list_closed_issues_by_label(label, limit)`` as a
-    fully positional call; the fake must accept the same shape."""
+    fully positional call; the fake must accept the same shape AND bind
+    ``limit`` to the right parameter — seeded so the truncation only comes
+    out right if the positional args land where the Port says they do."""
     fake = FakeGitHub()
+    for number in range(3):
+        fake.add_issue(
+            number,
+            f"issue {number}",
+            "body",
+            labels=["hydraflow-find"],
+            state="closed",
+        )
 
-    result = await fake.list_closed_issues_by_label("hydraflow-find", 50)
+    result = await fake.list_closed_issues_by_label("hydraflow-find", 2)
 
-    assert result == []
+    assert len(result) == 2
 
 
 def test_fake_keeps_limit_positional_or_keyword() -> None:
@@ -130,6 +143,25 @@ def test_registry_sweep_finds_zero_kind_violations() -> None:
         for violation in _kind_violations(port_cls, fake_cls)
     ]
     assert violations == []
+
+
+def test_signatures_compatible_still_accepts_the_kind_narrowing() -> None:
+    """Context pin: the shared ``_signatures_compatible`` comparator is fed
+    synthetic Port/Fake signatures reproducing this exact narrowing and
+    still reports them compatible — documenting that the #11415 kind-
+    blindness hole is untouched by this fix and survives it unchanged.
+    Fed synthetic signatures rather than the real classes, so it stays
+    green regardless of #11423's own fix.
+    """
+
+    async def port_method(self, label: str, limit: int = 100) -> list: ...
+    async def narrowing_fake_method(self, label: str, *, limit: int = 100) -> list: ...
+
+    ok, reason = _signatures_compatible(
+        inspect.signature(port_method), inspect.signature(narrowing_fake_method)
+    )
+
+    assert ok, reason
 
 
 def test_port_declares_limit_positional_or_keyword() -> None:

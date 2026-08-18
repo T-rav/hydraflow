@@ -21,8 +21,8 @@ model {
       description 'src/mockworld/fakes/fake_github.py:1063 — (self, label, *, limit=100). DEFECT: limit is KEYWORD_ONLY.'
     }
 
-    callers = component 'PRPort callers (8 loops)' {
-      description 'escalation_reconcile, github_cache_loop, corpus_learning_loop, rc_budget_loop, principles_audit_loop, auto_agent_preflight_loop, wiki_rot_detector_loop, adr_conformance_loop'
+    callers = component 'PRPort callers (9 modules)' {
+      description 'escalation_reconcile, github_cache_loop, corpus_learning_loop, rc_budget_loop, principles_audit_loop, auto_agent_preflight_loop, wiki_rot_detector_loop, adr_conformance_loop, review_insights (shared by RetrospectiveLoop and ReviewPhase)'
     }
 
     conformance = guard 'test_mockworld_fakes_conformance' {
