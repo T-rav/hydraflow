@@ -5,7 +5,7 @@ source_issue: 11165
 source_phase: plan
 created_at: 2026-08-14T19:36:20.069090+00:00
 status: active
-corroborations: 1
+corroborations: 2
 ---
 
 # Use RST double-backticks for label prose to avoid grep-guard false positives

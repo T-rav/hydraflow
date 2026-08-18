@@ -787,6 +787,12 @@ class MockWorld:
                 "clock": self._clock,
                 "state": self._harness.state,
             }
+            # The ctor's wiki_compiler kwarg only threads through
+            # PipelineHarness (Plan-phase wiring, #10306-era) — it never
+            # reached _loop_ports, so RepoWikiLoop's catalog builder saw
+            # None regardless of what the scenario passed in (#11416).
+            if self._wiki_compiler is not None:
+                self._loop_ports.setdefault("wiki_compiler", self._wiki_compiler)
         else:
             # Keep fakes up-to-date (cheap; they're the same objects)
             self._loop_ports["github"] = self._github

@@ -1,0 +1,86 @@
+// #11416 — MockWorld catalog drops optional loop collaborators on the floor.
+specification {
+  element system
+  element container
+  element component
+  element port
+  relationship seeds
+}
+
+model {
+  scenarios = system 'Scenario tier (tests/scenarios)' {
+    world = container 'MockWorld' {
+      description 'tests/scenarios/fakes/mock_world.py — owns _loop_ports'
+      ctorArgs = component 'ctor kwargs (wiki_store, wiki_compiler, beads_manager)'
+      loopPorts = component '_loop_ports dict' {
+        description 'github / workspace / state / clock / sentry + seed-seam keys'
+      }
+      seedSeam = component '_wire_seed_loop_seams()' {
+        description 'setdefault()s real fakes for seeded fixtures'
+      }
+    }
+    catalog = container 'LoopCatalog' {
+      description 'tests/scenarios/catalog/loop_registrations.py'
+      buildRepoWiki = component '_build_repo_wiki' {
+        description 'BUG: passes only config/wiki_store/deps'
+      }
+      buildSkillEval = component '_build_skill_prompt_eval' {
+        description 'BUG: refine_llm unseeded -> real claude spawn'
+      }
+      buildEscape = component '_build_escape_ledger' {
+        description 'BUG: auto_diagnoser unseeded -> real git reads'
+      }
+      buildDiagnostic = component '_build_diagnostic' {
+        description 'BUG: workspaces unseeded -> worktree path dead'
+      }
+      guard = component 'collaborator-wiring guard test' {
+        description 'NEW: None-guarded optional ctor param must be port-seedable'
+      }
+    }
+  }
+
+  prod = system 'Production loops (src/)' {
+    repoWiki = container 'RepoWikiLoop' {
+      description 'src/repo_wiki_loop.py'
+      phase2 = component 'Phase 2 compile_topic (legacy)'
+      phase8 = component 'Phase 8 compile_topic_tracked' {
+        description 'both gated on self._wiki_compiler is not None (line ~375)'
+      }
+      fingerprintGate = component 'WikiCompileState fingerprint gate (#11373)'
+    }
+    skillEval = container 'SkillPromptEvalLoop' {
+      cliRefine = component '_CLIRefineLLM -> run_lightweight_agent' {
+        description 'lazy fallback when refine_llm is None — real subprocess'
+      }
+    }
+    escapeLoop = container 'EscapeLedgerLoop' {
+      diagnoser = component 'EscapeAutoDiagnoser (lazy fallback)'
+    }
+  }
+
+  world.ctorArgs -> world.loopPorts 'wiki_compiler never lands here (gap)'
+  world.seedSeam -> world.loopPorts 'setdefault wiki_store only'
+  world.loopPorts -> catalog.buildRepoWiki 'ports dict'
+  catalog.buildRepoWiki -> prod.repoWiki 'RepoWikiLoop(config, wiki_store, deps)'
+  prod.repoWiki.phase8 -> prod.repoWiki.fingerprintGate 'unreachable in scenarios'
+  catalog.buildSkillEval -> prod.skillEval.cliRefine 'no port -> live agent'
+  catalog.buildEscape -> prod.escapeLoop.diagnoser 'no port -> live diagnoser'
+  catalog.guard -> catalog.buildRepoWiki 'fails until port threaded'
+}
+
+views {
+  view collaboratorWiring {
+    title 'Scenario collaborator wiring — where optional deps are dropped'
+    include *, world.*, catalog.*, prod.*
+    autoLayout TopBottom
+  }
+
+  dynamic view phase8Reach {
+    title 'Intended path: seeded compiler reaches Phase 8'
+    world.ctorArgs -> world.loopPorts 'ports["wiki_compiler"] = compiler (FIX)'
+    world.loopPorts -> catalog.buildRepoWiki 'instantiate("repo_wiki", ports=...)'
+    catalog.buildRepoWiki -> prod.repoWiki 'wiki_compiler=ports.get("wiki_compiler") (FIX)'
+    prod.repoWiki -> prod.repoWiki.phase8 'guard passes'
+    prod.repoWiki.phase8 -> prod.repoWiki.fingerprintGate 'should_compile / record'
+  }
+}

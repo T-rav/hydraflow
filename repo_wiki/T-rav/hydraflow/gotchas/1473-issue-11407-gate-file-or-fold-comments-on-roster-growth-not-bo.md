@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11407
 source_phase: plan
 created_at: 2026-08-18T02:53:10.561489+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11407 closed
 ---
 
 # Gate file_or_fold comments on roster growth, not body diff
