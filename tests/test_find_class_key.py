@@ -699,6 +699,61 @@ class TestFileOrFold:
             "Missing null check",
             "src/foo.py:12",
         ]
+        # The fallback appends a genuinely new roster entry -- roster grew,
+        # so the fold comment fires and the body change is persisted.
+        assert len(prs.comment_calls) == 1
+        assert len(prs.update_calls) == 1
+
+    async def test_bind_does_not_rewrite_a_bare_line_outside_the_roster_block(
+        self,
+    ) -> None:
+        # `_bind_bare_line`'s scan must stop at the roster's contiguous
+        # block boundary, exactly like `_append_site`'s own insert loop --
+        # a bare `- {title}` bullet appearing in a LATER section (after the
+        # roster ends) must never be mistaken for the legacy roster line
+        # and rewritten, even when the ambiguous-collision fallback path
+        # (a tagged roster line whose SITE value equals *title*) is what
+        # routed the call here. Silently rewriting unrelated body content
+        # would also mean the new site is never rostered at all.
+        prs = _FakePRPort()
+        class_key = compute_class_key("branch-parser", "branch namespace missing")
+        body = (
+            "## Problem\n\ndetails\n\n## Folded sites\n"
+            "- Some Other Title (site: `Missing null check`)\n\n"
+            "## Notes\n"
+            "- Missing null check\n"
+            "- something unrelated\n\n"
+            f"{render_marker(class_key)}\n"
+        )
+        prs._issues[7101] = {
+            "number": 7101,
+            "title": "Missing null check duplicate finding",
+            "body": body,
+        }
+        prs._next_number = 7102
+
+        result = await file_or_fold(
+            prs,
+            "branch-parser",
+            "branch namespace missing",
+            "Missing null check",
+            "## Problem\n\nunrelated",
+            ["hydraflow-find"],
+            site="src/foo.py:12",
+        )
+
+        assert result == 7101
+        updated_body = prs._issues[7101]["body"]
+        # The unrelated "## Notes" bullet must survive untouched.
+        assert "- Missing null check\n" in updated_body
+        # The new site must land in the roster via a fresh appended line,
+        # not be lost by binding to the unrelated later bullet.
+        assert extract_folded_sites(updated_body) == [
+            "Missing null check",
+            "src/foo.py:12",
+        ]
+        assert len(prs.comment_calls) == 1
+        assert len(prs.update_calls) == 1
 
     async def test_create_issue_zero_sentinel_propagates(self) -> None:
         class _ZeroCreatePRPort(_FakePRPort):

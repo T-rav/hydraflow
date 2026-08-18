@@ -362,8 +362,18 @@ def _bind_bare_line(body: str, title: str, effective_site: str) -> str | None:
     bare_line = f"- {title}"
     head, _, rest = body.partition(_SITES_HEADING)
     section_lines = rest.split("\n")
-    for i, raw_line in enumerate(section_lines):
-        if raw_line.strip() == bare_line:
+    # Bounded to the contiguous roster block only, mirroring the insert-loop
+    # boundary above -- content can follow the sites section (e.g. the
+    # class-key marker, or unrelated later headings/bullets), and matching
+    # a bare line out there would rewrite unrelated body content instead of
+    # correctly falling through to appending a fresh roster entry.
+    roster_end = 1
+    while roster_end < len(section_lines) and section_lines[roster_end].startswith(
+        "- "
+    ):
+        roster_end += 1
+    for i in range(1, roster_end):
+        if section_lines[i].strip() == bare_line:
             section_lines[i] = _site_line(title, effective_site)
             return head + _SITES_HEADING + "\n".join(section_lines)
     return None

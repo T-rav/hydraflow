@@ -224,6 +224,31 @@ async def test_legacy_untagged_line_collision_binds_instead_of_dropping_site() -
     assert len(board_after_tick_two) == 1
     # The new site is now tracked in the roster -- not silently dropped.
     assert "src/foo.py:12" in extract_folded_sites(board_after_tick_two[0]["body"])
+    # Binding an existing roster entry leaves the entry COUNT unchanged, so
+    # it must not post a "new site" comment -- only actual roster growth
+    # warrants one (#11407).
+    assert len(gh._comments) == 0
+
+    # Tick 3: a third, genuinely distinct site grows the roster for real --
+    # this DOES warrant a fold comment.
+    third_number = await file_or_fold(
+        gh,
+        source,
+        needle,
+        colliding_title,
+        "## Finding\n\nsrc/baz.py:7 missing null check",
+        ["hydraflow-find"],
+        site="src/baz.py:7",
+    )
+    assert third_number == first_number
+    board_after_tick_three = await gh.list_issues_by_label("hydraflow-find")
+    assert len(board_after_tick_three) == 1
+    assert extract_folded_sites(board_after_tick_three[0]["body"]) == [
+        "src/foo.py:12",
+        "src/baz.py:7",
+    ]
+    assert len(gh._comments) == 1
+    assert gh._comments[0][0] == first_number
 
 
 @pytest.mark.asyncio
