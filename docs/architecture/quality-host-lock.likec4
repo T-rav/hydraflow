@@ -1,0 +1,71 @@
+specification {
+  element system
+  element container
+  element component
+  element resource
+  relationship spawns
+  relationship signals
+}
+
+model {
+  host = system 'Developer / factory host' {
+    loop = container 'DiagnosticLoop / BaseRunner' {
+      description 'src/base_runner.py::_verify_quality — runs `make quality` in a worktree, killed on attempt end'
+    }
+    workspace = container 'WorkspaceManager' {
+      description 'src/workspace.py — destroys the worktree when the attempt ends (#11433)'
+    }
+    make = container 'make quality' {
+      description 'Makefile:522 — uv run python scripts/quality_host_lock.py -- make quality-unlocked'
+    }
+    wrapper = container 'quality_host_lock.py' {
+      description 'scripts/quality_host_lock.py — host-wide advisory lock wrapper (#11219/#11400)'
+      parentWatch = component 'parent-liveness guard (NEW)' {
+        description 'records os.getppid() at startup; abandons queue or SIGKILLs the suite group when it changes'
+      }
+      acquire = component '_acquire' {
+        description 'flock LOCK_EX|LOCK_NB poll loop, 2s interval, bounded by HYDRAFLOW_QUALITY_LOCK_TIMEOUT'
+      }
+      runner = component 'suite runner' {
+        description 'Popen(command, start_new_session=True) + poll loop + SIGINT/SIGTERM/SIGHUP forwarding'
+      }
+    }
+    lock = resource '$TMPDIR/hydraflow-quality.lock' {
+      description 'one flock per host; held for the lifetime of the holding process'
+    }
+    suite = container 'make quality-unlocked' {
+      description 'own process group / session'
+      pytest = component 'pytest -n auto'
+      workers = component 'xdist workers'
+    }
+  }
+
+  loop -> make 'spawns, then kills on attempt end' 
+  workspace -> make 'rmtree of cwd underneath it'
+  make -> wrapper 'exec via uv run (ignores SIGTERM)'
+  wrapper -> acquire 'queue for the host lock'
+  acquire -> lock 'flock LOCK_EX'
+  wrapper -> runner 'run once acquired'
+  runner -> suite 'spawns in a new session'
+  suite -> pytest 'spawns'
+  pytest -> workers 'spawns'
+  parentWatch -> acquire 'leave the queue, exit 75'
+  parentWatch -> runner 'killpg(SIGKILL), exit 75'
+}
+
+views {
+  view containers {
+    title 'Quality host lock — process topology'
+    include *
+  }
+
+  dynamic view abandonment {
+    title '#11434 — parent dies, wrapper abandons'
+    loop -> make 'attempt ends: kill make'
+    workspace -> make 'worktree destroyed'
+    wrapper -> acquire 'still queueing (was: forever, up to 3600s)'
+    parentWatch -> acquire 'getppid() != recorded -> leave queue, exit 75'
+    parentWatch -> runner 'if running: killpg(getpgid(child), SIGKILL)'
+    runner -> suite 'whole make -> pytest -> xdist tree dies as a unit'
+  }
+}
