@@ -1,0 +1,89 @@
+// #11424 — catalog builders silently drop optional collaborators.
+// Scope: tests/scenarios/catalog/loop_registrations.py (3 builder sites).
+specification {
+  element system
+  element container
+  element component
+  element klass
+  relationship builds
+  relationship forwards
+  relationship lazyBuilds
+}
+
+model {
+  scenarios = system 'MockWorld Scenario Tier' {
+    harness = container 'MockWorld' {
+      description 'tests/scenarios/fakes/mock_world.py — run_with_loops
+      seeds _loop_ports {github, workspace, sentry, clock, state}'
+    }
+    fakes = container 'Scenario Fakes' {
+      description 'no real subprocess / git / GitHub'
+      fakeWs   = component 'FakeWorkspace'  { description 'src/mockworld/fakes/fake_workspace.py — records created/destroyed' }
+      seeded   = component 'Seeded MagicMock collaborators' { description 'ports["auto_diagnoser"], ports["refine_llm"]' }
+    }
+    catalog = container 'LoopCatalog' {
+      description 'tests/scenarios/catalog/loop_catalog.py — instantiate(name, ports, config, deps)'
+      bEscape = component '_build_escape_ledger'    { description 'loop_registrations.py:155 — forwards auto_diagnoser' }
+      bSkill  = component '_build_skill_prompt_eval'{ description 'loop_registrations.py:859 — forwards refine_llm' }
+      bDiag   = component '_build_diagnostic'       { description 'loop_registrations.py:675 — forwards workspaces' }
+    }
+  }
+
+  prod = system 'Production Loops (src/)' {
+    escape = container 'EscapeLedgerLoop' {
+      description 'src/escape_ledger_loop.py:325 — auto_diagnoser: EscapeAutoDiagnoser | None = None'
+      escGate = component '_get_auto_diagnoser' { description 'src/escape_ledger_loop.py:717 — lazy fallback' }
+    }
+    skill = container 'SkillPromptEvalLoop' {
+      description 'src/skill_prompt_eval_loop.py:351 — refine_llm: _RefineLLM | None = None'
+      skGate = component '_refine_llm_complete' { description 'src/skill_prompt_eval_loop.py:1047 — lazy fallback' }
+    }
+    diag = container 'DiagnosticLoop' {
+      description 'src/diagnostic_loop.py:85 — workspaces: WorkspaceManager | None = None'
+      dgGate = component '_prepare_fix_workspace / _run_fix' {
+        description 'src/diagnostic_loop.py:386,445 — guarded on self._workspaces is not None; NO fallback → dead phase'
+      }
+    }
+  }
+
+  real = system 'Real-World Side Effects (must never fire in a scenario)' {
+    realDiagnoser = klass 'EscapeAutoDiagnoser' { description 'src/escape/auto_diagnose.py:396 — live git reads on config.repo_root' }
+    realCli       = klass '_CLIRefineLLM'       { description 'src/skill_prompt_eval_loop.py:297 — spawns a real claude subprocess' }
+  }
+
+  harness -> catalog 'passes ports dict'
+  catalog.bEscape -> escape  'builds (config, pr_manager, state, dedup, deps)'
+  catalog.bSkill  -> skill   'builds (config, state, pr_manager, dedup, deps)'
+  catalog.bDiag   -> diag    'builds (config, runner, prs, state, deps)'
+
+  // The three edges this issue ADDS.
+  seeded -> catalog.bEscape 'FIX: auto_diagnoser=ports.get("auto_diagnoser")'
+  seeded -> catalog.bSkill  'FIX: refine_llm=ports.get("refine_llm")'
+  fakeWs -> catalog.bDiag   'FIX: workspaces=ports.get("workspace")'
+
+  // The hazard the missing edges used to create — fixed by the FIX edges above.
+  escape.escGate -> realDiagnoser 'lazyBuilds when _auto_diagnoser is None'
+  skill.skGate   -> realCli       'lazyBuilds when _refine_llm is None'
+}
+
+views {
+  view collaboratorWiring {
+    title 'Catalog builder → loop → optional collaborator (#11424)'
+    include *
+    autoLayout LeftRight
+  }
+
+  dynamic view escapeLedgerHazard {
+    title 'Pre-#11424: a scenario reaching the gated path got a REAL collaborator'
+    harness -> catalog.bEscape 'instantiate("escape_ledger", ports)'
+    catalog.bEscape -> escape 'EscapeLedgerLoop(... no auto_diagnoser)'
+    escape -> realDiagnoser '_get_auto_diagnoser(): self._auto_diagnoser is None → construct real one'
+    realDiagnoser -> harness 'live git reads escape the fake boundary'
+  }
+
+  dynamic view diagnosticDeadPhase {
+    title 'Pre-#11424: DiagnosticLoop worktree create/destroy was unreachable in scenarios'
+    harness -> catalog.bDiag 'instantiate("diagnostic", ports)'
+    catalog.bDiag -> diag 'DiagnosticLoop(... no workspaces); _attempt_fix: self._workspaces is None → create/destroy silently skipped'
+  }
+}

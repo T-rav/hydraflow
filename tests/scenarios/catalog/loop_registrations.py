@@ -193,6 +193,7 @@ def _build_escape_ledger(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         state=state,
         dedup=dedup,
         deps=deps,
+        auto_diagnoser=ports.get("auto_diagnoser"),
     )
 
 
@@ -684,6 +685,7 @@ def _build_diagnostic(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         prs=ports["github"],
         state=state,
         deps=deps,
+        workspaces=ports.get("workspace"),
     )
 
 
@@ -895,6 +897,7 @@ def _build_skill_prompt_eval(ports: dict[str, Any], config: Any, deps: Any) -> A
         pr_manager=pr_manager,
         dedup=dedup,
         deps=deps,
+        refine_llm=ports.get("refine_llm"),
     )
 
     # Rewire external I/O to seeded async callables (if provided).
