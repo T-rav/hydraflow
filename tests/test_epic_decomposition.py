@@ -176,6 +176,9 @@ class TestMaybeDecompose:
             repo_root=tmp_path / "repo",
             state_file=tmp_path / "state.json",
             epic_decompose_complexity_threshold=8,
+            # #11298: intake decomposition is default-OFF; this test
+            # exercises the decompose MECHANISM, so enable it explicitly.
+            epic_decompose_on_intake_enabled=True,
         )
         mgr = AsyncMock()
         mgr.register_epic = AsyncMock()

@@ -374,6 +374,26 @@ def _reset_gh_semaphore():
 
 
 @pytest.fixture(autouse=True)
+def _hermetic_credentials(monkeypatch):
+    """Strip live provider credentials from every test's environment (#11302).
+
+    A live checkout's shell (or a sourced .env) carries the z.ai key pair and
+    the ANTHROPIC redirect pair; tests asserting 'no key configured' behavior
+    silently pass/fail depending on the HOST's billing setup — 15+ tests broke
+    under make quality on machines with ZAI_CODING_PLAN_KEY set (#11302,
+    #11317, #11368 class). Tests that need a credential set it explicitly via
+    monkeypatch.setenv, which layers on top of this deletion.
+    """
+    for key in (
+        "ZAI_API_KEY",
+        "ZAI_CODING_PLAN_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _reset_credit_failover():
     """Clear the credit-failover module singleton between tests (#10844).
 

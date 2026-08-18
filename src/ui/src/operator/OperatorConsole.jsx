@@ -35,6 +35,7 @@ import { useThemeMode } from './useThemeMode'
 import { useOperatorSelection } from './useOperatorSelection'
 import { ConsoleHeader } from './ConsoleHeader'
 import { PipelineRail } from './PipelineRail'
+import { isPipelineResyncing } from '../utils/pipelineFreshness'
 import { toPipeline } from './model/pipeline'
 import { toTranscript } from './model/transcript'
 import { toTimeline } from './model/timeline'
@@ -195,6 +196,8 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
     () => toPipeline({ stages: socket.pipelineIssues, stats: socket.pipelineStats }),
     [socket.pipelineIssues, socket.pipelineStats],
   )
+  // #11350: surface staleness instead of rendering a stale rail as truth.
+  const railResyncing = isPipelineResyncing(socket.pipelineSnapshotAt)
   // Loop faceplates (#10826): the static register half arrives via the poll
   // hook; the live half (PV/quiescence) is the WS backgroundWorkers slice, so
   // the join recomputes on every WS frame without refetching.
@@ -314,7 +317,7 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
               {showOverview ? (
                 <RepoOverview repos={repos} select={select} />
               ) : (
-                <PipelineRail pipeline={pipeline} select={select} stage={stage} />
+                <PipelineRail pipeline={pipeline} select={select} stage={stage} resyncing={railResyncing} />
               )}
               {!showOverview && <ReleasePromotionStrip release={release} />}
             </div>

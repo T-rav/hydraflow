@@ -852,6 +852,16 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
+        "auto_agent_light_intake_enabled",
+        "HYDRAFLOW_AUTO_AGENT_LIGHT_INTAKE_ENABLED",
+        False,
+    ),
+    (
+        "epic_decompose_on_intake_enabled",
+        "HYDRAFLOW_EPIC_DECOMPOSE_ON_INTAKE_ENABLED",
+        False,
+    ),
+    (
         "auto_pr_preflight_gate_enabled",
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
         True,
@@ -1771,6 +1781,15 @@ class HydraFlowConfig(BaseModel):
         default=["hydraflow-hitl-autofix"],
         description="Labels for HITL items undergoing automatic fix attempt (OR logic)",
     )
+    light_autofix_label: list[str] = Field(
+        default=["hydraflow-auto-light"],
+        description=(
+            "Claim label for #11298 light-lane issues being built by the "
+            "single-session auto-agent (OR logic). Swapped on by PlanPhase "
+            "at routing time; polled by AutoAgentPreflightLoop for intake "
+            "and crash recovery."
+        ),
+    )
     fixed_label: list[str] = Field(
         default=["hydraflow-fixed"],
         description="Labels applied after PR is merged (OR logic)",
@@ -1875,6 +1894,39 @@ class HydraFlowConfig(BaseModel):
         ge=1,
         le=10,
         description="Minimum triage complexity score to trigger decomposition",
+    )
+    epic_decompose_on_intake_enabled: bool = Field(
+        default=False,
+        description=(
+            "#11298 board-churn root cause: intake auto-decomposition minted "
+            "epics + parked children at classification time (push), re-"
+            "expanding consolidated work before anyone could build it — one "
+            "class canonical became 6 open issues in a day. Default OFF: "
+            "complex issues plan WHOLE, and the demand-driven ADR-0105 "
+            "stall path (non-convergence -> decompose) remains the "
+            "decomposition mechanism. Flip on only if whole-planning of "
+            "epics measurably thrashes."
+        ),
+    )
+    backlog_budget: int = Field(
+        default=25,
+        ge=0,
+        description=(
+            "#11298 retirement valve: cap on open advisory factory-generated "
+            "issues (find/plan/diagnose/parked labels, minus protected "
+            "classes). Beyond the budget, StaleIssueLoop retires the oldest "
+            "with a class-key comment — recurrence refiles via cross-tick "
+            "folding (#11341), so retirement is cheap and reversible. "
+            "0 disables the valve."
+        ),
+    )
+    backlog_budget_min_age_days: int = Field(
+        default=2,
+        ge=0,
+        description=(
+            "Grace period before an advisory issue is retirement-eligible "
+            "under backlog_budget — fresh filings get a chance to be worked."
+        ),
     )
     epic_monitor_interval: int = Field(
         default=1800,
@@ -3798,6 +3850,24 @@ class HydraFlowConfig(BaseModel):
             "(agent PRs target main directly)."
         ),
     )
+    rc_conflict_heal_enabled: bool = Field(
+        default=True,
+        description=(
+            "#11216: self-heal a DIRTY rc/* promotion PR by merging its "
+            "base branch in (the manual recipe a human ran 3x on "
+            "2026-08-15/16) instead of leaving it for an operator. Merge, "
+            "never rebase — rebasing diverges the RC (#11045)."
+        ),
+    )
+    rc_conflict_heal_max_attempts: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Per-RC-branch cap on #11216 self-heal attempts; beyond it the "
+            "conflict is genuinely unresolvable and escalates to the human."
+        ),
+    )
     rc_cadence_hours: int = Field(
         default=4,
         ge=1,
@@ -4198,6 +4268,58 @@ class HydraFlowConfig(BaseModel):
         ge=60,
         le=86400,
         description="Health monitor cycle interval in seconds",
+    )
+    fleet_vitals_enabled: bool = Field(
+        default=True,
+        description=(
+            "#11391 fleet-vitals shadow supervisor: bands over the health "
+            "monitor's fleet metrics (hitl_rate, first_pass_rate) with "
+            "hysteresis; on alarm, attaches a mechanical change-ledger "
+            "diagnosis and a SHADOW intervention proposal (never actuates)."
+        ),
+    )
+    fleet_hitl_rate_alarm: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "hitl_rate alarm threshold (#11391). Founding incident of "
+            "record: 0.74 logged at INFO while the light-tier cascade ran."
+        ),
+    )
+    fleet_hitl_rate_rearm: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="hitl_rate must settle below this to re-arm the alarm.",
+    )
+    fleet_first_pass_floor: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "first_pass_rate at or below this floor breaches (#11391); "
+            "clears above 2x the floor."
+        ),
+    )
+    fleet_board_growth_alarm: int = Field(
+        default=8,
+        ge=1,
+        description=(
+            "Net open-issue growth per health-monitor cycle (~2h) that "
+            "breaches the board_growth band (#11391) — the 88-issue churn "
+            "class: the #11390 valve bounds the LEVEL, this band alarms on "
+            "the RATE so a new generator is caught in hours."
+        ),
+    )
+    fleet_alarm_confirm_windows: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "Consecutive breaching health-monitor cycles required before a "
+            "fleet alarm fires (ISA-18.2 confirm discipline)."
+        ),
     )
     wiki_freshness_stale_days: int = Field(
         default=7,
@@ -5171,6 +5293,26 @@ class HydraFlowConfig(BaseModel):
             "auto_agent_preflight_enabled, which gates the whole loop."
         ),
     )
+    auto_agent_light_intake_enabled: bool = Field(
+        default=False,
+        description=(
+            "#11298 light lane: PlanPhase routes issues triaged at or below "
+            "auto_agent_light_max_complexity to the single-session auto-agent "
+            "(one spawn: read issue -> implement -> test -> PR) instead of the "
+            "staged plan/review pipeline. Exhaustion falls back to the staged "
+            "pipeline, never to a human. Default OFF - the operator flips it."
+        ),
+    )
+    auto_agent_light_max_complexity: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description=(
+            "Complexity ceiling for the #11298 light lane - a conservative "
+            "subset of the plan-tier band. Cycled, escalated, or unscored "
+            "issues never route here (shared _tier_eligible guard)."
+        ),
+    )
     auto_pr_preflight_gate_enabled: bool = Field(
         default=True,
         description=(
@@ -5981,6 +6123,12 @@ class HydraFlowConfig(BaseModel):
             self.hitl_label,
             self.hitl_active_label,
             self.hitl_autofix_label,
+            # #11298 light-lane claim label — omitted here it would never be
+            # cleared by swap_pipeline_labels (the #10785 stuck-stage-label
+            # class): the exhaustion fallback's swap to planner_label would
+            # leave the claim on forever, re-polled every tick while the plan
+            # queue races the same issue.
+            self.light_autofix_label,
             # ``diagnose`` and ``parked`` are route-back STAGES (the docstring
             # for ``in_progress_label`` below enumerates "hitl/diagnose/parked/
             # ready" as the swap targets) — but were omitted here, so
@@ -6212,6 +6360,21 @@ class HydraFlowConfig(BaseModel):
     def auto_agent_branch_for_issue(self, issue_number: int) -> str:
         """Return the Auto-Agent (preflight) session branch name for an issue."""
         return f"{AUTO_AGENT_BRANCH_PREFIX}{issue_number}"
+
+    def agent_branches_for_issue(self, issue_number: int) -> tuple[str, str]:
+        """Both branch names an issue's work can live on (#11281).
+
+        Manual dispatch mints ``agent/issue-{N}``; Auto-Agent preflight
+        mints ``agent/auto-agent-{N}``. Consumers that resolve "the branch
+        for this issue" must consider BOTH — knowing only the first is the
+        defect class behind #11282 (review loop blind to auto-agent PRs)
+        and #11281 (branch GC deleting live auto-agent work). Manual-first
+        ordering matches the resolution precedence those consumers use.
+        """
+        return (
+            self.branch_for_issue(issue_number),
+            self.auto_agent_branch_for_issue(issue_number),
+        )
 
     def regulated_label_set(self) -> frozenset[str]:
         """Parse ``regulated_labels`` CSV into a label set (CH-5).

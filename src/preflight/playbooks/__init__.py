@@ -153,6 +153,21 @@ _DISCOVER_STUCK = PreflightPlaybook(
 # Registry. Sub-labels mapped to their specialist. Anything not in this dict
 # resolves to ``_DEFAULT_PLAYBOOK`` via ``get_playbook``. Adding a specialist
 # is a single-line append plus a matching prompt file.
+_AUTO_LIGHT = PreflightPlaybook(
+    name="auto-light",
+    persona=(
+        "a senior implementer for this project working a triage-scored SIMPLE "
+        "issue end to end in one session: read the issue, implement the "
+        "smallest complete change with tests, verify, and deliver a PR. This "
+        "is a fresh build task, not an escalation — there are no prior "
+        "attempts to study. If the issue turns out larger than its score, "
+        "stop and report not-resolvable so the pipeline replans it at full "
+        "depth (#11298 light lane)."
+    ),
+    prompt_template="auto-light",
+)
+
+
 _REGISTRY: dict[str, PreflightPlaybook] = {
     pb.name: pb
     for pb in (
@@ -161,6 +176,7 @@ _REGISTRY: dict[str, PreflightPlaybook] = {
         _REVIEW_STUCK,
         _TRIAGE_STUCK,
         _DISCOVER_STUCK,
+        _AUTO_LIGHT,
     )
 }
 

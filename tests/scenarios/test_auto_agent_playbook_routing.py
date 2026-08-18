@@ -93,6 +93,7 @@ _W1_ROUTING_CASES = [
         "discovery / research specialist",
         "discover-stuck Playbook",
     ),
+    ("auto-light", "senior implementer", "Light-Lane Builder"),
 ]
 
 

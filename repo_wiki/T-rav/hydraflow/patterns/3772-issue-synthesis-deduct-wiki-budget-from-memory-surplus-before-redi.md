@@ -4,9 +4,10 @@ topic: patterns
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T15:30:55.378964+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 3627
+superseded_by: 3919
 ---
 
 # Deduct wiki budget from memory surplus before redistributing

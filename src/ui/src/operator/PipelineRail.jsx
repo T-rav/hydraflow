@@ -111,6 +111,17 @@ function makeStyles(t) {
   // neutral muted line for an unknown stage key.
   const stageColor = (key) => t.color[stageColorKey(key)] ?? severityColor.muted
   return {
+    resyncChip: {
+      alignSelf: 'center',
+      marginRight: 8,
+      padding: '1px 6px',
+      borderRadius: 8,
+      fontSize: 10,
+      fontWeight: 700,
+      color: t.color.bg,
+      backgroundColor: t.color.yellow,
+      flexShrink: 0,
+    },
     severityColor,
     stageColor,
     rail: {
@@ -499,12 +510,25 @@ function StageTile({ styles, stage, select, active }) {
  *   stage?: string|null,
  * }} props
  */
-export function PipelineRail({ pipeline = { stages: [] }, select = () => {}, stage = null }) {
+export function PipelineRail({ pipeline = { stages: [] }, select = () => {}, stage = null, resyncing = false }) {
   const t = useTokens()
   const styles = makeStyles(t)
   const stages = pipeline?.stages ?? []
   return (
     <div data-testid="pipeline-rail" style={styles.rail}>
+      {/* #11350: the rail derives from four surfaces on four cadences. When
+          the authoritative snapshot goes stale (missed poll, dropped socket,
+          server restart) the console SAYS so instead of presenting a
+          confidently-empty or stale rail as truth — the 2026-08-15 repro. */}
+      {resyncing && (
+        <span
+          style={styles.resyncChip}
+          data-testid="pipeline-resync-chip"
+          title="Waiting for an authoritative pipeline snapshot"
+        >
+          resyncing…
+        </span>
+      )}
       {stages.map(s => (
         <StageTile key={s.key} styles={styles} stage={s} select={select} active={s.key === stage} />
       ))}

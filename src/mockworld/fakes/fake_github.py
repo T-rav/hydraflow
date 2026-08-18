@@ -146,6 +146,25 @@ class FakePR:
     commits: int = 1
 
 
+class FakeGitHubUnmodelledCommand(RuntimeError):
+    """Raised when ``_run_gh`` sees a shape the fake does not model.
+
+    Fail-loud replaces the old silent ``"[]"`` (#11372) so a fidelity gap
+    surfaces as a stack at the call site instead of a passing scenario.
+    """
+
+
+#: ``gh`` command prefixes that may legitimately answer empty in the
+#: sandbox. Each entry needs a one-line reason; keep this list SHORT —
+#: modelling the command is the real fix.
+_QUIET_UNKNOWN_GH_SHAPES: tuple[str, ...] = (
+    # Rate-limit / auth probes: sandbox scenarios never assert on them and
+    # the real answers are environmental, not pipeline state.
+    "api rate_limit",
+    "auth status",
+)
+
+
 class FakeGitHub:
     """Stateful fake for GitHub API (PRManager + IssueFetcher)."""
 
@@ -1628,8 +1647,15 @@ class FakeGitHub:
         call it represents (``gh issue list``, ``gh pr list``, etc.) and
         synthesizes a JSON payload from in-memory state.
 
-        Unknown commands return ``"[]"`` rather than raising — keeps
-        loops that probe rare endpoints quiet during scenario runs.
+        Unknown commands RAISE (#11372) unless the shape is explicitly
+        allowlisted in :data:`_QUIET_UNKNOWN_GH_SHAPES`. The old silent
+        ``"[]"`` made every fidelity gap invisible: a loop probing an
+        unmodelled endpoint got a plausible empty answer, its scenario
+        passed, and the real adapter's behaviour was never exercised —
+        the gaps were then discovered one at a time by the fake-coverage
+        auditor and filed as separate issues. Failing loud converts that
+        class from "discovered one escape at a time" to "enumerated once,
+        at the call".
         """
         self._maybe_rate_limit()
         _ = cwd
@@ -1687,6 +1713,16 @@ class FakeGitHub:
                 ]
                 return _json.dumps(payload)
 
-        # Unknown verb: return empty JSON array — safe default for
-        # callers that ``json.loads`` the output.
-        return "[]"
+        # Unknown shape: FAIL LOUD (#11372). Quiet shapes are allowlisted
+        # above; anything else is a fidelity gap the scenario would
+        # otherwise paper over with a plausible empty answer.
+        shape = " ".join(args[:3])
+        if any(shape.startswith(quiet) for quiet in _QUIET_UNKNOWN_GH_SHAPES):
+            return "[]"
+        raise FakeGitHubUnmodelledCommand(
+            f"FakeGitHub has no model for `gh {' '.join(args)}`. Either model "
+            "the command (preferred — that is the fidelity fix) or, if the "
+            "caller genuinely tolerates an empty answer in the sandbox, add "
+            "its prefix to _QUIET_UNKNOWN_GH_SHAPES with a one-line reason. "
+            "Do NOT reintroduce a blanket empty default (#11372)."
+        )

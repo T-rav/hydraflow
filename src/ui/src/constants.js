@@ -34,6 +34,13 @@ export const MAX_EVENTS = 5000
  */
 export const PIPELINE_POLL_SAFETY_NET_MS = 30_000
 
+// #11350 staleness tripwire: how long the rail may go without a fresh
+// authoritative snapshot before the console admits it is resyncing rather
+// than rendering a confidently-empty/stale rail. Three safety-net polls —
+// long enough to ride out one missed poll plus jitter, short enough that an
+// operator never stares at a lie for a minute.
+export const PIPELINE_STALENESS_TRIPWIRE_MS = PIPELINE_POLL_SAFETY_NET_MS * 3
+
 /**
  * Operator cost panel (#10785) REST-poll cadence. The cost/tokens panel reads
  * `/api/diagnostics/cost/by-model-by-repo` (a JSONL-scanning rollup), so it

@@ -32,12 +32,18 @@ export const initialState = {
   adrDrafts: [],
   metrics: null,
   systemAlert: null,
+  //: #11306 advisory notices (severity==='warning') — bell, not banner.
+  advisoryNotices: [],
   intents: [],
   epics: [],
   epicReleasing: null, // { epicNumber, progress, total } or null
   githubMetrics: null,
   metricsHistory: null,
   pipelineIssues: { ...emptyPipeline },
+  //: #11350 — epoch ms of the last AUTHORITATIVE pipeline snapshot. The
+  //: rail derives from four surfaces on four cadences; this is the one
+  //: that reconciles them back to GitHub labels. null = never snapshotted.
+  pipelineSnapshotAt: null,
   pipelineStats: null,
   pipelinePollerLastRun: null,
   sessions: [],
@@ -667,11 +673,37 @@ export function reducer(state, action) {
       }
     }
 
-    case 'system_alert':
-      return { ...addEvent(state, action), systemAlert: action.data }
+    case 'system_alert': {
+      // #11306: severity routes the destination. ADVISORY notices (an epic
+      // gone stale, a fleet-vitals shadow alarm) accumulate in the notice
+      // list behind the bell; BLOCKING ones (credit pause, factory fault,
+      // HITL) claim the banner. Unclassified defaults to BLOCKING —
+      // fail-loud: a new alert kind must be demoted deliberately, never by
+      // omission.
+      const advisory = action.data?.severity === 'warning'
+      if (!advisory) {
+        return { ...addEvent(state, action), systemAlert: action.data }
+      }
+      const notice = { ...action.data, id: `${action.data?.kind || 'notice'}:${action.data?.message || ''}` }
+      const withoutDup = state.advisoryNotices.filter(n => n.id !== notice.id)
+      return {
+        ...addEvent(state, action),
+        // Newest first, capped — the bell is a digest, not a log.
+        advisoryNotices: [notice, ...withoutDup].slice(0, 50),
+      }
+    }
 
     case 'CLEAR_SYSTEM_ALERT':
       return { ...state, systemAlert: null }
+
+    case 'DISMISS_ADVISORY_NOTICE':
+      return {
+        ...state,
+        advisoryNotices: state.advisoryNotices.filter(n => n.id !== action.id),
+      }
+
+    case 'DISMISS_ALL_ADVISORY_NOTICES':
+      return { ...state, advisoryNotices: [] }
 
     case 'error':
       return addEvent(state, action)
@@ -718,6 +750,11 @@ export function reducer(state, action) {
         ...state,
         pipelineIssues: nextStages,
         pipelinePollerLastRun: new Date().toISOString(),
+        // #11350: an authoritative snapshot just reconciled the rail —
+        // restart the staleness clock. Delta frames (issue_moved etc.)
+        // deliberately do NOT reset it: a stream of deltas onto a stale
+        // baseline is exactly the failure this tripwire detects.
+        pipelineSnapshotAt: action.at ?? Date.now(),
       }
     }
 
@@ -1964,6 +2001,8 @@ export function HydraFlowProvider({ children }) {
     updateBgWorkerInterval,
     updateBgWorkerWatchdogTimeout,
     dismissSystemAlert: useCallback(() => dispatch({ type: 'CLEAR_SYSTEM_ALERT' }), [dispatch]),
+    dismissAdvisoryNotice: useCallback(id => dispatch({ type: 'DISMISS_ADVISORY_NOTICE', id }), [dispatch]),
+    dismissAllAdvisoryNotices: useCallback(() => dispatch({ type: 'DISMISS_ALL_ADVISORY_NOTICES' }), [dispatch]),
     refreshCreditStatus,
     clearCreditPause,
     refreshHitl: fetchHitlItems,

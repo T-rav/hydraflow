@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T12:24:40.979322+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0234
+superseded_by: 0268
 ---
 
 # fixability.py imports are one-way: models→fixability, never reverse

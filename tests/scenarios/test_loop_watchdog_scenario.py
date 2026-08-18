@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from bg_worker_manager import BGWorkerManager
+from diagnostic_loop import DiagnosticLoop
 from events import EventBus, EventType
 from report_issue_loop import ReportIssueLoop
 from state import StateTracker
@@ -76,7 +77,7 @@ async def test_llm_loops_resolve_to_the_wider_bound_via_real_config(
     """LONG_LLM_CYCLE production loops take loop_watchdog_llm_seconds from config."""
     config = ConfigFactory.create(repo_root=tmp_path / "repo")
 
-    for loop_cls in (ReportIssueLoop,):
+    for loop_cls in (ReportIssueLoop, DiagnosticLoop):
         assert loop_cls.LONG_LLM_CYCLE is True, (
             f"{loop_cls.__name__} should opt into the LLM watchdog bound"
         )

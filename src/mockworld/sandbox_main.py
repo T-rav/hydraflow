@@ -126,6 +126,16 @@ SANDBOX_SEAMS: dict[str, str] = {
     # loop no sandbox scenario exercises, so the whole loop is config-disabled
     # below rather than seeding those reads.
     "flake_tracker_loop": "config_disable",
+    # health_monitor_loop has two spawn paths (#11392):
+    # - ``_fleet_change_ledger`` (raw ``git log``): the whole fleet-vitals
+    #   feature is pinned OFF below (``fleet_vitals_enabled=False``) — it is
+    #   advisory and carries its own unit/regression coverage.
+    # - ``_check_stale_code`` (bounded ``git fetch``): previously
+    #   grandfathered; on the air-gapped network the fetch fails fast within
+    #   its own timeout tier and the check degrades per its documented
+    #   RuntimeError path — recorded here as the module's seam instead of in
+    #   the baseline (shrink-only rule).
+    "health_monitor_loop": "config_disable",
     # StagingPromotionLoop's raw-gh reads bypass FakeGitHub and hang the
     # air-gapped network (#10353): ``_list_merged_promotion_prs`` (`gh pr list`,
     # reached by the evidence reconcile AND the G1 observed-main-advance sweep),
@@ -186,6 +196,7 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
       the sandbox exercises the PR pipeline.
     """
     config.transcript_summarization_enabled = False  # type: ignore[misc]
+    config.fleet_vitals_enabled = False
     config.research_enabled = False  # type: ignore[misc]
     config.contract_refresh_external_enabled = False  # type: ignore[misc]
     config.merge_policy_enabled = False  # type: ignore[misc]
