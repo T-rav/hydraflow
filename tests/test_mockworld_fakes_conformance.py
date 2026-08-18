@@ -169,8 +169,41 @@ def _signatures_compatible(
                 f"Fake required={fake_required}.  They must agree on "
                 f"required-vs-optional status."
             )
+        if (
+            port_pinfo.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+            and fake_pinfo.kind is inspect.Parameter.KEYWORD_ONLY
+        ):
+            return False, (
+                f"Param '{name}': Port accepts it positional-or-keyword but "
+                f"Fake made it keyword-only.  A caller passing it "
+                f"positionally (valid against the Port) would raise "
+                f"TypeError against the Fake — the Fake must stay at least "
+                f"as permissive as the reference."
+            )
 
     return True, ""
+
+
+def test_signatures_compatible_flags_kind_narrowed_from_positional_to_keyword_only() -> (
+    None
+):
+    """A param that's POSITIONAL_OR_KEYWORD on the reference must not become
+    KEYWORD_ONLY on the Fake — a caller passing it positionally (valid
+    against the reference) would raise TypeError against the Fake. (#11409:
+    FakeWikiCompiler.compile_topic_tracked omitted WikiCompiler's
+    other_topics param outright, which the pre-existing "uncovered param"
+    rule above already catches; this rule guards the narrower case where
+    the param is present but marked keyword-only.)"""
+
+    def reference_method(self, topic: str, other_topics: list | None = None) -> int: ...
+    def fake_method(self, topic: str, *, other_topics: list | None = None) -> int: ...
+
+    ok, reason = _signatures_compatible(
+        inspect.signature(reference_method), inspect.signature(fake_method)
+    )
+
+    assert not ok
+    assert "other_topics" in reason
 
 
 @pytest.mark.parametrize(

@@ -22,6 +22,7 @@ class CompileCall:
     tracked_root: Path
     repo: str
     topic: str
+    other_topics: list[str] | None = None
 
 
 @dataclass
@@ -47,7 +48,12 @@ class FakeWikiCompiler:
         other_topics: list[str] | None = None,
     ) -> int:
         self.compile_calls.append(
-            CompileCall(tracked_root=tracked_root, repo=repo, topic=topic)
+            CompileCall(
+                tracked_root=tracked_root,
+                repo=repo,
+                topic=topic,
+                other_topics=other_topics,
+            )
         )
         return self.compiled_entries_per_call
 

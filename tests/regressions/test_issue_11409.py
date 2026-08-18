@@ -73,3 +73,4 @@ async def test_fake_compile_topic_tracked_accepts_other_topics_kwarg(
     )
 
     assert count == fake.compiled_entries_per_call
+    assert fake.compile_calls[-1].other_topics == ["gotchas"]

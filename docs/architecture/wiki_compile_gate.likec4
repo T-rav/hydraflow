@@ -1,5 +1,7 @@
-// Issue #11409 — the missing MockWorld scenario layer for the #11373
-// wiki fingerprint gate, and the broken Fake that hid it.
+// Issue #11409 — the #11373 wiki fingerprint gate's seam: the MockWorld
+// scenario layer that was missing, and the Fake that had drifted
+// keyword-only underneath it. Both were resolved (by #11416, #11432, and
+// this issue's own fix); this diagram records the seam as it now stands.
 specification {
   element system
   element container
@@ -39,7 +41,7 @@ model {
         description 'src/wiki_compiler.py:658 compile_topic_tracked(tracked_root, repo, topic, *, other_topics)'
       }
       fakeCompiler = klass 'FakeWikiCompiler' {
-        description 'src/mockworld/fakes/fake_wiki_compiler.py:42 — DRIFTED keyword-only, breaks the seam'
+        description 'src/mockworld/fakes/fake_wiki_compiler.py:42 — was keyword-only (broke the seam); fixed positional-or-keyword by #11416/#11409'
       }
     }
 
@@ -51,13 +53,13 @@ model {
         description 'Layer 1.5 — MagicMock deps, tracked_root=None (LEGACY path only)'
       }
       scenarioLayer = component 'tests/scenarios/test_wiki_evolution_scenarios.py' {
-        description 'Layer 2 — MockWorld scenario: MISSING for the gate (the escape)'
+        description 'Layer 2 pointer — the multi-tick MockWorld proof lives in tests/scenarios/test_repo_wiki_compile_scenario.py (added by #11432)'
       }
       conformance = component 'tests/test_mockworld_fakes_conformance.py' {
-        description 'Port<->Fake signature guard — no Port covers WikiCompiler, and it ignores param KIND'
+        description 'Port<->Fake signature guard — WikiCompiler/FakeWikiCompiler pair added, checks param KIND (#11409)'
       }
       catalog = component 'tests/scenarios/catalog/loop_registrations.py' {
-        description '_build_repo_wiki — never wires a wiki_compiler port, so MockWorld cannot reach the compile phase'
+        description '_build_repo_wiki — wires the wiki_compiler port so MockWorld reaches the compile phase (fixed by #11416)'
       }
     }
   }
@@ -71,10 +73,10 @@ model {
 
   unitLayer -> compileState 'covers'
   regLayer -> lintCompile 'covers legacy branch only'
-  scenarioLayer -> lintCompile 'SHOULD cover tracked branch across ticks'
+  scenarioLayer -> lintCompile 'covers tracked branch across ticks (added by #11432)'
   scenarioLayer -> fakeCompiler 'needs a callable Fake at the seam'
   catalog -> repoWikiLoop 'builds for MockWorld'
-  conformance -> fakeCompiler 'should guard, currently does not'
+  conformance -> fakeCompiler 'guards param KIND (added by #11409)'
 }
 
 views {
