@@ -31,8 +31,26 @@ describe('rail freshness resets with the rail (#11414)', () => {
     expect(isPipelineResyncing(state.pipelineSnapshotAt, 2000)).toBe(true)
   })
 
+  it('SELECT_REPO on a repo change clears the stamp with the rail', () => {
+    const state = reducer(seeded(), { type: 'SELECT_REPO', data: { slug: 'other/repo' } })
+    expect(state.pipelineIssues.plan).toEqual([])
+    expect(state.pipelineSnapshotAt).toBeNull()
+    expect(isPipelineResyncing(state.pipelineSnapshotAt, 2000)).toBe(true)
+  })
+
+  it('orchestrator_status session start (reset) clears the stamp with the rail', () => {
+    const state = reducer(seeded(), { type: 'orchestrator_status', data: { status: 'running', reset: true } })
+    expect(state.pipelineIssues.plan).toEqual([])
+    expect(state.pipelineSnapshotAt).toBeNull()
+    expect(isPipelineResyncing(state.pipelineSnapshotAt, 2000)).toBe(true)
+  })
+
   it('never shows a fresh clock over an empty rail', () => {
-    for (const action of [{ type: 'SESSION_RESET' }]) {
+    for (const action of [
+      { type: 'SESSION_RESET' },
+      { type: 'SELECT_REPO', data: { slug: 'other/repo' } },
+      { type: 'orchestrator_status', data: { status: 'running', reset: true } },
+    ]) {
       const state = reducer(seeded(), action)
       const railEmpty = Object.values(state.pipelineIssues).every(v => v.length === 0)
       if (railEmpty) {
