@@ -203,6 +203,116 @@ def test_forwards_sigterm_to_the_running_process_group(tmp_path: Path) -> None:
             wrapper.wait(timeout=10)
 
 
+def test_escalates_to_sigkill_when_forwarded_signal_is_ignored(tmp_path: Path) -> None:
+    """A forwarded signal the suite ignores must still end in a kill.
+
+    ``_forward`` sends the *original* signal first (SIGTERM here) for a
+    graceful shot, but must not just exit and hope — a suite or worker
+    that ignores it (or is mid slow-graceful-teardown) would otherwise be
+    orphaned exactly like #11434, just reached via the direct-signal path
+    instead of the ppid-divergence one. Confirms the wrapper waits, then
+    escalates to SIGKILL, before it reports itself as done.
+    """
+    env = {"TMPDIR": str(tmp_path)}
+    heartbeat = tmp_path / "heartbeat.txt"
+    worker_src = (
+        "import signal, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "i = 0\n"
+        "while True:\n"
+        f"    open({str(heartbeat)!r}, 'a').write(str(i) + chr(10))\n"
+        "    i += 1\n"
+        "    time.sleep(0.2)\n"
+    )
+    make_src = (
+        "import signal, subprocess, sys, time\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"subprocess.Popen([sys.executable, '-c', {worker_src!r}])\n"
+        "time.sleep(60)\n"
+    )
+    command = [sys.executable, "-c", make_src]
+
+    wrapper = subprocess.Popen(  # nosec B603
+        [sys.executable, str(_SCRIPT), "--", *command],
+        env={**os.environ, **env},
+    )
+    try:
+        assert _wait_for(heartbeat.exists, timeout=8), "suite tree never started"
+
+        wrapper.send_signal(15)  # SIGTERM — both stand-ins ignore it
+        wrapper.wait(timeout=20)
+        assert wrapper.returncode == 128 + 15
+
+        # The wrapper only exits once the group is actually dead — assert
+        # that directly rather than just that the wrapper process is gone.
+        time.sleep(0.6)
+        count_after = len(heartbeat.read_text().splitlines())
+        time.sleep(1.0)
+        count_settled = len(heartbeat.read_text().splitlines())
+        assert count_settled == count_after, (
+            "heartbeat kept growing after the wrapper exited — the ignored "
+            "signal orphaned the tree instead of the wrapper escalating to "
+            "SIGKILL"
+        )
+    finally:
+        if wrapper.poll() is None:
+            wrapper.kill()
+            wrapper.wait(timeout=10)
+
+
+def test_forwards_sigint_and_exits_130(tmp_path: Path) -> None:
+    """Ctrl-C (SIGINT) must reach the suite tree too, not just SIGTERM.
+
+    Named explicitly in #11434's own validation criteria ("SIGINT to the
+    wrapper returned 130 with suite and grandchild both dead") — a
+    developer's Ctrl-C is the most common real trigger for this code path,
+    so SIGTERM-only coverage would miss a SIGINT-specific regression.
+    """
+    env = {"TMPDIR": str(tmp_path)}
+    heartbeat = tmp_path / "heartbeat.txt"
+    worker_src = (
+        "import time\n"
+        "i = 0\n"
+        "while True:\n"
+        f"    open({str(heartbeat)!r}, 'a').write(str(i) + chr(10))\n"
+        "    i += 1\n"
+        "    time.sleep(0.2)\n"
+    )
+    make_src = (
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, '-c', {worker_src!r}])\n"
+        "time.sleep(60)\n"
+    )
+    command = [sys.executable, "-c", make_src]
+
+    wrapper = subprocess.Popen(  # nosec B603
+        [sys.executable, str(_SCRIPT), "--", *command],
+        env={**os.environ, **env},
+    )
+    try:
+        assert _wait_for(heartbeat.exists, timeout=8), "suite tree never started"
+        count_before = len(heartbeat.read_text().splitlines())
+
+        wrapper.send_signal(2)  # SIGINT
+        wrapper.wait(timeout=10)
+        assert wrapper.returncode == 128 + 2
+
+        time.sleep(0.6)
+        count_after = len(heartbeat.read_text().splitlines())
+        time.sleep(1.0)
+        count_settled = len(heartbeat.read_text().splitlines())
+
+        assert count_settled == count_after, (
+            "heartbeat kept growing after SIGINT — the worker (grandchild) "
+            "survived even though the wrapper itself exited"
+        )
+        assert count_after < count_before + 20
+    finally:
+        if wrapper.poll() is None:
+            wrapper.kill()
+            wrapper.wait(timeout=10)
+
+
 def test_acquire_abandons_when_ppid_diverges_to_a_non_one_value(
     tmp_path: Path, monkeypatch
 ) -> None:

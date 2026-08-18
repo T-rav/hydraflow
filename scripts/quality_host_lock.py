@@ -83,6 +83,15 @@ def _run_command(command: list[str], parent_pid: int) -> int:
     def _forward(signum: int, _frame: object) -> None:
         with contextlib.suppress(ProcessLookupError, OSError):
             os.killpg(proc.pid, signum)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # Forwarded signal alone didn't kill it (ignored/handled it, or
+            # is still in a slow graceful teardown) — SIGKILL can't be
+            # ignored, so this is what actually guarantees no orphan.
+            with contextlib.suppress(ProcessLookupError, OSError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
         sys.exit(128 + signum)
 
     previous_handlers = {
