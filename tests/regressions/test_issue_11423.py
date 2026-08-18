@@ -25,6 +25,7 @@ import inspect
 from mockworld.fakes.fake_github import FakeGitHub
 from pr_manager import PRManager
 from tests.scenarios.ports import PRPort
+from tests.test_mockworld_fakes_conformance import _PORT_FAKE_PAIRS
 
 
 async def test_fake_serves_the_positional_call_shape_the_port_permits() -> None:
@@ -118,9 +119,17 @@ def test_kind_aware_comparator_flags_keyword_only_narrowing() -> None:
 
 
 def test_registry_sweep_finds_zero_kind_violations() -> None:
-    """Applied to the real Port/Fake pair, the sweep must find nothing —
-    this is the assertion that would have caught #11423 directly."""
-    assert _kind_violations(PRPort, FakeGitHub) == []
+    """Applied to every Port/Fake pair in the shared registry — not just
+    the pair that regressed — the sweep must find nothing. This is the
+    class-level assertion: #11423 was one instance of "a Fake narrows a
+    Port param's kind"; any *other* pair with the same drift, present now
+    or introduced later, must fail here too."""
+    violations = [
+        violation
+        for port_cls, fake_cls in _PORT_FAKE_PAIRS
+        for violation in _kind_violations(port_cls, fake_cls)
+    ]
+    assert violations == []
 
 
 def test_port_declares_limit_positional_or_keyword() -> None:
