@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11407
 source_phase: plan
 created_at: 2026-08-18T02:53:10.561516+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11407 closed
 ---
 
 # Class titles are stable-by-design: multiple sites share one title

@@ -29,6 +29,7 @@ recipe lines (those run even under ``-n``).
 
 from __future__ import annotations
 
+import fcntl
 import os
 import subprocess
 from functools import cache
@@ -124,3 +125,59 @@ def test_standalone_test_ui_target_runs_same_stage() -> None:
 
     assert "node ./scripts/run-vitest.cjs run" in plan
     assert "[ui-tests SKIPPED]" in plan
+
+
+def test_dry_run_quality_does_not_block_on_a_held_host_lock(
+    tmp_path: Path,
+) -> None:
+    """`make -n quality` must never reach the #11219 host lock at all.
+
+    `quality`'s recipe wraps `$(MAKE) quality-unlocked` in
+    scripts/quality_host_lock.py (#11219). GNU Make force-executes any
+    recipe line containing the literal text "$(MAKE)" even under `-n`
+    (dry-run) — that's the mechanism a nested `make -n` relies on to show
+    the recursive plan (see the assertions above). Left unguarded, that
+    means a plain `make -n quality` doesn't just print: it really invokes
+    the lock wrapper, which does a real ``fcntl.flock``. On a host already
+    running a real `make quality` — this exact test file, invoked as
+    PART OF a real `make quality` run, is that host — the dry run would
+    block waiting for a lock the outer real run is still holding, up to
+    ``HYDRAFLOW_QUALITY_LOCK_TIMEOUT`` (3600s default): a self-deadlock.
+
+    Simulates that contention directly: hold the lock the way an outer
+    real run would, then assert `make -n quality` still finishes fast
+    instead of queueing behind it.
+    """
+    lock_path = tmp_path / "hydraflow-quality.lock"
+    handle = lock_path.open("w")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in {"MAKEFLAGS", "MFLAGS", "MAKELEVEL"}
+        }
+        env["TMPDIR"] = str(tmp_path) + os.sep
+
+        proc = subprocess.run(  # noqa: S603 — fixed argv, repo-root cwd
+            ["make", "-n", "quality"],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert proc.returncode == 0, (
+            f"`make -n quality` failed while a host lock was held "
+            f"(rc={proc.returncode}):\n{proc.stderr}"
+        )
+        assert "run-vitest.cjs" in proc.stdout, (
+            "the dry-run plan should still show the full nested "
+            "quality-unlocked plan even though the lock wrapper itself "
+            "was bypassed"
+        )
+    finally:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        handle.close()

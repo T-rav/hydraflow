@@ -4,6 +4,10 @@
 
 Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdocs.yml`. Grouped by ISO week.
 
+## 2026-W34
+
+- `b0aa945` — feat(quality): host-wide advisory lock so concurrent suites queue, not race (#11219) (#11400) (#11400) *(2026-08-17)*
+
 ## 2026-W33
 
 - `9bbae16` — feat(supervisor): fleet-vitals shadow alarms — bands, mechanical diagnosis, closed-menu proposals (#11391) (#11392) (#11392) *(2026-08-16)*
@@ -473,18 +477,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `a8e86d7` — chore: ruff format + arch-regen refresh *(2026-05-20)*
 - `4ff3f88` — chore(arch): regen after rebase against staging *(2026-05-20)*
 - `d15e32a` — style(trust-fleet-sanity): ruff lint + format fixes on breach-path tests *(2026-05-20)*
-- `18041e1` — feat(adversarial): remove the switch — adversarial pipeline always on (#9036) (#9036) *(2026-05-19)*
-- `31313f7` — feat(adversarial): flip pipeline ON by default (#9025) (#9025) *(2026-05-19)*
-- `6d6ed95` — test+docs(coverage): final cleanup wave — 6 sandbox scenarios + 1 ADR draft *(2026-05-19)*
-- `cb8508c` — test(scenarios): bulk coverage backfill C (9 beads) *(2026-05-19)*
-- `c32919f` — test(scenarios): coverage backfill for 10 loops (bulk B) *(2026-05-19)*
-- `2cc3d81` — chore(arch): regen after UL lint updates generated views *(2026-05-19)*
-- `7e4fc62` — docs(wiki+standards+adr): backfill 19 coverage-gap beads (batch 2) *(2026-05-19)*
-- `52a6c17` — test(flake-tracker): cover _download_junit paths (closes advisor-q08q) *(2026-05-19)*
-- `007c86c` — fix(tests): import AgentPort + FakeAgent in conformance test *(2026-05-19)*
-- `1a5b156` — test(contracts): FakeHoneycomb contract test (closes ADR-0047 gap for fake #5 of 11) *(2026-05-19)*
-- `d5f127d` — fix(tests): import AgentPort + FakeAgent in conformance test *(2026-05-19)*
-- `d566f5d` — feat(triage): TriageRetryLoop (ADR-0063 W2, closes advisor-vz1l) *(2026-05-19)*
 
 
 <!-- arch:generated -->

@@ -4,8 +4,9 @@ topic: architecture
 source_issue: 11407
 source_phase: plan
 created_at: 2026-08-18T02:53:10.561508+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11407 closed
 ---
 
 # find_class_check.py centralizes site-identifier ambiguity by design
