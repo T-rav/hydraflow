@@ -189,6 +189,11 @@ class FakeGitHub:
 
     def __init__(self) -> None:
         self._issues: dict[int, FakeIssue] = {}
+        # #11246: `gh issue view --json` fields the fake was asked for but
+        # does not model. Recorded instead of fabricated so scenarios can
+        # surface fake-fidelity gaps (matched-but-wrong shapes are invisible
+        # to strict-mode shape checks).
+        self.issue_view_unmodelled_fields: set[str] = set()
         self._pr_diff_names: dict[int, list[str]] = {}
         # Per-PR seeded diff stats for get_pr_diff_stats (#10788 timeline).
         self._pr_diff_stats: dict[int, PRDiffStats] = {}
@@ -1828,28 +1833,34 @@ class FakeGitHub:
         return None
 
     async def _handle_issue_edit(self, args: list[str]) -> None:
-        """Model ``gh issue edit <n> --repo <repo> --body-file <path>`` (#11419).
+        """Model ``gh issue edit <n> --body-file <path>`` / ``--body <text>``.
 
-        The only real issuer is ``PRManager.update_issue_body``, which sends
-        the body through a temp ``--body-file`` (``_run_with_body_file``),
-        not inline ``--body`` — the fake reads the same file the real CLI
-        would. Best-effort: extracts the issue number (first digit-only
-        positional) and the path after ``--body-file``, then delegates to
-        :meth:`update_issue_body` so the CLI route and the Port-method route
-        end up in the same place. A missing file or an edit without a body
-        flag (e.g. label-only edits) is a no-op.
+        The production issuer is ``PRManager.update_issue_body``, which sends
+        the body through a temp ``--body-file`` (``_run_with_body_file``)
+        (#11419) — the fake reads the same file the real CLI would. Inline
+        ``--body <text>`` (#11246) covers direct CLI callers so a
+        passthrough-routed repair is observable in fake state too.
+        Best-effort: extracts the issue number (first digit-only positional)
+        and the body from either flag (``--body-file`` wins if both appear),
+        then delegates to :meth:`update_issue_body` so the CLI route and the
+        Port-method route end up in the same place. A missing file, a
+        valueless flag, or an edit without a body flag (e.g. label-only
+        edits) is a no-op.
         """
         number = next((int(a) for a in args[2:] if a.isdigit()), None)
-        path: str | None = None
+        body: str | None = None
         if "--body-file" in args:
             idx = args.index("--body-file")
             if idx + 1 < len(args):
-                path = args[idx + 1]
-        if number is None or path is None:
-            return
-        try:
-            body = Path(path).read_text(encoding="utf-8")
-        except OSError:
+                try:
+                    body = Path(args[idx + 1]).read_text(encoding="utf-8")
+                except OSError:
+                    body = None
+        if body is None and "--body" in args:
+            idx = args.index("--body")
+            if idx + 1 < len(args):
+                body = args[idx + 1]
+        if number is None or body is None:
             return
         await self.update_issue_body(number, body)
 
@@ -1913,7 +1924,37 @@ class FakeGitHub:
                     await self._handle_issue_edit(args)
                 return ""
             if sub == "view":
-                return _json.dumps({"comments": []})
+                # Honour the --json selector: project exactly the requested
+                # fields from the in-memory FakeIssue (#11246). The branch
+                # used to return a hardcoded {"comments": []} for every
+                # selector, so a consumer reading labels/body through the
+                # passthrough always saw empty data under MockWorld — a
+                # matched-but-wrong shape invisible to strict-mode checks.
+                # Unmodelled fields are omitted and recorded in
+                # issue_view_unmodelled_fields rather than fabricated.
+                issue_number = next((int(a) for a in args[2:] if a.isdigit()), 0)
+                fields: list[str] = []
+                if "--json" in args:
+                    sel_idx = args.index("--json")
+                    if sel_idx + 1 < len(args):
+                        fields = [
+                            f.strip() for f in args[sel_idx + 1].split(",") if f.strip()
+                        ]
+                issue = self._issues.get(issue_number)
+                view_payload: dict[str, Any] = {}
+                if issue is not None:
+                    projections: dict[str, Any] = {
+                        "labels": [{"name": lbl} for lbl in issue.labels],
+                        "body": issue.body,
+                        "title": issue.title,
+                        "state": issue.state.upper(),
+                    }
+                    for field in fields:
+                        if field in projections:
+                            view_payload[field] = projections[field]
+                        else:
+                            self.issue_view_unmodelled_fields.add(field)
+                return _json.dumps(view_payload)
 
         if verb == "pr" and len(args) > 1:
             sub = args[1]
