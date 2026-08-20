@@ -81,10 +81,13 @@ pyramid includes deterministic pass-through fixtures, an in-process MockWorld
 scenario, and the `s91_gateway_session_tap.py` Docker sandbox scenario.
 
 One piece of evidence remains deliberately open: no committed artifact yet
-records a real provider-backed agentic session run both directly and through
-the gateway. Fixture and fake-upstream equality prove the deterministic proxy
-contract, but they are not represented as live-provider proof. Until that
-probe is run and recorded, the rollout remains opt-in and the proposal's
+records a real provider-backed, capture-compared agentic session through the
+gateway. The confidence probe now supports both provider bindings and compares
+each downstream stream with the gateway's upstream body capture for that exact
+request, then deletes the raw bodies and emits only hashes/counts. Fixture and
+fake-upstream equality prove the deterministic proxy contract, but they are not
+represented as live-provider proof. Until the enhanced probe is run and its
+sanitized artifact recorded, the rollout remains opt-in and the proposal's
 streaming-risk claim is not considered empirically closed against a live
 provider.
 

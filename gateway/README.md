@@ -45,6 +45,35 @@ Anthropic SSE `/v1/messages`, `/healthz`, and a sanitized
 `/observations/latest` endpoint.
 
 Run `scripts/gateway_probe.py` against a live gateway for the forced two-turn
-tool-use confidence probe. Its evidence artifact contains only response byte
-counts, hashes, status codes, and completion flags—never prompts, output, or
-credentials.
+tool-use confidence probe. The gateway must use the same `GATEWAY_LEDGER_PATH`
+and `GATEWAY_BODY_DIR` passed to the probe, the probe process needs read/delete
+access to both paths, and `GATEWAY_BODY_CAPTURE_REPOS` must contain the exact
+`--repo-slug`. For a z.ai harness canary:
+
+```bash
+.venv/bin/python scripts/gateway_probe.py \
+  --provider-binding zai-harness \
+  --model glm-5.2 \
+  --ledger-path "$GATEWAY_LEDGER_PATH" \
+  --body-dir "$GATEWAY_BODY_DIR" \
+  --live-provider-session \
+  --artifact /path/to/sanitized-gateway-evidence.json
+```
+
+The probe mints one short-lived, full-capture key. For each turn it resolves the
+matching ledger row, hashes the response bytes captured on the gateway's
+upstream side and those received downstream, requires exact byte equality, and
+then deletes both raw request and response captures. Cleanup also runs on
+failure and key revocation. The committed artifact contains only the versioned
+schema, provider/model, status codes, byte counts and SHA-256 hashes, completion
+flags, and explicit sanitization/cleanup claims—never prompts, outputs, paths,
+IDs, headers, raw bodies, or credentials.
+
+`--agent-session-receipt` can merge a separately collected queued-agent canary
+receipt into the artifact. That input is validated with an extra-fields-forbid
+schema limited to runtime/version, role and issue number, model/provider, tool
+call/result counts, the live-provider flag, validated-output and
+issue-transition signals, gateway 200/expected-marker-499 counts, and capture
+policy. Session IDs and transcripts are intentionally not accepted. Omit
+`--live-provider-session` for fake or sandbox runs so the artifact cannot
+silently claim live-provider evidence.

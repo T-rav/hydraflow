@@ -6,10 +6,14 @@ gateway application, then verifies exact response bytes, pinned SHA-256 values,
 status, and ordered response headers after excluding connection-scoped fields.
 
 This artifact deliberately does not claim a live provider run. The separate
-`scripts/gateway_probe.py` probe exercises a live-provider two-turn tool-use
-session when provider credentials are available and stores only sanitized
-hashes and counts. Replay conformance supplies the stable direct-versus-gateway
-comparison without relying on two nondeterministic model generations.
+`scripts/gateway_probe.py` exercises a provider-selectable two-turn tool-use
+session. With the gateway's explicit body-capture allowlist enabled, it compares
+the downstream stream with the gateway-captured upstream response for the exact
+same request, requires equal raw bytes/counts/SHA-256 values, deletes the raw
+request and response captures, and stores only a sanitized versioned artifact.
+This avoids the invalid comparison of two independent nondeterministic model
+generations. Replay conformance remains the stable fixture-level direct-versus-
+gateway comparison.
 
 `claude_cli_sandbox_evidence.json` records a separate confidence run made with
 the actual Claude Code binary over real local TCP sockets through the gateway
