@@ -46,6 +46,7 @@ from phase_utils import (
 )
 from runner_utils import (
     backend_probe_endpoint,
+    harness_billing_provider,
     normalize_provider,
     reap_all_tracked_processes,
 )
@@ -99,23 +100,39 @@ _POST_MERGE_DELAY: int = 5
 # recreated task, so it never blocks supervision of the other loops (#9621).
 _AUTH_TRANSIENT_RESTART_DELAY_S: float = 30.0
 
-# Loops whose primary LLM work routes through a per-role provider dial (the
-# one-shot OpenAI-compatible backends — z.ai / kimi / openrouter). Maps each
-# such loop to the ``HydraFlowConfig`` field holding its dial. EVERY other loop
-# runs on the Claude harness and bills against Anthropic; only these can route
-# elsewhere, so only these can survive an Anthropic credit pause (or be the sole
-# casualty of a backend cap). See :meth:`HydraFlowOrchestrator._loop_providers`.
+# Loops whose primary LLM work routes through a per-role provider dial. Maps
+# each loop to the ``HydraFlowConfig`` fields holding its dial and model. This
+# includes the four core work loops as well as independently-routed maintenance
+# loops; omitting a core loop here mis-scopes provider credit pauses even though
+# its runner correctly routes the actual spawn.
 # A loop that does MIXED work (dial'd one-shot + some harness spawns, e.g.
 # pr_unsticker's HITL analysis) self-heals: while it survives an Anthropic pause
 # its harness sub-call re-raises an ``anthropic`` signal that the already-active
 # pause absorbs. Keep in sync with the ``*_provider`` dials in config.py.
-_BACKEND_WORKER_LOOPS: dict[str, str] = {
-    "repo_wiki": "wiki_compilation_provider",
-    "adr_reviewer": "adr_review_provider",
-    "pr_unsticker": "pr_unstick_provider",
-    "term_proposer": "term_proposer_provider",
-    "entry_evidence": "term_proposer_provider",
-    "adr_drift_resolver": "adr_drift_resolver_provider",
+_BACKEND_WORKER_LOOPS: dict[str, tuple[str, str]] = {
+    "triage": ("triage_provider", "triage_model"),
+    "plan": ("planner_provider", "planner_model"),
+    "implement": ("implementation_provider", "model"),
+    "review": ("review_provider", "review_model"),
+    "repo_wiki": ("wiki_compilation_provider", "wiki_compilation_model"),
+    "adr_reviewer": ("adr_review_provider", "adr_review_model"),
+    "pr_unsticker": ("pr_unstick_provider", "background_model"),
+    "term_proposer": ("term_proposer_provider", "term_proposer_model"),
+    "entry_evidence": ("term_proposer_provider", "term_proposer_model"),
+    "adr_drift_resolver": (
+        "adr_drift_resolver_provider",
+        "adr_drift_resolver_model",
+    ),
+}
+
+# Core work loops whose runner seams apply repo routing and credit failover.
+# Used to distinguish a gateway transport (whose server owns the z.ai key) from
+# a direct harness route (which still requires a local z.ai credential).
+_PRIMARY_WORK_LOOP_TO_TOOL_FIELD: dict[str, str] = {
+    "triage": "triage_tool",
+    "plan": "planner_tool",
+    "implement": "implementation_tool",
+    "review": "review_tool",
 }
 
 
@@ -264,6 +281,7 @@ class HydraFlowOrchestrator:
             "contract_refresh": svc.contract_refresh_loop,
             "corpus_learning": svc.corpus_learning_loop,
             "auto_agent_preflight": svc.auto_agent_preflight_loop,
+            "gateway_coverage": svc.gateway_coverage_loop,
             "detector_calibration": svc.detector_calibration_loop,
             "sandbox_failure_fixer": svc.sandbox_failure_fixer_loop,
             "disturbance_dampener": svc.disturbance_dampener_loop,
@@ -1331,7 +1349,7 @@ class HydraFlowOrchestrator:
         pausing the factory. Everything else (prose-only signals, non-Claude
         caps, no zai key, disabled) falls through to the unchanged pause logic.
         """
-        if await self._maybe_engage_failover(exc):
+        if await self._maybe_engage_failover(exc, loop_name):
             await self._restart_loop(loop_name, exc, tasks, loop_factories)
             return
         paused = await self._pause_for_credits(exc, loop_name, tasks, loop_factories)
@@ -1350,7 +1368,9 @@ class HydraFlowOrchestrator:
                 ),
             )
 
-    async def _maybe_engage_failover(self, exc: CreditExhaustedError) -> bool:
+    async def _maybe_engage_failover(
+        self, exc: CreditExhaustedError, loop_name: str | None = None
+    ) -> bool:
         """Engage GLM failover for an authoritative Claude credit cap (#10844).
 
         Returns ``True`` when the caller should restart the crashed loop NOW (it
@@ -1358,8 +1378,11 @@ class HydraFlowOrchestrator:
         through to the unchanged pause/probe logic — for anything that is not a
         clear Claude cap we can fail over: the feature disabled, a non-Claude
         (zai/kimi) cap, a prose-only signal that still needs corroboration, or no
-        ``ZAI_API_KEY`` to route to (rerouting would silently fall back to Claude).
-        Idempotent while already failed over: it just re-signals "restart on GLM".
+        a usable route to z.ai. Direct harness routes still require a local z.ai
+        credential. A gateway-routed core work loop does not: the gateway owns
+        the provider credential and the restarted worker receives only a new
+        z.ai-bound virtual key. Idempotent while already failed over: it just
+        re-signals "restart on GLM".
         """
         if not self._config.credit_failover_enabled:
             return False
@@ -1368,7 +1391,8 @@ class HydraFlowOrchestrator:
             return False
         if not getattr(exc, "authoritative", False):
             return False
-        if not credit_failover.zai_key_present():
+        gateway_route = self._loop_uses_gateway_transport(loop_name)
+        if not credit_failover.zai_key_present() and not gateway_route:
             return False
         if credit_failover.is_active():
             # Already failed over (possibly engaged by another repo's orchestrator
@@ -1661,6 +1685,7 @@ class HydraFlowOrchestrator:
             ("contract_refresh", self._svc.contract_refresh_loop.run),
             ("corpus_learning", self._svc.corpus_learning_loop.run),
             ("auto_agent_preflight", self._svc.auto_agent_preflight_loop.run),
+            ("gateway_coverage", self._svc.gateway_coverage_loop.run),
             ("detector_calibration", self._svc.detector_calibration_loop.run),
             ("sandbox_failure_fixer", self._svc.sandbox_failure_fixer_loop.run),
             ("disturbance_dampener", self._svc.disturbance_dampener_loop.run),
@@ -2172,20 +2197,51 @@ class HydraFlowOrchestrator:
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
 
+    def _loop_uses_gateway_transport(self, loop_name: str | None) -> bool:
+        """Whether a core work loop's next spawn resolves through the gateway.
+
+        The explicit role dial wins. A still-Claude role may also inherit the
+        repo-wide gateway override. The fleet ratchet is included as a final
+        fail-safe for live config objects changed after validation. Non-core
+        maintenance loops are excluded because their one-shot seam does not
+        participate in work-spawn credit failover.
+        """
+        if loop_name not in _PRIMARY_WORK_LOOP_TO_TOOL_FIELD:
+            return False
+        route_fields = _BACKEND_WORKER_LOOPS[loop_name]
+        provider = getattr(self._config, route_fields[0])
+        if provider == "gateway":
+            return True
+        if provider != "claude":
+            return False
+        tool = getattr(self._config, _PRIMARY_WORK_LOOP_TO_TOOL_FIELD[loop_name])
+        if tool != "claude":
+            return False
+        return bool(
+            self._config.repo_provider == "gateway"
+            or self._config.gateway_fleet_ratchet_enabled
+        )
+
     def _loop_providers(self, loop_names: Iterable[str]) -> dict[str, str]:
         """Map each loop name to the billing provider its LLM work routes to.
 
-        Loops in ``_BACKEND_WORKER_LOOPS`` read their configured ``*_provider``
-        dial (normalized: the harness dial ``"claude"`` → ``"anthropic"``); every
-        other loop runs on the Claude harness → ``"anthropic"``. Read from live
-        config so an operator's dial change takes effect on the next pause."""
+        Loops in ``_BACKEND_WORKER_LOOPS`` read their configured provider/model
+        pair.  The model is required because ``gateway`` is a transport: Claude
+        models bill Anthropic while ``glm-*`` models bill z.ai.  Every other
+        loop runs on the Claude harness → ``"anthropic"``. Read from live config
+        so an operator's dial change takes effect on the next pause."""
         providers: dict[str, str] = {}
         for name in loop_names:
-            dial_field = _BACKEND_WORKER_LOOPS.get(name)
-            if dial_field is None:
+            route_fields = _BACKEND_WORKER_LOOPS.get(name)
+            if route_fields is None:
                 providers[name] = PROVIDER_ANTHROPIC
             else:
-                providers[name] = normalize_provider(getattr(self._config, dial_field))
+                dial_field, model_field = route_fields
+                dial = getattr(self._config, dial_field)
+                model = getattr(self._config, model_field) or "haiku"
+                providers[name] = normalize_provider(
+                    harness_billing_provider(dial, model)
+                )
         return providers
 
     def _affected_loops(

@@ -659,8 +659,19 @@ def _build_adr_reviewer(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 
     adr_reviewer = ports.get("adr_reviewer")
     if adr_reviewer is None:
-        adr_reviewer = MagicMock()
-        adr_reviewer.review_proposed_adrs = AsyncMock(return_value={"reviewed": 0})
+        runner = ports.get("adr_reviewer_runner")
+        if runner is not None:
+            from adr_reviewer import ADRCouncilReviewer  # noqa: PLC0415
+
+            adr_reviewer = ADRCouncilReviewer(
+                config,
+                deps.event_bus,
+                runner,
+                credentials=ports.get("credentials"),
+            )
+        else:
+            adr_reviewer = MagicMock()
+            adr_reviewer.review_proposed_adrs = AsyncMock(return_value={"reviewed": 0})
         ports["adr_reviewer"] = adr_reviewer
     return ADRReviewerLoop(config=config, adr_reviewer=adr_reviewer, deps=deps)
 
@@ -1745,6 +1756,15 @@ def _build_detector_calibration(ports: dict[str, Any], config: Any, deps: Any) -
     )
 
 
+def _build_gateway_coverage(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build GatewayCoverageLoop for scenarios."""
+    from gateway_coverage_loop import GatewayCoverageLoop  # noqa: PLC0415
+
+    state = ports.get("gateway_coverage_state") or MagicMock()
+    ports.setdefault("gateway_coverage_state", state)
+    return GatewayCoverageLoop(config=config, state=state, deps=deps)
+
+
 def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build AutoAgentPreflightLoop for scenarios (spec §1–§11).
 
@@ -2449,6 +2469,7 @@ _BUILDERS: dict[str, Any] = {
     "cost_budget_watcher": _build_cost_budget_watcher_loop,
     # auto-agent (spec §1–§11; ADR-0050)
     "auto_agent_preflight": _build_auto_agent_preflight,
+    "gateway_coverage": _build_gateway_coverage,
     "detector_calibration": _build_detector_calibration,
     "sandbox_failure_fixer": _build_sandbox_failure_fixer,
     # disturbance dampener burn-down actuator (ADR-0095, Pattern A)

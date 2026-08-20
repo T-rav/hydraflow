@@ -191,9 +191,20 @@ class TestFlakeFilter:
 
 
 class TestBisectHarness:
+    @pytest.mark.parametrize(
+        "first_bad_line",
+        [
+            "abc123def456 is the first bad commit",
+            "abc123def456 is the first 'bad' commit",
+        ],
+        ids=["git-before-2.55", "git-2.55"],
+    )
     @pytest.mark.asyncio
     async def test_run_bisect_returns_first_bad_sha(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        first_bad_line: str,
     ) -> None:
         loop, _prs, _state = _make_loop(tmp_path, monkeypatch)
 
@@ -202,7 +213,7 @@ class TestBisectHarness:
                 return (
                     0,
                     "Bisecting: 3 revisions left to test\n"
-                    "abc123def456 is the first bad commit\n"
+                    f"{first_bad_line}\n"
                     "commit abc123def456\n",
                     "",
                 )

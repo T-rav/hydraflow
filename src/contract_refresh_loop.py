@@ -68,6 +68,7 @@ from contract_diff import (
     detect_fleet_drift,
 )
 from contract_recording import (
+    CLAUDE_STREAM_MODEL,
     record_claude_stream,
     record_docker,
     record_git,
@@ -76,7 +77,11 @@ from contract_recording import (
 from dedup_store import DedupStore
 from models import WorkCycleResult  # noqa: TCH001
 from rollup_issue_manager import RollupIssueManager
-from subprocess_util import SubprocessTimeoutError, run_subprocess_result
+from runner_utils import record_inference_telemetry
+from subprocess_util import (
+    SubprocessTimeoutError,
+    run_subprocess_result,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -280,13 +285,52 @@ class ContractRefreshLoop(BaseBackgroundLoop):
             else []
         )
         recorded["claude"] = (
-            await self._record_with_trace(
-                "contract_recording.record_claude_stream",
-                record_claude_stream,
-                tmp_root / "claude",
+            await self._record_claude_stream(tmp_root / "claude") if external else []
+        )
+        return recorded
+
+    async def _record_claude_stream(self, tmp_stream_dir: Path) -> list[Path]:
+        """Record the native Claude raw stream before the terminal profile.
+
+        The recorder owns a native-compatible model independently of ADR and
+        maintenance routing. It is a legacy synchronous host subprocess and
+        therefore can read host OAuth/keychain state even when its environment
+        is scrubbed. The terminal profile disables it instead of pretending a
+        virtual token makes that host process credential-isolated.
+        Deterministic gateway conformance fixtures continue to cover the stream
+        protocol.
+        """
+
+        if self._config.gateway_fleet_ratchet_enabled:
+            logger.info(
+                "contract_refresh: skipping raw host Claude recorder under "
+                "the terminal gateway profile"
             )
-            if external
-            else []
+            return []
+
+        started = time.monotonic()
+        recorded = await self._record_with_trace(
+            "contract_recording.record_claude_stream",
+            record_claude_stream,
+            tmp_stream_dir,
+        )
+        transcript = ""
+        for path in recorded:
+            try:
+                transcript += path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                logger.warning(
+                    "contract_refresh: could not read recorded Claude stream %s",
+                    path,
+                )
+        record_inference_telemetry(
+            self._config,
+            source="contract_refresh",
+            cmd=["claude", "--model", CLAUDE_STREAM_MODEL],
+            prompt="ping",
+            transcript=transcript,
+            duration_s=time.monotonic() - started,
+            success=bool(recorded),
         )
         return recorded
 

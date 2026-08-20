@@ -23,6 +23,7 @@ from config import (
     _ENV_OPT_FLOAT_OVERRIDES,
     _ENV_OPT_INT_OVERRIDES,
     _ENV_STR_OVERRIDES,
+    GATEWAY_CAPABLE_PROVIDER_FIELDS,
     HydraFlowConfig,
     declared_default_config,
     declared_env_keys,
@@ -36,6 +37,18 @@ from queue_strategy import QueueStrategy
 
 
 class TestEnvVarOverrideTable:
+    @staticmethod
+    def _dependent_values(field: str, *, enabled: bool) -> dict[str, object]:
+        if field == "gateway_capture_bodies" and enabled:
+            return {"gateway_repo_class": "hydraflow"}
+        if field == "gateway_fleet_ratchet_enabled" and enabled:
+            values: dict[str, object] = dict.fromkeys(
+                GATEWAY_CAPABLE_PROVIDER_FIELDS, "gateway"
+            )
+            values["execution_mode"] = "docker"
+            return values
+        return {}
+
     @pytest.mark.parametrize(
         ("field", "env_key", "default"),
         _ENV_INT_OVERRIDES,
@@ -120,19 +133,21 @@ class TestEnvVarOverrideTable:
         default: str,
     ) -> None:
         """Each str override should apply when the field is at its default."""
-        monkeypatch.setenv(env_key, "custom-value")
+        override = "client" if field == "gateway_repo_class" else "custom-value"
+        monkeypatch.setenv(env_key, override)
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
             workspace_base=tmp_path / "wt",
             state_file=tmp_path / "s.json",
         )
         result = getattr(cfg, field)
-        assert str(result) == "custom-value"
+        assert str(result) == override
 
     # Valid non-default explicit values for Literal-typed string fields.
     # Generic tests can't use arbitrary strings for these fields.
     _EXPLICIT_VALUES: dict[str, str] = {
         "execution_mode": "docker",
+        "gateway_repo_class": "hydraflow",
         "security_patch_severity_threshold": "critical",
     }
 
@@ -151,7 +166,8 @@ class TestEnvVarOverrideTable:
     ) -> None:
         """Explicit values should take precedence over str env var overrides."""
         explicit = self._EXPLICIT_VALUES.get(field, "explicit-value")
-        monkeypatch.setenv(env_key, "env-value")
+        env_value = "client" if field == "gateway_repo_class" else "env-value"
+        monkeypatch.setenv(env_key, env_value)
         cfg = HydraFlowConfig(
             **{field: explicit},  # type: ignore[arg-type]
             repo_root=tmp_path,
@@ -264,10 +280,11 @@ class TestEnvVarOverrideTable:
         env_key: str,
         default: bool,
     ) -> None:
-        """Bool overrides should treat '1', 'true', 'yes' as True."""
+        """ADR-0110: bool overrides, including the gateway ratchet, accept truthy values."""
         for truthy in ("1", "true", "yes", "True", "YES"):
             monkeypatch.setenv(env_key, truthy)
             cfg = HydraFlowConfig(
+                **self._dependent_values(field, enabled=True),  # type: ignore[arg-type]
                 repo_root=tmp_path,
                 workspace_base=tmp_path / "wt",
                 state_file=tmp_path / "s.json",
@@ -316,6 +333,7 @@ class TestEnvVarOverrideTable:
             env_key, str(default).lower()
         )  # env tries to revert to default
         cfg = HydraFlowConfig(
+            **self._dependent_values(field, enabled=explicit),  # type: ignore[arg-type]
             **{field: explicit},  # type: ignore[arg-type]
             repo_root=tmp_path,
             workspace_base=tmp_path / "wt",

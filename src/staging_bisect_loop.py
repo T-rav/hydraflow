@@ -634,7 +634,11 @@ class StagingBisectLoop(BaseBackgroundLoop):
                 raise BisectHarnessError(
                     f"git bisect run errored (rc={rc}): {err[:500]}"
                 )
-            match = re.search(r"([0-9a-f]{7,40})\s+is the first bad commit", out)
+            # Git 2.55 quotes the selected bisect term in this message
+            # ("the first 'bad' commit"); older versions leave it unquoted.
+            match = re.search(
+                r"([0-9a-f]{7,40})\s+is the first (?:bad|'bad') commit", out
+            )
             if not match:
                 raise BisectHarnessError(
                     f"could not parse first-bad SHA from bisect output: {out[:500]}"

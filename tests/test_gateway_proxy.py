@@ -1,0 +1,1045 @@
+"""Transparent proxy tests across auth, bytes, headers, errors, and ledgering."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
+from typing import Any, cast
+
+import httpx
+import pytest
+from fastapi import HTTPException
+from pydantic import SecretStr
+from starlette.requests import Request
+from starlette.types import Message, Receive, Scope
+
+from hydraflow_gateway.app import create_app
+from hydraflow_gateway.keys import VirtualKeyStore
+from hydraflow_gateway.ledger import (
+    GatewayBodyCapture,
+    GatewayBodyStore,
+    GatewayLedger,
+)
+from hydraflow_gateway.models import (
+    GatewayIdentity,
+    MintKeyRequest,
+    ProviderBinding,
+    RepoClass,
+)
+from hydraflow_gateway.proxy import GatewayProxy, build_upstream_url
+from hydraflow_gateway.settings import (
+    GatewaySettings,
+    UpstreamAuthStyle,
+    UpstreamSettings,
+)
+from model_pricing import load_pricing
+
+_SSE_BYTES = (
+    b'event: message_start\r\ndata: {"type":"message_start","message":'
+    b'{"model":"claude-sonnet-4-6","usage":{"input_tokens":11,'
+    b'"cache_creation_input_tokens":3,"cache_read_input_tokens":4}}}\r\n\r\n'
+    b'event: content_block_start\ndata: {"type":"content_block_start",'
+    b'"index":0,"content_block":{"type":"tool_use","id":"tool-1",'
+    b'"name":"Read","input":{}}}\n\n'
+    b'event: message_delta\ndata: {"type":"message_delta","usage":'
+    b'{"output_tokens":17}}\n\n'
+    b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+)
+
+_CONTROL_TOKEN = "test-control-token-0123456789abcdef"
+
+
+class _ChunkStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+        self.closed = False
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self._chunks:
+            yield chunk
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def _mint_request(
+    *,
+    provider: ProviderBinding = ProviderBinding.ANTHROPIC,
+    capture_bodies: bool = True,
+    repo_class: RepoClass = RepoClass.HYDRAFLOW,
+) -> MintKeyRequest:
+    return MintKeyRequest(
+        principal_kind="spawn",
+        principal_id="implementer",
+        spawn_id="spawn-1",
+        session_id="session-1",
+        repo_slug="acme/hydraflow",
+        repo_class=repo_class,
+        provider_binding=provider,
+        capture_bodies=capture_bodies,
+        ttl_seconds=300,
+    )
+
+
+def _settings(
+    tmp_path: Path, *, max_request_bytes: int = 33_554_432
+) -> GatewaySettings:
+    return GatewaySettings(
+        control_token=SecretStr(_CONTROL_TOKEN),
+        upstreams={
+            ProviderBinding.ANTHROPIC: UpstreamSettings(
+                base_url="https://upstream.test/prefix",
+                api_key=SecretStr("real-anthropic-key"),
+                auth_style=UpstreamAuthStyle.X_API_KEY,
+            ),
+            ProviderBinding.ZAI_HARNESS: UpstreamSettings(
+                base_url="https://zai.test",
+                api_key=SecretStr("real-zai-key"),
+                auth_style=UpstreamAuthStyle.BEARER,
+            ),
+        },
+        ledger_path=tmp_path / "gateway.jsonl",
+        body_dir=tmp_path / "bodies",
+        max_request_bytes=max_request_bytes,
+    )
+
+
+def _gateway_client(
+    tmp_path: Path,
+    handler: Callable[[httpx.Request], Awaitable[httpx.Response]],
+    *,
+    provider: ProviderBinding = ProviderBinding.ANTHROPIC,
+    capture_bodies: bool = True,
+    repo_class: RepoClass = RepoClass.HYDRAFLOW,
+    max_request_bytes: int = 33_554_432,
+) -> tuple[httpx.AsyncClient, str, GatewayLedger]:
+    settings = _settings(tmp_path, max_request_bytes=max_request_bytes)
+    store = VirtualKeyStore(
+        max_ttl_seconds=600,
+        id_factory=lambda: "key-1",
+        secret_factory=lambda: "virtual-secret",
+        body_capture_repo_slugs=frozenset({"acme/hydraflow"}),
+    )
+    minted = store.mint(
+        _mint_request(
+            provider=provider,
+            capture_bodies=capture_bodies,
+            repo_class=repo_class,
+        )
+    )
+    ledger = GatewayLedger(settings.ledger_path)
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = create_app(
+        settings,
+        key_store=store,
+        client=upstream_client,
+        ledger=ledger,
+        body_store=GatewayBodyStore(settings.body_dir),
+    )
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://gateway.test",
+    )
+    return client, minted.token, ledger
+
+
+def _direct_gateway_proxy(
+    tmp_path: Path,
+    handler: Callable[[httpx.Request], Awaitable[httpx.Response]],
+) -> tuple[GatewayProxy, GatewayIdentity, GatewayLedger, httpx.AsyncClient]:
+    settings = _settings(tmp_path)
+    store = VirtualKeyStore(
+        max_ttl_seconds=600,
+        id_factory=lambda: "key-1",
+        secret_factory=lambda: "virtual-secret",
+        body_capture_repo_slugs=frozenset({"acme/hydraflow"}),
+    )
+    minted = store.mint(_mint_request())
+    identity = store.resolve(minted.token)
+    ledger = GatewayLedger(settings.ledger_path)
+    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    proxy = GatewayProxy(
+        settings=settings,
+        client=upstream_client,
+        ledger=ledger,
+        body_store=GatewayBodyStore(settings.body_dir),
+        pricing=load_pricing(),
+        request_id_factory=lambda: "request-1",
+    )
+    return proxy, identity, ledger, upstream_client
+
+
+def _streaming_request(receive: Receive) -> Request:
+    scope = cast(
+        Scope,
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/v1/messages",
+            "raw_path": b"/v1/messages",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+            "server": ("gateway.test", 80),
+            "client": ("127.0.0.1", 12345),
+        },
+    )
+    return Request(scope, receive)
+
+
+class TestGatewayProxy:
+    async def test_forwards_raw_sse_and_records_usage_without_mutation(
+        self, tmp_path: Path
+    ) -> None:
+        observed: dict[str, Any] = {}
+        stream = _ChunkStream([_SSE_BYTES[:31], _SSE_BYTES[31:177], _SSE_BYTES[177:]])
+
+        async def upstream(request: httpx.Request) -> httpx.Response:
+            observed["method"] = request.method
+            observed["url"] = str(request.url)
+            observed["headers"] = request.headers.raw
+            observed["body"] = await request.aread()
+            return httpx.Response(
+                200,
+                headers=[
+                    ("content-type", "text/event-stream"),
+                    ("content-encoding", "identity"),
+                    ("set-cookie", "one=1"),
+                    ("set-cookie", "two=2"),
+                    ("connection", "x-upstream-hop"),
+                    ("x-upstream-hop", "remove-me"),
+                    ("x-api-key", "must-not-return"),
+                    ("authorization", "Bearer must-not-return"),
+                ],
+                stream=stream,
+            )
+
+        client, token, ledger = _gateway_client(tmp_path, upstream)
+        request_body = b'{"model":"claude-requested","messages":[]}'
+        try:
+            response = await client.post(
+                "/v1/messages/special%2Fpart?x=1&x=2",
+                content=request_body,
+                headers=[
+                    ("authorization", f"Bearer {token}"),
+                    ("content-type", "application/json"),
+                    ("anthropic-beta", "oauth-2025-04-20"),
+                    ("anthropic-version", "2023-06-01"),
+                    ("connection", "x-client-hop"),
+                    ("x-client-hop", "remove-me"),
+                ],
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 200
+        assert response.content == _SSE_BYTES
+        assert response.headers.get_list("set-cookie") == ["one=1", "two=2"]
+        assert "x-upstream-hop" not in response.headers
+        assert "x-api-key" not in response.headers
+        assert "authorization" not in response.headers
+        assert response.headers["content-encoding"] == "identity"
+        assert observed["method"] == "POST"
+        assert observed["url"] == (
+            "https://upstream.test/prefix/v1/messages/special%2Fpart?x=1&x=2"
+        )
+        assert observed["body"] == request_body
+        upstream_headers = httpx.Headers(observed["headers"])
+        assert upstream_headers["x-api-key"] == "real-anthropic-key"
+        assert "authorization" not in upstream_headers
+        assert upstream_headers["anthropic-beta"] == "oauth-2025-04-20"
+        assert upstream_headers["anthropic-version"] == "2023-06-01"
+        assert "x-client-hop" not in upstream_headers
+        assert stream.closed is True
+
+        rows = ledger.read_all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.status_code == 200
+        assert row.status == "completed"
+        assert row.completed is True
+        assert row.client_aborted is False
+        assert row.model_requested == "claude-requested"
+        assert row.model_served == "claude-sonnet-4-6"
+        assert row.input_tokens == 11
+        assert row.output_tokens == 17
+        assert row.cache_read_input_tokens == 4
+        assert row.cache_creation_input_tokens == 3
+        assert row.cost_unknown is False
+        assert row.cost_usd == 0.00030045
+        assert row.timestamp.tzinfo is not None
+        assert row.request_id
+        assert row.source == "gateway"
+        assert row.body_capture_complete is True
+        assert (tmp_path / "bodies" / "key-1.request.body").exists() is False
+        body_files = sorted((tmp_path / "bodies").glob("*"))
+        assert [path.read_bytes() for path in body_files] == [
+            request_body,
+            _SSE_BYTES,
+        ]
+
+    @pytest.mark.parametrize(
+        "status_code, body",
+        [
+            (429, b'{"type":"error","error":{"type":"rate_limit_error"}}'),
+            (529, b'{"type":"error","error":{"type":"overloaded_error"}}'),
+        ],
+    )
+    async def test_passes_upstream_errors_verbatim_without_retry(
+        self, tmp_path: Path, status_code: int, body: bytes
+    ) -> None:
+        calls = 0
+
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(
+                status_code,
+                stream=_ChunkStream([body]),
+                headers={"content-type": "application/json", "retry-after": "3"},
+            )
+
+        client, token, ledger = _gateway_client(
+            tmp_path, upstream, capture_bodies=False
+        )
+        try:
+            response = await client.post(
+                "/v1/messages",
+                headers={"x-api-key": token},
+                json={"model": "claude-requested"},
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == status_code
+        assert response.content == body
+        assert response.headers["retry-after"] == "3"
+        assert calls == 1
+        assert ledger.read_all()[0].status_code == status_code
+
+    async def test_replaces_x_api_key_with_zai_bearer(self, tmp_path: Path) -> None:
+        observed_authorization = ""
+
+        async def upstream(request: httpx.Request) -> httpx.Response:
+            nonlocal observed_authorization
+            observed_authorization = request.headers["authorization"]
+            assert "x-api-key" not in request.headers
+            return httpx.Response(204, stream=_ChunkStream([]))
+
+        client, token, _ = _gateway_client(
+            tmp_path,
+            upstream,
+            provider=ProviderBinding.ZAI_HARNESS,
+            capture_bodies=False,
+        )
+        try:
+            response = await client.get("/v1/models", headers={"x-api-key": token})
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 204
+        assert observed_authorization == "Bearer real-zai-key"
+
+    @pytest.mark.parametrize("method", ["GET", "HEAD"])
+    async def test_bodyless_methods_do_not_gain_chunked_framing(
+        self, tmp_path: Path, method: str
+    ) -> None:
+        observed_headers = httpx.Headers()
+        observed_body = b"unexpected"
+
+        async def upstream(request: httpx.Request) -> httpx.Response:
+            nonlocal observed_headers, observed_body
+            observed_headers = request.headers
+            observed_body = await request.aread()
+            return httpx.Response(204, stream=_ChunkStream([]))
+
+        client, token, _ = _gateway_client(tmp_path, upstream, capture_bodies=False)
+        try:
+            response = await client.send(
+                httpx.Request(
+                    method,
+                    "http://gateway.test/v1/models",
+                    headers={"x-api-key": token},
+                )
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 204
+        assert observed_body == b""
+        assert "transfer-encoding" not in observed_headers
+        assert "content-length" not in observed_headers
+        assert "accept" not in observed_headers
+        assert "accept-encoding" not in observed_headers
+        assert "user-agent" not in observed_headers
+
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            {},
+            {"authorization": "Basic abc"},
+            {"authorization": "Bearer unknown"},
+            {"x-api-key": "unknown"},
+        ],
+    )
+    async def test_rejects_missing_or_invalid_credentials_before_upstream(
+        self, tmp_path: Path, headers: dict[str, str]
+    ) -> None:
+        calls = 0
+
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200)
+
+        client, _, ledger = _gateway_client(tmp_path, upstream)
+        try:
+            response = await client.get("/v1/models", headers=headers)
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 401
+        assert calls == 0
+        assert ledger.read_all() == []
+
+    async def test_rejects_ambiguous_dual_credentials(self, tmp_path: Path) -> None:
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            raise AssertionError("upstream must not be called")
+
+        client, token, _ = _gateway_client(tmp_path, upstream)
+        try:
+            response = await client.get(
+                "/v1/models",
+                headers=[
+                    ("authorization", f"Bearer {token}"),
+                    ("x-api-key", token),
+                ],
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 401
+
+    async def test_connect_failure_is_single_attempt_and_ledgered_502(
+        self, tmp_path: Path
+    ) -> None:
+        calls = 0
+
+        async def upstream(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            raise httpx.ConnectError("offline", request=request)
+
+        client, token, ledger = _gateway_client(
+            tmp_path, upstream, capture_bodies=False
+        )
+        try:
+            response = await client.post(
+                "/v1/messages",
+                headers={"authorization": f"Bearer {token}"},
+                json={"model": "claude-requested"},
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 502
+        assert response.json() == {"detail": "upstream unavailable"}
+        assert calls == 1
+        row = ledger.read_all()[0]
+        assert row.status_code == 502
+        assert row.completed is False
+        assert row.status == "upstream-error"
+        assert row.cost_usd is None
+        assert row.cost_unknown is True
+
+    async def test_unknown_model_cost_is_null_and_explicitly_unknown(
+        self, tmp_path: Path
+    ) -> None:
+        unknown_sse = _SSE_BYTES.replace(b"claude-sonnet-4-6", b"future-model-99")
+
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, stream=_ChunkStream([unknown_sse]))
+
+        client, token, ledger = _gateway_client(
+            tmp_path, upstream, capture_bodies=False
+        )
+        try:
+            response = await client.post(
+                "/v1/messages",
+                headers={"authorization": f"Bearer {token}"},
+                json={"model": "future-model-99"},
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 200
+        row = ledger.read_all()[0]
+        assert row.model_served == "future-model-99"
+        assert row.cost_usd is None
+        assert row.cost_unknown is True
+
+    @pytest.mark.parametrize("repo_class", [RepoClass.CLIENT, RepoClass.PERSONAL])
+    async def test_sensitive_repo_request_never_creates_body_artifacts(
+        self, tmp_path: Path, repo_class: RepoClass
+    ) -> None:
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, stream=_ChunkStream([b"ok"]))
+
+        client, token, ledger = _gateway_client(
+            tmp_path,
+            upstream,
+            capture_bodies=False,
+            repo_class=repo_class,
+        )
+        try:
+            response = await client.post(
+                "/v1/messages", headers={"x-api-key": token}, content=b"request"
+            )
+        finally:
+            await client.aclose()
+
+        assert response.content == b"ok"
+        assert ledger.read_all()[0].body_capture_id is None
+        assert not (tmp_path / "bodies").exists()
+
+    async def test_declared_oversized_request_is_rejected_before_upstream(
+        self, tmp_path: Path
+    ) -> None:
+        calls = 0
+
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, stream=_ChunkStream([]))
+
+        client, token, ledger = _gateway_client(
+            tmp_path,
+            upstream,
+            capture_bodies=True,
+            max_request_bytes=4,
+        )
+        try:
+            response = await client.post(
+                "/v1/messages",
+                headers={"x-api-key": token},
+                content=b"12345",
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 413
+        assert calls == 0
+        rows = ledger.read_all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.status_code == 413
+        assert row.completed is False
+        assert row.status == "upstream-error"
+        assert row.body_capture_id is None
+        assert row.body_capture_complete is None
+        assert not (tmp_path / "bodies").exists()
+
+    async def test_invalid_upstream_path_is_ledgered_without_capture_leak(
+        self, tmp_path: Path
+    ) -> None:
+        calls = 0
+
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, stream=_ChunkStream([]))
+
+        client, token, ledger = _gateway_client(
+            tmp_path,
+            upstream,
+            capture_bodies=True,
+        )
+        try:
+            response = await client.get(
+                "/v1/%252e%252e/admin",
+                headers={"x-api-key": token},
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 400
+        assert response.json() == {"detail": "invalid upstream path"}
+        assert calls == 0
+        rows = ledger.read_all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.status_code == 400
+        assert row.completed is False
+        assert row.status == "upstream-error"
+        assert row.body_capture_id is None
+        assert row.body_capture_complete is None
+        assert not (tmp_path / "bodies").exists()
+
+    async def test_body_capture_failure_latches_and_ledgers_next_503(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = 0
+        capture_start_calls = 0
+
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, stream=_ChunkStream([]))
+
+        client, token, ledger = _gateway_client(
+            tmp_path,
+            upstream,
+            capture_bodies=True,
+        )
+
+        def capture_unavailable(*_: object) -> None:
+            nonlocal capture_start_calls
+            capture_start_calls += 1
+            raise OSError("capture store unavailable")
+
+        monkeypatch.setattr(GatewayBodyStore, "start", capture_unavailable)
+        try:
+            response = await client.post(
+                "/v1/messages",
+                headers={"x-api-key": token},
+                content=b'{"model":"claude-requested"}',
+            )
+            health = await client.get("/healthz")
+            latched = await client.post(
+                "/v1/messages",
+                headers={"x-api-key": token},
+                content=b'{"model":"claude-requested"}',
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 503
+        assert response.json() == {
+            "detail": "gateway observation storage is unavailable"
+        }
+        assert latched.status_code == 503
+        assert latched.json() == {
+            "detail": "gateway observation storage is unavailable"
+        }
+        assert calls == 0
+        rows = ledger.read_all()
+        assert len(rows) == 2
+        row = rows[0]
+        assert row.status_code == 503
+        assert row.completed is False
+        assert row.status == "upstream-error"
+        assert row.body_capture_id is None
+        assert row.body_capture_complete is None
+        assert row.cost_usd is None
+        assert row.cost_unknown is True
+        latched_row = rows[1]
+        assert latched_row.status_code == 503
+        assert latched_row.status == "upstream-error"
+        assert latched_row.completed is False
+        assert latched_row.client_aborted is False
+        assert latched_row.body_capture_id is None
+        assert latched_row.body_capture_complete is None
+        assert latched_row.request_id != row.request_id
+        assert capture_start_calls == 1
+        assert health.status_code == 503
+        assert not (tmp_path / "bodies").exists()
+
+    @pytest.mark.parametrize(
+        ("failure_boundary", "captured_request", "captured_response"),
+        [
+            ("write_request", b"", b""),
+            ("write_response", b'{"model":"claude-requested"}', b""),
+            (
+                "close",
+                b'{"model":"claude-requested"}',
+                b"response-\x00\xff-bytes",
+            ),
+        ],
+        ids=["write-request", "write-response", "close"],
+    )
+    async def test_started_body_capture_persistence_failure_preserves_bytes_and_latches(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        failure_boundary: str,
+        captured_request: bytes,
+        captured_response: bytes,
+    ) -> None:
+        upstream_calls = 0
+        failure_calls = 0
+        observed_request_body = b""
+        request_body = b'{"model":"claude-requested"}'
+        response_body = b"response-\x00\xff-bytes"
+        original_close = GatewayBodyCapture.close
+
+        async def upstream(request: httpx.Request) -> httpx.Response:
+            nonlocal observed_request_body, upstream_calls
+            upstream_calls += 1
+            observed_request_body = await request.aread()
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/octet-stream"},
+                stream=_ChunkStream([response_body[:10], response_body[10:]]),
+            )
+
+        def persistence_failure(
+            capture: GatewayBodyCapture, _: bytes | None = None
+        ) -> None:
+            nonlocal failure_calls
+            failure_calls += 1
+            if failure_boundary == "close":
+                original_close(capture)
+            raise OSError(f"{failure_boundary} persistence failure")
+
+        client, token, ledger = _gateway_client(
+            tmp_path,
+            upstream,
+            capture_bodies=True,
+        )
+        monkeypatch.setattr(
+            GatewayBodyCapture,
+            failure_boundary,
+            persistence_failure,
+        )
+        try:
+            first = await client.post(
+                "/v1/messages",
+                headers={"x-api-key": token},
+                content=request_body,
+            )
+
+            first_rows = ledger.read_all()
+            assert len(first_rows) == 1
+            first_row = first_rows[0]
+            assert first_row.status_code == 200
+            assert first_row.status == "completed"
+            assert first_row.completed is True
+            assert first_row.client_aborted is False
+            assert first_row.body_capture_id is not None
+            assert first_row.body_capture_complete is False
+            assert (
+                tmp_path / "bodies" / f"{first_row.body_capture_id}.request.body"
+            ).read_bytes() == captured_request
+            assert (
+                tmp_path / "bodies" / f"{first_row.body_capture_id}.response.body"
+            ).read_bytes() == captured_response
+
+            health = await client.get("/healthz")
+            second = await client.post(
+                "/v1/messages",
+                headers={"x-api-key": token},
+                content=b"must-not-reach-upstream",
+            )
+        finally:
+            await client.aclose()
+
+        assert first.content == response_body
+        assert observed_request_body == request_body
+        assert health.status_code == 503
+        assert health.json()["status"] == "degraded"
+        assert second.status_code == 503
+        assert second.json() == {"detail": "gateway observation storage is unavailable"}
+        assert upstream_calls == 1
+        assert failure_calls == 1
+
+        rows = ledger.read_all()
+        assert len(rows) == 2
+        assert rows[0] == first_row
+        latched_row = rows[1]
+        assert latched_row.request_id != first_row.request_id
+        assert latched_row.status_code == 503
+        assert latched_row.status == "upstream-error"
+        assert latched_row.completed is False
+        assert latched_row.client_aborted is False
+        assert latched_row.body_capture_id is None
+        assert latched_row.body_capture_complete is None
+
+    async def test_chunked_request_is_stopped_at_streamed_size_limit(
+        self, tmp_path: Path
+    ) -> None:
+        calls = 0
+
+        async def upstream(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            await request.aread()
+            return httpx.Response(204, stream=_ChunkStream([]))
+
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b"12"
+            yield b"345"
+
+        client, token, ledger = _gateway_client(
+            tmp_path,
+            upstream,
+            capture_bodies=False,
+            max_request_bytes=4,
+        )
+        try:
+            response = await client.post(
+                "/v1/messages",
+                headers={"x-api-key": token},
+                content=chunks(),
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 413
+        assert calls == 0
+        row = ledger.read_all()[0]
+        assert row.status_code == 413
+        assert row.completed is False
+
+    async def test_cancellation_before_first_request_chunk_finalizes_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        upstream_calls = 0
+        capture_close_calls = 0
+        receive_started = asyncio.Event()
+        never_receive = asyncio.Event()
+        original_close = GatewayBodyCapture.close
+
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            nonlocal upstream_calls
+            upstream_calls += 1
+            return httpx.Response(200, stream=_ChunkStream([]))
+
+        async def receive() -> Message:
+            receive_started.set()
+            await never_receive.wait()
+            return {"type": "http.disconnect"}
+
+        def counted_close(capture: GatewayBodyCapture) -> None:
+            nonlocal capture_close_calls
+            capture_close_calls += 1
+            original_close(capture)
+
+        monkeypatch.setattr(GatewayBodyCapture, "close", counted_close)
+        proxy, identity, ledger, upstream_client = _direct_gateway_proxy(
+            tmp_path, upstream
+        )
+        task = asyncio.create_task(proxy.forward(_streaming_request(receive), identity))
+        try:
+            await asyncio.wait_for(receive_started.wait(), timeout=1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            await upstream_client.aclose()
+
+        rows = ledger.read_all()
+        assert len(rows) == 1
+        assert rows[0].status_code == 499
+        assert rows[0].status == "client-aborted"
+        assert rows[0].client_aborted is True
+        assert rows[0].completed is False
+        assert rows[0].body_capture_complete is True
+        assert upstream_calls == 0
+        assert capture_close_calls == 1
+        assert [
+            path.read_bytes() for path in sorted((tmp_path / "bodies").glob("*"))
+        ] == [
+            b"",
+            b"",
+        ]
+
+    async def test_cancellation_during_upstream_upload_finalizes_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        upstream_calls = 0
+        capture_close_calls = 0
+        receive_calls = 0
+        upload_blocked = asyncio.Event()
+        never_receive = asyncio.Event()
+        original_close = GatewayBodyCapture.close
+        first_chunk = b'{"model":"claude-sonnet-4-6",'
+
+        async def upstream(request: httpx.Request) -> httpx.Response:
+            nonlocal upstream_calls
+            upstream_calls += 1
+            await request.aread()
+            return httpx.Response(200, stream=_ChunkStream([]))
+
+        async def receive() -> Message:
+            nonlocal receive_calls
+            receive_calls += 1
+            if receive_calls == 1:
+                return {
+                    "type": "http.request",
+                    "body": first_chunk,
+                    "more_body": True,
+                }
+            upload_blocked.set()
+            await never_receive.wait()
+            return {"type": "http.disconnect"}
+
+        def counted_close(capture: GatewayBodyCapture) -> None:
+            nonlocal capture_close_calls
+            capture_close_calls += 1
+            original_close(capture)
+
+        monkeypatch.setattr(GatewayBodyCapture, "close", counted_close)
+        proxy, identity, ledger, upstream_client = _direct_gateway_proxy(
+            tmp_path, upstream
+        )
+        task = asyncio.create_task(proxy.forward(_streaming_request(receive), identity))
+        try:
+            await asyncio.wait_for(upload_blocked.wait(), timeout=1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            await upstream_client.aclose()
+
+        rows = ledger.read_all()
+        assert len(rows) == 1
+        assert rows[0].status_code == 499
+        assert rows[0].status == "client-aborted"
+        assert rows[0].client_aborted is True
+        assert rows[0].completed is False
+        assert rows[0].body_capture_complete is True
+        assert upstream_calls == 0
+        assert capture_close_calls == 1
+        captured_bodies = {
+            path.name: path.read_bytes() for path in (tmp_path / "bodies").glob("*")
+        }
+        assert captured_bodies == {
+            "request-1.request.body": first_chunk,
+            "request-1.response.body": b"",
+        }
+
+    async def test_cancellation_after_upstream_headers_closes_unstarted_response(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        capture_close_calls = 0
+        response_start_sent = asyncio.Event()
+        block_response_start = asyncio.Event()
+        original_close = GatewayBodyCapture.close
+        upstream_stream = _ChunkStream([b"must-not-be-consumed"])
+        request_messages: list[Message] = [
+            {
+                "type": "http.request",
+                "body": b'{"model":"claude-sonnet-4-6"}',
+                "more_body": False,
+            }
+        ]
+
+        async def upstream(request: httpx.Request) -> httpx.Response:
+            await request.aread()
+            return httpx.Response(200, stream=upstream_stream)
+
+        async def receive() -> Message:
+            if request_messages:
+                return request_messages.pop(0)
+            return {"type": "http.disconnect"}
+
+        async def send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                response_start_sent.set()
+                await block_response_start.wait()
+
+        def counted_close(capture: GatewayBodyCapture) -> None:
+            nonlocal capture_close_calls
+            capture_close_calls += 1
+            original_close(capture)
+
+        monkeypatch.setattr(GatewayBodyCapture, "close", counted_close)
+        request = _streaming_request(receive)
+        proxy, identity, ledger, upstream_client = _direct_gateway_proxy(
+            tmp_path, upstream
+        )
+        try:
+            response = await proxy.forward(request, identity)
+            response_task = asyncio.create_task(response(request.scope, receive, send))
+            await asyncio.wait_for(response_start_sent.wait(), timeout=1)
+            response_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await response_task
+        finally:
+            await upstream_client.aclose()
+
+        rows = ledger.read_all()
+        assert len(rows) == 1
+        assert rows[0].status_code == 499
+        assert rows[0].status == "client-aborted"
+        assert rows[0].client_aborted is True
+        assert rows[0].completed is False
+        assert rows[0].body_capture_complete is True
+        assert upstream_stream.closed is True
+        assert capture_close_calls == 1
+        captured_bodies = {
+            path.name: path.read_bytes() for path in (tmp_path / "bodies").glob("*")
+        }
+        assert captured_bodies == {
+            "request-1.request.body": b'{"model":"claude-sonnet-4-6"}',
+            "request-1.response.body": b"",
+        }
+
+    async def test_ledger_failure_does_not_break_started_response_and_fails_future(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = 0
+
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, stream=_ChunkStream([b"response-bytes"]))
+
+        client, token, ledger = _gateway_client(
+            tmp_path, upstream, capture_bodies=False
+        )
+
+        def disk_full(_: object) -> None:
+            raise OSError("disk full")
+
+        monkeypatch.setattr(ledger, "append", disk_full)
+        try:
+            first = await client.post(
+                "/v1/messages", headers={"x-api-key": token}, content=b"{}"
+            )
+            health = await client.get("/healthz")
+            second = await client.post(
+                "/v1/messages", headers={"x-api-key": token}, content=b"{}"
+            )
+        finally:
+            await client.aclose()
+
+        assert first.status_code == 200
+        assert first.content == b"response-bytes"
+        assert health.status_code == 503
+        assert health.json()["status"] == "degraded"
+        assert second.status_code == 503
+        assert calls == 1
+
+
+@pytest.mark.parametrize(
+    "raw_path",
+    [
+        b"/a/../admin",
+        b"/a/%2e%2e/admin",
+        b"/a/%252e%252e/admin",
+        b"/a/%2e%2e%2fadmin",
+        b"/a/%2e%2e%5cadmin",
+    ],
+)
+def test_build_upstream_url_rejects_decoded_dot_segments(raw_path: bytes) -> None:
+    request = Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": raw_path.decode("ascii"),
+            "raw_path": raw_path,
+            "query_string": b"",
+            "headers": [],
+            "server": ("gateway.test", 80),
+            "client": ("127.0.0.1", 12345),
+        }
+    )
+
+    with pytest.raises(HTTPException, match="invalid upstream path"):
+        build_upstream_url("https://upstream.test/prefix", request)

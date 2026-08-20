@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `daa3c82` — Fixes #11418: promote StaleIssueLoop/ReportIssueLoop/service_registry reach-throughs to PRPort methods *(2026-08-18)*
+- `cfa3338` — Fixes #11420: FakeLLM's nested runner stand-ins have drifted from t... (#11445) (#11445) *(2026-08-17)*
 - `7cba8c3` — Fixes #11416: MockWorld repo_wiki loop registration never wires a w... (#11428) (#11428) *(2026-08-17)*
 - `b0aa945` — feat(quality): host-wide advisory lock so concurrent suites queue, not race (#11219) (#11400) (#11400) *(2026-08-17)*
 
@@ -454,30 +456,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `72fea53` — Fixes #8979: fold epic sweep into monitor *(2026-05-22)*
 - `527bea0` — Fixes #8928: make issue creation failure explicit *(2026-05-22)*
 - `e7d4296` — Fixes #8481: register caretaker escalation labels *(2026-05-22)*
-- `60d07b4` — feat(mockworld): FakeDocker bd-CLI emulation for bead lifecycle coverage (closes #8367) (#9053) (#9053) *(2026-05-21)*
-- `4afc722` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `2efdbb1` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `fecc6a8` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `10e9737` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `81ce3ea` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `ffd5f38` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `049ec06` — test(sandbox): ADR-0063 W3a/W3b/W4/W5 recovery-path scenarios (s36/s37/s39/s40 rewrite) *(2026-05-20)*
-- `23def6e` — feat(mockworld): FakeLLM scripting hooks for discover/plan-review/shape-council/spec-review failure paths *(2026-05-20)*
-- `3b9ea23` — test(sandbox): ADR-0063 workstream e2e coverage (s35-s40) *(2026-05-20)*
-- `6981598` — chore(arch): regen post-rebase round 3 *(2026-05-20)*
-- `21b59db` — chore(arch): regen post-rebase round 2 *(2026-05-20)*
-- `0b33086` — chore(arch): regen post-rebase + ADR renumber *(2026-05-20)*
-- `9843c52` — chore(arch): regen after lint pass *(2026-05-20)*
-- `6da9a75` — docs(wiki+standards+adr): bulk backfill 3 — 12 wiki terms, standards wiring, 2 ADR drafts *(2026-05-20)*
-- `cd44f14` — chore(arch): regen post-rebase round 2 *(2026-05-20)*
-- `d483b28` — chore(arch): regen post-rebase *(2026-05-20)*
-- `cda3bd4` — chore(arch): regenerate arch artifacts post-backfill *(2026-05-20)*
-- `e788dcb` — docs(standards,adr): backfill standards refs and ADR drafts for 9 ports/loops *(2026-05-20)*
-- `ac80bb8` — docs(wiki): backfill missing wiki entries for 8 ports/loops *(2026-05-20)*
-- `75ad1a4` — chore(arch): regen after rebase against staging *(2026-05-20)*
-- `a8e86d7` — chore: ruff format + arch-regen refresh *(2026-05-20)*
-- `4ff3f88` — chore(arch): regen after rebase against staging *(2026-05-20)*
-- `d15e32a` — style(trust-fleet-sanity): ruff lint + format fixes on breach-path tests *(2026-05-20)*
 
 
 <!-- arch:generated -->

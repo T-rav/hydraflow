@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import get_args
+from typing import Literal, get_args
 from unittest.mock import patch
 
 import pytest
@@ -56,6 +56,176 @@ def test_allow_glm_on_zai_provider() -> None:
     )
     assert cfg.wiki_compilation_provider == "zai"
     assert cfg.wiki_compilation_model == "glm-5.2"
+
+
+@pytest.mark.parametrize("model", ["sonnet", "glm-5.2"])
+def test_allow_claude_harness_models_through_gateway(model: str) -> None:
+    cfg = HydraFlowConfig(implementation_provider="gateway", model=model)
+    assert cfg.implementation_provider == "gateway"
+    assert cfg.model == model
+
+
+def test_reject_gateway_provider_with_codex_tool() -> None:
+    with pytest.raises((ValueError, ValidationError), match="gateway.*claude"):
+        HydraFlowConfig(
+            implementation_provider="gateway",
+            implementation_tool="codex",
+            model="gpt-5-codex",
+        )
+
+
+def test_reject_gateway_pr_unstick_with_codex_background_tool() -> None:
+    with pytest.raises(
+        (ValueError, ValidationError), match="pr_unstick.*background_tool"
+    ):
+        HydraFlowConfig(
+            pr_unstick_provider="gateway",
+            background_tool="codex",
+        )
+
+
+@pytest.mark.parametrize("tool", ["inherit", "claude"])
+def test_allow_gateway_pr_unstick_with_claude_background_tool(
+    tool: Literal["inherit", "claude"],
+) -> None:
+    cfg = HydraFlowConfig(
+        pr_unstick_provider="gateway",
+        background_tool=tool,
+    )
+    assert cfg.pr_unstick_provider == "gateway"
+    assert cfg.background_tool == tool
+
+
+def test_adr_reviewer_is_explicit_gateway_canary_not_global_default() -> None:
+    direct = HydraFlowConfig()
+    canary = HydraFlowConfig(adr_review_provider="gateway")
+    assert direct.adr_review_provider == "claude"
+    assert canary.adr_review_provider == "gateway"
+    assert canary.implementation_provider == "claude"
+
+
+def test_adr_reviewer_gateway_canary_env_is_not_ignored() -> None:
+    with patch.dict(
+        os.environ, {"HYDRAFLOW_ADR_REVIEW_PROVIDER": "gateway"}, clear=False
+    ):
+        cfg = HydraFlowConfig()
+    assert cfg.adr_review_provider == "gateway"
+    assert cfg.implementation_provider == "claude"
+
+
+def test_gateway_fleet_ratchet_promotes_untouched_roles_to_terminal_profile() -> None:
+    cfg = HydraFlowConfig(
+        gateway_fleet_ratchet_enabled=True,
+        execution_mode="docker",
+    )
+    assert all(
+        getattr(cfg, field) == "gateway"
+        for field in config_module.GATEWAY_CAPABLE_PROVIDER_FIELDS
+    )
+
+
+@pytest.mark.parametrize("field", config_module.GATEWAY_AGENTIC_PROVIDER_FIELDS)
+@pytest.mark.parametrize("provider", ["claude", "zai"])
+def test_gateway_fleet_ratchet_rejects_explicit_direct_harness_role(
+    field: str, provider: str
+) -> None:
+    with pytest.raises((ValueError, ValidationError), match="fleet ratchet.*direct"):
+        HydraFlowConfig(
+            gateway_fleet_ratchet_enabled=True,
+            execution_mode="docker",
+            **{field: provider},
+        )
+
+
+def test_gateway_fleet_ratchet_accepts_centralized_routed_role_set() -> None:
+    routed = dict.fromkeys(config_module.GATEWAY_CAPABLE_PROVIDER_FIELDS, "gateway")
+    cfg = HydraFlowConfig(
+        gateway_fleet_ratchet_enabled=True,
+        execution_mode="docker",
+        **routed,
+    )
+    assert all(
+        getattr(cfg, field) == "gateway"
+        for field in config_module.GATEWAY_CAPABLE_PROVIDER_FIELDS
+    )
+
+
+def test_gateway_terminal_profile_and_direct_rejection_work_via_env() -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "HYDRAFLOW_GATEWAY_FLEET_RATCHET_ENABLED": "true",
+            "HYDRAFLOW_EXECUTION_MODE": "docker",
+        },
+        clear=False,
+    ):
+        cfg = HydraFlowConfig()
+    assert all(
+        getattr(cfg, field) == "gateway"
+        for field in config_module.GATEWAY_CAPABLE_PROVIDER_FIELDS
+    )
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "HYDRAFLOW_GATEWAY_FLEET_RATCHET_ENABLED": "true",
+                "HYDRAFLOW_IMPLEMENTATION_PROVIDER": "claude",
+                "HYDRAFLOW_EXECUTION_MODE": "docker",
+            },
+            clear=False,
+        ),
+        pytest.raises((ValueError, ValidationError), match="fleet ratchet.*direct"),
+    ):
+        HydraFlowConfig()
+
+
+def test_gateway_fleet_ratchet_preserves_excluded_one_shot_http_provider() -> None:
+    routed = dict.fromkeys(config_module.GATEWAY_CAPABLE_PROVIDER_FIELDS, "gateway")
+    routed["pr_unstick_provider"] = "zai"
+    cfg = HydraFlowConfig(
+        gateway_fleet_ratchet_enabled=True,
+        execution_mode="docker",
+        **routed,
+    )
+    assert cfg.pr_unstick_provider == "zai"
+
+
+def test_gateway_terminal_profile_rejects_host_keychain_runtime() -> None:
+    with pytest.raises((ValueError, ValidationError), match="requires execution_mode"):
+        HydraFlowConfig(gateway_fleet_ratchet_enabled=True, execution_mode="host")
+
+
+def test_gateway_terminal_profile_rejects_arbitrary_host_mounts() -> None:
+    with pytest.raises(
+        (ValueError, ValidationError), match="forbids docker_extra_mounts"
+    ):
+        HydraFlowConfig(
+            gateway_fleet_ratchet_enabled=True,
+            execution_mode="docker",
+            docker_extra_mounts=["/home/operator:/host-home:ro"],
+        )
+
+
+def test_gateway_repo_class_env_override_and_capture_policy() -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "HYDRAFLOW_GATEWAY_BASE_URL": "http://gateway:8080",
+            "HYDRAFLOW_GATEWAY_LEDGER_PATH": "/gateway-metadata/requests.jsonl",
+            "HYDRAFLOW_GATEWAY_REPO_CLASS": "client",
+            "HYDRAFLOW_GATEWAY_KEY_TTL_SECONDS": "300",
+        },
+        clear=False,
+    ):
+        cfg = HydraFlowConfig()
+    assert cfg.gateway_base_url == "http://gateway:8080"
+    assert cfg.gateway_ledger_path == "/gateway-metadata/requests.jsonl"
+    assert cfg.gateway_repo_class == "client"
+    assert cfg.gateway_key_ttl_seconds == 300
+
+    with pytest.raises((ValueError, ValidationError), match="metadata-only"):
+        HydraFlowConfig(gateway_repo_class="client", gateway_capture_bodies=True)
 
 
 def test_maintenance_knob_routes_only_maintenance_roles() -> None:

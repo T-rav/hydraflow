@@ -39,6 +39,7 @@ jobs:
       dockerfiles: ${{ steps.filter.outputs.dockerfiles }}
       compose: ${{ steps.filter.outputs.compose }}
       sandbox_scenarios: ${{ steps.filter.outputs.sandbox_scenarios }}
+      gateway_package: ${{ steps.filter.outputs.gateway_package }}
       config: ${{ steps.filter.outputs.config }}
       dashboard: ${{ steps.filter.outputs.dashboard }}
       subprocess_signal: ${{ steps.filter.outputs.subprocess_signal }}
@@ -51,6 +52,10 @@ jobs:
             python:
               - 'src/**/*.py'
               - 'tests/**'
+              # hydraflow-gateway is a root-context deployable. Its Python
+              # implementation lives under src/, but Docker/runtime contract
+              # changes under gateway/ must run the same verification lanes.
+              - 'gateway/**'
               - 'pyproject.toml'
               - 'uv.lock'
               # scripts/ is load-bearing for gates, not just tooling:
@@ -121,10 +126,39 @@ jobs:
               - 'src/mockworld/**'
             dockerfiles:
               - 'Dockerfile*'
+              - 'gateway/**/Dockerfile*'
             compose:
               - 'docker-compose*.yml'
             sandbox_scenarios:
               - 'tests/sandbox_scenarios/**'
+              - 'gateway/**'
+              # s91 spans the proxy, coverage reader, and centralized harness
+              # seams. Any layer can break the real Docker boundary without
+              # touching compose or the scenario file itself.
+              - 'src/hydraflow_gateway/**'
+              - 'src/gateway_coverage.py'
+              - 'src/gateway_coverage_loop.py'
+              - 'src/state/_gateway_coverage.py'
+              - 'src/adversarial_agent_runner.py'
+              - 'src/base_runner.py'
+              - 'src/docker_runner.py'
+              - 'src/credit_failover.py'
+              - 'src/repo_backend.py'
+              - 'src/runner_utils.py'
+              - 'src/subprocess_util.py'
+              - 'src/runners/base_subprocess_runner.py'
+            # #11470: independently enforce branch coverage for the deployed
+            # interception package when its code, tests, packaging, or gate
+            # contract changes. Makefile is included so a lowered threshold
+            # cannot merge without executing the replacement command.
+            gateway_package:
+              - 'gateway/**'
+              - 'src/hydraflow_gateway/**'
+              - 'tests/test_gateway_*.py'
+              - 'tests/fixtures/gateway/**'
+              - 'Makefile'
+              - 'pyproject.toml'
+              - 'uv.lock'
             config:
               # Startup-behaviour files that can wedge the full-machine sandbox
               # WITHOUT touching mockworld/orchestrator/service_registry — so the
@@ -185,7 +219,7 @@ jobs:
           predicate-quantifier: 'every'
           filters: |
             core_python:
-              - '{src/**/*.py,tests/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,prompts/**,control/**}'
+              - '{src/**/*.py,tests/**,gateway/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,prompts/**,control/**}'
               - '!src/arch/**'
               - '!tests/architecture/**'
               - '!tests/regressions/**'
@@ -361,10 +395,35 @@ jobs:
         #     into the shared worker (runner patch not applied → 0 commands, and
         #     a pydantic TypeAdapter AttributeError from a MagicMock-contaminated
         #     type); passes single-threaded (#10500).
+        #   tests/test_quality_host_lock.py — competing process trees around
+        #     one host-wide lock perturb signal/queue timing across workers;
+        #     passes single-threaded (#11219).
         # Keep in sync with the Makefile PYTEST_SERIAL_PATHS.
-        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/test_review_phase_metrics.py --ignore=tests/test_auto_pr_preflight.py -n auto --dist loadscope --reruns 2 --reruns-delay 1
+        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/test_review_phase_metrics.py --ignore=tests/test_auto_pr_preflight.py --ignore=tests/test_quality_host_lock.py -n auto --dist loadscope --reruns 2 --reruns-delay 1
       - name: Run serial (xdist-unsafe) tests
-        run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py
+        run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py tests/test_quality_host_lock.py
+
+  # #11470: the transparent interception boundary has a package-local branch
+  # coverage contract. This remains a first-class CI Gate dependency while a
+  # path filter avoids re-running its focused suite for unrelated changes.
+  gateway-package-coverage:
+    name: Gateway Package Coverage
+    needs: changes
+    if: needs.changes.outputs.gateway_package == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Enforce hydraflow_gateway branch coverage
+        run: make gateway-coverage
 
   # Trailing coverage gate (Tier 2a). Runs OFF the PR critical path — on push
   # to the default/staging branch and on the nightly schedule only
@@ -410,7 +469,7 @@ jobs:
         # Ignore list matches the `test` job's parallel leg exactly (guarded
         # by tests/regressions/test_issue_10883.py) — keep in sync with the
         # Makefile PYTEST_SERIAL_PATHS.
-        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/test_review_phase_metrics.py --ignore=tests/test_auto_pr_preflight.py --cov=src --cov-append --cov-fail-under=0 --cov-report= -n auto --dist loadscope --reruns 2 --reruns-delay 1 --timeout=300 --durations=25
+        run: PYTHONPATH=src uv run pytest tests/ --ignore=tests/regressions --ignore=tests/test_review_phase_metrics.py --ignore=tests/test_auto_pr_preflight.py --ignore=tests/test_quality_host_lock.py --cov=src --cov-append --cov-fail-under=0 --cov-report= -n auto --dist loadscope --reruns 2 --reruns-delay 1 --timeout=300 --durations=25
       - name: Run serial (xdist-unsafe) tests + regressions with coverage
         # tests/regressions is excluded from leg 1's ignore list (parity
         # with the `test` job) so it has to be collected here — the single-
@@ -420,7 +479,7 @@ jobs:
         # coarser is safe (merely slower) and this lane is off the PR critical
         # path. The superset relation is pinned by tests/regressions/
         # test_issue_10883.py::test_coverage_serial_leg_covers_every_makefile_serial_path.
-        run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py tests/regressions --cov=src --cov-append --cov-fail-under=70 --cov-report=term-missing --cov-report=json --timeout=300 --durations=25
+        run: PYTHONPATH=src uv run pytest tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py tests/test_quality_host_lock.py tests/regressions --cov=src --cov-append --cov-fail-under=70 --cov-report=term-missing --cov-report=json --timeout=300 --durations=25
       - name: Upload coverage.json
         if: always()
         uses: actions/upload-artifact@v4
@@ -522,6 +581,7 @@ jobs:
             tests/regressions/test_issue_9553.py \
             tests/regressions/test_issue_9579.py \
             tests/regressions/test_issue_9911_stop_path_reap.py \
+            tests/regressions/test_issue_11434.py \
             tests/regressions/test_issue_9641_unified_group_kill.py \
             tests/regressions/test_hostrunner_reap_grandchildren.py \
             tests/regressions/test_auto_pr_preflight_gate.py"
@@ -756,8 +816,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
-      - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
-      - name: Run fast subset (s01, s06, s53, s54, s55, s58, s59)
+      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
+      - name: Run fast subset (s01, s06, s53, s54, s55, s58, s59, s91)
         run: |
           # Run every scenario and aggregate failures — do NOT early-exit on the
           # first red, or a broken leading scenario (e.g. s01, #9754) silently
@@ -773,7 +833,7 @@ jobs:
           # the config→/api/control/status→context→StreamView chain that tells
           # an operator which algorithm is picking work (#10067).
           rc=0
-          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge s55_nested_decompose s58_work_queue_settings_ui s59_queue_strategy_board_badge; do
+          for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge s55_nested_decompose s58_work_queue_settings_ui s59_queue_strategy_board_badge s91_gateway_session_tap; do
             if python scripts/sandbox_scenario.py run "$s"; then
               echo "::notice::sandbox $s PASSED"
             else
@@ -861,7 +921,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
-      - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
+      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
       - name: Run shard ${{ matrix.shard }}/6
         run: python scripts/sandbox_scenario.py run-all --shard ${{ matrix.shard }}/6
       - if: failure()
@@ -913,7 +973,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
-      - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
+      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
       - name: Run full suite + record metrics
         run: python scripts/sandbox_scenario.py run-all
       - name: Open hydraflow-find issue on failure
@@ -968,7 +1028,7 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: uv sync --all-extras
-      - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
+      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
       - name: Run s82 (standard PR path + RC promotion path, one boot)
         run: make post-merge-smoke
       - name: File or update rolling post-merge-smoke issue on failure
@@ -1013,7 +1073,7 @@ jobs:
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [changes, lint, typecheck, security, arch, test, smoke, scenario, regression, audit, ui-build, scenario-browser-fast]
+    needs: [changes, lint, typecheck, security, arch, test, gateway-package-coverage, smoke, scenario, regression, audit, ui-build, scenario-browser-fast]
     if: always()
     steps:
       - name: Require all CI jobs to have passed or been skipped

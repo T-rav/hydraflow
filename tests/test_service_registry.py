@@ -461,6 +461,10 @@ class TestAdversarialPipelineWiring:
             assert isinstance(voter, SubprocessAgentRunner)
         assert isinstance(plan_phase._spec_ac_agent, SubprocessAgentRunner)
         assert isinstance(plan_phase._spec_judge_agent, SubprocessAgentRunner)
+        assert plan_phase._surfacer_agent.config is config
+        assert plan_phase._surfacer_agent.tool == config.planner_tool
+        assert plan_phase._surfacer_agent.model == config.planner_model
+        assert plan_phase._surfacer_agent.provider == config.planner_provider
 
 
 class TestAutoTightenGhClosures:
