@@ -1,6 +1,6 @@
 # LLM gateway: the session tap
 
-**Status:** implemented behind opt-in gateway configuration (2026-08-19); deterministic conformance, MockWorld, and sandbox evidence are present, while the live-provider direct-vs-gateway confidence-probe evidence is still pending. **Amends:** ADR-0110 (provider/harness backend split — the gateway becomes a first-class harness backend, and eventually the only one workers see). **Kin:** ADR-0093 (loop fitness as measured contract — gateway coverage is a gauge, not a promise), the pricing-refresh loop (ADR-0078 — the cost oracle the ledger prices against).
+**Status:** implemented behind opt-in gateway configuration (2026-08-19); deterministic conformance, MockWorld, sandbox, and same-request live-provider capture evidence are present. **Amends:** ADR-0110 (provider/harness backend split — the gateway becomes a first-class harness backend, and eventually the only one workers see). **Kin:** ADR-0093 (loop fitness as measured contract — gateway coverage is a gauge, not a promise), the pricing-refresh loop (ADR-0078 — the cost oracle the ledger prices against).
 
 ## The gap
 
@@ -80,13 +80,17 @@ ledger, read-only coverage loop and dashboard gauge are implemented. The test
 pyramid includes deterministic pass-through fixtures, an in-process MockWorld
 scenario, and the `s91_gateway_session_tap.py` Docker sandbox scenario.
 
-One piece of evidence remains deliberately open: no committed artifact yet
-records a real provider-backed agentic session run both directly and through
-the gateway. Fixture and fake-upstream equality prove the deterministic proxy
-contract, but they are not represented as live-provider proof. Until that
-probe is run and recorded, the rollout remains opt-in and the proposal's
-streaming-risk claim is not considered empirically closed against a live
-provider.
+The committed live-provider artifact records two z.ai-bound agentic turns and
+compares each downstream stream with the gateway's upstream body capture for
+that exact request. Both byte counts and SHA-256 values match, and the raw
+request/response captures were deleted before the sanitized artifact was
+written, and the ephemeral key's revocation was acknowledged before evidence
+finalization. The exact ledger rows preserve the provider's observed model
+resolution from requested `glm-5.2` to served `glm-5.3`. The embedded
+queued-agent receipt keeps issue-specific planner outcomes separate from shared
+gateway observation-window totals so concurrent keys are not misattributed.
+This closes the live streaming-transparency evidence gap; rollout remains
+opt-in until the operational burn-in and ratchet are separately approved.
 
 ## Out of scope, explicitly
 

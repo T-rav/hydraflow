@@ -195,14 +195,43 @@ async def run_refilling_pool(
     return results
 
 
-def release_batch_in_flight(store: IssueStorePort, issue_numbers: set[int]) -> None:
+def release_batch_in_flight(
+    store: IssueStorePort,
+    issue_numbers: set[int],
+    *,
+    expected_stage: str | None = None,
+) -> None:
     """Release in-flight protection for a batch of issues.
 
     Should be called in a ``finally`` block after ``run_concurrent_batch``
     to ensure no orphaned in-flight entries survive if a worker exits
     without reaching ``mark_active`` / ``mark_complete``.
     """
-    store.release_in_flight(issue_numbers)
+    if expected_stage is None:
+        store.release_in_flight(issue_numbers)
+    else:
+        store.release_in_flight(
+            issue_numbers,
+            expected_stage=expected_stage,
+        )
+
+
+# GitHub ``stateReason`` values that mean an issue is done — the vocabulary
+# of ``PRPort.get_issue_state`` (OPEN / COMPLETED / NOT_PLANNED / UNKNOWN).
+_RESOLVED_ISSUE_STATES = frozenset({"COMPLETED", "NOT_PLANNED"})
+
+
+def issue_state_is_resolved(state: object) -> bool:
+    """True only for GitHub issue states that mean the issue is resolved (#11457).
+
+    ``COMPLETED`` (fixed) and ``NOT_PLANNED`` (duplicate/wontfix close,
+    #10025) are resolved; ``OPEN`` / ``UNKNOWN`` / anything unreadable is
+    not. The ``str()`` coercion keeps the predicate fail-open: a caller
+    whose Port returns an arbitrary object (an unconfigured ``AsyncMock``
+    yields a ``MagicMock``) reads as NOT resolved, so a state re-check built
+    on this predicate never blocks a build on a garbage read.
+    """
+    return str(state or "").upper() in _RESOLVED_ISSUE_STATES
 
 
 async def escalate_to_hitl(

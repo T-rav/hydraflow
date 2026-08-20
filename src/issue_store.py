@@ -423,6 +423,39 @@ class IssueStore:
         self._eagerly_transitioned[task.id] = stage
         self._publish_queue_update_nowait()
 
+    def try_claim_stage(self, task: Task, expected_stage: str) -> bool:
+        """Atomically reserve *task* when it is queued in *expected_stage*.
+
+        Live-state validation requires awaited GitHub reads. This synchronous
+        compare-and-set closes the following local race: another phase can
+        claim or advance the issue while those reads are in flight. A missing
+        local queue entry fails closed; the caller's stale ``Task`` is not
+        evidence of current stage ownership.
+        """
+        stage_alias: dict[str, IssueStoreStage] = {
+            "find": STAGE_FIND,
+            "plan": STAGE_PLAN,
+            "ready": STAGE_READY,
+            "review": STAGE_REVIEW,
+        }
+        stage = stage_alias.get(expected_stage)
+        if stage is None:
+            return False
+
+        issue_number = task.id
+        if issue_number in self._active or issue_number in self._in_flight:
+            return False
+        if issue_number in self._hitl_numbers or issue_number in self._merged_numbers:
+            return False
+        if self._find_queue_stage(issue_number) != stage:
+            return False
+
+        self._remove_from_queue(stage, issue_number)
+        self._issue_cache[issue_number] = task
+        self._in_flight[issue_number] = stage
+        self._publish_queue_update_nowait()
+        return True
+
     def apply_label_transition(self, issue_number: int, new_label: str) -> bool:
         """Mirror a GitHub pipeline-label swap in-memory immediately (#9842).
 
@@ -651,15 +684,23 @@ class IssueStore:
                 queued.setdefault(task.id, str(stage))
         return queued
 
-    def release_in_flight(self, issue_numbers: set[int]) -> None:
+    def release_in_flight(
+        self,
+        issue_numbers: set[int],
+        *,
+        expected_stage: str | None = None,
+    ) -> None:
         """Remove *issue_numbers* from the in-flight protection set.
 
         Called after a batch completes (in a ``finally`` block) to ensure
         no orphaned in-flight entries survive if a worker exits without
-        reaching ``mark_active`` or ``mark_complete``.
+        reaching ``mark_active`` or ``mark_complete``. When *expected_stage*
+        is supplied, a claim that has since advanced to another worker stage
+        is preserved.
         """
         for tid in issue_numbers:
-            self._in_flight.pop(tid, None)
+            if expected_stage is None or self._in_flight.get(tid) == expected_stage:
+                self._in_flight.pop(tid, None)
         # Releasing in-flight items changes pipeline membership but was
         # previously silent — schedule a coalesced snapshot so the board
         # reflects the release in real time (PR3).
