@@ -153,6 +153,11 @@ class FakeGitHub:
 
     def __init__(self) -> None:
         self._issues: dict[int, FakeIssue] = {}
+        # #11246: `gh issue view --json` fields the fake was asked for but
+        # does not model. Recorded instead of fabricated so scenarios can
+        # surface fake-fidelity gaps (matched-but-wrong shapes are invisible
+        # to strict-mode shape checks).
+        self.issue_view_unmodelled_fields: set[str] = set()
         self._pr_diff_names: dict[int, list[str]] = {}
         # Per-PR seeded diff stats for get_pr_diff_stats (#10788 timeline).
         self._pr_diff_stats: dict[int, PRDiffStats] = {}
@@ -1662,15 +1667,52 @@ class FakeGitHub:
                     if issue.state == "open"
                 ]
                 return _json.dumps(payload)
-            if sub == "close":
+            if sub in ("close", "edit"):
                 # Best-effort: extract issue number from positional args.
-                for a in args[2:]:
-                    if a.isdigit():
-                        await self.close_issue(int(a))
-                        break
+                issue_number = next((int(a) for a in args[2:] if a.isdigit()), 0)
+                if sub == "close":
+                    if issue_number:
+                        await self.close_issue(issue_number)
+                elif "--body" in args:
+                    # `gh issue edit <n> --body <text>`: rewrite the in-memory
+                    # body (#11246). ReportIssueLoop._verify_issue appends the
+                    # screenshot URL through this command; without the mutation
+                    # the repair was never observable in fake state.
+                    body_idx = args.index("--body")
+                    if body_idx + 1 < len(args):
+                        await self.update_issue_body(issue_number, args[body_idx + 1])
                 return ""
             if sub == "view":
-                return _json.dumps({"comments": []})
+                # Honour the --json selector: project exactly the requested
+                # fields from the in-memory FakeIssue (#11246). The branch
+                # used to return a hardcoded {"comments": []} for every
+                # selector, so consumers like ReportIssueLoop._verify_issue
+                # (reads labels/body) always saw empty data under MockWorld.
+                # Unmodelled fields are omitted and recorded in
+                # issue_view_unmodelled_fields rather than fabricated.
+                issue_number = next((int(a) for a in args[2:] if a.isdigit()), 0)
+                fields: list[str] = []
+                if "--json" in args:
+                    sel_idx = args.index("--json")
+                    if sel_idx + 1 < len(args):
+                        fields = [
+                            f.strip() for f in args[sel_idx + 1].split(",") if f.strip()
+                        ]
+                issue = self._issues.get(issue_number)
+                view_payload: dict[str, Any] = {}
+                if issue is not None:
+                    projections: dict[str, Any] = {
+                        "labels": [{"name": lbl} for lbl in issue.labels],
+                        "body": issue.body,
+                        "title": issue.title,
+                        "state": issue.state.upper(),
+                    }
+                    for field in fields:
+                        if field in projections:
+                            view_payload[field] = projections[field]
+                        else:
+                            self.issue_view_unmodelled_fields.add(field)
+                return _json.dumps(view_payload)
 
         if verb == "pr" and len(args) > 1:
             sub = args[1]

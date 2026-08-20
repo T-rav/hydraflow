@@ -1,0 +1,97 @@
+// Issue #11246 — `gh issue view` read path: production vs MockWorld.
+// The Fake terminates the same seam the production adapter uses, but today
+// synthesizes a fixed {"comments": []} payload regardless of --json.
+
+specification {
+  element system
+  element container
+  element component
+  element datastore
+  relationship reads
+  relationship writes
+}
+
+model {
+  hydraflow = system 'HydraFlow' {
+
+    loops = container 'Background loops' {
+      reportIssue = component 'ReportIssueLoop._verify_issue' {
+        description '
+          Reads `gh issue view <n> --json labels,body` through the PRManager
+          passthrough seam, then repairs the issue: adds the missing plan
+          label and appends the screenshot URL via `gh issue edit --body`.
+        '
+      }
+      staleIssue = component 'StaleIssueLoop' {
+        description 'Also reaches _run_gh directly (issue list / issue close / gh api).'
+      }
+    }
+
+    adapters = container 'GitHub adapter (production)' {
+      prManager = component 'PRManager' {
+        description 'Implements PRPort. Owns _run_gh + _repo.'
+      }
+      runGh = component 'PRManager._run_gh' {
+        description 'run_subprocess_with_retry("gh", ...) -> stdout. RuntimeError on non-zero exit.'
+      }
+      portReads = component 'PRPort issue readers' {
+        description '
+          get_issue_labels (--json labels --jq .labels[].name),
+          get_issue_updated_at (--json updatedAt --jq .updatedAt),
+          get_issue_state (--json state,stateReason),
+          list_issue_comments (--json comments),
+          update_issue_body (issue edit --body).
+        '
+      }
+    }
+
+    fakes = container 'MockWorld fakes' {
+      fakeGithub = component 'FakeGitHub' {
+        description 'Duck-types PRPort *and* the _run_gh / _repo reach-around seam.'
+      }
+      fakeRunGh = component 'FakeGitHub._run_gh' {
+        description '
+          DEFECT: `issue view` returns a hardcoded {"comments": []} for every
+          --json field set, and `issue edit` falls through to the "[]" catch-all
+          (a silent write no-op).
+          FIX: project the requested fields from FakeIssue, render --jq for the
+          shapes production actually uses, record unmodelled field names.
+        '
+      }
+      projector = component 'gh_issue_view projector (new)' {
+        description 'Pure field->value mapping + --jq rendering + unmodelled-field report.'
+      }
+      issueStore = datastore 'FakeIssue registry' {
+        description 'number, title, body, labels, state, state_reason, updated_at, closed_at, comments'
+      }
+    }
+
+    gh = container 'gh CLI + GitHub API' {
+      description 'Real endpoint. Never reached under MockWorld.'
+    }
+  }
+
+  loops.reportIssue -> adapters.runGh 'gh issue view --json labels,body' 'reads'
+  loops.reportIssue -> adapters.runGh 'gh issue edit --body <repaired>' 'writes'
+  loops.staleIssue -> adapters.runGh 'gh issue list / close / api' 'reads'
+  adapters.portReads -> adapters.runGh 'gh issue view --json ... [--jq ...]' 'reads'
+  adapters.runGh -> hydraflow.gh 'subprocess' 'reads'
+
+  loops.reportIssue -> fakes.fakeRunGh 'same seam under MockWorld' 'reads'
+  fakes.fakeGithub -> fakes.fakeRunGh 'exposes'
+  fakes.fakeRunGh -> fakes.projector 'delegates field projection' 'reads'
+  fakes.projector -> fakes.issueStore 'projects requested --json fields' 'reads'
+  fakes.fakeRunGh -> fakes.issueStore 'issue edit --body / --add-label' 'writes'
+}
+
+views {
+  view index {
+    title 'gh issue view — production vs MockWorld read path'
+    include *
+  }
+
+  view fakeDetail of hydraflow.fakes {
+    title 'FakeGitHub _run_gh dispatch after the fix'
+    include *
+  }
+}

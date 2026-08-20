@@ -1,0 +1,60 @@
+// Issue #11246 — FakeGitHub `gh issue view` must honour the --json selector.
+//
+// Two runtimes share ONE call site: ReportIssueLoop._verify_issue shells out
+// through PRManager._run_gh directly (bypassing the port methods).
+// In production that reaches the real gh CLI; under MockWorld it reaches
+// FakeGitHub._run_gh, whose `issue view` branch is a hardcoded
+// {"comments": []} — a matched-but-wrong shape that #11237 strict mode
+// cannot catch. The fix projects requested fields from FakeIssue state and
+// applies `issue edit --body` writes back into it.
+
+specification {
+  element loop
+  element module
+  element changedmodule {
+    style { color green }
+  }
+  element extsystem
+  element store
+}
+
+model {
+  reportLoop = loop 'report_issue_loop.ReportIssueLoop' {
+    description '_verify_issue: gh issue view --json labels,body; repairs via add_labels + gh issue edit --body'
+  }
+
+  prManager = module 'pr_manager.PRManager' {
+    description '_run_gh — prod adapter: exec gh CLI, raises RuntimeError on non-zero exit'
+  }
+
+  ghCli = extsystem 'gh CLI / GitHub' {
+    description 'Real service. issue view returns ONLY the requested --json fields; view/edit of unknown issue exits non-zero'
+  }
+
+  fake = changedmodule 'mockworld.fakes.FakeGitHub' {
+    description 'CHANGED: _run_gh issue-view branch now parses --json, projects modelled fields (number,title,body,labels,state,stateReason,updatedAt,comments), records unmodelled fields, raises on unknown issue; NEW issue edit --body mutates FakeIssue.body'
+  }
+
+  fakeIssue = store 'FakeIssue (in-memory)' {
+    description 'number,title,body,labels,state,comments,updated_at,state_reason — the projection source'
+  }
+
+  unmodelled = store 'issue_view_unmodelled_fields' {
+    description 'NEW public record: requested-but-unmodelled fields (--jq, unknown keys) — observable drift signal for scenarios/#11237 strict mode'
+  }
+
+  reportLoop -> prManager 'direct _run_gh call (bypasses port methods)'
+  prManager -> ghCli 'subprocess'
+  reportLoop -> fake 'same call site under MockWorld'
+  fake -> fakeIssue 'project requested fields (gh wire shapes: labels=[{name}], camelCase keys, comments GraphQL author/createdAt)'
+  fake -> unmodelled 'append on unmodelled request'
+  fake -> fakeIssue 'WRITE: issue edit --body updates body (screenshot-append repair becomes observable)'
+}
+
+views {
+  view issue11246 {
+    title 'Issue #11246 — selector-honouring gh issue view in FakeGitHub'
+    include *
+    autoLayout LeftRight
+  }
+}

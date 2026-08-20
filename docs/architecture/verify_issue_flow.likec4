@@ -1,0 +1,52 @@
+// Issue #11246 — dynamic view of ReportIssueLoop._verify_issue under MockWorld,
+// before and after the fake honours the --json selector.
+
+specification {
+  element actor
+  element component
+  relationship step
+}
+
+model {
+  loop = component 'ReportIssueLoop._verify_issue'
+  seam = component 'FakeGitHub._run_gh'
+  projector = component 'gh_issue_view projector (new)'
+  state = component 'FakeIssue registry'
+  labels = component 'FakeGitHub.add_labels'
+
+  loop -> seam 'gh issue view <n> --repo <r> --json labels,body'
+  seam -> projector 'fields = [labels, body]'
+  projector -> state 'read FakeIssue(<n>)'
+  state -> projector 'labels, body'
+  projector -> seam '{"labels": [{"name": ...}], "body": "..."}'
+  seam -> loop 'JSON payload'
+  loop -> labels 'add_labels only when the plan label is genuinely absent'
+  loop -> seam 'gh issue edit <n> --body <original + screenshot appendix>'
+  seam -> state 'FakeIssue.body = repaired body'
+}
+
+views {
+  view broken {
+    title 'BEFORE — every field set collapses to {"comments": []}'
+    description '
+      _verify_issue sees labels=[] and body="" for any seeded issue, so the
+      repair branch fires unconditionally: add_labels is always called and the
+      screenshot appendix is always re-appended. The subsequent `issue edit`
+      hits the catch-all "[]" return and never mutates FakeIssue, so no test
+      can observe either the false repair or a correct no-op.
+    '
+    include *
+  }
+
+  view repaired {
+    title 'AFTER — projected fields + observable write-back'
+    description '
+      The projector reads the real FakeIssue. A seeded issue that already
+      carries the plan label and the screenshot URL takes the no-repair path;
+      a seeded issue missing either one takes the repair path and the edit is
+      visible in FakeIssue.body. Unmodelled --json fields are recorded (and
+      raise under the strict flag) instead of silently resolving to a default.
+    '
+    include *
+  }
+}
