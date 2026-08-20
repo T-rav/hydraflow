@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useCallback, useReducer, useMemo } from 'react'
-import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS, PIPELINE_POLL_SAFETY_NET_MS, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS, REPO_ALL } from '../constants'
+import { MAX_EVENTS, SYSTEM_WORKER_INTERVALS, PIPELINE_POLL_SAFETY_NET_MS, WS_RECONNECT_BASE_MS, WS_RECONNECT_MAX_MS, REPO_ALL, WS_BATCH_FLUSH_MS, WS_BATCH_MAX_QUEUE } from '../constants'
 import { deriveStageStatus } from '../hooks/useStageStatus'
 
 const emptyPipeline = {
@@ -159,6 +159,14 @@ export function reducer(state, action) {
       return { ...state, connected: true }
     case 'DISCONNECTED':
       return { ...state, connected: false }
+
+    // Coalesced WS frames (#11221): live frames are queued by the batcher and
+    // flushed here as one action. Fold sequentially through this same reducer
+    // so dedup / lastSeenId / repo-keying semantics are byte-identical to
+    // dispatching each action one at a time — only the notification frequency
+    // changes. An empty actions array reduces back to the same reference.
+    case 'WS_BATCH':
+      return action.actions.reduce((s, a) => reducer(s, a), state)
 
     case 'phase_change': {
       const newPhase = action.data.phase
@@ -987,6 +995,47 @@ export function reducer(state, action) {
   }
 }
 
+// Coalesces live WS frames into bounded-cadence batches so a burst of events
+// produces one reducer pass / one context-value change instead of one per
+// frame (#11221). Pure and dependency-free — takes `dispatch` as a parameter
+// and owns no React state — so the cadence semantics (throttle vs debounce,
+// multi-cycle re-arm, immediate flush at maxQueue) are unit-testable without
+// mounting HydraFlowProvider. `flush()` is also what the provider calls on
+// visibilitychange and unmount, so a queued-but-not-yet-elapsed batch is
+// never stranded by a boundary crossing.
+export function createWsBatcher(dispatch, { flushMs = WS_BATCH_FLUSH_MS, maxQueue = WS_BATCH_MAX_QUEUE } = {}) {
+  let queue = []
+  let timer = null
+
+  function flush() {
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+    if (queue.length === 0) return
+    const actions = queue
+    queue = []
+    dispatch({ type: 'WS_BATCH', actions })
+  }
+
+  function enqueue(action) {
+    queue.push(action)
+    if (queue.length >= maxQueue) {
+      flush()
+      return
+    }
+    // Throttle, not debounce: arm the timer only when none is pending. A
+    // frame arriving mid-window must NOT push the deadline out — a sustained
+    // stream under a debounce could starve the flush indefinitely and blow
+    // past the perceived-latency budget.
+    if (timer === null) {
+      timer = setTimeout(flush, flushMs)
+    }
+  }
+
+  return { enqueue, flush }
+}
+
 const HydraFlowContext = createContext(null)
 
 // Fallback UUID v4 generator for non-secure contexts (e.g. the
@@ -1036,8 +1085,25 @@ export function HydraFlowProvider({ children }) {
   const lastEventTsRef = useRef(null)
   const bgWorkersRef = useRef(state.backgroundWorkers)
   const reporterIdRef = useRef(getReporterId())
+  // Lazy-init (not useRef(createWsBatcher(dispatch)), which would construct a
+  // batcher on every render): the batcher owns its own queue/timer closure
+  // and must be created exactly once per provider mount. `dispatch` from
+  // useReducer is referentially stable across renders, so capturing it here
+  // is safe.
+  const wsBatcherRef = useRef(null)
+  if (wsBatcherRef.current === null) {
+    wsBatcherRef.current = createWsBatcher(dispatch)
+  }
 
   bgWorkersRef.current = state.backgroundWorkers
+
+  const enqueueWsAction = useCallback((action) => {
+    wsBatcherRef.current.enqueue(action)
+  }, [])
+
+  const flushWsQueue = useCallback(() => {
+    wsBatcherRef.current.flush()
+  }, [])
 
   const applyRepoParam = useCallback((url) => {
     const slug = state.selectedRepoSlug
@@ -1815,7 +1881,12 @@ export function HydraFlowProvider({ children }) {
     ws.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data)
-        dispatch({ type: event.type, data: event.data, timestamp: event.timestamp, id: event.id, repo: event.repo })
+        // Queued and flushed at a bounded cadence (#11221) rather than
+        // dispatched per-frame — see createWsBatcher. The backfill cursor and
+        // the side-effect REST refetches below stay synchronous per message;
+        // only the reducer dispatch (the O(MAX_EVENTS) rebuild + consumer
+        // fan-out) is coalesced.
+        enqueueWsAction({ type: event.type, data: event.data, timestamp: event.timestamp, id: event.id, repo: event.repo })
         if (event.timestamp && (!lastEventTsRef.current || event.timestamp > lastEventTsRef.current)) {
           lastEventTsRef.current = event.timestamp
         }
@@ -1877,7 +1948,7 @@ export function HydraFlowProvider({ children }) {
       console.warn('[HydraFlow] WebSocket error; awaiting close for reconnect', err)
     }
     wsRef.current = ws
-  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchLoopFitness, fetchAdrConformance, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo])
+  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchLoopFitness, fetchAdrConformance, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo, enqueueWsAction])
 
   useEffect(() => {
     const poll = () => {
@@ -1915,6 +1986,21 @@ export function HydraFlowProvider({ children }) {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
     }
   }, [connect])
+
+  // Flush any queued-but-not-yet-elapsed WS batch when the tab is hidden and
+  // on unmount (#11221) — otherwise a flush window straddling either boundary
+  // could strand up to WS_BATCH_FLUSH_MS of tail events (background tabs get
+  // their timers clamped, so a hidden-tab window may not fire on time).
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') flushWsQueue()
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      flushWsQueue()
+    }
+  }, [flushWsQueue])
 
   useEffect(() => {
     fetchRepos()
