@@ -43,6 +43,7 @@ from phase_utils import (
     MemorySuggester,
     PipelineEscalator,
     _sentry_transaction,
+    issue_state_is_resolved,
     log_exception_with_bug_classification,
     record_harness_failure,
     release_batch_in_flight,
@@ -68,7 +69,7 @@ logger = logging.getLogger("hydraflow.implement_phase")
 #
 # The per-issue implement pipeline runs as an explicit ``src.flows.Flow``:
 #
-#     decompose -> no-progress-abort -> build -> screen
+#     decompose -> no-progress-abort -> issue-state -> build -> screen
 #         screen  --(zero-commit / null-delivery)--> spec-verify -> gate -> done
 #         screen  --(otherwise)---------------------> open-pr
 #         open-pr --(success / early-return)--------> done
@@ -567,6 +568,13 @@ class ImplementPhase:
         * ``no-progress-abort`` *(new — the point of P2, #10659/#10616)* —
           before spending another (up to ``agent_timeout``) build, escalate a
           non-converging issue to HITL instead of retry-thrashing to the cap.
+        * ``issue-state`` *(new — #11457)* — the last gate before the
+          actuator: re-read the issue's state from GitHub and abandon the
+          build when the issue was resolved elsewhere between selection and
+          branch-cut. Placement after ``no-progress-abort`` is deliberate —
+          ``decompose``'s existing-PR shortcut and attempt cap must still run
+          first. ``open-pr`` re-checks the same thing before pushing, closing
+          the mid-build half of the window.
         * ``build`` — the sole actuator: runs the implementation agent and
           records the run (unchanged from today).
         * ``screen`` — classify the outcome (zero-commit / null-delivery /
@@ -595,6 +603,11 @@ class ImplementPhase:
                     self._flow_no_progress_abort,
                     kind="gate",
                 ),
+                Node(
+                    "issue-state",
+                    self._flow_issue_state,
+                    kind="gate",
+                ),
                 Node("build", self._flow_build),
                 Node("screen", self._flow_screen, kind="gate"),
                 Node("spec-verify", self._flow_spec_verify),
@@ -607,7 +620,9 @@ class ImplementPhase:
                 Edge("decompose", "done", when=_flow_stopped),
                 Edge("decompose", "no-progress-abort"),
                 Edge("no-progress-abort", "done", when=_flow_stopped),
-                Edge("no-progress-abort", "build"),
+                Edge("no-progress-abort", "issue-state"),
+                Edge("issue-state", "done", when=_flow_stopped),
+                Edge("issue-state", "build"),
                 Edge("build", "screen"),
                 Edge("screen", "spec-verify", when=_route_is_failure_screen),
                 Edge("screen", "open-pr"),
@@ -700,6 +715,26 @@ class ImplementPhase:
         if not self._should_abort_no_progress(issue):
             return state
         state["result"] = await self._escalate_no_progress(issue, branch)
+        state["_stop"] = True
+        return state
+
+    async def _flow_issue_state(self, state: FlowState) -> FlowState:
+        """Re-check the issue's GitHub state immediately before the build (#11457).
+
+        The work-picker validates issue state at selection only; between the
+        pick and the branch-cut another PR can close the issue and the local
+        cache goes stale — building anyway produced the duplicate PRs behind
+        #11443/#11451. GitHub is the source of truth (ADR-0041), so this node
+        re-reads it as the LAST gate before the actuator and abandons the
+        attempt when the issue was resolved elsewhere. The read fails open:
+        only a positive resolved state abandons, never a failed one.
+        """
+        issue = state["issue"]
+        if not await self._issue_resolved_elsewhere(issue.id):
+            return state
+        state["result"] = await self._abandon_resolved_issue(
+            issue, state["branch"], at="branch-cut"
+        )
         state["_stop"] = True
         return state
 
@@ -866,6 +901,17 @@ class ImplementPhase:
         result = state["result"]
         is_retry = state["is_retry"]
 
+        # Surface B of the #11457 window: the issue can also close DURING
+        # the (minutes-long) build. Re-check before pushing so a resolved
+        # issue never opens the duplicate PR — the commit cost is already
+        # spent, but the PR, its CI, and the review round are not.
+        if await self._issue_resolved_elsewhere(issue.id):
+            state["result"] = await self._abandon_resolved_issue(
+                issue, state["branch"], at="open-pr"
+            )
+            state["_stop"] = True
+            return state
+
         # Fresh failed attempts skip the push entirely — partial commits never
         # land on origin. Cycling retries reset the worktree to main. Retries
         # with review feedback push so the existing PR sees the iteration.
@@ -989,6 +1035,63 @@ class ImplementPhase:
             return plan_path.read_text()
         except OSError:
             return ""
+
+    # -- resolved-issue gate helpers (#11457) -------------------------------
+
+    async def _issue_resolved_elsewhere(self, issue_number: int) -> bool:
+        """Re-read the issue's state from GitHub; True when resolved (#11457).
+
+        Fail-open by contract: a transient Port failure logs and reads as
+        "not resolved" — the gate only ever abandons on a positive resolved
+        read, so an unreadable issue still builds (trading a rare duplicate
+        PR for a guaranteed stuck factory would be the worse failure).
+        Credit/auth exhaustion and likely bugs re-raise per the
+        ``reraise_on_credit_or_bug`` dark-factory contract.
+        """
+        try:
+            gh_state = await self._prs.get_issue_state(issue_number)
+        except Exception as exc:
+            from exception_classify import reraise_on_credit_or_bug
+
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "Issue-state re-check failed for #%d — failing open (build proceeds)",
+                issue_number,
+                exc_info=True,
+            )
+            return False
+        return issue_state_is_resolved(gh_state)
+
+    async def _abandon_resolved_issue(
+        self, issue: Task, branch: str, *, at: str
+    ) -> WorkerResult:
+        """Abandon an attempt whose issue was resolved elsewhere (#11457).
+
+        Terminal, side-effect-free exit: the build slot returns without an
+        agent run, worktree, or PR. Deliberately NO re-enqueue to ready and
+        NO label stripping — the issue is closed on GitHub, so
+        ``IssueFetcher._is_open`` drops it on the next refresh and
+        ``LabelDriftWatcherLoop`` reconciles any stray pipeline labels
+        (ADR-0088); re-queueing or swapping here would fight both. The state
+        records ``completed`` (the terminal, workspace-clearing status) so no
+        retry sweeper can pick a resolved issue back up, and the returned
+        ``WorkerResult`` is non-success: this worker delivered nothing.
+        """
+        logger.info(
+            "Issue #%d was resolved elsewhere (closed on GitHub) — abandoning "
+            "the attempt at %s before spending further work (#11457)",
+            issue.id,
+            at,
+        )
+        self._state.mark_issue(issue.id, "completed")
+        return WorkerResult(
+            issue_number=issue.id,
+            branch=branch,
+            error=(
+                f"Issue #{issue.id} already resolved elsewhere (closed on "
+                f"GitHub) — build abandoned at {at}"
+            ),
+        )
 
     async def _create_beads_in_worktree(
         self, issue: Task, wt_path: Path

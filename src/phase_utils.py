@@ -215,6 +215,24 @@ def release_batch_in_flight(
         )
 
 
+# GitHub ``stateReason`` values that mean an issue is done — the vocabulary
+# of ``PRPort.get_issue_state`` (OPEN / COMPLETED / NOT_PLANNED / UNKNOWN).
+_RESOLVED_ISSUE_STATES = frozenset({"COMPLETED", "NOT_PLANNED"})
+
+
+def issue_state_is_resolved(state: object) -> bool:
+    """True only for GitHub issue states that mean the issue is resolved (#11457).
+
+    ``COMPLETED`` (fixed) and ``NOT_PLANNED`` (duplicate/wontfix close,
+    #10025) are resolved; ``OPEN`` / ``UNKNOWN`` / anything unreadable is
+    not. The ``str()`` coercion keeps the predicate fail-open: a caller
+    whose Port returns an arbitrary object (an unconfigured ``AsyncMock``
+    yields a ``MagicMock``) reads as NOT resolved, so a state re-check built
+    on this predicate never blocks a build on a garbage read.
+    """
+    return str(state or "").upper() in _RESOLVED_ISSUE_STATES
+
+
 async def escalate_to_hitl(
     state: StateTracker,
     prs: PRPort,
