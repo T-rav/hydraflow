@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "actual_claude_cli_sandbox_gateway_probe",
+  "recorded_at": "2026-08-20T01:33:15Z",
+  "actual_claude_cli": true,
+  "claude_cli_version": "2.1.236",
+  "live_provider_session": false,
+  "upstream_kind": "deterministic_anthropic_http_sandbox",
+  "transport": {
+    "cli_to_gateway": "real_local_tcp",
+    "gateway_to_upstream": "real_local_tcp"
+  },
+  "session": {
+    "model_requested": "claude-sonnet-4-6",
+    "model_served": "claude-sonnet-4-6",
+    "cli_exit_code": 0,
+    "cli_reported_turns": 2,
+    "terminal_reason": "completed",
+    "tool_result_observed_upstream": true,
+    "upstream_provider_auth_valid": true,
+    "client_aborted": false
+  },
+  "gateway": {
+    "upstream_exchange_count": 3,
+    "ledger_row_count": 3,
+    "status_codes": [
+      200,
+      200,
+      200
+    ],
+    "ledger_statuses": [
+      "completed",
+      "completed",
+      "completed"
+    ],
+    "body_capture_policy": "metadata-only",
+    "body_capture_count": 0
+  },
+  "usage": {
+    "input_tokens_total": 63,
+    "output_tokens_total": 54,
+    "cache_creation_input_tokens_total": 6,
+    "cache_read_input_tokens_total": 10,
+    "cost_usd_total": 0.0010245,
+    "cost_unknown": false
+  },
+  "credential_boundary": {
+    "real_provider_credentials_present_in_cli_environment": false,
+    "provider_credential_injected_by_gateway": true
+  },
+  "direct_comparison_artifact": "conformance_manifest.json",
+  "sanitization": {
+    "raw_prompt_omitted": true,
+    "raw_model_output_omitted": true,
+    "session_and_request_ids_omitted": true,
+    "request_headers_and_bodies_omitted": true,
+    "virtual_control_and_provider_credentials_omitted": true
+  }
+}

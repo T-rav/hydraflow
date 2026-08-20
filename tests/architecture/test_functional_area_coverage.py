@@ -308,6 +308,19 @@ _JUSTIFIED_NEW_LOOPS: dict[str, str] = {
         "repair vs Tier-2 goal-driven mission redirect — ADR-0124 keeps the tiers "
         "separate so no LLM sits in the deterministic kernel)"
     ),
+    # GatewayCoverageLoop (#11473): repository-scoped attribution completeness
+    # compares gateway ledger spend with all agentic telemetry on its own
+    # window/cadence. CostBudgetWatcherLoop was considered and rejected because
+    # it enforces budgets rather than detecting bypass; HealthMonitorLoop was
+    # rejected because it repairs runtime mechanisms rather than preserving a
+    # durable, auditable coverage ceiling. No individual workstream phase sees
+    # every gateway and direct-provider exchange across the fleet.
+    "GatewayCoverageLoop": (
+        "repo-wide gateway-vs-direct attribution on its own window/cadence; "
+        "CostBudgetWatcherLoop host rejected (budget enforcement, not bypass "
+        "detection) and HealthMonitorLoop host rejected (runtime repair, not "
+        "durable coverage-ceiling evidence)"
+    ),
 }
 
 

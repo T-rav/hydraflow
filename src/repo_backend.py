@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from credit_failover import zai_key_present
-from prompt_telemetry import rewrite_command_model
+from prompt_telemetry import parse_command_tool_model, rewrite_command_model
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -48,8 +48,18 @@ def apply_repo_provider(
     """
     if provider != "claude":
         return provider, cmd
-    if config.repo_provider != "zai":
+    repo_provider = config.repo_provider
+    if repo_provider not in {"gateway", "zai"}:
         return provider, cmd
+    tool, _ = parse_command_tool_model(cmd)
+    if tool == "codex":
+        return provider, cmd
+    if repo_provider == "gateway":
+        model = config.repo_model.strip()
+        return (
+            "gateway",
+            rewrite_command_model(cmd, model) if model else cmd,
+        )
     if not zai_key_present():
         return provider, cmd
     model = config.repo_model.strip() or config.credit_failover_model

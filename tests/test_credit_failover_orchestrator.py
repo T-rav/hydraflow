@@ -80,7 +80,48 @@ async def test_no_zai_key_does_not_engage(
     monkeypatch.delenv("ZAI_API_KEY", raising=False)
     monkeypatch.delenv("HYDRAFLOW_ZAI_API_KEY", raising=False)
     orch = HydraFlowOrchestrator(config)
-    assert await orch._maybe_engage_failover(_auth_claude_cap()) is False
+    assert await orch._maybe_engage_failover(_auth_claude_cap(), "plan") is False
+    assert credit_failover.is_active() is False
+
+
+@pytest.mark.asyncio
+async def test_gateway_work_loop_engages_without_local_zai_key(
+    config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for key in (
+        "ZAI_CODING_PLAN_KEY",
+        "HYDRAFLOW_ZAI_CODING_PLAN_KEY",
+        "ZAI_API_KEY",
+        "HYDRAFLOW_ZAI_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    object.__setattr__(config, "planner_provider", "gateway")
+    orch = HydraFlowOrchestrator(config)
+    orch._start_failover_probe = MagicMock()  # type: ignore[method-assign]
+
+    engaged = await orch._maybe_engage_failover(_auth_claude_cap(), "plan")
+
+    assert engaged is True
+    assert credit_failover.is_active() is True
+    orch._start_failover_probe.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_direct_work_loop_still_requires_local_zai_key(
+    config, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for key in (
+        "ZAI_CODING_PLAN_KEY",
+        "HYDRAFLOW_ZAI_CODING_PLAN_KEY",
+        "ZAI_API_KEY",
+        "HYDRAFLOW_ZAI_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    orch = HydraFlowOrchestrator(config)
+
+    engaged = await orch._maybe_engage_failover(_auth_claude_cap(), "plan")
+
+    assert engaged is False
     assert credit_failover.is_active() is False
 
 

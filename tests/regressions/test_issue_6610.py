@@ -45,9 +45,11 @@ def _make_stale_issue_loop(
     deps = make_bg_loop_deps(tmp_path, enabled=True)
 
     prs = MagicMock()
-    prs._repo = "owner/repo"
-    prs._run_gh = AsyncMock(return_value="[]")
+    prs.list_all_issues = AsyncMock(return_value=[])
     prs.post_comment = AsyncMock()
+    prs.close_issue = AsyncMock()
+    prs.list_branch_refs = AsyncMock(return_value=[])
+    prs.list_branch_commits = AsyncMock(return_value=[])
 
     state = MagicMock()
     state.get_stale_issue_settings = MagicMock(return_value=StaleIssueSettings())
@@ -96,22 +98,22 @@ def _make_stale_issue_gc_loop(
 class TestStaleIssueLoopAuthErrorOnFetch:
     """Issue #6610 finding 1 — ``except Exception`` at line 68 of
     ``stale_issue_loop.py`` swallows ``AuthenticationError`` from the
-    ``_run_gh`` call that fetches the issue list.
+    ``list_all_issues`` call that fetches the issue list.
     """
 
     @pytest.mark.asyncio
     async def test_authentication_error_propagates_from_fetch(
         self, tmp_path: Path
     ) -> None:
-        """When ``_run_gh`` raises ``AuthenticationError``, ``_do_work``
-        must let it propagate rather than returning stats dict.
+        """When ``list_all_issues`` raises ``AuthenticationError``,
+        ``_do_work`` must let it propagate rather than returning stats dict.
 
         Currently FAILS (RED) because the broad ``except Exception`` at
         line 68 catches ``AuthenticationError`` and silently returns
         ``{"scanned": 0, "closed": 0, "skipped": 0}``.
         """
         loop, prs, _ = _make_stale_issue_loop(tmp_path)
-        prs._run_gh.side_effect = AuthenticationError("Bad credentials")
+        prs.list_all_issues.side_effect = AuthenticationError("Bad credentials")
 
         with pytest.raises(AuthenticationError):
             await loop._do_work()
@@ -124,7 +126,7 @@ class TestStaleIssueLoopAuthErrorOnFetch:
         This is GREEN on the current code and should remain GREEN after fix.
         """
         loop, prs, _ = _make_stale_issue_loop(tmp_path)
-        prs._run_gh.side_effect = RuntimeError("network timeout")
+        prs.list_all_issues.side_effect = RuntimeError("network timeout")
 
         result = await loop._do_work()
 
@@ -155,19 +157,14 @@ class TestStaleIssueLoopAuthErrorOnClose:
         loop, prs, state = _make_stale_issue_loop(tmp_path)
 
         # Return one stale issue (updated long ago)
-        import json
-
-        stale_issue = json.dumps(
-            [
-                {
-                    "number": 42,
-                    "title": "old issue",
-                    "updatedAt": "2020-01-01T00:00:00Z",
-                    "labels": [],
-                }
-            ]
-        )
-        prs._run_gh.side_effect = AsyncMock(return_value=stale_issue)
+        prs.list_all_issues.return_value = [
+            {
+                "number": 42,
+                "title": "old issue",
+                "updatedAt": "2020-01-01T00:00:00Z",
+                "labels": [],
+            }
+        ]
         # The close path calls post_comment first — make it raise
         prs.post_comment.side_effect = AuthenticationError("Bad credentials")
 

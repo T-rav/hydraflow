@@ -128,7 +128,7 @@ entries:
   src/disturbance_dampener_loop.py::noqa:BLE001: 1
   src/disturbance_dampener_loop.py::noqa:S101: 1
   src/docker_runner.py::noqa:A002: 1
-  src/docker_runner.py::noqa:ARG002: 6
+  src/docker_runner.py::noqa:ARG002: 5
   src/docker_runner.py::noqa:PLC0415: 8
   src/docker_runner.py::noqa:S108: 1
   src/docker_runner.py::type-ignore[arg-type]: 1

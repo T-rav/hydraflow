@@ -105,6 +105,45 @@ class TestLoopProviders:
         # A non-dialed loop is unaffected.
         assert providers["plan"] == PROVIDER_ANTHROPIC
 
+    def test_gateway_glm_loop_maps_to_zai_billing_provider(self) -> None:
+        orch = HydraFlowOrchestrator(
+            ConfigFactory.create().model_copy(
+                update={
+                    "adr_review_provider": "gateway",
+                    "adr_review_model": "glm-5.2",
+                }
+            )
+        )
+
+        providers = orch._loop_providers(["adr_reviewer", "plan"])
+
+        assert providers == {"adr_reviewer": "zai", "plan": PROVIDER_ANTHROPIC}
+
+    def test_primary_work_loops_use_their_provider_and_model_dials(self) -> None:
+        orch = HydraFlowOrchestrator(
+            ConfigFactory.create().model_copy(
+                update={
+                    "triage_provider": "gateway",
+                    "triage_model": "glm-5.2",
+                    "planner_provider": "zai",
+                    "planner_model": "glm-5.2",
+                    "implementation_provider": "gateway",
+                    "model": "sonnet",
+                    "review_provider": "zai",
+                    "review_model": "glm-5.2",
+                }
+            )
+        )
+
+        providers = orch._loop_providers(["triage", "plan", "implement", "review"])
+
+        assert providers == {
+            "triage": "zai",
+            "plan": "zai",
+            "implement": PROVIDER_ANTHROPIC,
+            "review": "zai",
+        }
+
 
 class TestAffectedLoops:
     def test_anthropic_cap_spares_backend_routed_loop(self) -> None:

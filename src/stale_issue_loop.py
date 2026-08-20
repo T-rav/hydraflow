@@ -28,7 +28,6 @@ truth comment on GitHub — StaleIssueLoop's existing ``post_comment`` +
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -187,25 +186,11 @@ class StaleIssueLoop(BaseBackgroundLoop):
         }
 
     async def _branch_gc_candidate_branches(self) -> list[str]:
-        """List remote branches under the tracked GC prefixes (#10011).
-
-        Composes the existing ``PRManager._run_gh`` passthrough (already used
-        above for ``gh issue list``) rather than adding a new PRPort method —
-        the GitHub matching-refs read needs no port-level abstraction beyond
-        what's already reachable here, and FakeGitHub's generic ``_run_gh``
-        dispatcher safely no-ops unknown ``gh api`` shapes to ``"[]"``.
-        """
+        """List remote branches under the tracked GC prefixes (#10011)."""
         branches: list[str] = []
         for prefix in _BRANCH_GC_PREFIXES:
             try:
-                raw = await self._prs._run_gh(
-                    "gh",
-                    "api",
-                    f"repos/{self._prs._repo}/git/matching-refs/heads/{prefix}",
-                    "--jq",
-                    "[.[].ref]",
-                )
-                refs = json.loads(raw) if raw.strip() else []
+                refs = await self._prs.list_branch_refs(prefix)
             except Exception as exc:
                 reraise_on_credit_or_bug(exc)
                 logger.debug(
@@ -214,54 +199,29 @@ class StaleIssueLoop(BaseBackgroundLoop):
                     exc_info=True,
                 )
                 continue
-            branches.extend(
-                str(ref).removeprefix("refs/heads/")
-                for ref in refs
-                if isinstance(ref, str)
-            )
+            branches.extend(branch for branch, _sha in refs)
         return branches
 
     async def _branch_gc_commit_info(self, branch: str) -> tuple[str, list[str]] | None:
         """Return ``(last_commit_iso, commit_messages)`` for *branch*, newest first.
 
-        One ``gh api .../commits`` call serves both the branch's age (the
-        newest commit's date) and the full commit-message history needed to
-        find a ``Fixes #N`` reference that isn't necessarily the tip commit.
-        ``--method GET`` is required alongside ``--field`` — ``gh api``
-        defaults to POST once any ``--field`` is present (matches
-        ``find_open_pr_for_branch``'s call shape above).
+        Serves both the branch's age (the newest commit's date) and the
+        full commit-message history needed to find a ``Fixes #N`` reference
+        that isn't necessarily the tip commit.
         """
         try:
-            raw = await self._prs._run_gh(
-                "gh",
-                "api",
-                f"repos/{self._prs._repo}/commits",
-                "--method",
-                "GET",
-                "--field",
-                f"sha={branch}",
-                "--field",
-                "per_page=30",
-                "--jq",
-                "[.[] | {date: .commit.committer.date, message: .commit.message}]",
-            )
-            commits = json.loads(raw) if raw.strip() else []
+            commits = await self._prs.list_branch_commits(branch, limit=30)
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             logger.debug(
                 "branch-gc: could not fetch commits for %s", branch, exc_info=True
             )
             return None
-        if not isinstance(commits, list) or not commits:
+        if not commits:
             return None
-        messages = [c.get("message", "") for c in commits if isinstance(c, dict)]
+        messages = [c.get("message", "") for c in commits]
         last_commit_iso = next(
-            (
-                c.get("date", "")
-                for c in commits
-                if isinstance(c, dict) and c.get("date")
-            ),
-            "",
+            (c.get("date", "") for c in commits if c.get("date")), ""
         )
         return last_commit_iso, messages
 
@@ -407,20 +367,7 @@ class StaleIssueLoop(BaseBackgroundLoop):
         ]
 
         try:
-            raw = await self._prs._run_gh(
-                "gh",
-                "issue",
-                "list",
-                "--repo",
-                self._prs._repo,
-                "--state",
-                "open",
-                "--limit",
-                "100",
-                "--json",
-                "number,title,updatedAt,labels",
-            )
-            issues = json.loads(raw) if raw else []
+            issues = await self._prs.list_all_issues(state="open", limit=100)
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             logger.warning("Failed to fetch issues for stale check", exc_info=True)
@@ -473,14 +420,7 @@ class StaleIssueLoop(BaseBackgroundLoop):
                     "If this is still relevant, please reopen it.\n\n"
                     "*Closed by HydraFlow Stale Issue Cleanup.*",
                 )
-                await self._prs._run_gh(
-                    "gh",
-                    "issue",
-                    "close",
-                    "--repo",
-                    self._prs._repo,
-                    str(number),
-                )
+                await self._prs.close_issue(number)
                 self._state.add_stale_issue_closed(number)
                 stats["closed"] += 1
                 logger.info(
@@ -522,20 +462,7 @@ class StaleIssueLoop(BaseBackgroundLoop):
         if not isinstance(budget, int) or budget <= 0:
             return stats
         try:
-            raw = await self._prs._run_gh(
-                "gh",
-                "issue",
-                "list",
-                "--repo",
-                self._prs._repo,
-                "--state",
-                "open",
-                "--limit",
-                "200",
-                "--json",
-                "number,title,createdAt,labels",
-            )
-            issues = json.loads(raw) if raw else []
+            issues = await self._prs.list_all_issues(state="open", limit=200)
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
             logger.warning("Backlog-budget fetch failed", exc_info=True)
@@ -579,9 +506,9 @@ class StaleIssueLoop(BaseBackgroundLoop):
         dry_run = bool(self._config.dry_run) or bool(settings.dry_run)
         for pick in picks:
             if dry_run:
-                # Mirrors the stale-close path 40 lines below: dry-run
-                # logs the decision, closes nothing (review BLOCKING —
-                # _run_gh has no dry-run awareness of its own).
+                # Mirrors the stale-close path 40 lines below: dry-run logs
+                # the decision, closes nothing (review BLOCKING — settings
+                # .dry_run is loop-instance state close_issue can't see).
                 logger.info(
                     "[dry-run] Backlog valve would retire #%d (%.1fd): %s",
                     pick.number,
@@ -591,14 +518,7 @@ class StaleIssueLoop(BaseBackgroundLoop):
                 continue
             try:
                 await self._prs.post_comment(pick.number, RETIREMENT_COMMENT)
-                await self._prs._run_gh(
-                    "gh",
-                    "issue",
-                    "close",
-                    "--repo",
-                    self._prs._repo,
-                    str(pick.number),
-                )
+                await self._prs.close_issue(pick.number)
                 stats["retired"] += 1
                 logger.info(
                     "Backlog valve retired #%d (%.1fd old): %s",

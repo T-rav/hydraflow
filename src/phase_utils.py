@@ -194,14 +194,25 @@ async def run_refilling_pool(
     return results
 
 
-def release_batch_in_flight(store: IssueStorePort, issue_numbers: set[int]) -> None:
+def release_batch_in_flight(
+    store: IssueStorePort,
+    issue_numbers: set[int],
+    *,
+    expected_stage: str | None = None,
+) -> None:
     """Release in-flight protection for a batch of issues.
 
     Should be called in a ``finally`` block after ``run_concurrent_batch``
     to ensure no orphaned in-flight entries survive if a worker exits
     without reaching ``mark_active`` / ``mark_complete``.
     """
-    store.release_in_flight(issue_numbers)
+    if expected_stage is None:
+        store.release_in_flight(issue_numbers)
+    else:
+        store.release_in_flight(
+            issue_numbers,
+            expected_stage=expected_stage,
+        )
 
 
 # GitHub ``stateReason`` values that mean an issue is done — the vocabulary

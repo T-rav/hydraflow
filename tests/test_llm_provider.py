@@ -106,6 +106,13 @@ class TestTelemetryCmd:
             "haiku",
         ]
 
+    def test_gateway_head_marks_transport_for_coverage_deduplication(self):
+        assert _telemetry_cmd("gateway", "claude", "haiku") == [
+            "gateway",
+            "--model",
+            "haiku",
+        ]
+
 
 class TestBackendRegistry:
     """Each OpenAI-compatible backend resolves a base URL (from config) and a
@@ -555,7 +562,7 @@ class TestRunLightweightAgentDispatch:
             recorded.update(kw)
 
         monkeypatch.setattr("runner_utils._openai_compatible_complete", _fake_complete)
-        monkeypatch.setattr("runner_utils._record_inference", _fake_record)
+        monkeypatch.setattr("runner_utils.record_inference_telemetry", _fake_record)
 
         await run_lightweight_agent(
             runner=AsyncMock(),
@@ -605,6 +612,71 @@ class TestRunLightweightAgentDispatch:
         assert cli_called["n"] == 1
         assert http_called["n"] == 0
 
+    async def test_terminal_gateway_replaces_host_runner_with_owned_docker_runner(
+        self, monkeypatch
+    ):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from config import HydraFlowConfig
+        from execution import HostRunner, SimpleResult
+        from runner_utils import GatewayMintCredential, run_lightweight_agent
+
+        isolated_runner = AsyncMock()
+        isolated_runner.run_simple.return_value = SimpleResult(
+            stdout="isolated",
+            returncode=0,
+        )
+        gateway_client = AsyncMock()
+        gateway_client.mint_key.return_value = GatewayMintCredential(
+            key_id="terminal-long-prompt",
+            token="hfgw_terminal_long_prompt",
+            expires_at="2099-08-19T12:05:00Z",
+        )
+        gateway_client.revoke_key.return_value = True
+        prompt = "p" * 100_001
+        monkeypatch.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", "control-secret")
+
+        monkeypatch.setattr(
+            "runner_utils.get_docker_runner",
+            lambda _config: isolated_runner,
+        )
+        monkeypatch.setattr(
+            "runner_utils.record_inference_telemetry",
+            lambda *_args, **_kwargs: None,
+        )
+        # The boundary under test is the large-prompt stdin handoff. Prompt
+        # shape observation is intentionally exercised by its own suite and is
+        # expensive for a 100 KiB synthetic string.
+        monkeypatch.setattr(
+            "runner_utils.gate_prompt",
+            lambda prompt, **_kwargs: SimpleNamespace(prompt=prompt),
+        )
+
+        result = await run_lightweight_agent(
+            runner=HostRunner(),
+            config=HydraFlowConfig(
+                gateway_fleet_ratchet_enabled=True,
+                execution_mode="docker",
+            ),
+            tool="claude",
+            model="haiku",
+            prompt=prompt,
+            source="sampled_audit",
+            timeout=10.0,
+            gateway_client=gateway_client,
+        )
+
+        assert result.stdout == "isolated"
+        run_kwargs = isolated_runner.run_simple.await_args.kwargs
+        assert run_kwargs["input"] == prompt.encode()
+        assert run_kwargs["env"]["ANTHROPIC_AUTH_TOKEN"] == (
+            "hfgw_terminal_long_prompt"
+        )
+        assert run_kwargs["env"]["ANTHROPIC_API_KEY"] == ""
+        isolated_runner.cleanup.assert_awaited_once_with()
+        gateway_client.revoke_key.assert_awaited_once()
+
 
 class TestHarnessBackend:
     """z.ai as a Claude-harness backend (the /api/anthropic face)."""
@@ -622,29 +694,33 @@ class TestHarnessBackend:
         assert harness_base_url("anthropic", cfg) == ""
         assert harness_base_url("openrouter", cfg) == ""
 
-    def test_resolve_harness_env_isolation_and_zai(self, monkeypatch) -> None:
+    @pytest.mark.asyncio
+    async def test_resolve_harness_env_isolation_and_zai(self, monkeypatch) -> None:
         from config import HydraFlowConfig
         from runner_utils import resolve_harness_env
 
         cfg = HydraFlowConfig()
         # Native Anthropic: pristine env — the main workers must stay untouched.
-        assert resolve_harness_env("claude", cfg) == {}
-        assert resolve_harness_env("anthropic", cfg) == {}
+        assert await resolve_harness_env("claude", cfg) == {}
+        assert await resolve_harness_env("anthropic", cfg) == {}
         # zai: point the Claude CLI at GLM + clear the shadowing API key.
         monkeypatch.setenv("ZAI_API_KEY", "sk-zai-test")
-        env = resolve_harness_env("zai", cfg)
+        env = await resolve_harness_env("zai", cfg)
         assert env["ANTHROPIC_BASE_URL"] == cfg.zai_harness_base_url
         assert env["ANTHROPIC_AUTH_TOKEN"] == "sk-zai-test"
         assert env["ANTHROPIC_API_KEY"] == ""
 
-    def test_resolve_harness_env_missing_key_falls_open(self, monkeypatch) -> None:
+    @pytest.mark.asyncio
+    async def test_resolve_harness_env_missing_key_falls_open(
+        self, monkeypatch
+    ) -> None:
         from config import HydraFlowConfig
         from runner_utils import resolve_harness_env
 
         monkeypatch.delenv("ZAI_API_KEY", raising=False)
         monkeypatch.delenv("HYDRAFLOW_ZAI_API_KEY", raising=False)
         # No key → fall open to Anthropic rather than spawn a broken CLI.
-        assert resolve_harness_env("zai", HydraFlowConfig()) == {}
+        assert await resolve_harness_env("zai", HydraFlowConfig()) == {}
 
     @pytest.mark.asyncio
     async def test_cli_spawn_env_carries_zai_override(self, monkeypatch) -> None:

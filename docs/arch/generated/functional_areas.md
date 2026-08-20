@@ -60,6 +60,7 @@ flowchart LR
         release_StagingPromotionLoop([StagingPromotionLoop])
     end
     subgraph meta_observability["Meta-Observability"]
+        meta_observability_GatewayCoverageLoop([GatewayCoverageLoop])
         meta_observability_GoalSupervisorLoop([GoalSupervisorLoop])
         meta_observability_HealthMonitorLoop([HealthMonitorLoop])
         meta_observability_TrustFleetSanityLoop([TrustFleetSanityLoop])
@@ -201,20 +202,26 @@ Release-candidate promotion and recovery per the two-tier branch model (ADR-0042
 
 ## Meta-Observability
 
-Monitoring and observability workers that watch the factory watching itself — pipeline-trend health monitoring / auto-tuning and the trust-fleet sanity check that keeps the meta-observability layer honest.
+Monitoring and observability workers that watch the factory watching itself — pipeline-trend health monitoring / auto-tuning, the gateway- transit coverage gauge, and the trust-fleet sanity check that keeps the meta-observability layer honest.
 
 **Loops**
 
+- `GatewayCoverageLoop` — `src.gateway_coverage_loop`
 - `GoalSupervisorLoop` — `src.goal_supervisor_loop`
 - `HealthMonitorLoop` — `src.health_monitor_loop`
 - `TrustFleetSanityLoop` — `src.trust_fleet_sanity_loop`
 
-**Related ADRs:** `ADR-0045`, `ADR-0056`, `ADR-0124`
+**Module globs**
+
+- `src/gateway_coverage.py`
+- `src/gateway_coverage_loop.py`
+
+**Related ADRs:** `ADR-0045`, `ADR-0056`, `ADR-0093`, `ADR-0110`, `ADR-0124`
 
 
 ## Operations
 
-Infrastructure, recovery, and lifecycle workers that keep the pipeline moving — cost-budget watching, diagnostics, epic monitoring/sweeping, GitHub cache, merge-state watching, and PR unsticking.
+Infrastructure, recovery, and lifecycle workers that keep the pipeline moving — the LLM gateway data/control planes, cost-budget watching, diagnostics, epic monitoring/sweeping, GitHub cache, merge-state watching, and PR unsticking.
 
 **Loops**
 
@@ -226,7 +233,12 @@ Infrastructure, recovery, and lifecycle workers that keep the pipeline moving �
 - `MergeStateWatcherLoop` — `src.merge_state_watcher_loop`
 - `PRUnstickerLoop` — `src.pr_unsticker_loop`
 
-**Related ADRs:** `ADR-0029`
+**Module globs**
+
+- `gateway/**`
+- `src/hydraflow_gateway/**`
+
+**Related ADRs:** `ADR-0029`, `ADR-0110`
 
 
 ## Intake

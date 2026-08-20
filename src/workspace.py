@@ -854,6 +854,22 @@ class WorkspaceManager:
         """
         env_src = self._repo_root / ".env"
         env_dst = wt_path / ".env"
+        if self._config.gateway_fleet_ratchet_enabled:
+            # Terminal gateway workers must never receive the source repo's
+            # provider credentials through their filesystem. Workspaces are
+            # disposable clones, so remove a pre-existing copied/symlinked
+            # dotenv as well as declining to create a new one.
+            try:
+                if env_dst.is_symlink() or env_dst.is_file():
+                    env_dst.unlink()
+            except OSError:
+                logger.warning(
+                    "Could not remove .env from terminal gateway workspace %s",
+                    wt_path,
+                    exc_info=True,
+                )
+                raise
+            return
         if env_src.exists() and not env_dst.exists():
             try:
                 if docker:
@@ -892,6 +908,19 @@ class WorkspaceManager:
         """Copy .claude/settings.local.json into the worktree (not symlink — agents may modify)."""
         local_settings_src = self._repo_root / ".claude" / "settings.local.json"
         local_settings_dst = wt_path / ".claude" / "settings.local.json"
+        if self._config.gateway_fleet_ratchet_enabled:
+            try:
+                if local_settings_dst.is_symlink() or local_settings_dst.is_file():
+                    local_settings_dst.unlink()
+            except OSError:
+                logger.warning(
+                    "Could not remove local Claude settings from terminal "
+                    "gateway workspace %s",
+                    wt_path,
+                    exc_info=True,
+                )
+                raise
+            return
         if local_settings_src.exists() and not local_settings_dst.exists():
             try:
                 local_settings_dst.parent.mkdir(parents=True, exist_ok=True)

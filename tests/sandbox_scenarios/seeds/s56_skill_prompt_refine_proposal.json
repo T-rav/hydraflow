@@ -35,6 +35,7 @@
   "expired_run_dirs": [],
   "epic_states": [],
   "health_metrics": {},
+  "prompt_telemetry_source_initialized": false,
   "worker_heartbeats": {},
   "issue_refinement_backlog": [],
   "issue_refinement_verdicts": [],

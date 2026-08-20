@@ -22,7 +22,7 @@ from docker_runner import (
     _check_docker_available,
     get_docker_runner,
 )
-from execution import HostRunner, SubprocessRunner
+from execution import HostRunner, SimpleResult, SubprocessRunner
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -54,6 +54,8 @@ class _MockSocketBuffer:
     def __init__(self, data: bytes) -> None:
         self._data = data
         self._pos = 0
+        self.sent = b""
+        self.write_shutdown = False
 
     def recv(self, n: int) -> bytes:
         if self._pos >= len(self._data):
@@ -62,8 +64,11 @@ class _MockSocketBuffer:
         self._pos += len(chunk)
         return chunk
 
-    def sendall(self, data: bytes) -> None:  # noqa: ARG002
-        pass
+    def sendall(self, data: bytes) -> None:
+        self.sent += data
+
+    def shutdown(self, _how: int) -> None:
+        self.write_shutdown = True
 
 
 def _make_mock_socket_from_frames(*frames: bytes) -> MagicMock:
@@ -465,6 +470,7 @@ def _make_runner(
     git_user_name: str = "",
     git_user_email: str = "",
     mock_client: MagicMock | None = None,
+    config: HydraFlowConfig | None = None,
 ) -> tuple[DockerRunner, MagicMock]:
     """Create a DockerRunner with mocked Docker client."""
     client = mock_client or _make_mock_docker_client()
@@ -480,6 +486,7 @@ def _make_runner(
             spawn_delay=spawn_delay,
             network=network,
             extra_mounts=extra_mounts,
+            config=config,
         )
     # Swap the real client with the mock
     runner._client = client
@@ -531,6 +538,37 @@ class TestDockerRunnerCreateStreamingProcess:
         assert env["ANTHROPIC_AUTH_TOKEN"] == "zai-token"
         # The override WINS over the injected native key (merged after _build_env).
         assert env["ANTHROPIC_API_KEY"] == ""
+
+    @pytest.mark.asyncio
+    async def test_gateway_harness_scrubs_real_keys_before_virtual_overlay(
+        self, tmp_path: Path
+    ) -> None:
+        runner, client = _make_runner(log_dir=tmp_path / "logs")
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+        real_keys = {
+            "ANTHROPIC_API_KEY": "sk-real-anthropic",
+            "CLAUDE_CODE_OAUTH_TOKEN": "oauth-real",
+            "OPENAI_API_KEY": "sk-real-openai",
+            "ZAI_API_KEY": "sk-real-zai",
+        }
+        with patch.dict("os.environ", real_keys, clear=True):
+            await runner.create_streaming_process(
+                ["claude", "-p", "--model", "sonnet"],
+                harness_env={
+                    "ANTHROPIC_BASE_URL": "http://gateway:8080",
+                    "ANTHROPIC_AUTH_TOKEN": "hfgw_virtual",
+                    "ANTHROPIC_API_KEY": "",
+                },
+            )
+
+        env = client.containers.create.call_args.kwargs["environment"]
+        assert env["ANTHROPIC_BASE_URL"] == "http://gateway:8080"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "hfgw_virtual"
+        assert env["ANTHROPIC_API_KEY"] == ""
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+        assert "OPENAI_API_KEY" not in env
+        assert "ZAI_API_KEY" not in env
 
     @pytest.mark.asyncio
     async def test_passes_minimal_env_vars(self, tmp_path: Path) -> None:
@@ -739,6 +777,104 @@ class TestDockerRunnerRunSimple:
         assert result.stdout == "hello output"
 
     @pytest.mark.asyncio
+    async def test_run_simple_honors_bounded_gateway_route_and_scrubs_keys(
+        self, tmp_path: Path
+    ) -> None:
+        home = tmp_path / "home"
+        repo = tmp_path / "repo"
+        workspace = tmp_path / "workspace"
+        for credential_home in (home / ".claude", home / ".codex", home / ".pi"):
+            credential_home.mkdir(parents=True, exist_ok=True)
+        (home / ".claude.json").write_text("real session")
+        repo.mkdir()
+        workspace.mkdir()
+        (repo / ".env").write_text("ZAI_API_KEY=real-zai-key\n")
+        (workspace / ".env").write_text("ANTHROPIC_API_KEY=real-anthropic-key\n")
+        runner, client = _make_runner(
+            repo_root=repo,
+            log_dir=tmp_path / "logs",
+        )
+        (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+        caller_env = {
+            "PATH": "/host/bin",
+            "ANTHROPIC_BASE_URL": "http://gateway:8080",
+            "ANTHROPIC_AUTH_TOKEN": "hfgw_virtual",
+            "ANTHROPIC_API_KEY": "",
+        }
+
+        with (
+            patch("docker_runner.Path.home", return_value=home),
+            patch.dict(
+                "os.environ",
+                {
+                    "ANTHROPIC_API_KEY": "sk-real-anthropic",
+                    "OPENAI_API_KEY": "sk-real-openai",
+                    "ZAI_API_KEY": "sk-real-zai",
+                },
+                clear=True,
+            ),
+        ):
+            await runner.run_simple(
+                ["claude", "-p", "hello"],
+                cwd=str(workspace),
+                env=caller_env,
+            )
+
+        env = client.containers.create.call_args.kwargs["environment"]
+        assert env["ANTHROPIC_BASE_URL"] == "http://gateway:8080"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "hfgw_virtual"
+        assert env["ANTHROPIC_API_KEY"] == ""
+        assert "OPENAI_API_KEY" not in env
+        assert "ZAI_API_KEY" not in env
+        assert "PATH" not in env
+        volumes = client.containers.create.call_args.kwargs["volumes"]
+        assert str(repo) not in volumes
+        assert str(home / ".claude") not in volumes
+        assert str(home / ".claude.json") not in volumes
+        assert str(home / ".codex") not in volumes
+        assert str(home / ".pi") not in volumes
+        dotenv_masks = [
+            Path(source)
+            for source, mount in volumes.items()
+            if mount["bind"] == "/workspace/.env"
+        ]
+        assert len(dotenv_masks) == 1
+        assert dotenv_masks[0].read_text() == ""
+
+    @pytest.mark.asyncio
+    async def test_terminal_gateway_route_rejects_late_injected_extra_mount(
+        self, tmp_path: Path
+    ) -> None:
+        config = HydraFlowConfig(
+            execution_mode="docker",
+            gateway_fleet_ratchet_enabled=True,
+        )
+        # Defense in depth for callers that mutate a validated config or
+        # construct DockerRunner directly instead of using the factory.
+        object.__setattr__(
+            config,
+            "docker_extra_mounts",
+            [f"{tmp_path}:/host-home:ro"],
+        )
+        runner, _ = _make_runner(
+            repo_root=tmp_path / "repo",
+            log_dir=tmp_path / "logs",
+            extra_mounts=config.docker_extra_mounts,
+            config=config,
+        )
+
+        with pytest.raises(RuntimeError, match="forbids arbitrary Docker extra"):
+            await runner.run_simple(
+                ["claude", "-p", "hello"],
+                cwd=str(tmp_path / "workspace"),
+                env={
+                    "ANTHROPIC_BASE_URL": "http://gateway:8080",
+                    "ANTHROPIC_AUTH_TOKEN": "hfgw_virtual",
+                    "ANTHROPIC_API_KEY": "",
+                },
+            )
+
+    @pytest.mark.asyncio
     async def test_run_simple_nonzero_exit(self, tmp_path: Path) -> None:
         container = _make_mock_container(exit_code=1)
         container.logs.side_effect = [b"", b"error output"]
@@ -794,16 +930,32 @@ class TestDockerRunnerRunSimple:
         container.kill.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_run_simple_raises_not_implemented_when_input_provided(self) -> None:
-        """DockerRunner.run_simple raises NotImplementedError when input is provided.
+    async def test_run_simple_streams_large_prompt_through_container_stdin(
+        self,
+    ) -> None:
+        container = _make_mock_container(exit_code=0)
+        socket = _make_mock_socket_from_frames(
+            _frame_stdout(b"answer\n"),
+            _frame_stderr(b"warning\n"),
+        )
+        client = _make_mock_docker_client(container=container, socket=socket)
+        runner, _ = _make_runner(mock_client=client)
+        prompt = b"p" * 100_001
 
-        Stdin piping is not supported in Docker mode — callers should use
-        the host runner for commands that require stdin input.
-        """
-        runner, _ = _make_runner()
+        result = await runner.run_simple(
+            ["claude", "-p", "-"],
+            input=prompt,
+        )
 
-        with pytest.raises(NotImplementedError, match="stdin input not supported"):
-            await runner.run_simple(["claude", "-p"], input=b"hello")
+        assert result == SimpleResult(
+            stdout="answer",
+            stderr="warning",
+            returncode=0,
+        )
+        assert socket._sock.sent == prompt
+        assert socket._sock.write_shutdown is True
+        assert container.attach_socket.call_args.kwargs["params"]["stdin"] == 1
+        container.remove.assert_called_once_with(force=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1144,6 +1296,57 @@ class TestGetDockerRunner:
         ):
             get_docker_runner(config, docker_checker=lambda: True)
         assert "falling back to host runner" in caplog.text.lower()
+
+    def test_get_docker_runner_terminal_profile_raises_when_image_missing(
+        self,
+    ) -> None:
+        config = HydraFlowConfig(
+            execution_mode="docker",
+            docker_image="",
+            gateway_fleet_ratchet_enabled=True,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="terminal gateway profile requires Docker isolation.*docker_image",
+        ):
+            get_docker_runner(config)
+
+    def test_get_docker_runner_terminal_profile_raises_when_daemon_unavailable(
+        self,
+    ) -> None:
+        config = HydraFlowConfig(
+            execution_mode="docker",
+            docker_image="hydra:latest",
+            gateway_fleet_ratchet_enabled=True,
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="terminal gateway profile requires Docker isolation.*daemon",
+        ):
+            get_docker_runner(config, docker_checker=lambda: False)
+
+    def test_get_docker_runner_terminal_profile_raises_when_construction_fails(
+        self,
+    ) -> None:
+        config = HydraFlowConfig(
+            execution_mode="docker",
+            docker_image="hydra:latest",
+            gateway_fleet_ratchet_enabled=True,
+        )
+
+        with (
+            patch("docker.from_env", side_effect=OSError("daemon restarting")),
+            pytest.raises(
+                RuntimeError,
+                match=(
+                    "terminal gateway profile requires Docker isolation.*"
+                    "construction failed"
+                ),
+            ),
+        ):
+            get_docker_runner(config, docker_checker=lambda: True)
 
 
 # ---------------------------------------------------------------------------

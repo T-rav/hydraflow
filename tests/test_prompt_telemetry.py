@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
+import prompt_telemetry as prompt_telemetry_module
 from model_pricing import ModelPricingTable
-from prompt_telemetry import PromptTelemetry, _as_float, parse_command_tool_model
+from prompt_telemetry import (
+    PromptTelemetry,
+    _as_float,
+    parse_command_tool_model,
+    prompt_telemetry_health_path,
+    prompt_telemetry_source_complete,
+)
 from tests.helpers import ConfigFactory
 
 
@@ -79,6 +87,124 @@ class TestPromptTelemetry:
         assert row["total_tokens"] == row["total_est_tokens"]
         assert row["token_estimation_mode"] == "model-aware-chars-per-token"
         assert row["token_estimation_confidence"] in {"low", "medium"}
+        marker = json.loads(prompt_telemetry_health_path(inf_file).read_text())
+        assert marker["status"] == "healthy"
+        assert marker["record_count"] == 1
+        assert marker["chain_head"] == row["record_hash"]
+        assert prompt_telemetry_source_complete(inf_file) is True
+
+    def test_append_failure_persists_unhealthy_source_marker(
+        self, telemetry: PromptTelemetry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def deny_append(_record: dict[str, object]) -> None:
+            raise OSError("disk denied")
+
+        monkeypatch.setattr(telemetry._chain, "append", deny_append)
+
+        telemetry.record(
+            source="reviewer",
+            tool="claude",
+            model="sonnet",
+            issue_number=None,
+            pr_number=None,
+            session_id=None,
+            prompt_chars=100,
+            transcript_chars=10,
+            duration_seconds=0.1,
+            success=True,
+        )
+
+        path = telemetry._config.cost_inferences_path
+        marker = json.loads(prompt_telemetry_health_path(path).read_text())
+        assert marker["status"] == "degraded"
+        assert prompt_telemetry_source_complete(path) is False
+
+    def test_newer_degradation_wins_over_older_healthy_completion(
+        self, telemetry: PromptTelemetry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Serialize the state transition and marker write as one operation."""
+        healthy_write_started = threading.Event()
+        release_healthy_write = threading.Event()
+        newer_writer_progressed = threading.Event()
+        errors: list[Exception] = []
+        real_atomic_write = prompt_telemetry_module.atomic_write
+
+        class ObservableLock:
+            def __init__(self) -> None:
+                self._lock = threading.Lock()
+
+            def __enter__(self) -> ObservableLock:
+                if not self._lock.acquire(blocking=False):
+                    newer_writer_progressed.set()
+                    self._lock.acquire()
+                return self
+
+            def __exit__(
+                self,
+                exc_type: object,
+                exc_value: object,
+                traceback: object,
+            ) -> None:
+                self._lock.release()
+
+        def controlled_atomic_write(path, data: str) -> None:
+            thread_name = threading.current_thread().name
+            if thread_name == "older-healthy":
+                healthy_write_started.set()
+                release_healthy_write.wait(timeout=5)
+            real_atomic_write(path, data)
+            if thread_name == "newer-degraded":
+                newer_writer_progressed.set()
+
+        def set_health(status: str) -> None:
+            try:
+                telemetry._set_source_health(
+                    status,
+                    chain_head="older-head" if status == "healthy" else None,
+                    record_count=1 if status == "healthy" else None,
+                )
+            except Exception as exc:  # pragma: no cover - asserted below
+                errors.append(exc)
+
+        monkeypatch.setattr(prompt_telemetry_module, "_HEALTH_LOCK", ObservableLock())
+        monkeypatch.setattr(
+            prompt_telemetry_module, "atomic_write", controlled_atomic_write
+        )
+        older = threading.Thread(
+            target=set_health,
+            args=("healthy",),
+            name="older-healthy",
+        )
+        newer = threading.Thread(
+            target=set_health,
+            args=("degraded",),
+            name="newer-degraded",
+        )
+
+        older.start()
+        assert healthy_write_started.wait(timeout=5)
+        newer.start()
+        try:
+            # With the write inside the health lock, the newer transition is
+            # now contending. If the write escapes the lock, this event is set
+            # only after the newer degraded marker is durably written. Either
+            # ordering makes the historical lost-latch race deterministic.
+            assert newer_writer_progressed.wait(timeout=5)
+        finally:
+            release_healthy_write.set()
+        older.join(timeout=5)
+        newer.join(timeout=5)
+
+        assert not older.is_alive()
+        assert not newer.is_alive()
+        assert errors == []
+        marker = json.loads(
+            prompt_telemetry_health_path(
+                telemetry._config.cost_inferences_path
+            ).read_text()
+        )
+        assert marker["status"] == "degraded"
+        assert marker["dropped_writes"] == 1
 
     def test_record_writes_pr_rollup(self, telemetry):
         telemetry.record(

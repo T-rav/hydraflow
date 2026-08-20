@@ -116,7 +116,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0107 | `src.discover_runner`, `src.models`, `src.plan_phase`, `src.shape_runner`, `src.triage_phase` | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0108 | `src.event_loop_watchdog`, `src.health_monitor_loop`, `src.issue_fetcher`, `src.issue_store`, `src.mockworld.fakes.fake_clock`, `src.mockworld.sandbox_main`, `src.models`, `src.phase_utils`, `src.retrospective_queue`, `src.subprocess_util` | — |
 | ADR-0109 | `src.agent_cli`, `src.exception_classify`, `src.ports`, `src.review_advisor`, `src.review_phase._phase`, `src.reviewer`, `src.ultra_review` | `pytest:tests/test_ultra_review.py` |
-| ADR-0110 | `src.base_runner`, `src.runner_utils`, `src.subprocess_util` | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
+| ADR-0110 | `src.base_runner`, `src.gateway_coverage_loop`, `src.hydraflow_gateway.app`, `src.runner_utils`, `src.subprocess_util` | `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` |
 | ADR-0111 | `src.flows.adapters`, `src.flows.flow` | `pytest:tests/test_flows.py` |
 | ADR-0112 | `src.config`, `src.ports`, `src.workspace` | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 | ADR-0113 | — | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
@@ -230,6 +230,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.flows.flow` | ADR-0111 |
 | `src.gate_activation_check` | ADR-0082 |
 | `src.gate_activator_loop` | ADR-0082 |
+| `src.gateway_coverage_loop` | ADR-0110 |
 | `src.github_cache_loop` | ADR-0076 |
 | `src.goal_supervisor_loop` | ADR-0124 |
 | `src.harness_insights` | ADR-0099 |
@@ -237,6 +238,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.hitl_runner` | ADR-0103 |
 | `src.human_steering` | ADR-0103 |
 | `src.human_steering_loop` | ADR-0103 |
+| `src.hydraflow_gateway.app` | ADR-0110 |
 | `src.implement_phase` | ADR-0002, ADR-0005, ADR-0014, ADR-0024, ADR-0063, ADR-0097 |
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_fetcher` | ADR-0019, ADR-0067, ADR-0108 |

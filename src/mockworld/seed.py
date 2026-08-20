@@ -243,6 +243,17 @@ class MockWorldSeed:
     # Default empty: no files created, every existing seed payload unchanged.
     health_metrics: dict[str, Any] = field(default_factory=dict)
 
+    # Materialize an explicitly empty, healthy PromptTelemetry source before
+    # sandbox loops boot. FakeLLM replaces every direct LLM runner in the
+    # air-gapped sandbox, so a gateway-only scenario can truthfully have zero
+    # direct inference rows; the coverage collector still requires the source
+    # file to exist before treating that zero as observed rather than missing.
+    # The loader verifies the audit chain and writes the same durable health
+    # marker production telemetry uses. It never injects a spend row and
+    # refuses to clear an existing degraded/corrupt source. Default False:
+    # every scenario that does not assert gateway coverage is unchanged.
+    prompt_telemetry_source_initialized: bool = False
+
     # Persisted worker heartbeats seeded into StateTracker at boot (#9643,
     # absorbed from #9904). Keyed by worker name; each value takes ``status``
     # (default "running"), ``age_seconds`` (numeric, relative — the

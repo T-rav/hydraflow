@@ -40,6 +40,7 @@ from ._erosion_metrics import ErosionMetricsStateMixin
 from ._escape_ledger import EscapeLedgerStateMixin
 from ._fake_coverage import FakeCoverageStateMixin
 from ._flake_tracker import FlakeTrackerStateMixin
+from ._gateway_coverage import GatewayCoverageStateMixin
 from ._gc import StateGCMixin
 from ._give_up import GiveUpStateMixin
 from ._hitl import HITLStateMixin
@@ -120,6 +121,7 @@ class StateTracker(
     TrustFleetSanityStateMixin,
     ContractRefreshStateMixin,
     AutoAgentStateMixin,
+    GatewayCoverageStateMixin,
     DetectorCalibrationStateMixin,
     SandboxFailureFixerStateMixin,
     PrRedRepairStateMixin,

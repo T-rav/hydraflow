@@ -4,31 +4,31 @@
       "content_sha": "03bf70aaf5d4945dab934da2dcad497becc7cf7a45895a2c7b606cb74e7cf4c5"
     },
     "adr-conformance.md": {
-      "content_sha": "25dcf2a7098970932fc05c73bd591476323794494ca39810808d02a1fb48b3d5"
+      "content_sha": "fd0deec8a876e39973acb39ef32525dba6808fff6ee8716eace20cee1a6ae55c"
     },
     "adr-enforcement.md": {
-      "content_sha": "e2584a7c4baa7284d3bcf7753f9eb06aac7c24bcd7a6cef703bc00a8b25aed1b"
+      "content_sha": "b0f446e129197ab91f7cff79d49e7efbb7fe457b03b551bee136493dae9f1bba"
     },
     "adr-falsifiability.md": {
-      "content_sha": "dcf99456321b91ab7a6c78912a832338d19e7c7e87c890dae3340aade0aa9006"
+      "content_sha": "a3a535e33b734f2b970ec63cdab139ad09e866a7e79e257664bb9ac518144681"
     },
     "adr_xref.md": {
-      "content_sha": "52b5ac3d2598cdfc1dec79da4a33f923f4a02d2a2e446b398036aea7346a5abf"
+      "content_sha": "51325a7afd79bc5b1a7d1090a694aa1958a0cae4387556a65264fb17e7a4da94"
     },
     "ai_system_inventory.md": {
-      "content_sha": "ccf213cb533c60167652df93ffd6fe7349c4425a1b96879db7caba02c91f5ae3"
+      "content_sha": "98182cc57073c3dc1808acccbb33276255e4c65d63b03415e114186019ae63e5"
     },
     "changelog.md": {
-      "content_sha": "2d862d3db67ce8ef58a12d7b8230edd50135191a30389773299ed72d13928b86"
+      "content_sha": "7de039d5fbcfbdb7d6a102d7cf951849a915ccbf892917f22ddbed6441c909b5"
     },
     "coverage_matrix.md": {
-      "content_sha": "43f4351138f7ca2250f3d77781e5944aa8d862890c1e56074f899949d9e8fdb4"
+      "content_sha": "43d824a30a8579b12e24a69507a350bf6dea0d3a439ed7d51ef88f47476c3928"
     },
     "events.md": {
       "content_sha": "4102b85691d1dc25c404bfb332aab10a8aa42c2f95ff43d6dac94513ff41aebe"
     },
     "functional_areas.md": {
-      "content_sha": "ff7cb07505e5d489bf942be97ca27cf928a03447a31134643feade78c7512ef7"
+      "content_sha": "bd045a39e58ec311f5b7ab2e1d2069e884a882cc764345a886eac9c240809023"
     },
     "gauntlet-calibration.md": {
       "content_sha": "a04ac9289e3456ea2de979818193f105d5d69d3d08c0f19d77e8008ec226502d"
@@ -37,16 +37,16 @@
       "content_sha": "3a9f46c2a2264d70cfa9fc9ad00212cfb2c0fe358af60acc3c7a7f09aa0126de"
     },
     "loops.md": {
-      "content_sha": "959e20da142c2e8785a0274a7c7c976bb2cfb61d42f5cc7cc50461bcf5818a02"
+      "content_sha": "bf9ca55049491b54114c61afa02a2b263f31f801f0e898d9e9a8bcb72566bf53"
     },
     "mockworld.md": {
-      "content_sha": "c97137e2444e001f5ee8741be6f867807fbcd66b593f1d33f90620c56c759e9e"
+      "content_sha": "ddff9ec2f53a774c9060dcd601333de49ef089cda348aa4c2b56d957c2f4030a"
     },
     "modules.md": {
-      "content_sha": "9bfa4d44424dae58298f0f0f16573bb28c4ec163a23ecc4caa0319609134be6b"
+      "content_sha": "95a2c51f67c20c87c99bf0fdc288d605a3cba8d7494dd7221ef709ccf1ce201c"
     },
     "ports.md": {
-      "content_sha": "ba93efeeda06781b37dfc99ef4e2d673a83e8e26e308d646b4aa0945d6abfabf"
+      "content_sha": "0c430115ec7533dfdcf277d04f457c39308b644ce0368e88e325bdad580600d8"
     },
     "traceability_matrix.md": {
       "content_sha": "df86c0747ce17ddad086a080af88c83afde30844363f3dcacab19e9c345fda5b"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "d79530a563e33f1d96c419912fcaa95d0ddb970f933cd43c563be22405fe1249"
+  "content_sha": "0d340c8a3990fe6793ccee0a9971b6068df52bb1083cb481c145a6154bbb3d6f"
 }

@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-16T17:52:50.703142+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0251
+superseded_by: 0287
 ---
 
 # Backend src/timeline.py owns stage vocabulary; UI mirrors it

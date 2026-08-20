@@ -32,15 +32,21 @@ from config import HydraFlowConfig
 from credit_failover import apply_credit_failover
 from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
+from execution import get_default_runner
 from model_pricing import load_pricing
 from prompt_gate import PromptGateBlockedError, gate_prompt
-from prompt_telemetry import PromptTelemetry
+from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from repo_backend import apply_repo_provider
 from runner_utils import (
     AuthenticationRetryError,
     StreamConfig,
+    _terminal_gateway_runner,
+    harness_billing_provider,
+    renew_gateway_key_if_needed,
     resolve_harness_env,
+    revoke_gateway_key,
     stream_claude_process,
+    telemetry_tool_for_transport,
 )
 
 logger = logging.getLogger("hydraflow.runners.base_subprocess_runner")
@@ -193,76 +199,131 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
 
         self._pre_spawn_hook(prompt)
         cmd = self._build_command(prompt, Path(worktree_path))
+        initial_provider = "claude"
+        cmd_tool, _ = parse_command_tool_model(cmd)
+        if (
+            getattr(self._config, "gateway_fleet_ratchet_enabled", False) is True
+            and cmd_tool == "claude"
+        ):
+            initial_provider = "gateway"
         # Repo-wide backend override (#11211): these runners have no provider
         # dial of their own (always native Claude), so config.repo_provider is
         # the only lever routing this seam's spawns to GLM. No-op unless
         # repo_provider == "zai" and ZAI_API_KEY is present.
-        provider, cmd = apply_repo_provider("claude", cmd, self._config)
+        provider, cmd = apply_repo_provider(initial_provider, cmd, self._config)
         # Credit failover (#10844): these runners always spawn on native Claude
         # (no provider dial), so without this a Claude cap would crash-loop the
         # loop instead of failing over. Reroute the spawn to GLM while failover
         # is active, mirroring base_runner._execute. No-op otherwise.
         provider, cmd = apply_credit_failover(provider, cmd, self._config)
-        harness_env = resolve_harness_env(provider, self._config)
+        _, resolved_model = parse_command_tool_model(cmd)
+        timeout_s = self._default_timeout_s()
+        try:
+            harness_env = await resolve_harness_env(
+                provider,
+                self._config,
+                model=resolved_model,
+                source=self._telemetry_source(),
+                session_id=getattr(self._bus, "current_session_id", None),
+                timeout_seconds=timeout_s,
+            )
+        except Exception as exc:
+            # A failed gateway mint is a pre-spawn crash, never permission to
+            # fall through to a direct credential.  Preserve this base class's
+            # never-raises contract for infrastructure failures.
+            reraise_on_credit_or_bug(exc)
+            return self._make_result(
+                SpawnOutcome(
+                    transcript=f"gateway routing error: {exc}",
+                    usage_stats={},
+                    wall_clock_s=0.0,
+                    crashed=True,
+                    prompt_hash=hash_prompt(prompt),
+                    cost_usd=0.0,
+                )
+            )
+        billing_provider = harness_billing_provider(provider, resolved_model)
 
         usage_stats: dict[str, object] = {}
         prompt_hash = hash_prompt(prompt)
-        timeout_s = self._default_timeout_s()
         start = time.monotonic()
         crashed = False
         transcript = ""
 
         last_auth_error: AuthenticationRetryError | None = None
-        for attempt in range(1, self._AUTH_RETRY_MAX + 1):
-            try:
-                transcript = await stream_claude_process(
-                    cmd=cmd,
-                    prompt=prompt,
-                    cwd=Path(worktree_path),
-                    active_procs=self._active_procs,
-                    event_bus=self._bus,
-                    event_data={
-                        "issue": issue_number,
-                        "source": self._telemetry_source(),
-                    },
-                    logger=logger,
-                    config=StreamConfig(
-                        timeout=timeout_s,
-                        usage_stats=usage_stats,
-                        harness_env=harness_env,
-                        provider=provider,
-                    ),
-                )
-                last_auth_error = None
-                break
-            except AuthenticationRetryError as exc:
-                last_auth_error = exc
-                if attempt < self._AUTH_RETRY_MAX:
-                    delay = self._AUTH_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+        spawn_runner = get_default_runner()
+        owned_runner = None
+        runner_resolved = False
+        try:
+            for attempt in range(1, self._AUTH_RETRY_MAX + 1):
+                try:
+                    if not runner_resolved:
+                        spawn_runner, owned_runner = _terminal_gateway_runner(
+                            spawn_runner,
+                            self._config,
+                            provider,
+                        )
+                        runner_resolved = True
+                    transcript = await stream_claude_process(
+                        cmd=cmd,
+                        prompt=prompt,
+                        cwd=Path(worktree_path),
+                        active_procs=self._active_procs,
+                        event_bus=self._bus,
+                        event_data={
+                            "issue": issue_number,
+                            "source": self._telemetry_source(),
+                        },
+                        logger=logger,
+                        config=StreamConfig(
+                            timeout=timeout_s,
+                            runner=spawn_runner,
+                            usage_stats=usage_stats,
+                            harness_env=harness_env,
+                            harness_transport=provider,
+                            provider=billing_provider,
+                        ),
+                    )
+                    last_auth_error = None
+                    break
+                except AuthenticationRetryError as exc:
+                    last_auth_error = exc
+                    if attempt < self._AUTH_RETRY_MAX:
+                        delay = self._AUTH_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                        logger.warning(
+                            "subprocess runner auth retry %d/%d for issue #%d, "
+                            "sleeping %.0fs: %s",
+                            attempt,
+                            self._AUTH_RETRY_MAX,
+                            issue_number,
+                            delay,
+                            exc,
+                        )
+                        await asyncio.sleep(delay)
+                        await renew_gateway_key_if_needed(
+                            harness_env,
+                            min_validity_seconds=timeout_s,
+                        )
+                except Exception as exc:
+                    # Credit / terminal-auth / programming bugs propagate so the
+                    # caretaker loop can suspend or surface the bug; everything
+                    # else collapses to crashed=True with a partial transcript.
+                    reraise_on_credit_or_bug(exc)
+                    crashed = True
+                    tail = transcript[-2000:] if transcript else ""
+                    transcript = f"{tail}\n\nspawn error: {exc}"
                     logger.warning(
-                        "subprocess runner auth retry %d/%d for issue #%d, "
-                        "sleeping %.0fs: %s",
-                        attempt,
-                        self._AUTH_RETRY_MAX,
+                        "subprocess runner failed for issue #%d: %s",
                         issue_number,
-                        delay,
                         exc,
                     )
-                    await asyncio.sleep(delay)
-            except Exception as exc:
-                # Credit / terminal-auth / programming bugs propagate so the
-                # caretaker loop can suspend or surface the bug; everything
-                # else collapses to crashed=True with a partial transcript.
-                reraise_on_credit_or_bug(exc)
-                crashed = True
-                tail = transcript[-2000:] if transcript else ""
-                transcript = f"{tail}\n\nspawn error: {exc}"
-                logger.warning(
-                    "subprocess runner failed for issue #%d: %s",
-                    issue_number,
-                    exc,
-                )
-                break
+                    break
+        finally:
+            try:
+                await revoke_gateway_key(harness_env)
+            finally:
+                if owned_runner is not None:
+                    await owned_runner.cleanup()
 
         if last_auth_error is not None:
             crashed = True
@@ -281,8 +342,10 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
         try:
             self._telemetry.record(
                 source=self._telemetry_source(),
-                tool=self._config.implementation_tool,
-                model=self._config.model,
+                tool=telemetry_tool_for_transport(
+                    provider, self._config.implementation_tool
+                ),
+                model=resolved_model,
                 issue_number=issue_number,
                 pr_number=None,
                 session_id=self._bus.current_session_id,

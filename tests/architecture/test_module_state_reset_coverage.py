@@ -68,6 +68,7 @@ _DISPOSITION: dict[str, str] = {
     "src/subprocess_util.py::_rate_limit_until": "reset:_reset_gh_semaphore",
     "src/subprocess_util.py::_gh_circuit_breaker": "reset:_reset_gh_semaphore (reset_gh_circuit_breaker)",
     "src/credit_failover.py::_state": "reset:_reset_credit_failover",
+    "src/prompt_telemetry.py::_HEALTH_STATE": "reset:_reset_prompt_telemetry_health_state",
     # --- harmless (effectively immutable, import-time-only, or caller-paired) ---
     "src/config.py::_ENV_INT_OVERRIDES": "harmless:import-time-only += (config.py) appending give-up-window overrides; never mutated during a run",
     "src/config.py::_DOTENV_INERT_ROOTS": "harmless:session-scoped registration of the default repo root; extra register_dotenv_inert_root calls must be unregister-paired by the caller (test_dotenv_inert_under_pytest_10902.py), not reset per-test",
