@@ -385,6 +385,10 @@ def check_drift(
         )
 
     current_shares = {e["source"]: e["share"] for e in report["fleet"]["phase_share"]}
+    # Only baselined (registered → actually sigma-tested) charts count toward
+    # the family size: a current-week-only source is UNBASELINED and performs
+    # no test, so it adds no false-alarm probability — counting it would
+    # over-widen every real chart's limit. The baseline is the registration.
     charts = len(baseline.source_share_series) + 1  # +1 for the median chart
     multiplier = widened_sigma_multiplier(charts, two_sided=False)
     sources = _build_source_drifts(
