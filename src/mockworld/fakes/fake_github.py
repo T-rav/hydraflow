@@ -189,6 +189,11 @@ class FakeGitHub:
 
     def __init__(self) -> None:
         self._issues: dict[int, FakeIssue] = {}
+        # #11246: `gh issue view --json` fields the fake was asked for but
+        # does not model. Recorded instead of fabricated so scenarios can
+        # surface fake-fidelity gaps (matched-but-wrong shapes are invisible
+        # to strict-mode shape checks).
+        self.issue_view_unmodelled_fields: set[str] = set()
         self._pr_diff_names: dict[int, list[str]] = {}
         # Per-PR seeded diff stats for get_pr_diff_stats (#10788 timeline).
         self._pr_diff_stats: dict[int, PRDiffStats] = {}
@@ -1827,31 +1832,75 @@ class FakeGitHub:
             return json.dumps([])
         return None
 
-    async def _handle_issue_edit(self, args: list[str]) -> None:
-        """Model ``gh issue edit <n> --repo <repo> --body-file <path>`` (#11419).
+    @staticmethod
+    def _option_value(args: list[str], option: str) -> str | None:
+        """Return the value following *option*, or ``None`` when absent."""
+        if option not in args:
+            return None
+        value_index = args.index(option) + 1
+        return args[value_index] if value_index < len(args) else None
 
-        The only real issuer is ``PRManager.update_issue_body``, which sends
-        the body through a temp ``--body-file`` (``_run_with_body_file``),
-        not inline ``--body`` — the fake reads the same file the real CLI
-        would. Best-effort: extracts the issue number (first digit-only
-        positional) and the path after ``--body-file``, then delegates to
-        :meth:`update_issue_body` so the CLI route and the Port-method route
-        end up in the same place. A missing file or an edit without a body
-        flag (e.g. label-only edits) is a no-op.
+    def _issue_edit_body(self, args: list[str]) -> str | None:
+        """Read the body-file value, falling back to an inline body."""
+        path = self._option_value(args, "--body-file")
+        if path is not None:
+            try:
+                return Path(path).read_text(encoding="utf-8")
+            except OSError:
+                pass
+        return self._option_value(args, "--body")
+
+    async def _handle_issue_edit(self, args: list[str]) -> None:
+        """Model ``gh issue edit <n> --body-file <path>`` / ``--body <text>``.
+
+        The production issuer is ``PRManager.update_issue_body``, which sends
+        the body through a temp ``--body-file`` (``_run_with_body_file``)
+        (#11419) — the fake reads the same file the real CLI would. Inline
+        ``--body <text>`` (#11246) covers direct CLI callers so a
+        passthrough-routed repair is observable in fake state too.
+        Best-effort: extracts the issue number (first digit-only positional)
+        and the body from either flag (``--body-file`` wins if both appear),
+        then delegates to :meth:`update_issue_body` so the CLI route and the
+        Port-method route end up in the same place. A missing file, a
+        valueless flag, or an edit without a body flag (e.g. label-only
+        edits) is a no-op.
         """
         number = next((int(a) for a in args[2:] if a.isdigit()), None)
-        path: str | None = None
-        if "--body-file" in args:
-            idx = args.index("--body-file")
-            if idx + 1 < len(args):
-                path = args[idx + 1]
-        if number is None or path is None:
-            return
-        try:
-            body = Path(path).read_text(encoding="utf-8")
-        except OSError:
+        body = self._issue_edit_body(args)
+        if number is None or body is None:
             return
         await self.update_issue_body(number, body)
+
+    def _render_issue_view(self, args: list[str]) -> str:
+        """Project requested ``gh issue view --json`` fields from fake state.
+
+        The old dispatcher returned a hardcoded ``{"comments": []}`` for
+        every selector. That matched the command while silently giving
+        consumers the wrong shape. Unsupported fields are deliberately
+        omitted and recorded instead of fabricated (#11246).
+        """
+        issue_number = next((int(a) for a in args[2:] if a.isdigit()), 0)
+        selector = self._option_value(args, "--json")
+        fields = [
+            field.strip() for field in (selector or "").split(",") if field.strip()
+        ]
+        issue = self._issues.get(issue_number)
+        if issue is None:
+            return json.dumps({})
+
+        projections: dict[str, Any] = {
+            "labels": [{"name": label} for label in issue.labels],
+            "body": issue.body,
+            "title": issue.title,
+            "state": issue.state.upper(),
+        }
+        payload: dict[str, Any] = {}
+        for field_name in fields:
+            if field_name in projections:
+                payload[field_name] = projections[field_name]
+            else:
+                self.issue_view_unmodelled_fields.add(field_name)
+        return json.dumps(payload)
 
     async def _run_gh(self, *cmd: str, cwd: Any = None) -> str:
         """Generic ``gh`` CLI passthrough — returns minimal-shape JSON.
@@ -1913,7 +1962,7 @@ class FakeGitHub:
                     await self._handle_issue_edit(args)
                 return ""
             if sub == "view":
-                return _json.dumps({"comments": []})
+                return self._render_issue_view(args)
 
         if verb == "pr" and len(args) > 1:
             sub = args[1]
