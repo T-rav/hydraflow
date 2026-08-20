@@ -73,6 +73,7 @@ from flake_tracker_loop import FlakeTrackerLoop
 from gate_activation_check import check_gate_activation
 from gate_activator_loop import GateActivatorLoop  # noqa: TCH001
 from gate_health_loop import GateHealthLoop
+from gateway_coverage_loop import GatewayCoverageLoop
 from github_cache_loop import GitHubCacheLoop, GitHubDataCache
 from giveup_self_solve import PlanRetrySelfSolver
 from giveup_window import GiveUpClass, GiveUpTracker, GiveUpWindow, resolve_window
@@ -344,6 +345,7 @@ class ServiceRegistry:
     contract_refresh_loop: ContractRefreshLoop
     corpus_learning_loop: CorpusLearningLoop
     auto_agent_preflight_loop: AutoAgentPreflightLoop
+    gateway_coverage_loop: GatewayCoverageLoop
     detector_calibration_loop: DetectorCalibrationLoop
     sandbox_failure_fixer_loop: SandboxFailureFixerLoop
     disturbance_dampener_loop: DisturbanceDampenerLoop
@@ -1055,8 +1057,11 @@ def build_services(
 
     adversarial_agent = SubprocessAgentRunner(
         runner=subprocess_runner,
-        tool=config.implementation_tool,
+        config=config,
+        tool=config.planner_tool,
+        model=config.planner_model,
         credentials=credentials,
+        provider=config.planner_provider,
     )
 
     planner_phase.attach_adversarial_agents(
@@ -1826,6 +1831,12 @@ def build_services(
         github_cache=gh_cache,
     )
 
+    gateway_coverage_loop = GatewayCoverageLoop(
+        config=config,
+        state=state,
+        deps=loop_deps,
+    )
+
     auto_agent_audit_store = PreflightAuditStore(config.data_root)
     auto_agent_preflight_loop = AutoAgentPreflightLoop(  # noqa: F841
         config=config,
@@ -2065,6 +2076,7 @@ def build_services(
         contract_refresh_loop=contract_refresh_loop,
         corpus_learning_loop=corpus_learning_loop,
         auto_agent_preflight_loop=auto_agent_preflight_loop,
+        gateway_coverage_loop=gateway_coverage_loop,
         detector_calibration_loop=detector_calibration_loop,
         sandbox_failure_fixer_loop=sandbox_failure_fixer_loop,
         disturbance_dampener_loop=disturbance_dampener_loop,

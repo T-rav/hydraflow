@@ -2,9 +2,11 @@
 
 **Status:** Accepted
 **Accepted on:** 2026-07-25 — operator-approved (route agentic maintenance loops to GLM while work stays on Claude).
+**Amended on:** 2026-08-19 — the session tap adds a first-class gateway
+transport without collapsing the upstream billing/provider axis.
 **Date:** 2026-07-25
 **Enforcement:** enforced
-**Enforced by:** pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider
+**Enforced by:** pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values
 **Amends:** ADR-0001 (Five Concurrent Async Loops — background workers gain a per-role harness backend dial)
 
 ## Context
@@ -74,12 +76,47 @@ four core streaming runners (implementation/planner/review/triage) set their
 dial. Default `claude` is a no-op, so behavior is unchanged until an operator
 flips a dial.
 
+**7. Gateway is a transport, not an upstream identity (2026-08-19).**
+`provider=gateway` selects the Anthropic-compatible session-tap transport. Each
+spawn still carries an explicit upstream binding (`anthropic` or
+`zai-harness`) for key policy, ledger attribution, pricing, and credit scoping.
+The gateway resolver mints a short-lived virtual credential asynchronously and
+fails closed; it never treats a mint failure as permission to fall through to
+the worker's direct provider environment.
+
+**8. Credential isolation and rollout ratchet (2026-08-19).** In gateway mode,
+the final host or Docker spawn environment is scrubbed of all real provider and
+gateway-control credentials before the virtual token is overlaid. Direct
+Claude/z.ai behavior remains unchanged for roles that have not migrated. An
+explicit fleet ratchet validates that every gateway-capable Claude-harness role
+is routed through the gateway. Enabling the ratchet is the terminal deployment
+profile: untouched provider dials are promoted to `gateway`, while an explicitly
+configured direct Claude/z.ai harness value is a configuration error rather
+than an observable-but-permitted bypass. The default remains off so an install
+without a deployed gateway continues to start safely.
+
+**9. Coverage is a meta-observability signal, not transport control
+(2026-08-19).** `src/gateway_coverage_loop.py:GatewayCoverageLoop` reads the
+gateway ledger and the known bypass telemetry to publish a repo-scoped
+coverage snapshot. It never proxies traffic, mints credentials, or enforces a
+budget. The deployable gateway itself is rooted at
+`src/hydraflow_gateway/app.py:create_app`; keeping these symbols separate makes
+the operational transport and the read-only completeness gauge independently
+auditable.
+
 ## Consequences
 
 - An operator routes any wired role to GLM by config alone (no code change):
   set the role's `*_provider=zai` and a `glm-*` model, or use `maintenance_*`.
 - The main coding workers stay on Claude by default; the isolation invariant
   (per-spawn override) guarantees a z.ai config can't hijack them.
+- Gateway migration can proceed role by role without changing model selection
+  or credit ownership. The first canary is a bounded maintenance role; safe
+  defaults remain direct until the gateway service and control credential are
+  deployed.
+- Once the ratchet is enabled, gateway availability is fleet availability and
+  workers no longer possess provider credentials. This is intentionally a
+  deployment decision rather than an implicit fallback.
 - A backend cap is scoped, not global — GLM exhaustion no longer halts Claude
   work.
 - The tool axis is `claude`+`codex` only; gemini/pi are un-configurable and

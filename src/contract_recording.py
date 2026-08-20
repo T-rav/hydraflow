@@ -1007,6 +1007,12 @@ def record_docker(tmp_cassette_dir: Path) -> list[Path]:
 
 CLAUDE_STREAM_FILENAME = "stream_001_ping.jsonl"
 
+# This recorder guards the native Claude CLI's raw stream-json protocol.  Its
+# model is deliberately owned by the recorder instead of borrowed from an
+# unrelated runtime role: maintenance/ADR routing may validly select a GLM,
+# OpenRouter, or Kimi model that the native Anthropic endpoint cannot execute.
+CLAUDE_STREAM_MODEL = "sonnet"
+
 # Placeholder substituted for live assistant/result text (see
 # ``_redact_claude_text``). Deliberately unambiguous so anyone reading a
 # committed cassette can tell at a glance that the wording was redacted,
@@ -1072,8 +1078,8 @@ def _redact_event_text(event: dict[str, Any]) -> None:
 def record_claude_stream(tmp_stream_dir: Path) -> list[Path]:
     """Record a minimal ``claude`` stream JSONL.
 
-    Runs ``claude -p "ping" --output-format stream-json --verbose`` and
-    writes the redacted stdout (see ``_redact_claude_text``) to
+    Runs ``claude -p "ping" --output-format stream-json --verbose --model
+    sonnet`` and writes the redacted stdout (see ``_redact_claude_text``) to
     ``<tmp_stream_dir>/stream_001_ping.jsonl``. The Claude adapter
     cassette is *not* YAML — it is a raw JSONL file because the fake
     replays lines verbatim.
@@ -1085,9 +1091,14 @@ def record_claude_stream(tmp_stream_dir: Path) -> list[Path]:
     skill content changes, and has nothing to do with the stream-json
     protocol shape this cassette exists to guard (issue #10220).
 
-    Returns ``[]`` if ``claude`` is missing, exits non-zero, or produces
-    empty stdout (a zero-byte stream is useless as a fixture and would
-    only corrupt later diffs).
+    The recorder always selects :data:`CLAUDE_STREAM_MODEL`; it does not reuse
+    an ADR/maintenance role's provider or model because those roles may be
+    routed to a non-Anthropic model. The terminal gateway profile skips this
+    legacy host subprocess at the composition root because a process running
+    on the host cannot be isolated from host OAuth/keychain state. Returns
+    ``[]`` if ``claude`` is missing, exits non-zero, or produces empty stdout
+    (a zero-byte stream is useless as a fixture and would only corrupt later
+    diffs).
     """
     tmp_stream_dir = Path(tmp_stream_dir)
     tmp_stream_dir.mkdir(parents=True, exist_ok=True)
@@ -1099,6 +1110,8 @@ def record_claude_stream(tmp_stream_dir: Path) -> list[Path]:
         "--output-format",
         "stream-json",
         "--verbose",
+        "--model",
+        CLAUDE_STREAM_MODEL,
         *claude_isolation_flags(),
     ]
     proc = _run(argv)

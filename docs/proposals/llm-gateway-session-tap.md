@@ -1,6 +1,6 @@
 # LLM gateway: the session tap
 
-**Status:** proposal (2026-08-19). **Amends:** ADR-0110 (provider/harness backend split — the gateway becomes a first-class harness backend, and eventually the only one workers see). **Kin:** ADR-0093 (loop fitness as measured contract — gateway coverage is a gauge, not a promise), the pricing-refresh loop (ADR-0078 — the cost oracle the ledger prices against).
+**Status:** implemented behind opt-in gateway configuration (2026-08-19); deterministic conformance, MockWorld, and sandbox evidence are present, while the live-provider direct-vs-gateway confidence-probe evidence is still pending. **Amends:** ADR-0110 (provider/harness backend split — the gateway becomes a first-class harness backend, and eventually the only one workers see). **Kin:** ADR-0093 (loop fitness as measured contract — gateway coverage is a gauge, not a promise), the pricing-refresh loop (ADR-0078 — the cost oracle the ledger prices against).
 
 ## The gap
 
@@ -72,6 +72,21 @@ The engineering risk is streaming transparency, so it gets the fixture treatment
 4. Wiring: `_HARNESS_BACKENDS` entry, per-role dial, first maintenance loop live.
 5. Ledger + pricing join + dashboard gauge.
 6. Ratchet roles until direct is a config error.
+
+## Implementation status (2026-08-19)
+
+The deployable data/control planes, virtual-key harness wiring, append-only
+ledger, read-only coverage loop and dashboard gauge are implemented. The test
+pyramid includes deterministic pass-through fixtures, an in-process MockWorld
+scenario, and the `s91_gateway_session_tap.py` Docker sandbox scenario.
+
+One piece of evidence remains deliberately open: no committed artifact yet
+records a real provider-backed agentic session run both directly and through
+the gateway. Fixture and fake-upstream equality prove the deterministic proxy
+contract, but they are not represented as live-provider proof. Until that
+probe is run and recorded, the rollout remains opt-in and the proposal's
+streaming-risk claim is not considered empirically closed against a live
+provider.
 
 ## Out of scope, explicitly
 

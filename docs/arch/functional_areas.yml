@@ -104,20 +104,26 @@ areas:
     label: Meta-Observability
     description: >
       Monitoring and observability workers that watch the factory watching
-      itself — pipeline-trend health monitoring / auto-tuning and the
-      trust-fleet sanity check that keeps the meta-observability layer honest.
+      itself — pipeline-trend health monitoring / auto-tuning, the gateway-
+      transit coverage gauge, and the trust-fleet sanity check that keeps the
+      meta-observability layer honest.
     loops:
+      - GatewayCoverageLoop
       - GoalSupervisorLoop
       - HealthMonitorLoop
       - TrustFleetSanityLoop
-    related_adrs: ['0045', '0056', '0124']
+    modules:
+      - src/gateway_coverage.py
+      - src/gateway_coverage_loop.py
+    related_adrs: ['0045', '0056', '0093', '0110', '0124']
 
   operations:
     label: Operations
     description: >
       Infrastructure, recovery, and lifecycle workers that keep the pipeline
-      moving — cost-budget watching, diagnostics, epic monitoring/sweeping,
-      GitHub cache, merge-state watching, and PR unsticking.
+      moving — the LLM gateway data/control planes, cost-budget watching,
+      diagnostics, epic monitoring/sweeping, GitHub cache, merge-state
+      watching, and PR unsticking.
     loops:
       - CostBudgetWatcherLoop
       - DiagnosticLoop
@@ -126,7 +132,10 @@ areas:
       - GitHubCacheLoop
       - MergeStateWatcherLoop
       - PRUnstickerLoop
-    related_adrs: ['0029']
+    modules:
+      - gateway/**
+      - src/hydraflow_gateway/**
+    related_adrs: ['0029', '0110']
 
   intake:
     label: Intake

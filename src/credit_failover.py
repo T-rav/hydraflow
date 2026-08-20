@@ -147,12 +147,17 @@ def apply_credit_failover(
     rewritten to ``config.credit_failover_model`` (the zai backend requires a
     glm-* model). The input *cmd* is never mutated.
     """
-    if provider != "claude":
+    if provider not in {"claude", "gateway"}:
         return provider, cmd
     if not config.credit_failover_enabled:
         return provider, cmd
     if not is_active():
         return provider, cmd
-    if not zai_key_present():
+    # A gateway-routed failover keeps the transport and mints a z.ai-bound
+    # virtual key from the rewritten GLM model; the worker must not require or
+    # receive a real local z.ai credential. Direct Claude retains the existing
+    # key-presence guard byte-for-byte.
+    if provider == "claude" and not zai_key_present():
         return provider, cmd
-    return "zai", rewrite_command_model(cmd, config.credit_failover_model)
+    resolved_provider = "gateway" if provider == "gateway" else "zai"
+    return resolved_provider, rewrite_command_model(cmd, config.credit_failover_model)

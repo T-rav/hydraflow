@@ -68,7 +68,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
-      - run: docker compose -f docker-compose.sandbox.yml build hydraflow ui playwright
+      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
       - name: Run shard ${{ matrix.shard }}/6 against staging HEAD
         run: |
           python scripts/sandbox_scenario.py run-all \

@@ -90,6 +90,7 @@ describe('FactoryCostTab', () => {
     expect(
       screen.getByRole('heading', { level: 3, name: /Waterfall/i }),
     ).toBeInTheDocument()
+    expect(screen.getByTestId('gateway-coverage-gauge')).toBeInTheDocument()
 
     // After async settle: summary + top-issue + per-loop rows present.
     await waitFor(() => {
@@ -158,7 +159,7 @@ describe('FactoryCostTab', () => {
     // path component → fetchWithRepo → repo param → network.
     await waitFor(() => {
       const urls = global.fetch.mock.calls.map(([u]) => u)
-      for (const path of ['/cost/rolling-24h', '/cost/top-issues', '/loops/cost', '/cost/by-model']) {
+      for (const path of ['/cost/rolling-24h', '/cost/top-issues', '/loops/cost', '/cost/by-model', '/gateway-coverage']) {
         expect(urls.some((u) => u.includes(path) && u.includes('repo=org-x'))).toBe(true)
       }
     })

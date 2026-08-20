@@ -59,6 +59,10 @@ from finder_faceplate import (
     baseline_ledger_path,
     build_faceplates,
 )
+from gateway_coverage import (
+    build_coverage_for_configs,
+    gateway_coverage_snapshot_path,
+)
 from loop_faceplate import build_loop_faceplates
 from prompt_telemetry import PromptTelemetry
 from route_types import REPO_ALL, RepoSlugParam
@@ -729,6 +733,59 @@ def build_diagnostics_router(
         return merge_rolling_24h(
             [build_rolling_24h(cfg) for cfg, _slug in _runtimes(repo)]
         )
+
+    @router.get("/gateway-coverage")
+    def gateway_coverage(
+        range: str = Query("24h"), repo: RepoSlugParam = None
+    ) -> dict[str, Any]:
+        """Share of priced LLM spend observed through the gateway.
+
+        Gateway metadata is global and therefore read once; direct agentic and
+        one-shot PromptTelemetry is repo-scoped and unioned for ``repo=__all__``.
+        Unknown prices produce an honest ``partial`` response with no claimed
+        coverage percentage.
+        """
+        try:
+            window = _parse_range(range)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        now = _cost_rollups_mod._utcnow()
+
+        if ctx is None:
+            configs = [config]
+            scope = "repo"
+            repo_slug: str | None = config.repo_slug
+        elif repo is not None and repo.strip().lower() == REPO_ALL:
+            configs = [cfg for cfg, _slug in _runtimes(repo)]
+            scope = "global"
+            repo_slug = None
+        else:
+            runtimes = _runtimes(repo)
+            configs = [cfg for cfg, _slug in runtimes]
+            scope = "repo"
+            repo_slug = runtimes[0][1]
+
+        snapshot = build_coverage_for_configs(
+            configs,
+            since=now - window,
+            until=now,
+            window_label=range,
+            scope=scope,
+            repo_slug=repo_slug,
+        )
+        payload = snapshot.to_json_dict()
+        prior_snapshots = [
+            _load_json_file(gateway_coverage_snapshot_path(cfg)) for cfg in configs
+        ]
+        payload["ceiling_achieved"] = any(
+            item is not None and item.get("ceiling_achieved") is True
+            for item in prior_snapshots
+        )
+        payload["regression_detected"] = any(
+            item is not None and item.get("regression_detected") is True
+            for item in prior_snapshots
+        )
+        return payload
 
     @router.get("/cost/top-issues")
     def cost_top_issues(

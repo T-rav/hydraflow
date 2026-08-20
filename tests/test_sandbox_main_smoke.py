@@ -266,6 +266,64 @@ def test_materialize_health_metrics_noops_when_empty(tmp_path) -> None:
     assert not (config.repo_memory_dir / "harness_failures.jsonl").exists()
 
 
+def test_materialize_prompt_telemetry_source_creates_verified_empty_ledger(
+    tmp_path,
+) -> None:
+    """An opted-in sandbox proves zero bypass rows without inventing a row."""
+    import json
+
+    from mockworld.seed import MockWorldSeed
+    from prompt_telemetry import (
+        prompt_telemetry_health_path,
+        prompt_telemetry_source_complete,
+    )
+
+    config = _seed_config(tmp_path)
+    seed = MockWorldSeed(prompt_telemetry_source_initialized=True)
+
+    sandbox_main.materialize_prompt_telemetry_source(config, seed)
+
+    inference_path = config.cost_inferences_path
+    assert inference_path.read_text() == ""
+    marker = json.loads(prompt_telemetry_health_path(inference_path).read_text())
+    assert marker["status"] == "healthy"
+    assert marker["record_count"] == 0
+    assert marker["chain_head"] is None
+    assert prompt_telemetry_source_complete(inference_path) is True
+
+
+def test_materialize_prompt_telemetry_source_noops_without_opt_in(tmp_path) -> None:
+    from mockworld.seed import MockWorldSeed
+
+    config = _seed_config(tmp_path)
+
+    sandbox_main.materialize_prompt_telemetry_source(config, MockWorldSeed())
+
+    assert not config.cost_inferences_path.exists()
+
+
+def test_materialize_prompt_telemetry_source_refuses_corrupt_existing_ledger(
+    tmp_path,
+) -> None:
+    """Scenario bootstrap must not turn missing evidence into false health."""
+    import pytest
+
+    from mockworld.seed import MockWorldSeed
+    from prompt_telemetry import prompt_telemetry_source_complete
+
+    config = _seed_config(tmp_path)
+    inference_path = config.cost_inferences_path
+    inference_path.parent.mkdir(parents=True, exist_ok=True)
+    inference_path.write_text("{not-json}\n")
+    seed = MockWorldSeed(prompt_telemetry_source_initialized=True)
+
+    with pytest.raises(RuntimeError, match="Could not initialize healthy"):
+        sandbox_main.materialize_prompt_telemetry_source(config, seed)
+
+    assert inference_path.read_text() == "{not-json}\n"
+    assert prompt_telemetry_source_complete(inference_path) is False
+
+
 def test_materialize_worker_heartbeats_backdates_last_run(tmp_path) -> None:
     """``age_seconds`` becomes a tz-aware back-dated ``last_run``; empty
     seeds write nothing (#9643/#9904)."""

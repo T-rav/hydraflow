@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from subprocess_util import make_clean_env
 
 
@@ -43,12 +45,13 @@ def test_make_clean_env_keeps_native_api_key(monkeypatch) -> None:
     assert make_clean_env().get("ANTHROPIC_API_KEY") == "sk-native"
 
 
-def test_harness_lane_still_injects_backend_pair(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_harness_lane_still_injects_backend_pair(monkeypatch) -> None:
     from config import HydraFlowConfig
     from runner_utils import resolve_harness_env
 
     monkeypatch.setenv("ZAI_CODING_PLAN_KEY", "zp-test")
-    env = resolve_harness_env("zai", HydraFlowConfig())
+    env = await resolve_harness_env("zai", HydraFlowConfig())
     assert env.get("ANTHROPIC_AUTH_TOKEN") == "zp-test"
     assert env.get("ANTHROPIC_BASE_URL")
 

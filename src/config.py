@@ -463,6 +463,8 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_DETECTOR_CALIBRATION_SPRAY_MIN_ENTITIES",
         5,
     ),
+    ("gateway_coverage_interval", "HYDRAFLOW_GATEWAY_COVERAGE_INTERVAL", 3600),
+    ("gateway_key_ttl_seconds", "HYDRAFLOW_GATEWAY_KEY_TTL_SECONDS", 3660),
     ("auto_agent_preflight_interval", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_INTERVAL", 120),
     ("auto_agent_max_attempts", "HYDRAFLOW_AUTO_AGENT_MAX_ATTEMPTS", 3),
     (
@@ -620,6 +622,9 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
 ]
 
 _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
+    ("gateway_base_url", "HYDRAFLOW_GATEWAY_BASE_URL", "http://127.0.0.1:8080"),
+    ("gateway_ledger_path", "HYDRAFLOW_GATEWAY_LEDGER_PATH", ""),
+    ("gateway_repo_class", "HYDRAFLOW_GATEWAY_REPO_CLASS", "personal"),
     ("judge_independent_model", "HYDRAFLOW_JUDGE_INDEPENDENT_MODEL", ""),
     (
         "security_patch_severity_threshold",
@@ -849,6 +854,13 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     ("detector_calibration_enabled", "HYDRAFLOW_DETECTOR_CALIBRATION_ENABLED", True),
+    ("gateway_coverage_enabled", "HYDRAFLOW_GATEWAY_COVERAGE_ENABLED", True),
+    ("gateway_capture_bodies", "HYDRAFLOW_GATEWAY_CAPTURE_BODIES", False),
+    (
+        "gateway_fleet_ratchet_enabled",
+        "HYDRAFLOW_GATEWAY_FLEET_RATCHET_ENABLED",
+        False,
+    ),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
     ("auto_agent_redrive_enabled", "HYDRAFLOW_AUTO_AGENT_REDRIVE_ENABLED", True),
     (
@@ -1137,6 +1149,20 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("docker_network_mode", "HYDRAFLOW_DOCKER_NETWORK_MODE"),
     ("epic_merge_strategy", "HYDRAFLOW_EPIC_MERGE_STRATEGY"),
     ("release_version_source", "HYDRAFLOW_RELEASE_VERSION_SOURCE"),
+    ("implementation_provider", "HYDRAFLOW_IMPLEMENTATION_PROVIDER"),
+    ("review_provider", "HYDRAFLOW_REVIEW_PROVIDER"),
+    ("planner_provider", "HYDRAFLOW_PLANNER_PROVIDER"),
+    ("triage_provider", "HYDRAFLOW_TRIAGE_PROVIDER"),
+    ("ac_provider", "HYDRAFLOW_AC_PROVIDER"),
+    ("repo_provider", "HYDRAFLOW_REPO_PROVIDER"),
+    ("wiki_compilation_provider", "HYDRAFLOW_WIKI_COMPILATION_PROVIDER"),
+    ("adr_review_provider", "HYDRAFLOW_ADR_REVIEW_PROVIDER"),
+    ("transcript_summary_provider", "HYDRAFLOW_TRANSCRIPT_SUMMARY_PROVIDER"),
+    ("triage_honeypot_provider", "HYDRAFLOW_TRIAGE_HONEYPOT_PROVIDER"),
+    ("pr_unstick_provider", "HYDRAFLOW_PR_UNSTICK_PROVIDER"),
+    ("term_proposer_provider", "HYDRAFLOW_TERM_PROPOSER_PROVIDER"),
+    ("adr_drift_resolver_provider", "HYDRAFLOW_ADR_DRIFT_RESOLVER_PROVIDER"),
+    ("maintenance_provider", "HYDRAFLOW_MAINTENANCE_PROVIDER"),
 ]
 
 # StrEnum-typed fields, kept separate from _ENV_LITERAL_OVERRIDES because
@@ -2794,6 +2820,54 @@ class HydraFlowConfig(BaseModel):
             "one-shot background traffic stays on API credits (secrets — env-only)."
         ),
     )
+    gateway_base_url: str = Field(
+        default="http://127.0.0.1:8080",
+        min_length=1,
+        description=(
+            "Anthropic-compatible data-plane URL and control-plane origin for "
+            "the session-tap gateway. HydraFlow mints at /control/v1/keys; the "
+            "env-only HYDRAFLOW_GATEWAY_CONTROL_TOKEN authenticates that call."
+        ),
+    )
+    gateway_ledger_path: str = Field(
+        default="",
+        description=(
+            "Optional read-only path to the gateway metadata ledger. Empty "
+            "uses <data_root>/gateway/requests.jsonl."
+        ),
+    )
+    gateway_repo_class: Literal["hydraflow", "client", "personal"] = Field(
+        default="personal",
+        description=(
+            "Governance class stamped onto gateway virtual keys. Defaults to "
+            "personal (the privacy-safe no-body-capture class)."
+        ),
+    )
+    gateway_capture_bodies: bool = Field(
+        default=False,
+        description=(
+            "Request full prompt/response capture for gateway-routed spawns. "
+            "Allowed only for gateway_repo_class='hydraflow'."
+        ),
+    )
+    gateway_key_ttl_seconds: int = Field(
+        default=3660,
+        ge=60,
+        le=86_400,
+        description=(
+            "Minimum lifetime requested for each per-spawn gateway virtual key. "
+            "The runner raises the effective TTL when needed to cover the full "
+            "subprocess timeout plus a cleanup grace period."
+        ),
+    )
+    gateway_fleet_ratchet_enabled: bool = Field(
+        default=False,
+        description=(
+            "Terminal gateway profile: promote untouched gateway-capable role "
+            "dials to the gateway and fail config load for any explicitly "
+            "configured direct harness role. Opt in only after deploy."
+        ),
+    )
     kimi_base_url: str = Field(
         default="https://api.moonshot.ai/v1",
         description=(
@@ -2803,32 +2877,40 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     # Per-role backend dials for the one-shot (no-tools) loops. "claude" keeps
-    # the CLI harness; "openrouter", "zai", and "kimi" call a cheap direct model
-    # over an OpenAI-compatible endpoint. Pair each with the role's *_model (e.g.
+    # the direct CLI harness, "gateway" sends that same harness through the tap,
+    # and "openrouter", "zai", and "kimi" call a cheap direct model over an
+    # OpenAI-compatible endpoint. Pair each with the role's *_model (e.g.
     # a DeepSeek id for openrouter, "glm-5.2" for zai, "kimi-k3" for kimi).
-    wiki_compilation_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
-        default="claude", description="Backend for wiki topic compilation."
+    wiki_compilation_provider: Literal[
+        "claude", "gateway", "openrouter", "zai", "kimi"
+    ] = Field(default="claude", description="Backend for wiki topic compilation.")
+    adr_review_provider: Literal["claude", "gateway", "openrouter", "zai", "kimi"] = (
+        Field(default="claude", description="Backend for the ADR reviewer.")
     )
-    adr_review_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
-        default="claude", description="Backend for the ADR reviewer."
-    )
-    transcript_summary_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
-        default="claude", description="Backend for transcript summarization."
-    )
-    triage_honeypot_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+    transcript_summary_provider: Literal[
+        "claude", "gateway", "openrouter", "zai", "kimi"
+    ] = Field(default="claude", description="Backend for transcript summarization.")
+    triage_honeypot_provider: Literal[
+        "claude", "gateway", "openrouter", "zai", "kimi"
+    ] = Field(
         default="claude", description="Backend for the triage injection honeypot."
     )
-    pr_unstick_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
-        default="claude", description="Backend for the PR-unsticker cause analysis."
+    pr_unstick_provider: Literal["claude", "gateway", "openrouter", "zai", "kimi"] = (
+        Field(
+            default="claude", description="Backend for the PR-unsticker cause analysis."
+        )
     )
-    term_proposer_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+    term_proposer_provider: Literal[
+        "claude", "gateway", "openrouter", "zai", "kimi"
+    ] = Field(
         default="claude",
         description="Backend for the term-proposer / entry-evidence drafters.",
     )
     # Per-role backend dials for the AGENTIC (tool-using) roles. Unlike the
-    # one-shot dials above, these only offer harness backends: "claude" (the
-    # native Anthropic endpoint) or "zai" (the Claude CLI pointed at GLM's
-    # /api/anthropic endpoint). This is what lets an operator route maintenance
+    # one-shot dials above, these only offer harness transports: "claude" (the
+    # native Anthropic endpoint), "zai" (the Claude CLI pointed at GLM's
+    # /api/anthropic endpoint), or "gateway" (the per-spawn session tap). This
+    # is what lets an operator route maintenance
     # loops to GLM while implement/review/plan/triage stay on Claude. Pair a
     # "zai" dial with a glm-* model (enforced by _harmonize_tool_model_defaults).
     #
@@ -2839,19 +2921,19 @@ class HydraFlowConfig(BaseModel):
     # ac_provider; the verification judge shares review's tool+model so it runs
     # on review_provider. Adding a dead dial here would validate at config-load
     # yet never route at runtime — a footgun, so we don't.
-    implementation_provider: Literal["claude", "zai"] = Field(
+    implementation_provider: Literal["claude", "gateway", "zai"] = Field(
         default="claude", description="Harness backend for implementation agents."
     )
-    review_provider: Literal["claude", "zai"] = Field(
+    review_provider: Literal["claude", "gateway", "zai"] = Field(
         default="claude", description="Harness backend for review agents."
     )
-    planner_provider: Literal["claude", "zai"] = Field(
+    planner_provider: Literal["claude", "gateway", "zai"] = Field(
         default="claude", description="Harness backend for planning agents."
     )
-    triage_provider: Literal["claude", "zai"] = Field(
+    triage_provider: Literal["claude", "gateway", "zai"] = Field(
         default="claude", description="Harness backend for triage agents."
     )
-    ac_provider: Literal["claude", "zai"] = Field(
+    ac_provider: Literal["claude", "gateway", "zai"] = Field(
         default="claude", description="Harness backend for acceptance-criteria agents."
     )
     # One knob to route ALL maintenance loops to a backend, coherently. Unlike
@@ -2860,7 +2942,7 @@ class HydraFlowConfig(BaseModel):
     # on the maintenance role-set (wiki, adr-review, transcript, drift-resolver,
     # term-proposer, triage-honeypot, pr-unstick) and NEVER touches implement/
     # review/plan/triage. Leave at claude/"" to configure roles individually.
-    maintenance_provider: Literal["claude", "zai"] = Field(
+    maintenance_provider: Literal["claude", "gateway", "zai"] = Field(
         default="claude",
         description=(
             "Backend applied to every maintenance loop (not the work loops). "
@@ -2883,7 +2965,7 @@ class HydraFlowConfig(BaseModel):
     # already routed a role off "claude") and UNDER credit-failover (which only
     # further reroutes a spawn still resolving to "claude"). Resolution order:
     # role dial > repo_provider > credit-failover.
-    repo_provider: Literal["claude", "zai"] = Field(
+    repo_provider: Literal["claude", "gateway", "zai"] = Field(
         default="claude",
         description=(
             "Repo-wide harness backend override for this repo's work spawns. "
@@ -3821,7 +3903,9 @@ class HydraFlowConfig(BaseModel):
         le=1800,
         description="Per-call timeout (seconds) for AdrDriftResolverLoop's TRIAGE call (#9976).",
     )
-    adr_drift_resolver_provider: Literal["claude", "openrouter", "zai", "kimi"] = Field(
+    adr_drift_resolver_provider: Literal[
+        "claude", "gateway", "openrouter", "zai", "kimi"
+    ] = Field(
         default="claude",
         description="Backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
     )
@@ -5296,6 +5380,16 @@ class HydraFlowConfig(BaseModel):
             "the 3-PR shape that produced #11405's fabricated churn."
         ),
     )
+    gateway_coverage_enabled: bool = Field(
+        default=True,
+        description="UI kill-switch for GatewayCoverageLoop (ADR-0049).",
+    )
+    gateway_coverage_interval: int = Field(
+        default=3600,
+        ge=60,
+        le=86400,
+        description="Seconds between GatewayCoverageLoop cycles (default 1h).",
+    )
     auto_agent_preflight_enabled: bool = Field(
         default=True,
         description="UI kill-switch for AutoAgentPreflightLoop (ADR-0049).",
@@ -6586,6 +6680,14 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             ):
                 _apply_if_default(model_field, config.maintenance_model)
 
+    # Explicit terminal gateway profile. Safe defaults stay direct while the
+    # ratchet is off; enabling it promotes every untouched gateway-capable dial
+    # to the gateway. An operator-supplied direct value remains untouched here
+    # so the validator can reject that attempted bypass below.
+    if config.gateway_fleet_ratchet_enabled:
+        for field in GATEWAY_CAPABLE_PROVIDER_FIELDS:
+            _apply_if_default(field, "gateway")
+
 
 # The maintenance role-set the maintenance_* knob routes (never the work loops).
 _MAINTENANCE_ROLES: tuple[str, ...] = (
@@ -6596,6 +6698,28 @@ _MAINTENANCE_ROLES: tuple[str, ...] = (
     "term_proposer",
     "triage_honeypot",
     "pr_unstick",
+)
+
+# One registry for the provider dials whose Claude-CLI face can transit the
+# gateway.  The first rollout canary is ``adr_review_provider``; defaults remain
+# direct until an operator opts in.  The fleet ratchet, settings/schema tests,
+# and model/provider validation all consume these tuples rather than growing
+# independent role lists.
+GATEWAY_CANARY_PROVIDER_FIELD = "adr_review_provider"
+GATEWAY_AGENTIC_PROVIDER_FIELDS: tuple[str, ...] = (
+    "implementation_provider",
+    "review_provider",
+    "planner_provider",
+    "triage_provider",
+    "ac_provider",
+    "repo_provider",
+)
+GATEWAY_ONE_SHOT_PROVIDER_FIELDS: tuple[str, ...] = tuple(
+    f"{role}_provider" for role in _MAINTENANCE_ROLES
+)
+GATEWAY_CAPABLE_PROVIDER_FIELDS: tuple[str, ...] = (
+    *GATEWAY_AGENTIC_PROVIDER_FIELDS,
+    *GATEWAY_ONE_SHOT_PROVIDER_FIELDS,
 )
 
 # Model prefix → required tool. Any model starting with a listed prefix
@@ -6652,33 +6776,86 @@ def _required_provider_for_model(model: str) -> str | None:
     return None
 
 
-def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
-    """Validate that every (tool, model) pair is internally consistent.
-
-    Rejects:
-      - Any ``*-flash*`` model in any role (quality guard for the factory).
-      - Cross-provider mismatches (e.g. ``codex`` + ``opus``,
-        ``gemini`` + ``gpt-5-codex``).
-
-    Also auto-syncs ``verification_judge_tool`` to ``review_tool`` because
-    the two share ``review_model`` — the tools MUST agree, so we pick the
-    review side as the source of truth and let the ``review`` pair check
-    catch the underlying model mismatch if one exists. Emits a warning
-    when an explicit ``verification_judge_tool`` is being overridden so
-    the user isn't surprised.
-    """
-    if config.verification_judge_tool != config.review_tool:
-        logger.warning(
-            "verification_judge_tool=%r does not match review_tool=%r; "
-            "the two share review_model so they must agree. "
-            "Overriding verification_judge_tool to %r.",
-            config.verification_judge_tool,
-            config.review_tool,
-            config.review_tool,
+def _validate_gateway_capture_policy(config: HydraFlowConfig) -> None:
+    """Validate repo classification and the body-capture privacy boundary."""
+    if config.gateway_repo_class not in {"hydraflow", "client", "personal"}:
+        msg = "gateway_repo_class must be one of 'hydraflow', 'client', or 'personal'"
+        raise ValueError(msg)
+    if config.gateway_capture_bodies and config.gateway_repo_class != "hydraflow":
+        msg = (
+            "gateway_capture_bodies requires gateway_repo_class='hydraflow'; "
+            "client and personal repo classes are metadata-only"
         )
-    object.__setattr__(config, "verification_judge_tool", config.review_tool)
+        raise ValueError(msg)
 
-    stage_pairs: list[tuple[str, str, str]] = [
+
+def _gateway_direct_harness_roles(config: HydraFlowConfig) -> list[str]:
+    """Return gateway-capable roles that still bypass the terminal profile."""
+    direct = [
+        f"{field}={provider!r}"
+        for field in GATEWAY_AGENTIC_PROVIDER_FIELDS
+        if (provider := getattr(config, field)) in {"claude", "zai"}
+    ]
+    # openrouter/zai/kimi are explicitly excluded one-shot HTTP faces. Only
+    # their direct Claude-CLI option is a gateway bypass.
+    direct.extend(
+        f"{field}='claude'"
+        for field in GATEWAY_ONE_SHOT_PROVIDER_FIELDS
+        if getattr(config, field) == "claude"
+    )
+    return direct
+
+
+def _validate_gateway_fleet_profile(config: HydraFlowConfig) -> None:
+    """Enforce credential isolation and complete routing for the fleet ratchet."""
+    if not config.gateway_fleet_ratchet_enabled:
+        return
+    if config.execution_mode != "docker":
+        msg = (
+            "gateway fleet ratchet requires execution_mode='docker'; "
+            "host agent CLIs can read provider OAuth/keychain state even "
+            "when their process environment is scrubbed"
+        )
+        raise ValueError(msg)
+    if config.docker_extra_mounts:
+        msg = (
+            "gateway fleet ratchet forbids docker_extra_mounts; arbitrary "
+            "host mounts can re-expose repository .env files or provider "
+            "credential homes inside an otherwise isolated worker"
+        )
+        raise ValueError(msg)
+    if direct := _gateway_direct_harness_roles(config):
+        msg = (
+            "gateway fleet ratchet forbids direct Claude/z.ai harness "
+            "providers; set gateway-capable roles to provider='gateway' "
+            "(one-shot OpenAI-compatible providers remain allowed): "
+            + ", ".join(direct)
+        )
+        raise ValueError(msg)
+
+
+def _validate_gateway_pr_unstick_tool(config: HydraFlowConfig) -> None:
+    """Validate PRUnsticker's implicit background-tool wiring."""
+    # PRUnsticker's reflection call uses the shared background tool rather than
+    # a dedicated ``pr_unstick_tool`` field. The gateway exposes an Anthropic
+    # harness and therefore cannot execute a Codex background command.
+    pr_unstick_tool = (
+        "claude" if config.background_tool == "inherit" else config.background_tool
+    )
+    if config.pr_unstick_provider == "gateway" and pr_unstick_tool != "claude":
+        msg = (
+            "pr_unstick: provider 'gateway' requires background_tool='claude' "
+            f"or 'inherit'; got {config.background_tool!r}"
+        )
+        raise ValueError(msg)
+
+
+_StageToolModel = tuple[str, str, str]
+
+
+def _tool_model_stage_pairs(config: HydraFlowConfig) -> tuple[_StageToolModel, ...]:
+    """Return every independently configurable stage/tool/model triple."""
+    return (
         ("implementation", config.implementation_tool, config.model),
         ("review", config.review_tool, config.review_model),
         (
@@ -6709,54 +6886,107 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
             config.adr_drift_resolver_tool,
             config.adr_drift_resolver_model,
         ),
-    ]
+    )
 
-    for stage, tool, model in stage_pairs:
-        if not model:
-            continue  # empty — inherited/unset
-        if "flash" in model.lower():
-            msg = (
-                f"{stage}: model {model!r} is a *flash* variant; "
-                "flash models are rejected for the factory (insufficient "
-                "reasoning quality). Use a pro-tier model instead."
-            )
-            raise ValueError(msg)
-        required = _required_tool_for_model(model)
-        if required is not None and required != tool:
-            msg = (
-                f"{stage}: mismatched pair {tool!r}+{model!r}; "
-                f"model {model!r} requires tool {required!r}"
-            )
-            raise ValueError(msg)
-        # Provider-scoped model validation. A role's *_provider (default
-        # "claude" for roles without a dial) must agree with its model: a glm-*
-        # model needs provider "zai", and a "zai" provider needs a glm-* model.
-        # This is what stops a background/maintenance model from silently
-        # stranding a GLM model on a claude-provider (Anthropic) spawn.
-        #
-        # Sub-spawn stages have no dial of their own — they run on the harness of
-        # the outer runner(s) that spawn them, so validate their model against
-        # EVERY provider it can run on (the verifier runs via the implementation
-        # spawn; subskill/debug run via ac_provider AND review_provider). This
-        # rejects e.g. an opus sub-spawn model while a routing runner is on GLM,
-        # and a glm sub-spawn model unless every routing runner is on GLM.
-        provider_fields = _SUBSPAWN_PROVIDER_SOURCE.get(stage, (f"{stage}_provider",))
-        providers = {getattr(config, f, "claude") for f in provider_fields}
-        required_provider = _required_provider_for_model(model)
-        for provider in providers:
-            if required_provider is not None and provider != required_provider:
-                msg = (
-                    f"{stage}: model {model!r} requires provider "
-                    f"{required_provider!r} but a routing runner is on provider "
-                    f"{provider!r}"
-                )
-                raise ValueError(msg)
-            if provider == "zai" and required_provider != "zai":
-                msg = (
-                    f"{stage}: provider 'zai' (the GLM harness) requires a glm-* "
-                    f"model, got {model!r}"
-                )
-                raise ValueError(msg)
+
+def _validate_stage_provider(
+    *,
+    stage: str,
+    tool: str,
+    model: str,
+    provider: str,
+    required_provider: str | None,
+) -> None:
+    """Validate one routing provider against a stage's tool and model."""
+    if provider == "gateway" and tool != "claude":
+        msg = f"{stage}: provider 'gateway' requires tool 'claude'; got tool {tool!r}"
+        raise ValueError(msg)
+    provider_matches = provider == required_provider or (
+        provider == "gateway" and required_provider == "zai"
+    )
+    if required_provider is not None and not provider_matches:
+        msg = (
+            f"{stage}: model {model!r} requires provider "
+            f"{required_provider!r} but a routing runner is on provider "
+            f"{provider!r}"
+        )
+        raise ValueError(msg)
+    if provider == "zai" and required_provider != "zai":
+        msg = (
+            f"{stage}: provider 'zai' (the GLM harness) requires a glm-* "
+            f"model, got {model!r}"
+        )
+        raise ValueError(msg)
+
+
+def _validate_stage_tool_model(
+    config: HydraFlowConfig, stage: str, tool: str, model: str
+) -> None:
+    """Validate a stage's tool/model pair against every routing provider."""
+    if not model:
+        return  # empty — inherited/unset
+    if "flash" in model.lower():
+        msg = (
+            f"{stage}: model {model!r} is a *flash* variant; "
+            "flash models are rejected for the factory (insufficient "
+            "reasoning quality). Use a pro-tier model instead."
+        )
+        raise ValueError(msg)
+    required_tool = _required_tool_for_model(model)
+    if required_tool is not None and required_tool != tool:
+        msg = (
+            f"{stage}: mismatched pair {tool!r}+{model!r}; "
+            f"model {model!r} requires tool {required_tool!r}"
+        )
+        raise ValueError(msg)
+
+    # Sub-spawn stages have no dial of their own — they run on the harness of
+    # the outer runner(s) that spawn them, so validate against every provider
+    # they can inherit. Roles without a dial default to the Claude harness.
+    provider_fields = _SUBSPAWN_PROVIDER_SOURCE.get(stage, (f"{stage}_provider",))
+    providers = {getattr(config, field, "claude") for field in provider_fields}
+    required_provider = _required_provider_for_model(model)
+    for provider in providers:
+        _validate_stage_provider(
+            stage=stage,
+            tool=tool,
+            model=model,
+            provider=provider,
+            required_provider=required_provider,
+        )
+
+
+def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
+    """Validate that every (tool, model) pair is internally consistent.
+
+    Rejects:
+      - Any ``*-flash*`` model in any role (quality guard for the factory).
+      - Cross-provider mismatches (e.g. ``codex`` + ``opus``,
+        ``gemini`` + ``gpt-5-codex``).
+
+    Also auto-syncs ``verification_judge_tool`` to ``review_tool`` because
+    the two share ``review_model`` — the tools MUST agree, so we pick the
+    review side as the source of truth and let the ``review`` pair check
+    catch the underlying model mismatch if one exists. Emits a warning
+    when an explicit ``verification_judge_tool`` is being overridden so
+    the user isn't surprised.
+    """
+    if config.verification_judge_tool != config.review_tool:
+        logger.warning(
+            "verification_judge_tool=%r does not match review_tool=%r; "
+            "the two share review_model so they must agree. "
+            "Overriding verification_judge_tool to %r.",
+            config.verification_judge_tool,
+            config.review_tool,
+            config.review_tool,
+        )
+    object.__setattr__(config, "verification_judge_tool", config.review_tool)
+
+    _validate_gateway_capture_policy(config)
+    _validate_gateway_fleet_profile(config)
+    _validate_gateway_pr_unstick_tool(config)
+    for stage, tool, model in _tool_model_stage_pairs(config):
+        _validate_stage_tool_model(config, stage, tool, model)
 
 
 def _resolve_base_paths(config: HydraFlowConfig) -> None:
@@ -7400,6 +7630,7 @@ def _apply_env_overrides(config: HydraFlowConfig) -> None:
                 allowed = get_args(field_info.annotation)
                 if env_val in allowed:
                     object.__setattr__(config, field, env_val)
+                    config.__pydantic_fields_set__.add(field)
                 else:
                     logger.warning(
                         "Invalid %s=%r; expected one of %s",

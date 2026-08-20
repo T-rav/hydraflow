@@ -53,6 +53,7 @@ class TestInitialization:
             "ci_monitor_settings",
             "ci_monitor_tracked_failures",
             "cost_budget_killed_workers",
+            "gateway_coverage_attempts",
             "detector_calibration_attempts",
             "cost_throttled_workers",
             "default_disabled_workers_seeded",

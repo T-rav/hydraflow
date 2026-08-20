@@ -30,6 +30,10 @@ PYTEST_PARALLEL ?= -n auto --dist loadscope --reruns 2 --reruns-delay 1
 
 # Paths excluded from the parallel run and executed SERIALLY (xdist-unsafe:
 # process-global state that collides across workers).
+# These two suites exercise host-global process groups / advisory locks and
+# must not overlap even with the otherwise-serial pytest process that runs in
+# the background during `quality-unlocked` (#11219, #11434).
+PYTEST_HOST_EXCLUSIVE_PATHS := tests/test_quality_host_lock.py tests/regressions/test_issue_11434.py
 # tests/test_review_phase_metrics.py: a leaked global review_advisor client mock
 # degrades the advisor under cross-worker ordering (passes single-threaded) —
 # tracked follow-up (#10119). Add a path here when a non-scenario test proves
@@ -42,6 +46,7 @@ REAP_TESTS := tests/regressions/test_reap_processlookuperror.py \
   tests/regressions/test_issue_9553.py \
   tests/regressions/test_issue_9579.py \
   tests/regressions/test_issue_9911_stop_path_reap.py \
+  tests/regressions/test_issue_11434.py \
   tests/regressions/test_issue_9641_unified_group_kill.py \
   tests/regressions/test_hostrunner_reap_grandchildren.py \
   tests/regressions/test_auto_pr_preflight_gate.py
@@ -58,9 +63,25 @@ REAP_TESTS := tests/regressions/test_reap_processlookuperror.py \
 # the gate asserts on the wrong stage. Passes single-threaded; fails only in the
 # parallel bulk. The "rest of tests/regressions/ is xdist-safe" claim above did
 # not hold for this file.
+# test_quality_host_lock.py launches competing process trees around one
+# host-wide lock; concurrent xdist workers perturb its signal/queue timing.
+# Both it and issue_11434 pass serially but fail in the parallel bulk.
 # Everything else — including tests/scenarios (#10111) — parallelizes.
-PYTEST_SERIAL_PATHS ?= tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py $(REAP_TESTS)
+PYTEST_SERIAL_PATHS ?= tests/test_review_phase_metrics.py tests/test_auto_pr_preflight.py tests/test_quality_host_lock.py $(REAP_TESTS)
 PYTEST_SERIAL_IGNORE := $(addprefix --ignore=,$(PYTEST_SERIAL_PATHS))
+# `test` and `coverage` consume the complete serial set above. The quality
+# target runs host-global tests in the foreground, then backgrounds only the
+# remaining xdist-unsafe files alongside the parallel bulk.
+PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS := $(filter-out $(PYTEST_HOST_EXCLUSIVE_PATHS),$(PYTEST_SERIAL_PATHS))
+
+# #11470: the gateway is an independently deployable interception boundary,
+# so its package keeps a stricter branch-coverage contract than the aggregate
+# repository floor. Keep one canonical command for the explicit target, local
+# quality, and the path-triggered CI gate.
+GATEWAY_PACKAGE_TEST_PATHS := tests/test_gateway_*.py
+GATEWAY_PACKAGE_TEST_IGNORES := $(addprefix --ignore=,$(wildcard $(GATEWAY_PACKAGE_TEST_PATHS)))
+GATEWAY_PACKAGE_COVERAGE_MIN := 85
+GATEWAY_PACKAGE_COVERAGE_CMD := PYTHONPATH=src $(UV) pytest $(GATEWAY_PACKAGE_TEST_PATHS) --cov=hydraflow_gateway --cov-branch --cov-fail-under=$(GATEWAY_PACKAGE_COVERAGE_MIN) --cov-report=term-missing
 
 # Runtime overrides (used by `make hot`)
 WORKERS ?= 3
@@ -85,7 +106,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
+.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover gateway-coverage smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -103,6 +124,7 @@ help:
 	@echo "  make test-fast      Run unit tests (-x --tb=short)"
 	@echo "  make coverage [MIN] Run coverage-focused test command (default 70)"
 	@echo "  make cover [MIN]    Short alias for make coverage [MIN]"
+	@echo "  make gateway-coverage  Enforce gateway package branch coverage (minimum 85%)"
 	@echo "  make smoke          Run critical cross-system smoke tests"
 	@echo "  make test-cov       Run tests with coverage report"
 	@echo "  make lint           Auto-fix linting"
@@ -242,6 +264,11 @@ coverage: deps
 	@echo "$(GREEN)All tests passed$(RESET)"
 
 cover: coverage
+
+gateway-coverage: deps
+	@echo "$(BLUE)Enforcing hydraflow_gateway branch coverage >= $(GATEWAY_PACKAGE_COVERAGE_MIN)%...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(GATEWAY_PACKAGE_COVERAGE_CMD)
+	@echo "$(GREEN)Gateway package coverage passed$(RESET)"
 
 test: deps
 	@echo "$(BLUE)Running HydraFlow unit tests (parallel; scenarios serial)...$(RESET)"
@@ -511,8 +538,9 @@ test-ui:
 
 # Lint runs first, serially — ensures a failing lint aborts quality before
 # spending time on tests, and guarantees the same verdict as `make lint-check`.
-# pyright, bandit, pytest, and the UI vitest suite are parallelised after lint
-# passes.
+# The host-global process/lock suites run next in the foreground. Pyright,
+# bandit, the remaining pytest suites, and UI vitest parallelise only after
+# that exclusive preflight passes.
 # #11219: the suite runs under a host-wide advisory lock. Two concurrent
 # full suites on one box oversubscribe it — workers get killed mid-run and
 # the survivor reports failures that pass in isolation (observed
@@ -544,13 +572,15 @@ quality: deps lint-ul
 endif
 
 quality-unlocked:
-	@echo "$(BLUE)Running quality checks in parallel...$(RESET)"
+	@echo "$(BLUE)Running host-exclusive preflight, then parallel quality checks...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && $(UV) ruff check . && $(UV) ruff format . --check && echo "[lint OK]"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) pytest $(PYTEST_HOST_EXCLUSIVE_PATHS) && echo "[host-exclusive-tests OK]"
+	@cd $(HYDRAFLOW_DIR) && $(GATEWAY_PACKAGE_COVERAGE_CMD) && echo "[gateway-coverage OK]"
 	@cd $(HYDRAFLOW_DIR) && ( \
 		$(UV) pyright && echo "[typecheck OK]" & \
 		$(UV) bandit -c pyproject.toml -r . --severity-level medium && echo "[security OK]" & \
-		PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
-		PYTHONPATH=src $(UV) pytest $(PYTEST_SERIAL_PATHS) && echo "[serial-tests OK]" & \
+		PYTHONPATH=src $(UV) pytest tests/ $(PYTEST_SERIAL_IGNORE) $(GATEWAY_PACKAGE_TEST_IGNORES) $(PYTEST_PARALLEL) && echo "[tests OK]" & \
+		PYTHONPATH=src $(UV) pytest $(PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS) && echo "[serial-tests OK]" & \
 		PYTHONPATH=src $(UV) pytest tests/scenarios/ -m scenario_loops -q && echo "[scenario-loops OK]" & \
 		( $(UI_TEST_CMD) ) & \
 		wait_result=0; \

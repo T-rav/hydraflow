@@ -51,6 +51,34 @@ class TestSetupEnv:
         env_dst = wt_path / ".env"
         assert env_dst.is_symlink()
 
+    def test_terminal_gateway_workspace_exposes_no_local_credentials(
+        self, tmp_path: Path
+    ) -> None:
+        from config import HydraFlowConfig
+
+        repo_root = tmp_path / "repo"
+        wt_path = tmp_path / "worktree"
+        (repo_root / ".claude").mkdir(parents=True)
+        (repo_root / ".env").write_text("ANTHROPIC_API_KEY=real-key\n")
+        (repo_root / ".claude/settings.local.json").write_text(
+            '{"env":{"ANTHROPIC_API_KEY":"real-key"}}'
+        )
+        wt_path.mkdir()
+        (wt_path / ".env").write_text("stale-real-key")
+        (wt_path / ".claude").mkdir()
+        (wt_path / ".claude/settings.local.json").write_text("stale-settings")
+        config = HydraFlowConfig(
+            repo_root=repo_root,
+            workspace_base=tmp_path / "worktrees",
+            gateway_fleet_ratchet_enabled=True,
+            execution_mode="docker",
+        )
+
+        WorkspaceManager(config)._setup_env(wt_path)
+
+        assert not (wt_path / ".env").exists()
+        assert not (wt_path / ".claude/settings.local.json").exists()
+
     def test_setup_env_copies_settings_local_json(self, config, tmp_path: Path) -> None:
         """_setup_env should copy (not symlink) .claude/settings.local.json."""
         manager = WorkspaceManager(config)

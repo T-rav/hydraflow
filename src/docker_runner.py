@@ -12,11 +12,13 @@ import contextlib
 import logging
 import os
 import struct
+import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from execution import SimpleResult, SubprocessRunner, get_default_runner
+from subprocess_util import scrub_gateway_spawn_env
 
 if TYPE_CHECKING:
     from config import Credentials, HydraFlowConfig
@@ -56,6 +58,37 @@ _CONTAINER_HOME = "/home/hydraflow"
 _CONTAINER_PI_HOME = f"{_CONTAINER_HOME}/.pi"
 _CONTAINER_CODEX_HOME = f"{_CONTAINER_HOME}/.codex"
 _CONTAINER_CLAUDE_HOME = f"{_CONTAINER_HOME}/.claude"
+_HARNESS_ENV_KEYS = frozenset(
+    {"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
+)
+
+
+def _bounded_harness_env(env: dict[str, str] | None) -> dict[str, str]:
+    """Extract only the sanctioned Anthropic-compatible route triple."""
+
+    if not env or not (
+        env.get("ANTHROPIC_BASE_URL") and env.get("ANTHROPIC_AUTH_TOKEN")
+    ):
+        return {}
+    return {key: env[key] for key in _HARNESS_ENV_KEYS if key in env}
+
+
+def _is_gateway_harness_env(
+    harness_env: dict[str, str] | None,
+    config: HydraFlowConfig | None,
+) -> bool:
+    """Recognize a gateway route without exporting a marker to the worker."""
+
+    if not harness_env:
+        return False
+    if getattr(harness_env, "transport", None) == "gateway":
+        return True
+    token = harness_env.get("ANTHROPIC_AUTH_TOKEN", "")
+    if token.startswith("hfgw_"):
+        return True
+    configured_url = str(getattr(config, "gateway_base_url", "") or "").rstrip("/")
+    routed_url = harness_env.get("ANTHROPIC_BASE_URL", "").rstrip("/")
+    return bool(configured_url and routed_url == configured_url)
 
 
 def build_container_kwargs(config: HydraFlowConfig) -> dict[str, Any]:
@@ -309,7 +342,10 @@ class DockerRunner:
         self._last_spawn_time: float = 0.0
         self._containers: set[Any] = set()
         self._user_tool_mounts_cache: dict[str, dict[str, str]] | None = None
-        self._user_tool_mounts_cache_key: tuple[str, str, str, str, bool] | None = None
+        self._user_tool_mounts_cache_key: (
+            tuple[str, str, str, str, bool, bool] | None
+        ) = None
+        self._gateway_env_mask_path: Path | None = None
 
     def _ensure_client(self, max_retries: int = 6, delay: float = 5.0) -> None:
         """Verify Docker is reachable; wait and retry if the daemon is restarting.
@@ -361,7 +397,11 @@ class DockerRunner:
         await self.cleanup()
 
     def _build_mounts(
-        self, cwd: str | None, *, harness_routed: bool = False
+        self,
+        cwd: str | None,
+        *,
+        harness_routed: bool = False,
+        gateway_routed: bool = False,
     ) -> dict[str, dict[str, str]]:
         """Build Docker volume mount specification.
 
@@ -371,6 +411,11 @@ class DockerRunner:
         ``ANTHROPIC_AUTH_TOKEN`` and silently route traffic to the exhausted
         native account (the long-standing suppress-claude-mounts wiki
         pattern, source #10600).
+
+        *gateway_routed* tightens that boundary further: no host agent homes
+        or separate live source repo are mounted, and an empty read-only file
+        masks a worktree's top-level ``.env``. Gateway workers receive only
+        their virtual key, never another tool's on-disk provider credential.
         """
         mounts: dict[str, dict[str, str]] = {}
         if cwd:
@@ -378,7 +423,7 @@ class DockerRunner:
         # Only mount /repo separately when it differs from cwd — otherwise
         # the dict key collision overwrites the /workspace mount with /repo.
         repo_str = str(self._repo_root)
-        if repo_str != cwd:
+        if repo_str != cwd and not gateway_routed:
             mounts[repo_str] = {"bind": "/repo", "mode": "ro"}
 
         # NOTE: The host .git directory is NOT mounted.  Workspaces are
@@ -388,16 +433,51 @@ class DockerRunner:
 
         self._log_dir.mkdir(parents=True, exist_ok=True)
         mounts[str(self._log_dir)] = {"bind": "/logs", "mode": "rw"}
-        mounts.update(self._get_user_tool_mounts(harness_routed=harness_routed))
+        mounts.update(
+            self._get_user_tool_mounts(
+                harness_routed=harness_routed,
+                gateway_routed=gateway_routed,
+            )
+        )
+        if (
+            gateway_routed
+            and self._config is not None
+            and self._config.gateway_fleet_ratchet_enabled
+            and self._extra_mounts
+        ):
+            raise RuntimeError(
+                "terminal gateway profile forbids arbitrary Docker extra mounts"
+            )
         for spec in self._extra_mounts:
             parts = spec.split(":")
             if len(parts) >= 2:
                 mode = parts[2] if len(parts) > 2 else "ro"
                 mounts[parts[0]] = {"bind": parts[1], "mode": mode}
+        if gateway_routed and cwd:
+            mounts[str(self._gateway_dotenv_mask())] = {
+                "bind": "/workspace/.env",
+                "mode": "ro",
+            }
         return mounts
 
+    def _gateway_dotenv_mask(self) -> Path:
+        """Return a runner-owned empty file used to hide workspace ``.env``."""
+
+        if self._gateway_env_mask_path is None:
+            self._log_dir.mkdir(parents=True, exist_ok=True)
+            fd, raw_path = tempfile.mkstemp(
+                prefix=".gateway-empty-env-",
+                dir=self._log_dir,
+            )
+            os.close(fd)
+            self._gateway_env_mask_path = Path(raw_path)
+        return self._gateway_env_mask_path
+
     def _get_user_tool_mounts(
-        self, *, harness_routed: bool = False
+        self,
+        *,
+        harness_routed: bool = False,
+        gateway_routed: bool = False,
     ) -> dict[str, dict[str, str]]:
         """Return cached user-tool mounts, refreshing when env/home selection changes.
 
@@ -411,22 +491,29 @@ class DockerRunner:
             os.environ.get("CODEX_HOME", "").strip(),
             os.environ.get("CLAUDE_CONFIG_DIR", "").strip(),
             harness_routed,
+            gateway_routed,
         )
         if (
             self._user_tool_mounts_cache is None
             or key != self._user_tool_mounts_cache_key
         ):
             self._user_tool_mounts_cache = self._build_user_tool_mounts(
-                harness_routed=harness_routed
+                harness_routed=harness_routed,
+                gateway_routed=gateway_routed,
             )
             self._user_tool_mounts_cache_key = key
         return dict(self._user_tool_mounts_cache)
 
     def _build_user_tool_mounts(
-        self, *, harness_routed: bool = False
+        self,
+        *,
+        harness_routed: bool = False,
+        gateway_routed: bool = False,
     ) -> dict[str, dict[str, str]]:
         """Mount host user agent settings into container when present."""
         mounts: dict[str, dict[str, str]] = {}
+        if gateway_routed:
+            return mounts
         home = Path.home()
 
         pi_dir_raw = os.environ.get("PI_CODING_AGENT_DIR", "").strip()
@@ -549,8 +636,15 @@ class DockerRunner:
         await self._enforce_spawn_delay()
 
         loop = asyncio.get_running_loop()
-        mounts = self._build_mounts(cwd, harness_routed=bool(harness_env))
+        gateway_routed = _is_gateway_harness_env(harness_env, self._config)
+        mounts = self._build_mounts(
+            cwd,
+            harness_routed=bool(harness_env),
+            gateway_routed=gateway_routed,
+        )
         container_env = self._build_env()
+        if gateway_routed:
+            container_env = scrub_gateway_spawn_env(container_env)
         # #11263: the harness backend override (ANTHROPIC_BASE_URL/AUTH_TOKEN,
         # cleared ANTHROPIC_API_KEY) MUST reach the container or a credit-
         # failover/repo-provider reroute sends a glm --model to the native
@@ -624,7 +718,7 @@ class DockerRunner:
         cmd: Sequence[str],
         *,
         cwd: str | None = None,
-        env: dict[str, str] | None = None,  # noqa: ARG002
+        env: dict[str, str] | None = None,
         timeout: float = 120.0,
         input: bytes | None = None,  # noqa: A002
         cancel_check: Callable[[], bool] | None = None,
@@ -637,14 +731,14 @@ class DockerRunner:
         already container-scoped and reaped with the container, so there is
         no host process group to poll-cancel.
 
-        .. note::
-            The ``env`` parameter is intentionally ignored — see
-            :meth:`create_streaming_process` for the rationale.
+        ``env`` is otherwise ignored, but the bounded three-key harness route
+        produced by ``resolve_harness_env`` is extracted so lightweight Claude
+        calls honor z.ai/gateway routing without admitting the full host env.
+        Large prompts may arrive through ``input``; they are written through
+        Docker's attach socket so terminal gateway routing never falls back to
+        a host process merely to avoid the OS argument-size limit.
         """
         _ = (cancel_check, cancel_poll_interval)
-        if input is not None:
-            msg = "stdin input not supported in Docker mode"
-            raise NotImplementedError(msg)
         await self._enforce_spawn_delay()
 
         loop = asyncio.get_running_loop()
@@ -652,8 +746,18 @@ class DockerRunner:
         # Pre-flight: verify Docker is reachable (handles daemon restarts)
         await loop.run_in_executor(None, self._ensure_client)
 
-        mounts = self._build_mounts(cwd)
+        harness_env = _bounded_harness_env(env)
+        gateway_routed = _is_gateway_harness_env(harness_env, self._config)
+        mounts = self._build_mounts(
+            cwd,
+            harness_routed=bool(harness_env),
+            gateway_routed=gateway_routed,
+        )
         container_env = self._build_env()
+        if gateway_routed:
+            container_env = scrub_gateway_spawn_env(container_env)
+        if harness_env:
+            container_env.update(harness_env)
         working_dir = "/workspace" if cwd else None
 
         container_kwargs: dict[str, Any] = {
@@ -661,6 +765,7 @@ class DockerRunner:
             "command": list(cmd),
             "environment": container_env,
             "volumes": mounts,
+            "stdin_open": input is not None,
             "detach": True,
         }
         if working_dir:
@@ -679,6 +784,37 @@ class DockerRunner:
         try:
             await loop.run_in_executor(None, container.start)
             self._containers.add(container)
+
+            if input is not None:
+                socket = await loop.run_in_executor(
+                    None,
+                    lambda: container.attach_socket(
+                        params={"stdin": 1, "stdout": 1, "stderr": 1, "stream": 1}
+                    ),
+                )
+                process = DockerProcess(
+                    cast(ContainerLike, container),
+                    cast(DockerSocket, socket),
+                    loop,
+                )
+                process.stdin.write(input)
+                await process.stdin.drain()
+                process.stdin.close()
+
+                async def _collect_attached() -> tuple[bytes, bytes, int]:
+                    stdout_chunks = [chunk async for chunk in process.stdout]
+                    stderr_bytes = await process.stderr.read()
+                    return b"".join(stdout_chunks), stderr_bytes, await process.wait()
+
+                stdout_bytes, stderr_bytes, returncode = await asyncio.wait_for(
+                    _collect_attached(),
+                    timeout=timeout,
+                )
+                return SimpleResult(
+                    stdout=stdout_bytes.decode(errors="replace").strip(),
+                    stderr=stderr_bytes.decode(errors="replace").strip(),
+                    returncode=returncode,
+                )
 
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, container.wait),
@@ -755,6 +891,15 @@ class DockerRunner:
                     "Failed to remove container during cleanup", exc_info=True
                 )
         self._containers.clear()
+        if self._gateway_env_mask_path is not None:
+            try:
+                self._gateway_env_mask_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "Failed to remove gateway workspace env mask",
+                    exc_info=True,
+                )
+            self._gateway_env_mask_path = None
 
 
 def _check_docker_available() -> bool:
@@ -770,6 +915,22 @@ def _check_docker_available() -> bool:
         return False
 
 
+def _raise_if_terminal_gateway_profile(
+    config: HydraFlowConfig,
+    reason: str,
+    *,
+    cause: Exception | None = None,
+) -> None:
+    """Fail closed when terminal gateway isolation cannot be established."""
+
+    if not config.gateway_fleet_ratchet_enabled:
+        return
+    message = f"terminal gateway profile requires Docker isolation: {reason}"
+    if cause is not None:
+        raise RuntimeError(message) from cause
+    raise RuntimeError(message)
+
+
 def get_docker_runner(
     config: HydraFlowConfig,
     *,
@@ -778,12 +939,16 @@ def get_docker_runner(
 ) -> SubprocessRunner:
     """Factory: returns a :class:`SubprocessRunner` for agent execution.
 
-    Returns a ``DockerRunner`` when Docker is available and configured,
-    otherwise falls back to a ``HostRunner`` with a warning if:
+    Returns a ``DockerRunner`` when Docker is available and configured.
+    Outside the terminal gateway profile, falls back to a ``HostRunner`` with
+    a warning if:
 
     - ``execution_mode`` is not ``"docker"``
     - ``docker_image`` is not configured
     - Docker daemon is not available
+
+    The terminal gateway profile raises ``RuntimeError`` for Docker setup
+    failures because host execution can expose provider OAuth/keychain state.
 
     Parameters
     ----------
@@ -796,6 +961,7 @@ def get_docker_runner(
         return get_default_runner()
 
     if not config.docker_image:
+        _raise_if_terminal_gateway_profile(config, "no docker_image configured")
         logger.warning(
             "execution_mode='docker' but no docker_image configured; "
             "falling back to host runner"
@@ -804,6 +970,7 @@ def get_docker_runner(
 
     checker = docker_checker if docker_checker is not None else _check_docker_available
     if not checker():
+        _raise_if_terminal_gateway_profile(config, "Docker daemon is not available")
         logger.warning("Docker daemon not available; falling back to host runner")
         return get_default_runner()
 
@@ -828,6 +995,11 @@ def get_docker_runner(
         from exception_classify import reraise_on_credit_or_bug  # noqa: PLC0415
 
         reraise_on_credit_or_bug(exc)
+        _raise_if_terminal_gateway_profile(
+            config,
+            "DockerRunner construction failed",
+            cause=exc,
+        )
         logger.warning(
             "DockerRunner construction failed; falling back to host runner",
             exc_info=True,
