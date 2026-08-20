@@ -146,12 +146,11 @@ async def run_probe(
     """Mint a key and complete a forced tool-use turn plus tool-result turn."""
 
     owns_client = client is None
+    probe_client = client if client is not None else _new_probe_client()
     minted_key_id: str | None = None
-    if client is None:
-        client = _new_probe_client()
     base = gateway_base_url.rstrip("/")
     try:
-        mint = await client.post(
+        mint = await probe_client.post(
             f"{base}/control/v1/keys",
             headers={"authorization": f"Bearer {control_token}"},
             json={
@@ -199,7 +198,7 @@ async def run_probe(
             },
         }
         first_evidence, first_raw = await _stream_post(
-            client,
+            probe_client,
             f"{base}/v1/messages",
             headers=headers,
             body={
@@ -216,7 +215,7 @@ async def run_probe(
             raise RuntimeError("gateway probe did not observe the forced tool use")
 
         second_evidence, second_raw = await _stream_post(
-            client,
+            probe_client,
             f"{base}/v1/messages",
             headers=headers,
             body={
@@ -260,14 +259,14 @@ async def run_probe(
         try:
             if minted_key_id is not None:
                 await _revoke_probe_key(
-                    client,
+                    probe_client,
                     base=base,
                     control_token=control_token,
                     key_id=minted_key_id,
                 )
         finally:
             if owns_client:
-                await client.aclose()
+                await probe_client.aclose()
 
 
 async def _revoke_probe_key(
