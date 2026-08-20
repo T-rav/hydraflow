@@ -345,3 +345,93 @@ class TestTokenReportEndpoint:
         payload = response.json()
         assert payload["issues"] == []
         assert payload["fleet"]["issues_counted"] == 0
+
+    def test_drift_block_present_with_no_baseline(self, tmp_path: Path) -> None:
+        client = TestClient(self._app(tmp_path, None))
+        response = client.get("/api/diagnostics/token-report")
+        assert response.status_code == 200
+        assert response.json()["drift"]["status"] == "no_baseline"
+
+    def test_drift_block_reports_pinned_verdicts(self, tmp_path: Path) -> None:
+        from token_drift import TokenBaseline, TokenBaselineLedger, token_baseline_path
+
+        app = self._app(tmp_path, None)
+        now = datetime.now(UTC)
+        pinned_at = now - timedelta(days=1)
+        TokenBaselineLedger(token_baseline_path(tmp_path)).record(
+            TokenBaseline(
+                pinned_at=pinned_at,
+                windows_counted=8,
+                source_share_series={"implementer": [0.5] * 8},
+                median_tokens_series=[50_000.0] * 8,
+            )
+        )
+        trailing_ts = (now - timedelta(days=7)).isoformat()
+        rows = [
+            {
+                "issue_number": 1,
+                "source": "implementer",
+                "total_tokens": 90_000,
+                "timestamp": trailing_ts,
+            },
+        ]
+        prompt_dir = tmp_path / "metrics" / "prompt"
+        prompt_dir.mkdir(parents=True, exist_ok=True)
+        with open(prompt_dir / "inferences.jsonl", "w") as f:
+            for row in rows:
+                f.write(json.dumps(row) + "\n")
+
+        client = TestClient(app)
+        response = client.get("/api/diagnostics/token-report")
+        assert response.status_code == 200
+        drift = response.json()["drift"]
+        assert drift["status"] == "ok"
+        assert {s["source"] for s in drift["sources"]} >= {
+            "implementer",
+            "median_tokens_per_issue",
+        }
+
+    def test_drift_block_degrades_on_corrupt_ledger(self, tmp_path: Path) -> None:
+        from token_drift import token_baseline_path
+
+        ledger_path = token_baseline_path(tmp_path)
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(
+            json.dumps({"windows_counted": 8}) + "\n", encoding="utf-8"
+        )
+
+        client = TestClient(self._app(tmp_path, None))
+        response = client.get("/api/diagnostics/token-report")
+
+        assert response.status_code == 200
+        assert response.json()["drift"]["status"] == "no_baseline"
+
+    def test_drift_block_degrades_on_structurally_corrupt_ledger(
+        self, tmp_path: Path
+    ) -> None:
+        """Valid JSON whose shape is corrupt — windows_counted claims windows
+        the series do not carry — must not 500: the drift block's never-500
+        contract covers structure, not just parseability.
+        """
+        from token_drift import token_baseline_path
+
+        ledger_path = token_baseline_path(tmp_path)
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(
+            json.dumps(
+                {
+                    "pinned_at": datetime.now(UTC).isoformat(),
+                    "windows_counted": 10,
+                    "source_share_series": {"implementer": []},
+                    "median_tokens_series": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        client = TestClient(self._app(tmp_path, None))
+        response = client.get("/api/diagnostics/token-report")
+
+        assert response.status_code == 200
+        assert response.json()["drift"]["status"] == "no_baseline"

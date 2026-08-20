@@ -87,3 +87,17 @@ def test_the_allowlisted_files_still_use_the_guarded_attrs() -> None:
                 f"{name} is allowlisted but no longer references "
                 f"{sorted(_GUARDED_ATTRS)} — remove it from _ALLOWED"
             )
+
+
+def test_the_guard_still_catches_a_synthetic_reach_through() -> None:
+    """Guard the guard: a green main scan must not be vacuous (#11415) —
+    the detector must actually flag the reach-through shape it exists
+    to ban, or the gate could silently rot to always-pass."""
+    tree = ast.parse("self._prs._run_gh('gh', 'issue', 'list')\nx = self._prs._repo\n")
+    assert set(_reach_through_sites(tree)) == {(1, "_run_gh"), (2, "_repo")}
+
+
+def test_bare_self_accesses_are_not_flagged() -> None:
+    """The legitimate in-adapter shape must never false-positive."""
+    tree = ast.parse("self._run_gh('gh', 'issue', 'list')\nx = self._repo\n")
+    assert _reach_through_sites(tree) == []

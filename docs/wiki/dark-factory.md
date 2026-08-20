@@ -302,6 +302,52 @@ the same list, with the issue references that surfaced each, lives in
 6. **Relocating a symbol → repoint tests that `patch()` it.** Grep for
    `patch("oldmodule.symbol")` before the move, or the test errors at collection.
 
+### 4.9 Token-drift baseline regeneration
+
+`token_drift.py` (#11441) pins a per-source token-share + median-tokens-per-issue
+baseline and compares each new trailing ISO week against it. `GET
+/api/diagnostics/token-report`'s `drift` block degrades to `no_baseline` (never
+pinned or the ledger is unreadable/corrupt), `insufficient_data` (fewer than
+`MIN_BASELINE_WINDOWS` — 8, mirroring `VitalsThresholds.min_baseline_windows`
+— pinned windows, or no issues in the trailing week), or `stale` (pinned more
+than `MAX_BASELINE_AGE` — 90 days — ago) instead of ever fabricating a
+verdict. **All three mean the instrument is not watching** — drift is not
+being checked, not that drift was checked and found clean.
+
+Re-pin whenever:
+
+- No baseline has ever been pinned (`no_baseline` on the diagnostics panel).
+- The baseline goes `stale` (>90 days old).
+- A deliberate token-efficiency lever landed (session continuation,
+  cache-aware prefixes, size tiering, …) and the new steady state should
+  become the comparison point, not a drift.
+
+```
+python scripts/pin_token_baseline.py --reason "why you're (re)pinning now"
+```
+
+That's a **dry run** — it prints the windows, sources, and median series it
+would pin without writing anything. Add `--apply` to actually write the
+ledger (there is no separate `--dry-run` flag; omitting `--apply` *is* the
+dry run — mirrors `scripts/cleanup_phantom_cost.py`):
+
+```
+python scripts/pin_token_baseline.py --reason "why you're (re)pinning now" --apply
+```
+
+`--reason` is required — re-pinning silently discards the ability to detect
+drift against the *old* steady state, so state why up front, the same
+discipline `scripts/regen_concentration_baseline.py` enforces for the
+concentration baseline. The ledger lands at
+`<data_root>/calibration/token_baseline.jsonl` (append-only,
+`finder_calibration.CALIBRATION_SUBDIR`; last row wins), needs at least 8
+complete ISO weeks of `inferences.jsonl` telemetry to pin from (`--windows`
+overrides the trailing-week count), and is read back by
+`token_drift.load_and_check_drift` on every `/token-report` request — no
+caretaker loop, no filing; this slice is read-only by design (the filing
+actuator is the deferred sibling issue). Verify a pin landed via
+`curl localhost:<port>/api/diagnostics/token-report | jq .drift`.
+
 ## §5 — Verifying the contract is honored
 
 Auto-discovery tests that fail when a load-bearing convention is broken:
