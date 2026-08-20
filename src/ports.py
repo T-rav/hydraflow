@@ -809,6 +809,10 @@ class IssueStorePort(Protocol):
         """Immediately route *task* into *next_stage* in-memory."""
         ...
 
+    def try_claim_stage(self, task: Task, expected_stage: str) -> bool:
+        """Atomically reserve *task* only when it is queued in *expected_stage*."""
+        ...
+
     def mark_active(self, issue_number: int, stage: str) -> None:
         """Mark a task as actively being processed in *stage*."""
         ...
@@ -821,8 +825,13 @@ class IssueStorePort(Protocol):
         """Record an issue as merged so it appears in the pipeline snapshot."""
         ...
 
-    def release_in_flight(self, issue_numbers: set[int]) -> None:
-        """Remove *issue_numbers* from the in-flight protection set."""
+    def release_in_flight(
+        self,
+        issue_numbers: set[int],
+        *,
+        expected_stage: str | None = None,
+    ) -> None:
+        """Release matching in-flight claims for *issue_numbers*."""
         ...
 
     def is_active(self, issue_number: int) -> bool:
