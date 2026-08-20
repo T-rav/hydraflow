@@ -1168,7 +1168,7 @@ class PlanPhase(PlanWikiIngestMixin):
                     issue.id,
                     review.error or "reviewer returned no result",
                 )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "Plan reviewer raised for issue #%d — leaving plan "
                 "without a review record",
