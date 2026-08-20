@@ -32,6 +32,7 @@ from control_register import regulate, setpoint_for
 from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
 from filing_budget import FilingBudget, file_overflow_summary, overflow_line
+from issue_state import issue_state_is_resolved
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
 
 if TYPE_CHECKING:
@@ -575,8 +576,10 @@ class GateHealthLoop(BaseBackgroundLoop):
                 reraise_on_credit_or_bug(exc)
                 continue
             # get_issue_state vocabulary: OPEN / COMPLETED / NOT_PLANNED
-            # ('' on error — treated as open, fail-safe: no finding).
-            if state.upper() in ("COMPLETED", "NOT_PLANNED", "CLOSED"):
+            # ('' on error — treated as open, fail-safe: no finding). The
+            # owned predicate deliberately excludes raw CLOSED — it never
+            # escapes the port (#11458).
+            if issue_state_is_resolved(state):
                 findings.append(
                     {
                         "kind": "stale_quarantine",

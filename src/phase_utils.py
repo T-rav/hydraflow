@@ -13,6 +13,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import is_likely_bug, reraise_on_credit_or_bug  # noqa: F401
 from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
+from issue_state import issue_state_is_resolved  # noqa: F401
 from models import EscalationContext, PipelineStage, PRInfo, ReviewUpdatePayload, Task
 from ports import IssueStorePort, PRPort
 from state import StateTracker
