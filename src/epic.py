@@ -15,6 +15,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from issue_fetcher import IssueFetcher
+from issue_state import issue_state_is_resolved
 from merge_policy import (
     ROLE_ORCHESTRATOR_REVIEWER,
     MergeApproval,
@@ -1264,7 +1265,11 @@ class EpicManager:
             reraise_on_credit_or_bug(exc)
             logger.debug("Epic #%d GitHub state unreadable: %s", epic_number, exc)
             return False
-        return str(state).upper() in {"CLOSED", "COMPLETED", "NOT_PLANNED"}
+        # issue_state_is_resolved owns the closed-membership set (#11458).
+        # The raw REST 'CLOSED' member this used to carry is unreachable —
+        # PRManager.get_issue_state normalizes CLOSED to the stateReason
+        # (or ''), so the port's vocabulary decides alone.
+        return issue_state_is_resolved(state)
 
     async def check_stale_epics(self) -> list[int]:
         """Find epics with no recent activity and post a warning comment."""

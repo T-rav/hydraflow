@@ -31,7 +31,10 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ 2026-08-02: +1 _diagnostics_routes PLC0415 (5→6) for the supervisor-ack\
   \ endpoint's lazy import of supervisor_observation.append_ack (#11002) —\
   \ matches the route module's existing deferred-import convention (the sibling\
-  \ supervisor/thread endpoint lazy-imports read_thread the same way)."
+  \ supervisor/thread endpoint lazy-imports read_thread the same way). re-snapshot\
+  \ 2026-08-20: -1 phase_utils noqa:F401 (1→0) — re-exports (exception_classify\
+  \ pair + the new issue_state_is_resolved, #11458) are declared via __all__\
+  \ instead of noqa, the route_types idiom; the disturbance ratchet shrinks."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -199,7 +202,6 @@ entries:
   src/orchestrator.py::noqa:BLE001: 1
   src/orchestrator.py::noqa:PLC0415: 1
   src/phase_utils.py::noqa:BLE001: 2
-  src/phase_utils.py::noqa:F401: 1
   src/phase_utils.py::noqa:PLC0415: 6
   "src/phase_utils.py::noqa:PLC0415\u2014deferredtoavoidcircularimport": 1
   src/plan_phase.py::noqa:BLE001: 7

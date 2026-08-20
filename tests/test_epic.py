@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1912,3 +1913,49 @@ class TestPerItemErrorGuards:
         # Should not raise — RuntimeError is transient, loop continues
         stale = await manager.check_stale_epics()
         assert 100 in stale
+
+
+class TestIsClosedOnGithub:
+    """#11458: the epic closed-on-GitHub check routes through the shared
+    ``issue_state_is_resolved`` predicate — the port vocabulary
+    (OPEN / COMPLETED / NOT_PLANNED / UNKNOWN / '') decides alone."""
+
+    def _manager(self, state: object) -> EpicManager:
+        mgr = object.__new__(EpicManager)
+        mgr._prs = SimpleNamespace(get_issue_state=AsyncMock(return_value=state))
+        return mgr
+
+    @pytest.mark.asyncio
+    async def test_completed_is_closed(self) -> None:
+        assert await self._manager("COMPLETED")._is_closed_on_github(1) is True
+
+    @pytest.mark.asyncio
+    async def test_not_planned_is_closed(self) -> None:
+        assert await self._manager("NOT_PLANNED")._is_closed_on_github(1) is True
+
+    @pytest.mark.asyncio
+    async def test_open_is_not_closed(self) -> None:
+        assert await self._manager("OPEN")._is_closed_on_github(1) is False
+
+    @pytest.mark.asyncio
+    async def test_unknown_is_not_closed(self) -> None:
+        assert await self._manager("UNKNOWN")._is_closed_on_github(1) is False
+
+    @pytest.mark.asyncio
+    async def test_empty_state_is_not_closed(self) -> None:
+        # '' = the port's report for epics closed before stateReason
+        # tracking; stays fail-soft to alerting (#11371), never heals on it.
+        assert await self._manager("")._is_closed_on_github(1) is False
+
+    @pytest.mark.asyncio
+    async def test_port_garbage_state_is_not_closed(self) -> None:
+        # str-coercion contract: a garbage read fails soft to alerting
+        # rather than silently healing a possibly-open epic.
+        assert await self._manager(MagicMock())._is_closed_on_github(1) is False
+
+    @pytest.mark.asyncio
+    async def test_raw_rest_closed_is_not_the_port_vocabulary(self) -> None:
+        # The raw REST 'CLOSED' value never escapes PRManager.get_issue_state
+        # (it is normalized to the stateReason, or '' when null) — carrying it
+        # here was a dead member, and #11458 drops it.
+        assert await self._manager("CLOSED")._is_closed_on_github(1) is False

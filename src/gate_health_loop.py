@@ -32,6 +32,7 @@ from control_register import regulate, setpoint_for
 from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
 from filing_budget import FilingBudget, file_overflow_summary, overflow_line
+from issue_state import issue_state_is_resolved
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
 
 if TYPE_CHECKING:
@@ -576,7 +577,10 @@ class GateHealthLoop(BaseBackgroundLoop):
                 continue
             # get_issue_state vocabulary: OPEN / COMPLETED / NOT_PLANNED
             # ('' on error — treated as open, fail-safe: no finding).
-            if state.upper() in ("COMPLETED", "NOT_PLANNED", "CLOSED"):
+            # issue_state_is_resolved owns the closed-membership set (#11458);
+            # the raw REST 'CLOSED' member this used to carry is unreachable —
+            # PRManager normalizes CLOSED to the stateReason (or '').
+            if issue_state_is_resolved(state):
                 findings.append(
                     {
                         "kind": "stale_quarantine",

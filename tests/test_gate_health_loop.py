@@ -757,3 +757,65 @@ class TestSetpointRegulation:
 
         assert result["pv_pass_rate"] == 1.0
         assert result["quiescent"] is True
+
+
+class TestFindStaleQuarantines:
+    """#11458: the stale-quarantine closed-state check routes through the
+    shared ``issue_state_is_resolved`` predicate, so the port vocabulary
+    (OPEN / COMPLETED / NOT_PLANNED / UNKNOWN / '') decides alone."""
+
+    def _loop_with_quarantine(
+        self, tmp_path: Path, state: object
+    ) -> tuple[GateHealthLoop, MagicMock]:
+        loop, prs = _make_loop(tmp_path)
+        scen_dir = (
+            Path(loop._config.repo_root) / "tests" / "sandbox_scenarios" / "scenarios"
+        )
+        scen_dir.mkdir(parents=True)
+        (scen_dir / "s55_example.py").write_text('QUARANTINED = "#9925"\n')
+        prs.get_issue_state = AsyncMock(return_value=state)
+        return loop, prs
+
+    @pytest.mark.asyncio
+    async def test_completed_quarantine_is_stale(self, tmp_path: Path) -> None:
+        loop, _ = self._loop_with_quarantine(tmp_path, "COMPLETED")
+        findings = await loop._find_stale_quarantines()
+        assert [f["kind"] for f in findings] == ["stale_quarantine"]
+
+    @pytest.mark.asyncio
+    async def test_not_planned_quarantine_is_stale(self, tmp_path: Path) -> None:
+        loop, _ = self._loop_with_quarantine(tmp_path, "NOT_PLANNED")
+        findings = await loop._find_stale_quarantines()
+        assert [f["kind"] for f in findings] == ["stale_quarantine"]
+
+    @pytest.mark.asyncio
+    async def test_open_quarantine_is_not_stale(self, tmp_path: Path) -> None:
+        loop, _ = self._loop_with_quarantine(tmp_path, "OPEN")
+        assert await loop._find_stale_quarantines() == []
+
+    @pytest.mark.asyncio
+    async def test_unknown_quarantine_is_not_stale(self, tmp_path: Path) -> None:
+        loop, _ = self._loop_with_quarantine(tmp_path, "UNKNOWN")
+        assert await loop._find_stale_quarantines() == []
+
+    @pytest.mark.asyncio
+    async def test_empty_state_is_not_stale(self, tmp_path: Path) -> None:
+        # '' = the port's report for issues closed before stateReason
+        # tracking; fail-safe: no finding.
+        loop, _ = self._loop_with_quarantine(tmp_path, "")
+        assert await loop._find_stale_quarantines() == []
+
+    @pytest.mark.asyncio
+    async def test_port_garbage_state_is_not_stale(self, tmp_path: Path) -> None:
+        # str-coercion contract: a garbage read never files a consent
+        # package against a possibly-live quarantine.
+        loop, _ = self._loop_with_quarantine(tmp_path, MagicMock())
+        assert await loop._find_stale_quarantines() == []
+
+    @pytest.mark.asyncio
+    async def test_raw_rest_closed_is_not_stale(self, tmp_path: Path) -> None:
+        # The raw REST 'CLOSED' value never escapes PRManager.get_issue_state
+        # (it is normalized to the stateReason, or '' when null) — carrying it
+        # here was a dead member, and #11458 drops it.
+        loop, _ = self._loop_with_quarantine(tmp_path, "CLOSED")
+        assert await loop._find_stale_quarantines() == []

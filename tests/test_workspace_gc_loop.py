@@ -1878,3 +1878,41 @@ class TestCollectOrphanedWorktrees:
         ):
             count = await loop._collect_orphaned_worktrees()
         assert count == 0
+
+
+class TestGetIssueStateVocabulary:
+    """#11458: _get_issue_state routes the closed mapping through the shared
+    ``issue_state_is_resolved`` predicate — unknown/garbage states still
+    fail closed to 'unknown' (never collected)."""
+
+    async def _map(self, tmp_path: Path, port_state: object) -> str:
+        loop, _state, _stop = _make_loop(tmp_path)
+        loop._prs.get_issue_state = AsyncMock(return_value=port_state)
+        return await loop._get_issue_state(7)
+
+    @pytest.mark.asyncio
+    async def test_completed_maps_to_closed(self, tmp_path: Path) -> None:
+        assert await self._map(tmp_path, "COMPLETED") == "closed"
+
+    @pytest.mark.asyncio
+    async def test_not_planned_maps_to_closed(self, tmp_path: Path) -> None:
+        assert await self._map(tmp_path, "NOT_PLANNED") == "closed"
+
+    @pytest.mark.asyncio
+    async def test_open_maps_to_open(self, tmp_path: Path) -> None:
+        assert await self._map(tmp_path, "OPEN") == "open"
+
+    @pytest.mark.asyncio
+    async def test_unknown_maps_to_unknown(self, tmp_path: Path) -> None:
+        assert await self._map(tmp_path, "UNKNOWN") == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_empty_state_maps_to_unknown(self, tmp_path: Path) -> None:
+        # '' = closed before stateReason tracking — deliberately unresolved,
+        # so an ancient close never gets its workspace collected.
+        assert await self._map(tmp_path, "") == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_port_garbage_state_maps_to_unknown(self, tmp_path: Path) -> None:
+        # str-coercion contract: a garbage read fails closed to 'unknown'.
+        assert await self._map(tmp_path, MagicMock()) == "unknown"

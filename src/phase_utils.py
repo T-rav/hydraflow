@@ -11,11 +11,41 @@ from typing import Any, TypeVar
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
-from exception_classify import is_likely_bug, reraise_on_credit_or_bug  # noqa: F401
+from exception_classify import is_likely_bug, reraise_on_credit_or_bug
 from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
+from issue_state import issue_state_is_resolved
 from models import EscalationContext, PipelineStage, PRInfo, ReviewUpdatePayload, Task
 from ports import IssueStorePort, PRPort
 from state import StateTracker
+
+# Public surface. The three re-exports are declared here rather than
+# silenced with lint markers — ``__all__`` membership marks an intentional
+# re-export for ruff/pyright (the ``route_types`` idiom) and keeps the
+# disturbance ratchet's suppression count shrinking, never growing. The
+# ``issue_state_is_resolved`` re-export preserves #11457's import surface;
+# the owner is the zero-dependency ``issue_state`` module (#11458).
+__all__ = [
+    "run_concurrent_batch",
+    "run_refilling_pool",
+    "release_batch_in_flight",
+    "escalate_to_hitl",
+    "escalate_to_diagnostic",
+    "park_issue",
+    "parse_memory_suggestion",
+    "file_memory_suggestion",
+    "safe_file_memory_suggestion",
+    "MemorySuggester",
+    "record_harness_failure",
+    "store_lifecycle",
+    "publish_review_status",
+    "log_exception_with_bug_classification",
+    "run_with_fatal_guard",
+    "PipelineEscalator",
+    # re-exports
+    "is_likely_bug",
+    "reraise_on_credit_or_bug",
+    "issue_state_is_resolved",
+]
 
 logger = logging.getLogger("hydraflow.phase_utils")
 

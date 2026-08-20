@@ -8,6 +8,7 @@ open+stale, open+fresh -> none) that P10.6 requires as a regression test.
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from regression_rot_scan import (
     RegressionRotFile,
@@ -216,6 +217,31 @@ class TestClassifyRegressionRot:
         findings = classify_regression_rot(
             files,
             issue_states={600: "UNKNOWN"},
+            ages_days={},
+            stale_days=14,
+        )
+        assert findings == []
+
+    def test_empty_state_string_yields_no_finding(self) -> None:
+        # '' is what the port reports for issues closed before stateReason
+        # tracking — deliberately not resolved, so never a false alarm
+        # (#11458 pins this against the shared predicate).
+        files = [_file((610,))]
+        findings = classify_regression_rot(
+            files,
+            issue_states={610: ""},
+            ages_days={},
+            stale_days=14,
+        )
+        assert findings == []
+
+    def test_port_garbage_value_yields_no_finding(self) -> None:
+        # str-coercion contract (#11458): a garbage state read must never
+        # manufacture a false-close alarm.
+        files = [_file((611,))]
+        findings = classify_regression_rot(
+            files,
+            issue_states={611: MagicMock()},  # type: ignore[dict-item]
             ages_days={},
             stale_days=14,
         )

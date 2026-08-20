@@ -59,7 +59,9 @@ def _manager(*, issue_state: str | Exception, epic_number: int = 10914):
 
 @pytest.mark.asyncio
 async def test_github_closed_epic_heals_instead_of_alerting() -> None:
-    mgr, closed = _manager(issue_state="CLOSED")
+    # The port reports a GitHub-closed epic as its stateReason —
+    # COMPLETED/NOT_PLANNED, never the raw REST 'CLOSED' (#11458).
+    mgr, closed = _manager(issue_state="COMPLETED")
     stale = await mgr.check_stale_epics()
     assert stale == []
     assert closed == [10914]

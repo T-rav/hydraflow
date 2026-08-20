@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import AUTO_AGENT_BRANCH_PREFIX, Credentials, HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
+from issue_state import issue_state_is_resolved
 from state import StateTracker
 from subprocess_util import run_subprocess
 
@@ -264,7 +265,8 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         uncertainty contract (an unknown state is never collected).
         """
         port_state = await self._prs.get_issue_state(issue_number)
-        if port_state in ("COMPLETED", "NOT_PLANNED"):
+        # issue_state_is_resolved owns the closed-membership set (#11458).
+        if issue_state_is_resolved(port_state):
             return "closed"
         if port_state == "OPEN":
             return "open"
