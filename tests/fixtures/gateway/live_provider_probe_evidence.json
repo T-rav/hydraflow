@@ -1,0 +1,64 @@
+{
+  "agent_session": {
+    "actual_agent_cli": true,
+    "agent_runtime": "claude",
+    "gateway_body_capture_policy": "metadata-only",
+    "gateway_count_scope": "shared_gateway_observation_window",
+    "gateway_session_total_completed_200_count": 50,
+    "gateway_session_total_marker_termination_499_count": 2,
+    "issue_number": 11464,
+    "issue_transition": "implementation",
+    "live_provider_session": true,
+    "model_requested": "glm-5.2",
+    "provider_binding": "zai-harness",
+    "receipt_kind": "queued_agent_canary",
+    "role": "planner",
+    "runtime_version": "2.1.236",
+    "tool_call_count": 15,
+    "tool_result_count": 15,
+    "validated_output_observed": true
+  },
+  "comparison_method": "gateway_captured_upstream_vs_downstream_raw_bytes",
+  "completion_observed": true,
+  "evidence_kind": "gateway_same_request_probe",
+  "first_turn": {
+    "byte_identical": true,
+    "captured_upstream": {
+      "byte_count": 1623,
+      "sha256": "1d5bb7cdf7427cb54f23e060bb7e8399b31eeda96fd717ff17b6e4fc8e53b55b"
+    },
+    "downstream": {
+      "byte_count": 1623,
+      "sha256": "1d5bb7cdf7427cb54f23e060bb7e8399b31eeda96fd717ff17b6e4fc8e53b55b"
+    },
+    "status_code": 200
+  },
+  "live_provider_session": true,
+  "model_requested": "glm-5.2",
+  "provider_binding": "zai-harness",
+  "raw_capture_cleanup_verified": true,
+  "recorded_at": "2026-08-20T06:50:43.162628Z",
+  "sanitization": {
+    "paths_omitted": true,
+    "raw_model_output_omitted": true,
+    "raw_prompt_omitted": true,
+    "request_and_key_ids_omitted": true,
+    "request_headers_and_bodies_omitted": true,
+    "session_ids_omitted": true,
+    "virtual_control_and_provider_credentials_omitted": true
+  },
+  "schema_version": 1,
+  "second_turn": {
+    "byte_identical": true,
+    "captured_upstream": {
+      "byte_count": 1101,
+      "sha256": "2b0c38eabed3ae4ec7bc396a094f411e057ffcd64e6a433d88b96e5ea96d577d"
+    },
+    "downstream": {
+      "byte_count": 1101,
+      "sha256": "2b0c38eabed3ae4ec7bc396a094f411e057ffcd64e6a433d88b96e5ea96d577d"
+    },
+    "status_code": 200
+  },
+  "tool_use_observed": true
+}

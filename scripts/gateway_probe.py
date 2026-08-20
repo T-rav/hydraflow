@@ -80,8 +80,9 @@ class AgentSessionEvidence(BaseModel):
     tool_result_count: int = Field(ge=0)
     validated_output_observed: Literal[True]
     issue_transition: str = Field(min_length=1)
-    gateway_completed_200_count: int = Field(ge=0)
-    gateway_marker_termination_499_count: int = Field(ge=0)
+    gateway_count_scope: Literal["shared_gateway_observation_window"]
+    gateway_session_total_completed_200_count: int = Field(ge=0)
+    gateway_session_total_marker_termination_499_count: int = Field(ge=0)
     gateway_body_capture_policy: Literal["metadata-only", "full"]
 
 

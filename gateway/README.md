@@ -73,7 +73,10 @@ IDs, headers, raw bodies, or credentials.
 receipt into the artifact. That input is validated with an extra-fields-forbid
 schema limited to runtime/version, role and issue number, model/provider, tool
 call/result counts, the live-provider flag, validated-output and
-issue-transition signals, gateway 200/expected-marker-499 counts, and capture
-policy. Session IDs and transcripts are intentionally not accepted. Omit
+issue-transition signals, shared-gateway-observation-window totals for 200 and
+expected marker-termination 499 rows, and capture policy. Those gateway totals
+must not be attributed to the receipt's issue when the observation window
+contained concurrent keys. Session IDs and transcripts are intentionally not
+accepted. Omit
 `--live-provider-session` for fake or sandbox runs so the artifact cannot
 silently claim live-provider evidence.

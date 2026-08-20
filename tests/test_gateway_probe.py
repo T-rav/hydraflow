@@ -97,8 +97,9 @@ def _agent_receipt() -> dict[str, Any]:
         "tool_result_count": 2,
         "validated_output_observed": True,
         "issue_transition": "test-ready",
-        "gateway_completed_200_count": 2,
-        "gateway_marker_termination_499_count": 1,
+        "gateway_count_scope": "shared_gateway_observation_window",
+        "gateway_session_total_completed_200_count": 2,
+        "gateway_session_total_marker_termination_499_count": 1,
         "gateway_body_capture_policy": "metadata-only",
     }
 
@@ -323,6 +324,49 @@ def test_agent_session_receipt_schema_accepts_only_sanitized_metrics(
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
     with pytest.raises(RuntimeError, match="agent-session receipt is invalid"):
         probe_module._load_agent_session_receipt(receipt_path)
+
+
+def test_agent_session_receipt_rejects_ambiguous_issue_scoped_gateway_counts(
+    tmp_path: Path,
+) -> None:
+    receipt_path = tmp_path / "agent-session.json"
+    receipt = _agent_receipt()
+    receipt["gateway_completed_200_count"] = receipt.pop(
+        "gateway_session_total_completed_200_count"
+    )
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="agent-session receipt is invalid"):
+        probe_module._load_agent_session_receipt(receipt_path)
+
+
+def test_live_provider_probe_evidence_fixture_is_strict_and_sanitized() -> None:
+    artifact_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "gateway"
+        / "live_provider_probe_evidence.json"
+    )
+
+    evidence = probe_module.ProbeEvidence.model_validate_json(
+        artifact_path.read_text(encoding="utf-8")
+    )
+
+    assert evidence.live_provider_session is True
+    assert evidence.provider_binding == "zai-harness"
+    assert evidence.model_requested == "glm-5.2"
+    assert evidence.first_turn.byte_identical is True
+    assert evidence.second_turn.byte_identical is True
+    assert evidence.raw_capture_cleanup_verified is True
+    assert evidence.agent_session is not None
+    assert evidence.agent_session.issue_number == 11464
+    assert evidence.agent_session.gateway_count_scope == (
+        "shared_gateway_observation_window"
+    )
+    assert evidence.agent_session.gateway_session_total_completed_200_count == 50
+    assert (
+        evidence.agent_session.gateway_session_total_marker_termination_499_count == 2
+    )
 
 
 @pytest.mark.parametrize(

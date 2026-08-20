@@ -15,6 +15,13 @@ This avoids the invalid comparison of two independent nondeterministic model
 generations. Replay conformance remains the stable fixture-level direct-versus-
 gateway comparison.
 
+`live_provider_probe_evidence.json` records the 2026-08-20 real-provider run.
+Both z.ai-bound turns compare the gateway-captured upstream response with the
+bytes delivered downstream for the exact same request. The embedded queued
+agent receipt records issue-specific planner outcomes separately from totals
+over a shared gateway observation window; those totals are not evidence that
+all counted requests belonged to the receipt's issue.
+
 `claude_cli_sandbox_evidence.json` records a separate confidence run made with
 the actual Claude Code binary over real local TCP sockets through the gateway
 to the deterministic Anthropic HTTP sandbox. It proves that the CLI completed
