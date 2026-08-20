@@ -518,6 +518,52 @@ describe('WS event batching wiring (#11221)', () => {
     expect(getCaptured().lastSeenId).toBe(-1)
   })
 
+  it('ignores late frames from the invalidated old socket after a repo switch', async () => {
+    const { getCaptured } = await mountWithProbe()
+
+    await act(async () => { getCaptured().selectRepo('owner-a') })
+    const repoASocket = wsInstances.at(-1)
+
+    // Exercise the narrow pre-cleanup window: React has not committed the
+    // SELECT_REPO update yet, but selectRepo must already have invalidated A.
+    await act(async () => {
+      getCaptured().selectRepo('owner-b')
+      sendFrame(repoASocket, {
+        id: 8,
+        timestamp: '2026-08-20T10:00:08Z',
+        repo: 'owner-a',
+      })
+    })
+    const repoBSocket = wsInstances.at(-1)
+
+    // Also model a browser message task delivered after effect cleanup. The
+    // test socket deliberately keeps its old handler callable after close().
+    await act(async () => {
+      sendFrame(repoASocket, {
+        id: 9,
+        timestamp: '2026-08-20T10:00:09Z',
+        repo: 'owner-a',
+      })
+      await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS)
+    })
+
+    expect(getCaptured().selectedRepoSlug).toBe('owner-b')
+    expect(getCaptured().events).toEqual([])
+    expect(getCaptured().lastSeenId).toBe(-1)
+
+    // Counter-control: the replacement socket remains live and batches its
+    // own repo's frame normally.
+    await act(async () => {
+      sendFrame(repoBSocket, {
+        id: 10,
+        timestamp: '2026-08-20T10:00:10Z',
+        repo: 'owner-b',
+      })
+      await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS)
+    })
+    expect(getCaptured().events.map(e => [e.repo, e.id])).toEqual([['owner-b', 10]])
+  })
+
   it('updates the reconnect backfill cursor (lastEventTs) synchronously per frame, not at flush time', async () => {
     const requests = []
     global.fetch.mockImplementation((input) => {

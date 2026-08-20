@@ -1238,6 +1238,18 @@ export function HydraFlowProvider({ children }) {
   }, [fetchWithRepo])
 
   const selectRepo = useCallback((slug) => {
+    const newSlug = normalizeRepoSlug(slug)
+    const changed = newSlug !== state.selectedRepoSlug
+    if (changed) {
+      // Invalidate the old socket synchronously, before React runs the
+      // connection effect cleanup. A message task already queued by the
+      // browser can otherwise arrive after the queue flush below and enqueue
+      // old-repo state into the new scope. Keep the socket instance so it can
+      // still be closed after the identity guard has been armed.
+      const oldWs = wsRef.current
+      wsRef.current = null
+      if (oldWs) oldWs.close()
+    }
     // Preserve reducer ordering across the scope boundary: drain any frames
     // from the old repo before SELECT_REPO clears repo-scoped state. Without
     // this synchronous flush, the old timer can fire after the reset and
@@ -1247,7 +1259,7 @@ export function HydraFlowProvider({ children }) {
     // independent, so the old since= watermark must not gate it.
     lastEventTsRef.current = null
     dispatch({ type: 'SELECT_REPO', data: { slug } })
-  }, [flushWsQueue])
+  }, [flushWsQueue, state.selectedRepoSlug])
 
   const fetchRepos = useCallback(async () => {
     try {
@@ -1807,6 +1819,7 @@ export function HydraFlowProvider({ children }) {
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws${repoParam}`)
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) return
       // A reconnect can beat the 220ms batch timer. Drain the previous
       // socket's tail before starting the inclusive REST backfill so the
       // replay sees those events in state and de-duplicates them (#11221).
@@ -1884,6 +1897,7 @@ export function HydraFlowProvider({ children }) {
         fetchWithRepo(`/api/events?since=${encodeURIComponent(lastEventTsRef.current)}`)
           .then(r => r.json())
           .then(events => {
+            if (wsRef.current !== ws) return
             // Frames can arrive on the new socket while this request is in
             // flight. Flush them immediately before the backfill dispatch;
             // reducer action order then guarantees BACKFILL_EVENTS merges and
@@ -1895,6 +1909,10 @@ export function HydraFlowProvider({ children }) {
       }
     }
     ws.onmessage = (e) => {
+      // Repository switches invalidate the previous socket synchronously.
+      // Ignore any message task the browser had already queued for that stale
+      // connection so it cannot enter the shared batch and cross scopes.
+      if (wsRef.current !== ws) return
       try {
         const event = JSON.parse(e.data)
         // Queued and flushed at a bounded cadence (#11221) rather than
@@ -1998,7 +2016,9 @@ export function HydraFlowProvider({ children }) {
   useEffect(() => {
     connect()
     return () => {
-      if (wsRef.current) wsRef.current.close()
+      const ws = wsRef.current
+      wsRef.current = null
+      if (ws) ws.close()
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
     }
   }, [connect])
