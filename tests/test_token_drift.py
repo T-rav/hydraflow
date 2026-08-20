@@ -18,6 +18,7 @@ from token_drift import (
     MAX_BASELINE_AGE,
     MEDIAN_TOKENS_SOURCE,
     MIN_BASELINE_WINDOWS,
+    DriftReport,
     DriftStatus,
     DriftVerdict,
     TokenBaseline,
@@ -170,6 +171,21 @@ class TestCheckDriftGuardrails:
         assert report.reason
         assert report.sources == []
 
+    def test_series_length_mismatch_with_windows_counted_is_corrupt(self) -> None:
+        """windows_counted is the row's self-report; the engine does not trust
+        it in place of the actual series — a baseline whose series disagree is
+        corrupt (never a ZeroDivisionError from an empty chart).
+        """
+        baseline = TokenBaseline(
+            pinned_at=_NOW - timedelta(days=1),
+            windows_counted=8,
+            source_share_series={},
+            median_tokens_series=[],
+        )
+        report = check_drift(baseline, _two_source_window(0.5), now=_NOW)
+        assert report.status is DriftStatus.NO_BASELINE
+        assert report.reason
+
     def test_aged_baseline_yields_stale_with_no_sources(self) -> None:
         baseline = _baseline(pinned_at=_NOW - MAX_BASELINE_AGE - timedelta(days=1))
         report = check_drift(baseline, _two_source_window(0.5), now=_NOW)
@@ -181,6 +197,19 @@ class TestCheckDriftGuardrails:
         baseline = _baseline()
         report = check_drift(baseline, [], now=_NOW)
         assert report.status is DriftStatus.INSUFFICIENT_DATA
+        assert report.reason
+
+    def test_fleet_idle_in_trailing_week_is_not_ok_on_older_data(self) -> None:
+        """The trailing window is the calendar's latest complete week: when
+        the fleet was idle that week the instrument is not watching, even
+        though older complete weeks still hold data — never an `ok` (let
+        alone `drifting`) verdict computed on stale data.
+        """
+        baseline = _baseline(source_share_series={"target": [0.5] * 8})
+        rows = _two_source_window(0.6, ts=_OLDER_WEEK_TS)  # W09; now is W11
+        report = check_drift(baseline, rows, now=_NOW)
+        assert report.status is DriftStatus.INSUFFICIENT_DATA
+        assert report.window_key is None
         assert report.reason
 
     def test_trailing_window_rows_below_issue_floor_yields_insufficient_data(
@@ -195,6 +224,32 @@ class TestCheckDriftGuardrails:
         report = check_drift(baseline, tiny_rows, now=_NOW)
         assert report.status is DriftStatus.INSUFFICIENT_DATA
         assert report.window_key == "2026-W10"
+
+
+# --- check_drift: payload -----------------------------------------------------
+
+
+class TestDriftReportPayload:
+    def test_carries_window_key_with_monday_and_sunday_dates(self) -> None:
+        report = check_drift(_baseline(), _two_source_window(0.5), now=_NOW)
+        payload = report.to_json_dict()
+        assert payload["window_key"] == "2026-W10"
+        assert payload["window_start"] == "2026-03-02"  # Monday
+        assert payload["window_end"] == "2026-03-08"  # Sunday
+
+    def test_window_dates_are_null_without_a_window(self) -> None:
+        payload = DriftReport(
+            status=DriftStatus.NO_BASELINE, reason="no baseline"
+        ).to_json_dict()
+        assert payload["window_start"] is None
+        assert payload["window_end"] is None
+
+    def test_malformed_window_key_yields_null_dates_not_an_error(self) -> None:
+        payload = DriftReport(
+            status=DriftStatus.OK, reason="r", window_key="2026-W99"
+        ).to_json_dict()
+        assert payload["window_start"] is None
+        assert payload["window_end"] is None
 
 
 # --- check_drift: verdicts ----------------------------------------------------
@@ -291,6 +346,7 @@ class TestCheckDriftVerdicts:
             len(wide.source_share_series) + 1, two_sided=False
         )
         assert l_wide > l_narrow  # sanity: the fleet-count effect is real here
+        assert l_narrow == 3.0  # the classic floor — 2 charts are far below it
 
         spread = 0.04 / 1.128
         centre = 0.12
@@ -409,6 +465,43 @@ class TestLoadAndCheckDrift:
         path = token_baseline_path(config.data_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"windows_counted": 8}) + "\n", encoding="utf-8")
+
+        report = load_and_check_drift(config, now=_NOW)
+
+        assert report.status is DriftStatus.NO_BASELINE
+        assert report.reason
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            # A scalar where the series mapping belongs: dict(5) TypeError.
+            {"pinned_at": _NOW.isoformat(), "source_share_series": 5},
+            # null inside a series: float(None) TypeError.
+            {
+                "pinned_at": _NOW.isoformat(),
+                "source_share_series": {"target": [0.5, None] * 4},
+            },
+            # windows_counted claims 8 windows the series do not carry.
+            {
+                "pinned_at": _NOW.isoformat(),
+                "windows_counted": 8,
+                "source_share_series": {},
+                "median_tokens_series": [],
+            },
+        ],
+        ids=["scalar-series", "null-in-series", "series-window-mismatch"],
+    )
+    def test_structurally_corrupt_rows_degrade_to_no_baseline(
+        self, tmp_path: Path, row: dict
+    ) -> None:
+        """Structurally corrupt shapes — the ones that would raise TypeError
+        or ZeroDivisionError straight through the fail-soft seam and 500 the
+        diagnostics route — degrade like any other corrupt row.
+        """
+        config = _fake_config(tmp_path)
+        path = token_baseline_path(config.data_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(row) + "\n", encoding="utf-8")
 
         report = load_and_check_drift(config, now=_NOW)
 

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -119,21 +119,31 @@ class TokenBaseline:
         stale, and the caller must not silently treat it as valid. A
         timezone-naive ``pinned_at`` is likewise rejected here rather than
         left to blow up later as a ``TypeError`` when :func:`check_drift`
-        subtracts it from an aware ``now``.
+        subtracts it from an aware ``now`` — and a structurally corrupt field
+        (a scalar where a series belongs, ``null`` inside a series) is
+        converted to ``ValueError`` here for the same reason: ``ValueError``
+        is the corrupt-row signal :func:`load_and_check_drift` catches, while
+        a raw ``TypeError`` would escape it and 500 the diagnostics route.
         """
         pinned_at = datetime.fromisoformat(str(raw["pinned_at"]))
         if pinned_at.tzinfo is None:
             raise ValueError(f"pinned_at must be timezone-aware, got {pinned_at!r}")
-        return cls(
-            pinned_at=pinned_at,
-            windows_counted=int(raw.get("windows_counted", 0) or 0),
-            source_share_series={
+        try:
+            windows_counted = int(raw.get("windows_counted", 0) or 0)
+            source_share_series = {
                 str(source): [float(v) for v in series]
                 for source, series in dict(raw.get("source_share_series") or {}).items()
-            },
-            median_tokens_series=[
+            }
+            median_tokens_series = [
                 float(v) for v in (raw.get("median_tokens_series") or [])
-            ],
+            ]
+        except TypeError as exc:
+            raise ValueError(f"baseline row is structurally corrupt: {exc}") from exc
+        return cls(
+            pinned_at=pinned_at,
+            windows_counted=windows_counted,
+            source_share_series=source_share_series,
+            median_tokens_series=median_tokens_series,
         )
 
 
@@ -171,7 +181,12 @@ class SourceDrift:
 
 @dataclass(frozen=True)
 class DriftReport:
-    """The drift verdict for one trailing window against a pinned baseline."""
+    """The drift verdict for one trailing window against a pinned baseline.
+
+    :meth:`to_json_dict` also carries the window's Monday/Sunday dates
+    (``window_start``/``window_end``) derived from ``window_key``, so a UI can
+    render the comparison period without re-deriving ISO-week arithmetic.
+    """
 
     status: DriftStatus
     reason: str
@@ -179,10 +194,21 @@ class DriftReport:
     window_key: str | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
+        start: date | None = None
+        end: date | None = None
+        if self.window_key:
+            try:
+                start, end = _iso_week_bounds(self.window_key)
+            except ValueError:
+                # to_json_dict is as fail-soft as the rest of the seam: an
+                # unparseable window_key yields null dates, never an error.
+                start, end = None, None
         return {
             "status": self.status.value,
             "reason": self.reason,
             "window_key": self.window_key,
+            "window_start": start.isoformat() if start else None,
+            "window_end": end.isoformat() if end else None,
             "sources": [s.to_json_dict() for s in self.sources],
         }
 
@@ -193,6 +219,13 @@ class DriftReport:
 def _iso_week_key(dt: datetime) -> str:
     year, week, _weekday = dt.isocalendar()
     return f"{year}-W{week:02d}"
+
+
+def _iso_week_bounds(week_key: str) -> tuple[date, date]:
+    """The (Monday, Sunday) calendar dates of the ISO week *week_key* names."""
+    year, week = week_key.split("-W")
+    monday = date.fromisocalendar(int(year), int(week), 1)
+    return monday, monday + timedelta(days=6)
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -336,28 +369,37 @@ def _build_source_drifts(
     return sources
 
 
-def check_drift(
-    baseline: TokenBaseline | None, rows: list[dict[str, Any]], *, now: datetime
-) -> DriftReport:
-    """Compare the latest trailing complete ISO week against *baseline*.
+def _baseline_guardrail(
+    baseline: TokenBaseline, *, now: datetime
+) -> DriftReport | None:
+    """The guardrail that blocks checking *baseline*, or ``None`` to proceed.
 
-    Guardrails, evaluated in order, each degrading to a non-``ok`` status with
-    a human-readable ``reason`` rather than raising or fabricating a verdict:
-    no baseline; a baseline pinned from too few windows; a baseline old enough
-    that "clean" no longer means what it meant; and an empty trailing window
-    (nothing to compare).
+    Evaluated in order — too few pinned windows; a structurally corrupt row; a
+    stale pin — each degrading to a non-``ok`` status with a human-readable
+    ``reason`` rather than raising or fabricating a verdict.
     """
-    if baseline is None:
-        return DriftReport(
-            status=DriftStatus.NO_BASELINE,
-            reason="no baseline pinned; run scripts/pin_token_baseline.py --apply",
-        )
     if baseline.windows_counted < MIN_BASELINE_WINDOWS:
         return DriftReport(
             status=DriftStatus.INSUFFICIENT_DATA,
             reason=(
                 f"baseline pinned from only {baseline.windows_counted} window(s); "
                 f"needs at least {MIN_BASELINE_WINDOWS}"
+            ),
+        )
+    if len(baseline.median_tokens_series) != baseline.windows_counted or any(
+        len(series) != baseline.windows_counted
+        for series in baseline.source_share_series.values()
+    ):
+        # pin_baseline writes exactly one observation per window per chart, so
+        # any disagreement means the row did not come from pin_baseline —
+        # hand-edited, half-written, or foreign. Without this guard an empty
+        # series would ZeroDivisionError inside _chart_drift, outside every
+        # fail-soft net, and 500 the diagnostics route.
+        return DriftReport(
+            status=DriftStatus.NO_BASELINE,
+            reason=(
+                "baseline structurally corrupt (series lengths disagree with "
+                "windows_counted); re-pin via scripts/pin_token_baseline.py --apply"
             ),
         )
     age = now - baseline.pinned_at
@@ -369,11 +411,43 @@ def check_drift(
                 f"{MAX_BASELINE_AGE.days}-day limit — re-pin before trusting it"
             ),
         )
+    return None
+
+
+def check_drift(
+    baseline: TokenBaseline | None, rows: list[dict[str, Any]], *, now: datetime
+) -> DriftReport:
+    """Compare the latest trailing complete ISO week against *baseline*.
+
+    Guardrails, evaluated in order, each degrading to a non-``ok`` status with
+    a human-readable ``reason`` rather than raising or fabricating a verdict:
+    no baseline; a baseline pinned from too few windows; a structurally corrupt
+    baseline (series that disagree with the row's ``windows_counted`` — the
+    self-report is never trusted as a substitute for the actual series); a
+    baseline old enough that "clean" no longer means what it meant; and an
+    empty trailing window (nothing to compare). The trailing window is the
+    calendar's latest complete week, not merely the newest week with data: a
+    fleet idle last week gets ``insufficient_data``, never an ``ok`` verdict
+    computed on older data as if the instrument were still watching.
+    """
+    if baseline is None:
+        return DriftReport(
+            status=DriftStatus.NO_BASELINE,
+            reason="no baseline pinned; run scripts/pin_token_baseline.py --apply",
+        )
+    blocked = _baseline_guardrail(baseline, now=now)
+    if blocked is not None:
+        return blocked
+    expected_week = _iso_week_key(now - timedelta(days=7))
     trailing = iso_week_windows(rows, now=now, windows=1)
-    if not trailing:
+    if not trailing or trailing[-1][0] != expected_week:
+        latest = trailing[-1][0] if trailing else "none"
         return DriftReport(
             status=DriftStatus.INSUFFICIENT_DATA,
-            reason="no issues in the trailing window",
+            reason=(
+                f"no issues in the trailing window ({expected_week}; "
+                f"latest activity {latest})"
+            ),
         )
     window_key, window_rows = trailing[-1]
     report = build_token_report(window_rows, recent_issues=max(len(window_rows), 1))
@@ -391,6 +465,10 @@ def check_drift(
     # over-widen every real chart's limit. The baseline is the registration.
     charts = len(baseline.source_share_series) + 1  # +1 for the median chart
     multiplier = widened_sigma_multiplier(charts, two_sided=False)
+    # One-sided L is floored at the classic 3.0 until the family is large —
+    # it first lifts at 38 charts at the 5% monthly default — so at today's
+    # source counts the limit IS centre + 3.0·σ̂; the widening is headroom
+    # for family growth, not a wider band today.
     sources = _build_source_drifts(
         baseline,
         current_shares,

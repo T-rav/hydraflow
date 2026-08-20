@@ -405,3 +405,33 @@ class TestTokenReportEndpoint:
 
         assert response.status_code == 200
         assert response.json()["drift"]["status"] == "no_baseline"
+
+    def test_drift_block_degrades_on_structurally_corrupt_ledger(
+        self, tmp_path: Path
+    ) -> None:
+        """Valid JSON whose shape is corrupt — windows_counted claims windows
+        the series do not carry — must not 500: the drift block's never-500
+        contract covers structure, not just parseability.
+        """
+        from token_drift import token_baseline_path
+
+        ledger_path = token_baseline_path(tmp_path)
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_text(
+            json.dumps(
+                {
+                    "pinned_at": datetime.now(UTC).isoformat(),
+                    "windows_counted": 10,
+                    "source_share_series": {"implementer": []},
+                    "median_tokens_series": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        client = TestClient(self._app(tmp_path, None))
+        response = client.get("/api/diagnostics/token-report")
+
+        assert response.status_code == 200
+        assert response.json()["drift"]["status"] == "no_baseline"
