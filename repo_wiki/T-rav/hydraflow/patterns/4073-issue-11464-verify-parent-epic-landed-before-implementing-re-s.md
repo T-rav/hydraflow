@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11464
 source_phase: plan
 created_at: 2026-08-20T06:25:26.202135+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Verify parent epic landed before implementing re-slices
