@@ -64,10 +64,13 @@ The probe mints one short-lived, full-capture key. For each turn it resolves the
 matching ledger row, hashes the response bytes captured on the gateway's
 upstream side and those received downstream, requires exact byte equality, and
 then deletes both raw request and response captures. Cleanup also runs on
-failure and key revocation. The committed artifact contains only the versioned
-schema, provider/model, status codes, byte counts and SHA-256 hashes, completion
-flags, and explicit sanitization/cleanup claims—never prompts, outputs, paths,
-IDs, headers, raw bodies, or credentials.
+failure and key revocation. The artifact is finalized only after the key's
+revocation is acknowledged. It contains only the versioned schema, provider,
+requested and provider-served model names, status codes, byte counts and SHA-256
+hashes, completion flags, and explicit sanitization/cleanup/revocation
+claims—never prompts, outputs, paths, IDs, headers, raw bodies, or credentials.
+The successful-evidence schema rejects blank requested/served models, any
+non-2xx turn, and byte counts or hashes that differ across the two sides.
 
 `--agent-session-receipt` can merge a separately collected queued-agent canary
 receipt into the artifact. That input is validated with an extra-fields-forbid

@@ -84,11 +84,13 @@ The committed live-provider artifact records two z.ai-bound agentic turns and
 compares each downstream stream with the gateway's upstream body capture for
 that exact request. Both byte counts and SHA-256 values match, and the raw
 request/response captures were deleted before the sanitized artifact was
-written. The embedded queued-agent receipt keeps issue-specific planner
-outcomes separate from shared gateway observation-window totals so concurrent
-keys are not misattributed. This closes the live streaming-transparency evidence
-gap; rollout remains opt-in until the operational burn-in and ratchet are
-separately approved.
+written, and the ephemeral key's revocation was acknowledged before evidence
+finalization. The exact ledger rows preserve the provider's observed model
+resolution from requested `glm-5.2` to served `glm-5.3`. The embedded
+queued-agent receipt keeps issue-specific planner outcomes separate from shared
+gateway observation-window totals so concurrent keys are not misattributed.
+This closes the live streaming-transparency evidence gap; rollout remains
+opt-in until the operational burn-in and ratchet are separately approved.
 
 ## Out of scope, explicitly
 

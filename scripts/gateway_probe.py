@@ -20,7 +20,14 @@ from pathlib import Path
 from typing import Any, Literal, Self
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 ProviderBinding = Literal["anthropic", "zai-harness"]
 _PROVIDER_BINDINGS: tuple[ProviderBinding, ...] = ("anthropic", "zai-harness")
@@ -43,9 +50,27 @@ class TurnEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     status_code: int = Field(ge=100, le=599)
+    model_served: str = Field(min_length=1)
     downstream: ByteEvidence
     captured_upstream: ByteEvidence
     byte_identical: Literal[True]
+
+    @field_validator("model_served")
+    @classmethod
+    def require_non_blank_served_model(cls, value: str) -> str:
+        """Reject ledger rows that do not identify the provider-served model."""
+
+        if not value.strip():
+            raise ValueError("served model must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def require_exact_byte_equality(self) -> Self:
+        """Make the equality claim derive from the serialized byte evidence."""
+
+        if self.downstream != self.captured_upstream:
+            raise ValueError("upstream and downstream byte evidence must match exactly")
+        return self
 
 
 class SanitizationEvidence(BaseModel):
@@ -96,7 +121,7 @@ class ProbeEvidence(BaseModel):
     recorded_at: datetime
     live_provider_session: bool
     provider_binding: ProviderBinding
-    model_requested: str
+    model_requested: str = Field(min_length=1)
     comparison_method: Literal["gateway_captured_upstream_vs_downstream_raw_bytes"] = (
         _COMPARISON_METHOD
     )
@@ -105,8 +130,29 @@ class ProbeEvidence(BaseModel):
     tool_use_observed: Literal[True]
     completion_observed: Literal[True]
     raw_capture_cleanup_verified: Literal[True]
+    key_revocation_verified: Literal[True]
     agent_session: AgentSessionEvidence | None = None
     sanitization: SanitizationEvidence = SanitizationEvidence()
+
+    @field_validator("model_requested")
+    @classmethod
+    def require_non_blank_requested_model(cls, value: str) -> str:
+        """Reject artifacts that cannot identify the requested model."""
+
+        if not value.strip():
+            raise ValueError("requested model must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def require_successful_turn_statuses(self) -> Self:
+        """Successful probe artifacts require a 2xx result for both turns."""
+
+        if any(
+            not 200 <= turn.status_code < 300
+            for turn in (self.first_turn, self.second_turn)
+        ):
+            raise ValueError("successful probe turns must have 2xx status codes")
+        return self
 
     @model_validator(mode="after")
     def require_consistent_agent_receipt(self) -> Self:
@@ -279,13 +325,13 @@ async def _wait_for_probe_row(
         await asyncio.sleep(0.01)
 
 
-def _capture_id_from_row(
+def _capture_details_from_row(
     row: dict[str, Any],
     *,
     provider_binding: ProviderBinding,
     model: str,
     status_code: int,
-) -> str:
+) -> tuple[str, str]:
     """Validate that a ledger row describes a complete captured probe turn."""
 
     if row.get("source") != "gateway":
@@ -300,6 +346,9 @@ def _capture_id_from_row(
         raise RuntimeError(
             "gateway probe ledger row recorded the wrong requested model"
         )
+    model_served = row.get("model_served")
+    if not isinstance(model_served, str) or not model_served.strip():
+        raise RuntimeError("gateway probe ledger row has no served model")
     if row.get("status_code") != status_code:
         raise RuntimeError("gateway probe ledger and downstream status codes differ")
     if row.get("status") != "completed":
@@ -314,7 +363,7 @@ def _capture_id_from_row(
         or _CAPTURE_ID_PATTERN.fullmatch(capture_id) is None
     ):
         raise RuntimeError("gateway probe ledger row has an invalid body capture id")
-    return capture_id
+    return capture_id, model_served
 
 
 def _capture_paths(body_dir: Path, capture_id: str) -> tuple[Path, Path]:
@@ -351,7 +400,7 @@ async def _prove_turn_bytes(
     """Compare one downstream stream with its exact captured upstream body."""
 
     row = await _wait_for_probe_row(ledger_path, key_id, turn_index=turn_index)
-    capture_id = _capture_id_from_row(
+    capture_id, model_served = _capture_details_from_row(
         row,
         provider_binding=provider_binding,
         model=model,
@@ -374,6 +423,7 @@ async def _prove_turn_bytes(
             raise RuntimeError("gateway captured upstream bytes differ from downstream")
         return TurnEvidence(
             status_code=status_code,
+            model_served=model_served,
             downstream=downstream,
             captured_upstream=captured_upstream,
             byte_identical=True,
@@ -424,6 +474,7 @@ async def run_probe(
     owns_client = client is None
     probe_client = client if client is not None else _new_probe_client()
     minted_key_id: str | None = None
+    completed_run: tuple[TurnEvidence, TurnEvidence]
     base = gateway_base_url.rstrip("/")
     try:
         mint = await probe_client.post(
@@ -542,18 +593,7 @@ async def run_probe(
         if not completion_observed:
             raise RuntimeError("gateway probe second turn did not complete")
 
-        return ProbeEvidence(
-            recorded_at=datetime.now(UTC),
-            live_provider_session=live_provider_session,
-            provider_binding=provider_binding,
-            model_requested=model,
-            first_turn=first_evidence,
-            second_turn=second_evidence,
-            tool_use_observed=True,
-            completion_observed=True,
-            raw_capture_cleanup_verified=True,
-            agent_session=agent_session,
-        )
+        completed_run = (first_evidence, second_evidence)
     finally:
         try:
             try:
@@ -570,6 +610,21 @@ async def run_probe(
         finally:
             if owns_client:
                 await probe_client.aclose()
+
+    first_evidence, second_evidence = completed_run
+    return ProbeEvidence(
+        recorded_at=datetime.now(UTC),
+        live_provider_session=live_provider_session,
+        provider_binding=provider_binding,
+        model_requested=model,
+        first_turn=first_evidence,
+        second_turn=second_evidence,
+        tool_use_observed=True,
+        completion_observed=True,
+        raw_capture_cleanup_verified=True,
+        key_revocation_verified=True,
+        agent_session=agent_session,
+    )
 
 
 async def _revoke_probe_key(

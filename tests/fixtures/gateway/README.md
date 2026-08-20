@@ -20,7 +20,10 @@ Both z.ai-bound turns compare the gateway-captured upstream response with the
 bytes delivered downstream for the exact same request. The embedded queued
 agent receipt records issue-specific planner outcomes separately from totals
 over a shared gateway observation window; those totals are not evidence that
-all counted requests belonged to the receipt's issue.
+all counted requests belonged to the receipt's issue. The request named
+`glm-5.2`; z.ai reported `glm-5.3` as the model served on both exact ledger
+rows. The artifact preserves that observed divergence rather than treating a
+requested model as proof of the model served.
 
 `claude_cli_sandbox_evidence.json` records a separate confidence run made with
 the actual Claude Code binary over real local TCP sockets through the gateway
