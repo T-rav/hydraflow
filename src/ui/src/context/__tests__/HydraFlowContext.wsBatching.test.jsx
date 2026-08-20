@@ -421,14 +421,20 @@ describe('WS event batching wiring (#11221)', () => {
     errors.mockRestore()
   })
 
-  it('preserves a queued-but-unflushed batch across a WS reconnect/backfill without loss, duplication, or reordering', async () => {
-    // Backfill returns one event the live queue never saw (id 99).
+  it('flushes before a zero-delay inclusive reconnect backfill, preserving order and uniqueness', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    let resolveBackfill
+    const backfillResponse = new Promise(resolve => { resolveBackfill = resolve })
+
+    // The backend's `since` filter is inclusive, so the latest queued live
+    // frame (id 2) is replayed. It can also include a frame (id 3) that arrives
+    // on the replacement socket while the request is in flight.
     global.fetch.mockImplementation((input) => {
       const url = typeof input === 'string' ? input : String(input)
       if (url.includes('/api/events?since=')) {
         return Promise.resolve({
           ok: true,
-          json: async () => ([{ type: 'log', timestamp: 't-backfill', data: {}, id: 99 }]),
+          json: () => backfillResponse,
         })
       }
       if (url.includes('/api/system/workers')) return Promise.resolve({ ok: true, json: async () => ({ workers: [] }) })
@@ -445,28 +451,71 @@ describe('WS event batching wiring (#11221)', () => {
     // Open the first connection so the reconnect backfill cursor is armed.
     await act(async () => { wsInstances[0].onopen && wsInstances[0].onopen() })
     await act(async () => {
-      sendFrame(wsInstances[0], { id: 1, timestamp: 't1' })
-      sendFrame(wsInstances[0], { id: 2, timestamp: 't2' })
+      sendFrame(wsInstances[0], { id: 1, timestamp: '2026-08-20T10:00:01Z' })
+      sendFrame(wsInstances[0], { id: 2, timestamp: '2026-08-20T10:00:02Z' })
     })
     // Still queued — the flush window hasn't elapsed when the socket drops.
     expect(getCaptured().events.some(e => e.id === 1 || e.id === 2)).toBe(false)
 
-    // Drop the connection (non-1008 → reconnect backoff armed). The queue is
-    // owned by the provider, not the socket, so it must survive the drop.
+    // A zero jitter value opens the replacement socket before the 220ms batch
+    // timer. This is the race the old test masked by advancing 1220ms first.
     await act(async () => { wsInstances[0].onclose({ code: 1006 }) })
-
-    // Advance past the reconnect delay AND the flush window — a new socket
-    // opens while the pre-disconnect batch flushes through.
-    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS + 1000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(wsInstances.length).toBe(2)
 
-    // The new connection's onopen fires the backfill seeded from
-    // lastEventTsRef (updated synchronously per frame, NOT at flush time).
+    // onopen synchronously drains ids 1/2 before requesting backfill. The
+    // response stays pending so a new live id 3 can queue behind it.
     await act(async () => { wsInstances[1].onopen && wsInstances[1].onopen() })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(getCaptured().events.map(e => e.id).filter(id => id !== -1)).toEqual([2, 1])
 
-    const ids = getCaptured().events.map(e => e.id).filter(id => id !== -1).sort((a, b) => a - b)
-    expect(ids).toEqual([1, 2, 99]) // no loss, no duplication
+    await act(async () => {
+      sendFrame(wsInstances[1], { id: 3, timestamp: '2026-08-20T10:00:03Z' })
+    })
+    expect(getCaptured().events.map(e => e.id).filter(id => id !== -1)).toEqual([2, 1])
+
+    // The response inclusively echoes ids 2/3 and adds id 4. The pre-dispatch
+    // flush must reduce the pending live id 3 first; BACKFILL_EVENTS can then
+    // de-duplicate both echoes and sort the exact newest-first chronology.
+    await act(async () => {
+      resolveBackfill([
+        { type: 'log', timestamp: '2026-08-20T10:00:02Z', data: {}, id: 2 },
+        { type: 'log', timestamp: '2026-08-20T10:00:03Z', data: {}, id: 3 },
+        { type: 'log', timestamp: '2026-08-20T10:00:04Z', data: {}, id: 4 },
+      ])
+      await Promise.resolve()
+    })
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS) })
+
+    const ids = getCaptured().events.map(e => e.id).filter(id => id !== -1)
+    expect(ids).toEqual([4, 3, 2, 1])
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('flushes a pending old-repo batch before SELECT_REPO clears scoped state', async () => {
+    const { getCaptured } = await mountWithProbe()
+
+    await act(async () => { getCaptured().selectRepo('owner-a') })
+    const repoASocket = wsInstances.at(-1)
+    await act(async () => {
+      sendFrame(repoASocket, {
+        id: 7,
+        timestamp: '2026-08-20T10:00:07Z',
+        repo: 'owner-a',
+      })
+    })
+    expect(getCaptured().events).toHaveLength(0)
+
+    // The queued owner-a frame must reduce before SELECT_REPO, whose reset
+    // then clears it. The cancelled old timer must not leak it into owner-b.
+    await act(async () => { getCaptured().selectRepo('owner-b') })
+    expect(getCaptured().selectedRepoSlug).toBe('owner-b')
+    expect(getCaptured().events).toEqual([])
+    expect(getCaptured().lastSeenId).toBe(-1)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS) })
+    expect(getCaptured().events).toEqual([])
+    expect(getCaptured().lastSeenId).toBe(-1)
   })
 
   it('updates the reconnect backfill cursor (lastEventTs) synchronously per frame, not at flush time', async () => {

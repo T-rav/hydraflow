@@ -1238,11 +1238,16 @@ export function HydraFlowProvider({ children }) {
   }, [fetchWithRepo])
 
   const selectRepo = useCallback((slug) => {
+    // Preserve reducer ordering across the scope boundary: drain any frames
+    // from the old repo before SELECT_REPO clears repo-scoped state. Without
+    // this synchronous flush, the old timer can fire after the reset and
+    // repopulate the new repo's events/workers with stale data (#11221).
+    flushWsQueue()
     // Reset the reconnect backfill cursor: the new scope's event timeline is
     // independent, so the old since= watermark must not gate it.
     lastEventTsRef.current = null
     dispatch({ type: 'SELECT_REPO', data: { slug } })
-  }, [])
+  }, [flushWsQueue])
 
   const fetchRepos = useCallback(async () => {
     try {
@@ -1802,6 +1807,10 @@ export function HydraFlowProvider({ children }) {
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws${repoParam}`)
 
     ws.onopen = () => {
+      // A reconnect can beat the 220ms batch timer. Drain the previous
+      // socket's tail before starting the inclusive REST backfill so the
+      // replay sees those events in state and de-duplicates them (#11221).
+      flushWsQueue()
       // Successful connect — reset the reconnect backoff so the next drop
       // starts again from BASE rather than wherever the last storm left off.
       reconnectAttempts.current = 0
@@ -1874,7 +1883,14 @@ export function HydraFlowProvider({ children }) {
         // the backfill must hit the SELECTED repo's bus, not the default one.
         fetchWithRepo(`/api/events?since=${encodeURIComponent(lastEventTsRef.current)}`)
           .then(r => r.json())
-          .then(events => dispatch({ type: 'BACKFILL_EVENTS', data: events }))
+          .then(events => {
+            // Frames can arrive on the new socket while this request is in
+            // flight. Flush them immediately before the backfill dispatch;
+            // reducer action order then guarantees BACKFILL_EVENTS merges and
+            // sorts against every live frame the inclusive response may echo.
+            flushWsQueue()
+            dispatch({ type: 'BACKFILL_EVENTS', data: events })
+          })
           .catch(() => {})
       }
     }
@@ -1948,7 +1964,7 @@ export function HydraFlowProvider({ children }) {
       console.warn('[HydraFlow] WebSocket error; awaiting close for reconnect', err)
     }
     wsRef.current = ws
-  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchLoopFitness, fetchAdrConformance, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo, enqueueWsAction])
+  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchLoopFitness, fetchAdrConformance, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo, enqueueWsAction, flushWsQueue])
 
   useEffect(() => {
     const poll = () => {
