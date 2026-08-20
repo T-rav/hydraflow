@@ -10,7 +10,9 @@
 //   B. createWsBatcher is a THROTTLE (timer armed on the first queued frame,
 //      fixed max cadence), not a debounce — written to die on mutation.
 //   C. The provider wires ws.onmessage through the batcher, flushes on
-//      visibilitychange, and never strands tail events.
+//      visibilitychange / socket close / repo switch / unmount, and never
+//      strands tail events or applies them after out-of-band dispatches
+//      (backfill, scope reset) that assume queued frames already landed.
 //   D. A queued-but-unflushed batch survives a WS reconnect/backfill without
 //      loss, duplication, or reordering.
 //   E. REAL components from BOTH dashboards (classic MetricsPanel, operator
@@ -467,6 +469,76 @@ describe('WS event batching wiring (#11221)', () => {
 
     const ids = getCaptured().events.map(e => e.id).filter(id => id !== -1).sort((a, b) => a - b)
     expect(ids).toEqual([1, 2, 99]) // no loss, no duplication
+  })
+
+  it('drains the queue on socket close BEFORE the reconnect backfill can race it (inclusive ?since= would duplicate same-timestamp frames)', async () => {
+    // The real /api/events?since= filter is INCLUSIVE (_is_timestamp_in_range
+    // excludes only parsed < since), so a reconnect backfill re-delivers the
+    // events AT the cursor timestamp. A frame still sitting in the batch queue
+    // is invisible to BACKFILL_EVENTS' type|timestamp|repo key dedup and (in
+    // single-repo mode) the lastSeenId watermark hasn't advanced past it — so
+    // if the backfill resolves before the flush timer fires, the frame lands
+    // TWICE. Pre-batching this was impossible: frames dispatched on arrival.
+    global.fetch.mockImplementation((input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('/api/events?since=')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ([
+            { type: 'log', timestamp: 't-same', data: {}, id: 1, repo: null },
+            { type: 'log', timestamp: 't-same', data: {}, id: 2, repo: null },
+          ]),
+        })
+      }
+      if (url.includes('/api/system/workers')) return Promise.resolve({ ok: true, json: async () => ({ workers: [] }) })
+      if (url.includes('/api/repos')) return Promise.resolve({ ok: true, json: async () => ({ repos: [] }) })
+      if (url.includes('/api/runtimes')) return Promise.resolve({ ok: true, json: async () => ({ runtimes: [] }) })
+      if (url.includes('/api/sessions')) return Promise.resolve({ ok: true, json: async () => [] })
+      if (url.includes('/api/epics')) return Promise.resolve({ ok: true, json: async () => ({ epics: [] }) })
+      if (url.includes('/api/pipeline')) return Promise.resolve({ ok: true, json: async () => ({ stages: {} }) })
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    })
+    // Reconnect backoff delay = random(0, ceiling) → 0: the new socket opens
+    // and its backfill resolves long before the 220ms flush window closes.
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+
+    const { getCaptured } = await mountWithProbe()
+    await act(async () => { wsInstances[0].onopen && wsInstances[0].onopen() })
+    await act(async () => {
+      sendFrame(wsInstances[0], { id: 1, timestamp: 't-same' })
+      sendFrame(wsInstances[0], { id: 2, timestamp: 't-same' })
+    })
+
+    // Drop the socket mid-window. The close MUST drain the queue into state
+    // before any reconnect traffic: watermark advanced, each frame present
+    // exactly once.
+    await act(async () => { wsInstances[0].onclose({ code: 1006 }) })
+    expect(getCaptured().events.filter(e => e.id === 1 || e.id === 2)).toHaveLength(2)
+    expect(getCaptured().lastSeenId).toBe(2)
+
+    // Reconnect (delay 0) → new socket; its onopen backfill re-delivers the
+    // same events under inclusive since= semantics — all dedup, none doubled.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(wsInstances.length).toBe(2)
+    await act(async () => { wsInstances[1].onopen && wsInstances[1].onopen() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS * 2) })
+    const ids = getCaptured().events.filter(e => e.id === 1 || e.id === 2).map(e => e.id).sort((a, b) => a - b)
+    expect(ids).toEqual([1, 2])
+  })
+
+  it('drains the queue on repo switch BEFORE the scope reset — no old-scope frame leaks into the new scope', async () => {
+    const { getCaptured } = await mountWithProbe()
+    await act(async () => { sendFrame(wsInstances[0], { id: 7, timestamp: 't7' }) })
+    expect(getCaptured().events).toHaveLength(0) // queued, window not elapsed
+
+    await act(async () => { getCaptured().selectRepo('owner-b') })
+    expect(getCaptured().selectedRepoSlug).toBe('owner-b')
+    // SELECT_REPO wiped the old scope. The queued old-scope frame must have
+    // been flushed INTO that scope (and cleared with it) — not stranded in
+    // the batcher to land in the fresh scope after the reset.
+    expect(getCaptured().events).toHaveLength(0)
+    await act(async () => { await vi.advanceTimersByTimeAsync(WS_BATCH_FLUSH_MS * 2) })
+    expect(getCaptured().events).toHaveLength(0)
   })
 
   it('updates the reconnect backfill cursor (lastEventTs) synchronously per frame, not at flush time', async () => {

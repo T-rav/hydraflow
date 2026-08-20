@@ -1001,8 +1001,10 @@ export function reducer(state, action) {
 // and owns no React state — so the cadence semantics (throttle vs debounce,
 // multi-cycle re-arm, immediate flush at maxQueue) are unit-testable without
 // mounting HydraFlowProvider. `flush()` is also what the provider calls on
-// visibilitychange and unmount, so a queued-but-not-yet-elapsed batch is
-// never stranded by a boundary crossing.
+// visibilitychange, socket close, repo switch, and unmount, so a
+// queued-but-not-yet-elapsed batch is never stranded by a boundary crossing
+// — and never applies after non-batched dispatches (backfill, scope reset)
+// whose dedup/wipe semantics assume queued frames already reached the state.
 export function createWsBatcher(dispatch, { flushMs = WS_BATCH_FLUSH_MS, maxQueue = WS_BATCH_MAX_QUEUE } = {}) {
   let queue = []
   let timer = null
@@ -1241,6 +1243,12 @@ export function HydraFlowProvider({ children }) {
     // Reset the reconnect backfill cursor: the new scope's event timeline is
     // independent, so the old since= watermark must not gate it.
     lastEventTsRef.current = null
+    // Drain the batch queue BEFORE the scope reset (#11221): frames received
+    // in the old scope but not yet flushed would otherwise land AFTER
+    // SELECT_REPO's wipe and leak old-repo events/workers into the fresh
+    // scope. Pre-batching they dispatched before the reset and were cleared
+    // with it — flush here restores that ordering.
+    wsBatcherRef.current.flush()
     dispatch({ type: 'SELECT_REPO', data: { slug } })
   }, [])
 
@@ -1922,6 +1930,15 @@ export function HydraFlowProvider({ children }) {
       // (wsRef.current = new_ws). If this onclose fires after that, skip the
       // reconnect to avoid opening a second connection to the wrong repo.
       if (wsRef.current !== ws) return
+      // Drain the batch queue (#11221) BEFORE the reconnect's backfill can
+      // resolve. /api/events?since= is INCLUSIVE, so the backfill re-delivers
+      // events at the cursor timestamp; a frame still sitting in the queue is
+      // invisible to BACKFILL_EVENTS' key dedup and the lastSeenId watermark
+      // hasn't advanced past it (single-repo mode) — a fast reconnect whose
+      // backfill beats the flush timer would land such frames TWICE. Frames
+      // from a stale socket are excluded by the guard above; the repo-switch
+      // drain happens in selectRepo, before the scope reset.
+      flushWsQueue()
       dispatch({ type: 'DISCONNECTED' })
       // 1008 = Policy Violation — server explicitly rejected our repo slug.
       // Don't reconnect; the slug is invalid and retrying would loop forever.
@@ -1948,7 +1965,7 @@ export function HydraFlowProvider({ children }) {
       console.warn('[HydraFlow] WebSocket error; awaiting close for reconnect', err)
     }
     wsRef.current = ws
-  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchLoopFitness, fetchAdrConformance, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo, enqueueWsAction])
+  }, [state.selectedRepoSlug, applyRepoParam, fetchLifetimeStats, fetchHitlItems, fetchGithubMetrics, fetchMetricsHistory, fetchLoopFitness, fetchAdrConformance, fetchPipeline, fetchPipelineStats, fetchEpics, fetchSessions, fetchRepos, fetchRuntimes, fetchWithRepo, enqueueWsAction, flushWsQueue])
 
   useEffect(() => {
     const poll = () => {
