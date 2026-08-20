@@ -128,6 +128,9 @@ class CachingIssueStore:
     def enqueue_transition(self, task: Task, next_stage: str) -> None:
         self._inner.enqueue_transition(task, next_stage)
 
+    def try_claim_stage(self, task: Task, expected_stage: str) -> bool:
+        return self._inner.try_claim_stage(task, expected_stage)
+
     def mark_active(self, issue_number: int, stage: str) -> None:
         self._inner.mark_active(issue_number, stage)
 
@@ -137,8 +140,16 @@ class CachingIssueStore:
     def mark_merged(self, issue_number: int) -> None:
         self._inner.mark_merged(issue_number)
 
-    def release_in_flight(self, issue_numbers: set[int]) -> None:
-        self._inner.release_in_flight(issue_numbers)
+    def release_in_flight(
+        self,
+        issue_numbers: set[int],
+        *,
+        expected_stage: str | None = None,
+    ) -> None:
+        self._inner.release_in_flight(
+            issue_numbers,
+            expected_stage=expected_stage,
+        )
 
     def is_active(self, issue_number: int) -> bool:
         return self._inner.is_active(issue_number)

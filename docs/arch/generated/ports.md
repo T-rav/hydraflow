@@ -67,7 +67,7 @@ graph LR
 ### IssueStorePort
 
 - Module: `src.ports`
-- Methods: `enqueue_transition`, `enrich_with_comments`, `get_implementable`, `get_plannable`, `get_reviewable`, `get_triageable`, `is_active`, `mark_active`, `mark_complete`, `mark_merged`, `release_in_flight`
+- Methods: `enqueue_transition`, `enrich_with_comments`, `get_implementable`, `get_plannable`, `get_reviewable`, `get_triageable`, `is_active`, `mark_active`, `mark_complete`, `mark_merged`, `release_in_flight`, `try_claim_stage`
 - Adapters:
   - `CachingIssueStore` (`src.caching_issue_store`)
   - `IssueStore` (`src.issue_store`)

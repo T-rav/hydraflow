@@ -195,14 +195,32 @@ async def run_refilling_pool(
     return results
 
 
-def release_batch_in_flight(store: IssueStorePort, issue_numbers: set[int]) -> None:
+def release_batch_in_flight(
+    store: IssueStorePort,
+    issue_numbers: set[int],
+    *,
+    expected_stage: str | None = None,
+) -> None:
     """Release in-flight protection for a batch of issues.
 
     Should be called in a ``finally`` block after ``run_concurrent_batch``
     to ensure no orphaned in-flight entries survive if a worker exits
     without reaching ``mark_active`` / ``mark_complete``.
     """
-    store.release_in_flight(issue_numbers)
+    if expected_stage is None:
+        store.release_in_flight(issue_numbers)
+    else:
+        store.release_in_flight(
+            issue_numbers,
+            expected_stage=expected_stage,
+        )
+
+
+# ``issue_state_is_resolved`` — the resolved-state predicate — is re-exported
+# from ``issue_state`` (see the import block above). The vocabulary lives in
+# that zero-dependency leaf so stdlib-only scanners can use it without
+# importing the phase stack; ``phase_utils`` re-exports it because phase
+# modules (implement_phase, #11457) pin this module as the import surface.
 
 
 async def escalate_to_hitl(
