@@ -6,7 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `b12bb48` — Fixes #11482: guard epic replans against stale ownership *(2026-08-20)*
+- `d729b3b` — fix(planner): guard epic replans against stale ownership (#11482) (#11484) (#11484) *(2026-08-20)*
 - `6013271` — feat: add LLM gateway session tap (#11477) (#11477) *(2026-08-20)*
 - `daa3c82` — Fixes #11418: promote StaleIssueLoop/ReportIssueLoop/service_registry reach-throughs to PRPort methods *(2026-08-18)*
 - `cfa3338` — Fixes #11420: FakeLLM's nested runner stand-ins have drifted from t... (#11445) (#11445) *(2026-08-17)*

@@ -12,6 +12,7 @@ import json
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mockworld.fakes._factories import PRInfoFactory
@@ -1826,6 +1827,32 @@ class FakeGitHub:
             return json.dumps([])
         return None
 
+    async def _handle_issue_edit(self, args: list[str]) -> None:
+        """Model ``gh issue edit <n> --repo <repo> --body-file <path>`` (#11419).
+
+        The only real issuer is ``PRManager.update_issue_body``, which sends
+        the body through a temp ``--body-file`` (``_run_with_body_file``),
+        not inline ``--body`` — the fake reads the same file the real CLI
+        would. Best-effort: extracts the issue number (first digit-only
+        positional) and the path after ``--body-file``, then delegates to
+        :meth:`update_issue_body` so the CLI route and the Port-method route
+        end up in the same place. A missing file or an edit without a body
+        flag (e.g. label-only edits) is a no-op.
+        """
+        number = next((int(a) for a in args[2:] if a.isdigit()), None)
+        path: str | None = None
+        if "--body-file" in args:
+            idx = args.index("--body-file")
+            if idx + 1 < len(args):
+                path = args[idx + 1]
+        if number is None or path is None:
+            return
+        try:
+            body = Path(path).read_text(encoding="utf-8")
+        except OSError:
+            return
+        await self.update_issue_body(number, body)
+
     async def _run_gh(self, *cmd: str, cwd: Any = None) -> str:
         """Generic ``gh`` CLI passthrough — returns minimal-shape JSON.
 
@@ -1875,12 +1902,15 @@ class FakeGitHub:
                     if issue.state == "open"
                 ]
                 return _json.dumps(payload)
-            if sub == "close":
-                # Best-effort: extract issue number from positional args.
-                for a in args[2:]:
-                    if a.isdigit():
-                        await self.close_issue(int(a))
-                        break
+            if sub in ("close", "edit"):
+                if sub == "close":
+                    # Best-effort: extract issue number from positional args.
+                    for a in args[2:]:
+                        if a.isdigit():
+                            await self.close_issue(int(a))
+                            break
+                else:
+                    await self._handle_issue_edit(args)
                 return ""
             if sub == "view":
                 return _json.dumps({"comments": []})
