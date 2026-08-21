@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11480
 source_phase: plan
 created_at: 2026-08-20T06:54:25.786690+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Closing-keyword parsing: use false_close.closing_issue_refs, not _FIXES_RE
