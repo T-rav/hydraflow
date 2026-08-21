@@ -789,7 +789,7 @@ class PostMergeHandler:
         lint / drift / maintenance-PR rollup is the existing
         subscription path.
         """
-        from src.wiki_carryover import (  # noqa: PLC0415
+        from wiki_carryover import (  # noqa: PLC0415
             build_wiki_entry,
             detect_shipped_with_known_gaps,
         )

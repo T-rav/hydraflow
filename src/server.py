@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import importlib.metadata
 import logging
 import os
 import signal
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +27,8 @@ from runtime_config import (
 from unpushed_branch_alert import check_and_alert_unpushed_branches
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from dashboard import HydraFlowDashboard
     from events import EventBus
     from repo_runtime import RepoRuntimeRegistry
@@ -409,7 +414,50 @@ async def _run(config: HydraFlowConfig) -> None:
         await _run_headless(config)
 
 
-def main() -> None:
+def package_version() -> str:
+    """Version of the running HydraFlow: installed metadata, else the checkout.
+
+    A wheel / editable install answers through ``importlib.metadata``. A bare
+    checkout run with ``PYTHONPATH=src`` (``make run``, the agent image's
+    ``--no-install-project`` venv) has no metadata, so fall back to the
+    ``[project] version`` in the checkout's ``pyproject.toml``.
+    """
+    try:
+        return importlib.metadata.version("hydraflow")
+    except importlib.metadata.PackageNotFoundError:
+        pass
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    try:
+        return str(tomllib.loads(pyproject.read_text("utf-8"))["project"]["version"])
+    except (OSError, KeyError, tomllib.TOMLDecodeError):
+        return "unknown"
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """CLI surface of the ``hydraflow`` console script (#11580).
+
+    Configuration is environment-driven (``.env`` / ``HYDRAFLOW_*``), so the
+    only options are ``--help`` and ``--version`` — both answer without
+    touching config, logging or the event loop, which is what lets an
+    installed wheel be smoke-tested in a clean venv.
+    """
+    parser = argparse.ArgumentParser(
+        prog="hydraflow",
+        description=(
+            "Start the HydraFlow server. Configuration is read from the "
+            "environment and .env (HYDRAFLOW_* keys; see README.md)."
+        ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {package_version()}",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    parse_args(argv)
     from dotenv import load_dotenv  # noqa: PLC0415
 
     load_dotenv()

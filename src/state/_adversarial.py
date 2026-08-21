@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
     from models import StateData
-    from src.pending_concerns import AdversarialState
+    from pending_concerns import AdversarialState
 
 _V = TypeVar("_V")
 

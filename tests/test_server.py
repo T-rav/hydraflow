@@ -36,7 +36,7 @@ class TestServerMain:
         ):
             from server import main
 
-            main()
+            main([])
             mock_logging.assert_called_once()
             mock_run.assert_called_once()
 
@@ -56,9 +56,97 @@ class TestServerMain:
         ):
             from server import main
 
-            main()
+            main([])
             call_kwargs = mock_logging.call_args
             assert call_kwargs[1]["level"] == logging.DEBUG
+
+
+class TestServerCli:
+    """``hydraflow --version`` / ``--help`` answer without booting (#11580)."""
+
+    def test_version_prints_and_exits_before_any_boot_work(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with (
+            patch("server.setup_logging") as mock_logging,
+            patch("server.load_runtime_config") as mock_config,
+            patch("server.asyncio.run") as mock_run,
+            patch("server.package_version", return_value="9.9.9"),
+        ):
+            from server import main
+
+            with pytest.raises(SystemExit) as exc:
+                main(["--version"])
+
+        assert exc.value.code == 0
+        assert capsys.readouterr().out.strip() == "hydraflow 9.9.9"
+        mock_logging.assert_not_called()
+        mock_config.assert_not_called()
+        mock_run.assert_not_called()
+
+    def test_help_uses_the_console_script_name(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from server import main
+
+        with pytest.raises(SystemExit) as exc:
+            main(["--help"])
+
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert out.startswith("usage: hydraflow")
+        assert "--version" in out
+
+    def test_unknown_argument_is_rejected(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch("server.asyncio.run") as mock_run:
+            from server import main
+
+            with pytest.raises(SystemExit) as exc:
+                main(["--bogus"])
+
+        assert exc.value.code == 2
+        assert "unrecognized arguments: --bogus" in capsys.readouterr().err
+        mock_run.assert_not_called()
+
+    def test_package_version_prefers_installed_metadata(self) -> None:
+        from server import package_version
+
+        with patch("server.importlib.metadata.version", return_value="1.2.3"):
+            assert package_version() == "1.2.3"
+
+    def test_package_version_falls_back_to_the_checkout_pyproject(self) -> None:
+        """PYTHONPATH=src runs (make run, the agent image) have no metadata."""
+        import importlib.metadata
+        import tomllib
+
+        from server import package_version
+
+        expected = tomllib.loads(
+            (Path(__file__).parent.parent / "pyproject.toml").read_text("utf-8")
+        )["project"]["version"]
+        with patch(
+            "server.importlib.metadata.version",
+            side_effect=importlib.metadata.PackageNotFoundError("hydraflow"),
+        ):
+            assert package_version() == expected
+
+    def test_package_version_is_unknown_without_metadata_or_pyproject(
+        self,
+    ) -> None:
+        import importlib.metadata
+
+        from server import package_version
+
+        with (
+            patch(
+                "server.importlib.metadata.version",
+                side_effect=importlib.metadata.PackageNotFoundError("hydraflow"),
+            ),
+            patch("server.tomllib.loads", side_effect=KeyError("project")),
+        ):
+            assert package_version() == "unknown"
 
 
 class TestRunDispatch:

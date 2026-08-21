@@ -21,15 +21,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+_ADVERSARIAL_MODULE_NAMES = (
+    "spec_ac_generator",
+    "spec_judge",
+    "plan_council",
+    "discovery_council",
+    "shape_council",
+    "assumption_surfacer",
+    "adversarial_retry_loop",
+    "complexity_gate",
+)
+# Production code imports bare (``from spec_judge import ...``); the
+# ``src.``-prefixed spelling is kept so a reintroduced alias import (it cannot
+# resolve from an installed wheel, #11580) is caught here too.
 _ADVERSARIAL_MODULES = {
-    "src.spec_ac_generator",
-    "src.spec_judge",
-    "src.plan_council",
-    "src.discovery_council",
-    "src.shape_council",
-    "src.assumption_surfacer",
-    "src.adversarial_retry_loop",
-    "src.complexity_gate",
+    *_ADVERSARIAL_MODULE_NAMES,
+    *(f"src.{name}" for name in _ADVERSARIAL_MODULE_NAMES),
 }
 
 

@@ -27,9 +27,9 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 
-from src.adversarial_agents import AgentLike, extract_json
-from src.pending_concerns import Concern
-from src.plan_council_prompts import (
+from adversarial_agents import AgentLike, extract_json
+from pending_concerns import Concern
+from plan_council_prompts import (
     BUILDER_PROMPT,
     RISK_SKEPTIC_PROMPT,
     TESTER_PROMPT,
