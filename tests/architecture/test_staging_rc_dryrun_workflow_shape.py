@@ -395,7 +395,14 @@ class TestCacheWritingClassifier:
 
 
 class TestFleetSweep:
-    """Any sharded, cache-writing job in the fleet must justify its ref."""
+    """Any cache-writing job in the fleet must justify its expression-ref checkout.
+
+    Matrix-sharding is NOT the criterion — it is incidental to ``dryrun-shard``,
+    not to the vulnerability. A non-sharded job with a job-output checkout and a
+    cache-writing step is exactly as poisonable; requiring sharding here would
+    make the sweep miss it. (It used to: see #11565 — the sweep silently
+    covered only ``dryrun-shard`` itself until that was found and fixed.)
+    """
 
     @staticmethod
     def _offenders() -> list[str]:
@@ -406,9 +413,7 @@ class TestFleetSweep:
             for job_name, job in (workflow.get("jobs") or {}).items():
                 if not isinstance(job, dict):
                     continue
-                if not (
-                    _is_matrix_sharded(job) and any(map(_is_cache_writing, _steps(job)))
-                ):
+                if not any(map(_is_cache_writing, _steps(job))):
                     continue
                 expression_refs = [
                     s
@@ -422,14 +427,44 @@ class TestFleetSweep:
                     offenders.append(f"{path.name}:{job_name}")
         return offenders
 
+    #: Tracked-but-unresolved offenders: checking these out under
+    #: `refs/pull/N/merge` (weaker provenance than a literal protected branch)
+    #: is plausible but not established as safe, so stamping a `# TRUST:`
+    #: marker on them would be a false attestation. Named here instead, so a
+    #: *new* unmarked offender anywhere else still fails this test, and so
+    #: this set must shrink (forcing a human decision) the moment any of these
+    #: three is fixed or genuinely justified. See #11565.
+    _KNOWN_GAP_JOBS = frozenset(
+        {
+            "rc-promotion-scenario.yml:scenario",
+            "rc-promotion-scenario.yml:scenario-browser",
+            "rc-promotion-scenario.yml:trust",
+        }
+    )
+
+    def test_sweep_inspects_more_than_the_one_job_it_was_written_for(self) -> None:
+        # Sanity: a sweep that (re-)degrades to selecting only `dryrun-shard`
+        # would pass every assertion below vacuously. #11565 was exactly this.
+        eligible = [
+            f"{path.name}:{job_name}"
+            for path in sorted(WORKFLOW_DIR.glob("*.yml"))
+            for job_name, job in (_load(path).get("jobs") or {}).items()
+            if isinstance(job, dict) and any(map(_is_cache_writing, _steps(job)))
+        ]
+        assert len(eligible) > 1, eligible
+
     def test_sweep_covers_the_shard_job(self) -> None:
         # Sanity: the classifier must actually select the job we care about,
-        # otherwise the sweep below passes vacuously.
+        # otherwise the sweep below passes vacuously for this job specifically.
         workflow = _load(DRYRUN_WORKFLOW)
         job = workflow["jobs"]["dryrun-shard"]
-        assert _is_matrix_sharded(job) and any(map(_is_cache_writing, _steps(job)))
+        assert any(map(_is_cache_writing, _steps(job)))
 
-    def test_no_sharded_cache_writing_job_checks_out_an_unjustified_ref(
-        self,
-    ) -> None:
-        assert self._offenders() == []
+    def test_no_new_cache_writing_job_checks_out_an_unjustified_ref(self) -> None:
+        assert set(self._offenders()) == self._KNOWN_GAP_JOBS
+
+    def test_known_gap_jobs_are_still_actually_offenders(self) -> None:
+        # If any of these stops being an offender (fixed, or genuinely
+        # TRUST-marked), it must be removed from `_KNOWN_GAP_JOBS` above —
+        # an exemption list must not outlive the gap it names.
+        assert set(self._offenders()) >= self._KNOWN_GAP_JOBS
