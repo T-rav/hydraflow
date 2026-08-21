@@ -1,0 +1,86 @@
+specification {
+  element system
+  element container
+  element component
+  element externalSystem
+}
+
+model {
+  factory = system 'HydraFlow Factory' {
+
+    gcLoop = container 'WorkspaceGCLoop' {
+      description 'src/workspace_gc_loop.py — caretaker loop (ADR-0029/ADR-0069)'
+
+      discover = component 'Phase 5 discovery' {
+        description '_collect_orphaned_worktrees — git worktree list --porcelain across all roots (#10698)'
+      }
+      decide = component 'Reap decision' {
+        description '_reap_worktree_if_safe — min_age, dirty, issue-state, landed guards'
+      }
+      landed = component 'Landed predicate' {
+        description '_worktree_has_unmerged_commits — DEFECT: SHA-identity rev-list only'
+      }
+      issueState = component 'Issue state read' {
+        description '_get_issue_state — PRPort.get_issue_state (ADR-0041 prior art)'
+      }
+      reap = component 'Reaper' {
+        description '_reap_worktree — worktree remove --force + force branch delete'
+      }
+    }
+
+    prPort = container 'PRPort' {
+      description 'src/ports.py — hexagonal GitHub boundary'
+    }
+    prManager = container 'GitHubPRManager' {
+      description 'src/pr_manager.py — real gh adapter'
+    }
+    fakeGithub = container 'FakeGitHub' {
+      description 'src/mockworld/fakes/fake_github.py — MockWorld adapter'
+    }
+    localGit = container 'Local git' {
+      description 'run_subprocess("git", ...) inside the worktree'
+    }
+  }
+
+  github = externalSystem 'GitHub' {
+    description 'source of truth for PR merge state (ADR-0041); squash-merges every PR into staging (ADR-0042)'
+  }
+
+  factory.gcLoop.discover -> factory.gcLoop.decide 'candidate worktree + branch'
+  factory.gcLoop.decide -> factory.gcLoop.landed 'has this work landed?'
+  factory.gcLoop.decide -> factory.gcLoop.issueState 'open / closed?'
+  factory.gcLoop.decide -> factory.gcLoop.reap 'safe -> reap'
+  factory.gcLoop.landed -> factory.localGit 'rev-list --count origin/base..HEAD'
+  factory.gcLoop.landed -> factory.prPort 'NEW: get_branch_pr_state(branch)'
+  factory.gcLoop.issueState -> factory.prPort 'get_issue_state(n)'
+  factory.prPort -> factory.prManager 'production'
+  factory.prPort -> factory.fakeGithub 'MockWorld / sandbox'
+  factory.prManager -> github 'gh api repos/{repo}/pulls'
+  factory.gcLoop.reap -> factory.localGit 'remove worktree + delete branch'
+}
+
+views {
+  view componentView {
+    title 'WorkspaceGCLoop reap decision — squash-merge blind spot (#11502)'
+    include factory.*, factory.gcLoop.*, github
+    autoLayout TopBottom
+  }
+
+  dynamic view landedFlow {
+    title 'Fixed landed-check ladder — cheap local first, authoritative last'
+
+    factory.gcLoop.decide -> factory.gcLoop.landed 'path, branch'
+    factory.gcLoop.landed -> factory.localGit 'rev-list --count origin/<base>..HEAD'
+    factory.localGit -> factory.gcLoop.landed '0 => LANDED (fast path, unchanged)'
+    factory.gcLoop.landed -> factory.localGit 'diff --name-only origin/<base> HEAD (TWO dots)'
+    factory.localGit -> factory.gcLoop.landed 'empty => LANDED (content identity, post-squash window)'
+    factory.gcLoop.landed -> factory.prPort 'get_branch_pr_state(branch)'
+    factory.prPort -> factory.prManager 'gh api pulls?state=all&head=owner:branch'
+    factory.prManager -> github 'read'
+    github -> factory.prManager 'mergedAt set'
+    factory.prManager -> factory.prPort 'MERGED'
+    factory.prPort -> factory.gcLoop.landed 'MERGED => LANDED; anything else => fail closed'
+    factory.gcLoop.landed -> factory.gcLoop.decide 'has_unmerged = not LANDED'
+    factory.gcLoop.decide -> factory.gcLoop.reap 'reap only when landed + clean + past min_age'
+  }
+}
