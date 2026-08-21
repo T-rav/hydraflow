@@ -39,20 +39,97 @@ async def test_issue_view_projects_requested_labels_and_body() -> None:
 
 @pytest.mark.asyncio
 async def test_issue_view_projects_title_and_state() -> None:
-    """`--json title,state` projects title and a gh-style uppercase state."""
+    """State and its reason use the gh wire vocabulary."""
     gh = FakeGitHub()
     gh.add_issue(7, "Open issue", "body")
     gh.add_issue(8, "Closed issue", "body", state="closed")
 
     open_out = await gh._run_gh(
-        "gh", "issue", "view", "7", "--repo", gh._repo, "--json", "title,state"
+        "gh",
+        "issue",
+        "view",
+        "7",
+        "--repo",
+        gh._repo,
+        "--json",
+        "title,state,stateReason",
     )
     closed_out = await gh._run_gh(
-        "gh", "issue", "view", "8", "--repo", gh._repo, "--json", "title,state"
+        "gh",
+        "issue",
+        "view",
+        "8",
+        "--repo",
+        gh._repo,
+        "--json",
+        "title,state,stateReason",
     )
 
-    assert json.loads(open_out) == {"title": "Open issue", "state": "OPEN"}
-    assert json.loads(closed_out) == {"title": "Closed issue", "state": "CLOSED"}
+    assert json.loads(open_out) == {
+        "title": "Open issue",
+        "state": "OPEN",
+        "stateReason": "",
+    }
+    assert json.loads(closed_out) == {
+        "title": "Closed issue",
+        "state": "CLOSED",
+        "stateReason": "COMPLETED",
+    }
+
+
+@pytest.mark.asyncio
+async def test_issue_view_unions_repeated_json_selectors() -> None:
+    """Repeated `--json` flags are unioned, matching the real gh CLI."""
+    gh = FakeGitHub()
+    gh.add_issue(42, "T", "B")
+
+    output = await gh._run_gh(
+        "gh", "issue", "view", "42", "--json", "title", "--json", "body"
+    )
+
+    assert json.loads(output) == {"title": "T", "body": "B"}
+
+
+@pytest.mark.asyncio
+async def test_issue_view_projects_extended_issue_fields() -> None:
+    """All fields modelled by FakeIssue use gh-compatible wire shapes."""
+    gh = FakeGitHub()
+    gh.add_issue(
+        42,
+        "T",
+        "B",
+        state="closed",
+        updated_at="2026-08-20T12:34:56Z",
+    )
+    gh._issues[42].state_reason = "NOT_PLANNED"
+    gh.add_seeded_comment(
+        42,
+        "reviewed",
+        login="alice",
+        created_at="2026-08-20T12:30:00Z",
+    )
+
+    output = await gh._run_gh(
+        "gh",
+        "issue",
+        "view",
+        "42",
+        "--json",
+        "number,updatedAt,stateReason,comments",
+    )
+
+    assert json.loads(output) == {
+        "number": 42,
+        "updatedAt": "2026-08-20T12:34:56Z",
+        "stateReason": "NOT_PLANNED",
+        "comments": [
+            {
+                "author": {"login": "alice"},
+                "body": "reviewed",
+                "createdAt": "2026-08-20T12:30:00Z",
+            }
+        ],
+    }
 
 
 @pytest.mark.asyncio
@@ -71,15 +148,21 @@ async def test_issue_view_omits_and_records_unmodelled_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_issue_view_unknown_issue_returns_empty_object() -> None:
-    """Viewing an issue the fake never saw projects nothing (no fabricated data)."""
+async def test_issue_view_unknown_issue_raises() -> None:
+    """Unknown issues fail like gh instead of masquerading as empty state."""
     gh = FakeGitHub()
 
-    output = await gh._run_gh(
-        "gh", "issue", "view", "9999", "--repo", gh._repo, "--json", "labels,body"
-    )
-
-    assert json.loads(output) == {}
+    with pytest.raises(RuntimeError, match="issue 9999 not found"):
+        await gh._run_gh(
+            "gh",
+            "issue",
+            "view",
+            "9999",
+            "--repo",
+            gh._repo,
+            "--json",
+            "labels,body",
+        )
 
 
 @pytest.mark.asyncio
@@ -92,6 +175,7 @@ async def test_issue_view_without_json_selector_returns_empty_object() -> None:
     output = await gh._run_gh("gh", "issue", "view", "42")
 
     assert json.loads(output) == {}
+    assert gh.issue_view_unmodelled_fields == {"--json"}
 
 
 @pytest.mark.asyncio
@@ -105,6 +189,28 @@ async def test_issue_view_trailing_json_flag_without_value_returns_empty_object(
     output = await gh._run_gh("gh", "issue", "view", "42", "--json")
 
     assert json.loads(output) == {}
+    assert gh.issue_view_unmodelled_fields == {"--json"}
+
+
+@pytest.mark.asyncio
+async def test_issue_view_records_unapplied_jq_filter() -> None:
+    """The fake reports that it returned JSON without applying a jq filter."""
+    gh = FakeGitHub()
+    gh.add_issue(42, "T", "B", labels=["bug"])
+
+    output = await gh._run_gh(
+        "gh",
+        "issue",
+        "view",
+        "42",
+        "--json",
+        "labels",
+        "--jq",
+        ".labels[].name",
+    )
+
+    assert json.loads(output) == {"labels": [{"name": "bug"}]}
+    assert gh.issue_view_unmodelled_fields == {"--jq"}
 
 
 # ---------------------------------------------------------------------------

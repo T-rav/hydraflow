@@ -1840,6 +1840,15 @@ class FakeGitHub:
         value_index = args.index(option) + 1
         return args[value_index] if value_index < len(args) else None
 
+    @staticmethod
+    def _option_values(args: list[str], option: str) -> list[str]:
+        """Return every value supplied for a repeatable CLI *option*."""
+        return [
+            args[index + 1]
+            for index, argument in enumerate(args[:-1])
+            if argument == option
+        ]
+
     def _issue_edit_body(self, args: list[str]) -> str | None:
         """Read the body-file value, falling back to an inline body."""
         path = self._option_value(args, "--body-file")
@@ -1849,6 +1858,43 @@ class FakeGitHub:
             except OSError:
                 pass
         return self._option_value(args, "--body")
+
+    @classmethod
+    def _issue_view_fields(cls, args: list[str]) -> tuple[list[str], list[str]]:
+        """Return raw selectors and their ordered, de-duplicated field union."""
+        selectors = cls._option_values(args, "--json")
+        fields = [
+            field.strip()
+            for selector in selectors
+            for field in selector.split(",")
+            if field.strip()
+        ]
+        return selectors, list(dict.fromkeys(fields))
+
+    @staticmethod
+    def _issue_view_projections(issue: FakeIssue) -> dict[str, Any]:
+        """Return every FakeIssue field modelled by the gh view boundary."""
+        state_reason = issue.state_reason or (
+            "COMPLETED" if issue.state == "closed" else ""
+        )
+        comments = [
+            {
+                "author": {"login": comment.login},
+                "body": str(comment),
+                "createdAt": comment.created_at,
+            }
+            for comment in issue.comments
+        ]
+        return {
+            "number": issue.number,
+            "labels": [{"name": label} for label in issue.labels],
+            "body": issue.body,
+            "title": issue.title,
+            "state": issue.state.upper(),
+            "stateReason": state_reason,
+            "updatedAt": issue.updated_at,
+            "comments": comments,
+        }
 
     async def _handle_issue_edit(self, args: list[str]) -> None:
         """Model ``gh issue edit <n> --body-file <path>`` / ``--body <text>``.
@@ -1880,20 +1926,17 @@ class FakeGitHub:
         omitted and recorded instead of fabricated (#11246).
         """
         issue_number = next((int(a) for a in args[2:] if a.isdigit()), 0)
-        selector = self._option_value(args, "--json")
-        fields = [
-            field.strip() for field in (selector or "").split(",") if field.strip()
-        ]
+        selectors, fields = self._issue_view_fields(args)
         issue = self._issues.get(issue_number)
         if issue is None:
-            return json.dumps({})
+            raise RuntimeError(f"FakeGitHub: issue {issue_number} not found")
 
-        projections: dict[str, Any] = {
-            "labels": [{"name": label} for label in issue.labels],
-            "body": issue.body,
-            "title": issue.title,
-            "state": issue.state.upper(),
-        }
+        if not selectors:
+            self.issue_view_unmodelled_fields.add("--json")
+        if "--jq" in args:
+            self.issue_view_unmodelled_fields.add("--jq")
+
+        projections = self._issue_view_projections(issue)
         payload: dict[str, Any] = {}
         for field_name in fields:
             if field_name in projections:
