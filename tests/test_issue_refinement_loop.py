@@ -138,6 +138,29 @@ def _near_dup_pair(gh: FakeGitHub) -> None:
     )
 
 
+def _second_near_dup_pair(gh: FakeGitHub) -> None:
+    """A second pair (104/105) that clears the prefilter floor but shares no
+    subject with 101/102 — a fresh operator question on a later tick."""
+    gh.add_issue(
+        104,
+        "WikiCompileLoop double-writes the index on a cold restart",
+        "After a cold restart the WikiCompileLoop writes the wiki index twice "
+        "in the same tick, so the second write clobbers the first entry.",
+        labels=[],
+    )
+    gh.add_issue(
+        105,
+        "WikiCompileLoop double-writes the index after cold restart",
+        "The WikiCompileLoop writes the wiki index twice in the same tick after "
+        "a cold restart; the second write clobbers the first entry.",
+        labels=[],
+    )
+
+
+_LIKELY_DUP_101_102 = {frozenset({101, 102}): _dup_json("likely_dup", 101, "medium")}
+_LIKELY_DUP_104_105 = {frozenset({104, 105}): _dup_json("likely_dup", 104, "medium")}
+
+
 def _refinement_events(bus: EventBus):
     return [e for e in bus.get_history() if e.type == EventType.ISSUE_REFINEMENT_UPDATE]
 
@@ -411,7 +434,9 @@ async def test_credit_error_during_apply_reraises(tmp_path) -> None:
 async def test_digest_created_then_updated(tmp_path) -> None:
     gh, state, dedup, bus = _env(tmp_path)
     _near_dup_pair(gh)
-    llm = ScriptedRefinementLLM()
+    # A proposal gives the tick something to say — the digest is only minted
+    # with content (#11519).
+    llm = ScriptedRefinementLLM(dup=_LIKELY_DUP_101_102)
     loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
 
     await loop._do_work()
@@ -552,7 +577,7 @@ async def test_quiet_tick_after_refinement_is_zero_llm_and_digest_untouched(
     gh, state, dedup, bus = _env(tmp_path)
     _near_dup_pair(gh)
     state.set_refinement_last_full_sweep(datetime.now(UTC))  # incremental mode
-    llm = ScriptedRefinementLLM()
+    llm = ScriptedRefinementLLM(dup=_LIKELY_DUP_101_102)  # something to say
     loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
 
     # Tick N: refines the two new issues, creates the digest.
@@ -600,36 +625,42 @@ async def test_earlier_open_proposal_re_renders_on_later_changed_tick(
     assert "#101 vs #102" in gh._issues[digest_num].body
 
 
-async def test_digest_reopened_when_stored_issue_closed(tmp_path) -> None:
-    """A closed digest issue is reopened + reused, not silently written.
+async def test_digest_reopened_when_stored_issue_closed_and_tick_has_content(
+    tmp_path,
+) -> None:
+    """A closed digest is reopened + reused — not silently written, not churned
+    into a fresh issue — when the tick has something to say.
 
-    Now that ``PRPort`` grows a ``reopen_issue`` seam (added for the
-    close-verification controller, #10358), ``_reopen_digest``'s capability
-    probe fires and the rolling digest is reused instead of a fresh one being
-    minted — the behaviour the seam was explicitly kept for. The invariant is
-    unchanged: the loop never silently writes the body of a *closed* issue.
+    ``PRPort`` grew a ``reopen_issue`` seam (close-verification controller,
+    #10358), so ``_reopen_digest``'s capability probe fires and the rolling
+    issue keeps its identity. The reopen is gated on content (#11519): here
+    the open 101/102 question still stands, so the tick has something to say.
     """
     gh, state, dedup, bus = _env(tmp_path)
     _near_dup_pair(gh)
     state.set_refinement_last_full_sweep(datetime.now(UTC))
-    llm = ScriptedRefinementLLM()
+    llm = ScriptedRefinementLLM(dup=_LIKELY_DUP_101_102)
     loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
 
-    await loop._do_work()  # tick N: create digest
+    await loop._do_work()  # tick N: proposal -> digest minted
     old_digest = state.get_refinement_digest_issue()
     assert old_digest > 0
     gh._issues[old_digest].state = "closed"  # closed out-of-band
+    issue_count = len(gh._issues)
 
-    # Tick N+1: change an issue so the tick refines and writes the digest.
+    # Tick N+1: change an issue so the tick refines; the 101/102 question is
+    # still open, so the digest has something to say.
     gh._issues[101].body = "Rewritten body to force a change and re-refinement."
     gh.set_issue_updated_at(101, "2026-07-19T00:00:00Z")
-    await loop._do_work()
+    stats = await loop._do_work()
 
+    assert stats["open_questions"] >= 1
     new_digest = state.get_refinement_digest_issue()
     # The rolling digest is reopened and reused — not churned into a new issue.
     assert new_digest == old_digest
     assert gh._issues[new_digest].state == "open"
     assert _DIGEST_LABEL in gh._issues[new_digest].labels
+    assert len(gh._issues) == issue_count
 
 
 async def test_digest_adopted_by_label_when_state_lost_number(tmp_path) -> None:
@@ -655,3 +686,203 @@ async def test_digest_adopted_by_label_when_state_lost_number(tmp_path) -> None:
     assert state.get_refinement_digest_issue() == 9001  # adopted, not re-created
     assert len(gh._issues) == issue_count_before  # no duplicate digest
     assert gh._issues[9001].body != "stale digest body"  # body refreshed
+
+
+# --- #11519: a human close retires the digest; mint only with something to say
+
+
+class _NoReopenPort:
+    """A PRPort double WITHOUT the ``reopen_issue`` seam, over a real FakeGitHub."""
+
+    def __init__(self, inner: FakeGitHub) -> None:
+        self._inner = inner
+
+    def __getattr__(self, name: str):
+        if name == "reopen_issue":
+            raise AttributeError(name)
+        return getattr(self._inner, name)
+
+
+async def _mint_digest_then_retire(tmp_path, *, pr=None):
+    """Tick N mints the digest off a 101/102 likely_dup proposal; a human then
+    closes it AND answers the open question (closes #102), so the next tick
+    has nothing to report. Returns ``(gh, state, loop, digest)``.
+    """
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    state.set_refinement_last_full_sweep(datetime.now(UTC))  # incremental mode
+    llm = ScriptedRefinementLLM(dup={**_LIKELY_DUP_101_102, **_LIKELY_DUP_104_105})
+    loop = _make_loop(_cfg(tmp_path), pr or gh, state, dedup, bus, llm)
+
+    await loop._do_work()
+    digest = state.get_refinement_digest_issue()
+    assert digest > 0
+    await gh.close_issue(digest)  # a human retires the rolling report
+    await gh.close_issue(102, reason="not planned")  # ...and answers the question
+    return gh, state, loop, digest
+
+
+# Mutually dissimilar title AND body: none clears the dup prefilter floor
+# against any other seeded issue (identical bodies alone would — body overlap
+# is 40% of the score), so a new one makes the tick non-quiet without a question.
+_UNRELATED = {
+    200: ("Telemetry export gap on the metrics endpoint", "counters stop at noon"),
+    201: ("OAuth login flow returns a blank page", "redirect lands on nothing"),
+    202: ("Webhook retries hammer the staging deploy hook", "backoff never grows"),
+}
+
+
+def _add_unrelated(gh: FakeGitHub, number: int) -> None:
+    """A dissimilar new issue: makes the tick non-quiet without any question."""
+    title, body = _UNRELATED[number]
+    gh.add_issue(number, title, body)
+
+
+def _digest_count(gh: FakeGitHub) -> int:
+    return sum(1 for i in gh._issues.values() if _DIGEST_LABEL in i.labels)
+
+
+async def test_retired_digest_stays_closed_on_tick_with_nothing_to_report(
+    tmp_path,
+) -> None:
+    """Stored digest CLOSED + tick with 0 proposals and 0 open questions ->
+    no reopen, no fresh digest, body untouched (#11519 — the #10224 timeline:
+    closed by a human 08-02/08-17, reopened by the bot 08-14/08-18 with a body
+    reading "none this tick / proposals: 0")."""
+    gh, state, loop, digest = await _mint_digest_then_retire(tmp_path)
+    body_at_retirement = gh._issues[digest].body
+    _add_unrelated(gh, 200)
+    issue_count = len(gh._issues)
+
+    stats = await loop._do_work()
+
+    assert stats["changed"] >= 1  # the tick refined (not the quiet short-circuit)
+    assert stats["proposals"] == 0
+    assert stats["open_questions"] == 0
+    assert gh._issues[digest].state == "closed"  # not reopened
+    assert gh._issues[digest].body == body_at_retirement  # not rewritten
+    assert len(gh._issues) == issue_count  # no fresh digest minted
+    assert state.get_refinement_digest_issue() == digest  # state still points at it
+
+
+async def test_retired_digest_reopened_exactly_once_when_tick_has_a_proposal(
+    tmp_path,
+) -> None:
+    """Stored digest CLOSED + >=1 proposal -> exactly one reopen (same rolling
+    issue, no fresh one), body written with the new question."""
+    gh, state, loop, digest = await _mint_digest_then_retire(tmp_path)
+    _second_near_dup_pair(gh)
+    issue_count = len(gh._issues)
+
+    stats = await loop._do_work()
+
+    assert stats["proposals"] == 1
+    assert state.get_refinement_digest_issue() == digest
+    assert gh._issues[digest].state == "open"
+    assert "#104 vs #105" in gh._issues[digest].body
+    assert len(gh._issues) == issue_count  # reopened, not re-minted
+    assert _digest_count(gh) == 1
+
+
+async def test_retired_digest_minted_fresh_once_when_port_cannot_reopen(
+    tmp_path,
+) -> None:
+    """A port without ``reopen_issue`` falls back to minting — still exactly one
+    new digest, still only with something to say, state re-pointed at it."""
+    gh = FakeGitHub()
+    port = _NoReopenPort(gh)
+    # Build the env by hand so the loop sees the narrower port.
+    state = StateTracker(state_file=tmp_path / "state.json")
+    dedup = DedupStore("issue_refinement", tmp_path / "dedup.json")
+    _near_dup_pair(gh)
+    state.set_refinement_last_full_sweep(datetime.now(UTC))
+    llm = ScriptedRefinementLLM(dup={**_LIKELY_DUP_101_102, **_LIKELY_DUP_104_105})
+    loop = _make_loop(_cfg(tmp_path), port, state, dedup, EventBus(), llm)
+    await loop._do_work()
+    old_digest = state.get_refinement_digest_issue()
+    await gh.close_issue(old_digest)
+    await gh.close_issue(102, reason="not planned")
+
+    # Empty tick: nothing minted.
+    _add_unrelated(gh, 200)
+    await loop._do_work()
+    assert gh._issues[old_digest].state == "closed"
+    assert _digest_count(gh) == 1  # just the retired one
+
+    # Proposal tick: exactly one fresh digest (the port cannot reopen).
+    _second_near_dup_pair(gh)
+    await loop._do_work()
+
+    new_digest = state.get_refinement_digest_issue()
+    assert new_digest != old_digest
+    assert gh._issues[old_digest].state == "closed"
+    assert gh._issues[new_digest].state == "open"
+    assert "#104 vs #105" in gh._issues[new_digest].body
+    assert _digest_count(gh) == 2
+
+
+async def test_open_digest_body_still_rewritten_on_tick_with_nothing_to_report(
+    tmp_path,
+) -> None:
+    """Pin the unchanged LIVE-digest behaviour: an OPEN digest has its body
+    rewritten every refining tick, even one with nothing to report — the
+    content gate only governs minting/reopening (#11519 decision point)."""
+    gh, state, dedup, bus = _env(tmp_path)
+    _near_dup_pair(gh)
+    state.set_refinement_last_full_sweep(datetime.now(UTC))
+    llm = ScriptedRefinementLLM(dup=_LIKELY_DUP_101_102)
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+    await loop._do_work()
+    digest = state.get_refinement_digest_issue()
+    body_before = gh._issues[digest].body
+    await gh.close_issue(102, reason="not planned")  # question answered
+    _add_unrelated(gh, 200)
+
+    stats = await loop._do_work()
+
+    assert stats["open_questions"] == 0
+    assert gh._issues[digest].state == "open"
+    assert gh._issues[digest].body != body_before  # stats refreshed
+    assert "#101 vs #102" not in gh._issues[digest].body
+
+
+async def test_never_minted_digest_not_created_on_tick_with_nothing_to_report(
+    tmp_path,
+) -> None:
+    """First run with nothing to report mints no digest at all — the empty
+    "none this tick" issue is exactly the board noise the ruling retires."""
+    gh, state, dedup, bus = _env(tmp_path)
+    _add_unrelated(gh, 200)
+    _add_unrelated(gh, 201)
+    llm = ScriptedRefinementLLM()
+    loop = _make_loop(_cfg(tmp_path), gh, state, dedup, bus, llm)
+
+    stats = await loop._do_work()  # full sweep: refines, nothing to say
+
+    assert stats["changed"] == 2
+    assert state.get_refinement_digest_issue() == 0
+    assert _digest_count(gh) == 0
+    assert _DIGEST_DEDUP_KEY not in dedup.get()
+
+
+async def test_retired_digest_not_reopened_for_completed_work_alone(
+    tmp_path,
+) -> None:
+    """An auto-close with no open question does not resurrect a retired digest:
+    completed work is recorded on the closed issue itself (evidence comment +
+    ``refinement-auto`` label), and the operator ruling re-files only for
+    proposals (#11519 decision point, pinned)."""
+    gh, state, loop, digest = await _mint_digest_then_retire(tmp_path)
+    _second_near_dup_pair(gh)
+    loop._refinement_llm = ScriptedRefinementLLM(
+        dup={frozenset({104, 105}): _dup_json("exact_dup", 104, "high")}
+    )
+    issue_count = len(gh._issues)
+
+    stats = await loop._do_work()
+
+    assert stats["closed"] == 1
+    assert gh._issues[105].state == "closed"
+    assert _REFINEMENT_AUTO_LABEL in gh._issues[105].labels
+    assert gh._issues[digest].state == "closed"  # digest stays retired
+    assert len(gh._issues) == issue_count

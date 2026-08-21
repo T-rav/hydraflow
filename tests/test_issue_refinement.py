@@ -35,6 +35,7 @@ from issue_refinement import (
     body_hash,
     build_dup_judgment_prompt,
     build_priority_prompt,
+    digest_has_content,
     find_dup_candidates,
     is_guarded,
     merge_open_proposals,
@@ -891,3 +892,52 @@ class TestOpenProposalsToActions:
         )
 
         assert actions.dup_proposals == ()
+
+
+# ---------------------------------------------------------------------------
+# "Something to say" predicate — gates minting/reopening the digest (#11519)
+# ---------------------------------------------------------------------------
+
+
+class TestDigestHasContent:
+    """``digest_has_content`` decides whether a tick warrants a standing digest
+    issue. Only items that need a human count: open operator questions (dup
+    proposals, priority questions) and apply failures. Stats alone never do,
+    and neither does completed machine work (auto-closes, relabels) — that is
+    already recorded on the affected issues (evidence comment + label)."""
+
+    def test_empty_actions_have_nothing_to_say(self) -> None:
+        assert digest_has_content(_dup_actions()) is False
+
+    def test_dup_proposal_counts(self) -> None:
+        assert digest_has_content(_dup_actions(_proposal(1, 2))) is True
+
+    def test_priority_question_counts(self) -> None:
+        actions = issue_refinement.RefinementActions(
+            auto_closes=(),
+            relabels=(),
+            dup_proposals=(),
+            priority_questions=(
+                PriorityQuestion(number=7, current="P1", proposed="none", reason="r"),
+            ),
+        )
+
+        assert digest_has_content(actions) is True
+
+    def test_apply_failure_counts(self) -> None:
+        assert digest_has_content(_dup_actions(), failures=["close #2: boom"]) is True
+
+    def test_completed_work_alone_does_not_count(self) -> None:
+        actions = issue_refinement.RefinementActions(
+            auto_closes=(
+                AutoClose(canonical=1, duplicate=2, evidence="e", confidence="high"),
+            ),
+            relabels=(
+                RelabelAction(number=3, previous="none", priority="P1", reason="r"),
+            ),
+            dup_proposals=(),
+            priority_questions=(),
+            skipped_rows=1,
+        )
+
+        assert digest_has_content(actions) is False

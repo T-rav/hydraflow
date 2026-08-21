@@ -45,10 +45,13 @@ Tick pipeline (spec §3, steps 1-6):
 4b. Accumulate still-open operator questions (dup proposals + priority
     questions) in ``refinement_open_proposals``, pruned to the live backlog, so the
     digest renders EVERY open question, not just this tick's.
-5. Rewrite the rolling digest issue, recovering it if the stored issue was
-   closed (reopen if supported, else mint a fresh one) or if state lost the
-   number but the create-once dedup key survives (adopt the open digest found
-   by label).
+5. Rewrite the rolling digest issue if it is live: the stored issue is OPEN,
+   or state lost the number but the create-once dedup key survives (adopt the
+   open digest found by label). A missing digest — never minted, or CLOSED
+   because a human retired it — is reopened (if the port can) or freshly
+   minted ONLY when the tick has something a human needs to see
+   (``digest_has_content``: an open operator question or an apply failure).
+   A tick that would read "none this tick" leaves it retired (#11519).
 6. Persist the full-sweep marker (index + judged-pair cache already persisted
    pre-priority-pass; open proposals in 4b), and publish one
    ``ISSUE_REFINEMENT_UPDATE`` event for the dashboard.
@@ -81,6 +84,7 @@ from issue_refinement import (
     body_hash,
     build_dup_judgment_prompt,
     build_priority_prompt,
+    digest_has_content,
     find_dup_candidates,
     is_guarded,
     merge_open_proposals,
@@ -534,19 +538,26 @@ class IssueRefinementLoop(BaseBackgroundLoop):
     async def _write_digest(
         self, actions: RefinementActions, stats: dict[str, object], failures: list[str]
     ) -> None:
-        """Create the digest issue on first run, else rewrite its body.
+        """Rewrite the live digest; mint or reopen one only with something to say.
 
-        Recovers from two ways the rolling digest can go missing (review
-        finding: digest recovery):
+        A LIVE digest gets its body rewritten every refining tick:
 
-        * The stored issue was CLOSED (a human tidied the backlog, or a stale
-          GC pass closed it). Reopen it if the port supports reopening, else
-          mint a fresh digest and re-point state at it — never silently write
-          the body of a closed issue nobody is watching.
-        * State lost the number (reset to 0) but the create-once dedup key
+        * the stored issue is OPEN, or
+        * state lost the number (reset to 0) but the create-once dedup key
           survives, so a real digest is out there. Read-then-adopt: find the
-          open ``hydraflow-refinement-digest`` issue by label and reclaim it before
-          creating a duplicate.
+          open ``hydraflow-refinement-digest`` issue by label and reclaim it
+          before creating a duplicate.
+
+        A MISSING digest — never minted, or the stored issue is CLOSED because
+        a human retired it (or a stale GC pass closed it) — is resurrected only
+        when :func:`digest_has_content` says the tick has something a human
+        needs to see. The digest is a rolling report, not a work item (operator
+        ruling on #10224, 2026-08-17): a human close retires it, and a tick
+        whose body would read "none this tick" must not reopen or re-mint it
+        (#11519). With something to say, reopen the stored issue (keeps the
+        rolling identity) and fall back to minting a fresh one, re-pointing
+        state at it — never silently write the body of a closed issue nobody
+        is watching.
         """
         body = render_digest(actions, stats)
         if failures:
@@ -558,10 +569,6 @@ class IssueRefinementLoop(BaseBackgroundLoop):
             if await self._pr.get_issue_state(digest_number) == "OPEN":
                 await self._pr.update_issue_body(digest_number, body)
                 return
-            if await self._reopen_digest(digest_number):
-                await self._pr.update_issue_body(digest_number, body)
-                return
-            # Closed and un-reopenable — fall through to mint a fresh digest.
         elif _DIGEST_DEDUP_KEY in self._dedup.get():
             adopted = await self._find_open_digest_by_label()
             if adopted > 0:
@@ -569,6 +576,20 @@ class IssueRefinementLoop(BaseBackgroundLoop):
                 await self._pr.update_issue_body(adopted, body)
                 return
 
+        # No live digest. A retired (or never-minted) digest is resurrected
+        # only for something a human needs to see — never to say "none this
+        # tick" (#11519).
+        if not digest_has_content(actions, failures):
+            logger.debug(
+                "refinement digest: nothing to report this tick; not minting or "
+                "reopening one (stored digest #%d)",
+                digest_number,
+            )
+            return
+        if digest_number > 0 and await self._reopen_digest(digest_number):
+            await self._pr.update_issue_body(digest_number, body)
+            return
+        # Never minted, or closed and un-reopenable — mint a fresh digest.
         created = await self._pr.create_issue(_DIGEST_TITLE, body, [_DIGEST_LABEL])
         if created > 0:
             self._state.set_refinement_digest_issue(created)
@@ -577,12 +598,15 @@ class IssueRefinementLoop(BaseBackgroundLoop):
             self._dedup.set_all(dedup)
 
     async def _reopen_digest(self, number: int) -> bool:
-        """Reopen the digest issue if the port exposes a ``reopen_issue`` seam.
+        """Reopen the stored digest issue; False if the port cannot.
 
-        Capability-probed rather than assumed: the current ``PRPort`` has no
-        reopen method, so this returns False and the caller mints a fresh
-        digest. Kept as a seam so a port that later grows reopen support
-        reuses the rolling issue instead of churning a new one each recovery.
+        ``PRPort.reopen_issue`` exists (added for the close-verification
+        controller, #10358; FakeGitHub mirrors it), so on the production port
+        this reopens the rolling issue and the caller reuses it instead of
+        churning a fresh one. The ``getattr`` probe stays so a narrower port
+        double without the seam degrades to "mint a fresh digest" rather than
+        raising. Callers gate on :func:`digest_has_content` first — a retired
+        digest is never reopened just to say "none this tick" (#11519).
         """
         reopen = getattr(self._pr, "reopen_issue", None)
         if reopen is None:
