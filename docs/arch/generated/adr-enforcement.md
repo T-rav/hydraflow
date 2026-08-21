@@ -6,14 +6,14 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 81
-- **REAL** (real asserting enforcement): 78 (96.3%)
+- **Accepted ADRs:** 82
+- **REAL** (real asserting enforcement): 79 (96.3%)
 - **WEAK** (prose-only or tautological): 3
 - **MISSING** (no `**Enforced by:**`): 0
 - **Justified exemptions** (process-only, allow-listed): 3
-- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 81 = 0.0%**
+- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 82 = 0.0%**
 
-By declared `**Enforcement:**` kind: `enforced` 78 · `manual` 3 · `decision-of-record` 0.
+By declared `**Enforcement:**` kind: `enforced` 79 · `manual` 3 · `decision-of-record` 0.
 
 ## Classification
 
@@ -100,6 +100,7 @@ By declared `**Enforcement:**` kind: `enforced` 78 · `manual` 3 · `decision-of
 | ADR-0118 | REAL | — | enforced | `pytest:tests/architecture/test_no_otel_imports.py` |
 | ADR-0119 | REAL | — | enforced | `pytest:tests/test_credit_failover.py` |
 | ADR-0134 | REAL | — | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
+| ADR-0135 | REAL | — | enforced | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
 
 ## Unenforced-decision debt
 

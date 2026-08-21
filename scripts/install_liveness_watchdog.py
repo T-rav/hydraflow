@@ -11,6 +11,15 @@ This is deliberately a manual, operator-run step — NOT something the factory
 installs on itself. A factory loop cannot install the thing that watches for
 the factory being down; see docs/wiki/dependencies.md.
 
+Pair it with ``scripts/install_factory_service.py`` (ADR-0135), which runs the
+factory itself as the ``com.hydraflow.factory`` launchd agent and gives the
+``restart.knob`` seeded here its ``RESTART_LABEL`` target — without that label
+``attempt_restart()`` has nothing to kick. Recipe (wiki "Factory-as-service
+install recipe")::
+
+    python scripts/install_factory_service.py
+    python scripts/install_liveness_watchdog.py
+
 Usage::
 
     scripts/install_liveness_watchdog.py                 # install/update

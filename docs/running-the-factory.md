@@ -28,6 +28,27 @@ This runs `scripts/run-factory-isolated.sh`, which:
 Your dev checkout is never touched. The factory's PRs still land on `origin` as
 usual; pull them into your clean checkout with `git pull`.
 
+## Run it as a launchd service (the durable default, ADR-0135)
+
+`make factory` runs in your terminal and dies with it. The durable way is the
+`com.hydraflow.factory` launchd agent, which runs the same launcher **in place
+from the workspace** in service mode (`HYDRAFLOW_FACTORY_SERVICE=1`) with
+`KeepAlive`:
+
+```bash
+make factory-service-install          # python scripts/install_factory_service.py
+python scripts/install_liveness_watchdog.py
+```
+
+It must run from `~/.hydraflow/…`, not from your checkout: macOS TCC denies
+launchd agents `~/Documents`, which is how the previous autostart attempt died
+with `make: getcwd: Operation not permitted`. Service mode refuses any
+workspace outside `$HOME/.hydraflow/` and never clones (the installer does).
+The second command arms the liveness kernel; the first gives its restart knob
+the `RESTART_LABEL=com.hydraflow.factory` target it kicks. Full recipe and the
+Stop-latch semantics: wiki "Factory-as-service install recipe"
+(`docs/wiki/dependencies.md`). `make factory-service-uninstall` removes it.
+
 ### Overrides
 
 | Env var | Default | Purpose |
@@ -84,6 +105,12 @@ server-boot autostart above — both end up calling `POST /api/control/start`
 on a healthy, verified-correct boot. That's fine: `host_runtime.start()` is a
 no-op when the line is already running, so whichever one gets there first
 wins and the other is a harmless idempotent check.
+
+Both also honour the operator's Stop (ADR-0135): `POST /api/control/stop`
+persists the `operator_stopped` latch, `GET /api/control/status` exposes it,
+and a verified-correct *idle* boot under the latch is `NO_ACTION` for the
+kernel — exactly as it is "skipped" for autostart — until `POST
+/api/control/start` clears it. Stop in the UI means stopped.
 
 ## Why not just `git restore` after each run?
 
