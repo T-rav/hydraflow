@@ -13,6 +13,7 @@ from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import is_likely_bug, reraise_on_credit_or_bug  # noqa: F401
 from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
+from issue_state import issue_state_is_resolved  # noqa: F401
 from models import EscalationContext, PipelineStage, PRInfo, ReviewUpdatePayload, Task
 from ports import IssueStorePort, PRPort
 from state import StateTracker
@@ -215,22 +216,11 @@ def release_batch_in_flight(
         )
 
 
-# GitHub ``stateReason`` values that mean an issue is done — the vocabulary
-# of ``PRPort.get_issue_state`` (OPEN / COMPLETED / NOT_PLANNED / UNKNOWN).
-_RESOLVED_ISSUE_STATES = frozenset({"COMPLETED", "NOT_PLANNED"})
-
-
-def issue_state_is_resolved(state: object) -> bool:
-    """True only for GitHub issue states that mean the issue is resolved (#11457).
-
-    ``COMPLETED`` (fixed) and ``NOT_PLANNED`` (duplicate/wontfix close,
-    #10025) are resolved; ``OPEN`` / ``UNKNOWN`` / anything unreadable is
-    not. The ``str()`` coercion keeps the predicate fail-open: a caller
-    whose Port returns an arbitrary object (an unconfigured ``AsyncMock``
-    yields a ``MagicMock``) reads as NOT resolved, so a state re-check built
-    on this predicate never blocks a build on a garbage read.
-    """
-    return str(state or "").upper() in _RESOLVED_ISSUE_STATES
+# ``issue_state_is_resolved`` — the resolved-state predicate — is re-exported
+# from ``issue_state`` (see the import block above). The vocabulary lives in
+# that zero-dependency leaf so stdlib-only scanners can use it without
+# importing the phase stack; ``phase_utils`` re-exports it because phase
+# modules (implement_phase, #11457) pin this module as the import surface.
 
 
 async def escalate_to_hitl(

@@ -57,9 +57,15 @@ def _manager(*, issue_state: str | Exception, epic_number: int = 10914):
     return mgr, closed
 
 
+# Port vocabulary for a closed epic is COMPLETED / NOT_PLANNED — the real
+# PRManager.get_issue_state normalizes raw REST CLOSED into its stateReason
+# before the value escapes the port, so "CLOSED" is unreachable (#11458).
 @pytest.mark.asyncio
-async def test_github_closed_epic_heals_instead_of_alerting() -> None:
-    mgr, closed = _manager(issue_state="CLOSED")
+@pytest.mark.parametrize("issue_state", ["COMPLETED", "NOT_PLANNED"])
+async def test_github_closed_epic_heals_instead_of_alerting(
+    issue_state: str,
+) -> None:
+    mgr, closed = _manager(issue_state=issue_state)
     stale = await mgr.check_stale_epics()
     assert stale == []
     assert closed == [10914]
