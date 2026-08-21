@@ -757,8 +757,20 @@ export function reducer(state, action) {
       // WS pushes never carry this flag — they only fire after a mutation,
       // which can't happen before that repo's first refresh completes — so
       // they're implicitly always ready.
+      // The reason to skip is EVICTION: a pre-refresh snapshot is empty or
+      // partial, and reconciling it would remove cards for a repo that simply
+      // hasn't reported in yet. An empty rail has nothing to evict, so
+      // skipping there protects nothing — it strands the rail permanently,
+      // because no snapshot can populate it while any repo is mid-refresh.
+      // Fall through in that case and let the first snapshot land, keeping
+      // the resyncing badge on so it is never presented as authoritative.
       if (action.ready === false) {
-        return { ...state, pipelineSnapshotReady: false }
+        const hasRailCards = Object.values(state.pipelineIssues || {}).some(
+          (issues) => (issues?.length || 0) > 0
+        )
+        if (hasRailCards) {
+          return { ...state, pipelineSnapshotReady: false }
+        }
       }
 
       // WS frame carries {seq, stages}; REST dispatch passes stages already
@@ -785,7 +797,9 @@ export function reducer(state, action) {
       return {
         ...state,
         pipelineIssues: nextStages,
-        pipelineSnapshotReady: true,
+        // A not-ready snapshot that reached here populated an empty rail; it
+        // is still not authoritative, so the badge stays on until a ready poll.
+        pipelineSnapshotReady: action.ready !== false,
         pipelinePollerLastRun: new Date().toISOString(),
         // #11350: an authoritative snapshot just reconciled the rail —
         // restart the staleness clock. Delta frames (issue_moved etc.)
