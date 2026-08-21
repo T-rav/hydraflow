@@ -85,6 +85,12 @@ class TestS1LowClarityIssueGetsDiscoverHelper:
             )
         )
         harness.plan_phase._discover_runner = discover_runner
+        # Light lane is ON by default since #11590 and would route this simple
+        # issue straight to the auto-agent, bypassing the planner gate under
+        # test. Pin it off: this scenario is about the discover helper.
+        harness.plan_phase._config = harness.plan_phase._config.model_copy(
+            update={"auto_agent_light_intake_enabled": False}
+        )
 
         world.add_issue(
             401,

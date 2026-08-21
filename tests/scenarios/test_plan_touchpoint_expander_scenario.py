@@ -350,6 +350,12 @@ class TestS4LightTierSkipsReview:
         )
         harness = world.harness
         phase = harness.plan_phase
+        # Light lane is ON by default since #11590; this scenario exercises the
+        # planner-side light *tier* fallback (lane off / preflight disabled), so
+        # pin the lane off explicitly. S6 covers the lane-on routing.
+        phase._config = phase._config.model_copy(
+            update={"auto_agent_light_intake_enabled": False}
+        )
 
         reviewer = _ScriptedReviewer([])  # any call would raise: no scripts
         phase._plan_reviewer = reviewer
@@ -395,6 +401,12 @@ class TestS5LightTierForcesLitePlan:
         )
         harness = world.harness
         phase = harness.plan_phase
+        # Light lane is ON by default since #11590; this scenario exercises the
+        # planner-side light *tier* fallback (lane off / preflight disabled), so
+        # pin the lane off explicitly. S6 covers the lane-on routing.
+        phase._config = phase._config.model_copy(
+            update={"auto_agent_light_intake_enabled": False}
+        )
 
         reviewer = _ScriptedReviewer([])  # any call would raise: no scripts
         phase._plan_reviewer = reviewer

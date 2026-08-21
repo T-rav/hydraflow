@@ -140,6 +140,10 @@ async def test_kill_switch_restores_single_label_poll(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HYDRAFLOW_AUTO_AGENT_HITL_INTAKE_ENABLED", "false")
+    # The light lane (#11298) is ON by default since #11590 and adds its own
+    # claim-label poll; switch it off too so the assertion isolates the HITL
+    # kill switch restoring the single-label poll.
+    monkeypatch.setenv("HYDRAFLOW_AUTO_AGENT_LIGHT_INTAKE_ENABLED", "false")
     loop, _state, pr = _make_loop(
         tmp_path, {"hydraflow-hitl": [_issue(5, ["hydraflow-hitl"])]}
     )
