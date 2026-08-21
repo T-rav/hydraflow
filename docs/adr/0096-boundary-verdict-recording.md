@@ -34,7 +34,7 @@ The helper is a side-write, inserted immediately before an existing return site.
 
 ### Verdict mapping per boundary
 
-- **Triage:** outcomes `{plan, sentry_noise_closed, already_addressed, epic_decomposed, bug_not_present}` map to ADVANCE; outcomes `{discover, parked}` map to LOOP_BACK; any other outcome produces no record.
+- **Triage:** outcomes `{plan, sentry_noise_closed, already_addressed, bug_not_present}` map to ADVANCE; outcomes `{discover, parked}` map to LOOP_BACK; any other outcome produces no record. (The `epic_decomposed` ADVANCE outcome was retired with the #11298 intake auto-decomposition path — flag-rot cleanup, 2026-08-21.)
 - **Shape:** finalized / selection-made / council-consensus maps to ADVANCE; waiting maps to LOOP_BACK.
 - **Plan:** outcome `success` maps to ADVANCE; outcome `failed` maps to LOOP_BACK; outcome `escalated` maps to ESCALATE; an already-satisfied-closed early exit maps to ADVANCE.
 - **Signatures:** Shape and Plan use `signatures_from_concerns(adv.pending_concerns)`, which extracts sorted, unique CRITICAL/HIGH concern text from the adversarial loop state. Triage uses `[]` (no adversarial concerns at that boundary).
