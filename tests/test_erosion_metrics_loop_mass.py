@@ -211,6 +211,36 @@ class TestClassIssueFiling:
         prs.create_issue.assert_awaited_once()
         assert find_class_issue_entry(dedup._store, "mass")[0] == 9
 
+    async def test_create_issue_returning_zero_stores_nothing(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        base = _current_head_sha(repo)
+        _seed(repo, dup_tests=False)
+        prs = _prs()
+        prs.create_issue = AsyncMock(
+            return_value=0
+        )  # PRManager's no-raise failure sentinel
+        dedup = _make_dedup()
+        loop = _make_loop(
+            tmp_path, repo, state=_make_state(base), pr_manager=prs, dedup=dedup
+        )
+
+        result = await loop._do_work()
+
+        assert result["filed"] == 0
+        assert find_class_issue_entry(dedup._store, "mass") is None
+        # Next tick (new commit) tries again instead of believing "#0" exists.
+        (repo / "src" / "more.py").write_text("x = 1\n")
+        _commit_all(repo, "more")
+        prs.create_issue = AsyncMock(return_value=11)
+        again = await loop._do_work()
+        assert again["filed"] == 1
+        assert find_class_issue_entry(dedup._store, "mass") == (
+            11,
+            again["mass"]["digest"],
+        )
+
     async def test_unknown_issue_state_is_a_no_op_this_tick(
         self, tmp_path: Path
     ) -> None:

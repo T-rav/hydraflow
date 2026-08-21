@@ -518,6 +518,16 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
                     "ErosionMetrics: failed to file %s class issue", kind, exc_info=True
                 )
                 continue
+            if not number:
+                # PRManager.create_issue returns 0 on failure without raising.
+                # Recording "#0" would make every later tick read an unresolvable
+                # issue as "open, unreadable" and never file this kind again.
+                logger.warning(
+                    "ErosionMetrics: create_issue returned no number for %s class "
+                    "issue; retrying next tick",
+                    kind,
+                )
+                continue
             stale = {e for e in seen if e.startswith(f"{kind}:class:#")}
             self._dedup.set_all(
                 (seen - stale) | {class_issue_fingerprint(kind, number, digest)}

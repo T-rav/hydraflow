@@ -115,7 +115,14 @@ def _ignored_files(lanes: list[tuple[str, list[str]]], repo_root: Path) -> set[s
 
 
 def _lane_runs(tokens: list[str], file: str) -> bool:
-    """True when *tokens* names *file* (or an ancestor dir) positionally and does not ignore it."""
+    """True when *tokens* names *file* (or an ancestor dir) positionally and does not ignore it.
+
+    A lane that deselects by marker or keyword (``-m`` / ``-k``) never counts:
+    pytest would collect the file and then select zero tests from it unless
+    the file happens to carry the marker, which this guard cannot see.
+    """
+    if any(t in {"-m", "-k"} or t.startswith(("-m=", "-k=")) for t in tokens):
+        return False
     positional = [t for t in tokens if not t.startswith("-") and t.startswith("tests")]
     ignores = [
         t[len(_IGNORE_FLAG) :].rstrip("/") for t in tokens if t.startswith(_IGNORE_FLAG)
@@ -127,6 +134,15 @@ def _lane_runs(tokens: list[str], file: str) -> bool:
         if file == base or file.startswith(base + "/"):
             return True
     return False
+
+
+def test_marker_filtered_lane_is_not_credited_as_coverage() -> None:
+    assert _lane_runs(["tests/", "-q"], "tests/test_x.py")
+    assert not _lane_runs(
+        ["tests/scenarios/", "-m", "scenario_loops"], "tests/scenarios/test_x.py"
+    )
+    assert not _lane_runs(["tests/", "-k", "smoke"], "tests/test_x.py")
+    assert not _lane_runs(["tests/", "--ignore=tests/test_x.py"], "tests/test_x.py")
 
 
 def test_every_ignored_test_file_runs_in_some_lane(real_repo_root: Path) -> None:

@@ -4,8 +4,9 @@
 pass, but two shapes of redundancy are mechanical and safe to name:
 
 * **Parametrize candidates** — ≥ ``min_group`` test functions in ONE file whose
-  bodies are identical once names, attribute spellings, constants and the
-  docstring are normalized away. They are one ``pytest.mark.parametrize``
+  bodies are identical once literal values and the docstring are normalized
+  away. Identifiers are kept: two tests that call *different* functions are
+  different tests, not a group (only the values vary in a parametrize case). They are one ``pytest.mark.parametrize``
   waiting to happen; each extra copy is a line of suite mass that buys no
   new assertion.
 * **Cross-file duplicates** — the same test *name* with an identical normalized
@@ -38,7 +39,6 @@ _SKIP_DIRS = frozenset({"__pycache__", "node_modules", ".venv"})
 
 _SKIP_FIELDS = frozenset(
     {
-        "name",
         "lineno",
         "col_offset",
         "end_lineno",
@@ -50,13 +50,9 @@ _SKIP_FIELDS = frozenset(
 
 
 def _dump(node: object) -> str:
-    """Structural dump with identities erased: names, attribute spellings, constant values, arg names."""
-    if isinstance(node, ast.Name | ast.arg):
-        return "N"
+    """Structural dump with literal VALUES erased (kept: their type) and identifiers kept."""
     if isinstance(node, ast.Constant):
         return f"C:{type(node.value).__name__}"
-    if isinstance(node, ast.Attribute):
-        return f"At({_dump(node.value)})"
     if isinstance(node, ast.AST):
         parts = [
             f"{field}={_dump(value)}"

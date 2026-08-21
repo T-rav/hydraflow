@@ -16,10 +16,21 @@ def _tests(*bodies: tuple[str, str]) -> str:
 # --- normalized_signature ----------------------------------------------------
 
 
-def test_signature_ignores_names_constants_and_docstrings() -> None:
+def test_signature_ignores_literal_values_function_name_and_docstring() -> None:
     a = "def test_a():\n    '''doc'''\n    assert parse('x') == 1\n"
     b = "def test_b():\n    assert parse('yy') == 2\n"
     assert normalized_signature(a) == normalized_signature(b)
+
+
+def test_signature_keeps_callee_and_attribute_names() -> None:
+    base = "def test_a():\n    result = compute_sum(1, 2)\n    assert result == 3\n"
+    other = (
+        "def test_b():\n    result = compute_product(1, 2)\n    assert result == 3\n"
+    )
+    assert normalized_signature(base) != normalized_signature(other)
+    attr_a = "def test_a():\n    assert obj.enabled is True\n"
+    attr_b = "def test_b():\n    assert obj.broken is True\n"
+    assert normalized_signature(attr_a) != normalized_signature(attr_b)
 
 
 def test_signature_distinguishes_structure() -> None:
