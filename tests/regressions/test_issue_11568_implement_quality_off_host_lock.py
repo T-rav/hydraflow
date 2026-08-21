@@ -128,7 +128,9 @@ async def test_operator_runners_still_run_the_locked_full_suite(tmp_path: Path) 
     for cls in (HITLRunner, DiagnosticRunner):
         rec = _RecordingRunner()
         runner = cls(_config(tmp_path), EventBus(), runner=rec)
-        result = await BaseRunner._verify_quality(runner, tmp_path)
+        # Through the instance, not ``BaseRunner._verify_quality(runner, …)``:
+        # a future override on either runner must trip the argv pin below.
+        result = await runner._verify_quality(tmp_path)
         assert result.passed is True, cls.__name__
         assert rec.commands == [["make", "quality"]], cls.__name__
         assert type(runner)._verify_quality is BaseRunner._verify_quality, cls.__name__
