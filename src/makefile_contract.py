@@ -83,6 +83,21 @@ def _parse_target_names(content: str) -> set[str]:
     return targets
 
 
+def makefile_targets(worktree_path: Path) -> set[str]:
+    """Return the target names declared in ``<worktree>/Makefile``.
+
+    Empty when the Makefile is absent or unreadable. A lightweight probe for
+    callers that branch on an OPTIONAL target — the implement-path quality
+    gate (#11568) runs ``make test-impacted`` only when the repo declares it
+    and falls back to ``config.test_command`` otherwise.
+    """
+    try:
+        content = (worktree_path / "Makefile").read_text()
+    except OSError:
+        return set()
+    return _parse_target_names(content)
+
+
 def validate(worktree_path: Path) -> ContractResult:
     """Check whether the Makefile in *worktree_path* satisfies the contract.
 

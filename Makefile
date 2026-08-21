@@ -384,10 +384,18 @@ test-cov: deps
 # Override the compared ref with e.g. `make test-impacted BASE_REF=origin/main`.
 # BASE_REF corresponds to config.base_branch() (origin/staging by default).
 BASE_REF ?= origin/staging
+# #11568: the implementer's post-build gate (AgentRunner._verify_quality) runs
+# this target with IMPACTED_ARGS=--bounded instead of the host-locked `make
+# quality`. In bounded mode the selector never emits __ALL__ — a high-fanout
+# diff keeps its name-mapped tests + the floor and defers the full suite to
+# CI — so N concurrent implementers cannot each expand into an UNLOCKED full
+# suite (the #11219 thrash the lock exists to prevent). Humans get the
+# conservative default (no flag → __ALL__ runs everything, unlocked, as before).
+IMPACTED_ARGS ?=
 test-impacted: deps
 	@cd $(HYDRAFLOW_DIR) && set -e; \
 	base="$(BASE_REF)"; \
-	sel="$$(PYTHONPATH=src $(UV) python scripts/impacted_tests.py --base "$$base")"; \
+	sel="$$(PYTHONPATH=src $(UV) python scripts/impacted_tests.py --base "$$base" $(IMPACTED_ARGS))"; \
 	if [ "$$sel" = "__ALL__" ]; then \
 		echo "$(YELLOW)test-impacted: FULL SUITE required (high-fanout/infra change vs $$base) — running everything$(RESET)"; \
 		PYTHONPATH=src $(UV) pytest tests/ -n auto --dist loadscope; \

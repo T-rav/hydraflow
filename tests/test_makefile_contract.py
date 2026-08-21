@@ -10,6 +10,7 @@ from makefile_contract import (
     OPTIONAL_TARGETS,
     REQUIRED_TARGETS,
     ContractResult,
+    makefile_targets,
     validate,
     validate_and_repair,
 )
@@ -197,3 +198,16 @@ class TestContractResult:
         assert result.optional_missing == []
         assert result.warnings == []
         assert result.repaired is False
+
+
+class TestMakefileTargets:
+    """``makefile_targets`` — the probe the implement-path gate uses (#11568)."""
+
+    def test_reads_target_names_from_makefile(self, tmp_repo: Path) -> None:
+        (tmp_repo / "Makefile").write_text(
+            "VAR := x\ntest-impacted: deps\n\t@true\nquality-lite:\n\t@true\n"
+        )
+        assert makefile_targets(tmp_repo) == {"test-impacted", "quality-lite"}
+
+    def test_missing_makefile_is_empty(self, tmp_repo: Path) -> None:
+        assert makefile_targets(tmp_repo) == set()

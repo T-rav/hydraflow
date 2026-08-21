@@ -924,6 +924,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
+        "implement_full_quality_gate",
+        "HYDRAFLOW_IMPLEMENT_FULL_QUALITY_GATE",
+        False,
+    ),
+    (
         "human_steering_enabled",
         "HYDRAFLOW_HUMAN_STEERING_ENABLED",
         True,
@@ -1652,6 +1657,21 @@ class HydraFlowConfig(BaseModel):
             "When ci_enabled=False, use `make quality` (full suite) in review fix "
             "prompts instead of `make lint && {test_cmd}`. Set False for repos "
             "without a wired Makefile quality target."
+        ),
+    )
+    implement_full_quality_gate: bool = Field(
+        default=False,
+        description=(
+            "Implementer post-build gate (#11568). Off (default): after each "
+            "build and each quality-fix round the implementer runs "
+            "`make quality-lite` (lint + typecheck + security) then "
+            "`make test-impacted IMPACTED_ARGS=--bounded` (the tests its diff "
+            "touches, never the whole suite; repos without that target run "
+            "test_command) — both host-lock-free — and CI is the one "
+            "full-suite gate per PR. On: restore the pre-#11568 full "
+            "`make quality`, which queues every implementer on the host-wide "
+            "quality lock (#11400) so max_workers no longer reflects real "
+            "parallelism. HITL and diagnostic runners always run the full gate."
         ),
     )
     max_merge_conflict_fix_attempts: int = Field(
@@ -3243,7 +3263,11 @@ class HydraFlowConfig(BaseModel):
         default=3600,
         ge=60,
         le=7200,
-        description="Timeout in seconds for 'make quality' verification",
+        description=(
+            "Timeout in seconds per post-build verification command: the full "
+            "'make quality' (HITL / diagnostic runners) or each implement-path "
+            "step — 'make quality-lite', then the impacted-test run (#11568)"
+        ),
     )
     git_command_timeout: int = Field(
         default=30,

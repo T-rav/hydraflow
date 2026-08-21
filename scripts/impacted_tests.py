@@ -58,6 +58,7 @@ CLI
     impacted_tests.py <path> [<path> ...]   # changed files as args
     impacted_tests.py --base origin/staging # compute via git diff <base>...HEAD
     git diff --name-only ... | impacted_tests.py --stdin
+    impacted_tests.py --bounded ...         # never __ALL__ (implement gate, #11568)
 
 Output: the selected test file paths, one per line, sorted+deduped, on stdout.
 When the full suite is required, stdout is the single sentinel line ``__ALL__``
@@ -323,11 +324,23 @@ def _always_on_floor(fs: FileIndex) -> frozenset[str]:
     return frozenset(floor)
 
 
-def select_tests(changed_files: Iterable[str], fs: FileIndex) -> Selection:
+def select_tests(
+    changed_files: Iterable[str], fs: FileIndex, *, bounded: bool = False
+) -> Selection:
     """Compute the impacted-test selection for ``changed_files`` (pure).
 
     Returns a full-suite :class:`Selection` if any path forces it, otherwise the
     sorted+deduped union of mapped tests plus the always-on floor (rules c+d).
+
+    ``bounded`` (#11568) never returns the full-suite sentinel. The
+    implementer's post-build gate runs OFF the host quality lock
+    (``scripts/quality_host_lock.py``), so it must never expand into an
+    unlocked full suite — N concurrent implementers doing that is exactly
+    the host thrash the lock exists to prevent (#11219). A path that would
+    force the full suite instead keeps its name-mapped tests (a high-fanout
+    ``src/`` module still runs its ``test_<mod>*`` files) plus the always-on
+    floor, and its reason is recorded as deferred to CI — which runs the full
+    suite once per PR and is the real gate.
     """
     reasons: list[str] = []
     collected: set[str] = set()
@@ -335,6 +348,12 @@ def select_tests(changed_files: Iterable[str], fs: FileIndex) -> Selection:
     for path in changed_files:
         tests, reason = classify_path(path, fs)
         if reason is not None:
+            if bounded:
+                reasons.append(f"{reason} (bounded: deferred to CI)")
+                p = path.strip()
+                if p.startswith("src/") and p.endswith(".py"):
+                    collected.update(tests_for_module_stem(_stem(p), fs))
+                continue
             full = True
             reasons.append(reason)
         collected.update(tests)
@@ -410,6 +429,13 @@ def main(argv: list[str]) -> int:
         "when neither files nor --base are given).",
     )
     parser.add_argument(
+        "--bounded",
+        action="store_true",
+        help=f"Never print {FULL_SUITE_SENTINEL!r}: a full-suite trigger keeps "
+        "its name-mapped tests + the floor and defers the full run to CI "
+        "(the implement-path gate's mode, #11568).",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -419,7 +445,7 @@ def main(argv: list[str]) -> int:
 
     changed = _read_changed(args)
     fs = RealFileIndex(_repo_root())
-    result = select_tests(changed, fs)
+    result = select_tests(changed, fs, bounded=args.bounded)
 
     if args.verbose:
         for reason in result.reasons:
@@ -432,8 +458,9 @@ def main(argv: list[str]) -> int:
         return 0
 
     if args.verbose:
+        mode = "impacted, bounded" if args.bounded else "impacted"
         print(
-            f"mode: impacted ({len(result.test_files)} test files)",
+            f"mode: {mode} ({len(result.test_files)} test files)",
             file=sys.stderr,
         )
     for path in result.test_files:
