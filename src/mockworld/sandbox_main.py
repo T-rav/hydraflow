@@ -492,6 +492,45 @@ def seed_stale_workspaces(
         state.set_branch(number, branch)
 
 
+def wire_seeded_workspace_landed_proof(
+    loop: Any, config: HydraFlowConfig, seed: MockWorldSeed
+) -> None:
+    """Prove only exact stale-workspace identities supplied by a sandbox seed.
+
+    The hardened production GC requires a clean-HEAD landed proof before it
+    destroys anything. Docker sandbox seeds model already-landed work without
+    materializing a real Git repository, so bind a sandbox-only proof seam for
+    the exact ``(path, branch, issue)`` tuples in ``stale_workspaces``. Any
+    unseeded or ambiguous identity still fails closed.
+    """
+    seeded_identities = {
+        (
+            config.workspace_path_for_issue(int(entry["number"]))
+            .expanduser()
+            .resolve(),
+            str(entry.get("branch") or f"agent/issue-{int(entry['number'])}"),
+            int(entry["number"]),
+        )
+        for entry in seed.stale_workspaces
+    }
+    if not seeded_identities:
+        return
+
+    async def _seeded_worktree_work_has_landed(
+        path: Path,
+        *,
+        expected_branch: str | None,
+        expected_issue: int | None,
+    ) -> bool:
+        try:
+            candidate = path.expanduser().resolve()
+        except (OSError, RuntimeError):
+            return False
+        return (candidate, expected_branch, expected_issue) in seeded_identities
+
+    vars(loop)["_worktree_work_has_landed"] = _seeded_worktree_work_has_landed
+
+
 def materialize_expired_runs(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
     """Create back-dated run-artifact dirs for RunsGCLoop to purge (#9543).
 
@@ -1121,6 +1160,7 @@ async def main() -> None:
         runners=fake_llm,
         subprocess_runner=fake_subprocess_runner,
     )
+    wire_seeded_workspace_landed_proof(svc.workspace_gc_loop, config, seed)
 
     # Registered-worker SET for the dead-man-switch stall/escalate sweep
     # (#10086). ``HealthMonitorLoop._check_worker_staleness`` only sweeps
