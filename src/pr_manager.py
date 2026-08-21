@@ -21,6 +21,7 @@ import ci_sentinels
 from comment_formatter import CommentFormatter, SelfReviewError
 from config import Credentials, HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
+from false_close import CLOSE_KEYWORD_RE, closing_issue_refs
 from label_transitions import pipeline_stage_labels
 from merge_state_watcher import ConflictingPR
 from models import (
@@ -828,14 +829,16 @@ class PRManager(PRManagerPromotionMixin):
             # Resolve the issue number from the PR title once, here, so it can
             # both (a) ride the MERGE_UPDATE event — the dashboard needs it to
             # move the card review -> merged in real time — and (b) feed the
-            # per-issue cost check below. Prefer a Fixes/Closes/Resolves-anchored
-            # match so an embedded reference like "Fixes #12: address #34" picks
-            # the issue the PR actually fixes (not the first bare "#N"); fall
-            # back to the first "#N" for keyword-less titles (e.g.
-            # "feat(x): do thing (#123)") so cost is still attributed.
-            issue_match = re.search(
-                r"(?:Fixes|Closes|Resolves)\s+#(\d+)", pr_title or "", re.IGNORECASE
-            ) or re.search(r"#(\d+)", pr_title or "")
+            # per-issue cost check below. Prefer a closing-verb-anchored match
+            # — the canonical ``false_close.CLOSE_KEYWORD_RE``, which covers
+            # every form GitHub auto-closes on (#11481) — so a title like
+            # "Part of #34 - Fixed #12" bills the issue the PR actually fixes
+            # rather than the epic it merely references; fall back to the first
+            # "#N" for keyword-less titles (e.g. "feat(x): do thing (#123)")
+            # so cost is still attributed.
+            issue_match = CLOSE_KEYWORD_RE.search(pr_title or "") or re.search(
+                r"#(\d+)", pr_title or ""
+            )
             issue_no = int(issue_match.group(1)) if issue_match else None
 
             payload = MergeUpdatePayload(pr=pr_number, status="merged")
@@ -1945,7 +1948,6 @@ class PRManager(PRManagerPromotionMixin):
         out: list[LabelDrift] = []
         pre_pr_labels = {"hydraflow-ready", "hydraflow-plan", "hydraflow-find"}
         post_pr_labels = {"hydraflow-fixed", "hydraflow-hitl"}
-        fixes_re = re.compile(r"(?:fixes|closes|resolves)\s+#(\d+)", re.IGNORECASE)
 
         for pr in raw:
             if not isinstance(pr, dict):
@@ -1975,7 +1977,7 @@ class PRManager(PRManagerPromotionMixin):
             )
             body = pr.get("body") or ""
             matched_issue_ns = list(
-                dict.fromkeys(int(m.group(1)) for m in fixes_re.finditer(body))
+                dict.fromkeys(int(m.group(1)) for m in CLOSE_KEYWORD_RE.finditer(body))
             )
             if not matched_issue_ns:
                 continue
@@ -2192,20 +2194,17 @@ class PRManager(PRManagerPromotionMixin):
         if not isinstance(raw, list):
             return None
 
-        fixes_re = re.compile(r"(?:fixes|closes|resolves)\s+#(\d+)", re.IGNORECASE)
         for pr in raw:
             if not isinstance(pr, dict):
                 continue
             if pr.get("isDraft"):
                 continue
             body = pr.get("body") or ""
-            # A body can carry more than one Fixes/Closes/Resolves link (e.g.
-            # an epic PR resolving several issues) — check every match, not
-            # just the first, so this issue's link isn't missed when it
-            # isn't the leftmost one.
-            if not any(
-                int(m.group(1)) == issue_number for m in fixes_re.finditer(body)
-            ):
+            # A body can carry more than one closing link (e.g. an epic PR
+            # resolving several issues) — ``closing_issue_refs`` collects every
+            # match, not just the first, so this issue's link isn't missed when
+            # it isn't the leftmost one.
+            if issue_number not in closing_issue_refs(body):
                 continue
             try:
                 pr_n = int(pr.get("number", 0))
