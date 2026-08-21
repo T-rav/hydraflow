@@ -1,13 +1,12 @@
 ---
-id: 0278
+id: 0297
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-18T13:47:37.724265+00:00
-status: superseded
+created_at: 2026-08-21T11:38:32.595351+00:00
+status: active
 corroborations: 1
-supersedes: 0260
-superseded_by: 0297
+supersedes: 0278
 ---
 
 # _follow_reexports reuses _collect_defined_symbols helper

@@ -4,8 +4,9 @@ topic: dependencies
 source_issue: 11518
 source_phase: plan
 created_at: 2026-08-21T09:08:16.052874+00:00
-status: active
+status: superseded
 corroborations: 1
+superseded_by: 0308
 ---
 
 # # TRUST: marker + fleet sweep pin workflow checkout-ref trust

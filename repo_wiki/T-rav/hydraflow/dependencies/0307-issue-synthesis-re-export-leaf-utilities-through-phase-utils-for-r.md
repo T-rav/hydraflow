@@ -1,13 +1,12 @@
 ---
-id: 0290
+id: 0307
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-18T13:47:37.729173+00:00
-status: superseded
+created_at: 2026-08-21T11:38:32.622499+00:00
+status: active
 corroborations: 1
-supersedes: 0272
-superseded_by: 0307
+supersedes: 0290
 ---
 
 # Re-export leaf utilities through phase_utils for regression pin compatibility

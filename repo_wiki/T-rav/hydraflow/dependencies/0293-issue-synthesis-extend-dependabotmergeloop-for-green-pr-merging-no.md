@@ -1,13 +1,12 @@
 ---
-id: 0274
+id: 0293
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-18T13:47:37.722603+00:00
-status: superseded
+created_at: 2026-08-21T11:38:32.585566+00:00
+status: active
 corroborations: 1
-supersedes: 0256
-superseded_by: 0293
+supersedes: 0274
 ---
 
 # Extend DependabotMergeLoop for green-PR merging, not a new loop
