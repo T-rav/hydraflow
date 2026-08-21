@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11480
 source_phase: plan
 created_at: 2026-08-20T06:54:25.786735+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Run full make quality, never a file-targeted subset (PR #8460 lesson)
