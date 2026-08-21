@@ -20,9 +20,13 @@ third of that set, and (lacking ``\b`` boundaries) false-matching
   did not count as a resolving link, so a stale escalation label could
   re-trigger an auto-agent attempt against an already-open PR.
 
-A fifth site, ``src/escape/attribution.py``, already carried the full verb set
-but as its own hand-rolled alternation — behaviourally fine, yet it kept the
-duplication class open. It is folded onto the canonical object here too.
+Two further sites carried the full verb set but as their own hand-rolled
+copies — behaviourally near-equivalent, yet they kept the duplication class
+open. Both are folded onto the canonical object too:
+
+* ``src/escape/attribution.py`` — its own verb alternation.
+* ``src/arch/generators/traceability_matrix.py`` — the canonical pattern with
+  a named group and no trailing ``\b``, found by review of this fix.
 
 The fix is *reuse*, not re-derivation: every site imports
 ``false_close.CLOSE_KEYWORD_RE``. The identity pins are the load-bearing part
@@ -33,6 +37,7 @@ asserted rather than mere equality.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
@@ -46,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import branch_gc_scan
 import false_close
 import pr_manager
+from arch.generators import traceability_matrix
 from branch_gc_scan import extract_issue_number
 from escape import attribution
 from false_close import CLOSE_KEYWORD_RE
@@ -67,9 +73,29 @@ CLOSING_VERBS = (
     "resolved",
 )
 
-# The narrowed copy this class removes. Kept as a literal so the source scan
-# below fails loudly if any site re-derives it.
-NARROW_COPY_RE = re.compile(r"\(\?:[Ff]ixes\|[Cc]loses\|[Rr]esolves\)")
+# Shape of a hand-rolled closing-keyword parser: a regex literal naming a
+# closing verb somewhere ahead of a ``#<digits>`` capture. Deliberately NOT
+# the exact narrowed literal this issue removed — a needle that specific
+# would have missed both shapes the fix itself deleted (``attribution``'s
+# full-verb alternation and the arch generator's named-group copy), so it
+# would have reported "class closed" while live duplicates survived.
+HANDROLLED_SHAPE_RE = re.compile(r"(?:close|fix|resolve)[^\n]{0,80}?#\(", re.IGNORECASE)
+
+# ``false_close`` is where the one definition is allowed to live.
+CANONICAL_MODULE = "src/false_close.py"
+
+
+def _regex_literals(source: str) -> list[str]:
+    """Every string literal in *source* — regex patterns included."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:  # pragma: no cover - src/ is always parseable
+        return []
+    return [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
 
 
 # --------------------------------------------------------------------------
@@ -92,16 +118,28 @@ def test_attribution_reuses_the_canonical_regex_object() -> None:
     assert attribution.CLOSE_KEYWORD_RE is false_close.CLOSE_KEYWORD_RE
 
 
-def test_no_narrowed_copy_survives_anywhere_in_src() -> None:
-    """Class-closure pin: the needle that defined this class has zero hits."""
-    offenders = [
-        str(path.relative_to(REPO_ROOT))
+def test_traceability_matrix_reuses_the_canonical_regex_object() -> None:
+    """The sixth site: the canonical pattern re-spelled with a named group."""
+    assert traceability_matrix.CLOSE_KEYWORD_RE is false_close.CLOSE_KEYWORD_RE
+
+
+def test_false_close_is_the_only_module_defining_the_grammar() -> None:
+    """Class-closure pin: exactly one module under ``src/`` may spell out a
+    closing-verb-plus-``#(digits)`` regex. Six sites had re-derived it in
+    four different spellings, so this asserts on the *shape* rather than on
+    any one narrowed literal."""
+    offenders = sorted(
+        rel
         for path in (REPO_ROOT / "src").rglob("*.py")
-        if NARROW_COPY_RE.search(path.read_text(encoding="utf-8"))
-    ]
+        if (rel := str(path.relative_to(REPO_ROOT))) != CANONICAL_MODULE
+        and any(
+            HANDROLLED_SHAPE_RE.search(literal)
+            for literal in _regex_literals(path.read_text(encoding="utf-8"))
+        )
+    )
     assert offenders == [], (
-        f"Narrowed closing-keyword regex re-derived in: {offenders}. "
-        "Import false_close.CLOSE_KEYWORD_RE instead."
+        f"Closing-keyword grammar re-derived in: {offenders}. "
+        "Import false_close.CLOSE_KEYWORD_RE (or closing_issue_refs) instead."
     )
 
 
