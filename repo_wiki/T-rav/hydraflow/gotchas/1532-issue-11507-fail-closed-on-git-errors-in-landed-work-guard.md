@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11507
 source_phase: plan
 created_at: 2026-08-21T02:19:43.269824+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Fail-closed on git errors in landed-work guard
