@@ -1,0 +1,7 @@
+comment: 'High-water marks for structural test redundancy (erosion.suite_hygiene):
+  parametrize copies (identical bodies in one file) and cross-file duplicate tests.
+  The gate fails only when a count rises above its mark; falling is the point. Last
+  moved: initial marks at sensor introduction (erosion mass + suite hygiene PR)'
+cross_file_duplicates: 85
+parametrize_copies: 1354
+total_tests: 19782

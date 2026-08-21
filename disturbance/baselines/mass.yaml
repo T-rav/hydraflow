@@ -1,0 +1,106 @@
+classes:
+  src/adr_reviewer.py:ADRCouncilReviewer:
+    loc: 833
+    methods: 29
+  src/adr_touchpoint_auditor_loop.py:AdrTouchpointAuditorLoop:
+    loc: 642
+    methods: 22
+  src/agent.py:AgentRunner:
+    loc: 1346
+    methods: 35
+  src/auto_agent_preflight_loop.py:AutoAgentPreflightLoop:
+    loc: 611
+    methods: 17
+  src/config.py:HydraFlowConfig:
+    loc: 4894
+    methods: 39
+  src/contract_refresh_loop.py:ContractRefreshLoop:
+    loc: 671
+    methods: 23
+  src/epic.py:EpicManager:
+    loc: 898
+    methods: 36
+  src/health_monitor_loop.py:HealthMonitorLoop:
+    loc: 1489
+    methods: 36
+  src/implement_phase.py:ImplementPhase:
+    loc: 1587
+    methods: 55
+  src/issue_store.py:IssueStore:
+    loc: 710
+    methods: 48
+  src/mockworld/fakes/fake_github.py:FakeGitHub:
+    loc: 1561
+    methods: 125
+  src/orchestrator.py:HydraFlowOrchestrator:
+    loc: 1969
+    methods: 84
+  src/plan_phase.py:PlanPhase:
+    loc: 1895
+    methods: 55
+  src/planner.py:PlannerRunner:
+    loc: 854
+    methods: 23
+  src/ports.py:PRPort:
+    loc: 488
+    methods: 76
+  src/post_merge_handler.py:PostMergeHandler:
+    loc: 696
+    methods: 13
+  src/pr_manager.py:PRManager:
+    loc: 3181
+    methods: 110
+  src/pr_unsticker.py:PRUnsticker:
+    loc: 903
+    methods: 20
+  src/repo_wiki.py:RepoWikiStore:
+    loc: 763
+    methods: 30
+  src/repo_wiki_loop.py:RepoWikiLoop:
+    loc: 826
+    methods: 17
+  src/review_phase/_phase.py:ReviewPhase:
+    loc: 3097
+    methods: 78
+  src/reviewer.py:ReviewRunner:
+    loc: 983
+    methods: 21
+  src/skill_prompt_eval_loop.py:SkillPromptEvalLoop:
+    loc: 748
+    methods: 25
+  src/staging_bisect_loop.py:StagingBisectLoop:
+    loc: 832
+    methods: 23
+  src/staging_promotion_loop.py:StagingPromotionLoop:
+    loc: 977
+    methods: 32
+  src/triage.py:TriageRunner:
+    loc: 602
+    methods: 17
+  src/wiki_compiler.py:WikiCompiler:
+    loc: 773
+    methods: 23
+  src/wiki_rot_detector_loop.py:WikiRotDetectorLoop:
+    loc: 803
+    methods: 20
+  src/workspace.py:WorkspaceManager:
+    loc: 970
+    methods: 41
+comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC or\
+  \ method count >= class thresholds) \u2014 the mass sensor (erosion.mass). The gate\
+  \ flags NEW entries beyond this set; the ErosionMetricsLoop files the burn-down\
+  \ roster. Last moved: initial baseline at sensor introduction (erosion mass + suite\
+  \ hygiene PR)"
+files:
+  src/config.py: 7134
+  src/dashboard_routes/_routes.py: 2103
+  src/health_monitor_loop.py: 1736
+  src/implement_phase.py: 1665
+  src/mockworld/fakes/fake_github.py: 1672
+  src/models.py: 2844
+  src/orchestrator.py: 2074
+  src/plan_phase.py: 1975
+  src/pr_manager.py: 3307
+  src/repo_wiki.py: 1589
+  src/review_phase/_phase.py: 3228
+  src/service_registry.py: 1636
