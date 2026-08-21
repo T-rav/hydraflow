@@ -30,6 +30,8 @@ from implement_spec_reviewer import (
     compute_branch_diff,
     format_gaps_for_prior_failure,
 )
+from implement_timeout import tiered_implement_timeout
+from issue_cache import classification_complexity
 from models import (
     EscalationContext,
     GitHubIssue,
@@ -57,6 +59,7 @@ from task_source import TaskTransitioner
 from transcript_summarizer import TranscriptSummarizer
 
 if TYPE_CHECKING:
+    from issue_cache import IssueCache
     from ports import IssueStorePort, PRPort, WorkspacePort
     from precondition_gate import PreconditionGate
 
@@ -70,13 +73,17 @@ logger = logging.getLogger("hydraflow.implement_phase")
 # The per-issue implement pipeline runs as an explicit ``src.flows.Flow``:
 #
 #     decompose -> no-progress-abort -> issue-state -> build -> screen
-#         screen  --(zero-commit / null-delivery)--> spec-verify -> gate -> done
+#         screen  --(zero-commit)-------------------> zero-commit-abort
+#             zero-commit-abort --(routed to diagnose, #11568)--> done
+#             zero-commit-abort --(abort disabled / below threshold)--> spec-verify
+#         screen  --(null-delivery)-----------------> spec-verify -> gate -> done
 #         screen  --(otherwise)---------------------> open-pr
 #         open-pr --(success / early-return)--------> done
 #         open-pr --(failed retry / no-PR failure)--> spec-verify -> gate -> done
 #
 # Every fail-closed early-exit (existing-PR shortcut, attempt-cap, no-progress
-# abort, ``_handle_successful_push`` early return) sets ``state['_stop']`` and
+# abort, zero-commit abort, ``_handle_successful_push`` early return) sets
+# ``state['_stop']`` and
 # routes straight to the terminal ``done`` sink. The LLM/agent call lives inside
 # ``build`` alone (the actuator boundary); routing between nodes is
 # deterministic. The graph is reused two ways: ``_worker_inner`` runs it from
@@ -90,13 +97,25 @@ def _flow_stopped(state: FlowState) -> bool:
     return bool(state.get("_stop"))
 
 
+def _route_is_zero_commit(state: FlowState) -> bool:
+    """Edge guard: ``screen`` classified a zero-commit failure (#11568).
+
+    Zero-commit results visit ``zero-commit-abort`` first: at/over the
+    ``implement_no_progress_abort_attempts`` threshold (default 1 — the
+    FIRST such result) the issue routes to diagnose and the walk ends;
+    otherwise it falls through to ``spec-verify`` like any other failure.
+    """
+    return state.get("route") == "fail_zero_commit"
+
+
 def _route_is_failure_screen(state: FlowState) -> bool:
     """Edge guard: ``screen`` classified a zero-commit / null-delivery failure.
 
     These are the two failures that never push and go straight to the shared
     ``spec-verify`` node (screen-specific comment + spec-compliance review).
     Every other classification (success, retry-push, committed-but-failed,
-    no-workspace) flows through ``open-pr`` first.
+    no-workspace) flows through ``open-pr`` first. Zero-commit results reach
+    here only via ``zero-commit-abort`` (its first-match edge wins).
     """
     return state.get("route") in {"fail_zero_commit", "fail_null_delivery"}
 
@@ -132,6 +151,7 @@ class ImplementPhase:
         transcript_summarizer: TranscriptSummarizer | None = None,
         precondition_gate: PreconditionGate | None = None,
         spec_reviewer: SpecComplianceReviewer | None = None,
+        issue_cache: IssueCache | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -161,6 +181,10 @@ class ImplementPhase:
         # that don't care, and by production when ``spec_reviewer`` isn't
         # wired into the service registry).
         self._spec_reviewer = spec_reviewer
+        # #11568: triage's complexity score (the same IssueCache record the
+        # plan-side size tiers read) sizes each build's wall-clock budget.
+        # None → every spawn gets the full ``agent_timeout`` ceiling.
+        self._issue_cache = issue_cache
         self._escalator = PipelineEscalator(
             state,
             prs,
@@ -580,6 +604,12 @@ class ImplementPhase:
         * ``screen`` — classify the outcome (zero-commit / null-delivery /
           push / no-op) exactly as the pre-refactor ``_handle_implementation_
           result`` head did.
+        * ``zero-commit-abort`` *(#11568)* — a zero-commit result at/over
+          ``implement_no_progress_abort_attempts`` (default 1: the FIRST one)
+          routes to diagnose with the transcript tail and ends the walk,
+          instead of spending the W5 reviewer and attempts 2 and 3 on the
+          same shape. Below the threshold (or disabled) it falls through to
+          ``spec-verify`` — the pre-#11568 retry shape.
         * ``spec-verify`` — reuse ``SpecComplianceReviewer`` via
           ``_run_spec_compliance_review`` (the shared node from the P0.5 map)
           on any failed attempt, plus the screen-specific comment.
@@ -610,6 +640,11 @@ class ImplementPhase:
                 ),
                 Node("build", self._flow_build),
                 Node("screen", self._flow_screen, kind="gate"),
+                Node(
+                    "zero-commit-abort",
+                    self._flow_zero_commit_abort,
+                    kind="gate",
+                ),
                 Node("spec-verify", self._flow_spec_verify),
                 Node("gate", self._flow_gate, kind="gate"),
                 Node("open-pr", self._flow_open_pr),
@@ -624,8 +659,11 @@ class ImplementPhase:
                 Edge("issue-state", "done", when=_flow_stopped),
                 Edge("issue-state", "build"),
                 Edge("build", "screen"),
+                Edge("screen", "zero-commit-abort", when=_route_is_zero_commit),
                 Edge("screen", "spec-verify", when=_route_is_failure_screen),
                 Edge("screen", "open-pr"),
+                Edge("zero-commit-abort", "done", when=_flow_stopped),
+                Edge("zero-commit-abort", "spec-verify"),
                 Edge("spec-verify", "gate"),
                 Edge("gate", "done"),
                 Edge("open-pr", "done", when=_open_pr_terminal),
@@ -847,6 +885,32 @@ class ImplementPhase:
             state["route"] = "final_only"
         return state
 
+    async def _flow_zero_commit_abort(self, state: FlowState) -> FlowState:
+        """Route a zero-commit result to diagnose instead of attempt N+1 (#11568).
+
+        Measured 2026-08-21: attempts per merged issue doubled (1.2 → 2.2);
+        13 of 153 implement results ended "No commits found on branch" and
+        each then burned a second and third full build on the same shape. A
+        zero-commit attempt is not a partial success to retry blindly. When
+        this attempt is at/over ``implement_no_progress_abort_attempts``
+        (default 1 — the first one), escalate now through the shared
+        diagnose/HITL escalator with the transcript tail, skip the W5 spec
+        review (there is no diff to review) and end the walk. Below the
+        threshold, or with the abort disabled (0), fall through to
+        ``spec-verify`` — the pre-#11568 corrective-retry shape.
+
+        Credit exhaustion never reaches here: ``AgentRunner.run`` re-raises
+        ``CreditExhaustedError`` before a ``WorkerResult`` exists, so the
+        ADR-0119 pause is untouched.
+        """
+        issue = state["issue"]
+        if not self._should_abort_zero_commit(issue):
+            return state
+        await self._escalate_zero_commit(issue, state["result"])
+        state["disposition"] = "escalate"
+        state["_stop"] = True
+        return state
+
     async def _flow_spec_verify(self, state: FlowState) -> FlowState:
         """Handle a failed attempt + reuse ``SpecComplianceReviewer`` (#10682).
 
@@ -875,8 +939,9 @@ class ImplementPhase:
         here: it records ``state['disposition']`` (``"retry"`` for a converging
         failure that re-queues as ``hydraflow-ready`` for a corrective attempt,
         ``"escalate"`` for a thrashing / cap-reached one). Enforcement stays in
-        ``decompose`` (``_check_attempt_cap``) and ``no-progress-abort`` so the
-        HITL escalation fires exactly once (never double-firing here).
+        ``decompose`` (``_check_attempt_cap``), ``no-progress-abort`` and
+        ``zero-commit-abort`` so the HITL escalation fires exactly once (never
+        double-firing here).
         """
         issue = state["issue"]
         attempts = self._state.get_issue_attempts(issue.id)
@@ -960,10 +1025,28 @@ class ImplementPhase:
         if threshold <= 0:
             return False
         attempts = self._state.get_issue_attempts(issue.id)
-        if attempts < threshold:
+        # "Prior attempt" means the prior attempt of THIS cycle: a human
+        # re-queue resets the counter but not the last worker meta, so attempt
+        # 1 with stale zero-commit meta must build, not bounce (#11568).
+        if attempts < 2 or attempts < threshold:
             return False
         prior_meta = self._state.get_worker_result_meta(issue.id) or {}
         return self._is_no_output_signal(prior_meta)
+
+    def _should_abort_zero_commit(self, issue: Task) -> bool:
+        """Post-build twin of :meth:`_should_abort_no_progress` (#11568).
+
+        ``True`` when THIS attempt's zero-commit result is at/over the
+        ``implement_no_progress_abort_attempts`` threshold — default 1, so
+        the first zero-commit result routes to diagnose. ``0`` disables both
+        aborts (the pre-#11568 retry-to-cap shape).
+        """
+        threshold = self._config.implement_no_progress_abort_attempts
+        if threshold <= 0:
+            return False
+        # A zero-commit result proves at least one attempt ran, even when the
+        # graph was re-entered at ``screen`` without ``decompose`` counting it.
+        return max(self._state.get_issue_attempts(issue.id), 1) >= threshold
 
     @staticmethod
     def _is_no_output_signal(meta: WorkerResultMeta) -> bool:
@@ -1027,6 +1110,97 @@ class ImplementPhase:
                 f"({attempts - 1} no-output attempt(s))"
             ),
         )
+
+    def _implement_timeout(self, issue: Task) -> int:
+        """Complexity-tiered spawn budget for *issue* (#11568).
+
+        Reads triage's ``complexity_score`` from the shared IssueCache
+        classification record (the field #11304/#11305 tier on) and maps it
+        through :func:`implement_timeout.tiered_implement_timeout` with
+        ``agent_timeout`` as the ceiling. Unknown → the ceiling, so an
+        unscored issue never gets a shorter budget than it did before.
+        """
+        complexity = classification_complexity(self._issue_cache, issue.id)
+        ceiling = int(self._config.agent_timeout)
+        timeout = tiered_implement_timeout(complexity, ceiling)
+        if timeout != ceiling:
+            logger.info(
+                "Issue #%d: implement timeout %ds (complexity %s, ceiling %ds)",
+                issue.id,
+                timeout,
+                complexity,
+                ceiling,
+            )
+        return timeout
+
+    def _transcript_tail(self, result: WorkerResult) -> str | None:
+        """Last ``error_output_max_chars`` of the run transcript, or ``None``."""
+        transcript = result.transcript or ""
+        if not transcript:
+            return None
+        return transcript[-self._config.error_output_max_chars :]
+
+    async def _escalate_zero_commit(self, issue: Task, result: WorkerResult) -> None:
+        """Route a zero-commit attempt to diagnose with the transcript tail (#11568).
+
+        Posts the zero-commit comment (with the tail folded in), stores an
+        ``EscalationContext`` whose ``agent_transcript`` IS the tail (the
+        diagnostic Stage-1 prompt quotes its head, so the tail is what the
+        diagnoser sees), escalates through the shared escalator (label swap
+        to diagnose + store transition + harness-failure record) and marks
+        the issue failed. The ``WorkerResult`` is left as-is: it is the
+        zero-commit result; the routing is the disposition.
+        """
+        # Floored like ``_should_abort_zero_commit``: a resume at ``screen``
+        # can arrive before ``decompose`` counted this attempt.
+        attempts = max(self._state.get_issue_attempts(issue.id), 1)
+        max_attempts = self._config.max_issue_attempts
+        last_error = result.error or "No commits found on branch"
+        tail = self._transcript_tail(result)
+        logger.warning(
+            "Issue #%d: zero commits on attempt %d/%d — routing to diagnose (#11568)",
+            issue.id,
+            attempts,
+            max_attempts,
+        )
+        tail_section = (
+            "\n<details><summary>Transcript tail</summary>\n\n"
+            f"```\n{tail}\n```\n</details>\n"
+            if tail
+            else ""
+        )
+        await self._transitioner.post_comment(
+            issue.id,
+            "## Implementation Failed — Zero Commits\n\n"
+            "The implementation agent ran but produced no commits "
+            f"(attempt {attempts}/{max_attempts}). A zero-commit attempt is "
+            "not a partial success to retry blindly: rather than spend "
+            "another full build on the same shape, HydraFlow is routing this "
+            "issue to the diagnostic agent now with the transcript tail "
+            "(#11568).\n\n"
+            f"Last error: {last_error}\n"
+            f"{tail_section}\n"
+            "---\n"
+            "*Generated by HydraFlow Implementer*",
+        )
+        context = EscalationContext(
+            cause=self._hitl_cause(
+                issue, f"implementation produced zero commits (attempt {attempts})"
+            ),
+            origin_phase="implement",
+            agent_transcript=tail,
+        )
+        await self._escalator(
+            issue,
+            cause=context.cause,
+            details=(
+                f"Zero-commit attempt {attempts}/{max_attempts} routed to "
+                f"diagnose: {last_error}"
+            ),
+            category=FailureCategory.HITL_ESCALATION,
+            context=context,
+        )
+        self._state.mark_issue(issue.id, "failed")
 
     def _read_plan_for_recording(self, issue_number: int) -> str:
         """Read the plan file for *issue_number*, returning empty string on failure."""
@@ -1421,6 +1595,9 @@ class ImplementPhase:
             # Diverse-retry: the agent frames its strategy-delta directive
             # as "attempt N of M" (rendered only when prior_failure is set).
             "attempt_number": self._state.get_issue_attempts(issue.id),
+            # #11568: complexity-tiered wall-clock budget for the build spawn;
+            # ``agent_timeout`` remains the ceiling inside the runner.
+            "timeout_s": self._implement_timeout(issue),
         }
         if bead_mapping:
             run_kwargs["bead_mapping"] = bead_mapping
@@ -1734,10 +1911,13 @@ class ImplementPhase:
     async def _handle_zero_commits(
         self, issue: Task, result: WorkerResult
     ) -> WorkerResult:
-        """Handle a zero-commit implementation failure.
+        """Handle a zero-commit failure on the retry path.
 
-        Marks as failed so the attempt-cap mechanism can retry with corrective
-        context (prior_failure feedback) instead of escalating immediately.
+        Reached only when ``zero-commit-abort`` fell through — the abort is
+        disabled (``implement_no_progress_abort_attempts == 0``) or this
+        attempt is below its threshold (#11568). Marks as failed so the
+        attempt-cap mechanism can retry with corrective context
+        (prior_failure feedback) instead of escalating immediately.
         """
         attempts = self._state.get_issue_attempts(issue.id)
         logger.warning(

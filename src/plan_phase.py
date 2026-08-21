@@ -16,6 +16,7 @@ from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
 from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from harness_insights import FailureCategory, HarnessInsightStore
+from issue_cache import classification_complexity
 from models import (
     ConversationTurn,
     DiscoverResult,
@@ -529,19 +530,7 @@ class PlanPhase(PlanWikiIngestMixin):
         review for never-classified issues — found by the sampled re-audit
         on #11304 (#11314, audit-upheld).
         """
-        if self._issue_cache is None:
-            return None
-        try:
-            record = self._issue_cache.latest_classification(issue.id)
-        except (AttributeError, TypeError, ValueError):
-            return None
-        payload = getattr(record, "payload", None)
-        if not isinstance(payload, dict):
-            return None
-        try:
-            return int(payload["complexity_score"])
-        except (KeyError, TypeError, ValueError):
-            return None
+        return classification_complexity(self._issue_cache, issue.id)
 
     def _skip_plan_review(self, issue: Task) -> tuple[bool, int]:
         """#11298 size tiering: does this issue skip the adversarial review?

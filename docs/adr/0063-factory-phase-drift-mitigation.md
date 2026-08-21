@@ -68,6 +68,7 @@ Each workstream gets its own bead under the `factory-phase-drift` label.
 - Reduces `human-required` rate for prompt-failure modes that have known remediations (context expansion, specialist routing).
 - The specialist-aware preflight makes audit JSONL more useful: a failed `plan-stuck` attempt records the touchpoint set the expander pulled, which is itself a corpus signal for the principles-audit loop.
 - Establishes a phase-by-phase mitigation pattern other ADRs can extend.
+- **W5 scope narrowed by #11568 (2026-08-21).** Measured attempts per merged issue doubled (1.2 → 2.2) with zero-commit attempts re-dispatching through W5 into attempts 2 and 3 on the same shape. A zero-commit result now routes to diagnose on its FIRST occurrence (`ImplementPhase` `zero-commit-abort` node, `implement_no_progress_abort_attempts` default 1) with the transcript tail; the W5 spec-compliance re-dispatch applies to committed-but-failed attempts, which still carry a diff to review. Raising the knob to 2–3 restores the original zero-diff re-dispatch.
 
 **Negative:**
 

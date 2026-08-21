@@ -151,7 +151,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     (
         "implement_no_progress_abort_attempts",
         "HYDRAFLOW_IMPLEMENT_NO_PROGRESS_ABORT_ATTEMPTS",
-        3,
+        1,
     ),
     ("max_decomposition_depth", "HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", 2),
     (
@@ -1673,20 +1673,24 @@ class HydraFlowConfig(BaseModel):
         description="Max total implementation attempts per issue before HITL escalation",
     )
     implement_no_progress_abort_attempts: int = Field(
-        default=3,
+        default=1,
         ge=0,
         le=10,
         description=(
-            "No-progress early-abort threshold for ImplementPhase's flow "
-            "(#10659/#10616, P2 of #10682). When an issue reaches this attempt "
-            "number AND its immediately prior attempt produced no output (zero "
-            "commits with an error), the ``no-progress-abort`` flow node "
-            "escalates it to HITL BEFORE spending another full (up to "
-            "``agent_timeout``) build, instead of retry-thrashing to the "
-            "``max_issue_attempts`` cap. Default 3 == the default "
-            "``max_issue_attempts``, so the final futile build is skipped while "
-            "the ADR-0063 W5 corrective retry still runs; lower it to abort "
-            "sooner (fewer corrective retries) or set 0 to disable the abort."
+            "Zero-commit abort threshold for ImplementPhase's flow "
+            "(#10659/#10616, P2 of #10682; tightened by #11568): the attempt "
+            "number at/after which a zero-commit (no output) attempt stops "
+            "the retry loop and routes the issue to diagnose with the "
+            "transcript tail. Default 1: the FIRST zero-commit result routes "
+            "to diagnose (post-build ``zero-commit-abort`` node) instead of "
+            "burning attempts 2 and 3 on the same shape — measured 2026-08-21 "
+            "as the doubling of attempts per merged issue (1.2 → 2.2). The "
+            "pre-build ``no-progress-abort`` node applies the same threshold "
+            "to the immediately prior attempt of the current cycle (a "
+            "backstop for state written before #11568). Raise to 2–3 to "
+            "restore the ADR-0063 W5 corrective retry after a zero-commit "
+            "attempt; set 0 to disable both aborts (retry to the "
+            "``max_issue_attempts`` cap)."
         ),
     )
     max_decomposition_depth: int = Field(

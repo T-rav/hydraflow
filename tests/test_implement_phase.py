@@ -1478,10 +1478,10 @@ class TestWorkerResultMetaPersistence:
 
 class TestZeroCommitEscalation:
     @pytest.mark.asyncio
-    async def test_zero_commit_marks_failed_without_hitl(
+    async def test_zero_commit_routes_to_diagnose_on_first_attempt(
         self, config: HydraFlowConfig
     ) -> None:
-        """Zero-commit should mark failed and allow retry, not directly escalate to HITL."""
+        """The first zero-commit result routes to diagnose, not to attempt 2 (#11568)."""
         issue = TaskFactory.create()
 
         async def zero_commit_agent(
@@ -1511,8 +1511,10 @@ class TestZeroCommitEscalation:
         comment_calls = [c.args for c in mock_prs.post_comment.call_args_list]
         assert any("Zero Commits" in c[1] for c in comment_calls)
 
-        # Should NOT directly escalate to HITL — let attempt cap handle it
-        assert phase._state.get_hitl_cause(42) is None
+        # Routed through the shared escalator to the diagnostic agent —
+        # never to the human HITL queue directly.
+        assert phase._state.get_hitl_cause(42) is not None
+        mock_prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-diagnose")
 
     @pytest.mark.asyncio
     async def test_zero_commit_marks_issue_failed(
@@ -1585,10 +1587,10 @@ class TestZeroCommitEscalation:
         assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
 
     @pytest.mark.asyncio
-    async def test_epic_child_zero_commit_does_not_directly_escalate(
+    async def test_epic_child_zero_commit_routes_to_diagnose(
         self, config: HydraFlowConfig
     ) -> None:
-        """Epic child zero-commit should mark failed, not directly escalate."""
+        """Epic children take the same zero-commit → diagnose route (#11568)."""
         issue = TaskFactory.create(
             tags=["hydraflow-epic-child"],
             body="## Parent Epic: #1551\n\nSome description",
@@ -1617,9 +1619,7 @@ class TestZeroCommitEscalation:
 
         await phase.run_batch()
 
-        # Zero-commit no longer directly escalates — should be None
-        cause = phase._state.get_hitl_cause(42)
-        assert cause is None
+        mock_prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-diagnose")
         assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
 
 
@@ -1632,10 +1632,10 @@ class TestPostMortemMemoryFiling:
     """Failure escalations file memory suggestions from agent transcripts."""
 
     @pytest.mark.asyncio
-    async def test_zero_commit_marks_failed_for_retry(
+    async def test_zero_commit_routes_to_diagnose_not_hitl(
         self, config: HydraFlowConfig
     ) -> None:
-        """Zero-commit failure should mark as failed (no HITL escalation) for retry."""
+        """Zero-commit failure marks failed and routes to diagnose — never straight to HITL."""
         issue = TaskFactory.create()
 
         async def zero_commit_agent(
@@ -1662,10 +1662,10 @@ class TestPostMortemMemoryFiling:
 
         results, _ = await phase.run_batch()
 
-        # Should NOT escalate to HITL — just mark failed for retry
         assert results[0].success is False
         assert results[0].error == "No commits found on branch"
-        # No HITL transition should occur
+        # Diagnose, not the human queue (#11568).
+        mock_prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-diagnose")
         hitl_calls = [
             c
             for c in mock_prs.swap_pipeline_labels.call_args_list
@@ -2156,10 +2156,10 @@ class TestHandleImplementationResult:
     """Unit tests for the _handle_implementation_result helper."""
 
     @pytest.mark.asyncio
-    async def test_zero_commit_marks_failed_without_hitl(
+    async def test_zero_commit_marks_failed_and_routes_to_diagnose(
         self, config: HydraFlowConfig
     ) -> None:
-        """Zero-commit failure should mark as failed, not directly escalate to HITL."""
+        """Zero-commit failure marks failed and routes to diagnose (#11568)."""
         issue = TaskFactory.create()
         result = WorkerResultFactory.create(
             success=False,
@@ -2173,9 +2173,8 @@ class TestHandleImplementationResult:
         returned = await phase._handle_implementation_result(issue, result, False)
 
         assert phase._state.to_dict()["processed_issues"].get(str(42)) == "failed"
-        # Should NOT directly escalate to HITL
-        mock_prs.swap_pipeline_labels.assert_not_awaited()
-        assert phase._state.get_hitl_cause(42) is None
+        mock_prs.swap_pipeline_labels.assert_awaited_once_with(42, "hydraflow-diagnose")
+        assert phase._state.get_hitl_cause(42) is not None
         assert returned is result
 
     @pytest.mark.asyncio
@@ -2842,7 +2841,14 @@ class TestZeroCommitCorrectiveRetry:
     async def test_zero_commit_comment_includes_attempt_count(
         self, config: HydraFlowConfig
     ) -> None:
-        """Zero-commit comment should show attempt/max info."""
+        """Zero-commit comment should show attempt/max info.
+
+        Pins the abort-disabled retry path: with
+        ``implement_no_progress_abort_attempts=0`` a zero-commit attempt is
+        marked failed for the attempt-cap retry instead of routing to
+        diagnose (#11568).
+        """
+        config = config.model_copy(update={"implement_no_progress_abort_attempts": 0})
         issue = TaskFactory.create()
         result = WorkerResultFactory.create(
             success=False,

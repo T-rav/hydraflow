@@ -25,6 +25,11 @@ These tests pin the load-bearing invariants of that cutover:
 
 If any regress, a converted phase could resume mid-node, drop a step, thrash to
 the attempt cap, or silently change the delivered ``WorkerResult``.
+
+#11568 added the ``zero-commit-abort`` node after ``screen``: a zero-commit
+result now routes to diagnose on its FIRST occurrence and never reaches
+``spec-verify``/``gate``, so the failed-attempt walk below is driven with a
+committed-but-failed build (the W5 corrective-retry shape that remains).
 """
 
 from __future__ import annotations
@@ -91,6 +96,25 @@ async def _zero_commit_agent(
     )
 
 
+async def _committed_failure_agent(
+    issue,
+    wt_path: Path,
+    branch: str,
+    worker_id: int = 0,
+    review_feedback: str = "",
+    prior_failure: str = "",
+    **_kwargs: object,
+):
+    return WorkerResultFactory.create(
+        issue_number=issue.id,
+        branch=branch,
+        success=False,
+        error="make quality failed",
+        commits=1,
+        workspace_path=str(wt_path),
+    )
+
+
 # ---------------------------------------------------------------------------
 # 1. Flow shape + node order
 # ---------------------------------------------------------------------------
@@ -109,7 +133,9 @@ async def test_worker_inner_builds_a_flow_entered_at_decompose(config) -> None:
 async def test_failed_attempt_walks_decompose_build_spec_verify_gate(config) -> None:
     """A failed build walks decompose -> build -> spec-verify -> gate (in order)."""
     issue = TaskFactory.create()
-    phase, _, _ = make_implement_phase(config, [issue], agent_run=_zero_commit_agent)
+    phase, _, _ = make_implement_phase(
+        config, [issue], agent_run=_committed_failure_agent
+    )
 
     recorded: list[str] = []
     flow = phase._build_implement_flow(
@@ -192,8 +218,8 @@ async def test_happy_path_flow_walks_through_open_pr(config) -> None:
     assert result.terminal == "done"
 
 
-async def test_zero_commit_parity_marks_failed_without_hitl(config) -> None:
-    """Zero-commit failure marks failed + posts the comment, no HITL (parity)."""
+async def test_zero_commit_marks_failed_and_routes_to_diagnose(config) -> None:
+    """Zero-commit failure marks failed, posts the comment, routes to diagnose (#11568)."""
     issue = TaskFactory.create()
     phase, _, mock_prs = make_implement_phase(
         config, [issue], agent_run=_zero_commit_agent
@@ -203,7 +229,7 @@ async def test_zero_commit_parity_marks_failed_without_hitl(config) -> None:
 
     assert result.success is False
     assert phase._state.to_dict()["processed_issues"].get("42") == "failed"
-    assert phase._state.get_hitl_cause(42) is None
+    mock_prs.swap_pipeline_labels.assert_any_call(42, "hydraflow-diagnose")
     comment_bodies = [c.args[1] for c in mock_prs.post_comment.call_args_list]
     assert any("Zero Commits" in body for body in comment_bodies)
 
