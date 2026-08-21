@@ -20,6 +20,7 @@ from config import Credentials, HydraFlowConfig
 from credit_failover import apply_credit_failover
 from events import EventBus
 from execution import get_default_runner
+from model_pricing import usage_shape_for_tool
 from models import LoopResult, TranscriptEventData
 from prompt_gate import GateResult, gate_prompt
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
@@ -380,8 +381,8 @@ class BaseRunner:
                 source = telemetry_source or str(event_data.get("source", "unknown"))
                 issue_number = event_data.get("issue")
                 pr_number = event_data.get("pr")
-                tool, model = parse_command_tool_model(cmd)
-                tool = telemetry_tool_for_transport(provider, tool)
+                cli_tool, model = parse_command_tool_model(cmd)
+                tool = telemetry_tool_for_transport(provider, cli_tool)
                 merged_stats = {
                     **self._consume_context_stats(),
                     **usage_stats,
@@ -399,6 +400,10 @@ class BaseRunner:
                     duration_seconds=duration,
                     success=succeeded,
                     stats=merged_stats,
+                    # Shape follows the CLI that produced the counts, not the
+                    # transport marker (a Claude spawn under credit failover
+                    # is recorded as tool="zai" but streams Anthropic-shaped).
+                    usage_shape=usage_shape_for_tool(cli_tool),
                 )
             finally:
                 try:

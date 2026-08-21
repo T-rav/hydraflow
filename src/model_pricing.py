@@ -5,10 +5,71 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger("hydraflow.model_pricing")
+
+# Usage SHAPE stamped on inference telemetry rows by the writer that obtained
+# the counts. Cache-inclusiveness is a property of the shape (transport), not
+# of the model id: the same GLM model is Anthropic-shaped through the Claude
+# CLI harness / gateway (``input_tokens`` EXCLUDES cache) and OpenAI-shaped
+# through the one-shot client (``prompt_tokens`` INCLUDES cache).
+USAGE_SHAPE_ANTHROPIC = "anthropic"
+USAGE_SHAPE_OPENAI_COMPAT = "openai_compat"
+# Tool markers whose usage is always produced by an Anthropic-shaped stream:
+# the Claude CLI (direct or via a harness base URL) and the gateway data plane.
+_ANTHROPIC_SHAPED_TOOLS = frozenset({"claude", "gateway"})
+
+
+def usage_shape_for_tool(tool: str | None) -> str | None:
+    """Usage shape implied by the CLI / client that PRODUCED the counts.
+
+    Call at WRITE time with the real producer — the command head (``claude`` /
+    ``codex``), the gateway marker, or the one-shot provider name — never with
+    the transport-rewritten telemetry marker: a Claude CLI spawn under credit
+    failover is recorded as ``tool="zai"`` but its stream is Anthropic-shaped.
+    """
+    name = (tool or "").strip().lower()
+    if not name:
+        return None
+    if name in _ANTHROPIC_SHAPED_TOOLS:
+        return USAGE_SHAPE_ANTHROPIC
+    # Codex CLI and the one-shot zai/kimi/openrouter clients report OpenAI
+    # ``prompt_tokens`` semantics.
+    return USAGE_SHAPE_OPENAI_COMPAT
+
+
+def input_includes_cache_for(usage_shape: object, tool: object = None) -> bool | None:
+    """THE one place that decides cache-inclusiveness for a telemetry row.
+
+    Returns the ``input_includes_cache`` override for
+    :meth:`ModelPricingTable.estimate_cost`:
+
+    * ``"anthropic"`` stamp → ``False`` (input already excludes cache);
+    * ``"openai_compat"`` stamp → ``None`` (table default: GLM is inclusive,
+      Kimi is not — the table flag describes exactly this face);
+    * no / unknown stamp (legacy rows) → ``False`` for Claude-CLI / gateway
+      tool markers, else ``None``. The ``zai`` marker is ambiguous on legacy
+      rows (the Claude CLI wears it under credit failover too), so those rows
+      keep the table default; the impossible-counts guard in
+      :meth:`ModelRate.estimate_cost` remains the last line of defense.
+    """
+    shape = str(usage_shape or "").strip().lower()
+    if shape == USAGE_SHAPE_ANTHROPIC:
+        return False
+    if shape == USAGE_SHAPE_OPENAI_COMPAT:
+        return None
+    if str(tool or "").strip().lower() in _ANTHROPIC_SHAPED_TOOLS:
+        return False
+    return None
+
+
+def row_input_includes_cache(row: Mapping[str, object]) -> bool | None:
+    """Override for a stored inference row: its ``usage_shape`` stamp, then tool."""
+    return input_includes_cache_for(row.get("usage_shape"), row.get("tool"))
+
 
 _ASSET_PATH = Path(__file__).parent / "assets" / "model_pricing.json"
 

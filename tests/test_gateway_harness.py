@@ -690,3 +690,40 @@ async def test_stream_with_telemetry_threads_attribution_into_gateway_mint(
     (_, _, request) = client.calls[0]
     assert request.issue_number == 42
     assert request.pr_number == 77
+
+
+@pytest.mark.asyncio
+async def test_stream_with_telemetry_stamps_anthropic_usage_shape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Gateway-routed Claude CLI rows carry tool="gateway" AND an explicit
+    Anthropic usage-shape stamp, so readers never fall back to the model flag."""
+    monkeypatch.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", "control-secret")
+    client = _FakeGatewayClient()
+    event_bus = MagicMock()
+    event_bus.current_session_id = "session-1"
+
+    with (
+        patch("runner_utils._HttpGatewayControlClient", return_value=client),
+        patch(
+            "runner_utils.stream_claude_process",
+            new_callable=AsyncMock,
+            return_value="complete",
+        ),
+        patch("runner_utils.record_inference_telemetry") as record_mock,
+    ):
+        await stream_claude_with_telemetry(
+            config=HydraFlowConfig(gateway_base_url="http://gateway:8080"),
+            cmd=["claude", "--model", "glm-5.2", "-p"],
+            prompt="hello",
+            cwd=tmp_path,
+            active_procs=set(),
+            event_bus=event_bus,
+            event_data={"source": "implementer"},
+            logger=logging.getLogger("test"),
+            stream_config=StreamConfig(timeout=10),
+            provider="gateway",
+        )
+
+    assert record_mock.call_args.kwargs["cmd"][0] == "gateway"
+    assert record_mock.call_args.kwargs["usage_shape"] == "anthropic"

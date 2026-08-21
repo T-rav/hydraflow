@@ -33,7 +33,7 @@ from credit_failover import apply_credit_failover
 from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
-from model_pricing import load_pricing
+from model_pricing import input_includes_cache_for, load_pricing, usage_shape_for_tool
 from prompt_gate import PromptGateBlockedError, gate_prompt
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from repo_backend import apply_repo_provider
@@ -96,7 +96,7 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
     Subclasses MAY override:
     - `_default_timeout_s()` → int (default: config.agent_timeout)
     - `_pre_spawn_hook(prompt)` → None (logging, validation, etc.)
-    - `_estimate_cost(usage_stats)` → float (default: model_pricing lookup)
+    - `_estimate_cost(usage_stats, usage_shape=...)` → float (default: model_pricing lookup)
     """
 
     # Match BaseRunner._execute auth-retry budget so transient OAuth blips
@@ -130,13 +130,20 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
         """Hook for pre-spawn checks/logging (e.g., warn on backend mismatch)."""
         # Default: no-op.
 
-    def _estimate_cost(self, usage_stats: dict[str, object]) -> float | None:
+    def _estimate_cost(
+        self, usage_stats: dict[str, object], *, usage_shape: str | None = None
+    ) -> float | None:
         """Default cost estimate via model_pricing.
 
         Returns ``None`` when the model isn't in the pricing table (or the
         lookup fails) — the caller records the spend as UNKNOWN rather than
         silently folding it into $0 (#9821). Subclasses may override for
         custom pricing or no-op for free-tier runs.
+
+        ``usage_shape`` is how the CLI produced the counts (see
+        :func:`model_pricing.usage_shape_for_tool`); a Claude CLI spawn is
+        Anthropic-shaped (cache excluded) even when credit failover routes it
+        to a GLM model whose one-shot table flag is cache-inclusive.
         """
         try:
             pricing = load_pricing()
@@ -150,6 +157,7 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
                 cache_read_tokens=_coerce_int(
                     usage_stats.get("cache_read_input_tokens")
                 ),
+                input_includes_cache=input_includes_cache_for(usage_shape),
             )
             return float(estimate) if estimate is not None else None
         except Exception as exc:
@@ -339,6 +347,9 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
             )
         wall_s = time.monotonic() - start
 
+        # Shape of the usage counts follows the CLI that ran (``cmd_tool``),
+        # never the transport marker stamped on ``tool`` below.
+        usage_shape = usage_shape_for_tool(cmd_tool)
         # Telemetry — best-effort write to inferences.jsonl.
         try:
             self._telemetry.record(
@@ -355,11 +366,12 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
                 duration_seconds=wall_s,
                 success=not crashed,
                 stats=usage_stats,
+                usage_shape=usage_shape,
             )
         except Exception as exc:
             logger.warning("subprocess runner telemetry write failed: %s", exc)
 
-        estimate = self._estimate_cost(usage_stats)
+        estimate = self._estimate_cost(usage_stats, usage_shape=usage_shape)
         # Caps/sums stay numeric on 0.0; the FLAG carries honesty to
         # display surfaces (#9821).
         cost_usd = estimate if estimate is not None else 0.0

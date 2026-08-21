@@ -333,3 +333,74 @@ async def test_run_threads_issue_number_into_harness_env(tmp_path: Path) -> None
         )
 
     assert resolve_mock.await_args.kwargs["issue_number"] == 11464
+
+
+def _glm_shaped_table(tmp_path: Path, model: str):
+    from model_pricing import ModelPricingTable
+
+    pricing_path = tmp_path / "pricing.json"
+    pricing_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "models": {
+                    model: {
+                        "input_cost_per_million": 1.4,
+                        "output_cost_per_million": 4.4,
+                        "cache_read_cost_per_million": 0.26,
+                        "input_includes_cache": True,
+                    }
+                },
+            }
+        )
+    )
+    return ModelPricingTable(pricing_path)
+
+
+def test_cost_estimate_prices_cli_usage_as_anthropic_shaped(tmp_path: Path) -> None:
+    """The Claude CLI's stream usage EXCLUDES cache even when the model's
+    one-shot table flag says inclusive (credit-failover GLM, ADR-0119)."""
+    runner = _make_runner()
+    table = _glm_shaped_table(tmp_path, runner._config.model)
+    stats = {"input_tokens": 5_000_000, "cache_read_input_tokens": 4_000_000}
+
+    with patch("runners.base_subprocess_runner.load_pricing", return_value=table):
+        exclusive = runner._estimate_cost(stats, usage_shape="anthropic")
+        table_default = runner._estimate_cost(stats, usage_shape="openai_compat")
+
+    assert exclusive == pytest.approx((1.4 * 5_000_000 + 0.26 * 4_000_000) / 1e6)
+    assert table_default == pytest.approx((1.4 * 1_000_000 + 0.26 * 4_000_000) / 1e6)
+
+
+@pytest.mark.asyncio
+async def test_run_stamps_anthropic_usage_shape_on_telemetry_row(
+    tmp_path: Path,
+) -> None:
+    class _ClaudeRunner(_FakeRunner):
+        # The stamp follows the command head that actually ran (so a runner
+        # that pins tool="claude" is right even if implementation_tool differs).
+        def _build_command(self, prompt: str, worktree: Path) -> list[str]:
+            return ["claude", "--model", self._config.model, "-p"]
+
+    async def fake_stream(*, config, **kwargs: Any) -> str:
+        config.usage_stats["input_tokens"] = 100
+        config.usage_stats["output_tokens"] = 50
+        return "<status>resolved</status>"
+
+    config = ConfigFactory.create()
+    bus = MagicMock()
+    bus.current_session_id = "test-session"
+    runner = _ClaudeRunner(config=config, event_bus=bus)
+    with patch(
+        "runners.base_subprocess_runner.stream_claude_process",
+        side_effect=fake_stream,
+    ):
+        await runner.run(prompt="hello", worktree_path=str(tmp_path), issue_number=1)
+
+    rows = [
+        json.loads(line)
+        for line in config.cost_inferences_path.read_text().splitlines()
+        if line
+    ]
+    assert rows[-1]["tool"] == "claude"
+    assert rows[-1]["usage_shape"] == "anthropic"

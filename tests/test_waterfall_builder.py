@@ -125,6 +125,50 @@ def test_llm_action_sourced_from_prompt_telemetry(config) -> None:
         output_tokens=500,
         cache_write_tokens=100,
         cache_read_tokens=200,
+        # Legacy (unstamped) Claude-CLI row: Anthropic-shaped, cache excluded.
+        input_includes_cache=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "row_fields, expected_override",
+    [
+        ({"tool": "zai", "usage_shape": "anthropic"}, False),
+        ({"tool": "zai", "usage_shape": "openai_compat"}, None),
+        ({"tool": "zai"}, None),
+        ({"tool": "gateway"}, False),
+    ],
+    ids=["stamped-anthropic", "stamped-openai-compat", "legacy-zai", "legacy-gateway"],
+)
+def test_llm_action_passes_usage_shape_override_to_pricing(
+    config, row_fields, expected_override
+) -> None:
+    _write_inference(
+        config,
+        timestamp="2026-04-22T10:00:00+00:00",
+        source="implementer",
+        model="glm-5.2",
+        issue_number=1234,
+        input_tokens=1000,
+        output_tokens=500,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=200,
+        duration_seconds=1.0,
+        status="success",
+        **row_fields,
+    )
+    pricing = MagicMock()
+    pricing.estimate_cost.return_value = 0.01
+
+    build_waterfall(
+        config,
+        issue=1234,
+        issue_meta={"number": 1234, "title": "t", "labels": []},
+        pricing=pricing,
+    )
+
+    assert pricing.estimate_cost.call_args.kwargs["input_includes_cache"] is (
+        expected_override
     )
 
 
