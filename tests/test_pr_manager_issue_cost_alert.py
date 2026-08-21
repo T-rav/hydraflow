@@ -308,3 +308,42 @@ async def test_title_variants_are_all_parsed(
     await run("Fixes #42: tidy budgets")
     await run("refactor: tidy (closes #7)")
     assert captured == [123, 42, 7]
+
+
+async def test_title_bare_and_past_tense_verb_forms_are_anchored_matches(
+    merge_cfg: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#11481: the title-anchored match only covered ``Fixes/Closes/Resolves``
+    (third-person-singular), so a ``Fixed #N`` title fell through to the bare
+    ``#N`` fallback — which, for a title carrying a second unrelated ``#N``
+    reference, silently attributed cost/dashboard data to the WRONG issue.
+    Widening to ``false_close.CLOSE_KEYWORD_RE`` must anchor on the bare and
+    past-tense forms too, not just fall back to the first bare number."""
+    captured: list[int] = []
+
+    async def fake_check_issue_cost(_cfg, *, issue_number, **_kw):
+        captured.append(issue_number)
+
+    async def run(title: str) -> None:
+        pm, _ = _make_manager(merge_cfg)
+        monkeypatch.setattr(
+            pm, "get_pr_title_and_body", AsyncMock(return_value=(title, ""))
+        )
+        monkeypatch.setattr("pr_manager.run_subprocess", AsyncMock())
+        monkeypatch.setattr("pr_manager.load_pricing", _stub_pricing)
+        monkeypatch.setattr(
+            "pr_manager.iter_priced_inferences_for_issue",
+            lambda *_a, **_kw: iter([]),
+        )
+        monkeypatch.setattr("pr_manager.check_issue_cost", fake_check_issue_cost)
+        assert await pm.merge_pr(0) is True
+
+    # Bare number in the title is a red herring the anchored match must skip.
+    await run("Fixed #12: address #34 in passing")
+    await run("Closed #56: cleanup, see also #78")
+    await run("Resolved #90: also touches #11")
+    await run("Fix #21: quick patch, mentions #99")
+    await run("Close #22: see #100 for background")
+    await run("Resolve #23: relates to #101")
+    assert captured == [12, 56, 90, 21, 22, 23]
