@@ -296,9 +296,9 @@ a project policy can actually mean “always.”
 
 Within one precedence level, higher numeric priority wins. Two enabled policies
 with the same specificity and priority that resolve differently are invalid;
-the store rejects the update instead of relying on insertion order. Exact slug
-matches outrank globs; overlapping equally specific globs are a validation
-error.
+the store rejects the update instead of relying on insertion order. Exact
+canonical repository identity matches outrank globs; overlapping equally
+specific globs are a validation error.
 
 The resolver returns the entire ordered trace: policies considered, match/no
 match reason, precedence tuple, rejected accounts/models, chosen account/model,
