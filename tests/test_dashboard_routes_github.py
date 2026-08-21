@@ -144,56 +144,46 @@ class TestGitHubRepoEndpoints:
         data = json.loads(response.body)
         assert "timed out" in data["error"]
 
+    @pytest.mark.parametrize(
+        ("stdout", "stderr", "returncode", "expected_status", "error_fragment"),
+        [
+            pytest.param(
+                b"",
+                b"auth login required",
+                1,
+                401,
+                "auth",
+                id="auth-error",
+            ),
+            pytest.param(b"", b"some error", 1, 502, "failed", id="gh-command-failure"),
+            pytest.param(b"not json", b"", 0, 502, "parse", id="bad-json"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_list_github_repos_auth_error(
-        self, config, event_bus, state, tmp_path
+    async def test_list_github_repos_failure_response(
+        self,
+        config,
+        event_bus,
+        state,
+        tmp_path,
+        stdout: bytes,
+        stderr: bytes,
+        returncode: int,
+        expected_status: int,
+        error_fragment: str,
     ) -> None:
         router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
         endpoint = find_endpoint(router, "/api/github/repos", "GET")
 
         mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b"auth login required"))
-        mock_proc.returncode = 1
+        mock_proc.communicate = AsyncMock(return_value=(stdout, stderr))
+        mock_proc.returncode = returncode
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             response = await endpoint(query=None)
-        assert response.status_code == 401
+        assert response.status_code == expected_status
         data = json.loads(response.body)
-        assert "auth" in data["error"].lower()
-
-    @pytest.mark.asyncio
-    async def test_list_github_repos_gh_failure(
-        self, config, event_bus, state, tmp_path
-    ) -> None:
-        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
-        endpoint = find_endpoint(router, "/api/github/repos", "GET")
-
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b"some error"))
-        mock_proc.returncode = 1
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            response = await endpoint(query=None)
-        assert response.status_code == 502
-        data = json.loads(response.body)
-        assert "failed" in data["error"].lower()
-
-    @pytest.mark.asyncio
-    async def test_list_github_repos_bad_json(
-        self, config, event_bus, state, tmp_path
-    ) -> None:
-        router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
-        endpoint = find_endpoint(router, "/api/github/repos", "GET")
-
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"not json", b""))
-        mock_proc.returncode = 0
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            response = await endpoint(query=None)
-        assert response.status_code == 502
-        data = json.loads(response.body)
-        assert "parse" in data["error"].lower()
+        assert error_fragment in data["error"].lower()
 
     # -----------------------------------------------------------------------
     # POST /api/github/clone
