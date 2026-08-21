@@ -29,7 +29,12 @@ import pytest
 from events import EventBus
 from issue_store import IssueStore
 from tests.conftest import TaskFactory
-from tests.helpers import ConfigFactory, find_endpoint, make_dashboard_router
+from tests.helpers import (
+    ConfigFactory,
+    PipelineHarness,
+    find_endpoint,
+    make_dashboard_router,
+)
 
 
 def _make_store(fetch_result: list | None = None) -> IssueStore:
@@ -60,6 +65,20 @@ class TestHasCompletedInitialRefresh:
         await store.refresh()
 
         assert store.has_completed_initial_refresh is False
+
+
+def test_pipeline_harness_direct_seed_is_authoritative(tmp_path) -> None:
+    """The test harness's direct seed is its stand-in for initial refresh."""
+    harness = PipelineHarness(tmp_path)
+    assert harness.store.has_completed_initial_refresh is False
+
+    harness.seed_issue(TaskFactory.create(id=42), stage="find")
+
+    assert harness.store.has_completed_initial_refresh is True
+    assert [
+        entry["issue_number"]
+        for entry in harness.store.get_pipeline_snapshot()["find"]
+    ] == [42]
 
 
 class TestPipelineRouteReadinessGate:

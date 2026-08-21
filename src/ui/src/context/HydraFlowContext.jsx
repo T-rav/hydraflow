@@ -805,7 +805,12 @@ export function reducer(state, action) {
         // restart the staleness clock. Delta frames (issue_moved etc.)
         // deliberately do NOT reset it: a stream of deltas onto a stale
         // baseline is exactly the failure this tripwire detects.
-        pipelineSnapshotAt: action.at ?? Date.now(),
+        // A partial/not-ready response is useful for populating a previously
+        // empty rail, but it is not an authoritative reconciliation and must
+        // not refresh the #11350 staleness clock.
+        pipelineSnapshotAt: action.ready === false
+          ? state.pipelineSnapshotAt
+          : (action.at ?? Date.now()),
       }
     }
 

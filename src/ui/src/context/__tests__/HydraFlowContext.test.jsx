@@ -639,7 +639,7 @@ describe('Merged state from backend', () => {
     // strands the rail forever — no snapshot can land while any repo is
     // mid-refresh. This is what broke four sandbox happy-path browser
     // scenarios: the rail never showed a merged count at all.
-    const next = reducer(initialState, {
+    const next = reducer({ ...initialState, pipelineSnapshotAt: 123 }, {
       type: 'PIPELINE_SNAPSHOT',
       data: { merged: [{ issue_number: 7, title: 'Done', url: '', status: 'merged' }] },
       ready: false,
@@ -647,6 +647,7 @@ describe('Merged state from backend', () => {
     expect(next.pipelineIssues.merged).toHaveLength(1)
     // ...but it is still not authoritative, so the resyncing badge stays on.
     expect(next.pipelineSnapshotReady).toBe(false)
+    expect(next.pipelineSnapshotAt).toBe(123)
   })
 
   it('a not-ready snapshot does NOT evict cards from a POPULATED rail', () => {

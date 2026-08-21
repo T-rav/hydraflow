@@ -1073,8 +1073,15 @@ class PipelineHarness:
         return path
 
     def seed_issue(self, task, stage: str = "find") -> None:
-        """Place *task* in the requested queue stage."""
+        """Place *task* in the requested queue stage.
+
+        Direct seeding is the harness equivalent of a successful initial
+        ``IssueStore.refresh()``.  Mark the store authoritative so dashboard
+        scenarios that expose this harness through ``/api/pipeline`` do not
+        remain in the production boot-window state forever (#11279).
+        """
         self.store.enqueue_transition(task, stage)
+        self.store._has_completed_initial_refresh = True  # noqa: SLF001
 
     async def run_full_lifecycle(
         self,
