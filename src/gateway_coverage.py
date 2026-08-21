@@ -224,7 +224,10 @@ def _nonnegative_cost(row: Mapping[str, object], *keys: str) -> float | None:
 
 
 def _row_cost(
-    row: Mapping[str, object], pricing: ModelPricingTable
+    row: Mapping[str, object],
+    pricing: ModelPricingTable,
+    *,
+    input_includes_cache: bool | None = None,
 ) -> tuple[float, bool]:
     input_tokens = _nonnegative_int(row, "input_tokens", "tokens_in")
     output_tokens = _nonnegative_int(row, "output_tokens", "tokens_out")
@@ -245,13 +248,17 @@ def _row_cost(
         row.get("model_served") or row.get("model_requested") or row.get("model") or ""
     ).strip()
 
-    if token_total > 0 and model:
+    # Partial counts from an aborted / unfinished gateway stream are not a
+    # price: leave such rows on their stored (unknown) cost.
+    usage_complete = row.get("usage_complete") is not False
+    if token_total > 0 and model and usage_complete:
         estimated = pricing.estimate_cost(
             model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cache_write_tokens=cache_write,
             cache_read_tokens=cache_read,
+            input_includes_cache=input_includes_cache,
         )
         if estimated is not None:
             return float(estimated), False
@@ -375,7 +382,9 @@ def _aggregate_gateway_rows(
     for row in rows:
         if not _row_is_selected(row, since=since, until=until, repo_slug=repo_slug):
             continue
-        cost, unknown = _row_cost(row, pricing)
+        # Gateway streams are Anthropic-shaped for every upstream: their
+        # ``input_tokens`` EXCLUDES cache whatever the model's one-shot flag.
+        cost, unknown = _row_cost(row, pricing, input_includes_cache=False)
         spend_usd += cost
         requests += 1
         unpriced_requests += int(unknown)

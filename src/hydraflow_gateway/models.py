@@ -57,6 +57,10 @@ class Principal(BaseModel):
     id: str = Field(min_length=1, max_length=256)
     spawn_id: str | None = Field(default=None, min_length=1, max_length=256)
     session_id: str | None = Field(default=None, min_length=1, max_length=256)
+    # Optional work attribution: the GitHub issue / PR the spawn was working
+    # on, so ledger spend can be rolled up per issue. Additive and optional.
+    issue_number: int | None = Field(default=None, ge=1)
+    pr_number: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def require_spawn_id_for_spawn(self) -> Principal:
@@ -75,6 +79,8 @@ class MintKeyRequest(BaseModel):
     principal_id: str = Field(min_length=1, max_length=256)
     spawn_id: str | None = Field(default=None, min_length=1, max_length=256)
     session_id: str | None = Field(default=None, min_length=1, max_length=256)
+    issue_number: int | None = Field(default=None, ge=1)
+    pr_number: int | None = Field(default=None, ge=1)
     repo_slug: str = Field(min_length=1, max_length=512)
     repo_class: RepoClass
     provider_binding: ProviderBinding
@@ -84,12 +90,7 @@ class MintKeyRequest(BaseModel):
     @model_validator(mode="after")
     def enforce_identity_and_capture_policy(self) -> MintKeyRequest:
         """Reject incomplete spawn identity and prohibited body capture."""
-        Principal(
-            kind=self.principal_kind,
-            id=self.principal_id,
-            spawn_id=self.spawn_id,
-            session_id=self.session_id,
-        )
+        self.principal()
         if self.repo_class is not RepoClass.HYDRAFLOW and self.capture_bodies:
             raise ValueError("body capture is prohibited for client and personal repos")
         return self
@@ -101,6 +102,8 @@ class MintKeyRequest(BaseModel):
             id=self.principal_id,
             spawn_id=self.spawn_id,
             session_id=self.session_id,
+            issue_number=self.issue_number,
+            pr_number=self.pr_number,
         )
 
     @property

@@ -675,3 +675,61 @@ def test_missing_sources_are_no_data_only_until_activity_is_observed(
 
     assert partial.status == "partial"
     assert partial.coverage_percent is None
+
+
+def test_gateway_rows_are_priced_with_anthropic_shaped_usage() -> None:
+    """Gateway streams are Anthropic-shaped for EVERY upstream — ``input_tokens``
+    excludes cache — so the table's one-shot ``input_includes_cache`` flag for
+    GLM must not subtract the cache from a gateway row's billable input."""
+    snapshot = build_coverage(
+        [
+            _row(
+                upstream_provider="zai-harness",
+                model_requested="glm-5.2",
+                model_served="glm-5.3",
+                input_tokens=5_000_000,
+                output_tokens=53_200,
+                cache_read_input_tokens=4_678_400,
+                usage_complete=True,
+                cost_usd=None,
+                cost_unknown=True,
+            )
+        ],
+        [],
+        since=_SINCE,
+        until=_NOW,
+        window_label="24h",
+    )
+
+    exclusive = (1.4 * 5_000_000 + 4.4 * 53_200 + 0.26 * 4_678_400) / 1_000_000
+    assert snapshot.gateway_requests == 1
+    assert snapshot.unpriced_gateway_requests == 0
+    assert snapshot.gateway_spend_usd == pytest.approx(exclusive, abs=1e-6)
+
+
+def test_gateway_row_with_incomplete_usage_is_never_repriced() -> None:
+    """An aborted stream's partial counts are not a price; the row stays unknown."""
+    snapshot = build_coverage(
+        [
+            _row(
+                status="client-aborted",
+                status_code=499,
+                completed=False,
+                client_aborted=True,
+                usage_complete=False,
+                model_served="glm-5.3",
+                input_tokens=1_244,
+                cache_read_input_tokens=46_784,
+                cost_usd=None,
+                cost_unknown=True,
+            )
+        ],
+        [],
+        since=_SINCE,
+        until=_NOW,
+        window_label="24h",
+    )
+
+    assert snapshot.gateway_requests == 1
+    assert snapshot.unpriced_gateway_requests == 1
+    assert snapshot.gateway_spend_usd == 0.0

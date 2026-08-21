@@ -285,3 +285,26 @@ class TestGatewaySettings:
                     )
                 },
             )
+
+
+class TestAttribution:
+    """Optional issue/PR attribution rides the principal onto every ledger row."""
+
+    def test_mint_carries_issue_and_pr_numbers_into_identity(self) -> None:
+        store = VirtualKeyStore(max_ttl_seconds=600)
+
+        minted = store.mint(_request(issue_number=11464, pr_number=11500))
+        principal = store.resolve(minted.token).principal
+
+        assert (principal.issue_number, principal.pr_number) == (11464, 11500)
+
+    def test_attribution_defaults_to_none(self) -> None:
+        principal = _request().principal()
+
+        assert principal.issue_number is None
+        assert principal.pr_number is None
+
+    @pytest.mark.parametrize("field", ["issue_number", "pr_number"])
+    def test_attribution_rejects_non_positive_numbers(self, field: str) -> None:
+        with pytest.raises(ValidationError):
+            _request(**{field: 0})

@@ -89,6 +89,8 @@ class ModelRate:
         output_tokens: int,
         cache_write_tokens: int = 0,
         cache_read_tokens: int = 0,
+        *,
+        input_includes_cache: bool | None = None,
     ) -> float:
         """Return estimated cost in USD for the given token counts.
 
@@ -98,12 +100,30 @@ class ModelRate:
         instead of both at the full input rate and the cache rate (#10761).
         Anthropic/Claude (``input_includes_cache`` False) is billed as-is,
         because its ``input_tokens`` already excludes cache.
+
+        Inclusiveness is a property of the usage SHAPE, not the model id: the
+        same GLM model is inclusive on its OpenAI-compat one-shot face but
+        Anthropic-shaped (exclusive) through the gateway. The
+        ``input_includes_cache`` keyword overrides the table default per call;
+        ``None`` keeps it. Hard guard: under inclusive semantics
+        ``input_tokens`` can never be smaller than the cached counts, so such
+        counts are always billed as exclusive instead of clamping input to 0.
         """
-        billable_input = input_tokens
-        if self.input_includes_cache:
-            billable_input = max(
-                0, input_tokens - cache_read_tokens - cache_write_tokens
+        inclusive = (
+            self.input_includes_cache
+            if input_includes_cache is None
+            else input_includes_cache
+        )
+        cached_tokens = cache_read_tokens + cache_write_tokens
+        if inclusive and input_tokens < cached_tokens:
+            logger.debug(
+                "input_tokens=%d < cached tokens=%d is impossible under "
+                "cache-inclusive semantics; billing input as exclusive",
+                input_tokens,
+                cached_tokens,
             )
+            inclusive = False
+        billable_input = input_tokens - cached_tokens if inclusive else input_tokens
         return (
             self.input_cost_per_million * billable_input
             + self.output_cost_per_million * output_tokens
@@ -247,13 +267,23 @@ class ModelPricingTable:
         output_tokens: int,
         cache_write_tokens: int = 0,
         cache_read_tokens: int = 0,
+        *,
+        input_includes_cache: bool | None = None,
     ) -> float | None:
-        """Return estimated cost in USD, or None if model is unknown."""
+        """Return estimated cost in USD, or None if model is unknown.
+
+        ``input_includes_cache`` overrides the model's table default for this
+        call (see :meth:`ModelRate.estimate_cost`); ``None`` keeps it.
+        """
         rate = self.get_rate(model)
         if rate is None:
             return None
         return rate.estimate_cost(
-            input_tokens, output_tokens, cache_write_tokens, cache_read_tokens
+            input_tokens,
+            output_tokens,
+            cache_write_tokens,
+            cache_read_tokens,
+            input_includes_cache=input_includes_cache,
         )
 
 
