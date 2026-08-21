@@ -180,10 +180,9 @@ def test_fake_beads_sequential_deps_form_dag(n_tasks: int) -> None:
     """Creating N tasks with deps only on earlier tasks yields a DAG."""
     import asyncio
     from pathlib import Path
+    from tempfile import TemporaryDirectory
 
-    cwd = Path("/tmp/fake-beads-dag-test")
-
-    async def run() -> None:
+    async def run(cwd: Path) -> None:
         beads = FakeBeads()
         await beads.init(cwd)
         ids: list[str] = []
@@ -208,4 +207,5 @@ def test_fake_beads_sequential_deps_form_dag(n_tasks: int) -> None:
                 deps = beads._tasks[node].depends_on if node in beads._tasks else []
                 stack.extend(deps)
 
-    asyncio.run(run())
+    with TemporaryDirectory(prefix="fake-beads-dag-") as temp_dir:
+        asyncio.run(run(Path(temp_dir)))

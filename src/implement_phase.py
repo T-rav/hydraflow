@@ -1209,10 +1209,7 @@ class ImplementPhase:
                     )
                     changed = True
                     remaining.remove(task.id)
-        except Exception as exc:  # noqa: BLE001
-            from exception_classify import reraise_on_credit_or_bug  # noqa: PLC0415
-
-            reraise_on_credit_or_bug(exc)
+        except (KeyError, OSError, RuntimeError, ValueError) as exc:
             logger.warning(
                 "bead lifecycle completion failed in %s: %s",
                 wt_path,

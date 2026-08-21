@@ -523,6 +523,10 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
             "retry silently\n"
             f"- REFACTOR sub-agent may attempt up to **{max_fix}** fix cycles "
             "before reporting failure\n\n"
+            "**Example:** If a phase shows `Bead: #task-123`, launch its "
+            "RED, GREEN, and REFACTOR sub-agents as specified. Do not claim or "
+            "close that task; HydraFlow updates its JSONL lifecycle after the "
+            "verified run.\n\n"
         )
 
         phase_sections: list[str] = []
