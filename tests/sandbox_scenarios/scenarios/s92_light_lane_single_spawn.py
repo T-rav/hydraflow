@@ -75,14 +75,17 @@ def seed() -> MockWorldSeed:
             },
             "review": {_ISSUE: [{"verdict": "approve", "comments": []}]},
         },
-        # loops_enabled=None: every caretaker runs — including
-        # auto_agent_preflight, the lane's consumer — and the phase
-        # orchestrators run regardless (separate BGWorkerManager gate).
-        loops_enabled=None,
-        # Used by the Tier-1 parity check (single-shot run_pipeline; the
-        # harness PlanPhase has no issue cache, so the issue plans on the
-        # staged path there and merely has to show progress past triage).
-        cycles_to_run=4,
+        # Only the lane's consumer caretaker runs (the phase orchestrators —
+        # triage/plan/review — run regardless: separate BGWorkerManager gate,
+        # same recipe as s54). NOT loops_enabled=None: seeded FakeIssues carry
+        # a hard-coded 2026-01-01 updated_at, so an all-caretakers run lets
+        # StaleIssueLoop close #1 as stale before PlanPhase ever routes it
+        # (observed on the first run of this scenario: state showed
+        # stale_issue_closed=[1] and the lane was never reached).
+        loops_enabled=["auto_agent_preflight"],
+        # Used by the Tier-1 parity check (run_with_loops ticks the preflight
+        # loop against the seeded, still-unclaimed issue — no spawn).
+        cycles_to_run=2,
         # AutoAgentPreflightLoop has run_on_startup=False, so its first tick
         # lands one caretaker interval after boot; tick every 15s (not the
         # 60s default) so claim → spawn → review → merge completes well inside
