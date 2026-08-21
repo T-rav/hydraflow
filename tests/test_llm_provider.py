@@ -919,3 +919,33 @@ class TestUsageShapeStamp:
 
         assert recorded["cmd"][0] == "claude"
         assert recorded["usage_shape"] == "anthropic"
+
+    @pytest.mark.parametrize(
+        "cmd_head, expected_shape",
+        [("claude", "anthropic"), ("gateway", "anthropic"), ("zai", "openai_compat")],
+    )
+    def test_record_inference_telemetry_derives_shape_from_cmd_head(
+        self, tmp_path, cmd_head, expected_shape
+    ):
+        """Wrappers that omit ``usage_shape`` (e.g. contract_refresh) still
+        stamp it from the cmd head, which for them is the real producer."""
+        import json
+
+        from runner_utils import record_inference_telemetry
+        from tests.helpers import ConfigFactory
+
+        config = ConfigFactory.create(repo_root=tmp_path)
+
+        record_inference_telemetry(
+            config,
+            source="contract_refresh",
+            cmd=[cmd_head, "--model", "glm-5.2"],
+            prompt="ping",
+            transcript="pong",
+            duration_s=0.1,
+            success=True,
+        )
+
+        row = json.loads(config.cost_inferences_path.read_text().strip())
+        assert row["tool"] == cmd_head
+        assert row["usage_shape"] == expected_shape
