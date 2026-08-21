@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `845ba5a` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop (Fixes #11442) *(2026-08-21)*
+- `0cce8a7` — Fixes #11481: fold sixth site, and widen the class-closure guard to find it *(2026-08-21)*
 - `53b4905` — fix(workspace-gc): prove exact HEAD landed before cleanup (#11530) (#11530) *(2026-08-21)*
 - `b91594d` — Fix factory task graphs to per-worktree JSONL (#11527) (#11527) *(2026-08-21)*
 - `54795e2` — fix: inherit maintenance routing for shared caretakers (#11525) (#11525) *(2026-08-21)*

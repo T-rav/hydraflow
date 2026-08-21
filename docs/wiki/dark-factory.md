@@ -343,9 +343,11 @@ concentration baseline. The ledger lands at
 `finder_calibration.CALIBRATION_SUBDIR`; last row wins), needs at least 8
 complete ISO weeks of `inferences.jsonl` telemetry to pin from (`--windows`
 overrides the trailing-week count), and is read back by
-`token_drift.load_and_check_drift` on every `/token-report` request — no
-caretaker loop, no filing; this slice is read-only by design (the filing
-actuator is the deferred sibling issue). Verify a pin landed via
+`token_drift.load_and_check_drift` on every `/token-report` request and by
+`ErosionMetricsLoop` on each tick that saw new commits, which files one
+`hydraflow-find` issue per drifting source per ISO week (#11442,
+`erosion.token_drift_filing`); the engine itself stays read-only — no
+prompt pruning, no config change. Verify a pin landed via
 `curl localhost:<port>/api/diagnostics/token-report | jq .drift`.
 
 ## §5 — Verifying the contract is honored
