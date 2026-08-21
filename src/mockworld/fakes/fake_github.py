@@ -771,7 +771,9 @@ class FakeGitHub:
         number = self._pr_counter
         self._pr_counter += 1
         issue_number = getattr(issue, "id", getattr(issue, "number", 0))
-        url = f"https://github.com/test/repo/pull/{number}"
+        # Slug matches the recorded pr_create cassette (test-org/test-repo) —
+        # the contract replay normalizes the number but NOT the repo slug.
+        url = f"https://github.com/test-org/test-repo/pull/{number}"
         self._prs[number] = FakePR(
             number=number,
             issue_number=issue_number,

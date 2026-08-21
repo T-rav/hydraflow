@@ -69,7 +69,7 @@ enrichment without creating live GitHub issues.
 | s15_ci_monitor_main_branch_red | Main-branch CI failure is detected and surfaced |
 | s54_decompose_to_converge | Auto-agent-exhausted stall decomposes into children; children ship via the light lane |
 | s55_nested_decompose | Depth-2 nested decompose; leaf children ship via the light lane; root epic converges |
-| s92_light_lane_single_spawn | Complexity-2 issue → light lane → one scripted auto-agent spawn → PR → merged (no plan/implement, no human) |
+| s93_light_lane_single_spawn | Complexity-2 issue → light lane → one scripted auto-agent spawn → PR → merged (no plan/implement, no human) |
 | s_advisor_full_loop | Advisor loop runs through full review feedback flow |
 
 ## CI

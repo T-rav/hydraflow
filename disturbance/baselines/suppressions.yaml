@@ -188,7 +188,6 @@ entries:
   src/mockworld/fakes/fake_review_insight_store.py::noqa:PLC0415: 1
   src/mockworld/fakes/fake_subprocess_runner.py::noqa:A002: 2
   src/mockworld/fakes/fake_wiki_compiler.py::noqa:PLC0415: 1
-  src/mockworld/sandbox_main.py::noqa:PLC0415: 1
   src/mockworld/sandbox_main.py::type-ignore[attr-defined]: 7
   src/mockworld/sandbox_main.py::type-ignore[misc]: 4
   "src/models.py::noqa:F401\u2014usedinField(validation_alias=...)": 1

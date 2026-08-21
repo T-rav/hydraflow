@@ -1,4 +1,4 @@
-"""s92 — #11298 light lane, single spawn: a triage-scored simple issue skips
+"""s93 — #11298 light lane, single spawn: a triage-scored simple issue skips
 the staged plan/implement pipeline and takes ONE auto-agent spawn to a PR.
 
 Flow (the lane is ON by default since PR #11590):
@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from mockworld.seed import MockWorldSeed
 
-NAME = "s92_light_lane_single_spawn"
+NAME = "s93_light_lane_single_spawn"
 DESCRIPTION = (
     "Complexity-2 issue routes to the auto-agent light lane: one scripted "
     "spawn mints the PR, the claim releases to review, the PR merges — no "
