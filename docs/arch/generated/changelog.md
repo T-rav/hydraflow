@@ -18,6 +18,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `deed8f0` — test(workspace-gc): pin proof-before-delete source order; cite the arch and scenario pins in ADR-0069 *(2026-08-21)*
 - `82e997e` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof *(2026-08-21)*
 - `859a391` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports *(2026-08-21)*
+- `44d8967` — docs(readme,changelog): pinned-release install path is library + CLI; Unreleased note (refs #11580) *(2026-08-21)*
+- `69b157a` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports *(2026-08-21)*
+- `b3ff35a` — fix(implement): tier build timeout by complexity, route zero-commit attempts to diagnose (#11568) (#11585) (#11585) *(2026-08-21)*
+- `e25d020` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof (Fixes #11570, Fixes #11571) (#11582) (#11582) *(2026-08-21)*
 - `1b9e118` — fix(token-drift): load telemetry by window, not by row count (Fixes #11581) (#11586) (#11586) *(2026-08-21)*
 - `2e6e13d` — chore(release): bump to 1.0.0, CHANGELOG, pinned-install docs (refs #11520) (#11584) (#11584) *(2026-08-21)*
 - `28338b9` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop — one issue per source per ISO week (Fixes #11442) (#11578) (#11578) *(2026-08-21)*
