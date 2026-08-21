@@ -10,19 +10,19 @@
       "content_sha": "b0f446e129197ab91f7cff79d49e7efbb7fe457b03b551bee136493dae9f1bba"
     },
     "adr-falsifiability.md": {
-      "content_sha": "1d9ed6e225e4bbf4a8826bcaa8bd93722abe05973d3b54091f6d08727bf57b1f"
+      "content_sha": "a3a535e33b734f2b970ec63cdab139ad09e866a7e79e257664bb9ac518144681"
     },
     "adr_xref.md": {
-      "content_sha": "024b477db0719748065a445df3c00880fb8c7b4e609a2a440611aec79abe9700"
+      "content_sha": "51325a7afd79bc5b1a7d1090a694aa1958a0cae4387556a65264fb17e7a4da94"
     },
     "ai_system_inventory.md": {
-      "content_sha": "620e119bd8eb42a5a4a5a4aa6d3ec217a376cbbe19318474776188ab3cd3b197"
+      "content_sha": "98182cc57073c3dc1808acccbb33276255e4c65d63b03415e114186019ae63e5"
     },
     "changelog.md": {
-      "content_sha": "229432759e2f0e3533a400ffe2e5ed976eec4720d32b52a15208047d758ec082"
+      "content_sha": "335bf8e18e580f6fa67cff575d286516d9fff78402c0b3c3dc06cbf707b7b06b"
     },
     "coverage_matrix.md": {
-      "content_sha": "48e5647459cb4eb7064336cb58e4a1e56d6a93024c2a0f83f68516b1c465ab8b"
+      "content_sha": "43d824a30a8579b12e24a69507a350bf6dea0d3a439ed7d51ef88f47476c3928"
     },
     "events.md": {
       "content_sha": "4102b85691d1dc25c404bfb332aab10a8aa42c2f95ff43d6dac94513ff41aebe"
@@ -40,13 +40,13 @@
       "content_sha": "bf9ca55049491b54114c61afa02a2b263f31f801f0e898d9e9a8bcb72566bf53"
     },
     "mockworld.md": {
-      "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
+      "content_sha": "ddff9ec2f53a774c9060dcd601333de49ef089cda348aa4c2b56d957c2f4030a"
     },
     "modules.md": {
-      "content_sha": "b4b99c377c5b1c28a73c7c30b18da2b5cfdd4917fe39ba739cf855dabf401177"
+      "content_sha": "357929f200a4367b2b213a169e39367bde1f8b8e23e186f1ee5e3342b06f2ca9"
     },
     "ports.md": {
-      "content_sha": "a7a40fb281bf772c24e2192cb1dbf3ee5099cbc1fc51b2b7125bb609e377f30d"
+      "content_sha": "0c430115ec7533dfdcf277d04f457c39308b644ce0368e88e325bdad580600d8"
     },
     "traceability_matrix.md": {
       "content_sha": "df86c0747ce17ddad086a080af88c83afde30844363f3dcacab19e9c345fda5b"
@@ -55,11 +55,11 @@
       "content_sha": "461790aedeeb92e64745ecc069d3f718b787f6c7099023026f07e8eafa566de0"
     },
     "ubiquitous-language.md": {
-      "content_sha": "89ce40fb04279645fdf061547827f03193a842c42ccba09e38b874de7bc8c7c6"
+      "content_sha": "4a1b4891b4c5f45bdc2160c40cb8371ce2e322d8b1a4c3495a11c98dee4c4b99"
     },
     "vitals-methodology.md": {
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "6ee18ad4a0e3ba786413d06f4be2285aa0e1c31753c73654a59674bb6098c18c"
+  "content_sha": "59e455dafafed7c5b0711aa81d5a8658dce72a91958b397f6e2837646322bb08"
 }
