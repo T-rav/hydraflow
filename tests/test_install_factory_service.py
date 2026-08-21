@@ -98,6 +98,10 @@ class TestRenderPlist:
         assert "/usr/local/bin" in parts
         assert "/usr/bin" in parts
         assert "/bin" in parts
+        # launchd's own default PATH is /usr/bin:/bin:/usr/sbin:/sbin — the
+        # pin must be a superset of it, never a regression.
+        assert "/usr/sbin" in parts
+        assert "/sbin" in parts
         assert parts[-1] == str(tmp_path / "home" / ".local" / "bin")
         assert all(p.startswith("/") for p in parts)
 

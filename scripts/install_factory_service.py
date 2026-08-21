@@ -73,13 +73,17 @@ _THROTTLE_INTERVAL_SECONDS = 60
 
 
 def _service_path(home: Path) -> str:
-    """PATH for the job: launchd's default lacks uv/node/gh/docker."""
+    """PATH for the job: launchd's default (``/usr/bin:/bin:/usr/sbin:/sbin``)
+    lacks uv/node/gh/docker — prepend Homebrew and append the user-local bin,
+    keeping every default entry so nothing the default could find is lost."""
     return ":".join(
         [
             "/opt/homebrew/bin",
             "/usr/local/bin",
             "/usr/bin",
             "/bin",
+            "/usr/sbin",
+            "/sbin",
             str(home / ".local" / "bin"),
         ]
     )
