@@ -60,8 +60,15 @@ CACHE_WRITING_ACTIONS = ("actions/cache",)
 #: Inputs that turn a setup-* action into a cache writer.
 CACHE_ENABLING_INPUTS = ("cache", "enable-cache", "cache-dependency-path")
 #: setup-* actions whose caching defaults to ON — unlike setup-python/setup-node
-#: (opt-in via ``cache:``), these write a cache unless explicitly disabled.
-DEFAULT_CACHING_ACTIONS = ("actions/setup-go@",)
+#: (opt-in via ``cache:``), these write a cache unless explicitly disabled. Maps
+#: the action's ``uses:`` prefix to the ``with:`` input that turns caching off.
+DEFAULT_CACHING_ACTIONS = {
+    "actions/setup-go@": "cache",
+    # astral-sh/setup-uv's documented default is `enable-cache: auto`, which
+    # caches on GitHub-hosted runners (with a few excluded trigger events) —
+    # only an explicit `false` on its own key opts a step out.
+    "astral-sh/setup-uv@": "enable-cache",
+}
 
 
 def _load(path: Path) -> dict:
@@ -92,12 +99,17 @@ def _is_cache_writing(step: dict) -> bool:
     uses = str(step.get("uses", ""))
     if uses.startswith(CACHE_WRITING_ACTIONS):
         return True
-    if uses.startswith(DEFAULT_CACHING_ACTIONS):
-        # Authoritative for this prefix: presence of `cache:` alone isn't
-        # enough here (unlike the generic setup-* branch below) — the default
-        # is ON, so only an explicit `false` turns it off.
+    default_caching_prefix = next(
+        (prefix for prefix in DEFAULT_CACHING_ACTIONS if uses.startswith(prefix)),
+        None,
+    )
+    if default_caching_prefix is not None:
+        # Authoritative for this prefix: presence of the generic cache-enabling
+        # inputs below isn't the test — the default is ON, so only an explicit
+        # `false` on the action's own disable input turns it off.
         inputs = step.get("with") or {}
-        return str(inputs.get("cache", "true")).strip().lower() != "false"
+        disable_key = DEFAULT_CACHING_ACTIONS[default_caching_prefix]
+        return str(inputs.get(disable_key, "true")).strip().lower() != "false"
     if "setup-" in uses:
         inputs = step.get("with") or {}
         if any(key in inputs for key in CACHE_ENABLING_INPUTS):
@@ -391,6 +403,35 @@ class TestCacheWritingClassifier:
             if str(s.get("uses", "")).startswith("actions/setup-go@")
         ]
         assert offenders, "sanity: quality.yml must still use actions/setup-go"
+        assert all(_is_cache_writing(s) for s in offenders)
+
+    def test_setup_uv_is_cache_writing_with_no_explicit_input(self) -> None:
+        # astral-sh/setup-uv's documented default is `enable-cache: auto`,
+        # which caches on GitHub-hosted runners with no `with:` block at all —
+        # same fail-open shape as setup-go, under a different input name.
+        assert _is_cache_writing({"uses": "astral-sh/setup-uv@v4"})
+
+    def test_setup_uv_with_cache_explicitly_disabled_is_not_cache_writing(
+        self,
+    ) -> None:
+        assert not _is_cache_writing(
+            {"uses": "astral-sh/setup-uv@v4", "with": {"enable-cache": "false"}}
+        )
+
+    def test_real_fleet_setup_uv_usage_is_classified_as_cache_writing(self) -> None:
+        # Every astral-sh/setup-uv step in the fleet today declares
+        # `enable-cache` explicitly, so this pins that the classifier reads
+        # the action's own disable key (`enable-cache`) rather than the
+        # setup-go one (`cache`) it happens to share a branch with.
+        offenders = [
+            s
+            for path in sorted(WORKFLOW_DIR.glob("*.yml"))
+            for job in (_load(path).get("jobs") or {}).values()
+            if isinstance(job, dict)
+            for s in _steps(job)
+            if str(s.get("uses", "")).startswith("astral-sh/setup-uv@")
+        ]
+        assert offenders, "sanity: the fleet must still use astral-sh/setup-uv"
         assert all(_is_cache_writing(s) for s in offenders)
 
 
