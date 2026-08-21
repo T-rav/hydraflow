@@ -7,6 +7,16 @@ fires. The DecompositionCouncil is driven by scripted transcripts (via the
 ``_mockworld_fake_llm`` sentinel wired in sandbox_main): a direction proposing a
 2-child split, then a validation that APPROVEs. Expected: an auto-decomposed
 epic + its children exist, and issue #1 is NOT marked ``human-required``.
+
+#11298 (light lane ON by default): the decomposed children (#3, #4 — FakeGitHub
+numbers deterministically, the epic is #2) are triaged by the default fake
+(complexity 0 ≤ ``auto_agent_light_max_complexity``) and so route to the
+single-session auto-agent instead of the staged plan pipeline. Their spawns are
+scripted (``scripts["auto_agent"]``) to resolve — the sandbox's fake spawn seam
+mints each child's PR through the PRPort and releases it to review — because
+an UNSCRIPTED spawn is a deterministic crash under the air-gap (and, before the
+seam existed, a real in-container ``claude`` that wedged this scenario on CLI
+auth retries).
 """
 
 from __future__ import annotations
@@ -39,6 +49,10 @@ _VALIDATION = json.dumps(
         "reasoning": "Sound, non-overlapping split.",
     }
 )
+# Light-lane spawn outcome for each decomposed child (#11298): the seam mints
+# the PR on ``agent/auto-agent-<n>`` and the decision routes the child to
+# review. Keyed by the children's deterministic numbers (epic #2 → #3, #4).
+_LIGHT_RESOLVED = {"status": "resolved", "diagnosis": "Child shipped in one session."}
 
 
 def seed() -> MockWorldSeed:
@@ -55,8 +69,12 @@ def seed() -> MockWorldSeed:
         # Start the auto-agent already at its cap so the decompose terminal
         # fires on the first tick (default auto_agent_max_attempts = 3).
         auto_agent_attempts={1: 3},
-        # The council's two seam calls (direction then validation), scripted.
-        scripts={"decomposition": {1: [_DIRECTION, _VALIDATION]}},
+        # The council's two seam calls (direction then validation), scripted;
+        # plus the children's light-lane spawns (see module docstring).
+        scripts={
+            "decomposition": {1: [_DIRECTION, _VALIDATION]},
+            "auto_agent": {3: [_LIGHT_RESOLVED], 4: [_LIGHT_RESOLVED]},
+        },
         cycles_to_run=2,
     )
 

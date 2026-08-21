@@ -19,6 +19,20 @@
         "{\"epic_title\": \"Epic: split issue #1\", \"epic_body\": \"## Sub-issues\\n\\n- [ ] Child A\\n- [ ] Child B\", \"children\": [{\"title\": \"Child A: extract the parser\", \"body\": \"Split out parsing.\"}, {\"title\": \"Child B: extract the renderer\", \"body\": \"Split out rendering.\"}], \"rationale\": \"Two independently shippable layers.\"}",
         "{\"decision\": \"approve\", \"confidence\": \"high\", \"reasoning\": \"Sound, non-overlapping split.\"}"
       ]
+    },
+    "auto_agent": {
+      "3": [
+        {
+          "status": "resolved",
+          "diagnosis": "Child shipped in one session."
+        }
+      ],
+      "4": [
+        {
+          "status": "resolved",
+          "diagnosis": "Child shipped in one session."
+        }
+      ]
     }
   },
   "advisor_scripts": {},

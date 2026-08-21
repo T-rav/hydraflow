@@ -67,11 +67,14 @@ enrichment without creating live GitHub issues.
 | s09_dependabot_auto_merge | Dependabot PR + green CI → auto-merged |
 | s12_trust_fleet_three_repos_independent | 3 repos process independently |
 | s15_ci_monitor_main_branch_red | Main-branch CI failure is detected and surfaced |
+| s54_decompose_to_converge | Auto-agent-exhausted stall decomposes into children; children ship via the light lane |
+| s55_nested_decompose | Depth-2 nested decompose; leaf children ship via the light lane; root epic converges |
+| s92_light_lane_single_spawn | Complexity-2 issue → light lane → one scripted auto-agent spawn → PR → merged (no plan/implement, no human) |
 | s_advisor_full_loop | Advisor loop runs through full review feedback flow |
 
 ## CI
 
 The sandbox-{fast,full,nightly} CI jobs run scenarios at 3 cadences:
-- **fast** (PR→staging): s01, s06 only
+- **fast** (PR→staging): s01, s06, s53, s54, s55, s58, s59, s91 (the list lives in `.github/workflows/ci.yml`)
 - **full** (rc/* promotion PR): all scenarios, with auto-fix label routing on failure
 - **nightly** (03:00 UTC schedule): all scenarios, opens hydraflow-find issue on failure
