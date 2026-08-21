@@ -18,6 +18,7 @@ capabilities = ["ghas"]
 [branch.main]
 allowed_merge_methods = ["merge"]
 required_approving_review_count = 0
+require_extra_approval_for_unattributed_changes = true
 code_quality_severity = "errors"
 [[branch.main.code_scanning]]
 tool = "CodeQL"
@@ -27,6 +28,7 @@ alerts_threshold = "errors"
 [branch.staging]
 allowed_merge_methods = ["squash", "merge"]
 required_approving_review_count = 0
+require_extra_approval_for_unattributed_changes = true
 
 # --- core gates (required on main) ---
 [[gate]]

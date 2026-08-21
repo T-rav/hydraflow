@@ -38,6 +38,11 @@ class BranchEnvelope:
     name: str
     allowed_merge_methods: list[str]
     required_approving_review_count: int = 0
+    # GitHub's newer pull_request rule parameter (2026): when true, a PR whose
+    # commits are not attributed to a GitHub user needs an extra approval.
+    # GitHub returns it on every live ruleset, so a contract that does not
+    # declare it reads as permanent drift (#11512). Default mirrors GitHub's.
+    require_extra_approval_for_unattributed_changes: bool = True
     code_quality_severity: str | None = None
     code_scanning: list[CodeScanningTool] = field(default_factory=list)
 
@@ -82,6 +87,9 @@ def load_gates(path: Path) -> Contract:
             name=bname,
             allowed_merge_methods=list(b["allowed_merge_methods"]),
             required_approving_review_count=b.get("required_approving_review_count", 0),
+            require_extra_approval_for_unattributed_changes=bool(
+                b.get("require_extra_approval_for_unattributed_changes", True)
+            ),
             code_quality_severity=b.get("code_quality_severity"),
             code_scanning=[
                 CodeScanningTool(

@@ -44,3 +44,23 @@ def test_branch_envelopes_present() -> None:
     assert contract.branches["staging"].allowed_merge_methods == ["squash", "merge"]
     assert contract.branches["main"].code_quality_severity == "errors"
     assert contract.branches["staging"].code_quality_severity is None
+
+
+def test_unattributed_changes_approval_defaults_true_and_parses_explicit(
+    tmp_path,
+) -> None:
+    toml = tmp_path / "gates.toml"
+    toml.write_text(
+        '[branch.main]\nallowed_merge_methods = ["merge"]\n'
+        '[branch.staging]\nallowed_merge_methods = ["squash"]\n'
+        "require_extra_approval_for_unattributed_changes = false\n"
+    )
+    contract = load_gates(toml)
+    assert (
+        contract.branches["main"].require_extra_approval_for_unattributed_changes
+        is True
+    )
+    assert (
+        contract.branches["staging"].require_extra_approval_for_unattributed_changes
+        is False
+    )
