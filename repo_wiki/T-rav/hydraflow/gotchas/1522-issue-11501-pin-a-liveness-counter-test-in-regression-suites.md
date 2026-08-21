@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11501
 source_phase: plan
 created_at: 2026-08-21T01:19:24.541898+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Pin a liveness counter-test in regression suites
