@@ -52,10 +52,26 @@ os.environ.pop("SENTRY_AUTH_TOKEN", None)
 _SANDBOX_SEEDS_DIR = Path(__file__).resolve().parent / "sandbox_scenarios" / "seeds"
 
 
-def _sandbox_seed_mtimes() -> dict[str, int]:
-    if not _SANDBOX_SEEDS_DIR.is_dir():
+def _sandbox_seed_mtimes(seeds_dir: Path = _SANDBOX_SEEDS_DIR) -> dict[str, int]:
+    """Snapshot ``{name: st_mtime_ns}`` for every ``*.json`` seed in *seeds_dir*.
+
+    #11552: ``glob()`` and ``stat()`` are two syscalls, and under
+    ``-n auto --forked`` another worker can unlink a TRANSIENT seed between
+    them (``regression_issue_10094.py`` materializes and removes the seedless
+    ``s75_worker_stall_escalation.json`` + ``scenario.json`` in this very dir).
+    A path that vanished after discovery is not a committed seed, so it cannot
+    be a #10094 violation — skip ONLY that path. Any other ``stat()`` failure
+    still propagates.
+    """
+    if not seeds_dir.is_dir():
         return {}
-    return {p.name: p.stat().st_mtime_ns for p in _SANDBOX_SEEDS_DIR.glob("*.json")}
+    mtimes: dict[str, int] = {}
+    for path in seeds_dir.glob("*.json"):
+        try:
+            mtimes[path.name] = path.stat().st_mtime_ns
+        except FileNotFoundError:
+            continue
+    return mtimes
 
 
 # #10094 + #11016: snapshot per TEST (setup -> teardown), not once at import.
@@ -74,7 +90,9 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
     item.stash[_SEED_MTIMES_KEY] = _sandbox_seed_mtimes()
 
 
-def _content_dirty_seeds(names: list[str]) -> list[str]:
+def _content_dirty_seeds(
+    names: list[str], *, seeds_dir: Path = _SANDBOX_SEEDS_DIR
+) -> list[str]:
     """Of *names*, those whose CONTENT actually differs from git (index/HEAD).
 
     A re-serialization that writes identical bytes bumps mtime but leaves git
@@ -87,8 +105,8 @@ def _content_dirty_seeds(names: list[str]) -> list[str]:
         return []
     try:
         out = subprocess.run(
-            ["git", "status", "--porcelain", "--", str(_SANDBOX_SEEDS_DIR)],
-            cwd=_SANDBOX_SEEDS_DIR.parent,
+            ["git", "status", "--porcelain", "--", str(seeds_dir)],
+            cwd=seeds_dir.parent,
             capture_output=True,
             text=True,
             timeout=30,
@@ -100,6 +118,22 @@ def _content_dirty_seeds(names: list[str]) -> list[str]:
         line[3:].strip().rsplit("/", 1)[-1] for line in out.splitlines() if line.strip()
     }
     return sorted(n for n in names if n in dirty)
+
+
+def _mutated_committed_seeds(
+    before: dict[str, int], *, seeds_dir: Path = _SANDBOX_SEEDS_DIR
+) -> list[str]:
+    """Committed seeds whose mtime moved since *before* AND whose content is dirty.
+
+    Only a real CONTENT change is a #10094 violation; a bare mtime bump from
+    re-serializing identical bytes leaves git clean and is harmless (and under
+    --forked was blaming innocents). Confirm content drift via git first.
+    """
+    current = _sandbox_seed_mtimes(seeds_dir)
+    touched = sorted(
+        name for name, mtime in current.items() if before.get(name) != mtime
+    )
+    return _content_dirty_seeds(touched, seeds_dir=seeds_dir)
 
 
 def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> None:  # noqa: ARG001 — nextitem required by pytest hook signature
@@ -131,14 +165,7 @@ def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> 
     before = item.stash.get(_SEED_MTIMES_KEY, None)
     if before is None:
         return
-    current_seed_mtimes = _sandbox_seed_mtimes()
-    touched = sorted(
-        name for name, mtime in current_seed_mtimes.items() if before.get(name) != mtime
-    )
-    # Only a real CONTENT change is a #10094 violation; a bare mtime bump from
-    # re-serializing identical bytes leaves git clean and is harmless (and under
-    # --forked was blaming innocents). Confirm content drift via git first.
-    mutated_seeds = _content_dirty_seeds(touched)
+    mutated_seeds = _mutated_committed_seeds(before)
     if mutated_seeds:
         pytest.fail(
             f"Sandbox-seed tree-clean violation: test {item.nodeid} mutated "
@@ -313,6 +340,15 @@ def setup_test_environment():
     ``build_credentials()``'s ``gh_token`` chain, behind the ``GH_TOKEN``
     seeded below — but a test that deletes ``GH_TOKEN`` to probe that
     fallback path must not fall through to the host's real token.
+
+    ``GITHUB_OUTPUT`` is scrubbed as well (#11562): GitHub Actions always sets
+    it, and the CLI scripts under ``scripts/`` default ``--github-output`` /
+    ``--out`` to it. A test that calls such a ``main()`` in-process without the
+    flag would otherwise write the verdict into the runner's REAL step-output
+    file instead of stdout — green on every laptop, red only on CI (PR #11560),
+    and polluting the job's outputs. Tests that want the variable set pass
+    ``env=`` to a subprocess explicitly. ``tests/architecture/
+    test_github_output_hermetic.py`` pins this scrub.
     """
     # Imported lazily (not at module scope) to keep runner_utils' heavier
     # import chain (execution/subprocess_util/process_group/...) out of
@@ -352,6 +388,8 @@ def setup_test_environment():
             "GIT_AUTHOR_EMAIL",
             "GIT_COMMITTER_NAME",
             "GIT_COMMITTER_EMAIL",
+            # Actions step-output file; see the docstring (#11562).
+            "GITHUB_OUTPUT",
         }
     )
     saved_env = {key: os.environ.pop(key) for key in scrub_keys if key in os.environ}
