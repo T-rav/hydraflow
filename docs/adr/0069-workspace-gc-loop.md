@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-05-19
-**Enforced by:** tests/test_workspace_gc_loop.py, tests/regressions/test_workspace_gc_landed_safety.py, tests/regressions/test_issue_11503.py, tests/regressions/test_issue_11507.py
+**Enforced by:** tests/test_workspace_gc_loop.py, tests/regressions/test_workspace_gc_landed_safety.py, tests/regressions/test_issue_11503.py, tests/regressions/test_issue_11507.py, tests/regressions/test_issue_11570.py, tests/regressions/test_issue_11571.py
 
 ## Context
 
@@ -20,7 +20,7 @@ Introduce `WorkspaceGCLoop`, a `BaseBackgroundLoop` that runs a five-phase GC pa
 
 1. **Phase 1 — tracked workspaces:** for each entry in `StateTracker.get_active_workspaces()`, require issue-policy safety plus the shared clean-and-landed predicate before removing state and calling `WorkspacePort.destroy()`.
 2. **Phase 2 — orphaned disk directories:** scan the worktree root for directories that have no `StateTracker` entry, then apply the same issue-policy and landed checks before destruction.
-3. **Phase 3 — orphaned remote branches:** list remote `issue/*` branches with no open PR and no `StateTracker` entry.
+3. **Phase 3 — orphaned local branches:** list local branches in every issue namespace; leave alone any whose issue is tracked, active, in the pipeline, in a retry window, or labelled, and any checked out in a registered worktree; force-delete the rest only after the same landed predicate proves the branch **tip** landed on `origin/<base>`.
 4. **Phase 4 — stale branch state:** prune branch-state entries only after their issue is safe and no worktree remains.
 5. **Phase 5 — all-root worktrees:** enumerate authoritative `git worktree list --porcelain` entries under configured roots and apply the same landed predicate before direct worktree removal.
 
@@ -79,6 +79,32 @@ Kill-switch: `enabled_cb("workspace_gc")` AND `config.workspace_gc_loop_enabled`
   pipeline, retry-window, minimum-age, and stop gates make a concurrent writer
   in this interval abnormal. Eliminating the interval entirely requires a
   shared workspace ownership lock spanning every writer and GC implementation.
+- **Branch-tip proof contract (#11571):** phase 3 is under the same proof as
+  every worktree destroy. The ladder's rungs (ancestry, squash-tree equality,
+  exact-HEAD merged PR into the configured base) are one shared generator with
+  two identity front-ends — the worktree's clean `HEAD` for phases 1, 2 and 5,
+  and `rev-parse --verify refs/heads/<branch>^{commit}` for phase 3 — and one
+  driver in the loop, so there is exactly one place a proof can be wrong. The
+  tip is re-read after positive proof before `git branch -D`, mirroring the
+  worktree status re-read. Phase 3's active/pipeline/retry/label guards remain
+  the liveness gate for in-flight sessions; it deliberately does not add
+  `_is_safe_to_gc`'s per-branch issue-state reads, because a tip that provably
+  landed cannot lose work whatever the issue state, and a tip that did not is
+  never deleted. A branch checked out in any registered worktree — prunable
+  (directory gone) and locked registrations included, exactly the set `git
+  branch -D` refuses — is the all-root sweep's to reap and is skipped at
+  DEBUG, not surfaced as a per-cycle error.
+- **Gone-versus-unavailable contract (#11570):** a tracked entry whose destroy
+  target has nothing at it (not even a dangling symlink) while
+  `workspace_base/<repo_slug>` is a present directory is pruned from
+  `active_workspaces` with nothing destroyed and no branch touched — there is
+  nothing to destroy and nothing to lose, and leaving it made phases 3–4 skip
+  that issue forever. The branch-state entry is left to phase 4 and the branch
+  ref to phase 3, each under its own guard. A missing workspace root is the
+  transient-mount shape (#6413) and stays fail-closed, as does every other
+  preflight failure (present-but-unlanded, non-git attributed directory,
+  identity mismatch): the prune keys on the path being absent, never on the
+  proof failing.
 
 ## Alternatives considered
 

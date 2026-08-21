@@ -183,14 +183,22 @@ class TestActiveAutoAgentWorktreePreserved:
             WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
         )  # type: ignore[method-assign]
 
+        async def fake_git(*cmd: str, **_kw: object) -> str:
+            if cmd[:3] == ("git", "branch", "--list"):
+                return "  agent/auto-agent-89\n"
+            if cmd[:3] == ("git", "rev-parse", "--verify"):
+                return "a" * 40  # the branch tip, ancestral to origin/<base> below
+            if cmd[:2] == ("git", "rev-list"):
+                return "0"  # #11571: phase 3 deletes only a provably landed tip
+            return ""
+
         with patch(
             "workspace_gc_loop.run_subprocess", new_callable=AsyncMock
         ) as run_sub:
-            run_sub.side_effect = ["  agent/auto-agent-89\n", ""]
+            run_sub.side_effect = fake_git
             count = await loop._collect_orphaned_branches()
 
         assert count == 1
-        assert run_sub.await_count == 2  # list + delete
         run_sub.assert_any_call(
             "git",
             "branch",
