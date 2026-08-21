@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-
-SMOKE_SUITE_SIZE = 8
+import atexit
+import os
 import shutil
+import tempfile
+import threading
 from collections.abc import Callable, Coroutine
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -15,11 +17,43 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from config import Credentials
 
+SMOKE_SUITE_SIZE = 8
+
 if TYPE_CHECKING:
     from events import HydraFlowEvent
     from models import QueueStats, Task
     from state import StateTracker
     from workspace import WorkspaceManager
+
+
+_CONFIG_FACTORY_TEMP_ROOT_PREFIX = "hydraflow-test-repo-"
+_CONFIG_FACTORY_TEMP_ROOTS: dict[int, set[Path]] = {}
+_CONFIG_FACTORY_TEMP_ROOTS_LOCK = threading.Lock()
+
+
+def _new_config_factory_temp_root() -> Path:
+    """Return a unique, process-owned root for an implicit test config."""
+
+    owner_pid = os.getpid()
+    root = Path(
+        tempfile.mkdtemp(prefix=f"{_CONFIG_FACTORY_TEMP_ROOT_PREFIX}{owner_pid}-")
+    ).resolve()
+    with _CONFIG_FACTORY_TEMP_ROOTS_LOCK:
+        _CONFIG_FACTORY_TEMP_ROOTS.setdefault(owner_pid, set()).add(root)
+    return root
+
+
+def _cleanup_owned_config_factory_temp_roots() -> None:
+    """Remove only implicit config roots created by the current process."""
+
+    owner_pid = os.getpid()
+    with _CONFIG_FACTORY_TEMP_ROOTS_LOCK:
+        roots = _CONFIG_FACTORY_TEMP_ROOTS.pop(owner_pid, set())
+    for root in roots:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+atexit.register(_cleanup_owned_config_factory_temp_roots)
 
 
 @dataclass
@@ -474,7 +508,12 @@ class ConfigFactory:
         """Create a HydraFlowConfig with test-friendly defaults."""
         from config import HydraFlowConfig
 
-        root = repo_root or Path("/tmp/hydraflow-test-repo")
+        if repo_root is None:
+            root = _new_config_factory_temp_root()
+            default_workspace_base = root / "test-worktrees"
+        else:
+            root = repo_root
+            default_workspace_base = root.parent / "test-worktrees"
         with ExitStack() as stack:
             if execution_mode == "docker" and shutil.which("docker") is None:
                 stack.enter_context(
@@ -584,7 +623,7 @@ class ConfigFactory:
                 max_issue_body_chars=max_issue_body_chars,
                 max_review_diff_chars=max_review_diff_chars,
                 repo_root=root,
-                workspace_base=workspace_base or root.parent / "test-worktrees",
+                workspace_base=workspace_base or default_workspace_base,
                 state_file=state_file or root / ".hydraflow-state.json",
                 event_log_path=event_log_path or root / ".hydraflow-events.jsonl",
                 memory_compaction_model=memory_compaction_model,
@@ -1073,8 +1112,15 @@ class PipelineHarness:
         return path
 
     def seed_issue(self, task, stage: str = "find") -> None:
-        """Place *task* in the requested queue stage."""
+        """Place *task* in the requested queue stage.
+
+        Direct seeding is the harness equivalent of a successful initial
+        ``IssueStore.refresh()``.  Mark the store authoritative so dashboard
+        scenarios that expose this harness through ``/api/pipeline`` do not
+        remain in the production boot-window state forever (#11279).
+        """
         self.store.enqueue_transition(task, stage)
+        self.store._has_completed_initial_refresh = True  # noqa: SLF001
 
     async def run_full_lifecycle(
         self,

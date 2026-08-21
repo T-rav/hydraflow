@@ -457,6 +457,11 @@ class MockWorld:
             from issue_store import IssueStore  # noqa: PLC0415
 
             issue_store = IssueStore(cfg, AsyncMock(), bus)
+            # This harness seeds pipeline state directly (mark_active, etc.)
+            # rather than driving a real start()/refresh() boot sequence, so
+            # mark it ready immediately — consistent with running=True below
+            # and matching production's post-boot steady state (#11279).
+            issue_store._has_completed_initial_refresh = True  # noqa: SLF001
             orchestrator = _HarnessOrchestratorShim(SimpleNamespace(store=issue_store))
             running = True
 

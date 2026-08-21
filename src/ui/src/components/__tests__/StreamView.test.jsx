@@ -62,6 +62,28 @@ const basePipeIssue = {
   url: 'https://github.com/test/42',
 }
 
+describe('pipeline readiness badge (#11279)', () => {
+  it('shows resyncing while the latest pipeline snapshot is not authoritative', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineSnapshotReady: false,
+    }))
+
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.getByTestId('pipeline-resyncing-badge')).toHaveTextContent('resyncing')
+  })
+
+  it('hides resyncing after an authoritative pipeline snapshot', () => {
+    mockUseHydraFlow.mockReturnValue(defaultHydraFlowContext({
+      pipelineSnapshotReady: true,
+    }))
+
+    render(<StreamView {...defaultProps} />)
+
+    expect(screen.queryByTestId('pipeline-resyncing-badge')).not.toBeInTheDocument()
+  })
+})
+
 describe('HITL issues are rendered in the workstream (WS-RT)', () => {
   it('renders a card for an issue escalated to the hitl bucket', () => {
     // Before the fix PIPELINE_STAGES had no 'hitl' entry, so StreamView's
