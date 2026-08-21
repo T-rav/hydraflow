@@ -78,4 +78,4 @@ async def test_active_implement_child_is_not_replanned(mock_world) -> None:
         plans[11464],
         len(remaining_replans),
         store.get_active_issues(),
-    ) == ("Initial #11464 plan", 1, {11464: "implement"})
+    ) == ("Initial #11464 plan", 1, {11464: "ready"})

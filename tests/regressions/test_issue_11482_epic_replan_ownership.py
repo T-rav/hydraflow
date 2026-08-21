@@ -51,7 +51,9 @@ async def test_gap_replan_preserves_active_implement_owner(config) -> None:
 
     await phase.plan_issues()
 
+    # The store canonicalizes the phase name to its stage (#11551): the
+    # implement owner is preserved and shows under READY.
     assert (
         planners.plan.await_count,
         store.get_active_issues(),
-    ) == (2, {11464: "implement"})
+    ) == (2, {11464: "ready"})
