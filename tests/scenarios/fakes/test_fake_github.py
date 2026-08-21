@@ -66,49 +66,29 @@ class TestFakeGitHubPRs:
 class TestFakeGitHubBranchPrState:
     """Exact branch HEAD identity guards destructive GC reads (#11502)."""
 
-    async def test_merged_exact_head_reports_merged(self) -> None:
-        gh = FakeGitHub()
-        gh.add_pr(
-            number=1,
-            issue_number=1,
-            branch="fix/reused",
-            head_sha="a" * 40,
-            merged=True,
-        )
-
-        state = await gh.get_branch_pr_state("fix/reused", "a" * 40, "main")
-
-        assert state == "MERGED"
-
-    async def test_sha256_merged_exact_head_reports_merged(self) -> None:
-        gh = FakeGitHub()
-        gh.add_pr(
-            number=1,
-            issue_number=1,
-            branch="fix/reused",
-            head_sha="a" * 64,
-            merged=True,
-        )
-
-        state = await gh.get_branch_pr_state("fix/reused", "a" * 64, "main")
-
-        assert state == "MERGED"
-
-    async def test_old_merged_pr_on_reused_branch_does_not_match_new_head(
-        self,
+    @pytest.mark.parametrize(
+        ("stored_sha", "queried_sha", "expected"),
+        [
+            pytest.param("a" * 40, "a" * 40, "MERGED", id="sha1-merged"),
+            pytest.param("a" * 64, "a" * 64, "MERGED", id="sha256-merged"),
+            pytest.param("a" * 40, "b" * 40, "NONE", id="reused-branch"),
+        ],
+    )
+    async def test_exact_head_state(
+        self, stored_sha: str, queried_sha: str, expected: str
     ) -> None:
         gh = FakeGitHub()
         gh.add_pr(
             number=1,
             issue_number=1,
             branch="fix/reused",
-            head_sha="a" * 40,
+            head_sha=stored_sha,
             merged=True,
         )
 
-        state = await gh.get_branch_pr_state("fix/reused", "b" * 40, "main")
+        state = await gh.get_branch_pr_state("fix/reused", queried_sha, "main")
 
-        assert state == "NONE"
+        assert state == expected
 
     async def test_multiple_exact_head_rows_fail_closed(self) -> None:
         gh = FakeGitHub()

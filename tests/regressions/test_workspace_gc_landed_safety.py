@@ -11,6 +11,13 @@ import pytest
 from mockworld.fakes.fake_github import FakeGitHub
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
+from workspace_gc_landed_safety import (
+    GitProbe,
+    PRProbe,
+    active_workspace_snapshot,
+    landed_proof,
+    parse_issue_from_branch,
+)
 from workspace_gc_loop import WorkspaceGCLoop
 
 _BRANCH = "fix/reused-workspace-gc"
@@ -133,6 +140,47 @@ def _loop(tmp_path: Path, github: FakeGitHub) -> WorkspaceGCLoop:
         deps=deps.loop_deps,
         is_in_pipeline_cb=lambda _issue: False,
     )
+
+
+def test_pure_landed_proof_requests_exact_git_and_pr_identity(tmp_path: Path) -> None:
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    (worktree / ".git").write_text("gitdir: fake\n")
+    head_sha = "a" * 40
+    status = f"# branch.oid {head_sha}\n# branch.head fix/landed-42\n"
+    proof = landed_proof(
+        worktree,
+        base_branch="staging",
+        expected_branch="fix/landed-42",
+        expected_issue=42,
+        issue_from_branch=parse_issue_from_branch,
+    )
+
+    assert next(proof) == GitProbe(("rev-parse", "--show-toplevel"))
+    assert proof.send(str(worktree.resolve())) == GitProbe(
+        ("status", "--porcelain=v2", "--branch")
+    )
+    assert proof.send(status) == GitProbe(
+        ("rev-list", "--count", f"origin/staging..{head_sha}")
+    )
+    assert proof.send("2\n") == GitProbe(
+        ("diff", "--name-only", "origin/staging", head_sha)
+    )
+    assert proof.send("changed.py\n") == PRProbe("fix/landed-42", head_sha, "staging")
+    assert proof.send("MERGED") == GitProbe(("status", "--porcelain=v2", "--branch"))
+    with pytest.raises(StopIteration) as completed:
+        proof.send(status)
+    assert completed.value.value is True
+
+
+def test_pure_ownership_snapshot_rejects_ambiguous_paths(tmp_path: Path) -> None:
+    owned = tmp_path / "owned"
+
+    snapshot = active_workspace_snapshot({42: str(owned), 99: str(owned)})
+
+    assert snapshot is not None
+    assert snapshot.path_owners == {owned.resolve(): {42, 99}}
+    assert active_workspace_snapshot({42: "relative/worktree"}) is None
 
 
 @pytest.mark.asyncio

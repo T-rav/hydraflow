@@ -4,18 +4,34 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import re
-import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
-from config import AUTO_AGENT_BRANCH_PREFIX, Credentials, HydraFlowConfig
+from config import Credentials, HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
 from issue_state import issue_state_is_resolved
 from state import StateTracker
 from subprocess_util import run_subprocess
+from workspace_gc_landed_safety import (
+    ActiveWorkspaceSnapshot as _ActiveWorkspaceSnapshot,
+)
+from workspace_gc_landed_safety import (
+    GitProbe,
+    PRProbe,
+    active_workspace_snapshot,
+    canonical_active_path_owners,
+    landed_proof,
+    parse_git_worktrees,
+    parse_issue_from_branch,
+    path_within,
+    tracked_path_matches_destroy_target,
+    worktree_too_new,
+)
+from workspace_gc_landed_safety import (
+    WorktreeEntry as _WorktreeEntry,
+)
 
 if TYPE_CHECKING:
     from ports import PRPort, WorkspacePort
@@ -24,29 +40,17 @@ logger = logging.getLogger("hydraflow.workspace_gc_loop")
 
 # Maximum worktrees to GC per cycle to avoid long-running passes.
 _MAX_GC_PER_CYCLE = 20
-_GIT_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
-class _WorktreeEntry(NamedTuple):
-    """A single worktree parsed from ``git worktree list --porcelain``."""
-
-    path: Path
-    branch: str | None  # short name (``refs/heads/`` stripped); None if detached
-
-
-class _ActiveWorkspaceSnapshot(NamedTuple):
-    """Lossless, path-aware active-workspace state for one GC cycle."""
-
-    workspaces: dict[int, str]
-    path_owners: dict[Path, set[int]]
-
-
-def _path_within(path: Path, root: Path) -> bool:
-    """True when *path* is *root* itself or nested under it."""
+async def _read_pr_probe(prs: PRPort, probe: PRProbe) -> str | None:
+    """Read one proof-bound PR state; transient failures fail closed."""
     try:
-        return path == root or path.is_relative_to(root)
-    except (OSError, ValueError):  # pragma: no cover - defensive
-        return False
+        return await prs.get_branch_pr_state(
+            probe.branch, probe.head_sha, probe.base_branch
+        )
+    except (RuntimeError, OSError) as exc:
+        reraise_on_credit_or_bug(exc)
+        return None
 
 
 class WorkspaceGCLoop(BaseBackgroundLoop):
@@ -87,7 +91,9 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         errors = 0
 
         # Phase 1: GC workspaces tracked in state
-        active_snapshot = self._active_workspace_snapshot()
+        active_snapshot = active_workspace_snapshot(
+            self._state.get_active_workspaces_validated()
+        )
         if active_snapshot is None:
             logger.warning(
                 "GC: active workspace state identity is malformed or ambiguous — skipping cycle"
@@ -102,7 +108,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 if await self._is_safe_to_gc(issue_number):
                     destroy_path = self._config.workspace_path_for_issue(issue_number)
                     recorded_path = Path(active_workspaces[issue_number])
-                    if not self._tracked_path_matches_destroy_target(
+                    if not tracked_path_matches_destroy_target(
                         recorded_path, destroy_path
                     ):
                         skipped += 1
@@ -346,7 +352,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
     ) -> int:
         """Scan filesystem for orphaned issue-* dirs not tracked in state."""
         if active_path_owners is None:
-            active_path_owners = self._canonical_active_path_owners(tracked)
+            active_path_owners = canonical_active_path_owners(tracked)
             if active_path_owners is None:
                 logger.warning(
                     "GC: active workspace path identity is ambiguous — skipping orphan scan"
@@ -423,33 +429,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 )
         return collected
 
-    # Real branch namespaces the pipeline and sub-agents create. Matches
-    # ``issue-<N>`` / ``agent/issue-<N>``, the trailing ``-<N>`` suffix on
-    # ``fix|feat|refactor|chore|test|docs/<slug>-<N>`` branches (#10698), and
-    # Auto-Agent (preflight) session branches, ``agent/auto-agent-<N>``
-    # (#11182) — minted by ``AutoAgentPreflightLoop._resolve_worktree`` via
-    # ``HydraFlowConfig.auto_agent_branch_for_issue``.
-    _ISSUE_BRANCH_RES: tuple[re.Pattern[str], ...] = (
-        re.compile(r"^(?:agent/)?issue-(\d+)$"),
-        re.compile(r"^(?:fix|feat|refactor|chore|test|docs)/.*-(\d+)$"),
-        re.compile(rf"^{re.escape(AUTO_AGENT_BRANCH_PREFIX)}(\d+)$"),
-    )
-
-    @classmethod
-    def _parse_issue_from_branch(cls, branch: str | None) -> int | None:
-        """Resolve the issue number a branch belongs to across all namespaces.
-
-        Returns None (fail-closed) when the branch cannot be attributed to an
-        issue — the caller must NOT guess an issue number for such branches.
-        """
-        if not branch:
-            return None
-        name = branch.strip().removeprefix("refs/heads/")
-        for pattern in cls._ISSUE_BRANCH_RES:
-            match = pattern.match(name)
-            if match:
-                return int(match.group(1))
-        return None
+    _parse_issue_from_branch = staticmethod(parse_issue_from_branch)
 
     async def _collect_orphaned_branches(self, budget: int = _MAX_GC_PER_CYCLE) -> int:
         """Delete local orphaned branches with no corresponding worktree.
@@ -584,7 +564,9 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             for root in self._config.worktree_gc_root_paths()
         ]
         if active_snapshot is None:
-            active_snapshot = self._active_workspace_snapshot()
+            active_snapshot = active_workspace_snapshot(
+                self._state.get_active_workspaces_validated()
+            )
         if active_snapshot is None:
             logger.warning(
                 "GC: active workspace state identity is malformed or ambiguous — skipping all-root sweep"
@@ -602,7 +584,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             if path == repo_root:
                 continue
             # Blast-radius gate: only sweep configured/known factory roots.
-            if not any(_path_within(path, root) for root in roots):
+            if not any(path_within(path, root) for root in roots):
                 continue
             # State owns paths independently of whichever branch happens to be
             # checked out there. Branch parsing must never relabel a live path
@@ -637,51 +619,6 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 )
         return collected
 
-    @staticmethod
-    def _canonical_active_path_owners(
-        active_workspaces: dict[int, str],
-    ) -> dict[Path, set[int]] | None:
-        """Reverse active state into canonical path → owning issue IDs.
-
-        A malformed state path makes ownership unknowable, so the whole cycle
-        stops before any destructive phase rather than risk treating an owned
-        path as an orphan. Multiple issue IDs may conservatively own one path.
-        """
-        owners: dict[Path, set[int]] = {}
-        try:
-            for issue_number, raw_path in active_workspaces.items():
-                if (
-                    type(raw_path) is not str
-                    or not raw_path.strip()
-                    or "\0" in raw_path
-                ):
-                    return None
-                candidate = Path(raw_path)
-                if not candidate.is_absolute():
-                    return None
-                canonical = candidate.resolve()
-                owners.setdefault(canonical, set()).add(issue_number)
-        except (OSError, RuntimeError, TypeError, ValueError):
-            return None
-        return owners
-
-    def _active_workspace_snapshot(self) -> _ActiveWorkspaceSnapshot | None:
-        """Validate active-workspace keys and paths once for a GC cycle.
-
-        StateTracker's ordinary normalized accessor is intentionally lossy:
-        malformed keys are dropped and int-equivalent spellings collapse.
-        Destructive GC instead takes one raw-validated snapshot and reuses its
-        reverse path ownership in phases 1, 2, and 5. Any ambiguous key or
-        path disables the cycle before workspace, branch, or state mutation.
-        """
-        workspaces = self._state.get_active_workspaces_validated()
-        if workspaces is None:
-            return None
-        path_owners = self._canonical_active_path_owners(workspaces)
-        if path_owners is None:
-            return None
-        return _ActiveWorkspaceSnapshot(workspaces, path_owners)
-
     async def _reap_worktree_if_safe(
         self, path: Path, branch: str | None, issue_number: int | None
     ) -> bool:
@@ -695,7 +632,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         that proof (#11503), and unattributable worktrees use the same proof.
         """
         # min_age guard — never reap a worktree created mid-run.
-        if self._worktree_too_new(path):
+        if worktree_too_new(path, self._config.worktree_gc_min_age_seconds):
             logger.debug("GC: worktree %s younger than min_age — skipping", path)
             return False
 
@@ -714,12 +651,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         return True
 
     async def _list_git_worktrees(self) -> list[_WorktreeEntry]:
-        """Parse ``git worktree list --porcelain`` into worktree entries.
-
-        Skips ``bare`` and ``locked`` worktrees (an operator locked those
-        deliberately). Raises ``RuntimeError`` if the git call fails so the
-        caller can fail-closed to an empty sweep.
-        """
+        """Read and parse registered worktrees; errors propagate fail-closed."""
         output = await run_subprocess(
             "git",
             "worktree",
@@ -728,99 +660,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             cwd=self._config.repo_root,
             gh_token=self._credentials.gh_token,
         )
-        entries: list[_WorktreeEntry] = []
-        path: Path | None = None
-        branch: str | None = None
-        locked = False
-        is_bare = False
-
-        def _flush() -> None:
-            nonlocal path, branch, locked, is_bare
-            if path is not None and not locked and not is_bare:
-                entries.append(_WorktreeEntry(path=path, branch=branch))
-            path, branch, locked, is_bare = None, None, False, False
-
-        for raw_line in output.splitlines():
-            line = raw_line.rstrip()
-            if line.startswith("worktree "):
-                _flush()
-                with contextlib.suppress(OSError):
-                    path = Path(line[len("worktree ") :]).expanduser().resolve()
-            elif line.startswith("branch "):
-                branch = line[len("branch ") :].strip().removeprefix("refs/heads/")
-            elif line == "detached":
-                branch = None
-            elif line == "bare":
-                is_bare = True
-            elif line.startswith("locked"):
-                locked = True
-        _flush()
-        return entries
-
-    def _worktree_too_new(self, path: Path) -> bool:
-        """True when *path* is younger than ``worktree_gc_min_age_seconds``.
-
-        A stat failure fails closed (treated as too-new → skip).
-        """
-        min_age = self._config.worktree_gc_min_age_seconds
-        if min_age <= 0:
-            return False
-        try:
-            mtime = path.stat().st_mtime
-        except OSError:
-            return True
-        return (time.time() - mtime) < min_age
-
-    @staticmethod
-    def _tracked_path_matches_destroy_target(
-        recorded_path: Path, destroy_path: Path
-    ) -> bool:
-        """True when phase 1 inspected the path ``WorkspacePort`` will delete.
-
-        ``WorkspacePort.destroy(issue)`` derives its target from config, not
-        the StateTracker value.  A stale/mismatched mapping must therefore
-        fail closed rather than inspect one directory and delete another.
-        """
-        try:
-            recorded = recorded_path.expanduser().resolve()
-            target = destroy_path.expanduser().resolve()
-            return recorded == target
-        except OSError:
-            return False
-
-    @staticmethod
-    def _parse_worktree_status(
-        output: str,
-    ) -> tuple[str, str | None, bool] | None:
-        """Parse ``git status --porcelain=v2 --branch`` identity + dirtiness."""
-        head_sha: str | None = None
-        branch: str | None = None
-        saw_branch = False
-        dirty = False
-        for line in output.splitlines():
-            if line.startswith("# branch.oid "):
-                if head_sha is not None:
-                    return None
-                head_sha = line.removeprefix("# branch.oid ").strip().lower()
-            elif line.startswith("# branch.head "):
-                if saw_branch:
-                    return None
-                raw_branch = line.removeprefix("# branch.head ").strip()
-                if not raw_branch or (
-                    raw_branch.startswith("(") and raw_branch != "(detached)"
-                ):
-                    return None
-                branch = None if raw_branch == "(detached)" else raw_branch
-                saw_branch = True
-            elif line and not line.startswith("# "):
-                dirty = True
-        if (
-            not saw_branch
-            or head_sha is None
-            or _GIT_OID_RE.fullmatch(head_sha) is None
-        ):
-            return None
-        return head_sha, branch, dirty
+        return parse_git_worktrees(output)
 
     async def _worktree_work_has_landed(
         self,
@@ -829,195 +669,36 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         expected_branch: str | None,
         expected_issue: int | None,
     ) -> bool:
-        """Prove the exact clean worktree HEAD landed, or fail closed.
-
-        The ladder is deliberately HEAD-aware and ordered cheapest-first:
-
-        1. a HEAD already ancestral to ``origin/<base>`` is landed;
-        2. an identical two-rev tree diff covers a fresh squash merge;
-        3. after the base advances, GitHub must report one merged PR whose
-           base, branch, and historical ``head.sha`` match this worktree.
-
-        Branch name alone is never authoritative because names are reusable.
-        Dirty worktrees, branch/issue/path identity mismatches, missing refs,
-        malformed git output, GitHub errors, and ambiguous PR rows all return
-        ``False``. Local comparisons use the initially captured OID, then
-        status is re-read so a concurrent HEAD move cannot mix identities.
-        An absent registered path is not landed proof: phase 5 could otherwise
-        prune its registry entry and delete the only branch carrying the work.
-        An attributed candidate must have a ``.git`` marker and must report
-        its own canonical path from ``git rev-parse --show-toplevel`` before
-        status is read, so parent-repository discovery or a misdirected
-        gitfile cannot prove one tree while GC deletes another. Empty,
-        existing, unattributed non-git directories are the sole non-git
-        candidates considered provably empty.
-        """
-        if not path.exists():
-            return False
-        if not path.is_dir():
-            return False
-        git_marker = path / ".git"
-        if not git_marker.exists():
-            if expected_branch is not None or expected_issue is not None:
-                return False
-            empty = False
-            with contextlib.suppress(OSError):
-                empty = next(path.iterdir(), None) is None
-            return empty
-
+        """Drive the single pure HEAD-aware proof ladder, failing closed."""
+        proof = landed_proof(
+            path,
+            base_branch=self._config.base_branch(),
+            expected_branch=expected_branch,
+            expected_issue=expected_issue,
+            issue_from_branch=self._parse_issue_from_branch,
+        )
         try:
-            candidate_root = path.expanduser().resolve()
-        except (OSError, RuntimeError):
-            return False
-
-        base = self._config.base_branch()
-        commands: list[tuple[str, tuple[str, ...]]] = [
-            ("top-level", ("rev-parse", "--show-toplevel")),
-        ]
-        head_sha = ""
-        actual_branch: str | None = None
-        local_result: bool | None = None
-        while commands and local_result is None:
-            kind, args = commands.pop(0)
-            if kind == "pr":
-                if actual_branch is None:
-                    local_result = False
-                    continue
-                pr_state = "UNKNOWN"
-                try:
-                    pr_state = await self._prs.get_branch_pr_state(
-                        actual_branch,
-                        head_sha,
-                        base,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    reraise_on_credit_or_bug(exc)
-                if pr_state == "MERGED":
-                    commands.append(
-                        (
-                            "verify-status",
-                            ("status", "--porcelain=v2", "--branch"),
+            probe = next(proof)
+            while True:
+                if isinstance(probe, GitProbe):
+                    try:
+                        response = await run_subprocess(
+                            "git",
+                            *probe.args,
+                            cwd=path,
+                            gh_token=self._credentials.gh_token,
                         )
-                    )
-                else:
-                    local_result = False
-                continue
-
-            try:
-                output = await run_subprocess(
-                    "git",
-                    *args,
-                    cwd=path,
-                    gh_token=self._credentials.gh_token,
-                )
-            except (RuntimeError, OSError):
-                local_result = False
-                break
-
-            if kind == "top-level":
-                reported_root = output.strip()
-                try:
-                    reported_path = Path(reported_root)
-                    if (
-                        not reported_root
-                        or "\0" in reported_root
-                        or len(output.splitlines()) != 1
-                        or not reported_path.is_absolute()
-                        or reported_path.expanduser().resolve() != candidate_root
-                    ):
-                        local_result = False
-                    else:
-                        commands.append(
-                            ("status", ("status", "--porcelain=v2", "--branch"))
-                        )
-                except (OSError, RuntimeError, ValueError):
-                    local_result = False
-                continue
-
-            if kind in {"status", "verify-status"}:
-                parsed = self._parse_worktree_status(output)
-                if parsed is None:
-                    local_result = False
-                elif kind == "verify-status":
-                    verified_head, verified_branch, verified_dirty = parsed
-                    local_result = (
-                        not verified_dirty
-                        and verified_head == head_sha
-                        and verified_branch == actual_branch
-                    )
-                else:
-                    head_sha, actual_branch, dirty = parsed
-                    normalized_expected = (
-                        expected_branch.removeprefix("refs/heads/")
-                        if expected_branch
-                        else None
-                    )
-                    if (
-                        dirty
-                        or (
-                            normalized_expected is not None
-                            and actual_branch != normalized_expected
-                        )
-                        or (
-                            expected_issue is not None
-                            and self._parse_issue_from_branch(actual_branch)
-                            != expected_issue
-                        )
-                    ):
-                        local_result = False
-                    else:
-                        commands.append(
-                            (
-                                "rev-list",
-                                (
-                                    "rev-list",
-                                    "--count",
-                                    f"origin/{base}..{head_sha}",
-                                ),
-                            )
-                        )
-                continue
-
-            if kind == "rev-list":
-                try:
-                    unique_commits = int(output.strip())
-                except ValueError:
-                    local_result = False
-                else:
-                    if unique_commits < 0:
-                        local_result = False
-                    elif unique_commits == 0:
-                        commands.append(
-                            (
-                                "verify-status",
-                                ("status", "--porcelain=v2", "--branch"),
-                            )
-                        )
-                    else:
-                        commands.append(
-                            (
-                                "diff",
-                                (
-                                    "diff",
-                                    "--name-only",
-                                    f"origin/{base}",
-                                    head_sha,
-                                ),
-                            )
-                        )
-                continue
-
-            if not output.strip():
-                commands.append(
-                    (
-                        "verify-status",
-                        ("status", "--porcelain=v2", "--branch"),
-                    )
-                )
-            else:
-                commands.append(("pr", ()))
-
-        return local_result is True
+                    except (RuntimeError, OSError):
+                        return False
+                elif isinstance(probe, PRProbe):
+                    response = await _read_pr_probe(self._prs, probe)
+                    if response is None:
+                        return False
+                else:  # pragma: no cover - closed probe protocol
+                    return False
+                probe = proof.send(response)
+        except StopIteration as result:
+            return result.value is True
 
     async def _reap_worktree(
         self, path: Path, branch: str | None, issue_number: int | None

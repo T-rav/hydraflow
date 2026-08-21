@@ -15,6 +15,7 @@ from events import EventType
 from mockworld.fakes.fake_github import FakeGitHub
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
+from workspace_gc_landed_safety import worktree_too_new
 from workspace_gc_loop import _MAX_GC_PER_CYCLE, WorkspaceGCLoop
 
 # Force-delete flag for branch deletion assertions
@@ -2086,17 +2087,25 @@ class TestWorktreeGuards:
 
     def test_too_new_false_when_min_age_zero(self, tmp_path: Path) -> None:
         loop, _s, _e = _make_loop(tmp_path, worktree_gc_min_age_seconds=0)
-        assert loop._worktree_too_new(tmp_path) is False
+        assert (
+            worktree_too_new(tmp_path, loop._config.worktree_gc_min_age_seconds)
+            is False
+        )
 
     def test_too_new_true_for_fresh_dir(self, tmp_path: Path) -> None:
         loop, _s, _e = _make_loop(tmp_path, worktree_gc_min_age_seconds=3600)
         fresh = tmp_path / "fresh"
         fresh.mkdir()
-        assert loop._worktree_too_new(fresh) is True
+        assert worktree_too_new(fresh, loop._config.worktree_gc_min_age_seconds) is True
 
     def test_too_new_fails_closed_on_missing_path(self, tmp_path: Path) -> None:
         loop, _s, _e = _make_loop(tmp_path, worktree_gc_min_age_seconds=3600)
-        assert loop._worktree_too_new(tmp_path / "nope") is True
+        assert (
+            worktree_too_new(
+                tmp_path / "nope", loop._config.worktree_gc_min_age_seconds
+            )
+            is True
+        )
 
 
 class TestCollectOrphanedWorktrees:

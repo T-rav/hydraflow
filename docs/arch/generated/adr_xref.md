@@ -75,7 +75,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0066 | `src.agent`, `src.base_runner`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0067 | `src.issue_fetcher`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0068 | `src.ports`, `src.term_proposer_loop`, `src.term_pruner_loop` | `(none) — structural subtype check planned in follow-up` |
-| ADR-0069 | `src.ports`, `src.workspace_gc_loop` | `tests/test_workspace_gc_loop.py` |
+| ADR-0069 | `src.ports`, `src.workspace_gc_landed_safety`, `src.workspace_gc_loop` | `tests/test_workspace_gc_loop.py` |
 | ADR-0070 | `src.ports`, `src.review_insights` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0071 | `src.route_back`, `src.state.__init__` | `pytest:tests/test_route_back.py` |
 | ADR-0072 | `src.stale_issue_gc_loop`, `src.stale_issue_loop` | `tests/test_stale_issue_loop.py` |
@@ -358,6 +358,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.wiki_compiler` | ADR-0032 |
 | `src.wiki_rot_detector_loop` | ADR-0045 |
 | `src.workspace` | ADR-0003, ADR-0009, ADR-0010, ADR-0055, ADR-0112 |
+| `src.workspace_gc_landed_safety` | ADR-0069 |
 | `src.workspace_gc_loop` | ADR-0069 |
 
 ## Symbol-Granularity Nudges

@@ -88,6 +88,7 @@ Kill-switch: `enabled_cb("workspace_gc")` AND `config.workspace_gc_loop_enabled`
 ## Related
 
 - `src/workspace_gc_loop.py:WorkspaceGCLoop`
+- `src/workspace_gc_landed_safety.py` — pure ownership and landed-proof engine
 - `src/ports.py:WorkspacePort`, `src/ports.py:PRPort`
 - [ADR-0003](0003-git-worktrees-for-isolation.md) — Git Worktrees for Issue Isolation
 - [ADR-0029](0029-caretaker-loop-pattern.md) — Caretaker Background Loop Pattern

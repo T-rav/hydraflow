@@ -1127,41 +1127,30 @@ class TestGetBranchPrState:
         }
 
     @pytest.mark.asyncio
-    async def test_exact_merged_head_reports_merged(self, config, event_bus) -> None:
-        manager = make_pr_manager(config, event_bus)
-        manager._run_gh = AsyncMock(  # type: ignore[method-assign]
-            return_value=json.dumps([self._row(sha="a" * 40)])
-        )
-
-        state = await manager.get_branch_pr_state("fix/reused", "a" * 40, "main")
-
-        assert state == "MERGED"
-
-    @pytest.mark.asyncio
-    async def test_sha256_exact_merged_head_reports_merged(
-        self, config, event_bus
+    @pytest.mark.parametrize(
+        ("stored_sha", "queried_sha", "expected"),
+        [
+            pytest.param("a" * 40, "a" * 40, "MERGED", id="sha1-merged"),
+            pytest.param("a" * 64, "a" * 64, "MERGED", id="sha256-merged"),
+            pytest.param("a" * 40, "b" * 40, "NONE", id="reused-branch"),
+        ],
+    )
+    async def test_exact_head_state(
+        self,
+        config,
+        event_bus,
+        stored_sha: str,
+        queried_sha: str,
+        expected: str,
     ) -> None:
         manager = make_pr_manager(config, event_bus)
         manager._run_gh = AsyncMock(  # type: ignore[method-assign]
-            return_value=json.dumps([self._row(sha="a" * 64)])
+            return_value=json.dumps([self._row(sha=stored_sha)])
         )
 
-        state = await manager.get_branch_pr_state("fix/reused", "a" * 64, "main")
+        state = await manager.get_branch_pr_state("fix/reused", queried_sha, "main")
 
-        assert state == "MERGED"
-
-    @pytest.mark.asyncio
-    async def test_reused_branch_old_merged_head_reports_none(
-        self, config, event_bus
-    ) -> None:
-        manager = make_pr_manager(config, event_bus)
-        manager._run_gh = AsyncMock(  # type: ignore[method-assign]
-            return_value=json.dumps([self._row(sha="a" * 40)])
-        )
-
-        state = await manager.get_branch_pr_state("fix/reused", "b" * 40, "main")
-
-        assert state == "NONE"
+        assert state == expected
 
     @pytest.mark.asyncio
     async def test_duplicate_exact_head_rows_report_unknown(
