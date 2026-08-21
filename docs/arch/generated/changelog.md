@@ -17,6 +17,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `07cc599` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof *(2026-08-21)*
 - `deed8f0` — test(workspace-gc): pin proof-before-delete source order; cite the arch and scenario pins in ADR-0069 *(2026-08-21)*
 - `82e997e` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof *(2026-08-21)*
+- `859a391` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports *(2026-08-21)*
+- `1b9e118` — fix(token-drift): load telemetry by window, not by row count (Fixes #11581) (#11586) (#11586) *(2026-08-21)*
+- `2e6e13d` — chore(release): bump to 1.0.0, CHANGELOG, pinned-install docs (refs #11520) (#11584) (#11584) *(2026-08-21)*
 - `28338b9` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop — one issue per source per ISO week (Fixes #11442) (#11578) (#11578) *(2026-08-21)*
 - `112ec85` — fix(release): tag the promoted main SHA, never the factory checkout HEAD (Fixes #11517) (#11576) (#11576) *(2026-08-21)*
 - `91c83ee` — fix(telemetry): one-shot claude spawns report usage — issue_refinement / sampled_audit / sampled_audit_adjudicate (Fixes #11514, Fixes #11515, Fixes #11516) (#11579) (#11579) *(2026-08-21)*

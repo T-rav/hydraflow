@@ -5,6 +5,14 @@ All notable changes to HydraFlow. Stable tags are cut by hand on a promoted `mai
 what a tag promises, and the cut recipe live in
 [`docs/wiki/patterns.md` → Release policy](docs/wiki/patterns.md#release-policy--stable-tags-vs-the-rolling-main-tip).
 
+## Unreleased
+
+- Packaging: the wheel now ships the flat `src/` modules and `assets/`, so
+  `uv pip install git+https://github.com/T-rav/hydraflow@<tag>` yields a working `hydraflow`
+  console script (`--version` / `--help`); 21 `from src.<mod>` imports in 11 modules rewritten
+  bare; `setuptools` added to the `test` extra (#11580, #11591). Running the server still
+  needs a checkout — templates, prompts and the UI bundle are not in the wheel (#11589).
+
 ## v1.0.0 — 2026-08-21 — stable base
 
 **What stable means.** v1.0.0 is the first pinned, known-good HydraFlow for downstream

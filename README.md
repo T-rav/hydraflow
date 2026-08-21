@@ -150,12 +150,20 @@ git -C hydraflow describe --tags --exact-match   # → v1.0.0
 To move to the next release, repeat the `fetch --tags` + `checkout vX.Y.Z` step and
 commit the new submodule pointer. Do not track `main` from a downstream repo.
 
-`uv pip install git+https://github.com/T-rav/hydraflow@v1.0.0` is **not** a supported
-install path today: the wheel built from `pyproject.toml` packages only the `src/`
-sub-packages (`[tool.setuptools.packages.find]`), not the flat top-level modules
-(`server.py`, `config.py`, …) that the `hydraflow` console script imports, so the
-installed entry point fails at import time. Run HydraFlow from a checkout — the Makefile
-targets set `PYTHONPATH=src`.
+`uv pip install git+https://github.com/T-rav/hydraflow@v1.0.0` (or any later tag) installs
+the HydraFlow modules and the `hydraflow` console script into a venv — useful for importing
+HydraFlow as a library or smoke-testing a pinned release:
+
+```bash
+uv venv .venv-hydraflow
+uv pip install --python .venv-hydraflow/bin/python git+https://github.com/T-rav/hydraflow@v1.0.0
+.venv-hydraflow/bin/hydraflow --version   # → hydraflow 1.0.0
+```
+
+It is **not** a way to run the server. The wheel does not carry the dashboard templates,
+prompt files, static assets or the UI bundle (`src/ui/dist`), which the server locates
+relative to a checkout (#11589). Run HydraFlow from a checkout — the Makefile targets set
+`PYTHONPATH=src`.
 
 ### Dashboard Mode (multi-repo)
 

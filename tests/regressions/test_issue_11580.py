@@ -16,8 +16,12 @@ This builds the real wheel with the venv's own setuptools (no network, no
   on ``sys.path`` and would mask the bug) is never processed; third-party
   dependencies come from the venv's site-packages through ``PYTHONPATH``.
 
-One module-scoped build (a few seconds) is shared by the tests below. The
-static counterpart (no build) is ``tests/architecture/test_wheel_console_script.py``.
+The build fixtures are module-scoped so one build (~1 s) serves the tests
+below in a normal run; the CI regression lane runs ``--forked`` (#11004),
+where each forked test re-runs the fixture and rebuilds — a cost, not a
+correctness concern (``tmp_path_factory`` hands each fork its own directory).
+The static counterpart (no build) is
+``tests/architecture/test_wheel_console_script.py``.
 """
 
 from __future__ import annotations
