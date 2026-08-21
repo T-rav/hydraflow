@@ -48,6 +48,7 @@ def _router(config, event_bus, state, tmp_path, registry):
 def _active_orch(*, queue=None, snapshot=None, pipeline_stats=None):
     """A minimal active orchestrator stub for the pipeline/queue routes."""
     orch = MagicMock()
+    orch.issue_store.has_completed_initial_refresh = True
     orch.issue_store.get_queue_stats = MagicMock(return_value=queue or QueueStats())
     orch.issue_store.get_pipeline_snapshot = MagicMock(return_value=snapshot or {})
     if pipeline_stats is not None:

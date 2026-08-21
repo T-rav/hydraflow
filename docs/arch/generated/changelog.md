@@ -6,13 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `08c8553` — Fixes #11441: Drift detection engine + API drift block (salvage) *(2026-08-20)*
-- `1ae1c2e` — Fixes #11425: land the true remainder of the fake-fidelity hardening pass (#11488) (#11488) *(2026-08-20)*
-- `d729b3b` — fix(planner): guard epic replans against stale ownership (#11482) (#11484) (#11484) *(2026-08-20)*
-- `6013271` — feat: add LLM gateway session tap (#11477) (#11477) *(2026-08-20)*
-- `daa3c82` — Fixes #11418: promote StaleIssueLoop/ReportIssueLoop/service_registry reach-throughs to PRPort methods *(2026-08-18)*
-- `cfa3338` — Fixes #11420: FakeLLM's nested runner stand-ins have drifted from t... (#11445) (#11445) *(2026-08-17)*
+- `818670a` — Merge branch 'staging' into agent/auto-agent-11279 *(2026-08-17)*
 - `7cba8c3` — Fixes #11416: MockWorld repo_wiki loop registration never wires a w... (#11428) (#11428) *(2026-08-17)*
+- `ecbe348` — Merge remote-tracking branch 'origin/staging' into pipefix-heal *(2026-08-17)*
 - `b0aa945` — feat(quality): host-wide advisory lock so concurrent suites queue, not race (#11219) (#11400) (#11400) *(2026-08-17)*
 
 ## 2026-W33
@@ -20,6 +16,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `9bbae16` — feat(supervisor): fleet-vitals shadow alarms — bands, mechanical diagnosis, closed-menu proposals (#11391) (#11392) (#11392) *(2026-08-16)*
 - `49df312` — feat(light-lane): route simple issues to the single-session auto-agent — one spawn, issue to PR (#11298) (#11389) (#11389) *(2026-08-16)*
 - `4610eb2` — fix(diagnostic): opt DiagnosticLoop into the LLM watchdog bound (#11262) (#11369) (#11369) *(2026-08-16)*
+- `a0ca56f` — fix(pipeline): gate /api/pipeline snapshot on IssueStore's first refresh (#11279) (#11279) *(2026-08-16)*
 - `a08bf72` — feat(find-filing): class-key fold layer for pattern-shaped find-issues (#11292) (#11324) (#11324) *(2026-08-16)*
 - `9d7bf33` — feat(providers): ZAI_CODING_PLAN_KEY — plan vs API billing lane split (#11267) (#11267) *(2026-08-15)*
 - `66b3cff` — Fixes #11208: make factory should auto-start the orchestrator (#11257) (#11257) *(2026-08-15)*
@@ -453,13 +450,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `e5e3dbd` — Refs #8930: add onboarding draft API foundation *(2026-05-22)*
 - `52784fb` — Fixes #8368: resolve dashboard a11y violations *(2026-05-22)*
 - `3381e36` — Refs #8475: preserve managed repo config models *(2026-05-22)*
-- `22b8cee` — Fixes #8617: expose repo pipeline enabled state *(2026-05-22)*
-- `90279ad` — Fixes #8651: collapse crowded pipeline dots *(2026-05-22)*
-- `1e94520` — Fixes #8674: refresh arch artifacts before bot push *(2026-05-22)*
-- `700bc6b` — Fixes #8658: update Opus 4.7 pricing *(2026-05-22)*
-- `72fea53` — Fixes #8979: fold epic sweep into monitor *(2026-05-22)*
-- `527bea0` — Fixes #8928: make issue creation failure explicit *(2026-05-22)*
-- `e7d4296` — Fixes #8481: register caretaker escalation labels *(2026-05-22)*
 
 
 <!-- arch:generated -->
