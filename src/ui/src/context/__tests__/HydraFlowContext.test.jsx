@@ -633,6 +633,34 @@ describe('Merged state from backend', () => {
     expect(next.pipelineSnapshotReady).toBe(false)
   })
 
+  it('a not-ready snapshot still populates an EMPTY rail (nothing to evict)', () => {
+    // The skip exists to stop a pre-refresh snapshot evicting rail cards. An
+    // empty rail has no cards to evict, so skipping there protects nothing and
+    // strands the rail forever — no snapshot can land while any repo is
+    // mid-refresh. This is what broke four sandbox happy-path browser
+    // scenarios: the rail never showed a merged count at all.
+    const next = reducer(initialState, {
+      type: 'PIPELINE_SNAPSHOT',
+      data: { merged: [{ issue_number: 7, title: 'Done', url: '', status: 'merged' }] },
+      ready: false,
+    })
+    expect(next.pipelineIssues.merged).toHaveLength(1)
+    // ...but it is still not authoritative, so the resyncing badge stays on.
+    expect(next.pipelineSnapshotReady).toBe(false)
+  })
+
+  it('a not-ready snapshot does NOT evict cards from a POPULATED rail', () => {
+    const populated = reducer(initialState, {
+      type: 'PIPELINE_SNAPSHOT',
+      data: { merged: [{ issue_number: 9, title: 'Keep me', url: '', status: 'merged' }] },
+      ready: true,
+    })
+    expect(populated.pipelineIssues.merged).toHaveLength(1)
+    const next = reducer(populated, { type: 'PIPELINE_SNAPSHOT', data: {}, ready: false })
+    expect(next.pipelineIssues.merged).toHaveLength(1)
+    expect(next.pipelineSnapshotReady).toBe(false)
+  })
+
   it('a subsequent ready snapshot clears pipelineSnapshotReady and reconciles normally', () => {
     const notReady = reducer(initialState, { type: 'PIPELINE_SNAPSHOT', data: {}, ready: false })
     const next = reducer(notReady, {
