@@ -10,6 +10,23 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `55509a5` — feat(implement): test-adequacy gate repairs in-run before rejecting (#11593) (#11593) *(2026-08-21)*
 - `9cf6452` — feat(factory): auto-rebase own dirty PRs when staging moves (#11595) (#11598) (#11598) *(2026-08-21)*
 - `98d9393` — feat(factory): run as a launchd service; liveness kernel honours operator Stop (#11594) (#11594) *(2026-08-21)*
+- `845ba5a` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop (Fixes #11442) *(2026-08-21)*
+- `651dfb8` — fix(implement): tier build timeout by complexity, route zero-commit attempts to diagnose *(2026-08-21)*
+- `2e6e13d` — chore(release): bump to 1.0.0, CHANGELOG, pinned-install docs (refs #11520) (#11584) (#11584) *(2026-08-21)*
+- `fc22a36` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) *(2026-08-21)*
+- `f698417` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) *(2026-08-21)*
+- `28338b9` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop — one issue per source per ISO week (Fixes #11442) (#11578) (#11578) *(2026-08-21)*
+- `112ec85` — fix(release): tag the promoted main SHA, never the factory checkout HEAD (Fixes #11517) (#11576) (#11576) *(2026-08-21)*
+- `91c83ee` — fix(telemetry): one-shot claude spawns report usage — issue_refinement / sampled_audit / sampled_audit_adjudicate (Fixes #11514, Fixes #11515, Fixes #11516) (#11579) (#11579) *(2026-08-21)*
+- `07cc599` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof *(2026-08-21)*
+- `deed8f0` — test(workspace-gc): pin proof-before-delete source order; cite the arch and scenario pins in ADR-0069 *(2026-08-21)*
+- `82e997e` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof *(2026-08-21)*
+- `859a391` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports *(2026-08-21)*
+- `44d8967` — docs(readme,changelog): pinned-release install path is library + CLI; Unreleased note (refs #11580) *(2026-08-21)*
+- `69b157a` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports *(2026-08-21)*
+- `7be0267` — docs: ADR-0135 factory-as-launchd-service + operator Stop latch; wiki install recipe *(2026-08-21)*
+- `25133bc` — chore(pr): ADR-0135 Binds line, hygiene-ratchet test fixes, arch regen after rebase *(2026-08-21)*
+- `76b37b2` — docs: ADR-0135 factory-as-launchd-service + operator Stop latch; wiki install recipe *(2026-08-21)*
 - `e3e5665` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports (Fixes #11580) (#11591) (#11591) *(2026-08-21)*
 - `35f8b29` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) (#11583) (#11583) *(2026-08-21)*
 - `83b0f29` — fix(implement): take make quality off the host lock on the implement path (#11568 seam 3) (#11592) (#11592) *(2026-08-21)*

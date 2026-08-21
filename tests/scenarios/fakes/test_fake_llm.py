@@ -205,33 +205,6 @@ async def test_no_budget_set_means_no_gating() -> None:
     assert result.success is True
 
 
-async def test_triage_runner_script_decomposition_returns_scripted_result() -> None:
-    from mockworld.fakes.fake_llm import FakeLLM
-    from models import EpicDecompResult, NewIssueSpec
-
-    llm = FakeLLM()
-    decomp = EpicDecompResult(
-        should_decompose=True,
-        children=[
-            NewIssueSpec(title="child-a", body=""),
-            NewIssueSpec(title="child-b", body=""),
-        ],
-    )
-    llm.triage_runner.script_decomposition(42, decomp)
-
-    result = await llm.triage_runner.run_decomposition(TaskFactory.create(id=42))
-    assert result.should_decompose is True
-    assert len(result.children) == 2
-
-
-async def test_triage_runner_default_decomposition_is_false() -> None:
-    from mockworld.fakes.fake_llm import FakeLLM
-
-    llm = FakeLLM()
-    result = await llm.triage_runner.run_decomposition(TaskFactory.create(id=99))
-    assert result.should_decompose is False
-
-
 async def test_review_runner_captures_code_scanning_alerts() -> None:
     from mockworld.fakes.fake_llm import FakeLLM
     from models import CodeScanningAlert

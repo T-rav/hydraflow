@@ -20,7 +20,7 @@ from mockworld.fakes._factories import (
     TriageResultFactory,
     WorkerResultFactory,
 )
-from models import EpicDecompResult, ReviewVerdict
+from models import ReviewVerdict
 from subprocess_util import CreditExhaustedError
 
 if TYPE_CHECKING:
@@ -91,25 +91,11 @@ class _ScriptedRunner:
 
 
 class _FakeTriageRunner(_ScriptedRunner):
-    def __init__(self) -> None:
-        super().__init__()
-        self._decomposition_scripts: dict[int, EpicDecompResult] = {}
-
-    def script_decomposition(self, issue_number: int, result: EpicDecompResult) -> None:
-        """Script the EpicDecompResult returned for the given issue."""
-        self._decomposition_scripts[issue_number] = result
-
     async def evaluate(self, issue: Any, worker_id: int = 0) -> Any:
         issue_number = getattr(issue, "id", getattr(issue, "number", 0))
         return self._pop(
             issue_number,
             lambda: TriageResultFactory.create(issue_number=issue_number, ready=True),
-        )
-
-    async def run_decomposition(self, task: Any) -> EpicDecompResult:
-        issue_number = getattr(task, "id", getattr(task, "number", 0))
-        return self._decomposition_scripts.get(
-            issue_number, EpicDecompResult(should_decompose=False)
         )
 
 

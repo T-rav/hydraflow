@@ -509,24 +509,6 @@ class TestTriageExceptionChaining:
         assert result.ready is False
         assert any("network timeout" in r for r in result.reasons)
 
-    @pytest.mark.asyncio
-    async def test_decompose_reraises_bug(self, config, event_bus) -> None:
-        from triage import TriageRunner
-
-        agent = TriageRunner(config, event_bus)
-        task = TaskFactory.create(id=7, title="Decompose me")
-        with (
-            patch.object(
-                agent,
-                "_execute",
-                new_callable=AsyncMock,
-                side_effect=AttributeError("no attr"),
-            ),
-            patch.object(agent, "_save_transcript"),
-            pytest.raises(AttributeError, match="no attr"),
-        ):
-            await agent.run_decomposition(task)
-
 
 # ---------------------------------------------------------------------------
 # VerificationJudge (verification_judge.py:107, 158)
