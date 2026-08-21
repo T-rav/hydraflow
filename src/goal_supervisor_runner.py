@@ -26,7 +26,7 @@ import logging
 from pathlib import Path
 
 from agent_cli import build_agent_command
-from model_pricing import load_pricing
+from model_pricing import input_includes_cache_for, load_pricing
 from runners.base_subprocess_runner import (
     BaseSubprocessRunner,
     SpawnOutcome,
@@ -67,7 +67,9 @@ class GoalSupervisorRunner(BaseSubprocessRunner[SupervisorVerdict]):
         # rather than a fabricated resolution (honest-thread contract, rule 6).
         return parse_supervisor_verdict(outcome.transcript)
 
-    def _estimate_cost(self, usage_stats: dict[str, object]) -> float | None:
+    def _estimate_cost(
+        self, usage_stats: dict[str, object], *, usage_shape: str | None = None
+    ) -> float | None:
         # Attribute spend to the Fable model (not config.model) so per-loop cost
         # rollups are honest.
         try:
@@ -82,6 +84,9 @@ class GoalSupervisorRunner(BaseSubprocessRunner[SupervisorVerdict]):
                 cache_read_tokens=_coerce_int(
                     usage_stats.get("cache_read_input_tokens")
                 ),
+                # The supervisor always runs on the Claude CLI (tool pinned to
+                # "claude"): Anthropic-shaped usage, cache excluded from input.
+                input_includes_cache=input_includes_cache_for(usage_shape, "claude"),
             )
             return float(estimate) if estimate is not None else None
         except Exception as exc:  # noqa: BLE001

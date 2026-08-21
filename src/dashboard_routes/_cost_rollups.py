@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from cost_plausibility import DEFAULT_MAX_RATE_MULTIPLE, check_cost_plausibility
 from dashboard_routes._waterfall_builder import _phase_for_source
-from model_pricing import ModelPricingTable, load_pricing
+from model_pricing import ModelPricingTable, load_pricing, row_input_includes_cache
 from trace_collector import _slug_for_loop
 from tracing_context import source_to_phase
 
@@ -140,6 +140,9 @@ def iter_priced_inferences(
                         rec.get("cache_creation_input_tokens", 0) or 0
                     ),
                     cache_read_tokens=int(rec.get("cache_read_input_tokens", 0) or 0),
+                    # Cache-inclusiveness follows the row's usage-shape stamp
+                    # (then its tool), never the model id alone.
+                    input_includes_cache=row_input_includes_cache(rec),
                 )
                 priced = round(cost, 6) if cost is not None else 0.0
                 # #9821: an unpriced model must be MARKED, not silently folded

@@ -24,6 +24,7 @@ from agent_rate_backoff import classify_agent_outcome, get_agent_rate_backoff
 from docker_runner import get_docker_runner
 from events import EventBus, EventType, HydraFlowEvent
 from execution import HostRunner, SimpleResult, SubprocessRunner, get_default_runner
+from model_pricing import USAGE_SHAPE_OPENAI_COMPAT, usage_shape_for_tool
 from models import TranscriptEventData, TranscriptLinePayload
 from process_group import kill_process_group
 from prompt_gate import PromptGateBlockedError, gate_prompt
@@ -583,11 +584,17 @@ def record_inference_telemetry(
     pr_number: int | None = None,
     session_id: str | None = None,
     stats: dict[str, object] | None = None,
+    usage_shape: str | None = None,
 ) -> None:
     """Best-effort :class:`PromptTelemetry` record for non-central spawn paths.
 
     Never raises — a telemetry write failure must not crash the spawn that
     produced it (matches the central runners' best-effort recording).
+
+    ``usage_shape`` stamps how the counts were produced (see
+    :func:`model_pricing.usage_shape_for_tool`); when omitted it is derived
+    from the ``cmd`` head, which for these wrappers is the real producer
+    (CLI name, ``gateway``, or the one-shot provider name).
     """
     from prompt_telemetry import PromptTelemetry  # noqa: PLC0415
 
@@ -605,6 +612,9 @@ def record_inference_telemetry(
             duration_seconds=duration_s,
             success=success,
             stats=stats,
+            usage_shape=(
+                usage_shape if usage_shape is not None else usage_shape_for_tool(tool)
+            ),
         )
     except Exception:
         logger.warning(
@@ -757,6 +767,9 @@ async def stream_claude_with_telemetry(
                 pr_number=attributed_pr,
                 session_id=getattr(event_bus, "current_session_id", None),
                 stats=stats,
+                # The CLI produced the counts: Anthropic-shaped for the Claude
+                # CLI even when the transport marker is ``gateway``/``zai``.
+                usage_shape=usage_shape_for_tool(gate_tool),
             )
         finally:
             try:
@@ -1815,6 +1828,11 @@ async def run_lightweight_agent(
                     issue_number=issue_number,
                     pr_number=pr_number,
                     session_id=session_id,
+                    usage_shape=(
+                        USAGE_SHAPE_OPENAI_COMPAT
+                        if backend is not None
+                        else usage_shape_for_tool(tool)
+                    ),
                     stats=usage_stats,
                 )
         finally:

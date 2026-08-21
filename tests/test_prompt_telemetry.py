@@ -1127,3 +1127,89 @@ class TestRecordNeverRaises:
             self._record_with_stats(telemetry, {})
 
         assert any("prompt telemetry" in r.getMessage().lower() for r in caplog.records)
+
+
+class TestUsageShapeStamp:
+    """Writers stamp the usage SHAPE; the record's own cost honors it."""
+
+    def _glm_table(self, tmp_path) -> ModelPricingTable:
+        pricing_path = tmp_path / "pricing.json"
+        pricing_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "models": {
+                        "glm-5.2": {
+                            "input_cost_per_million": 1.4,
+                            "output_cost_per_million": 4.4,
+                            "cache_read_cost_per_million": 0.26,
+                            "input_includes_cache": True,
+                        }
+                    },
+                }
+            )
+        )
+        return ModelPricingTable(pricing_path)
+
+    def _record(self, telemetry: PromptTelemetry, **overrides) -> None:
+        kwargs = {
+            "source": "implementer",
+            "tool": "zai",
+            "model": "glm-5.2",
+            "issue_number": 1,
+            "pr_number": None,
+            "session_id": "s",
+            "prompt_chars": 10,
+            "transcript_chars": 10,
+            "duration_seconds": 1.0,
+            "success": True,
+            # input >= cache_read: the impossible-counts guard cannot decide.
+            # Non-zero output so the char-estimate fallback does not kick in.
+            "stats": {
+                "input_tokens": 5_000_000,
+                "output_tokens": 1_000,
+                "cache_read_input_tokens": 4_000_000,
+            },
+        }
+        kwargs.update(overrides)
+        telemetry.record(**kwargs)
+
+    def test_record_stamps_usage_shape_and_prices_anthropic_shape_exclusive(
+        self, tmp_path
+    ):
+        config = ConfigFactory.create(repo_root=tmp_path)
+        telemetry = PromptTelemetry(config, pricing=self._glm_table(tmp_path))
+
+        self._record(telemetry, usage_shape="anthropic")
+
+        row = json.loads(config.cost_inferences_path.read_text().strip())
+        assert row["usage_shape"] == "anthropic"
+        assert row["estimated_cost_usd"] == pytest.approx(
+            (1.4 * 5_000_000 + 4.4 * 1_000 + 0.26 * 4_000_000) / 1e6, abs=1e-6
+        )
+
+    def test_record_without_stamp_keeps_table_default_for_ambiguous_tool(
+        self, tmp_path
+    ):
+        config = ConfigFactory.create(repo_root=tmp_path)
+        telemetry = PromptTelemetry(config, pricing=self._glm_table(tmp_path))
+
+        self._record(telemetry)
+
+        row = json.loads(config.cost_inferences_path.read_text().strip())
+        assert row["usage_shape"] is None
+        assert row["estimated_cost_usd"] == pytest.approx(
+            (1.4 * 1_000_000 + 4.4 * 1_000 + 0.26 * 4_000_000) / 1e6, abs=1e-6
+        )
+
+    def test_openai_compat_stamp_keeps_table_default(self, tmp_path):
+        config = ConfigFactory.create(repo_root=tmp_path)
+        telemetry = PromptTelemetry(config, pricing=self._glm_table(tmp_path))
+
+        self._record(telemetry, usage_shape="openai_compat")
+
+        row = json.loads(config.cost_inferences_path.read_text().strip())
+        assert row["usage_shape"] == "openai_compat"
+        assert row["estimated_cost_usd"] == pytest.approx(
+            (1.4 * 1_000_000 + 4.4 * 1_000 + 0.26 * 4_000_000) / 1e6, abs=1e-6
+        )

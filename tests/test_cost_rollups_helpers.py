@@ -1034,3 +1034,37 @@ def test_per_loop_cost_populates_prev_period_avg_for_spike_highlight(config) -> 
     assert row["tick_cost_avg_usd"] == pytest.approx(0.10)
     # Prior window: $0.02 over 1 tick.
     assert row["tick_cost_avg_usd_prev_period"] == pytest.approx(0.02)
+
+
+def test_iter_priced_inferences_prices_by_usage_shape_then_tool(config) -> None:
+    """Cache-inclusiveness follows the usage SHAPE stamp, then the tool for
+    legacy rows — never the model id alone (glm-5.2's table flag is inclusive)."""
+    from model_pricing import load_pricing
+
+    now = datetime(2026, 8, 21, 12, tzinfo=UTC)
+    common = {
+        "timestamp": (now - timedelta(minutes=5)).isoformat(),
+        "model": "glm-5.2",
+        "input_tokens": 5_000_000,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 4_000_000,
+    }
+    _write_inference(
+        config, source="stamped", tool="zai", usage_shape="anthropic", **common
+    )
+    _write_inference(config, source="legacy-claude", tool="claude", **common)
+    _write_inference(config, source="legacy-zai", tool="zai", **common)
+
+    priced = {
+        rec["source"]: rec["cost_usd"]
+        for rec in iter_priced_inferences(
+            config, since=now - timedelta(hours=1), until=now, pricing=load_pricing()
+        )
+    }
+
+    exclusive = round((1.4 * 5_000_000 + 0.26 * 4_000_000) / 1e6, 6)
+    inclusive = round((1.4 * 1_000_000 + 0.26 * 4_000_000) / 1e6, 6)
+    assert priced["stamped"] == pytest.approx(exclusive, abs=1e-6)
+    assert priced["legacy-claude"] == pytest.approx(exclusive, abs=1e-6)
+    assert priced["legacy-zai"] == pytest.approx(inclusive, abs=1e-6)

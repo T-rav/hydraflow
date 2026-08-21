@@ -848,3 +848,74 @@ class TestHarnessBackend:
         # The native provider gets no harness override — the isolation invariant
         # that keeps the main workers on Anthropic regardless of z.ai config.
         assert "ANTHROPIC_AUTH_TOKEN" not in captured
+
+
+class TestUsageShapeStamp:
+    """run_lightweight_agent stamps the shape of the usage it obtained."""
+
+    async def test_one_shot_backend_stamps_openai_compat(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from execution import SimpleResult
+        from runner_utils import run_lightweight_agent
+        from tests.helpers import ConfigFactory
+
+        async def _fake_complete(*, usage_out=None, **_kw):
+            if usage_out is not None:
+                usage_out.update({"input_tokens": 100, "output_tokens": 20})
+            return SimpleResult(stdout="ok", returncode=0)
+
+        recorded: dict = {}
+
+        def _fake_record(_config, **kw):
+            recorded.update(kw)
+
+        monkeypatch.setenv("ZAI_API_KEY", "zai-key")
+        monkeypatch.setattr("runner_utils._openai_compatible_complete", _fake_complete)
+        monkeypatch.setattr("runner_utils.record_inference_telemetry", _fake_record)
+
+        await run_lightweight_agent(
+            runner=AsyncMock(),
+            config=ConfigFactory.create(),
+            tool="claude",
+            model="glm-5.2",
+            prompt="p",
+            source="unit_test",
+            timeout=10.0,
+            provider="zai",
+        )
+
+        assert recorded["cmd"][0] == "zai"
+        assert recorded["usage_shape"] == "openai_compat"
+
+    async def test_claude_cli_path_stamps_anthropic(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from execution import SimpleResult
+        from runner_utils import run_lightweight_agent
+        from tests.helpers import ConfigFactory
+
+        async def _fake_cli(**_kw):
+            return SimpleResult(stdout="ok", returncode=0)
+
+        recorded: dict = {}
+
+        def _fake_record(_config, **kw):
+            recorded.update(kw)
+
+        monkeypatch.setattr("runner_utils._claude_cli_complete", _fake_cli)
+        monkeypatch.setattr("runner_utils.record_inference_telemetry", _fake_record)
+
+        await run_lightweight_agent(
+            runner=AsyncMock(),
+            config=ConfigFactory.create(),
+            tool="claude",
+            model="sonnet",
+            prompt="p",
+            source="unit_test",
+            timeout=10.0,
+            provider="claude",
+        )
+
+        assert recorded["cmd"][0] == "claude"
+        assert recorded["usage_shape"] == "anthropic"

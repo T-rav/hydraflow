@@ -20,7 +20,7 @@ from typing import Any, Literal, Protocol, get_args
 from agent_cli import AgentTool
 from file_util import atomic_write
 from hydraflow_gateway.ledger import GatewayLedgerRow
-from model_pricing import ModelPricingTable, load_pricing
+from model_pricing import ModelPricingTable, load_pricing, row_input_includes_cache
 from prompt_telemetry import prompt_telemetry_source_complete
 from runner_utils import one_shot_provider_names
 
@@ -417,7 +417,10 @@ def _aggregate_bypass_rows(
         family = family or "unattributed"
         provider = str(row.get("tool") or "unknown").strip().lower()
         row_repo = _normalise_repo_slug(row.get("repo_slug"))
-        cost, unknown = _row_cost(row, pricing)
+        # Direct inference rows: price by their usage-shape stamp, then tool.
+        cost, unknown = _row_cost(
+            row, pricing, input_includes_cache=row_input_includes_cache(row)
+        )
 
         spend_usd += cost
         requests += 1

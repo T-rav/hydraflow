@@ -616,3 +616,39 @@ class TestGatewayAttribution:
 
         assert resolve_mock.await_args.kwargs["issue_number"] == 42
         assert resolve_mock.await_args.kwargs["pr_number"] == 77
+
+
+class TestUsageShapeStamp:
+    @pytest.mark.asyncio
+    async def test_execute_stamps_anthropic_shape_for_claude_cli(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """A Claude CLI spawn is Anthropic-shaped whatever transport marker
+        ``telemetry_tool_for_transport`` later stamps on the row."""
+        runner = _TestRunner(config, event_bus)
+        with (
+            patch(
+                "base_runner.resolve_harness_env",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+            patch(
+                "base_runner.stream_claude_process",
+                new_callable=AsyncMock,
+                return_value="transcript output",
+            ),
+        ):
+            await runner._execute(
+                ["claude", "--model", "sonnet", "-p"],
+                "prompt",
+                tmp_path,
+                {"issue": 42, "source": "test_runner"},
+            )
+
+        rows = [
+            json.loads(line)
+            for line in config.cost_inferences_path.read_text().splitlines()
+            if line
+        ]
+        assert rows[-1]["tool"] == "claude"
+        assert rows[-1]["usage_shape"] == "anthropic"

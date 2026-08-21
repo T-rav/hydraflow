@@ -14,7 +14,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from model_pricing import ModelPricingTable, load_pricing
+from model_pricing import ModelPricingTable, load_pricing, row_input_includes_cache
 from tracing_context import source_to_phase
 
 if TYPE_CHECKING:
@@ -154,6 +154,7 @@ def _action_llm(rec: dict[str, Any], pricing: ModelPricingTable) -> dict[str, An
             output_tokens=output_tokens,
             cache_write_tokens=cache_write,
             cache_read_tokens=cache_read,
+            input_includes_cache=row_input_includes_cache(rec),
         )
         cost_usd = round(cost, 6) if cost is not None else 0.0
         cost_unknown = cost is None
