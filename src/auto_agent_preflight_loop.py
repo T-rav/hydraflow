@@ -489,7 +489,10 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         from preflight.audit import PreflightAuditEntry
         from preflight.context import gather_context
         from preflight.decision import apply_decision
-        from preflight.decompose_terminal import decompose_or_escalate
+        from preflight.decompose_terminal import (
+            ALREADY_SATISFIED,
+            decompose_or_escalate,
+        )
 
         issue_number = int(issue.get("number", 0))
         issue_body = str(issue.get("body", "") or "")
@@ -607,6 +610,20 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
                 # of an already-exhausted issue must not refresh its clock.
                 self._state.arm_auto_agent_redrive(issue_number, _now_iso())
                 return {"status": "skipped_exhausted"}
+            if outcome == ALREADY_SATISFIED:
+                # #11480: a fix for this issue already landed (or is in
+                # flight). Neither decompose nor page a human — no labels
+                # change, no re-drive is armed, and the widened claim stays
+                # put: the merge that satisfies the issue closes it, and if
+                # that PR is abandoned the next tick re-evaluates from
+                # scratch. decompose_or_escalate already commented the
+                # evidence (once).
+                logger.info(
+                    "Auto-agent: issue #%d already satisfied by a landed fix "
+                    "— skipping re-slice and HITL escalation (#11480)",
+                    issue_number,
+                )
+                return {"status": "skipped_already_satisfied"}
             return {"status": "skipped_decomposed"}
 
         # #9721: claim the widened issue BEFORE gathering context / spawning.
@@ -685,9 +702,15 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
 
         # #9719: the attempt that hits the cap arms the TTL re-drive marker.
         # Decomposed issues are already closed/superseded — nothing to
-        # re-drive. Arming is idempotent (state guard preserves the first
-        # exhaustion timestamp).
-        if decision.get("exhausted") and not decision.get("decomposed"):
+        # re-drive. #11480: an already-satisfied issue is equally exempt —
+        # arming would page a human once the TTL expires for a fix that
+        # already landed. Arming is idempotent (state guard preserves the
+        # first exhaustion timestamp).
+        if (
+            decision.get("exhausted")
+            and not decision.get("decomposed")
+            and not decision.get("already_satisfied")
+        ):
             self._state.arm_auto_agent_redrive(issue_number, _now_iso())
 
         # A *resolved* diagnose-failed issue (routed here from the diagnostic

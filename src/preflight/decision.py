@@ -100,6 +100,13 @@ async def apply_decision(
     `IssueDecomposer.create_epic_from_result`); a decline or missing wiring
     falls through to today's behavior unchanged.
 
+    #11480: that terminal has a third outcome, ``already-satisfied`` — a fix
+    for the issue already landed or is in flight, so the stall is spurious.
+    It suppresses the label/comment step too (returned as
+    ``already_satisfied=True``) but, unlike a decompose, leaves the issue
+    open and in the pipeline. Treating it as anything else silently pages a
+    human for work that is already done.
+
     #9721 widened intake: *hitl_widened* marks an issue that arrived via the
     widened ``hydraflow-hitl`` poll and is claimed under the autofix label.
     The resolver owns the transition (mirrors ``HITLPhase``):
@@ -149,6 +156,7 @@ async def apply_decision(
             add.append("auto-agent-exhausted")
 
     decomposed = False
+    already_satisfied = False
     if (
         "human-required" in add
         and decomposer is not None
@@ -156,8 +164,12 @@ async def apply_decision(
         and config is not None
         and ctx is not None
     ):
+        from preflight.decompose_terminal import (
+            ALREADY_SATISFIED,
+            DECOMPOSED,
+            decompose_or_escalate,
+        )
         from preflight.decompose_terminal import _PRPort as _DecomposePRPort
-        from preflight.decompose_terminal import decompose_or_escalate
 
         # decision._PRPort and decompose_terminal._PRPort are distinct minimal
         # Protocols (different method subsets); the concrete runtime object is a
@@ -173,7 +185,25 @@ async def apply_decision(
             state=state,
             prs=cast(_DecomposePRPort, pr_port),
         )
-        decomposed = outcome == "decomposed"
+        decomposed = outcome == DECOMPOSED
+        already_satisfied = outcome == ALREADY_SATISFIED
+
+    if already_satisfied:
+        # #11480: a fix for this issue already landed (or is in flight), so
+        # the stall is spurious. Neither the human-required family nor the
+        # attempt comment applies — the issue stays exactly where it is and
+        # closes with its fix. decompose_or_escalate already posted the
+        # evidence comment (deduped across ticks).
+        return {
+            "issue": issue_number,
+            "status": result.status,
+            "exhausted": exhausted,
+            "added": [],
+            "removed": [],
+            "decomposed": False,
+            "already_satisfied": True,
+            "hitl_widened": hitl_widened,
+        }
 
     if decomposed:
         # The issue was superseded by an epic — decompose_or_escalate /
@@ -188,6 +218,7 @@ async def apply_decision(
             "added": [],
             "removed": [],
             "decomposed": True,
+            "already_satisfied": False,
             "hitl_widened": hitl_widened,
         }
 
@@ -239,6 +270,7 @@ async def apply_decision(
         "added": add,
         "removed": remove,
         "decomposed": False,
+        "already_satisfied": False,
         "hitl_widened": hitl_widened,
     }
 

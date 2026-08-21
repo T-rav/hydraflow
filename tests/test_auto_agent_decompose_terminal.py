@@ -87,9 +87,57 @@ def _make_deps(tmp_path: Path):
     prs.find_open_pr_for_branch = AsyncMock(return_value=None)
     prs.get_pr_diff_names = AsyncMock(return_value=[])
     prs.close_pr = AsyncMock()
+    # #11480 already-satisfied gate reads. Seeded with the real "no evidence"
+    # shapes (an open issue, no PR detail, no base-branch history) rather than
+    # bare AsyncMock returns, so a test that decomposes does so because the
+    # gate found nothing — not because it choked on a MagicMock.
+    prs.get_issue_state = AsyncMock(return_value="OPEN")
+    prs.get_pr_title_and_body = AsyncMock(return_value=("", ""))
+    prs.get_pr_checks = AsyncMock(return_value=[])
+    prs.get_pr_reviews = AsyncMock(return_value=[])
+    prs.get_pr_mergeable = AsyncMock(return_value=True)
+    prs.list_branch_commits = AsyncMock(return_value=[])
     decomposer = AsyncMock()
     council = AsyncMock()
     return config, state, prs, decomposer, council
+
+
+def _seed_open_pr(
+    prs,
+    *,
+    branch: str,
+    pr_number: int,
+    title: str = "",
+    body: str = "",
+    draft: bool = False,
+    checks: list[tuple[str, str]] | None = None,
+    reviews: list[str] | None = None,
+    mergeable: bool | None = True,
+) -> None:
+    """Seed *prs* so exactly *branch* carries an open PR with these details."""
+    from models import PRInfo
+
+    async def _find(b: str, *, issue_number: int = 0) -> PRInfo | None:
+        if b != branch:
+            return None
+        return PRInfo(
+            number=pr_number, issue_number=issue_number, branch=b, draft=draft
+        )
+
+    prs.find_open_pr_for_branch = AsyncMock(side_effect=_find)
+    prs.get_pr_title_and_body = AsyncMock(return_value=(title, body))
+    prs.get_pr_checks = AsyncMock(
+        return_value=[
+            {"name": name, "state": state}
+            for name, state in (
+                checks if checks is not None else [("quality", "SUCCESS")]
+            )
+        ]
+    )
+    prs.get_pr_reviews = AsyncMock(
+        return_value=[{"author": "octocat", "state": s} for s in (reviews or [])]
+    )
+    prs.get_pr_mergeable = AsyncMock(return_value=mergeable)
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +369,462 @@ class TestDecomposeOrEscalate:
 
 
 # ---------------------------------------------------------------------------
+# #11480: the already-satisfied gate — never re-slice work that already landed
+# ---------------------------------------------------------------------------
+
+
+class TestAlreadySatisfiedGate:
+    """Each skip case pairs with a liveness counter-pin below it: the gate
+    must recognise a landed fix WITHOUT quietly disabling the stall path."""
+
+    @pytest.mark.asyncio
+    async def test_closing_keyword_pr_on_auto_agent_branch_skips_decomposition(
+        self, tmp_path: Path
+    ) -> None:
+        """#11427's exact shape: the fix lives on the auto-agent's own
+        branch, which the old branch lookup never read."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(
+            side_effect=AssertionError(
+                "council must not be called — fix already landed"
+            )
+        )
+        _seed_open_pr(
+            prs,
+            branch=config.auto_agent_branch_for_issue(11427),
+            pr_number=11461,
+            title="Fixes #11427: stop the frobnicator from stalling",
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=11427,
+            ctx=_ctx(issue_number=11427),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "already-satisfied"
+        council.decide.assert_not_called()
+        decomposer.create_epic_from_result.assert_not_called()
+        prs.close_pr.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_closing_keyword_pr_on_manual_branch_skips_decomposition(
+        self, tmp_path: Path
+    ) -> None:
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(side_effect=AssertionError("council must not run"))
+        _seed_open_pr(
+            prs,
+            branch=config.branch_for_issue(7),
+            pr_number=42,
+            title="Some title",
+            body="Resolves #7 — the whole thing.",
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "already-satisfied"
+        decomposer.create_epic_from_result.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_landed_commit_on_base_branch_skips_decomposition(
+        self, tmp_path: Path
+    ) -> None:
+        """The headline #11480 case: the fix merged hours ago and the issue
+        just hasn't closed yet."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(side_effect=AssertionError("council must not run"))
+        prs.list_branch_commits = AsyncMock(
+            return_value=[
+                {"date": "2026-08-18T09:00:00Z", "message": "chore: unrelated"},
+                {
+                    "date": "2026-08-18T07:08:00Z",
+                    "message": "Fixes #11427: land the real fix (#11430)",
+                },
+            ]
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=11427,
+            ctx=_ctx(issue_number=11427),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "already-satisfied"
+        prs.list_branch_commits.assert_awaited_once_with(
+            config.base_branch(), limit=100
+        )
+        decomposer.create_epic_from_result.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_closed_issue_skips_decomposition(self, tmp_path: Path) -> None:
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(side_effect=AssertionError("council must not run"))
+        prs.get_issue_state = AsyncMock(return_value="COMPLETED")
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "already-satisfied"
+        decomposer.create_epic_from_result.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skip_posts_evidence_comment_once(self, tmp_path: Path) -> None:
+        """The issue stays in the pipeline, so every later tick re-enters
+        this path — the comment must not repeat."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        prs.get_issue_state = AsyncMock(return_value="COMPLETED")
+
+        await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+        prs.post_comment.assert_awaited_once()
+        _, posted = prs.post_comment.call_args.args
+        assert "already landed" in posted
+
+        # Second tick: the marker is now in the gathered comments.
+        from preflight.context import IssueComment
+
+        prs.post_comment.reset_mock()
+        await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(
+                issue_number=7,
+                issue_comments=[
+                    IssueComment(author="hydraflow", body=posted, created_at="")
+                ],
+            ),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+        prs.post_comment.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_skip_happens_before_the_depth_cap(self, tmp_path: Path) -> None:
+        """A landed fix must not reach human-required either — the depth cap
+        escalates, so the gate has to run ahead of it."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        state.get_all_epic_states = MagicMock(
+            return_value={
+                "900": EpicState(
+                    epic_number=900,
+                    title="Parent epic",
+                    child_issues=[7],
+                    decomposition_depth=config.max_decomposition_depth,
+                )
+            }
+        )
+        prs.get_issue_state = AsyncMock(return_value="COMPLETED")
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "already-satisfied"
+
+    # --- Liveness counter-pins: a genuine stall must still decompose. ---
+
+    @pytest.mark.asyncio
+    async def test_genuinely_stalled_issue_with_no_landed_fix_still_decomposes(
+        self, tmp_path: Path
+    ) -> None:
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        prs.list_branch_commits = AsyncMock(
+            return_value=[{"date": "", "message": "Fixes #999: someone else's issue"}]
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        decomposer.create_epic_from_result.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_red_ci_pr_still_decomposes(self, tmp_path: Path) -> None:
+        """A PR that declares the fix but fails CI IS the stall — the gate
+        must not read its title as success."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        _seed_open_pr(
+            prs,
+            branch=config.auto_agent_branch_for_issue(7),
+            pr_number=42,
+            title="Fixes #7: attempt three",
+            checks=[("quality", "SUCCESS"), ("e2e", "FAILURE")],
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        prs.close_pr.assert_awaited_once_with(42)
+
+    @pytest.mark.asyncio
+    async def test_changes_requested_pr_still_decomposes(self, tmp_path: Path) -> None:
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        _seed_open_pr(
+            prs,
+            branch=config.auto_agent_branch_for_issue(7),
+            pr_number=42,
+            title="Fixes #7: attempt three",
+            reviews=["CHANGES_REQUESTED"],
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+
+    @pytest.mark.asyncio
+    async def test_pr_with_no_ci_checks_still_decomposes(self, tmp_path: Path) -> None:
+        """An empty check list is absence of evidence, not evidence of health."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        _seed_open_pr(
+            prs,
+            branch=config.auto_agent_branch_for_issue(7),
+            pr_number=42,
+            title="Fixes #7: attempt three",
+            checks=[],
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+
+    @pytest.mark.asyncio
+    async def test_unreadable_issue_state_still_decomposes(
+        self, tmp_path: Path
+    ) -> None:
+        """`UNKNOWN` is how both adapters report an unreadable issue; it must
+        never be mistaken for 'closed, so the work is done'."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        prs.get_issue_state = AsyncMock(return_value="UNKNOWN")
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+
+    @pytest.mark.asyncio
+    async def test_draft_pr_is_not_evidence_of_a_landed_fix(
+        self, tmp_path: Path
+    ) -> None:
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        _seed_open_pr(
+            prs,
+            branch=config.auto_agent_branch_for_issue(7),
+            pr_number=42,
+            title="Fixes #7: work in progress",
+            draft=True,
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+
+
+# ---------------------------------------------------------------------------
+# #11281 class: PR resolution must cover BOTH agent branch names
+# ---------------------------------------------------------------------------
+
+
+class TestPRResolutionCoversBothAgentBranches:
+    @pytest.mark.asyncio
+    async def test_supersede_closes_pr_on_the_auto_agent_branch(
+        self, tmp_path: Path
+    ) -> None:
+        """Before #11480, `_find_pr_number` read only `agent/issue-{N}`, so
+        the auto-agent's own PR was invisible: never superseded, and its diff
+        never reached the council as salvage evidence."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        _seed_open_pr(
+            prs,
+            branch=config.auto_agent_branch_for_issue(7),
+            pr_number=4242,
+            title="WIP: half a fix",
+        )
+        prs.get_pr_diff_names = AsyncMock(return_value=["src/frobnicator.py"])
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        prs.close_pr.assert_awaited_once_with(4242)
+        prs.get_pr_diff_names.assert_awaited_once_with(4242)
+
+    @pytest.mark.asyncio
+    async def test_manual_branch_wins_when_both_carry_a_pr(
+        self, tmp_path: Path
+    ) -> None:
+        """`agent_branches_for_issue` documents manual-first precedence."""
+        from models import PRInfo
+
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        numbers = {
+            config.branch_for_issue(7): 100,
+            config.auto_agent_branch_for_issue(7): 200,
+        }
+
+        async def _find(branch: str, *, issue_number: int = 0) -> PRInfo:
+            return PRInfo(
+                number=numbers[branch], issue_number=issue_number, branch=branch
+            )
+
+        prs.find_open_pr_for_branch = AsyncMock(side_effect=_find)
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        prs.close_pr.assert_awaited_once_with(100)
+
+    @pytest.mark.asyncio
+    async def test_supersede_never_closes_a_landing_fix_pr(
+        self, tmp_path: Path
+    ) -> None:
+        """Defence in depth: `escalation_context.pr_number` bypasses branch
+        resolution entirely, so the close path re-checks the PR itself."""
+        from models import EscalationContext
+
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        prs.get_pr_title_and_body = AsyncMock(
+            return_value=("Fixes #7: the complete fix", "")
+        )
+        prs.get_pr_checks = AsyncMock(return_value=[{"name": "q", "state": "SUCCESS"}])
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(
+                issue_number=7,
+                escalation_context=EscalationContext(
+                    cause="review-stuck", origin_phase="review", pr_number=888
+                ),
+            ),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        prs.close_pr.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
 # Wiring: AutoAgentPreflightLoop constructor threads epic_manager/runner
 # ---------------------------------------------------------------------------
 
@@ -386,6 +890,12 @@ def _make_wired_loop(tmp_path: Path, *, decomposer, council):
     pr.list_closed_issues_by_label = AsyncMock(return_value=[])
     pr.find_open_pr_for_branch = AsyncMock(return_value=None)
     pr.get_pr_diff_names = AsyncMock(return_value=[])
+    pr.get_issue_state = AsyncMock(return_value="OPEN")
+    pr.get_pr_title_and_body = AsyncMock(return_value=("", ""))
+    pr.get_pr_checks = AsyncMock(return_value=[])
+    pr.get_pr_reviews = AsyncMock(return_value=[])
+    pr.get_pr_mergeable = AsyncMock(return_value=True)
+    pr.list_branch_commits = AsyncMock(return_value=[])
     audit = MagicMock()
     audit.daily_spend = MagicMock(return_value=0.0)
     loop = AutoAgentPreflightLoop(
@@ -455,6 +965,31 @@ class TestAttemptCapPreCheckWiring:
         assert result["result_status"] == "skipped_exhausted"
         decomposer.create_epic_from_result.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_already_satisfied_neither_decomposes_nor_pages_a_human(
+        self, tmp_path: Path
+    ) -> None:
+        """#11480 at the loop seam: the attempt cap tripped on count, but a
+        fix for the issue already landed — no epic, no human-required, and
+        no TTL re-drive armed (that would page a human on a delay)."""
+        decomposer = AsyncMock()
+        council = AsyncMock()
+        council.decide = AsyncMock(side_effect=AssertionError("council must not run"))
+        loop, state, pr = _make_wired_loop(
+            tmp_path, decomposer=decomposer, council=council
+        )
+        pr.list_issues_by_label = AsyncMock(return_value=[_hitl_issue()])
+        pr.list_branch_commits = AsyncMock(
+            return_value=[{"date": "", "message": "Fixes #1: already landed"}]
+        )
+
+        result = await loop._do_work()
+
+        assert result["result_status"] == "skipped_already_satisfied"
+        pr.add_labels.assert_not_awaited()
+        decomposer.create_epic_from_result.assert_not_awaited()
+        state.arm_auto_agent_redrive.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Wiring: apply_decision's exhaustion + _LABEL_MAP needs_human/fatal path
@@ -498,6 +1033,39 @@ class TestApplyDecisionDecomposeWiring:
         assert out["decomposed"] is True
         pr_port.add_labels.assert_not_awaited()
         pr_port.post_comment.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_needs_human_already_satisfied_adds_no_label_or_comment(
+        self, tmp_path: Path
+    ) -> None:
+        """#11480: the third outcome must not fall into the human-required
+        path — `decomposed == False` alone used to guarantee exactly that."""
+        config, state, pr_port, decomposer, council = _make_deps(tmp_path)
+        state.get_auto_agent_attempts = MagicMock(return_value=1)
+        council.decide = AsyncMock(side_effect=AssertionError("council must not run"))
+        pr_port.get_issue_state = AsyncMock(return_value="COMPLETED")
+
+        out = await apply_decision(
+            issue_number=9,
+            sub_label="x",
+            result=_preflight_result("needs_human"),
+            pr_port=pr_port,
+            state=state,
+            max_attempts=3,
+            decomposer=decomposer,
+            council=council,
+            config=config,
+            ctx=_ctx(issue_number=9),
+        )
+
+        assert out["already_satisfied"] is True
+        assert out["decomposed"] is False
+        pr_port.add_labels.assert_not_awaited()
+        # The evidence comment is the terminal's; apply_decision's own
+        # attempt comment must not fire on top of it.
+        pr_port.post_comment.assert_awaited_once()
+        _, posted = pr_port.post_comment.call_args.args
+        assert "already landed" in posted
 
     @pytest.mark.asyncio
     async def test_needs_human_decompose_decline_still_adds_label(

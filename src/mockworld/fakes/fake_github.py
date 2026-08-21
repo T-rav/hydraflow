@@ -167,6 +167,12 @@ class FakePR:
     # created_at, mirroring FakeIssue.closed_at's convention (#9727).
     closed_at: str = ""
     merged_at: str = ""
+    # The PR's own declaration of what it closes (#11480). Production PR
+    # titles are ``Fixes #N: <title>``; the decompose terminal reads these
+    # to tell a landing fix from a stalled one. Empty by default so an
+    # unseeded PR declares nothing — a scenario must opt in explicitly.
+    title: str = ""
+    body: str = ""
 
 
 class FakeGitHubUnmodelledCommand(RuntimeError):
@@ -391,6 +397,9 @@ class FakeGitHub:
         created_at: str | None = None,
         closed_at: str | None = None,
         merged_at: str | None = None,
+        title: str = "",
+        body: str = "",
+        checks: list[tuple[str, str]] | None = None,
     ) -> None:
         """Directly insert a PR record (sync helper for test seeding).
 
@@ -401,6 +410,9 @@ class FakeGitHub:
         ``created_at``/``closed_at``/``merged_at`` let a scenario give
         distinct PRs distinct ages for fitness-window boundary testing
         (#11418) — unset, they fall back to FakePR's fixed defaults.
+        ``title``/``body``/``checks`` seed what ``get_pr_title_and_body`` and
+        ``get_pr_checks`` serve, so a scenario can stage a PR that declares
+        ``Fixes #N`` with live CI (#11480).
         """
         pr = FakePR(
             number=number,
@@ -413,6 +425,9 @@ class FakeGitHub:
             author=author,
             is_bot=is_bot,
             mergeable=mergeable,
+            title=title,
+            body=body,
+            checks=list(checks or []),
         )
         if created_at:
             pr.created_at = created_at
@@ -909,6 +924,19 @@ class FakeGitHub:
     async def get_pr_approvers(self, pr_number: int) -> list[str]:
         self._maybe_rate_limit()
         return ["octocat"]
+
+    async def get_pr_title_and_body(self, pr_number: int) -> tuple[str, str]:
+        """Serve seeded ``FakePR.title``/``FakePR.body`` (#11480).
+
+        Defaults to ``("", "")`` — the same "unreadable" shape the real
+        adapter returns on failure — so an unseeded PR never accidentally
+        declares a closing keyword for its issue.
+        """
+        self._maybe_rate_limit()
+        pr = self._prs.get(pr_number)
+        if pr is None:
+            return ("", "")
+        return (pr.title, pr.body)
 
     async def get_pr_checks(self, pr_number: int) -> list[dict[str, str]]:
         """Serve seeded ``FakePR.checks`` (#10260). Defaults to empty — same
