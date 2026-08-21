@@ -91,11 +91,13 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     # worktree-destruction decision. It still uses one lexical local-git seam;
     # the loop executes status/rev-list/two-rev-diff through that call site.
     # #11571 moved that single call site from ``_worktree_work_has_landed``
-    # into the shared ``_drive_landed_proof`` driver so the phase-3 branch-tip
-    # proof reuses it instead of opening a second seam — the entry is RENAMED
-    # to the new enclosing function (same count), not grown.
-    "src/workspace_gc_loop.py::WorkspaceGCLoop._drive_landed_proof::run_subprocess": 1,
-    "src/workspace_gc_loop.py::WorkspaceGCLoop._reap_worktree::run_subprocess": 2,
+    # into the shared module-level ``_drive_landed_proof`` driver so the
+    # phase-3 branch-tip proof reuses it instead of opening a second seam —
+    # the entry is RENAMED to the new enclosing function (same count), not grown.
+    "src/workspace_gc_loop.py::_drive_landed_proof::run_subprocess": 1,
+    # #11571 also hoisted the phase-5 executor to module level (the loop keeps
+    # policy; I/O executors take explicit deps) — RENAMED, same count.
+    "src/workspace_gc_loop.py::_reap_worktree::run_subprocess": 2,
 }
 
 

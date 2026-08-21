@@ -21,13 +21,23 @@ def _functions() -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
     }
 
 
+def _callee_name(call: ast.Call) -> str | None:
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    return None
+
+
 def _method_calls() -> dict[str, list[str]]:
+    """Callee names (method or bare function) invoked inside each function."""
     calls: dict[str, list[str]] = {}
     for name, node in _functions().items():
         calls[name] = [
-            child.func.attr
+            callee
             for child in ast.walk(node)
-            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute)
+            if isinstance(child, ast.Call)
+            and (callee := _callee_name(child)) is not None
         ]
     return calls
 
@@ -129,7 +139,7 @@ def test_every_branch_force_delete_is_post_proof() -> None:
 
 
 def test_both_landed_predicates_share_one_driver_and_one_subprocess_seam() -> None:
-    """One ladder, one driver: neither identity front-end spawns git itself."""
+    """One ladder, one module-level driver: neither front-end spawns git itself."""
     functions = _functions()
     calls = _method_calls()
 

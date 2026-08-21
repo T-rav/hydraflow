@@ -10,6 +10,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `112ec85` — fix(release): tag the promoted main SHA, never the factory checkout HEAD (Fixes #11517) (#11576) (#11576) *(2026-08-21)*
 - `91c83ee` — fix(telemetry): one-shot claude spawns report usage — issue_refinement / sampled_audit / sampled_audit_adjudicate (Fixes #11514, Fixes #11515, Fixes #11516) (#11579) (#11579) *(2026-08-21)*
 - `07cc599` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof *(2026-08-21)*
+- `deed8f0` — test(workspace-gc): pin proof-before-delete source order; cite the arch and scenario pins in ADR-0069 *(2026-08-21)*
+- `82e997e` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof *(2026-08-21)*
+- `112ec85` — fix(release): tag the promoted main SHA, never the factory checkout HEAD (Fixes #11517) (#11576) (#11576) *(2026-08-21)*
+- `91c83ee` — fix(telemetry): one-shot claude spawns report usage — issue_refinement / sampled_audit / sampled_audit_adjudicate (Fixes #11514, Fixes #11515, Fixes #11516) (#11579) (#11579) *(2026-08-21)*
 - `eac96f2` — Fixes #11480: never re-slice an issue whose fix already landed (#11566) (#11566) *(2026-08-21)*
 - `e1aa0d8` — test(workspace-gc): real-git pins for the closed-issue landed guard on phases 1-2 and 5 (refs #11503, #11507; fix shipped in #11530) (#11572) (#11572) *(2026-08-21)*
 - `0cce8a7` — Fixes #11481: fold sixth site, and widen the class-closure guard to find it *(2026-08-21)*
