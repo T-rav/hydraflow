@@ -40,6 +40,20 @@ refreshed in place; closed while the reading is still non-empty → re-filed
 ``test_suite_hygiene_ratchet.py``) stop NEW offenders; this loop keeps the
 burn-down of the grandfathered ones on the board.
 
+**Token-share drift (#11442).** A third whole-repo kind, ``token_drift``,
+rides the same tick: ``token_drift.load_and_check_drift`` (the #11441
+engine, fail-soft) compares the trailing complete ISO week's per-source
+token shares against the pinned baseline, and every DRIFTING chart becomes
+ONE regular ``hydraflow-find`` candidate fingerprinted
+``token_drift:<source>:<window_key>`` — filed through ``_file_findings``
+like spread/scatter, NOT as a class issue: each source+week is its own
+episode. The fingerprint is recorded only after ``create_issue`` returns a
+real number, so a failed filing retries next tick, a success never re-files
+that source+week, and a second source drifting in the same week files
+separately. A non-OK report (no/thin/stale baseline, idle week) files
+nothing and logs its reason at INFO. Filing is the whole actuator — no
+prompt pruning, no config change (helpers: ``erosion.token_drift_filing``).
+
 **Cursor + dedup design.** ``state.get_erosion_last_processed_sha()``
 persists the base-branch HEAD SHA this loop last finished analyzing
 (``state/_erosion_metrics.py``). Each tick reads the CURRENT HEAD sha of
@@ -116,10 +130,17 @@ from erosion.spread import changed_files_for_range
 from erosion.spread import compute as spread_compute
 from erosion.suite_hygiene import collect_tests
 from erosion.suite_hygiene import compute as suite_compute
+from erosion.token_drift_filing import (
+    TOKEN_DRIFT_KIND,
+    render_token_drift,
+    token_drift_candidates,
+    token_drift_summary,
+)
 from exception_classify import reraise_on_credit_or_bug
 from find_class_key import compute_class_key, render_marker
 from git_timeouts import GIT_READONLY_TIMEOUT_S
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
+from token_drift import DriftStatus, load_and_check_drift
 
 if TYPE_CHECKING:
     from arch._models import ModuleGraph
@@ -280,8 +301,10 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
         candidates = self._compute_candidates(
             commit_range, changed_files, added_symbols, module_graph
         )
-        class_candidates = self._repo_wide_candidates(repo_root)
-        filed, capped = await self._file_findings(candidates)
+        repo_wide = self._repo_wide_candidates(repo_root)
+        class_candidates = [c for c in repo_wide if c.get("class_issue")]
+        drift_candidates = [c for c in repo_wide if not c.get("class_issue")]
+        filed, capped = await self._file_findings(candidates + drift_candidates)
         class_filed, refreshed, class_capped = await self._reconcile_class_issues(
             class_candidates, already_filed=filed
         )
@@ -296,13 +319,15 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
             "status": "ok",
             "range": commit_range,
             "changed_files": len(changed_files),
-            "candidates": len(candidates) + len(class_candidates),
+            "candidates": len(candidates) + len(repo_wide),
             "filed": filed,
             "refreshed": refreshed,
             "capped": capped,
         }
         for candidate in class_candidates:
             result[candidate["kind"]] = candidate["summary"]
+        if drift_candidates:
+            result[TOKEN_DRIFT_KIND] = token_drift_summary(drift_candidates)
         return result
 
     def _resolve_range(
@@ -388,11 +413,14 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
         return candidates
 
     def _repo_wide_candidates(self, repo_root: Path) -> list[dict[str, Any]]:
-        """Whole-repo mass + suite-hygiene readings, one class candidate per non-empty kind.
+        """Whole-repo readings: one class candidate per non-empty mass /
+        suite-hygiene kind, plus one REGULAR candidate per drifting token chart.
 
         Not change-scoped like spread/scatter (size is a property of the tree,
-        not of a diff), but tied to the same cursor so each runs at most once
-        per tick that saw new commits.
+        token share a property of the week), but tied to the same cursor so
+        each runs at most once per tick that saw new commits. Callers split on
+        ``class_issue``: the class kinds go to ``_reconcile_class_issues``, the
+        ``token_drift`` kind rides ``_file_findings`` (#11442).
         """
         candidates: list[dict[str, Any]] = []
         src_dir = repo_root / "src"
@@ -453,7 +481,24 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
                         },
                     }
                 )
+        candidates.extend(self._token_drift_candidates())
         return candidates
+
+    def _token_drift_candidates(self) -> list[dict[str, Any]]:
+        """Token-share drift over the trailing ISO week (#11442), fail-soft.
+
+        ``load_and_check_drift`` never raises on a missing/corrupt ledger; any
+        non-OK verdict is logged at INFO with the engine's reason and files
+        nothing — a sensor with no baseline is silent, not alarming.
+        """
+        report = load_and_check_drift(self._config)
+        if report.status is not DriftStatus.OK:
+            logger.info(
+                "ErosionMetrics: token-drift check filed nothing (%s): %s",
+                report.status.value,
+                report.reason,
+            )
+        return token_drift_candidates(report)
 
     async def _reconcile_class_issues(
         self, candidates: list[dict[str, Any]], *, already_filed: int
@@ -559,13 +604,24 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
                 continue
             title, body = _render_finding(candidate)
             try:
-                await self._prs.create_issue(title, body, labels=_ISSUE_LABELS)
+                number = await self._prs.create_issue(title, body, labels=_ISSUE_LABELS)
             except Exception as exc:
                 reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "ErosionMetrics: failed to file finding %s",
                     fingerprint,
                     exc_info=True,
+                )
+                continue
+            if not number:
+                # PRManager.create_issue returns 0 on failure without raising.
+                # Recording the fingerprint here would retire a finding that
+                # was never filed (#11442 — the same trap #11522 closed for
+                # class issues); leave it so the next tick retries.
+                logger.warning(
+                    "ErosionMetrics: create_issue returned no number for finding "
+                    "%s; retrying next tick",
+                    fingerprint,
                 )
                 continue
             seen = seen | {fingerprint}
@@ -591,6 +647,8 @@ def _render_finding(candidate: dict[str, Any]) -> tuple[str, str]:
         return _render_mass(candidate)
     if candidate["kind"] == "suite_hygiene":
         return _render_suite_hygiene(candidate)
+    if candidate["kind"] == TOKEN_DRIFT_KIND:
+        return render_token_drift(candidate)
 
     commit_range = candidate["commit_range"]
     last_sha, _, current_sha = commit_range.partition("..")

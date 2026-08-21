@@ -16,5 +16,8 @@ Two whole-tree sensors sit beside the change-scoped ones: `erosion.mass`
 `tests/architecture/test_suite_hygiene_ratchet.py`). Both file ONE standing
 class issue each through `ErosionMetricsLoop` — the "always keep decomposing /
 always keep pruning" pressure — while the ratchets stop new offenders at PR
-time.
+time. `erosion.token_drift_filing` is the pure half of the token-share drift
+actuator (#11442): it turns `token_drift`'s weekly verdict into one regular
+`hydraflow-find` candidate per drifting source per ISO week, filed by the same
+loop.
 """
