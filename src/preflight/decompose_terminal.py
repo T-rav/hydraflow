@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from decomposition_docs import gather_decomposition_docs
 from exception_classify import reraise_on_credit_or_bug
+from false_close import closing_issue_refs
 from models import Task
 
 if TYPE_CHECKING:
@@ -58,6 +59,9 @@ class _PRPort(Protocol):
     ) -> Any: ...
     async def get_pr_diff_names(self, pr_number: int) -> list[str]: ...
     async def close_pr(self, pr_number: int) -> None: ...
+    async def list_branch_commits(
+        self, branch: str, *, limit: int = 30
+    ) -> list[dict[str, str]]: ...
 
 
 async def decompose_or_escalate(
@@ -72,10 +76,13 @@ async def decompose_or_escalate(
 ) -> str:
     """Attempt to decompose *issue_number* before it reaches `human-required`.
 
-    Returns ``"decomposed"`` when the issue was superseded by an epic (the
-    caller must NOT add `human-required`), or ``"human-required"`` when
-    decomposition is not wired, the council declines, or the depth cap is
-    already spent (the caller applies today's HITL behavior unchanged).
+    Returns ``"decomposed"`` when the issue was superseded by an epic, OR
+    when a closing-keyword commit (``Fixes #N``) for *issue_number* already
+    landed — the fix is done, so re-slicing would manufacture children for
+    finished work (#11480); either way the caller must NOT add
+    `human-required`. Returns ``"human-required"`` when decomposition is not
+    wired, the council declines, or the depth cap is already spent (the
+    caller applies today's HITL behavior unchanged).
 
     Idempotent: if a prior — possibly interrupted — tick already decomposed
     this issue, returns ``"decomposed"`` immediately without invoking the
@@ -91,6 +98,15 @@ async def decompose_or_escalate(
     if state.get_issue_status(issue_number) == DECOMPOSED:
         logger.info(
             "Issue #%d already decomposed — skipping duplicate decompose attempt",
+            issue_number,
+        )
+        return DECOMPOSED
+
+    if await _landed_closing_ref_present(issue_number, ctx=ctx, config=config, prs=prs):
+        logger.info(
+            "Issue #%d has a closing-keyword commit already landed — the fix "
+            "is done; skipping re-slice instead of manufacturing children "
+            "for finished work (#11480)",
             issue_number,
         )
         return DECOMPOSED
@@ -208,6 +224,44 @@ async def _decide_and_create(
             task.id,
         )
     return epic_number
+
+
+async def _landed_closing_ref_present(
+    issue_number: int, *, ctx: PreflightContext, config: HydraFlowConfig, prs: _PRPort
+) -> bool:
+    """True when a closing-keyword commit (``Fixes #N`` / ``Closes #N`` /
+    ``Resolves #N``) for *issue_number* has already landed (#11480) — e.g. a
+    fix merged while this issue sat stalled, so decomposing it would
+    manufacture children for already-finished work.
+
+    Two evidence channels, either one a hit:
+      (a) this tick's already-gathered ``ctx.recent_commits`` (cheap, no
+          extra I/O — may miss the fix if its commit doesn't touch a file
+          the issue body mentions), and
+      (b) the base branch's own recent commit history via
+          ``PRPort.list_branch_commits`` (authoritative, but a live read).
+
+    Fails open (``False``) on any scan error: this is an optional pre-check
+    ahead of the existing decompose/escalate terminal, which must never be
+    blocked by a broken commit-history read.
+    """
+    try:
+        if any(
+            issue_number in closing_issue_refs(commit.title)
+            for commit in ctx.recent_commits
+        ):
+            return True
+        commits = await prs.list_branch_commits(config.base_branch(), limit=30)
+        return any(
+            issue_number in closing_issue_refs(commit.get("message", ""))
+            for commit in commits
+        )
+    except Exception as exc:
+        reraise_on_credit_or_bug(exc)
+        logger.warning(
+            "Landed-fix scan failed for #%d: %s", issue_number, exc, exc_info=True
+        )
+        return False
 
 
 def _resolve_depth(issue_number: int, state: _StatePort) -> int:

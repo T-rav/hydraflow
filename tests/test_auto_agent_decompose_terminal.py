@@ -23,9 +23,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from auto_agent_preflight_loop import AutoAgentPreflightLoop
 from models import EpicDecompResult, EpicState, NewIssueSpec
-from preflight.context import PreflightContext
+from preflight.context import CommitRef, PreflightContext
 from preflight.decision import PreflightResult, apply_decision
 from preflight.decompose_terminal import decompose_or_escalate
+from subprocess_util import CreditExhaustedError
 from tests.helpers import ConfigFactory, make_bg_loop_deps, make_tracker
 
 # ---------------------------------------------------------------------------
@@ -62,6 +63,17 @@ def _decomp_result(**overrides: object) -> EpicDecompResult:
     }
     defaults.update(overrides)
     return EpicDecompResult(**defaults)  # type: ignore[arg-type]
+
+
+def _commit_ref(**overrides: object) -> CommitRef:
+    defaults: dict[str, object] = {
+        "sha": "abc1234",
+        "title": "chore: unrelated commit",
+        "author": "bot",
+        "date": "2026-08-18T07:08:00Z",
+    }
+    defaults.update(overrides)
+    return CommitRef(**defaults)  # type: ignore[arg-type]
 
 
 def _decline_result(**overrides: object) -> EpicDecompResult:
@@ -318,6 +330,206 @@ class TestDecomposeOrEscalate:
 
         assert outcome == "human-required"
         decomposer.create_epic_from_result.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Landed-fix guard (#11480): a closing-keyword commit that already landed
+# must skip re-slicing instead of manufacturing children for finished work.
+# ---------------------------------------------------------------------------
+
+
+class TestLandedFixGuard:
+    @pytest.mark.asyncio
+    async def test_landed_fix_on_base_branch_skips_council(
+        self, tmp_path: Path
+    ) -> None:
+        """Channel (a): the base branch's own commit history carries the
+        closing-keyword reference."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        prs.list_branch_commits = AsyncMock(
+            return_value=[
+                {
+                    "date": "2026-08-18T07:08:00Z",
+                    "message": "Fixes #7: retry-cap arithmetic",
+                }
+            ]
+        )
+        council.decide = AsyncMock(
+            side_effect=AssertionError(
+                "council must never run once a landed-fix commit is found"
+            )
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        council.decide.assert_not_called()
+        decomposer.create_epic_from_result.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_landed_fix_in_recent_commit_context_skips_council(
+        self, tmp_path: Path
+    ) -> None:
+        """Channel (b): this tick's already-gathered ``ctx.recent_commits``
+        carries the closing-keyword reference, even though the live
+        base-branch scan (channel a) comes back empty -- proving the two
+        channels are independently sufficient, not just channel (a) alone."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        prs.list_branch_commits = AsyncMock(return_value=[])
+        council.decide = AsyncMock(
+            side_effect=AssertionError(
+                "council must never run once a landed-fix commit is found"
+            )
+        )
+        ctx = _ctx(
+            issue_number=7,
+            recent_commits=[_commit_ref(title="Fixes #7: retry-cap arithmetic")],
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=ctx,
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        council.decide.assert_not_called()
+        decomposer.create_epic_from_result.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_landed_fix_anywhere_still_decomposes(
+        self, tmp_path: Path
+    ) -> None:
+        """Contrast case for the two tests above: with BOTH channels empty,
+        the guard must not fire and decomposition proceeds exactly as
+        before -- proving the guard discriminates on the commit evidence
+        rather than always (or never) skipping the council."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        prs.list_branch_commits = AsyncMock(return_value=[])
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        ctx = _ctx(issue_number=7, recent_commits=[_commit_ref()])
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=ctx,
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        council.decide.assert_awaited_once()
+        decomposer.create_epic_from_result.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_closing_ref_for_a_different_issue_does_not_skip(
+        self, tmp_path: Path
+    ) -> None:
+        """Specificity boundary: a landed closing-keyword commit exists, but
+        it references a DIFFERENT issue number than the one being
+        evaluated -- the guard must not false-positive on "some fix landed
+        somewhere" and must let this issue's own decomposition proceed."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        prs.list_branch_commits = AsyncMock(
+            return_value=[
+                {"date": "2026-08-18T07:08:00Z", "message": "Fixes #99: unrelated bug"}
+            ]
+        )
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        ctx = _ctx(
+            issue_number=7,
+            recent_commits=[_commit_ref(title="Fixes #714: also unrelated")],
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=ctx,
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        council.decide.assert_awaited_once()
+        decomposer.create_epic_from_result.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_scan_transient_error_fails_open_and_proceeds(
+        self, tmp_path: Path
+    ) -> None:
+        """The landed-fix pre-check is an optimization layered in front of
+        the existing terminal; an ordinary transient failure (network hiccup,
+        `gh` unavailable) must fail OPEN -- decomposition proceeds exactly as
+        it did before this guard existed, never silently blocking or
+        escalating on a scan bug."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        prs.list_branch_commits = AsyncMock(
+            side_effect=RuntimeError("gh api unavailable")
+        )
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        council.decide.assert_awaited_once()
+        decomposer.create_epic_from_result.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_credit_exhausted_during_scan_propagates_uncaught(
+        self, tmp_path: Path
+    ) -> None:
+        """A credit-exhaustion signal during the scan is NOT an ordinary
+        transient failure -- it must propagate out of ``decompose_or_escalate``
+        uncaught (per ``reraise_on_credit_or_bug``'s contract, docs/wiki/
+        dark-factory.md §2.2) rather than being swallowed as fail-open, or
+        the orchestrator's global credit-pause signal is silently eaten."""
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        prs.list_branch_commits = AsyncMock(
+            side_effect=CreditExhaustedError("credits exhausted")
+        )
+        council.decide = AsyncMock(
+            side_effect=AssertionError("council must not run once credits raise")
+        )
+
+        with pytest.raises(CreditExhaustedError, match="credits exhausted"):
+            await decompose_or_escalate(
+                issue_number=7,
+                ctx=_ctx(issue_number=7),
+                config=config,
+                decomposer=decomposer,
+                council=council,
+                state=state,
+                prs=prs,
+            )
+
+        council.decide.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

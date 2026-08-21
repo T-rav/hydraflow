@@ -39,6 +39,14 @@ Four cases (per ``.superpowers/sdd/task-8-brief.md``):
     both scripted to approve a split — proven by asserting no new epic is
     created despite the green light, so the assertion is non-vacuous
     (removing the guard would make this test start failing).
+(e) The landed-fix guard (#11480): a stalled issue whose fix already landed
+    (a ``Fixes #N`` commit on the base branch) does NOT get re-sliced —
+    proven with the council's LLM seam scripted to explode if ever called,
+    so a regression that removes the guard fails loudly instead of
+    silently creating an unwanted epic. Paired with a same-shape contrast
+    case (no landed-fix commit seeded) that DOES decompose normally, so the
+    guard is proven to discriminate on the commit evidence rather than
+    always (or never) firing.
 """
 
 from __future__ import annotations
@@ -637,3 +645,108 @@ class TestIntakeSkipsReSplittingAutoDecomposedChild:
         assert _find_epic_numbers(world, cfg.epic_label[0]) == []
         assert len(world.github._issues) == pre_issue_count
         assert world.harness.state.get_issue_status(issue_number) != "decomposed"
+
+
+# ---------------------------------------------------------------------------
+# (e) The landed-fix guard (#11480): a stalled issue whose fix already
+#     landed does not get re-sliced. Paired with a same-shape contrast case
+#     that DOES decompose, proving the guard discriminates on the evidence.
+# ---------------------------------------------------------------------------
+
+
+def _explode_council_seam(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the council's LLM seam raise if it is ever invoked -- proves the
+    landed-fix guard short-circuits BEFORE the council runs, not merely that
+    the end-to-end outcome happens to look the same."""
+
+    async def _explode(**_kwargs: object) -> None:
+        raise AssertionError(
+            "the council must never run once a landed-fix commit is found"
+        )
+
+    monkeypatch.setattr("runner_utils.run_lightweight_agent", _explode)
+
+
+class TestLandedFixGuardSkipsReslice:
+    async def test_landed_fix_on_base_branch_skips_decomposition(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        world = MockWorld(tmp_path)
+        cfg = world.harness.config
+        issue_number = 1050
+        world.add_issue(
+            issue_number,
+            "Root issue: the frobnicator never converges",
+            "The frobnicator keeps failing CI no matter what the auto-agent tries.",
+            labels=["hitl-escalation", "flaky-test-stuck"],
+        )
+        _exhaust_attempts(world, issue_number)
+        world.github.add_gc_branch(
+            cfg.base_branch(),
+            [
+                {
+                    "date": "2026-08-18T07:08:00Z",
+                    "message": f"Fixes #{issue_number}: retry-cap arithmetic",
+                }
+            ],
+        )
+
+        epic_manager = _make_epic_manager(world)
+        _wire_decompose(world, epic_manager)
+        _explode_council_seam(monkeypatch)
+
+        results = await world.run_with_loops(["auto_agent_preflight"], cycles=1)
+
+        assert results["auto_agent_preflight"] == {
+            "status": "ok",
+            "issues_processed": 1,
+            "result_status": "skipped_decomposed",
+            "suppressed": 0,
+        }
+        # No epic (or any child) was manufactured for already-finished work.
+        assert _find_epic_numbers(world, cfg.epic_label[0]) == []
+        assert "human-required" not in world.github.issue(issue_number).labels
+
+    async def test_no_landed_fix_on_base_branch_still_decomposes_normally(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Same issue shape as the case directly above, minus the seeded
+        base-branch commit -- the council DOES run and an epic + children
+        ARE created, proving the guard above fired because of the commit
+        evidence, not because decomposition is broken or skipped outright."""
+        world = MockWorld(tmp_path)
+        cfg = world.harness.config
+        issue_number = 1050
+        world.add_issue(
+            issue_number,
+            "Root issue: the frobnicator never converges",
+            "The frobnicator keeps failing CI no matter what the auto-agent tries.",
+            labels=["hitl-escalation", "flaky-test-stuck"],
+        )
+        _exhaust_attempts(world, issue_number)
+        # No world.github.add_gc_branch(...) seeding here -- the base branch
+        # carries no closing-keyword commit for this issue.
+
+        epic_manager = _make_epic_manager(world)
+        _wire_decompose(world, epic_manager)
+        _script_council(
+            monkeypatch,
+            [
+                _direction_reply(),
+                _validation_reply(decision="approve", confidence="high"),
+            ],
+        )
+
+        results = await world.run_with_loops(["auto_agent_preflight"], cycles=1)
+
+        assert results["auto_agent_preflight"] == {
+            "status": "ok",
+            "issues_processed": 1,
+            "result_status": "skipped_decomposed",
+            "suppressed": 0,
+        }
+        epic_numbers = _find_epic_numbers(world, cfg.epic_label[0])
+        assert len(epic_numbers) == 1
+        epic_state = world.harness.state.get_epic_state(epic_numbers[0])
+        assert epic_state is not None
+        assert len(epic_state.child_issues) == 2
