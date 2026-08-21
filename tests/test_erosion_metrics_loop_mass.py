@@ -10,12 +10,15 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from erosion_metrics_loop import (
     _current_head_sha,
     class_issue_fingerprint,
     find_class_issue_entry,
 )
 from find_class_key import extract_class_key, extract_folded_sites
+from subprocess_util import CreditExhaustedError
 from tests.test_erosion_metrics_loop import (
     _commit_all,
     _init_repo,
@@ -191,6 +194,42 @@ class TestClassIssueFiling:
             result["mass"]["digest"],
         )
         assert class_issue_fingerprint("mass", 7, "stale-digest") not in dedup._store
+
+    async def test_refresh_failure_is_swallowed_and_old_entry_kept(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        base = _current_head_sha(repo)
+        _seed(repo, dup_tests=False)
+        prs = _prs(state="OPEN")
+        prs.update_issue_body = AsyncMock(side_effect=RuntimeError("gh: 502"))
+        dedup = _make_dedup({class_issue_fingerprint("mass", 7, "stale-digest")})
+        loop = _make_loop(
+            tmp_path, repo, state=_make_state(base), pr_manager=prs, dedup=dedup
+        )
+
+        result = await loop._do_work()
+
+        assert result["refreshed"] == 0 and result["filed"] == 0
+        prs.create_issue.assert_not_awaited()
+        # The stale entry stays so the next tick retries the refresh.
+        assert find_class_issue_entry(dedup._store, "mass") == (7, "stale-digest")
+
+    async def test_refresh_failure_reraises_credit_exhausted(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _init_repo(tmp_path)
+        base = _current_head_sha(repo)
+        _seed(repo, dup_tests=False)
+        prs = _prs(state="OPEN")
+        prs.update_issue_body = AsyncMock(side_effect=CreditExhaustedError("credits"))
+        dedup = _make_dedup({class_issue_fingerprint("mass", 7, "stale-digest")})
+        loop = _make_loop(
+            tmp_path, repo, state=_make_state(base), pr_manager=prs, dedup=dedup
+        )
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._do_work()
 
     async def test_closed_issue_is_refiled_while_reading_is_non_empty(
         self, tmp_path: Path

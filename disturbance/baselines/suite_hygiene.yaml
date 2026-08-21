@@ -4,4 +4,4 @@ comment: 'High-water marks for structural test redundancy (erosion.suite_hygiene
   moved: initial marks at sensor introduction (identifiers kept, literal values normalized)'
 cross_file_duplicates: 32
 parametrize_copies: 784
-total_tests: 19786
+total_tests: 19789
