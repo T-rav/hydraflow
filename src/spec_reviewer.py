@@ -221,6 +221,7 @@ def cli_spec_reviewer(config, model: str) -> CLISpecReviewer:
                 source="spec_intake_review",
                 timeout=float(SPEC_REVIEW_TIMEOUT_S),
                 issue_labels=(),
+                provider="claude",
             )
         )
         if result.returncode != 0:
