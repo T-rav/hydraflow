@@ -526,6 +526,46 @@ class PlannerStatus(StrEnum):
     FAILED = "failed"
 
 
+class TestAdequacyOutcome(BaseModel):
+    """Telemetry for one test-adequacy gate evaluation (#11593 seam 3).
+
+    Recorded whenever the gate rejects a run or a repair pass runs, so the
+    independent verifier can be calibrated later (join against the escape
+    ledger, ADR-0127) and the System tab can show why implement attempts die.
+    Rides ``LoopResult.test_adequacy`` out of ``AgentRunner._run_skill``,
+    then ``WorkerResult.test_adequacy`` into the run manifest.
+    """
+
+    passed: bool = Field(
+        description="Final gate verdict after any repair passes",
+    )
+    verdict_source: (
+        Literal["llm-fail", "verifier-override", "coverage-delta"] | None
+    ) = Field(
+        default=None,
+        description=(
+            "What produced the final failing verdict: the finder LLM, the "
+            "independent verifier override, or the deterministic coverage "
+            "delta. None when the final verdict passed."
+        ),
+    )
+    findings: list[str] = Field(
+        default_factory=list,
+        description="Concrete gaps from the final failing verdict (bounded)",
+    )
+    repair_passes_used: int = Field(
+        default=0, ge=0, description="In-run repair passes spent (#11593 seam 1)"
+    )
+    repair_outcomes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Per-pass outcome: 'verdict-flipped' (repair fixed the gaps), "
+            "'still-failing' (re-check failed again), 'no-change' (the pass "
+            "wrote nothing and was burned)"
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class LoopResult:
     """Named result from internal agent verification/fix loops.
@@ -538,6 +578,9 @@ class LoopResult:
     passed: bool
     summary: str
     attempts: int = 0
+    #: Test-adequacy gate telemetry (#11593); None for every other loop and
+    #: for clean first-pass adequacy verdicts.
+    test_adequacy: TestAdequacyOutcome | None = None
 
 
 class NewIssueSpec(BaseModel):
@@ -891,6 +934,14 @@ class WorkerResult(BaseModel):
     )
     pr_info: PRInfo | None = Field(
         default=None, description="Pull request info if a PR was created"
+    )
+    test_adequacy: TestAdequacyOutcome | None = Field(
+        default=None,
+        description=(
+            "Test-adequacy gate telemetry (#11593): set whenever the gate "
+            "rejected the run or an in-run repair pass ran; recorded into "
+            "the run manifest by the implement phase"
+        ),
     )
 
 
@@ -1450,6 +1501,10 @@ class PipelineStats(BaseModel):
     queue: QueueStats = Field(default_factory=QueueStats)
     throughput: ThroughputStats = Field(default_factory=ThroughputStats)
     uptime_seconds: float = 0.0
+    #: Session counts of failed implement runs by failure class (#11593):
+    #: {test_adequacy, timeout, zero_commit, diff_sanity, quality, scope,
+    #: other}. Empty until the first classified failure.
+    implement_failures: dict[str, int] = Field(default_factory=dict)
 
 
 class RepoRuntimeInfo(BaseModel):
@@ -1542,6 +1597,12 @@ class SessionCounters(BaseModel):
     reviewed: int = 0
     merged: int = 0
     session_start: str = ""
+    #: Failed implement runs by failure class (#11593 seam 3): keys are
+    #: ``implement_failure_class.FAILURE_CLASSES`` (test_adequacy, timeout,
+    #: zero_commit, diff_sanity, quality, scope, other). Surfaced through
+    #: ``PipelineStats.implement_failures`` so the System tab can show why
+    #: attempts die, not just how many ran.
+    implement_failures: dict[str, int] = Field(default_factory=dict)
 
 
 class LifetimeStats(BaseModel):

@@ -6,8 +6,9 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
@@ -15,7 +16,14 @@ from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import exc_detail, is_likely_bug, reraise_on_credit_or_bug
 from human_steering import fenced_steering_guidance
 from implement_quality_gate import run_implement_quality_gate
-from models import LoopResult, Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
+from models import (
+    LoopResult,
+    Task,
+    TestAdequacyOutcome,
+    WorkerResult,
+    WorkerStatus,
+    WorkerUpdatePayload,
+)
 from plugin_skill_registry import (
     discover_plugin_skills,
     format_plugin_skills_for_prompt,
@@ -49,6 +57,24 @@ if TYPE_CHECKING:
     from tribal_wiki import TribalWikiStore
 
 logger = logging.getLogger("hydraflow.agent")
+
+#: What produced a failing gate verdict (#11593 seam 3 telemetry).
+_VerdictSource = Literal["llm-fail", "verifier-override", "coverage-delta"]
+
+
+@dataclass(slots=True)
+class _SkillCheckOutcome:
+    """One full evaluation of a skill gate: finder loop + coverage + verifier.
+
+    ``verdict_source`` and ``findings`` describe the failing verdict (both
+    empty on a pass); ``short_circuit`` marks the no-op cases (empty diff,
+    empty prompt) that must return without telemetry or repair.
+    """
+
+    result: LoopResult
+    verdict_source: _VerdictSource | None = None
+    findings: list[str] = field(default_factory=list)
+    short_circuit: bool = False
 
 
 class AgentRunner(BaseRunner):
@@ -253,6 +279,10 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
                     worker_id,
                     plan_text=skill_plan_text,
                 )
+                if skill_result.test_adequacy is not None:
+                    # Rejection/repair telemetry (#11593 seam 3) — rides the
+                    # WorkerResult into the run manifest and failure counters.
+                    result.test_adequacy = skill_result.test_adequacy
                 if not skill_result.passed and skill.blocking:
                     logger.warning(
                         "%s flagged issues for #%d: %s",
@@ -1149,8 +1179,12 @@ SUMMARY: <one-line summary>
     ) -> LoopResult:
         """Run a registered post-implementation skill via the skill registry.
 
-        Gets max_attempts from config via ``skill.config_key``.
-        Returns a :class:`LoopResult`.
+        Gets max_attempts from config via ``skill.config_key``. When the
+        check fails and the skill declares a repair seam (#11593 — only
+        test-adequacy today), up to ``skill.repair_config_key`` bounded
+        repair passes hand the concrete findings back to the implementer
+        worktree and re-run the FULL check; the run is rejected only when
+        the verdict still fails afterwards. Returns a :class:`LoopResult`.
         """
         max_attempts = getattr(self._config, skill.config_key, 0)
         if max_attempts <= 0:
@@ -1160,9 +1194,72 @@ SUMMARY: <one-line summary>
         if commits == 0:
             return LoopResult(passed=True, summary="No commits to check")
 
+        skill_started = time.monotonic()
+        check = await self._run_skill_check(
+            skill, issue, worktree_path, branch, max_attempts, plan_text
+        )
+        if check.short_circuit:
+            return check.result
+
+        check, repair_outcomes = await self._run_skill_repair_loop(
+            skill, issue, worktree_path, branch, max_attempts, plan_text, check
+        )
+        result = check.result
+
+        # Append the skill result to run-N/skill_results.json alongside
+        # the parent run. This is the source of truth for skill-effectiveness
+        # scoring in trace_rollup.
+        ctx = self._tracing_ctx
+        if ctx is not None:
+            self._append_skill_result(
+                ctx,
+                skill_name=skill.name,
+                passed=result.passed,
+                attempts=result.attempts,
+                duration_seconds=time.monotonic() - skill_started,
+                blocking=skill.blocking,
+            )
+
+        # Rejection telemetry (#11593 seam 3): record every failing verdict
+        # and every repair-pass outcome so the verifier can be calibrated
+        # later. A clean first-pass OK carries no record.
+        if skill.repair_config_key is not None and (
+            not result.passed or repair_outcomes
+        ):
+            result = replace(
+                result,
+                test_adequacy=TestAdequacyOutcome(
+                    passed=result.passed,
+                    verdict_source=check.verdict_source,
+                    findings=check.findings[:10],
+                    repair_passes_used=len(repair_outcomes),
+                    repair_outcomes=repair_outcomes,
+                ),
+            )
+        return result
+
+    async def _run_skill_check(
+        self,
+        skill: AgentSkill,
+        issue: Task,
+        worktree_path: Path,
+        branch: str,
+        max_attempts: int,
+        plan_text: str,
+    ) -> _SkillCheckOutcome:
+        """One full gate evaluation: finder loop, coverage delta, verifier.
+
+        Re-reads the branch diff on every call so a post-repair re-check
+        (#11593) judges the repaired worktree, not the diff the first check
+        saw. The failing verdict's source and concrete findings ride the
+        outcome for the repair prompt and the rejection telemetry.
+        """
         full_diff = await self._get_branch_diff(worktree_path, branch)
         if not full_diff.strip():
-            return LoopResult(passed=True, summary="Empty diff")
+            return _SkillCheckOutcome(
+                result=LoopResult(passed=True, summary="Empty diff"),
+                short_circuit=True,
+            )
 
         max_diff = self._config.max_review_diff_chars
         prompt_diff = (
@@ -1178,16 +1275,19 @@ SUMMARY: <one-line summary>
             plan_text=plan_text,
         )
         if not prompt.strip():
-            return LoopResult(passed=True, summary=f"{skill.name}: no input data")
+            return _SkillCheckOutcome(
+                result=LoopResult(passed=True, summary=f"{skill.name}: no input data"),
+                short_circuit=True,
+            )
 
         cmd = self._build_pre_quality_review_command()
         summary = ""
-        skill_started = time.monotonic()
         # The finder transcript feeds the verifier's explicit-OK trigger below.
         # Initialised for the type checker; the attempt loop always runs at
-        # least once (max_attempts <= 0 returns early above), and an empty
-        # transcript can never carry the explicit OK marker.
+        # least once (max_attempts <= 0 returns early in _run_skill), and an
+        # empty transcript can never carry the explicit OK marker.
         transcript = ""
+        findings: list[str] = []
 
         # Each iteration's _execute call allocates its own subprocess_idx
         # from BaseRunner's monotonic counter, so retries and back-to-back
@@ -1218,9 +1318,12 @@ SUMMARY: <one-line summary>
         else:
             result = LoopResult(passed=False, summary=summary, attempts=max_attempts)
 
+        verdict_source: _VerdictSource | None = None if result.passed else "llm-fail"
+
         # Coverage delta runs once after the LLM attempt loop — not per-attempt.
         # Running make coverage on each retry is expensive and redundant because
-        # the worktree code doesn't change between LLM attempts.
+        # the worktree code doesn't change between LLM attempts. (A repair
+        # re-check re-enters this method, so repaired code IS re-measured.)
         if result.passed and skill.coverage_check:
             uncovered = await self._run_coverage_delta_check(
                 worktree_path, full_diff, issue.id
@@ -1241,6 +1344,8 @@ SUMMARY: <one-line summary>
                     summary=cov_summary,
                     attempts=result.attempts,
                 )
+                verdict_source = "coverage-delta"
+                findings = uncovered
 
         # Independent verifier (#9546): a second-opinion pass with its own
         # model, gated on the finder's EXPLICIT OK marker — never on the
@@ -1253,25 +1358,160 @@ SUMMARY: <one-line summary>
             and getattr(self._config, skill.verifier.enabled_config_key, False)
             and skill.verifier.trigger(transcript)
         ):
-            result = await self._run_skill_verifier(
+            result, verifier_gaps = await self._run_skill_verifier(
                 skill, issue, worktree_path, prompt_diff, result
             )
+            if not result.passed:
+                verdict_source = "verifier-override"
+                findings = verifier_gaps
 
-        # Append the skill result to run-N/skill_results.json alongside
-        # the parent run. This is the source of truth for skill-effectiveness
-        # scoring in trace_rollup.
-        ctx = self._tracing_ctx
-        if ctx is not None:
-            self._append_skill_result(
-                ctx,
-                skill_name=skill.name,
-                passed=result.passed,
-                attempts=result.attempts,
-                duration_seconds=time.monotonic() - skill_started,
-                blocking=skill.blocking,
+        if result.passed:
+            verdict_source = None
+            findings = []
+        return _SkillCheckOutcome(
+            result=result, verdict_source=verdict_source, findings=findings
+        )
+
+    async def _run_skill_repair_loop(
+        self,
+        skill: AgentSkill,
+        issue: Task,
+        worktree_path: Path,
+        branch: str,
+        max_attempts: int,
+        plan_text: str,
+        check: _SkillCheckOutcome,
+    ) -> tuple[_SkillCheckOutcome, list[str]]:
+        """Bounded repair-in-run for a failing gate verdict (#11593 seam 1).
+
+        Hands the concrete findings back to the implementer worktree for up
+        to ``skill.repair_config_key`` focused fix passes, re-running the
+        FULL check (coverage delta + independent verifier included) after
+        each. Never weakens the gate: the final verdict is always the
+        re-checked one; a pass that writes nothing — or after which the diff
+        vanished — burns its pass and the standing failing verdict proceeds
+        to rejection. Returns the final check outcome plus per-pass outcome
+        labels (``verdict-flipped`` / ``still-failing`` / ``no-change``).
+        """
+        repair_outcomes: list[str] = []
+        budget = self._skill_repair_budget(skill)
+        while not check.result.passed and len(repair_outcomes) < budget:
+            pass_number = len(repair_outcomes) + 1
+            pass_started = time.monotonic()
+            changed = await self._run_skill_repair_pass(
+                skill, issue, worktree_path, check, pass_number, budget
             )
+            if changed:
+                recheck = await self._run_skill_check(
+                    skill, issue, worktree_path, branch, max_attempts, plan_text
+                )
+                if recheck.short_circuit:
+                    # The diff vanished mid-repair. Keep the standing failing
+                    # verdict — a repair pass must never wash the gate out.
+                    outcome = "no-change"
+                else:
+                    check = recheck
+                    outcome = (
+                        "verdict-flipped" if check.result.passed else "still-failing"
+                    )
+            else:
+                # Wrote nothing: burn the pass and proceed to rejection on the
+                # standing verdict instead of re-checking unchanged code.
+                outcome = "no-change"
+            repair_outcomes.append(outcome)
+            logger.info(
+                "%s repair pass %d/%d for #%d: %s",
+                skill.name,
+                pass_number,
+                budget,
+                issue.id,
+                outcome,
+            )
+            ctx = self._tracing_ctx
+            if ctx is not None:
+                self._append_skill_result(
+                    ctx,
+                    skill_name=f"{skill.name}-repair",
+                    passed=check.result.passed,
+                    attempts=pass_number,
+                    duration_seconds=time.monotonic() - pass_started,
+                    blocking=skill.blocking,
+                    role="repair",
+                    outcome=outcome,
+                )
+            if outcome == "no-change":
+                break
+        return check, repair_outcomes
 
-        return result
+    def _skill_repair_budget(self, skill: AgentSkill) -> int:
+        """Resolve the bounded repair-pass budget for *skill* (#11593).
+
+        0 when the skill declares no repair seam or the config field is 0 —
+        straight to rejection, the pre-#11593 behavior. Read via ``getattr``
+        on every gate evaluation so the setting stays live-editable.
+        """
+        if skill.repair_config_key is None or skill.repair_prompt_builder is None:
+            return 0
+        return max(0, getattr(self._config, skill.repair_config_key, 0))
+
+    async def _run_skill_repair_pass(
+        self,
+        skill: AgentSkill,
+        issue: Task,
+        worktree_path: Path,
+        check: _SkillCheckOutcome,
+        pass_number: int,
+        max_passes: int,
+    ) -> bool:
+        """Dispatch one focused repair pass to the implementer worktree.
+
+        Returns ``True`` when the pass changed the branch (HEAD moved —
+        worth a full re-check), ``False`` when it wrote nothing so the
+        caller burns the pass. Fails open to the re-check when HEAD cannot
+        be read: the verifier-checked re-check is the authority, and a
+        burned pass on a git hiccup would reject a possibly-repaired run.
+        """
+        builder = skill.repair_prompt_builder
+        if builder is None:  # pragma: no cover — _skill_repair_budget gates
+            return False
+        head_before = await self._git_head(worktree_path)
+        prompt = builder(
+            issue_number=issue.id,
+            issue_title=issue.title,
+            verdict_source=check.verdict_source or "llm-fail",
+            summary=check.result.summary,
+            findings=check.findings,
+            pass_number=pass_number,
+            max_passes=max_passes,
+        )
+        cmd = self._build_command(worktree_path)
+        await self._execute(
+            cmd,
+            prompt,
+            worktree_path,
+            {"issue": issue.id, "source": "implementer"},
+            issue_labels=issue.tags,
+            telemetry_source=f"{skill.name}-repair",
+        )
+        await self._force_commit_uncommitted(issue, worktree_path)
+        head_after = await self._git_head(worktree_path)
+        if not head_before or not head_after:
+            return True
+        return head_after != head_before
+
+    async def _git_head(self, worktree_path: Path) -> str:
+        """Return the worktree's HEAD SHA, or ``""`` when it cannot be read."""
+        try:
+            result = await self._runner.run_simple(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(worktree_path),
+                timeout=self._config.git_command_timeout,
+            )
+        except (TimeoutError, FileNotFoundError):
+            return ""
+        if result.returncode != 0:
+            return ""
+        return (result.stdout or "").strip()
 
     async def _run_skill_verifier(
         self,
@@ -1280,7 +1520,7 @@ SUMMARY: <one-line summary>
         worktree_path: Path,
         prompt_diff: str,
         finder_result: LoopResult,
-    ) -> LoopResult:
+    ) -> tuple[LoopResult, list[str]]:
         """Run the independent second-opinion pass for a skill (#9546).
 
         Dispatches the verifier prompt with the verifier's own tool/model
@@ -1289,10 +1529,13 @@ SUMMARY: <one-line summary>
         keeps the finder's pass; OVERRIDE flips it to a fail with the
         verifier's own gap list. Fail-soft by default: a degraded run (empty
         transcript) keeps the finder's OK unless the fail-closed knob is set.
+        Returns the (possibly overridden) result plus the verifier's gap
+        list — empty unless it overrode — for the repair prompt and the
+        rejection telemetry (#11593).
         """
         spec = skill.verifier
         if spec is None:  # pragma: no cover — caller-gated
-            return finder_result
+            return finder_result, []
 
         verifier_started = time.monotonic()
         verifier_cmd = build_agent_command(
@@ -1313,6 +1556,7 @@ SUMMARY: <one-line summary>
         )
 
         result = finder_result
+        gaps: list[str] = []
         if not verifier_transcript.strip():
             # Subprocess soft-failure — nothing to judge. Fail-soft keeps the
             # finder's OK; the opt-in fail-closed knob flips it to a retry.
@@ -1347,6 +1591,7 @@ SUMMARY: <one-line summary>
                     ),
                     attempts=finder_result.attempts,
                 )
+                gaps = v_gaps
 
         ctx = self._tracing_ctx
         if ctx is not None:
@@ -1360,7 +1605,7 @@ SUMMARY: <one-line summary>
                 role="verifier",
                 outcome=outcome,
             )
-        return result
+        return result, gaps
 
     async def _run_coverage_delta_check(
         self,

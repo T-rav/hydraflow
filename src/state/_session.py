@@ -51,6 +51,24 @@ class SessionStateMixin:
         setattr(sc, stage, getattr(sc, stage) + 1)
         self.save()
 
+    def increment_implement_failure(self, failure_class: str) -> None:
+        """Count a failed implement run under its failure class and persist.
+
+        #11593 seam 3: the System tab counts attempts but not why they die.
+        *failure_class* comes from
+        :func:`implement_failure_class.classify_implement_failure`; anything
+        outside :data:`implement_failure_class.FAILURE_CLASSES` is coerced to
+        ``"other"`` so a classifier drift can never grow unbounded keys in
+        persisted state.
+        """
+        from implement_failure_class import FAILURE_CLASSES  # noqa: PLC0415
+
+        if failure_class not in FAILURE_CLASSES:
+            failure_class = "other"
+        failures = self._data.session_counters.implement_failures
+        failures[failure_class] = failures.get(failure_class, 0) + 1
+        self.save()
+
     def get_session_counters(self) -> SessionCounters:
         """Return a copy of the current session counters."""
         return self._data.session_counters.model_copy()

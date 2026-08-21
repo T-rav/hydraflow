@@ -23,6 +23,7 @@ from harness_insights import (
     format_known_traps_for_prompt,
     top_failure_categories,
 )
+from implement_failure_class import classify_implement_failure
 from implement_spec_reviewer import (
     SpecComplianceReviewer,
     SpecReviewInput,
@@ -824,6 +825,21 @@ class ImplementPhase:
 
         result = await self._run_implementation(issue, branch, idx, review_feedback)
 
+        # Failure-class split (#11593 seam 3): classify every failed build at
+        # the point the result lands so the System tab shows why attempts die
+        # (test_adequacy / timeout / zero_commit / diff_sanity / quality /
+        # scope / other) instead of a bare attempt count. Counter updates
+        # must never take down the build path.
+        failure_class: str | None = None
+        if not result.success:
+            failure_class = classify_implement_failure(result.error)
+            try:
+                self._state.increment_implement_failure(failure_class)
+            except OSError:
+                logger.debug(
+                    "implement failure-class counter update failed", exc_info=True
+                )
+
         # Record a reflection for future cycles.
         if result.error:
             append_reflection(
@@ -847,7 +863,16 @@ class ImplementPhase:
                     for line in result.transcript.splitlines():
                         ctx.append_transcript(line)
                 outcome = "success" if result.success else "failed"
-                ctx.finalize(outcome, error=result.error)
+                ctx.finalize(
+                    outcome,
+                    error=result.error,
+                    failure_class=failure_class,
+                    test_adequacy=(
+                        result.test_adequacy.model_dump()
+                        if result.test_adequacy is not None
+                        else None
+                    ),
+                )
             except (RuntimeError, OSError):
                 logger.debug("Run recording finalize failed", exc_info=True)
 

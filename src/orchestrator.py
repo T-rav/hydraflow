@@ -1038,6 +1038,9 @@ class HydraFlowOrchestrator:
             queue=queue_stats,
             throughput=throughput,
             uptime_seconds=round(uptime, 1),
+            # Failure-class split (#11593 seam 3): why implement attempts die,
+            # counted by ImplementPhase at result classification.
+            implement_failures=dict(session_counters.implement_failures),
         )
 
     async def emit_pipeline_stats(self) -> None:
