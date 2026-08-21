@@ -602,6 +602,7 @@ async def test_gateway_mint_attribution_defaults_to_none(
     "attribution",
     [
         pytest.param({"issue_number": 11464, "pr_number": 11500}, id="attributed"),
+        pytest.param({"issue_number": 11464}, id="issue-only-omits-pr-key"),
         pytest.param({}, id="unattributed-omits-keys"),
     ],
 )
