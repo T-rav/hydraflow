@@ -1,0 +1,36 @@
+// Issue #11518 — dynamic view: fixed shard flow when staging advances mid-run.
+
+LikeC4({
+  include: https://likec4-theme-default
+
+  model {
+    scheduler = actor 'cron 6h / dispatch'
+    resolve = processor 'resolve: rev-parse staging → sha R'
+    checkout = processor 'shard: checkout ref: staging (literal)'
+    pin = processor 'pin: H = git rev-parse HEAD'
+    branch = processor 'H == R ?'
+    build = processor 'setup-python → pip install → docker build → run-all shard'
+    upload = processor 'upload summary artifact'
+    notice = processor '::notice staging advanced R→H; skip shard (next tick re-runs)'
+    report = processor 'report: collect_failures (tolerates missing shard summaries)'
+    alert = processor 'CodeQL: poisonable-step query'
+    resolved = state 'alert #108 auto-closed'
+
+    scheduler -> resolve -> checkout -> pin -> branch
+    branch -> build : 'matched=true'
+    branch -> notice : 'matched=false, exit 0'
+    build -> upload -> report
+    notice -> report : 'no artifact for this shard'
+    checkout -> alert : 'literal default-branch ref = trusted'
+    alert -> resolved : 'after fix lands on staging + CodeQL run'
+  }
+
+  views {
+    view pinFlow {
+      title 'Shard pin flow — staging advanced between jobs vs normal run'
+      include *
+      style notice { color amber }
+      style resolved { color green }
+    }
+  }
+})

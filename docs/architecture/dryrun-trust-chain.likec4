@@ -1,0 +1,52 @@
+// Issue #11518 — staging-rc-dryrun trust chain, before → after.
+// Container view: the three workflow jobs and what ref each checks out.
+
+LikeC4({
+  include: https://likec4-theme-default
+
+  model {
+    user = actor 'Scheduler / operator' {
+      -> 'runs workflow on default branch (staging), schedule+dispatch only'
+    }
+
+    wf = system 'staging-rc-dryrun.yml' {
+      resolve = component 'job: resolve' {
+        describedAs 'checkout ref: staging (literal, protected) → git rev-parse HEAD → outputs.sha'
+      }
+      shard = component 'job: dryrun-shard ×6' {
+        describedAs 'BEFORE: checkout ref: needs.resolve.outputs.sha (expression) → CodeQL flags run-all as poisonable (alert #108). AFTER: checkout ref: staging (literal default branch) + pin step asserting rev-parse HEAD == outputs.sha'
+      }
+      report = component 'job: report' {
+        describedAs 'checkout pinned to outputs.sha (unchanged — no cache-poisoning-capable step: no pip install/docker build)'
+      }
+      pin = component 'step: pin (new)' {
+        describedAs 'compare rev-parse HEAD vs needs.resolve.outputs.sha; mismatch → ::notice + matched=false, exit 0; gates every later shard step'
+      }
+    }
+
+    codeql = systemist 'CodeQL actions analysis' {
+      describedAs 'runs on push+PR to main & staging; literal default-branch ref = trusted → alert #108 auto-closes when fix lands on staging'
+    }
+
+    gh = system 'GitHub Issues' {
+      describedAs 'rolling hydraflow-find issue on scenario breakage'
+    }
+
+    user -> wf.resolve
+    resolve -> shard : 'needs.resolve.outputs.sha (hex SHA, not attacker-controlled)'
+    shard -> pin : 're-derives HEAD locally'
+    report -> gh : 'files/updates rolling issue'
+    wf -> codeql : 'scanned'
+  }
+
+  views {
+    view overview {
+      title 'staging-rc-dryrun trust chain — fix for alert #108'
+      include *
+      style wf.resolve { color green }
+      style wf.pin { color green }
+      style wf.shard { color amber }
+      style wf.report { color secondary }
+    }
+  }
+})
