@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11518
 source_phase: plan
 created_at: 2026-08-21T09:08:16.052902+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # CodeQL fix acceptance: API-verify alert closure; dismiss only as fallback
