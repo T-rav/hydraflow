@@ -51,7 +51,7 @@ Look up the relevant entry in [`docs/wiki/`](docs/wiki/index.md):
 | [`architecture-state-persistence.md`](docs/wiki/architecture-state-persistence.md) | State persistence, schema evolution, Pydantic patterns, FastAPI route registration |
 | [`architecture-refactoring.md`](docs/wiki/architecture-refactoring.md) | Dead-code removal, extraction, scope discipline, line-number-vs-pattern, multi-PR drift |
 | [`architecture-patterns-practices.md`](docs/wiki/architecture-patterns-practices.md) | Coordinator + parameter threading, transcript parsing, EventBus threading, dispatcher patterns |
-| [`patterns.md`](docs/wiki/patterns.md) | Kill-switch convention, dedup, escalation, quality gates, sentry, UI standards, commands |
+| [`patterns.md`](docs/wiki/patterns.md) | Kill-switch convention, dedup, escalation, quality gates, sentry, UI standards, commands, release policy (stable tags vs rolling `main`) |
 | [`gotchas.md`](docs/wiki/gotchas.md) | Worktree rules, avoided patterns, five-checkpoint loop wiring, recurring footguns |
 | [`testing.md`](docs/wiki/testing.md) | Test conventions, scenarios, cassettes, kill-switch tests, benchmarks |
 | [`dependencies.md`](docs/wiki/dependencies.md) | Optional services, graceful degradation, dependency boundaries |
