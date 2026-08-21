@@ -1054,6 +1054,11 @@ class MockWorld:
         if with_orchestrator:
             orchestrator = await self._build_wired_orchestrator(config, bus, state)
         else:
+            # The lightweight dashboard path exposes state seeded directly into
+            # PipelineHarness instead of running IssueStore.start()/refresh().
+            # Treat that synthetic state as authoritative so the production
+            # boot-readiness guard does not hide deliberately seeded cards.
+            self._harness.store._has_completed_initial_refresh = True  # noqa: SLF001
             # Lightweight shim so /api/pipeline and /api/queue serve harness data
             # without spinning up a full HydraFlowOrchestrator.
             orchestrator = _HarnessOrchestratorShim(self._harness)

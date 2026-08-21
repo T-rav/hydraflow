@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from mockworld import sandbox_main
@@ -120,6 +121,38 @@ def test_seed_stale_workspaces_defaults_branch_and_noops_when_empty(
     seed = MockWorldSeed(stale_workspaces=[{"number": 42}])
     sandbox_main.seed_stale_workspaces(state, config, seed)
     assert state.get_active_branches()[42] == "agent/issue-42"
+
+
+async def test_seeded_workspace_landed_proof_matches_only_exact_identity(
+    tmp_path,
+) -> None:
+    from mockworld.seed import MockWorldSeed
+
+    config = _seed_config(tmp_path)
+    issue = 7301
+    branch = f"agent/issue-{issue}"
+    path = config.workspace_path_for_issue(issue)
+    seed = MockWorldSeed(stale_workspaces=[{"number": issue, "branch": branch}])
+    loop = SimpleNamespace()
+
+    sandbox_main.wire_seeded_workspace_landed_proof(loop, config, seed)
+
+    proof = loop._worktree_work_has_landed
+    assert await proof(
+        path,
+        expected_branch=branch,
+        expected_issue=issue,
+    )
+    assert not await proof(
+        path,
+        expected_branch="agent/issue-9999",
+        expected_issue=issue,
+    )
+    assert not await proof(
+        config.workspace_path_for_issue(9999),
+        expected_branch=branch,
+        expected_issue=issue,
+    )
 
 
 def test_materialize_expired_runs_creates_purgeable_dir(tmp_path) -> None:
