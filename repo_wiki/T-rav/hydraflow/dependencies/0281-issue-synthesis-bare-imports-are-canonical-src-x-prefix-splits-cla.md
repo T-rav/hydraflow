@@ -4,9 +4,10 @@ topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
 created_at: 2026-08-18T13:47:37.725491+00:00
-status: active
+status: superseded
 corroborations: 1
 supersedes: 0263
+superseded_by: 0300
 ---
 
 # Bare imports are canonical; src.X prefix splits class identity
