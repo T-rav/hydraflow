@@ -1915,6 +1915,8 @@ class FakeGitHub:
         body = self._issue_edit_body(args)
         if number is None or body is None:
             return
+        if number not in self._issues:
+            raise RuntimeError(f"FakeGitHub: issue {number} not found")
         await self.update_issue_body(number, body)
 
     def _render_issue_view(self, args: list[str]) -> str:

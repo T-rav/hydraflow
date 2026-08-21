@@ -245,15 +245,13 @@ async def test_issue_edit_body_updates_fake_issue_body() -> None:
 
 
 @pytest.mark.asyncio
-async def test_issue_edit_body_unknown_issue_is_a_noop() -> None:
+async def test_issue_edit_body_unknown_issue_raises() -> None:
     gh = FakeGitHub()
 
-    output = await gh._run_gh(
-        "gh", "issue", "edit", "9999", "--repo", gh._repo, "--body", "x"
-    )
-
-    assert output == ""
-    assert gh._issues == {}
+    with pytest.raises(RuntimeError, match="issue 9999 not found"):
+        await gh._run_gh(
+            "gh", "issue", "edit", "9999", "--repo", gh._repo, "--body", "x"
+        )
 
 
 @pytest.mark.asyncio
