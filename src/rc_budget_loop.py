@@ -65,8 +65,9 @@ _WARMUP_STALL_TICKS = 6
 
 # Job-name markers for the heavy suite jobs gated behind the workflow's
 # ``gate`` job (``if: needs.gate.outputs.should_run == 'true'``). When the gate
-# resolves ``should_run=false`` (a schedule tick with no open ``rc/*`` PR, or a
-# non-RC PR), every one of these jobs is ``skipped`` and the run finishes in a
+# resolves ``should_run=false`` (a non-RC or fork PR — or, before #11565
+# removed the workflow's cron, a schedule tick with no open ``rc/*`` PR), every
+# one of these jobs is ``skipped`` and the run finishes in a
 # few seconds — a "gate-only" run that must be excluded from the baseline
 # population so it doesn't deflate the median/spike thresholds (#10254). The
 # shared run snapshot (#9814) carries no per-job data, so a run's gate-only

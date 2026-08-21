@@ -352,24 +352,59 @@ class TestPinGating:
         assert gated and min(gated) > pin_index
 
 
-class TestReportJobStaysPinnedToTheTestedCommit:
-    """Guard against over-fixing: the reporter must name one exact commit."""
+class TestReportJobNamesTheTestedCommit:
+    """Guard against over-fixing: the reporter must still name one exact commit.
 
-    def test_report_checks_out_the_resolved_sha(self, workflow: dict) -> None:
-        report = workflow["jobs"]["report"]
-        checkouts = [s for s in _steps(report) if _is_checkout(s)]
+    The report used to keep ``ref: ${{ needs.resolve.outputs.sha }}`` so its
+    checkout *was* the tested commit. That was the last job-output checkout in
+    the fleet (#11565; forbidden outright by
+    ``test_workflow_checkout_refs.py``), and it was never load-bearing: the
+    checkout only supplies the reporter script, while the SHA the report names
+    is the job output itself, handed to ``--sha``. So the property moves from
+    "checked out the right commit" to "passed the right SHA" — and a staging
+    tip that advanced since ``resolve`` cannot make the report lie.
+    """
+
+    @pytest.fixture
+    def report_steps(self, workflow: dict) -> list[dict]:
+        return _steps(workflow["jobs"]["report"])
+
+    def test_report_checks_out_the_literal_protected_branch(
+        self, report_steps: list[dict]
+    ) -> None:
+        checkouts = [s for s in report_steps if _is_checkout(s)]
         assert len(checkouts) == 1
-        assert "needs.resolve.outputs.sha" in _checkout_ref(checkouts[0])
+        assert _checkout_ref(checkouts[0]) == PROTECTED_REF
 
-    def test_report_job_writes_no_cache(self, workflow: dict) -> None:
-        # This is *why* the expression ref is safe to keep there.
-        assert not any(_is_cache_writing(s) for s in _steps(workflow["jobs"]["report"]))
+    def test_report_passes_the_resolved_sha_through_the_environment(
+        self, report_steps: list[dict]
+    ) -> None:
+        # Same hygiene as the shard's pin step: the job output reaches the
+        # reporter via `env:`, never interpolated into the shell body.
+        aggregate = next(s for s in report_steps if s.get("id") == "aggregate")
+        env = aggregate.get("env") or {}
+        names = [k for k, v in env.items() if "needs.resolve.outputs.sha" in str(v)]
+        assert len(names) == 1, f"expected one resolved-SHA env var, got {env}"
+        run = str(aggregate["run"])
+        assert f'--sha "${names[0]}"' in run
+        assert "${{ needs.resolve.outputs.sha }}" not in run
+
+    def test_no_report_step_interpolates_a_job_output_inline(
+        self, report_steps: list[dict]
+    ) -> None:
+        for step in report_steps:
+            assert "${{ needs." not in str(step.get("run", "")), step
+
+    def test_report_job_writes_no_cache(self, report_steps: list[dict]) -> None:
+        # Why no pin step is needed here: nothing builds or caches on the
+        # checked-out tree, so an advanced tip has nothing to poison.
+        assert not any(_is_cache_writing(s) for s in report_steps)
 
     def test_report_checkout_records_why_its_ref_is_trusted(
         self, raw_workflow: str
     ) -> None:
-        # The kept exception needs the same machine-checkable justification as
-        # the fixed one, so a future reader can tell "reviewed" from "missed".
+        # Same machine-checkable justification as the shard, so a future
+        # reader can tell "reviewed" from "missed".
         marked = _trust_marked_checkouts(
             raw_workflow, _job_line_span(raw_workflow, "report")
         )
@@ -468,20 +503,15 @@ class TestFleetSweep:
                     offenders.append(f"{path.name}:{job_name}")
         return offenders
 
-    #: Tracked-but-unresolved offenders: checking these out under
-    #: `refs/pull/N/merge` (weaker provenance than a literal protected branch)
-    #: is plausible but not established as safe, so stamping a `# TRUST:`
-    #: marker on them would be a false attestation. Named here instead, so a
-    #: *new* unmarked offender anywhere else still fails this test, and so
-    #: this set must shrink (forcing a human decision) the moment any of these
-    #: three is fixed or genuinely justified. See #11565.
-    _KNOWN_GAP_JOBS = frozenset(
-        {
-            "rc-promotion-scenario.yml:scenario",
-            "rc-promotion-scenario.yml:scenario-browser",
-            "rc-promotion-scenario.yml:trust",
-        }
-    )
+    #: Tracked-but-unresolved offenders. EMPTY since #11565 closed: the three
+    #: `rc-promotion-scenario.yml` jobs that sat here (checking out
+    #: `needs.gate.outputs.pr_ref` — a `refs/pull/N/merge` the scheduled path
+    #: resolved by `gh api`) now carry no `ref:` at all, in a workflow that
+    #: runs on `pull_request` only. The set stays as the mechanism: a *new*
+    #: unmarked offender anywhere in the fleet fails this test, and any entry
+    #: added here must still be a real offender (see the test below) so an
+    #: exemption cannot outlive the gap it names.
+    _KNOWN_GAP_JOBS: frozenset[str] = frozenset()
 
     def test_sweep_inspects_more_than_the_one_job_it_was_written_for(self) -> None:
         # Sanity: a sweep that (re-)degrades to selecting only `dryrun-shard`
