@@ -6,12 +6,12 @@ bounded_context: "caretaker"
 code_anchor: "src/workspace_gc_loop.py:WorkspaceGCLoop"
 aliases: ["workspace gc loop", "workspace garbage collector", "worktree gc loop"]
 related: [{"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K2"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K4"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K8"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "implements", "target": "01KQV37D10M06PGF32CF77W6K5"}, {"kind": "depends_on", "target": "01KVHDB0GY6PSQPWY90DH8TNQS"}, {"kind": "depends_on", "target": "01KWDRENTS7VACCW9PDA7Y488H"}]
-evidence: ["01KQNZNK5DWPQ75W9HBCJX2DJF"]
+evidence: ["01KQNZNK5DWPQ75W9HBCJX2DJF", "WORKTREE-BRANCH-VERIFY-001"]
 superseded_by: null
 superseded_reason: null
 confidence: "accepted"
 created_at: "2026-05-19T00:00:00.000000+00:00"
-updated_at: "2026-07-24T05:34:07.706352+00:00"
+updated_at: "2026-08-21T08:54:57.547312+00:00"
 ---
 
 ## Definition
