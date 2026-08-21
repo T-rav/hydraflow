@@ -213,7 +213,14 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "test_adequacy.build_test_adequacy_verifier_prompt",
         "tests/fixtures/prompts/test_adequacy_verifier.json",
         "Adjacent",
-        "src/test_adequacy.py:98",
+        "src/test_adequacy.py:166",
+    ),
+    AuditTarget(
+        "test_adequacy_repair",
+        "test_adequacy.build_test_adequacy_repair_prompt",
+        "tests/fixtures/prompts/test_adequacy_repair.json",
+        "Adjacent",
+        "src/test_adequacy.py:99",
     ),
     AuditTarget(
         "spec_match_requirements_gap",

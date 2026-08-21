@@ -224,6 +224,32 @@ class TestRepairLoop:
         assert result.summary == "missing tests"
 
     @pytest.mark.asyncio
+    async def test_vanished_diff_on_recheck_keeps_the_failing_verdict(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """A repair pass that empties the diff must not wash the gate out."""
+        runner = _runner(config, event_bus)
+        execute = AsyncMock(side_effect=[_FINDER_RETRY, "deleted everything"])
+        p = _gate_patches(runner, execute)
+        with (
+            p[0],
+            p[2],
+            p[3],
+            p[4],
+            p[5],
+            patch.object(
+                runner,
+                "_get_branch_diff",
+                new_callable=AsyncMock,
+                side_effect=["+def foo(): pass\n", ""],
+            ),
+        ):
+            result = await _run(runner, agent_task, tmp_path)
+        assert result.passed is False
+        assert result.summary == "missing tests"
+        assert result.test_adequacy.repair_outcomes == ["no-change"]
+
+    @pytest.mark.asyncio
     async def test_still_failing_recheck_rejects_with_the_final_verdict(
         self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:

@@ -48,7 +48,7 @@ entries:
   src/agent.py::noqa:BLE001: 2
   src/agent.py::noqa:F401: 1
   "src/agent.py::noqa:F841\u2014usedinf-stringprompt": 1
-  src/agent.py::noqa:PLC0415: 7
+  src/agent.py::noqa:PLC0415: 4
   src/agent.py::type-ignore[no-any-return]: 1
   src/arch/generators/coverage_matrix.py::noqa:BLE001: 1
   src/arch/generators/coverage_matrix.py::type-ignore[import-untyped]: 1

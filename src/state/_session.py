@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from file_util import atomic_write
+from implement_failure_class import FAILURE_CLASSES
 from models import SessionCounters, SessionLog
 
 if TYPE_CHECKING:
@@ -61,8 +62,6 @@ class SessionStateMixin:
         ``"other"`` so a classifier drift can never grow unbounded keys in
         persisted state.
         """
-        from implement_failure_class import FAILURE_CLASSES  # noqa: PLC0415
-
         if failure_class not in FAILURE_CLASSES:
             failure_class = "other"
         failures = self._data.session_counters.implement_failures

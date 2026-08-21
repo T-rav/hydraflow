@@ -8,6 +8,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 - `a8be8ee` — feat(factory): auto-rebase own dirty PRs when staging moves (#11595) (#11595) *(2026-08-21)*
 - `98d9393` — feat(factory): run as a launchd service; liveness kernel honours operator Stop (#11594) (#11594) *(2026-08-21)*
+- `fcdcfc3` — feat(implement): test-adequacy gate repairs in-run before rejecting (#11593) (#11593) *(2026-08-21)*
 - `e3e5665` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports (Fixes #11580) (#11591) (#11591) *(2026-08-21)*
 - `35f8b29` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) (#11583) (#11583) *(2026-08-21)*
 - `83b0f29` — fix(implement): take make quality off the host lock on the implement path (#11568 seam 3) (#11592) (#11592) *(2026-08-21)*
