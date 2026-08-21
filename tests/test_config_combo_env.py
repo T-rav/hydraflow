@@ -242,6 +242,57 @@ def test_maintenance_knob_routes_only_maintenance_roles() -> None:
     assert cfg.review_provider == "claude"
 
 
+def test_shared_maintenance_roles_resolve_maintenance_model() -> None:
+    from config import resolve_maintenance_model, resolve_maintenance_tool
+
+    cfg = HydraFlowConfig(
+        maintenance_provider="gateway",
+        maintenance_model="glm-5.2",
+    )
+    for field in (
+        "sampled_audit_model",
+        "issue_refinement_model",
+        "intervention_tally_model",
+        "skill_prompt_refine_model",
+    ):
+        assert (
+            resolve_maintenance_model(
+                role_model=getattr(cfg, field),
+                maintenance_model=cfg.maintenance_model,
+                background_model=cfg.background_model,
+            )
+            == "glm-5.2"
+        )
+    assert resolve_maintenance_tool(cfg) == "claude"
+
+
+@pytest.mark.parametrize(
+    ("field", "stage"),
+    [
+        ("sampled_audit_model", "sampled_audit"),
+        ("issue_refinement_model", "issue_refinement"),
+        ("intervention_tally_model", "intervention_tally"),
+        ("skill_prompt_refine_model", "skill_prompt_refine"),
+    ],
+)
+def test_shared_maintenance_roles_reject_glm_on_direct_claude(
+    field: str,
+    stage: str,
+) -> None:
+    with pytest.raises((ValueError, ValidationError), match=stage):
+        HydraFlowConfig(**{field: "glm-5.2"})
+
+
+def test_terminal_fleet_rejects_host_codex_caretaker_spawns() -> None:
+    with pytest.raises((ValueError, ValidationError), match="background_tool"):
+        HydraFlowConfig(
+            gateway_fleet_ratchet_enabled=True,
+            execution_mode="docker",
+            background_tool="codex",
+            background_model="gpt-5-codex",
+        )
+
+
 def test_verifier_model_validated_against_implementation_provider() -> None:
     """The test-adequacy verifier runs on the implementation harness, so its
     model is validated against implementation_provider, not a dial of its own."""

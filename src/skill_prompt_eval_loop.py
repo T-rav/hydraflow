@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from auto_pr import PREFLIGHT_DOCS_ONLY, generate_and_open_pr_async
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from config import resolve_maintenance_model, resolve_maintenance_tool
 from escalation_reconcile import EscalationReconciler
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
@@ -314,17 +315,17 @@ class _CLIRefineLLM:
         self._config = config
 
     def _resolve_model(self) -> str:
-        return (
-            self._config.skill_prompt_refine_model
-            or self._config.background_model
-            or "sonnet"
+        return resolve_maintenance_model(
+            role_model=self._config.skill_prompt_refine_model,
+            maintenance_model=self._config.maintenance_model,
+            background_model=self._config.background_model,
         )
 
     async def complete(self, prompt: str) -> str:
         result = await run_lightweight_agent(
             runner=get_default_runner(),
             config=self._config,
-            tool="claude",
+            tool=resolve_maintenance_tool(self._config),
             model=self._resolve_model(),
             prompt=prompt,
             source="skill_prompt_refine",

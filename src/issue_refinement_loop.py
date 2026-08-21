@@ -66,6 +66,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
+from config import resolve_maintenance_model, resolve_maintenance_tool
 from events import EventType, HydraFlowEvent
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
@@ -140,16 +141,22 @@ class _CLIRefinementLLM:
     a fake for all unit coverage.
     """
 
-    def __init__(self, config: HydraFlowConfig, model: str) -> None:
+    def __init__(self, config: HydraFlowConfig) -> None:
         self._config = config
-        self._model = model
+
+    def _resolve_model(self) -> str:
+        return resolve_maintenance_model(
+            role_model=self._config.issue_refinement_model,
+            maintenance_model=self._config.maintenance_model,
+            background_model=self._config.background_model,
+        )
 
     async def complete(self, prompt: str) -> str:
         result = await run_lightweight_agent(
             runner=get_default_runner(),
             config=self._config,
-            tool="claude",
-            model=self._model,
+            tool=resolve_maintenance_tool(self._config),
+            model=self._resolve_model(),
             prompt=prompt,
             source="issue_refinement",
             timeout=float(_REFINEMENT_LLM_TIMEOUT_SECONDS),
@@ -218,12 +225,7 @@ class IssueRefinementLoop(BaseBackgroundLoop):
     async def _refinement_complete(self, prompt: str) -> str:
         """Complete *prompt* via the injected fake or a lazily-built CLI client."""
         if self._refinement_llm is None:
-            model = (
-                self._config.issue_refinement_model
-                or self._config.background_model
-                or "sonnet"
-            )
-            self._refinement_llm = _CLIRefinementLLM(self._config, model)
+            self._refinement_llm = _CLIRefinementLLM(self._config)
         return await self._refinement_llm.complete(prompt)
 
     # --- Tick -----------------------------------------------------------------

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 import credit_failover
 from adr_utils import is_adr_issue_title
 from bg_worker_manager import BGWorkerManager
-from config import HydraFlowConfig
+from config import HydraFlowConfig, resolve_maintenance_model
 from event_loop_watchdog import build_event_loop_watchdog
 from events import EventBus, EventType, HydraFlowEvent
 from hitl_controller import HITLController
@@ -123,6 +123,10 @@ _BACKEND_WORKER_LOOPS: dict[str, tuple[str, str]] = {
         "adr_drift_resolver_provider",
         "adr_drift_resolver_model",
     ),
+    "intervention_tally": ("maintenance_provider", "intervention_tally_model"),
+    "sampled_audit": ("maintenance_provider", "sampled_audit_model"),
+    "issue_refinement": ("maintenance_provider", "issue_refinement_model"),
+    "skill_prompt_eval": ("maintenance_provider", "skill_prompt_refine_model"),
 }
 
 # Core work loops whose runner seams apply repo routing and credit failover.
@@ -2238,7 +2242,16 @@ class HydraFlowOrchestrator:
             else:
                 dial_field, model_field = route_fields
                 dial = getattr(self._config, dial_field)
-                model = getattr(self._config, model_field) or "haiku"
+                configured_model = getattr(self._config, model_field)
+                model = (
+                    resolve_maintenance_model(
+                        role_model=configured_model,
+                        maintenance_model=self._config.maintenance_model,
+                        background_model=self._config.background_model,
+                    )
+                    if dial_field == "maintenance_provider"
+                    else configured_model or "haiku"
+                )
                 providers[name] = normalize_provider(
                     harness_billing_provider(dial, model)
                 )
