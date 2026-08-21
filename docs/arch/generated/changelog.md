@@ -27,6 +27,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `7be0267` — docs: ADR-0135 factory-as-launchd-service + operator Stop latch; wiki install recipe *(2026-08-21)*
 - `25133bc` — chore(pr): ADR-0135 Binds line, hygiene-ratchet test fixes, arch regen after rebase *(2026-08-21)*
 - `76b37b2` — docs: ADR-0135 factory-as-launchd-service + operator Stop latch; wiki install recipe *(2026-08-21)*
+- `ef298c8` — chore(adr): retire the epic_decomposed outcome from ADR-0096's triage verdict enumeration *(2026-08-21)*
 - `25f6564` — chore(config): remove retired feature flags and their machinery (flag-rot audit) *(2026-08-21)*
 - `e3e5665` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports (Fixes #11580) (#11591) (#11591) *(2026-08-21)*
 - `35f8b29` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) (#11583) (#11583) *(2026-08-21)*

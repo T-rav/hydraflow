@@ -185,11 +185,11 @@ class TriagePhase:
         """Convert a 0-10 complexity score into a coarse rank label.
 
         The ``"high"`` boundary is tied to
-        ``epic_decompose_complexity_threshold`` so the cache rank
-        agrees with the epic-decomposition routing decision. If an
-        operator lowers the epic threshold, issues at that score
-        level will be marked ``"high"`` in the cache, matching the
-        decomposition behavior instead of drifting out of sync.
+        ``epic_decompose_complexity_threshold``, which is this rank's
+        sole remaining consumer: the intake auto-decomposition path that
+        once shared the threshold was removed (#11298 flag-rot cleanup),
+        so lowering the threshold now only widens what the cache marks
+        ``"high"`` — it triggers no decomposition.
         """
         if score is None:
             return "unscored"

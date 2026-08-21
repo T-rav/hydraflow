@@ -1967,7 +1967,13 @@ class HydraFlowConfig(BaseModel):
         default=8,
         ge=1,
         le=10,
-        description="Minimum triage complexity score to trigger decomposition",
+        description=(
+            "Complexity score at which the triage cache ranks an issue "
+            "'high' (TriagePhase._complexity_rank). No longer gates any "
+            "decomposition action — the #11298 intake auto-decomposition "
+            "path was removed; splits happen only via the ADR-0105 "
+            "stall-path terminal."
+        ),
     )
     backlog_budget: int = Field(
         default=25,
