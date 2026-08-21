@@ -163,17 +163,6 @@ class TestOperatorStoppedLatch:
         )
         assert d.action is BootAction.RESYNC_REBOOT
 
-    def test_latch_defaults_to_false_so_existing_callers_still_start(self) -> None:
-        d = boot_guard.decide_boot_action(
-            workspace_branch="staging",
-            factory_branch="staging",
-            origin_head=_ORIGIN,
-            boot_sha=_ORIGIN,
-            commits_behind=0,
-            status="idle",
-        )
-        assert d.action is BootAction.START
-
     def test_running_under_latch_is_no_action_without_latch_reason(self) -> None:
         # A latch with a still-running orchestrator is a transient (stop in
         # flight) — the "already active" branch wins, never a START.

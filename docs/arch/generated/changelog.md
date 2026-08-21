@@ -20,6 +20,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `859a391` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports *(2026-08-21)*
 - `44d8967` — docs(readme,changelog): pinned-release install path is library + CLI; Unreleased note (refs #11580) *(2026-08-21)*
 - `69b157a` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports *(2026-08-21)*
+- `7be0267` — docs: ADR-0135 factory-as-launchd-service + operator Stop latch; wiki install recipe *(2026-08-21)*
 - `b3ff35a` — fix(implement): tier build timeout by complexity, route zero-commit attempts to diagnose (#11568) (#11585) (#11585) *(2026-08-21)*
 - `e25d020` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof (Fixes #11570, Fixes #11571) (#11582) (#11582) *(2026-08-21)*
 - `1b9e118` — fix(token-drift): load telemetry by window, not by row count (Fixes #11581) (#11586) (#11586) *(2026-08-21)*

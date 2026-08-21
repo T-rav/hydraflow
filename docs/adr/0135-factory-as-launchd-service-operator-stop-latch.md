@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-21
 - **Enforcement:** enforced
+- **Binds:** factory
 - **Supersedes:** none
 - **Superseded by:** none
 - **Related:** [ADR-0042](0042-two-tier-branch-release-promotion.md) (the factory runs on `staging`; the service pins that branch), [ADR-0029](0029-caretaker-loop-pattern.md) (why the restart kernel lives *outside* the process)

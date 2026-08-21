@@ -429,16 +429,19 @@ class TestMainArgParsing:
         assert captured["origin_url"] == "git@x:y/z.git"
         assert captured["dry_run"] is True
 
-    def test_main_dry_run_uninstall_returns_zero(self, tmp_path: Path) -> None:
+    def test_main_dry_run_uninstall_calls_no_launchctl(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = _Calls()
+        monkeypatch.setattr(subprocess, "run", calls)
+        plist_path = tmp_path / "com.hydraflow.factory.plist"
+        plist_path.write_text("<plist/>", encoding="utf-8")
         rc = installer.main(
-            [
-                "--dry-run",
-                "--uninstall",
-                "--plist-path",
-                str(tmp_path / "com.hydraflow.factory.plist"),
-            ]
+            ["--dry-run", "--uninstall", "--plist-path", str(plist_path)]
         )
         assert rc == 0
+        assert calls.argv == []
+        assert plist_path.exists()
 
     def test_non_darwin_without_dry_run_exits_one(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
