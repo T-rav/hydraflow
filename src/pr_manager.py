@@ -550,6 +550,50 @@ class PRManager(PRManagerPromotionMixin):
             )
             return None
 
+    async def get_branch_pr_state(self, branch: str) -> str:
+        """Return *branch*'s PR state: MERGED/OPEN/CLOSED/NONE/UNKNOWN (#11502).
+
+        Unlike :meth:`find_open_pr_for_branch` (``state=open`` only), this
+        queries ``state=all`` so a squash-merged or closed PR is visible too
+        — a squash merge never leaves the original commits on the base
+        branch, so local git's ``rev-list`` can never observe the merge;
+        ``merged_at`` is the authoritative signal instead.
+        """
+        if self._config.dry_run:
+            return "UNKNOWN"
+        head_filter = f"{self._repo_owner}:{branch}" if self._repo_owner else branch
+        try:
+            raw = await self._run_gh(
+                "gh",
+                "api",
+                f"repos/{self._repo}/pulls",
+                "--method",
+                "GET",
+                "--field",
+                "state=all",
+                "--field",
+                f"head={head_filter}",
+                "--field",
+                "per_page=1",
+                "--jq",
+                "[.[] | {number, state, merged_at}]",
+            )
+            results = json.loads(raw)
+            if not isinstance(results, list) or not results:
+                return "NONE"
+            pr = results[0]
+            if not isinstance(pr, dict):
+                return "UNKNOWN"
+            if pr.get("merged_at"):
+                return "MERGED"
+            state = str(pr.get("state") or "").upper()
+            return state if state in ("OPEN", "CLOSED") else "UNKNOWN"
+        except (RuntimeError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            logger.debug(
+                "Could not resolve PR state for branch %s", branch, exc_info=True
+            )
+            return "UNKNOWN"
+
     async def branch_has_diff_from_main(self, branch: str) -> bool:
         """Return whether *branch* has commits ahead of configured main branch."""
         if self._config.dry_run:

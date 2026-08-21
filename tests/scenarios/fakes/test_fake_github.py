@@ -63,6 +63,30 @@ class TestFakeGitHubPRs:
         assert r2[0] is True
 
 
+class TestFakeGitHubBranchPrState:
+    """#11502: get_branch_pr_state mirrors the seeded merged/closed flags."""
+
+    async def test_merged_pr_reports_merged(self):
+        gh = FakeGitHub()
+        gh.add_pr(number=1, issue_number=1, branch="fix/thing", merged=True)
+        assert await gh.get_branch_pr_state("fix/thing") == "MERGED"
+
+    async def test_open_pr_reports_open(self):
+        gh = FakeGitHub()
+        gh.add_pr(number=1, issue_number=1, branch="fix/thing")
+        assert await gh.get_branch_pr_state("fix/thing") == "OPEN"
+
+    async def test_closed_unmerged_pr_reports_closed(self):
+        gh = FakeGitHub()
+        gh.add_pr(number=1, issue_number=1, branch="fix/thing")
+        gh.pr(1).closed = True
+        assert await gh.get_branch_pr_state("fix/thing") == "CLOSED"
+
+    async def test_unknown_branch_reports_none(self):
+        gh = FakeGitHub()
+        assert await gh.get_branch_pr_state("fix/never-existed") == "NONE"
+
+
 class TestFakeGitHubListAllPrs:
     """list_all_prs must reflect distinct per-PR dates (#11418 review finding).
 

@@ -189,6 +189,8 @@ class TestPRPortMethods:
         "get_issue_body",
         "list_all_issues",
         "list_all_prs",
+        # Squash-merge-aware GC reap policy (#11502)
+        "get_branch_pr_state",
     ]
 
     @pytest.mark.parametrize("method", _REQUIRED_METHODS)
@@ -339,6 +341,8 @@ class TestPRPortSignatures:
         "get_issue_body",
         "list_all_issues",
         "list_all_prs",
+        # Squash-merge-aware GC reap policy (#11502)
+        "get_branch_pr_state",
     ]
 
     @pytest.mark.parametrize("method", _SIGNED_METHODS)

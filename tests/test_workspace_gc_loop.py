@@ -53,6 +53,9 @@ def _make_loop(
     workspaces = MagicMock()
     workspaces.destroy = AsyncMock()
     prs = MagicMock()
+    # Fail-closed default (#11502): an unresolved PR state must fall through
+    # to the rev-list SHA check, not be mistaken for "merged".
+    prs.get_branch_pr_state = AsyncMock(return_value="UNKNOWN")
 
     loop = WorkspaceGCLoop(
         config=deps.config,
@@ -1530,7 +1533,7 @@ class TestWorktreeGuards:
             new_callable=AsyncMock,
             return_value="3\n",
         ):
-            assert await loop._worktree_has_unmerged_commits(Path("/wt")) is True
+            assert await loop._worktree_has_unmerged_commits(Path("/wt"), None) is True
 
     @pytest.mark.asyncio
     async def test_unmerged_false_when_zero(self, tmp_path: Path) -> None:
@@ -1540,7 +1543,7 @@ class TestWorktreeGuards:
             new_callable=AsyncMock,
             return_value="0\n",
         ):
-            assert await loop._worktree_has_unmerged_commits(Path("/wt")) is False
+            assert await loop._worktree_has_unmerged_commits(Path("/wt"), None) is False
 
     @pytest.mark.asyncio
     async def test_unmerged_fails_closed_on_error(self, tmp_path: Path) -> None:
@@ -1550,7 +1553,80 @@ class TestWorktreeGuards:
             new_callable=AsyncMock,
             side_effect=RuntimeError("bad ref"),
         ):
-            assert await loop._worktree_has_unmerged_commits(Path("/wt")) is True
+            assert await loop._worktree_has_unmerged_commits(Path("/wt"), None) is True
+
+    @pytest.mark.asyncio
+    async def test_unmerged_skips_pr_lookup_when_branch_none(
+        self, tmp_path: Path
+    ) -> None:
+        """A detached/unattributed worktree with no branch name has nothing
+        to ask GitHub about — the ladder must go straight to the rev-list
+        check without touching PRPort."""
+        loop, _s, _e = _make_loop(tmp_path)
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            return_value="1\n",
+        ):
+            assert await loop._worktree_has_unmerged_commits(Path("/wt"), None) is True
+        loop._prs.get_branch_pr_state.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unmerged_false_when_pr_state_merged_despite_positive_revlist(
+        self, tmp_path: Path
+    ) -> None:
+        """The squash-merge case (#11502): a squash replays the branch as one
+        new commit, so ``origin/<base>..HEAD`` never sees 0 and would report
+        "unmerged" forever. PR state MERGED is authoritative and must
+        override that — short-circuiting before the rev-list call runs."""
+        loop, _s, _e = _make_loop(tmp_path)
+        loop._prs.get_branch_pr_state = AsyncMock(return_value="MERGED")
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            return_value="1\n",
+        ) as run_sub:
+            result = await loop._worktree_has_unmerged_commits(
+                Path("/wt"), "fix/squashed-thing"
+            )
+        assert result is False
+        run_sub.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unmerged_true_when_pr_state_open_and_revlist_positive(
+        self, tmp_path: Path
+    ) -> None:
+        """A genuinely open PR must still fall through to the rev-list SHA
+        check — real unpushed commits stay protected (#10459/#6413)."""
+        loop, _s, _e = _make_loop(tmp_path)
+        loop._prs.get_branch_pr_state = AsyncMock(return_value="OPEN")
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            return_value="2\n",
+        ):
+            result = await loop._worktree_has_unmerged_commits(
+                Path("/wt"), "fix/in-progress-thing"
+            )
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_unmerged_fails_closed_when_pr_state_lookup_errors(
+        self, tmp_path: Path
+    ) -> None:
+        """A PRPort failure must fail closed to the existing rev-list check,
+        never be mistaken for "merged"."""
+        loop, _s, _e = _make_loop(tmp_path)
+        loop._prs.get_branch_pr_state = AsyncMock(side_effect=RuntimeError("gh boom"))
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            new_callable=AsyncMock,
+            return_value="0\n",
+        ):
+            result = await loop._worktree_has_unmerged_commits(
+                Path("/wt"), "fix/unknown-thing"
+            )
+        assert result is False
 
     def test_too_new_false_when_min_age_zero(self, tmp_path: Path) -> None:
         loop, _s, _e = _make_loop(tmp_path, worktree_gc_min_age_seconds=0)
@@ -1808,6 +1884,102 @@ class TestCollectOrphanedWorktrees:
             count = await loop._collect_orphaned_worktrees()
         assert count == 0
         assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_reaps_unattributed_squash_merged_branch(
+        self, tmp_path: Path
+    ) -> None:
+        """#11502: a squash merge replays the branch as one new commit, so
+        ``origin/<base>..HEAD`` never sees 0 — the un-numbered ``fix/*``
+        branch (e.g. ``fix/wiki-fingerprint-scenario``, unattributable to any
+        issue) was permanently stuck by the old "provably empty" rev-list-only
+        rule despite its PR being merged. PR state MERGED must now let it
+        reap once past min_age and clean, reproducing the real worked example
+        from the issue (worktree ``wikiscen`` / PR #11432)."""
+        root = tmp_path / "roots"
+        wt = root / "wikiscen"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        loop._prs.get_branch_pr_state = AsyncMock(return_value="MERGED")
+        porcelain = (
+            f"worktree {wt}\nHEAD abc\n"
+            "branch refs/heads/fix/wiki-fingerprint-scenario\n"
+        )
+        removed: list[str] = []
+        deleted: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            # revlist="1": the squashed commit's SHA never lands on origin/base
+            # — under the old rev-list-only rule this worktree could never
+            # reach "provably empty" and would leak forever.
+            self._dispatch(
+                worktrees=porcelain, revlist="1", removed=removed,
+                deleted_branches=deleted,
+            ),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 1
+        assert removed == [str(wt.resolve())]
+        assert deleted == ["fix/wiki-fingerprint-scenario"]
+
+    @pytest.mark.asyncio
+    async def test_keeps_unattributed_branch_with_no_merged_pr(
+        self, tmp_path: Path
+    ) -> None:
+        """The #10459/#6413 invariant must survive the fix: an unattributed
+        branch with genuinely unpushed commits and no merged PR is still
+        never reaped."""
+        root = tmp_path / "roots"
+        wt = root / "spike"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        loop._prs.get_branch_pr_state = AsyncMock(return_value="NONE")
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/fix/never-pushed\n"
+        removed: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(worktrees=porcelain, revlist="2", removed=removed),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0
+        assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_reaps_attributed_open_issue_with_squash_merged_pr(
+        self, tmp_path: Path
+    ) -> None:
+        """#11502: PRs merge into ``staging`` (ADR-0042), a non-default
+        branch, so GitHub's native "Fixes #N" auto-close never fires — the
+        linked issue can stay OPEN well after its squash-merged PR landed.
+        The issue-attributed path must recognize PR state MERGED too, not
+        just a closed issue, or these worktrees leak exactly like the
+        unattributed ones did."""
+        root = tmp_path / "roots"
+        wt = root / "auditfix"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        loop._get_issue_state = AsyncMock(return_value="open")
+        loop._prs.get_branch_pr_state = AsyncMock(return_value="MERGED")
+        porcelain = (
+            f"worktree {wt}\nHEAD abc\n"
+            "branch refs/heads/fix/sampled-audit-remediation-batch-11417\n"
+        )
+        removed: list[str] = []
+        deleted: list[str] = []
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            self._dispatch(
+                worktrees=porcelain, revlist="4", removed=removed,
+                deleted_branches=deleted,
+            ),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 1
+        assert removed == [str(wt.resolve())]
 
     @pytest.mark.asyncio
     async def test_skips_worktree_outside_allowed_roots(self, tmp_path: Path) -> None:

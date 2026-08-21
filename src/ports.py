@@ -576,6 +576,21 @@ class PRPort(Protocol):
         """Return the resolved state of a GitHub issue (``'COMPLETED'``, ``'OPEN'``, etc.)."""
         ...
 
+    async def get_branch_pr_state(self, branch: str) -> str:
+        """Return *branch*'s PR state: ``MERGED``, ``OPEN``, ``CLOSED``, ``NONE``, or ``UNKNOWN``.
+
+        Unlike :meth:`find_open_pr_for_branch` (open PRs only), this resolves
+        a PR in ANY state — the question it answers is "has this branch's
+        work landed", not "is there an open PR". A squash merge replays a
+        branch as one new commit with a new SHA, so local git can never see
+        the original commits land on the base branch; PR state is the
+        authoritative answer (ADR-0041: GitHub is the source of truth).
+        ``NONE`` means no PR was ever found for the branch; ``UNKNOWN`` means
+        the read failed or the shape was unrecognized — callers must treat
+        ``UNKNOWN`` the same as "not merged" (fail closed).
+        """
+        ...
+
     async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
         """Return recent workflow runs, newest first (#9974, read-only).
 

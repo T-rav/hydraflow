@@ -541,9 +541,11 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         Never reaps a worktree that: is younger than ``min_age``; has
         uncommitted changes; belongs to an active/HITL/in-pipeline/in-retry
         issue or an issue whose state is unknown (via ``_is_safe_to_gc``); or
-        has unique commits not yet on the integration branch. A worktree whose
-        branch cannot be attributed to an issue is reaped only when it is
-        provably empty (0 unique commits + clean) and older than ``min_age``.
+        whose branch has not landed, per ``_worktree_has_unmerged_commits``
+        (PR-state-authoritative, SHA rev-list fallback — #11502). A worktree
+        whose branch cannot be attributed to an issue is reaped only when its
+        branch has landed (merged PR, or 0 unique commits) and it is clean
+        and older than ``min_age``.
         """
         # min_age guard — never reap a worktree created mid-run.
         if self._worktree_too_new(path):
@@ -562,7 +564,9 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             # open-but-abandoned issue still needs the unmerged-commit guard so
             # unpushed work is never destroyed (#10459/#6413 invariant).
             state = await self._get_issue_state(issue_number)
-            if state != "closed" and await self._worktree_has_unmerged_commits(path):
+            if state != "closed" and await self._worktree_has_unmerged_commits(
+                path, branch
+            ):
                 logger.debug(
                     "GC: worktree %s (open issue #%d) has unmerged commits — skipping",
                     path,
@@ -570,7 +574,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 )
                 return False
         # Un-parseable / detached: reap only if provably empty.
-        elif await self._worktree_has_unmerged_commits(path):
+        elif await self._worktree_has_unmerged_commits(path, branch):
             logger.debug(
                 "GC: unattributable worktree %s has unique commits — skipping",
                 path,
@@ -652,13 +656,31 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             return True
         return bool(status.strip())
 
-    async def _worktree_has_unmerged_commits(self, path: Path) -> bool:
-        """True when the worktree has commits not on the integration branch.
+    async def _worktree_has_unmerged_commits(
+        self, path: Path, branch: str | None
+    ) -> bool:
+        """True when the worktree's branch has work that has not landed.
 
-        Compares ``origin/<base>..HEAD`` where ``<base>`` is
-        ``config.base_branch()``. Any failure (unknown ref, detached, git
-        error) fails closed — assume unmerged work exists and skip.
+        Asks "has this landed" via GitHub PR state first (ADR-0041: GitHub is
+        the source of truth), not SHA identity: a squash merge replays a
+        branch as one new commit, so ``origin/<base>..HEAD`` never sees 0
+        even after a clean merge — the old SHA-only check could never
+        recognize a squash-merged branch as safe (#11502). ``branch=None``
+        (detached/unattributed) or any PR-state other than ``MERGED``
+        (``OPEN``/``CLOSED``/``NONE``/``UNKNOWN``, including a lookup
+        failure) falls through to the rev-list SHA check unchanged,
+        preserving the #10459/#6413 invariant that unpushed work is never
+        destroyed. Any failure/ambiguity fails closed — treated as unmerged.
         """
+        if branch:
+            try:
+                pr_state = await self._prs.get_branch_pr_state(branch)
+            except Exception as exc:  # noqa: BLE001
+                reraise_on_credit_or_bug(exc)
+                pr_state = "UNKNOWN"
+            if pr_state == "MERGED":
+                return False
+
         base = self._config.base_branch()
         try:
             out = await run_subprocess(

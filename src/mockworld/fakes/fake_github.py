@@ -764,6 +764,22 @@ class FakeGitHub:
             branch=branch,
         )
 
+    async def get_branch_pr_state(self, branch: str) -> str:
+        """Mirror PRManager.get_branch_pr_state off the seeded PR's merged/closed flags.
+
+        Unlike :meth:`find_open_pr_for_branch`, this considers PRs in ANY
+        state — a squash-merged PR is ``merged=True`` in the seed and must
+        resolve to ``MERGED`` here too (#11502).
+        """
+        self._maybe_rate_limit()
+        for p in self._prs.values():
+            if p.branch != branch:
+                continue
+            if p.merged:
+                return "MERGED"
+            return "CLOSED" if p.closed else "OPEN"
+        return "NONE"
+
     async def branch_has_diff_from_main(self, branch: str) -> bool:
         self._maybe_rate_limit()
         return True
