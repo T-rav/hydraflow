@@ -78,21 +78,40 @@ class _Scanner(ast.NodeVisitor):
         self.reads.append(EnvRead(self.path, node.lineno, enclosing))
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        # Parameter defaults and decorators evaluate when the ``def`` statement
+        # runs — import time for a top-level function — NOT per call, so they
+        # belong to the OUTER scope. Only the body is call-time.
+        for child in (
+            *node.args.defaults,
+            *node.args.kw_defaults,
+            *node.decorator_list,
+        ):
+            if child is not None:
+                self.visit(child)
         self._stack.append(node.name)
-        self.generic_visit(node)
+        for stmt in node.body:
+            self.visit(stmt)
         self._stack.pop()
 
     visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
-        if (
-            isinstance(func, ast.Attribute)
-            and _first_arg_is_github_output(node)
-            and (
-                (func.attr == "get" and _is_os_environ(func.value))
-                or (func.attr == "getenv" and _is_os_module(func.value))
+        if _first_arg_is_github_output(node) and (
+            # os.environ.get(...) / environ.get(...)
+            (
+                isinstance(func, ast.Attribute)
+                and func.attr == "get"
+                and _is_os_environ(func.value)
             )
+            # os.getenv(...)
+            or (
+                isinstance(func, ast.Attribute)
+                and func.attr == "getenv"
+                and _is_os_module(func.value)
+            )
+            # getenv(...) after ``from os import getenv``
+            or (isinstance(func, ast.Name) and func.id == "getenv")
         ):
             self._record(node)
         self.generic_visit(node)
@@ -143,6 +162,36 @@ def test_scanner_attributes_call_time_reads_to_their_function() -> None:
             a = os.environ.get("GITHUB_OUTPUT")
             b = os.getenv("GITHUB_OUTPUT")
             c = os.environ["GITHUB_OUTPUT"]
+            return a, b, c
+        """
+    )
+    reads = scan_source(source, "scripts/x.py")
+    assert [r.lineno for r in reads] == [5, 6, 7]
+    assert {r.enclosing for r in reads} == {"main"}
+
+
+def test_scanner_treats_parameter_defaults_as_import_time() -> None:
+    """``def main(out=os.environ.get(...))`` evaluates at def time, not per call."""
+    source = dedent(
+        """
+        import os
+
+        def main(out=os.environ.get("GITHUB_OUTPUT")):
+            return out
+        """
+    )
+    assert scan_source(source, "scripts/x.py") == [EnvRead("scripts/x.py", 4, None)]
+
+
+def test_scanner_sees_bare_name_imports() -> None:
+    source = dedent(
+        """
+        from os import environ, getenv
+
+        def main():
+            a = environ.get("GITHUB_OUTPUT")
+            b = getenv("GITHUB_OUTPUT")
+            c = environ["GITHUB_OUTPUT"]
             return a, b, c
         """
     )
