@@ -133,7 +133,6 @@ REAL ADRs whose cited test resolves and asserts, but whose text never names the 
 | ADR-0007 | `pytest:tests/test_dashboard_routes_repo.py` |
 | ADR-0008 | `pytest:tests/test_dashboard_routes_repo.py` |
 | ADR-0010 | `pytest:tests/test_integration_worktree.py` |
-| ADR-0011 | `pytest:tests/test_epic.py`, `pytest:tests/test_release.py` |
 | ADR-0012 | `pytest:tests/test_epic_merge_coordination.py` |
 | ADR-0014 | `pytest:tests/test_state_machine.py` |
 | ADR-0015 | `pytest:tests/test_review_phase_hooks.py` |

@@ -68,8 +68,12 @@ automatic path that does not exist.
 2. **The primitive is not attached to any automatic trigger.** Epic close
    closes the epic and nothing else; the dashboard release action merges the
    bundle and nothing else. Neither mints a tag or a GitHub Release. This is
-   the state PR #2689 left and the state `test_no_release_on_epic_close`
-   enforces. The former `config.release_on_epic_close` gate no longer exists.
+   the state PR #2689 left, and both halves are pinned:
+   `tests/test_release.py::TestEpicCompletionWithRelease::test_no_release_on_epic_close`
+   (closing an epic calls neither `create_tag()` nor `create_release()`) and
+   `tests/test_epic.py::TestNarrowedExceptionHandling::test_release_epic_never_mints_tag_or_release`
+   (a successful bundle release calls neither). The former
+   `config.release_on_epic_close` gate no longer exists.
 
 3. **Releases are cut manually**, by an operator, against the promoted
    `main` SHA (ADR-0042) — never against `staging`, an agent branch, or a
