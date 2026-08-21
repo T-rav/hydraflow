@@ -1,0 +1,45 @@
+specification {
+  element system
+  element component
+  element external
+}
+
+model {
+  gc = system 'WorkspaceGCLoop' {
+    phase5 = component 'Phase 5: _collect_orphaned_worktrees' {
+      description 'Enumerates worktrees via git worktree list --porcelain across all roots'
+    }
+    decide = component '_reap_worktree_if_safe' {
+      description 'Fail-closed reap decision: min_age, dirty, safe-to-gc, landed'
+    }
+    safety = component '_is_safe_to_gc' {
+      description 'active / HITL / pipeline / retry-window / issue-state policy'
+    }
+    unmerged = component '_worktree_has_unmerged_commits' {
+      description 'git rev-list --count origin/<base>..HEAD (SHA identity)'
+    }
+    landed = component '_worktree_work_has_landed (new)' {
+      description 'two-dot git diff --quiet vs origin/<base> through run_subprocess_result; rc==0 means landed'
+    }
+    reap = component '_reap_worktree' {
+      description 'worktree removal + branch deletion + state eviction'
+    }
+  }
+  git = external 'local git'
+  ghp = external 'PRPort (GitHub / FakeGitHub)'
+
+  phase5 -> decide 'per enumerated worktree'
+  decide -> safety 'issue-attributed only'
+  safety -> ghp 'get_issue_state / find_open_pr_for_branch'
+  decide -> unmerged 'ALL paths, closed issues included (the #11503 fix)'
+  unmerged -> landed 'consulted only when unique commits exist'
+  landed -> git 'two-dot diff against origin/<base>'
+  decide -> reap 'clean + old enough + safe + landed'
+}
+
+views {
+  view reapDecision {
+    title 'Issue #11503 - reap decision flow'
+    include *
+  }
+}
