@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 _USAGE_KEYS = (
@@ -522,6 +523,58 @@ class StreamParser:
         for key in _USAGE_KEYS:
             out[key] = max(out.get(key, 0), self._final_usage.get(key, 0))
         return out
+
+
+@dataclass(frozen=True)
+class ResultEnvelope:
+    """One ``claude -p --output-format json`` reply, unwrapped.
+
+    ``result`` is the bare reply text the caller would have read from stdout
+    before the envelope existed; ``usage`` is the ``StreamParser.usage_snapshot``
+    shape (canonical token totals + ``usage_available`` / ``usage_status`` /
+    ``usage_backend`` / ``raw_usage``) so the one-shot path records exactly
+    what the streaming path records.
+    """
+
+    result: str
+    is_error: bool
+    session_id: str
+    usage: dict[str, object]
+
+
+def parse_result_envelope(stdout: str) -> ResultEnvelope | None:
+    """Unwrap the one-shot CLI JSON envelope, or ``None`` when *stdout* is not one.
+
+    The one-shot (``run_simple``) Claude spawn requests ``--output-format json``
+    so its token usage is observable; the CLI then prints a single JSON object
+    ``{"type": "result", "result": <text>, "usage": {...}, "is_error": ...}``.
+    Anything else passes through untouched (``None``): bare text from an older
+    CLI, a contract worker's own JSON reply (no ``type: result`` discriminator),
+    the multi-line stream-json event list MockWorld's fake runner returns, or
+    the fake's bare ``{"type": "result", "exit_code": 0}`` marker (no ``result``
+    string) — unwrapping any of those would erase the caller's stdout.
+    """
+    text = stdout.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        event = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(event, dict) or str(event.get("type", "")) != "result":
+        return None
+    result = event.get("result")
+    if not isinstance(result, str):
+        return None
+    parser = StreamParser()
+    parser.parse(text)
+    session_id = event.get("session_id")
+    return ResultEnvelope(
+        result=result,
+        is_error=bool(event.get("is_error", False)),
+        session_id=session_id if isinstance(session_id, str) else "",
+        usage=parser.usage_snapshot,
+    )
 
 
 def _pick_usage_extractor(

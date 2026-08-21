@@ -514,3 +514,181 @@ class TestStreamParserDelta:
         snap = parser.usage_snapshot
         assert snap["usage_backend"] == "codex"
         assert snap["input_tokens"] == 3
+
+
+# ===========================================================================
+# parse_result_envelope — the one-shot ``claude -p --output-format json`` shape
+# ===========================================================================
+
+
+def _cli_json_envelope(result_text: str, **overrides):
+    """A faithful ``claude -p --output-format json`` envelope (CLI 2.1.238)."""
+    envelope = {
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "duration_ms": 1339,
+        "duration_api_ms": 1200,
+        "num_turns": 1,
+        "result": result_text,
+        "session_id": "fe99e068-2bfb-4292-b7c2-d5b48beed108",
+        "total_cost_usd": 0.0178634,
+        "usage": {
+            "input_tokens": 10,
+            "cache_creation_input_tokens": 7431,
+            "cache_read_input_tokens": 18134,
+            "output_tokens": 45,
+            "output_tokens_details": {"thinking_tokens": 37},
+            "server_tool_use": {"web_search_requests": 0, "web_fetch_requests": 0},
+            "service_tier": "standard",
+            "cache_creation": {
+                "ephemeral_1h_input_tokens": 7431,
+                "ephemeral_5m_input_tokens": 0,
+            },
+            "iterations": [
+                {
+                    "input_tokens": 10,
+                    "output_tokens": 45,
+                    "cache_read_input_tokens": 18134,
+                    "cache_creation_input_tokens": 7431,
+                    "type": "message",
+                }
+            ],
+        },
+        "modelUsage": {
+            "claude-haiku-4-5-20251001": {
+                "inputTokens": 908,
+                "outputTokens": 56,
+                "cacheReadInputTokens": 18134,
+                "cacheCreationInputTokens": 7431,
+                "costUSD": 0.0178634,
+            }
+        },
+        "uuid": "0b4f0d3c-2b0a-4a7e-9a3e-5f6d7c8b9a01",
+    }
+    envelope.update(overrides)
+    return envelope
+
+
+class TestParseResultEnvelope:
+    def test_unwraps_result_text_and_canonical_usage(self):
+        from stream_parser import parse_result_envelope
+
+        envelope = parse_result_envelope(json.dumps(_cli_json_envelope("pong")))
+
+        assert envelope is not None
+        assert envelope.result == "pong"
+        assert envelope.is_error is False
+        assert envelope.session_id == "fe99e068-2bfb-4292-b7c2-d5b48beed108"
+        usage = envelope.usage
+        assert usage["input_tokens"] == 10
+        assert usage["output_tokens"] == 45
+        assert usage["cache_creation_input_tokens"] == 7431
+        assert usage["cache_read_input_tokens"] == 18134
+        assert usage["usage_available"] is True
+        assert usage["usage_status"] == "available"
+        assert usage["usage_backend"] == "claude"
+
+    def test_raw_usage_matches_streaming_shape(self):
+        # The cost surfaces already read ``raw_usage`` rows shaped by the
+        # streaming extractor; the one-shot envelope must produce the same shape.
+        from stream_parser import parse_result_envelope
+
+        envelope = parse_result_envelope(json.dumps(_cli_json_envelope("pong")))
+
+        assert envelope is not None
+        raw = envelope.usage["raw_usage"]
+        assert isinstance(raw, list) and raw
+        assert raw[0]["backend"] == "claude"
+        assert raw[0]["event_type"] == "result"
+        assert raw[0]["path"] == "usage"
+        assert raw[0]["payload"]["output_tokens"] == 45
+
+    def test_nested_non_usage_numbers_are_ignored(self):
+        # ``thinking_tokens`` / ``web_search_requests`` / ``total_cost_usd`` /
+        # ``num_turns`` are numeric but are NOT token usage; they must not leak
+        # into the canonical totals (``total_tokens`` stays derived, not 1339).
+        from stream_parser import parse_result_envelope
+
+        envelope = parse_result_envelope(json.dumps(_cli_json_envelope("pong")))
+
+        assert envelope is not None
+        assert envelope.usage["total_tokens"] == 0
+        assert set(envelope.usage) >= {
+            "input_tokens",
+            "output_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+        }
+
+    def test_is_error_flag_surfaces(self):
+        from stream_parser import parse_result_envelope
+
+        envelope = parse_result_envelope(
+            json.dumps(
+                _cli_json_envelope(
+                    "API Error: rate limited",
+                    is_error=True,
+                    subtype="error_during_execution",
+                )
+            )
+        )
+
+        assert envelope is not None
+        assert envelope.is_error is True
+        assert envelope.result == "API Error: rate limited"
+
+    def test_plain_text_is_not_an_envelope(self):
+        from stream_parser import parse_result_envelope
+
+        assert parse_result_envelope("just a plain reply") is None
+        assert parse_result_envelope("") is None
+        assert parse_result_envelope("   ") is None
+
+    def test_callers_own_json_reply_is_not_an_envelope(self):
+        # A contract worker's reply is itself JSON (``{"verdict": ...}``). It has
+        # no ``type: result`` discriminator, so it must pass through untouched.
+        from stream_parser import parse_result_envelope
+
+        reply = json.dumps({"verdict": "agree", "findings": ""})
+        assert parse_result_envelope(reply) is None
+
+    def test_stream_json_event_lines_are_not_an_envelope(self):
+        # MockWorld's FakeSubprocessRunner.run_simple returns the scripted
+        # stream-json event lines joined by newlines. That is a multi-object
+        # stream, not one envelope — passthrough.
+        from stream_parser import parse_result_envelope
+
+        lines = "\n".join(
+            [
+                json.dumps({"type": "assistant", "message": {"content": []}}),
+                json.dumps({"type": "result", "success": True, "exit_code": 0}),
+            ]
+        )
+        assert parse_result_envelope(lines) is None
+
+    def test_result_event_without_text_is_not_an_envelope(self):
+        # The MockWorld fake's bare result marker carries no ``result`` string;
+        # unwrapping it would erase the fake's stdout.
+        from stream_parser import parse_result_envelope
+
+        marker = json.dumps({"type": "result", "success": True, "exit_code": 0})
+        assert parse_result_envelope(marker) is None
+
+    def test_non_result_json_object_is_not_an_envelope(self):
+        from stream_parser import parse_result_envelope
+
+        assert parse_result_envelope(json.dumps({"type": "assistant"})) is None
+        assert parse_result_envelope(json.dumps([1, 2, 3])) is None
+
+    def test_envelope_without_usage_reports_unavailable(self):
+        from stream_parser import parse_result_envelope
+
+        bare = {"type": "result", "result": "ok", "is_error": False}
+        envelope = parse_result_envelope(json.dumps(bare))
+
+        assert envelope is not None
+        assert envelope.result == "ok"
+        assert envelope.session_id == ""
+        assert envelope.usage["usage_available"] is False
+        assert envelope.usage["usage_status"] == "unavailable"
