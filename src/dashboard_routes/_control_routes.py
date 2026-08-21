@@ -784,6 +784,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                     commits_behind=commits_behind,
                 ),
                 mockworld_active=mockworld_any,
+                # Factory-level latch (ADR-0135): Stop latches the host state
+                # only, so the rollup reports that — not an OR over per-repo
+                # states that never carry it.
+                operator_stopped=ctx.state.get_operator_stopped(),
                 repos=per_repo,
             )
             data = response.model_dump()
@@ -805,6 +809,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 commits_behind=commits_behind,
             ),
             mockworld_active=mockworld_active,
+            operator_stopped=ctx.state.get_operator_stopped(),
         )
         data = response.model_dump()
         data["current_session_id"] = current_session
