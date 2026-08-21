@@ -9,14 +9,16 @@ import sys
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from mockworld.fakes import FakeGitHub
 from models import PendingReport, TrackedReport
+from pr_manager import PRManager
 from report_issue_loop import ReportIssueLoop
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
@@ -41,8 +43,9 @@ def _make_loop(
     )
     pr_manager.create_issue = AsyncMock(return_value=123)
     pr_manager.add_labels = AsyncMock()
-    pr_manager._run_gh = AsyncMock(return_value='{"labels":[],"body":""}')
-    pr_manager._repo = "owner/repo"
+    pr_manager.get_issue_labels = AsyncMock(return_value=[])
+    pr_manager.get_issue_body = AsyncMock(return_value="")
+    pr_manager.update_issue_body = AsyncMock()
     runner = MagicMock()
 
     loop = ReportIssueLoop(
@@ -1711,3 +1714,158 @@ class TestReportEventPublishing:
         assert len(closed) == 1
         assert closed[0]["report_id"] == report.id
         assert closed[0]["detail"] == "stale"
+
+
+class TestVerifyIssue:
+    """#11418: _verify_issue reads/writes through PRPort (get_issue_labels /
+    get_issue_body / update_issue_body) instead of a raw
+    ``self._pr_manager._run_gh``/``_repo`` reach-around."""
+
+    @pytest.mark.asyncio
+    async def test_adds_missing_label(self, tmp_path: Path) -> None:
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        pr.get_issue_labels = AsyncMock(return_value=[])
+        pr.get_issue_body = AsyncMock(return_value="body text")
+
+        await loop._verify_issue(42, "hydraflow-find", "")
+
+        pr.add_labels.assert_awaited_once_with(42, ["hydraflow-find"])
+
+    @pytest.mark.asyncio
+    async def test_label_already_present_not_readded(self, tmp_path: Path) -> None:
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        pr.get_issue_labels = AsyncMock(return_value=["hydraflow-find"])
+        pr.get_issue_body = AsyncMock(return_value="body text")
+
+        await loop._verify_issue(42, "hydraflow-find", "")
+
+        pr.add_labels.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_appends_missing_screenshot_url(self, tmp_path: Path) -> None:
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        pr.get_issue_labels = AsyncMock(return_value=["hydraflow-find"])
+        pr.get_issue_body = AsyncMock(return_value="body text")
+
+        await loop._verify_issue(
+            42, "hydraflow-find", "https://gist.example.com/screenshot.png"
+        )
+
+        pr.update_issue_body.assert_awaited_once()
+        call_args = pr.update_issue_body.await_args.args
+        assert call_args[0] == 42
+        assert "body text" in call_args[1]
+        assert "https://gist.example.com/screenshot.png" in call_args[1]
+
+    @pytest.mark.asyncio
+    async def test_screenshot_already_in_body_not_reappended(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        url = "https://gist.example.com/screenshot.png"
+        pr.get_issue_labels = AsyncMock(return_value=["hydraflow-find"])
+        pr.get_issue_body = AsyncMock(return_value=f"body text\n\n{url}\n")
+
+        await loop._verify_issue(42, "hydraflow-find", url)
+
+        pr.update_issue_body.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_transient_read_failure_is_swallowed(self, tmp_path: Path) -> None:
+        """A plain RuntimeError is logged, not raised — the issue still exists."""
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        pr.get_issue_labels = AsyncMock(side_effect=RuntimeError("gh boom"))
+
+        await loop._verify_issue(42, "hydraflow-find", "")  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_credit_exhaustion_propagates(self, tmp_path: Path) -> None:
+        """A CreditExhaustedError must NOT be swallowed (#11418 defensive branch)."""
+        from subprocess_util import CreditExhaustedError
+
+        loop, _stop, _state, pr = _make_loop(tmp_path)
+        pr.get_issue_labels = AsyncMock(side_effect=CreditExhaustedError("no credits"))
+
+        with pytest.raises(CreditExhaustedError):
+            await loop._verify_issue(42, "hydraflow-find", "")
+
+
+# ---------------------------------------------------------------------------
+# _verify_issue against a real FakeGitHub (#11246)
+# ---------------------------------------------------------------------------
+
+
+def _make_loop_with_fake_github(
+    tmp_path: Path,
+) -> tuple[ReportIssueLoop, asyncio.Event, StateTracker, FakeGitHub]:
+    """Build a ReportIssueLoop wired to a real FakeGitHub as _pr_manager.
+
+    Exercises the production `_verify_issue` read/repair surface
+    (get_issue_labels/get_issue_body/add_labels/update_issue_body) against
+    in-memory fake state instead of a stubbed manager, so the repairs land
+    somewhere observable (#11246).
+    """
+    deps = make_bg_loop_deps(tmp_path, enabled=True, dry_run=False)
+    state = StateTracker(tmp_path / "state.json")
+    pr_manager = FakeGitHub()
+    loop = ReportIssueLoop(
+        config=deps.config,
+        state=state,
+        pr_manager=cast("PRManager", pr_manager),
+        deps=deps.loop_deps,
+        runner=MagicMock(),
+    )
+    return loop, deps.stop_event, state, pr_manager
+
+
+class TestVerifyIssueAgainstFakeGitHub:
+    """_verify_issue must repair conditionally, driven by real fake state.
+
+    Pins the end-to-end contract against real FakeGitHub state: the no-op
+    path when label and screenshot are already correct, and both repairs
+    landing in fake state when they are missing.
+    """
+
+    @pytest.mark.asyncio
+    async def test_no_repair_when_label_and_screenshot_present(
+        self, tmp_path: Path, caplog: Any
+    ) -> None:
+        """Label and screenshot URL already correct → no repair fires.
+
+        Final state alone cannot discriminate: both repairs are idempotent
+        no-ops when the label is present. The absence of repair warnings is
+        the observable contract.
+        """
+        import logging
+
+        url = "https://gist.example.com/screenshot.png"
+        loop, _stop, _state, gh = _make_loop_with_fake_github(tmp_path)
+        gh.add_issue(
+            42,
+            "Button broken",
+            f"Body text.\n\n![Screenshot]({url})",
+            labels=["hydraflow-plan"],
+        )
+
+        with caplog.at_level(logging.WARNING, logger="hydraflow.report_issue_loop"):
+            await loop._verify_issue(42, "hydraflow-plan", url)
+
+        assert gh._issues[42].labels == ["hydraflow-plan"]
+        assert gh._issues[42].body == f"Body text.\n\n![Screenshot]({url})"
+        assert not [r for r in caplog.records if "missing" in r.message]
+
+    @pytest.mark.asyncio
+    async def test_repairs_missing_label_and_appends_screenshot(
+        self, tmp_path: Path
+    ) -> None:
+        """Missing label and screenshot URL → both repairs land in fake state."""
+        url = "https://gist.example.com/screenshot.png"
+        loop, _stop, _state, gh = _make_loop_with_fake_github(tmp_path)
+        gh.add_issue(43, "Crash on save", "Crash body.")
+
+        await loop._verify_issue(43, "hydraflow-plan", url)
+
+        assert gh._issues[43].labels == ["hydraflow-plan"]
+        assert gh._issues[43].body == (
+            "Crash body." + f"\n\n## Screenshot\n\n![Screenshot]({url})\n"
+        )

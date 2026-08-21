@@ -329,3 +329,22 @@ HydraFlow honors HYDRAFLOW_DAILY_COST_BUDGET_USD env var. When rolling-24h LLM s
 ```json:entry
 {"id":"01KQP0V9KK99G77287P414NFRR","title":"Daily Cost-Cap Kill-Switch","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-05-03T04:16:50.803925+00:00","updated_at":"2026-05-03T04:16:50.803926+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"medium","stale":false,"corroborations":1}
 ```
+
+
+## Gateway transit coverage is a read-only completeness gauge
+
+The LLM session tap has two architectural responsibilities with different
+owners. `src/hydraflow_gateway/app.py:create_app` is an Operations deployable:
+it proxies provider traffic, mints short-lived virtual credentials, and writes
+the request ledger. `src/gateway_coverage_loop.py:GatewayCoverageLoop` is a
+Meta-Observability worker: it compares gateway-ledger spend with known bypass
+telemetry and publishes a repo-scoped coverage snapshot for the dashboard. The
+coverage loop is deliberately read-only; it does not route traffic, enforce
+budgets, or make an incomplete gauge look complete when either source is
+unavailable. See [ADR-0110](../adr/0110-provider-harness-backend-split.md) and
+the [LLM gateway session-tap proposal](../proposals/llm-gateway-session-tap.md).
+
+
+```json:entry
+{"id":"01KZGW9V7Q6R3M2A1B8C4D5E6F","title":"Gateway transit coverage is a read-only completeness gauge","topic":null,"source_type":"compiled","source_issue":null,"source_repo":null,"created_at":"2026-08-19T00:00:00.000000+00:00","updated_at":"2026-08-19T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

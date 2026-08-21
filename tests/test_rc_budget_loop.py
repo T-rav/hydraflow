@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -557,6 +558,9 @@ async def test_fetch_recent_runs_excludes_cancelled_runs(loop_env) -> None:
     data — including it misclassifies a hang as a wall-clock regression
     (#10215)."""
     loop = _loop(loop_env)
+    completed_at = datetime.now(UTC) - timedelta(minutes=1)
+    cancelled_started_at = completed_at - timedelta(minutes=45)
+    successful_started_at = completed_at - timedelta(seconds=5)
     loop._github_cache.get_rc_workflow_runs = AsyncMock(
         return_value=[
             {
@@ -564,18 +568,18 @@ async def test_fetch_recent_runs_excludes_cancelled_runs(loop_env) -> None:
                 "url": "u1",
                 "status": "completed",
                 "conclusion": "cancelled",
-                "created_at": "2026-07-22T02:16:51Z",
-                "run_started_at": "2026-07-22T01:31:51Z",
-                "updated_at": "2026-07-22T02:16:51Z",
+                "created_at": cancelled_started_at.isoformat(),
+                "run_started_at": cancelled_started_at.isoformat(),
+                "updated_at": completed_at.isoformat(),
             },
             {
                 "id": 2,
                 "url": "u2",
                 "status": "completed",
                 "conclusion": "success",
-                "created_at": "2026-07-21T23:21:55Z",
-                "run_started_at": "2026-07-21T23:21:50Z",
-                "updated_at": "2026-07-21T23:21:55Z",
+                "created_at": successful_started_at.isoformat(),
+                "run_started_at": successful_started_at.isoformat(),
+                "updated_at": completed_at.isoformat(),
             },
         ]
     )

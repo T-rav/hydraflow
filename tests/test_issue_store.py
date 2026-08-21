@@ -201,6 +201,74 @@ class TestRouting:
 
         assert len([t for t in store._queues[STAGE_PLAN] if t.id == 62]) == 1
 
+    def test_try_claim_stage_atomically_reserves_expected_queue(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=63, tags=["hydraflow-plan"])
+        store._route_issues([issue])
+
+        claimed = store.try_claim_stage(issue, "plan")
+
+        assert claimed is True
+        assert 63 not in store._queue_members[STAGE_PLAN]
+        assert store.get_worker_held_issues() == {63: "plan"}
+        assert store.try_claim_stage(issue, "plan") is False
+
+    @pytest.mark.parametrize("ownership", ["active", "in_flight"])
+    def test_try_claim_stage_rejects_worker_ownership(self, ownership: str) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=64, tags=["hydraflow-plan"])
+        store._route_issues([issue])
+        if ownership == "active":
+            store.mark_active(64, STAGE_READY)
+        else:
+            assert [task.id for task in store.get_plannable(1)] == [64]
+
+        assert store.try_claim_stage(issue, "plan") is False
+
+    @pytest.mark.parametrize("local_state", ["ready", "missing"])
+    def test_try_claim_stage_rejects_non_plan_local_state(
+        self, local_state: str
+    ) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=65, tags=["hydraflow-plan"])
+        if local_state == "ready":
+            store._route_issues([TaskFactory.create(id=65, tags=["test-label"])])
+
+        assert store.try_claim_stage(issue, "plan") is False
+
+    def test_try_claim_stage_rejects_unknown_stage(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=67, tags=["hydraflow-plan"])
+        store._route_issues([issue])
+
+        assert store.try_claim_stage(issue, "unknown") is False
+
+    @pytest.mark.parametrize("protected_state", ["hitl", "merged"])
+    def test_try_claim_stage_rejects_protected_state(
+        self, protected_state: str
+    ) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=68, tags=["hydraflow-plan"])
+        store._route_issues([issue])
+        if protected_state == "hitl":
+            store._hitl_numbers.add(68)
+        else:
+            store.mark_merged(68)
+
+        assert store.try_claim_stage(issue, "plan") is False
+
+    def test_stage_scoped_release_preserves_later_worker_claim(self) -> None:
+        store = _make_store()
+        issue = TaskFactory.create(id=66, tags=["test-label"])
+        store._route_issues([issue])
+        assert [task.id for task in store.get_implementable(1)] == [66]
+
+        store.release_in_flight({66}, expected_stage="plan")
+
+        assert store.get_worker_held_issues() == {66: "ready"}
+        store.release_in_flight({66}, expected_stage="ready")
+        assert store.get_worker_held_issues() == {}
+
 
 # ── Queue Accessors ──────────────────────────────────────────────────
 

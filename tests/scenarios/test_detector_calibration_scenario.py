@@ -92,6 +92,48 @@ class TestDetectorCalibrationScenario:
         assert stats["filed"] == 0
         assert await gh.list_issues_by_label("detector-calibration") == []
 
+    async def test_spray_fires_then_autocloses(self, tmp_path):
+        """#11427 — one template fired against many distinct #N entities
+        files a spray finding even though no single entity repeats; the
+        finding auto-closes once the spray window clears."""
+        world = MockWorld(tmp_path)
+        gh = world.github
+
+        async def _closed_escalation(title: str, age_days: int) -> int:
+            number = await gh.create_issue(title, "body", ["hitl-escalation"])
+            await gh.close_issue(number)
+            stamp = (datetime.now(UTC) - timedelta(days=age_days)).isoformat()
+            gh.issue(number).updated_at = stamp
+            return number
+
+        spray_entities = [
+            await _closed_escalation(
+                f"HITL: convergence oscillation detected for #{9001 + i}",
+                age_days=i + 1,
+            )
+            for i in range(5)
+        ]
+
+        stats = (await world.run_with_loops(["detector_calibration"], cycles=1))[
+            "detector_calibration"
+        ]
+        assert stats["filed"] == 1
+        assert stats["spraying_templates"] == 1
+        findings = await gh.list_issues_by_label("detector-calibration")
+        assert len(findings) == 1
+        assert "escalation spray" in findings[0]["title"]
+
+        # Spray window clears: every entity's close ages out → auto-close.
+        aged = (datetime.now(UTC) - timedelta(days=45)).isoformat()
+        for number in spray_entities:
+            gh.issue(number).updated_at = aged
+
+        stats2 = (await world.run_with_loops(["detector_calibration"], cycles=1))[
+            "detector_calibration"
+        ]
+        assert stats2["autoclosed"] == 1
+        assert await gh.list_issues_by_label("detector-calibration") == []
+
     async def test_scans_served_from_cache_without_subprocess(
         self, tmp_path, monkeypatch
     ) -> None:

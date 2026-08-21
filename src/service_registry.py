@@ -73,6 +73,7 @@ from flake_tracker_loop import FlakeTrackerLoop
 from gate_activation_check import check_gate_activation
 from gate_activator_loop import GateActivatorLoop  # noqa: TCH001
 from gate_health_loop import GateHealthLoop
+from gateway_coverage_loop import GatewayCoverageLoop
 from github_cache_loop import GitHubCacheLoop, GitHubDataCache
 from giveup_self_solve import PlanRetrySelfSolver
 from giveup_window import GiveUpClass, GiveUpTracker, GiveUpWindow, resolve_window
@@ -177,11 +178,10 @@ _PR_LIMIT = 1000
 def _make_fitness_issue_fetcher(prs: PRManager):
     """Return an async closure that fetches issues + PRs and maps them to IssueRecord.
 
-    Uses two ``gh`` CLI calls via ``prs._run_gh`` (the same low-level seam
-    used by StaleIssueLoop). If either call returns exactly the --limit count,
-    a warning is logged so the caller knows results may be capped.
+    Uses the ``list_all_issues``/``list_all_prs`` PRPort methods (#11418).
+    If either call returns exactly the --limit count, a warning is logged
+    so the caller knows results may be capped.
     """
-    import json as _json
     from datetime import datetime as _datetime
 
     def _parse_dt(s: str | None) -> _datetime | None:
@@ -193,20 +193,7 @@ def _make_fitness_issue_fetcher(prs: PRManager):
         records: list[_IssueRecord] = []
 
         # -- issues --
-        raw_issues = await prs._run_gh(
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            prs._repo,
-            "--state",
-            "all",
-            "--limit",
-            str(_ISSUE_LIMIT),
-            "--json",
-            "number,state,labels,createdAt,closedAt",
-        )
-        issues: list[dict] = _json.loads(raw_issues) if raw_issues else []
+        issues = await prs.list_all_issues(state="all", limit=_ISSUE_LIMIT)
         if len(issues) == _ISSUE_LIMIT:
             logger.warning(
                 "fitness_issue_fetcher: issue results capped at %d; "
@@ -227,20 +214,7 @@ def _make_fitness_issue_fetcher(prs: PRManager):
             )
 
         # -- pull requests --
-        raw_prs = await prs._run_gh(
-            "gh",
-            "pr",
-            "list",
-            "--repo",
-            prs._repo,
-            "--state",
-            "all",
-            "--limit",
-            str(_PR_LIMIT),
-            "--json",
-            "number,state,labels,createdAt,closedAt,mergedAt",
-        )
-        pull_requests: list[dict] = _json.loads(raw_prs) if raw_prs else []
+        pull_requests = await prs.list_all_prs(state="all", limit=_PR_LIMIT)
         if len(pull_requests) == _PR_LIMIT:
             logger.warning(
                 "fitness_issue_fetcher: PR results capped at %d; "
@@ -371,6 +345,7 @@ class ServiceRegistry:
     contract_refresh_loop: ContractRefreshLoop
     corpus_learning_loop: CorpusLearningLoop
     auto_agent_preflight_loop: AutoAgentPreflightLoop
+    gateway_coverage_loop: GatewayCoverageLoop
     detector_calibration_loop: DetectorCalibrationLoop
     sandbox_failure_fixer_loop: SandboxFailureFixerLoop
     disturbance_dampener_loop: DisturbanceDampenerLoop
@@ -1082,8 +1057,11 @@ def build_services(
 
     adversarial_agent = SubprocessAgentRunner(
         runner=subprocess_runner,
-        tool=config.implementation_tool,
+        config=config,
+        tool=config.planner_tool,
+        model=config.planner_model,
         credentials=credentials,
+        provider=config.planner_provider,
     )
 
     planner_phase.attach_adversarial_agents(
@@ -1853,6 +1831,12 @@ def build_services(
         github_cache=gh_cache,
     )
 
+    gateway_coverage_loop = GatewayCoverageLoop(
+        config=config,
+        state=state,
+        deps=loop_deps,
+    )
+
     auto_agent_audit_store = PreflightAuditStore(config.data_root)
     auto_agent_preflight_loop = AutoAgentPreflightLoop(  # noqa: F841
         config=config,
@@ -2092,6 +2076,7 @@ def build_services(
         contract_refresh_loop=contract_refresh_loop,
         corpus_learning_loop=corpus_learning_loop,
         auto_agent_preflight_loop=auto_agent_preflight_loop,
+        gateway_coverage_loop=gateway_coverage_loop,
         detector_calibration_loop=detector_calibration_loop,
         sandbox_failure_fixer_loop=sandbox_failure_fixer_loop,
         disturbance_dampener_loop=disturbance_dampener_loop,

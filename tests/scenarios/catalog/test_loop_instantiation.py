@@ -59,3 +59,14 @@ def test_loop_instantiates(tmp_path: Path, name: str) -> None:
         )
 
     assert instance is not None, f"{name!r} builder returned None"
+
+    for key, dedup in ports.items():
+        if not key.endswith("_dedup"):
+            continue
+        fingerprint = f"scenario-guard-{name}-{key}"
+        dedup.add(fingerprint)
+        assert fingerprint in dedup.get(), (
+            f"{name!r} wires ports[{key!r}] to a dedup fake that doesn't "
+            "round-trip add()->get() — looks like a MagicMock with a "
+            "hardcoded get() return value (#11446)"
+        )

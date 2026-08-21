@@ -10,8 +10,13 @@ work becomes a permanent guard rather than a one-time correction.
   escalated to HITL, reproducing the incident the fix claimed to close.
 - #11413 (on #11372): the fail-loud PR's safety claim ("no loop relied on
   the silent empty answer") was falsified — StaleIssueLoop's branch-GC
-  makes two real `gh api` calls the fake never modelled, which fail-loud
-  would now RAISE on.
+  made two real `gh api` calls the fake never modelled, which fail-loud
+  would then RAISE on. #11418 closed the underlying gap: those two calls
+  are now real ``PRPort`` methods (``list_branch_refs`` /
+  ``list_branch_commits``) instead of a raw ``_run_gh``/``_repo``
+  reach-around, so the fake models them by construction — a call that
+  never crosses the Port can never be modelled by the fake, and now
+  neither call bypasses the Port at all.
 - #11408 (on #11390): `advisory_labels or DEFAULT` silently substituted
   the module default for an explicitly-empty set — retiring issues the
   caller excluded.
@@ -19,7 +24,6 @@ work becomes a permanent guard rather than a one-time correction.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
@@ -58,16 +62,21 @@ async def test_schema_violation_fallback_is_infra_under_failover(tmp_path) -> No
 
 
 @pytest.mark.asyncio
-async def test_branch_gc_api_shapes_are_modelled_not_quiet() -> None:
-    """#11413: StaleIssueLoop's real gh api reads must be MODELLED — the
-    fail-loud default would otherwise raise inside the sandbox."""
+async def test_branch_gc_port_methods_are_modelled() -> None:
+    """#11413/#11418: StaleIssueLoop's branch-GC reads (once raw `gh api`
+    calls the fake never modelled) are now real ``PRPort`` methods that
+    FakeGitHub implements directly — no fail-loud raise, and real fidelity
+    instead of an always-empty stand-in."""
     fake = FakeGitHub()
-    refs = await fake._run_gh(
-        "gh", "api", "repos/o/r/git/matching-refs/heads/agent/", "--jq", "[.[].ref]"
+    fake.add_gc_branch(
+        "agent/issue-42", [{"date": "2026-01-02T00:00:00Z", "message": "Fixes #42"}]
     )
-    assert isinstance(json.loads(refs), list)
-    commits = await fake._run_gh("gh", "api", "repos/o/r/commits", "--method", "GET")
-    assert isinstance(json.loads(commits), list)
+
+    refs = await fake.list_branch_refs("agent/")
+    assert refs == [("agent/issue-42", "sha-agent/issue-42")]
+
+    commits = await fake.list_branch_commits("agent/issue-42")
+    assert commits == [{"date": "2026-01-02T00:00:00Z", "message": "Fixes #42"}]
 
 
 def test_explicit_empty_advisory_set_retires_nothing() -> None:

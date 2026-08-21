@@ -434,7 +434,7 @@ class TestReconcile:
         )
 
         await loop._do_work()
-        prs.get_issue_state = AsyncMock(return_value="CLOSED")
+        prs.get_issue_state = AsyncMock(return_value="COMPLETED")
         prs.get_issue_labels = AsyncMock(return_value=["audit-refuted"])
         await loop._do_work()
 

@@ -50,6 +50,25 @@ def test_reroutes_to_zai_when_repo_provider_is_zai(
     assert "glm-5.2" in new_cmd and "claude-opus-4-8" not in new_cmd
 
 
+def test_reroutes_to_gateway_without_requiring_real_provider_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    cmd = ["claude", "--model", "claude-opus-4-8", "-p", "x"]
+    provider, new_cmd = apply_repo_provider(
+        "claude", cmd, _cfg(tmp_path, repo_provider="gateway")
+    )
+    assert provider == "gateway"
+    assert new_cmd == cmd
+
+
+def test_gateway_repo_override_never_routes_codex_command(tmp_path: Path) -> None:
+    cmd = ["codex", "exec", "--model", "gpt-5-codex"]
+    assert apply_repo_provider(
+        "claude", cmd, _cfg(tmp_path, repo_provider="gateway")
+    ) == ("claude", cmd)
+
+
 def test_falls_back_to_credit_failover_model_when_repo_model_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

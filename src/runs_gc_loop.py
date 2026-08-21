@@ -18,6 +18,7 @@ from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from dedup_store import DedupStore
 from events import EventType, HydraFlowEvent
+from prompt_telemetry import refresh_prompt_telemetry_health_after_retention
 from run_recorder import RunRecorder
 
 logger = logging.getLogger("hydraflow.runs_gc_loop")
@@ -172,6 +173,14 @@ class RunsGCLoop(BaseBackgroundLoop):
             removed = chain.prune_before(cutoff, spec.timestamp_key)
             pruned[spec.name] = removed
             if removed:
+                if spec.name == "inference_telemetry" and not (
+                    refresh_prompt_telemetry_health_after_retention(spec.path)
+                ):
+                    logger.error(
+                        "Audit retention could not refresh prompt telemetry "
+                        "source-health anchor for %s",
+                        spec.path,
+                    )
                 logger.info(
                     "Audit retention: pruned %d record(s) older than %d days "
                     "from stream %r",

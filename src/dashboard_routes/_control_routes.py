@@ -164,6 +164,11 @@ _bg_worker_defs = [
         "Scans per-repo wikis for citations whose source code has moved or vanished.",
     ),
     (
+        "gateway_coverage",
+        "Gateway Coverage",
+        "Measures the share of LLM spend transiting the gateway.",
+    ),
+    (
         "detector_calibration",
         "Detector Calibration",
         "Mines closed escalations for repeat-offender subjects — churn means "

@@ -81,6 +81,7 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "contract_refresh": (86400, 2_592_000),  # 1d min, 30d max
     "corpus_learning": (3600, 2_592_000),  # 1h min, 30d max
     "auto_agent_preflight": (60, 600),
+    "gateway_coverage": (60, 86400),
     "detector_calibration": (60, 86400),
     "sandbox_failure_fixer": (60, 86400),  # 1m min, 10m max (ADR-0049)
     "disturbance_dampener": (60, 86400),  # 1m min, 1d max (ADR-0095, default 1h)

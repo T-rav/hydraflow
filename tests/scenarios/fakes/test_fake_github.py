@@ -63,6 +63,55 @@ class TestFakeGitHubPRs:
         assert r2[0] is True
 
 
+class TestFakeGitHubListAllPrs:
+    """list_all_prs must reflect distinct per-PR dates (#11418 review finding).
+
+    Before this fix, every PR was stamped with the same fixed date
+    regardless of when it was seeded/merged/closed, which would silently
+    defeat any age/window-boundary assertion a fitness-metric scenario
+    made against list_all_prs.
+    """
+
+    async def test_distinct_created_at_per_pr_survives_list_all_prs(self):
+        gh = FakeGitHub()
+        gh.add_pr(
+            number=1, issue_number=1, branch="b1", created_at="2026-01-01T00:00:00Z"
+        )
+        gh.add_pr(
+            number=2, issue_number=2, branch="b2", created_at="2026-06-15T00:00:00Z"
+        )
+
+        prs = await gh.list_all_prs()
+
+        by_number = {pr["number"]: pr for pr in prs}
+        assert by_number[1]["createdAt"] == "2026-01-01T00:00:00Z"
+        assert by_number[2]["createdAt"] == "2026-06-15T00:00:00Z"
+
+    async def test_merged_at_reflects_seeded_value(self):
+        gh = FakeGitHub()
+        gh.add_pr(
+            number=3,
+            issue_number=3,
+            branch="b3",
+            merged=True,
+            merged_at="2026-03-20T00:00:00Z",
+        )
+
+        prs = await gh.list_all_prs()
+
+        assert prs[0]["mergedAt"] == "2026-03-20T00:00:00Z"
+
+    async def test_unseeded_dates_fall_back_to_created_at(self):
+        """Backward-compat: PRs seeded without explicit dates keep working."""
+        gh = FakeGitHub()
+        gh.add_pr(number=4, issue_number=4, branch="b4", merged=True)
+
+        prs = await gh.list_all_prs()
+
+        pr = prs[0]
+        assert pr["createdAt"] == pr["closedAt"] == pr["mergedAt"]
+
+
 class TestFakeGitHubMutations:
     async def test_transition_updates_labels(self):
         gh = FakeGitHub()
@@ -157,6 +206,61 @@ class TestFakeGitHubMutations:
         assert comments[1]["user"]["login"] == "bob"
         assert comments[1]["body"] == "/resume"
         assert comments[1]["created_at"] == "2026-07-01T00:05:00Z"
+
+
+class TestFakeGitHubRunGhIssueEdit:
+    """#11419: FakeGitHub models ``gh issue edit <n> --body-file <path>``.
+
+    The only real issuer is ``PRManager.update_issue_body``, which routes
+    the body through a temp ``--body-file`` (``_run_with_body_file``), so
+    the fake reads the file — exactly what the real gh CLI would consume.
+    """
+
+    async def test_edit_updates_body_via_run_gh(self, tmp_path):
+        gh = FakeGitHub()
+        gh.add_issue(42, "title", "old body")
+        body_file = tmp_path / "body.md"
+        body_file.write_text("new body", encoding="utf-8")
+
+        await gh._run_gh(
+            "gh",
+            "issue",
+            "edit",
+            "42",
+            "--repo",
+            "o/r",
+            "--body-file",
+            str(body_file),
+        )
+
+        assert await gh.get_issue_body(42) == "new body"
+
+    async def test_edit_without_body_flag_is_a_noop(self):
+        gh = FakeGitHub()
+        gh.add_issue(42, "title", "old body")
+
+        await gh._run_gh("gh", "issue", "edit", "42", "--repo", "o/r")
+
+        assert await gh.get_issue_body(42) == "old body"
+
+    async def test_edit_with_missing_body_file_is_a_noop(self, tmp_path):
+        """_run_with_body_file unlinks its temp file in a finally — a path
+        that no longer resolves must not raise out of the fake."""
+        gh = FakeGitHub()
+        gh.add_issue(42, "title", "old body")
+
+        await gh._run_gh(
+            "gh",
+            "issue",
+            "edit",
+            "42",
+            "--repo",
+            "o/r",
+            "--body-file",
+            str(tmp_path / "gone.md"),
+        )
+
+        assert await gh.get_issue_body(42) == "old body"
 
 
 class TestFakeGitHubRateLimit:

@@ -86,6 +86,10 @@ health_monitor:
   class: error_driven
   pv: "loop liveness invariants (Tier-1 kernel)"
   notes: "judgment"
+gateway_coverage:
+  class: error_driven
+  pv: "gateway spend coverage vs 100% post-migration ceiling"
+  notes: "judgment: read-only meta-observability comparator"
 goal_supervisor:
   class: error_driven
   pv: "fleet health invariants (ADR-0124 health-only)"

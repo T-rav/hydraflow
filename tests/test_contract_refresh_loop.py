@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -34,6 +34,7 @@ import contract_refresh_loop as crl_module
 from auto_pr import AutoPrResult
 from base_background_loop import LoopDeps
 from config import HydraFlowConfig
+from contract_recording import CLAUDE_STREAM_MODEL
 from contract_refresh_loop import ContractRefreshLoop
 from events import EventBus
 
@@ -1141,3 +1142,60 @@ def test_record_all_runs_all_recorders_when_enabled(
     asyncio.run(loop._record_all(tmp_path / "rec"))
 
     assert set(calls) == {"github", "git", "docker", "claude"}
+
+
+def test_direct_recorder_does_not_borrow_zai_maintenance_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorded_path = tmp_path / "recorded" / "stream.jsonl"
+    recorded_path.parent.mkdir(parents=True)
+    recorded_path.write_text('{"type":"result","result":"pong"}\n')
+    recorder = MagicMock(return_value=[recorded_path])
+    telemetry = MagicMock()
+    monkeypatch.setattr(crl_module, "record_claude_stream", recorder)
+    monkeypatch.setattr(crl_module, "record_inference_telemetry", telemetry)
+    loop = _loop(
+        tmp_path,
+        maintenance_provider="zai",
+        maintenance_model="glm-5.2",
+    )
+    assert loop._config.adr_review_provider == "zai"
+    assert loop._config.adr_review_model == "glm-5.2"
+
+    recorded = asyncio.run(loop._record_claude_stream(tmp_path / "recorded"))
+
+    assert recorded == [recorded_path]
+    recorder.assert_called_once_with(tmp_path / "recorded")
+    telemetry.assert_called_once()
+    telemetry_kwargs = telemetry.call_args.kwargs
+    assert telemetry_kwargs["cmd"] == [
+        "claude",
+        "--model",
+        CLAUDE_STREAM_MODEL,
+    ]
+    assert telemetry_kwargs["success"] is True
+
+
+def test_terminal_profile_disables_raw_host_claude_recorder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(crl_module, "record_github", lambda *_a, **_k: [])
+    monkeypatch.setattr(crl_module, "record_git", lambda *_a, **_k: [])
+    monkeypatch.setattr(crl_module, "record_docker", lambda *_a, **_k: [])
+    claude = MagicMock(return_value=[tmp_path / "must-not-run.jsonl"])
+    telemetry = MagicMock()
+    monkeypatch.setattr(crl_module, "record_claude_stream", claude)
+    monkeypatch.setattr(crl_module, "record_inference_telemetry", telemetry)
+    loop = _loop(
+        tmp_path,
+        contract_refresh_external_enabled=True,
+        gateway_fleet_ratchet_enabled=True,
+        execution_mode="docker",
+    )
+    assert loop._config.adr_review_provider == "gateway"
+
+    recorded = asyncio.run(loop._record_all(tmp_path / "recorded"))
+
+    assert recorded["claude"] == []
+    claude.assert_not_called()
+    telemetry.assert_not_called()

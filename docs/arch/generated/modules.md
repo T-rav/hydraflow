@@ -19,6 +19,7 @@ graph LR
     src_erosion["src.erosion"]
     src_escape["src.escape"]
     src_flows["src.flows"]
+    src_hydraflow_gateway["src.hydraflow_gateway"]
     src_intervention["src.intervention"]
     src_mockworld["src.mockworld"]
     src_mockworld_fakes["src.mockworld.fakes"]
@@ -42,6 +43,7 @@ graph LR
     src -- "16" --> src_erosion
     src -- "9" --> src_escape
     src -- "4" --> src_flows
+    src -- "1" --> src_hydraflow_gateway
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
     src -- "18" --> src_preflight
@@ -49,7 +51,7 @@ graph LR
     src -- "1" --> src_runners
     src -- "1" --> src_signal_control
     src -- "62" --> src_state
-    src -- "4" --> src_vitals
+    src -- "6" --> src_vitals
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
     src_arch_generators -- "14" --> src_arch

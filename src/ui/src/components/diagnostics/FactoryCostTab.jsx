@@ -4,7 +4,9 @@ import { REPO_ALL } from '../../constants'
 import { useHydraFlow } from '../../context/HydraFlowContext'
 import { CostByModelChart } from './CostByModelChart'
 import { FactoryCostSummary } from './FactoryCostSummary'
+import { GatewayCoverageGauge } from './GatewayCoverageGauge'
 import { PerLoopCostTable } from './PerLoopCostTable'
+import { useGatewayCoverage } from './useGatewayCoverage'
 import { WaterfallView } from './WaterfallView'
 
 /**
@@ -22,6 +24,16 @@ import { WaterfallView } from './WaterfallView'
 
 export function FactoryCostTab({ range = '7d' }) {
   const { fetchWithRepo, selectedRepoSlug } = useHydraFlow()
+  const coverageFetcher = useCallback(async (url, { signal } = {}) => {
+    const response = await fetchWithRepo(url, { signal })
+    if (!response.ok) throw new Error(`gateway coverage ${response.status}`)
+    return response.json()
+  }, [fetchWithRepo])
+  const gatewayCoverage = useGatewayCoverage({
+    range,
+    fetcher: coverageFetcher,
+    scopeKey: selectedRepoSlug || '',
+  })
   const [rolling24h, setRolling24h] = useState(null)
   const [rollingError, setRollingError] = useState(null)
   const [topIssues, setTopIssues] = useState([])
@@ -117,6 +129,7 @@ export function FactoryCostTab({ range = '7d' }) {
   return (
     <div style={styles.wrap}>
       <FactoryCostSummary rolling24h={rolling24h} error={rollingError} />
+      <GatewayCoverageGauge {...gatewayCoverage} />
 
       <section style={styles.section}>
         <h3 style={styles.h3}>Cost by Model ({range})</h3>

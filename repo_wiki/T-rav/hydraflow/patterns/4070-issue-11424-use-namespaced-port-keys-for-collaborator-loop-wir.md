@@ -4,8 +4,9 @@ topic: patterns
 source_issue: 11424
 source_phase: review
 created_at: 2026-08-18T09:01:27.985879+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11424 closed
 ---
 
 # Use namespaced port keys for collaborator loop wiring

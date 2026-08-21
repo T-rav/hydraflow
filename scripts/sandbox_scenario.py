@@ -168,7 +168,14 @@ def cmd_run(name: str) -> int:
         # ``playwright`` must be built explicitly because the MS image ships no
         # test runner — ``Dockerfile.playwright`` adds pytest at build time so
         # ``compose run playwright pytest …`` works on the air-gapped network.
-        rc = _compose("build", "hydraflow", "ui", "playwright").returncode
+        rc = _compose(
+            "build",
+            "fake-llm-http",
+            "gateway",
+            "hydraflow",
+            "ui",
+            "playwright",
+        ).returncode
         if rc != 0:
             print(f"BUILD FAILED ({rc})")
             return 2

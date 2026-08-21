@@ -38,29 +38,33 @@ _APPROVED = frozenset(
     }
 )
 
+# The contract recorder consumes raw Claude stream-json as the artifact under
+# test, so it cannot use the ordinary text wrapper. During opt-in rollout its
+# composition root emits a direct PromptTelemetry bypass row. The terminal
+# profile disables the legacy host subprocess because a scrubbed environment
+# cannot isolate host OAuth/keychain state.
+_SPECIALIZED_GATEWAY_RECORDERS = frozenset({"contract_recording.py"})
+
 # Ratchet allow-list (rel paths). Each entry is a known-untelemetried lightweight
 # spawner whose telemetry backfill is blocked on threading a HydraFlowConfig into
 # a constructor that has none today (touches service_registry + many test
 # constructions). Credit IS handled for both. Tracked as the WS-2.2 telemetry
 # follow-up. MUST shrink toward empty and MUST NOT grow.
-_GRANDFATHERED = frozenset(
-    {
-        # term_proposer_runtime.py graduated: ClaudeCLIClient now takes a
-        # HydraFlowConfig and routes through run_lightweight_agent (telemetried).
-        "adversarial_agent_runner.py",  # SubprocessAgentRunner @dataclass, no config
-    }
-)
+_GRANDFATHERED = frozenset()
 
 
 def _untelemetried_spawners() -> set[str]:
     """Return non-approved modules that spawn an LLM without a recording seam."""
     offenders: set[str] = set()
     for facts in iter_module_facts():
-        if facts.rel in _APPROVED:
+        if facts.rel in _APPROVED or facts.rel in _SPECIALIZED_GATEWAY_RECORDERS:
             continue
         bypasses_primitive = bool(facts.calls & _RAW_PRIMITIVES)
         hand_rolled_argv = "run_simple" in facts.calls and facts.has_agent_argv
-        if bypasses_primitive or hand_rolled_argv:
+        raw_agent_spawn = (
+            facts.has_agent_inference_argv and facts.has_raw_subprocess_run
+        )
+        if bypasses_primitive or hand_rolled_argv or raw_agent_spawn:
             offenders.add(facts.rel)
     return offenders
 
@@ -95,3 +99,13 @@ def test_approved_recorders_actually_record_telemetry() -> None:
             f"{rel} is an approved telemetry recorder but no longer calls .record(); "
             "it may have stopped recording — fix the recorder or update _APPROVED."
         )
+
+
+def test_specialized_raw_recorder_is_visible_and_terminally_disabled() -> None:
+    """Keep the narrow raw-stream exception honest and terminally isolated."""
+
+    facts = {f.rel: f for f in iter_module_facts()}
+    recorder = facts["contract_recording.py"]
+    composition = facts["contract_refresh_loop.py"]
+    assert recorder.has_agent_inference_argv and recorder.has_raw_subprocess_run
+    assert "record_inference_telemetry" in composition.calls

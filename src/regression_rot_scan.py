@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from issue_state import issue_state_is_resolved
+
 # Matches `test_issue_9836`, `regression_issue_6709`, and multi-number slugs
 # like `test_issue_9419_9421_adr_drift` (first run of digit groups only).
 _ISSUE_NUMBERS_RE = re.compile(r"^(?:test|regression)_issue_((?:\d+_)*\d+)")
@@ -46,9 +48,6 @@ _BLOCKED_RE = re.compile(
 _SKIP_NAMES = {"__init__.py"}
 
 RegressionRotKind = Literal["false_close", "orphaned_red"]
-
-# Issue states (as returned by PRPort.get_issue_state) that count as closed.
-_CLOSED_STATES = frozenset({"COMPLETED", "NOT_PLANNED"})
 
 
 def parse_issue_numbers(stem: str) -> list[int]:
@@ -131,9 +130,10 @@ def classify_regression_rot(
     finding per issue (a single issue can be guarded by more than one
     regression file).
 
-    - Issue state in ``{"COMPLETED", "NOT_PLANNED"}`` -> ``"false_close"``
-      (fires immediately — a closed issue with a still-RED pin is a
-      contradiction regardless of how long it's been that way).
+    - Issue state resolved per :func:`issue_state.issue_state_is_resolved`
+      (``COMPLETED`` / ``NOT_PLANNED``) -> ``"false_close"`` (fires
+      immediately — a closed issue with a still-RED pin is a contradiction
+      regardless of how long it's been that way).
     - Issue state ``"OPEN"`` and ``ages_days[issue] > stale_days`` ->
       ``"orphaned_red"``. Fresh (not-yet-stale) OPEN issues yield nothing.
     - Any other state (``"UNKNOWN"``, missing) yields nothing — a transient
@@ -150,7 +150,7 @@ def classify_regression_rot(
     for number in sorted(candidates_by_issue):
         state = issue_states.get(number, "UNKNOWN")
         kind: RegressionRotKind | None = None
-        if state in _CLOSED_STATES:
+        if issue_state_is_resolved(state):
             kind = "false_close"
         elif state == "OPEN" and ages_days.get(number, 0) > stale_days:
             kind = "orphaned_red"

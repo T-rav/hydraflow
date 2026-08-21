@@ -345,6 +345,11 @@ class MockWorld:
             "wait_for_ci",
             "fetch_ci_failure_logs",
             "merge_pr",
+            # Issue-state read (OPEN/COMPLETED/NOT_PLANNED). Wired so the
+            # implement phase's #11457 branch-cut re-check reads the fake
+            # board instead of the unwired PRManager method (a real ``gh``
+            # subprocess).
+            "get_issue_state",
         ):
             setattr(prs, method, getattr(gh, method))
 
@@ -596,6 +601,10 @@ class MockWorld:
         return self._fs
 
     @property
+    def workspace(self) -> FakeWorkspace:
+        return self._workspace
+
+    @property
     def http(self) -> FakeHTTP:
         return self._http
 
@@ -768,7 +777,11 @@ class MockWorld:
             enabled_cb=bg.enabled_cb,
             sleep_fn=_counting_sleep,
         )
-        config = bg.config
+        # Run catalog-built loops with the world configuration supplied by the
+        # scenario.  ``make_bg_loop_deps`` still provides the bounded lifecycle
+        # callbacks, but its throwaway default config must not erase explicit
+        # routing, privacy, or provider settings passed to ``MockWorld``.
+        config = self._harness.config
         # The caller explicitly asked to run these loops, so enable any
         # deploy-time kill-switch they gate on (e.g. diagnostic_loop_enabled
         # defaults OFF, #9895). Otherwise _do_work short-circuits to
@@ -876,6 +889,7 @@ class MockWorld:
             materialize_epic_states,
             materialize_expired_runs,
             materialize_health_metrics,
+            materialize_prompt_telemetry_source,
             materialize_registered_workers,
             materialize_wiki_fixtures,
             materialize_worker_heartbeats,
@@ -925,6 +939,8 @@ class MockWorld:
             # the paths the catalog-built HealthMonitorLoop reads (both derive
             # from the same tmp repo_root as harness.config).
             materialize_health_metrics(config, seed)
+        if seed.prompt_telemetry_source_initialized:
+            materialize_prompt_telemetry_source(config, seed)
         if seed.worker_heartbeats:
             materialize_worker_heartbeats(self._harness.state, seed)
         if seed.worker_status_history:

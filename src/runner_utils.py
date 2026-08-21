@@ -6,18 +6,24 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import os
 import time
+import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
+
+import httpx
 
 import process_group
 from activity_parser import ActivityParser, get_activity_parser
 from agent_rate_backoff import classify_agent_outcome, get_agent_rate_backoff
+from docker_runner import get_docker_runner
 from events import EventBus, EventType, HydraFlowEvent
-from execution import SubprocessRunner, get_default_runner
+from execution import HostRunner, SimpleResult, SubprocessRunner, get_default_runner
 from models import TranscriptEventData, TranscriptLinePayload
 from process_group import kill_process_group
 from prompt_gate import PromptGateBlockedError, gate_prompt
@@ -29,12 +35,12 @@ from subprocess_util import (
     is_credit_exhaustion,
     make_clean_env,
     parse_credit_resume_time,
+    scrub_gateway_spawn_env,
 )
 
 if TYPE_CHECKING:
     from agent_cli import AgentTool
     from config import HydraFlowConfig
-    from execution import SimpleResult
     from trace_collector import TraceCollector
 
 logger = logging.getLogger("hydraflow.runner_utils")
@@ -45,6 +51,10 @@ logger = logging.getLogger("hydraflow.runner_utils")
 # same-message stream deltas is still caught, while keeping the per-line scan
 # O(1) instead of re-scanning the whole (growing) transcript.
 _CREDIT_SCAN_TAIL_CHARS = 512
+
+# A key must remain valid beyond the subprocess deadline so scheduling jitter,
+# container startup, and the final response bytes cannot race token expiry.
+_GATEWAY_LEASE_GRACE_SECONDS = 60
 
 
 class AuthenticationRetryError(RuntimeError):
@@ -108,6 +118,10 @@ class StreamConfig:
     # main workers get a pristine env. Merged AFTER make_clean_env so the
     # ANTHROPIC_* keys survive the strip.
     harness_env: dict[str, str] = field(default_factory=dict)
+    # Transport is separate from the billing provider.  In gateway mode the
+    # latter remains anthropic/zai while this field triggers the final
+    # credential scrub at the host boundary.
+    harness_transport: str = "claude"
     # The resolved billing provider for this spawn ("anthropic"/"zai") so a
     # credit-out is scoped to the right backend rather than a global kill switch.
     provider: str = "claude"
@@ -384,6 +398,8 @@ async def stream_claude_process(
         result_text → accumulated_text → raw_lines.
     """
     env = make_clean_env(config.gh_token)
+    if config.harness_transport == _GATEWAY:
+        env = scrub_gateway_spawn_env(env)
     runner = config.runner or get_default_runner()
     cmd_to_run, stdin_mode = _route_prompt_to_cmd(cmd, prompt)
 
@@ -554,7 +570,7 @@ def raise_if_credit_exhausted(
             )
 
 
-def _record_inference(
+def record_inference_telemetry(
     config: HydraFlowConfig,
     *,
     source: str,
@@ -633,7 +649,7 @@ async def stream_claude_with_telemetry(
     # CH-6 data-governance gate (#9734): redact/block BEFORE spawn. A
     # regulated-class block raises pre-spawn — nothing was sent, no telemetry
     # row — and propagates to the caller's failure path (fail closed).
-    gate_tool, _gate_model = parse_command_tool_model(cmd)
+    gate_tool, gate_model = parse_command_tool_model(cmd)
     gated = gate_prompt(
         prompt,
         config=config,
@@ -655,19 +671,54 @@ async def stream_claude_with_telemetry(
         stats = {}
         stream_config = replace(stream_config, usage_stats=stats)
 
+    # The fleet ratchet is a deployment opt-in.  It closes direct CLI call-site
+    # gaps without changing safe defaults before the gateway is deployed.
+    transport_provider = provider
+    if (
+        getattr(config, "gateway_fleet_ratchet_enabled", False) is True
+        and provider == "claude"
+        and gate_tool == "claude"
+    ):
+        transport_provider = _GATEWAY
+    if transport_provider == _GATEWAY and gate_tool != "claude":
+        raise ValueError(
+            f"provider 'gateway' requires the Claude harness, got {gate_tool!r}"
+        )
+
     # Point the CLI at the role's harness backend for this spawn only (empty for
     # native Anthropic — the main workers stay pristine), and carry the resolved
     # provider so a credit-out is scoped to the right backend.
+    harness_env = await resolve_harness_env(
+        transport_provider,
+        config,
+        model=gate_model,
+        source=str(event_data.get("source", "unknown")),
+        session_id=getattr(event_bus, "current_session_id", None),
+        timeout_seconds=stream_config.timeout,
+    )
     stream_config = replace(
         stream_config,
-        harness_env=resolve_harness_env(provider, config),
-        provider=provider,
+        harness_env=harness_env,
+        harness_transport=transport_provider,
+        provider=harness_billing_provider(transport_provider, gate_model),
+    )
+    telemetry_cmd = (
+        _telemetry_cmd(transport_provider, gate_tool, gate_model)
+        if transport_provider == _GATEWAY
+        else cmd
     )
 
     start = time.monotonic()
     transcript = ""
     success = False
+    owned_runner: SubprocessRunner | None = None
     try:
+        spawn_runner, owned_runner = _terminal_gateway_runner(
+            stream_config.runner or get_default_runner(),
+            config,
+            transport_provider,
+        )
+        stream_config = replace(stream_config, runner=spawn_runner)
         transcript = await stream_claude_process(
             cmd=cmd,
             prompt=prompt,
@@ -681,27 +732,34 @@ async def stream_claude_with_telemetry(
         success = True
         return transcript
     finally:
-        _record_inference(
-            config,
-            source=str(event_data.get("source", "unknown")),
-            cmd=cmd,
-            prompt=prompt,
-            transcript=transcript,
-            duration_s=time.monotonic() - start,
-            success=success,
-            issue_number=(
-                issue_number
-                if issue_number is not None
-                else _as_opt_int(event_data.get("issue"))
-            ),
-            pr_number=(
-                pr_number
-                if pr_number is not None
-                else _as_opt_int(event_data.get("pr"))
-            ),
-            session_id=getattr(event_bus, "current_session_id", None),
-            stats=stats,
-        )
+        try:
+            record_inference_telemetry(
+                config,
+                source=str(event_data.get("source", "unknown")),
+                cmd=telemetry_cmd,
+                prompt=prompt,
+                transcript=transcript,
+                duration_s=time.monotonic() - start,
+                success=success,
+                issue_number=(
+                    issue_number
+                    if issue_number is not None
+                    else _as_opt_int(event_data.get("issue"))
+                ),
+                pr_number=(
+                    pr_number
+                    if pr_number is not None
+                    else _as_opt_int(event_data.get("pr"))
+                ),
+                session_id=getattr(event_bus, "current_session_id", None),
+                stats=stats,
+            )
+        finally:
+            try:
+                await revoke_gateway_key(harness_env)
+            finally:
+                if owned_runner is not None:
+                    await owned_runner.cleanup()
 
 
 # --- Pluggable one-shot LLM backends -----------------------------------------
@@ -714,6 +772,360 @@ async def stream_claude_with_telemetry(
 _OPENROUTER = "openrouter"
 _ZAI = "zai"
 _KIMI = "kimi"
+_GATEWAY = "gateway"
+
+
+class GatewayMintError(RuntimeError):
+    """The gateway was selected but a per-spawn credential could not be minted."""
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayMintRequest:
+    """Stable runner-side contract for ``POST /control/v1/keys``."""
+
+    principal_kind: Literal["loop", "role", "spawn", "person", "team"]
+    principal_id: str
+    spawn_id: str
+    session_id: str | None
+    repo_slug: str
+    repo_class: Literal["hydraflow", "client", "personal"]
+    provider_binding: Literal["anthropic", "zai-harness"]
+    capture_bodies: bool
+    ttl_seconds: int
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayMintCredential:
+    """Validated subset of the gateway mint response used by a worker spawn."""
+
+    key_id: str
+    token: str = field(repr=False)
+    expires_at: str
+
+
+class GatewayControlClient(Protocol):
+    """Injectable key-lifecycle boundary for the gateway control plane."""
+
+    async def mint_key(
+        self,
+        *,
+        base_url: str,
+        control_token: str,
+        request: GatewayMintRequest,
+    ) -> GatewayMintCredential: ...
+
+    async def revoke_key(
+        self,
+        *,
+        base_url: str,
+        control_token: str,
+        key_id: str,
+    ) -> bool: ...
+
+
+class _HttpGatewayControlClient:
+    """Minimal production adapter for the gateway control endpoint."""
+
+    async def mint_key(
+        self,
+        *,
+        base_url: str,
+        control_token: str,
+        request: GatewayMintRequest,
+    ) -> GatewayMintCredential:
+        try:
+            async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
+                response = await client.post(
+                    f"{base_url.rstrip('/')}/control/v1/keys",
+                    headers={"Authorization": f"Bearer {control_token}"},
+                    json={
+                        "principal_kind": request.principal_kind,
+                        "principal_id": request.principal_id,
+                        "spawn_id": request.spawn_id,
+                        "session_id": request.session_id,
+                        "repo_slug": request.repo_slug,
+                        "repo_class": request.repo_class,
+                        "provider_binding": request.provider_binding,
+                        "capture_bodies": request.capture_bodies,
+                        "ttl_seconds": request.ttl_seconds,
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, json.JSONDecodeError):
+            # Never include a response body or credential in this exception: the
+            # failure can flow through caretaker logs.
+            raise GatewayMintError("gateway credential mint failed") from None
+
+        safe_key_id = _safe_gateway_key_id(
+            payload.get("key_id") if isinstance(payload, dict) else None
+        )
+        try:
+            if not isinstance(payload, dict):
+                raise GatewayMintError("gateway mint returned an invalid response")
+            key_id = payload.get("key_id")
+            token = payload.get("token")
+            expires_at = payload.get("expires_at")
+            if (
+                not isinstance(key_id, str)
+                or not isinstance(token, str)
+                or not isinstance(expires_at, str)
+            ):
+                raise GatewayMintError("gateway mint returned an invalid response")
+            credential = GatewayMintCredential(
+                key_id=key_id,
+                token=token,
+                expires_at=expires_at,
+            )
+            _validate_gateway_credential(credential)
+        except GatewayMintError:
+            if safe_key_id is not None:
+                await self._cleanup_invalid_mint(
+                    base_url=base_url,
+                    control_token=control_token,
+                    key_id=safe_key_id,
+                )
+            raise GatewayMintError(
+                "gateway mint returned an invalid response"
+            ) from None
+        return credential
+
+    async def _cleanup_invalid_mint(
+        self,
+        *,
+        base_url: str,
+        control_token: str,
+        key_id: str,
+    ) -> None:
+        """Best-effort revoke a key returned with malformed credential data."""
+
+        try:
+            revoked = await self.revoke_key(
+                base_url=base_url,
+                control_token=control_token,
+                key_id=key_id,
+            )
+            if not revoked:
+                raise GatewayMintError(
+                    "gateway invalid-mint revocation was not acknowledged"
+                )
+        except GatewayMintError:
+            # TTL remains the fail-closed fallback. Never retain or log the
+            # malformed response, which can contain virtual secret material.
+            logger.warning(
+                "gateway invalid-mint cleanup failed for key_id=%s",
+                key_id,
+            )
+
+    async def revoke_key(
+        self,
+        *,
+        base_url: str,
+        control_token: str,
+        key_id: str,
+    ) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
+                response = await client.delete(
+                    f"{base_url.rstrip('/')}/control/v1/keys/{key_id}",
+                    headers={"Authorization": f"Bearer {control_token}"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, json.JSONDecodeError):
+            # Do not retain an exception containing the authenticated request;
+            # cleanup failures can be logged by long-lived caretaker processes.
+            raise GatewayMintError("gateway credential revocation failed") from None
+        revoked = payload.get("revoked")
+        if not isinstance(revoked, bool):
+            raise GatewayMintError("gateway revoke returned an invalid response")
+        return revoked
+
+
+def _parse_gateway_expiry(value: str) -> datetime:
+    """Parse a control-plane expiry without ever including it in an error."""
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise GatewayMintError("gateway mint returned an invalid expiry") from None
+    if parsed.tzinfo is None:
+        raise GatewayMintError("gateway mint returned an invalid expiry")
+    return parsed.astimezone(UTC)
+
+
+def _safe_gateway_key_id(value: object) -> str | None:
+    """Return a path-safe key ID suitable for malformed-mint cleanup."""
+
+    if not isinstance(value, str) or not 1 <= len(value) <= 128:
+        return None
+    if not value.isascii() or any(
+        not (char.isalnum() or char in "-_") for char in value
+    ):
+        return None
+    return value
+
+
+def _validate_gateway_credential(credential: GatewayMintCredential) -> None:
+    if not credential.key_id or not credential.token or not credential.expires_at:
+        raise GatewayMintError("gateway mint returned an incomplete credential")
+    _parse_gateway_expiry(credential.expires_at)
+
+
+def _gateway_ttl_seconds(config: HydraFlowConfig, timeout_seconds: float | None) -> int:
+    """Return a TTL that covers one complete subprocess attempt plus cleanup."""
+
+    configured = int(getattr(config, "gateway_key_ttl_seconds", 3660))
+    if timeout_seconds is None:
+        return configured
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise GatewayMintError("gateway spawn timeout must be positive and finite")
+    return max(configured, math.ceil(timeout_seconds) + _GATEWAY_LEASE_GRACE_SECONDS)
+
+
+@dataclass(slots=True)
+class _GatewayKeyLease:
+    """Private retained control-plane state for one worker spawn."""
+
+    base_url: str
+    control_token: str = field(repr=False)
+    request: GatewayMintRequest
+    client: GatewayControlClient = field(repr=False)
+    credential: GatewayMintCredential = field(repr=False)
+    revoked: bool = False
+
+    @property
+    def key_id(self) -> str:
+        return self.credential.key_id
+
+    @property
+    def expires_at(self) -> str:
+        return self.credential.expires_at
+
+    def seconds_remaining(self) -> float:
+        return (
+            _parse_gateway_expiry(self.expires_at) - datetime.now(UTC)
+        ).total_seconds()
+
+    async def renew_if_needed(self, *, min_validity_seconds: float) -> bool:
+        """Remint only when this lease cannot cover one more full attempt."""
+
+        if self.revoked:
+            raise GatewayMintError("gateway credential lease is already closed")
+        if self.seconds_remaining() >= min_validity_seconds:
+            return False
+
+        previous_key_id = self.key_id
+        credential = await self.client.mint_key(
+            base_url=self.base_url,
+            control_token=self.control_token,
+            request=self.request,
+        )
+        _validate_gateway_credential(credential)
+        self.credential = credential
+        try:
+            revoked = await self.client.revoke_key(
+                base_url=self.base_url,
+                control_token=self.control_token,
+                key_id=previous_key_id,
+            )
+            if not revoked:
+                raise GatewayMintError(
+                    "gateway superseded-key revocation was not acknowledged"
+                )
+        except Exception:
+            # The superseded credential still has its short TTL. Do not discard
+            # the successfully minted replacement or expose control credentials.
+            logger.warning(
+                "gateway superseded-key revocation failed for key_id=%s",
+                previous_key_id,
+            )
+        return True
+
+    async def revoke(self) -> None:
+        if self.revoked:
+            return
+        revoked = await self.client.revoke_key(
+            base_url=self.base_url,
+            control_token=self.control_token,
+            key_id=self.key_id,
+        )
+        if not revoked:
+            raise GatewayMintError("gateway key revocation was not acknowledged")
+        self.revoked = True
+
+
+class _RoutedHarnessEnv(dict[str, str]):
+    """Env mapping with non-exported transport metadata for spawn boundaries."""
+
+    __slots__ = ("transport", "_gateway_lease")
+
+    def __init__(
+        self,
+        values: dict[str, str],
+        *,
+        transport: str,
+        gateway_lease: _GatewayKeyLease | None = None,
+    ) -> None:
+        super().__init__(values)
+        self.transport = transport
+        self._gateway_lease = gateway_lease
+
+    @property
+    def key_id(self) -> str | None:
+        return self._gateway_lease.key_id if self._gateway_lease is not None else None
+
+    @property
+    def expires_at(self) -> str | None:
+        return (
+            self._gateway_lease.expires_at if self._gateway_lease is not None else None
+        )
+
+    def __repr__(self) -> str:
+        redacted = {
+            key: "<redacted>" if key == "ANTHROPIC_AUTH_TOKEN" else value
+            for key, value in self.items()
+        }
+        return (
+            f"{type(self).__name__}({redacted!r}, transport={self.transport!r}, "
+            f"key_id={self.key_id!r}, expires_at={self.expires_at!r})"
+        )
+
+    __str__ = __repr__
+
+
+async def renew_gateway_key_if_needed(
+    harness_env: dict[str, str], *, min_validity_seconds: float
+) -> bool:
+    """Renew a gateway lease only when it cannot cover another attempt."""
+
+    if not isinstance(harness_env, _RoutedHarnessEnv):
+        return False
+    lease = harness_env._gateway_lease
+    if lease is None:
+        return False
+    renewed = await lease.renew_if_needed(min_validity_seconds=min_validity_seconds)
+    if renewed:
+        harness_env["ANTHROPIC_AUTH_TOKEN"] = lease.credential.token
+    return renewed
+
+
+async def revoke_gateway_key(harness_env: dict[str, str]) -> None:
+    """Best-effort close of a per-spawn gateway lease; TTL remains fallback."""
+
+    if not isinstance(harness_env, _RoutedHarnessEnv):
+        return
+    lease = harness_env._gateway_lease
+    if lease is None:
+        return
+    try:
+        await lease.revoke()
+    except Exception:
+        # Cleanup must never mask the worker's result or original exception.
+        logger.warning(
+            "gateway key revocation failed for key_id=%s",
+            lease.key_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -763,6 +1175,12 @@ _OPENAI_COMPAT_BACKENDS: dict[str, _OpenAICompatBackend] = {
 }
 
 
+def one_shot_provider_names() -> frozenset[str]:
+    """Public, registry-derived names of direct one-shot HTTP providers."""
+
+    return frozenset(_OPENAI_COMPAT_BACKENDS)
+
+
 def provider_key_presence() -> dict[str, bool]:
     """Which OpenAI-compatible providers have their (secret) API key set in the
     environment — booleans ONLY, never the key value. Powers the settings UI's
@@ -790,6 +1208,22 @@ def normalize_provider(dial: str) -> str:
     if dial in _OPENAI_COMPAT_BACKENDS:
         return dial
     return PROVIDER_ANTHROPIC
+
+
+def harness_billing_provider(provider: str, model: str) -> str:
+    """Resolve a harness *transport* to its upstream billing identity.
+
+    ``gateway`` is deliberately not a billing provider.  Its virtual key is
+    bound to z.ai for GLM models and Anthropic for every other Claude-harness
+    model.  Direct Claude/z.ai values are returned unchanged so their existing
+    credit behavior is byte-for-byte stable.
+    """
+
+    if provider != _GATEWAY:
+        return provider
+    if model.strip().lower().startswith("glm"):
+        return _ZAI
+    return "claude"
 
 
 def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str, str]:
@@ -822,8 +1256,8 @@ def backend_probe_endpoint(provider: str, config: HydraFlowConfig) -> tuple[str,
 # Anthropic-compatible *harness* backends: providers the Claude CLI can be
 # pointed at via ANTHROPIC_BASE_URL so an agentic (tool-using) role runs on a
 # non-Anthropic model. Distinct from _OPENAI_COMPAT_BACKENDS (the one-shot HTTP
-# face) — z.ai appears in both, with a different URL for each. Only z.ai is
-# wired today; kimi stays one-shot-only.
+# face) — z.ai appears in both, with a different URL for each. The gateway is a
+# transport-only entry with dynamic per-spawn auth; kimi stays one-shot-only.
 _HARNESS_BACKENDS: dict[str, _OpenAICompatBackend] = {
     _ZAI: _OpenAICompatBackend(
         base_url_field="zai_harness_base_url",
@@ -839,6 +1273,13 @@ _HARNESS_BACKENDS: dict[str, _OpenAICompatBackend] = {
             "ZAI_API_KEY",
             "HYDRAFLOW_ZAI_API_KEY",
         ),
+    ),
+    # Unlike direct harness backends, the gateway's credential is minted for
+    # each spawn.  ``api_key_envs`` is intentionally empty: a virtual worker
+    # token must never be read from ambient process state.
+    _GATEWAY: _OpenAICompatBackend(
+        base_url_field="gateway_base_url",
+        api_key_envs=(),
     ),
 }
 
@@ -863,7 +1304,8 @@ def harness_base_url(provider: str, config: HydraFlowConfig) -> str:
 
     Returns the endpoint the Claude CLI should be pointed at (via
     ``ANTHROPIC_BASE_URL``) when an agentic role's provider dial names a harness
-    backend (today: ``"zai"`` → ``/api/anthropic``). Returns ``""`` for
+    backend (``"zai"`` → ``/api/anthropic`` or ``"gateway"`` → the configured
+    tap). Returns ``""`` for
     ``"claude"``/``"anthropic"`` (the native endpoint — no override) and for
     one-shot-only providers (``"openrouter"``/``"kimi"``), which never back an
     agentic harness."""
@@ -873,23 +1315,87 @@ def harness_base_url(provider: str, config: HydraFlowConfig) -> str:
     return backend.base_url(config)
 
 
-def resolve_harness_env(provider: str, config: HydraFlowConfig) -> dict[str, str]:
+async def resolve_harness_env(
+    provider: str,
+    config: HydraFlowConfig,
+    *,
+    model: str = "",
+    source: str = "unknown",
+    session_id: str | None = None,
+    spawn_id: str | None = None,
+    timeout_seconds: float | None = None,
+    gateway_client: GatewayControlClient | None = None,
+) -> dict[str, str]:
     """Per-spawn env overrides that point the Claude CLI at a harness backend.
 
     Returns ``{}`` for ``"claude"``/``"anthropic"`` (the native endpoint — the
     main coding workers must get a pristine env) and for any non-harness
-    provider. For a harness backend (today: ``"zai"``) with its key present,
+    provider. For the direct z.ai harness with its key present,
     returns ``ANTHROPIC_BASE_URL`` + ``ANTHROPIC_AUTH_TOKEN`` and clears
     ``ANTHROPIC_API_KEY`` so a host Claude key can't shadow the backend token.
 
+    For ``gateway``, mints one short-lived virtual key for this spawn and binds
+    it to the upstream implied by *model*.  Mint failures raise
+    :class:`GatewayMintError`; gateway routing is fail closed and can never fall
+    through to an ambient real provider credential. The returned mapping owns
+    the retained key ID/expiry/control lease; production callers must pass it to
+    :func:`revoke_gateway_key` from a ``finally`` block.
+
     CRITICAL: this MUST be merged into a per-spawn env, never exported globally —
     a global ``ANTHROPIC_BASE_URL`` would silently reroute every Claude worker to
-    the backend. When the backend is selected but its key is unset, we fall open
-    to Anthropic (empty dict) rather than spawn a CLI that cannot authenticate.
+    the backend. When the *direct z.ai* backend is selected but its key is unset,
+    we retain its historical fall-open behavior. Gateway selection never falls
+    open: mint/config failures raise before any worker process starts.
     """
     base_url = harness_base_url(provider, config)
     if not base_url:
         return {}
+    if provider == _GATEWAY:
+        control_token = os.environ.get("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", "").strip()
+        if not control_token:
+            raise GatewayMintError(
+                "gateway selected but HYDRAFLOW_GATEWAY_CONTROL_TOKEN is unset"
+            )
+        billing_provider = harness_billing_provider(provider, model)
+        request = GatewayMintRequest(
+            principal_kind="spawn",
+            principal_id=source.strip() or "unknown",
+            spawn_id=spawn_id or uuid.uuid4().hex,
+            session_id=session_id,
+            repo_slug=str(getattr(config, "repo_slug", "") or "unknown"),
+            repo_class=cast(
+                Literal["hydraflow", "client", "personal"],
+                getattr(config, "gateway_repo_class", "personal"),
+            ),
+            provider_binding=(
+                "zai-harness" if billing_provider == _ZAI else "anthropic"
+            ),
+            capture_bodies=bool(getattr(config, "gateway_capture_bodies", False)),
+            ttl_seconds=_gateway_ttl_seconds(config, timeout_seconds),
+        )
+        client = gateway_client or _HttpGatewayControlClient()
+        credential = await client.mint_key(
+            base_url=base_url,
+            control_token=control_token,
+            request=request,
+        )
+        _validate_gateway_credential(credential)
+        lease = _GatewayKeyLease(
+            base_url=base_url,
+            control_token=control_token,
+            request=request,
+            client=client,
+            credential=credential,
+        )
+        return _RoutedHarnessEnv(
+            {
+                "ANTHROPIC_BASE_URL": base_url,
+                "ANTHROPIC_AUTH_TOKEN": credential.token,
+                "ANTHROPIC_API_KEY": "",
+            },
+            transport=_GATEWAY,
+            gateway_lease=lease,
+        )
     api_key = _HARNESS_BACKENDS[provider].api_key()
     if not api_key:
         logger.warning(
@@ -906,12 +1412,41 @@ def resolve_harness_env(provider: str, config: HydraFlowConfig) -> dict[str, str
 
 
 def _telemetry_cmd(provider: str, tool: str, model: str) -> list[str]:
-    """The ``cmd``-shaped descriptor ``_record_inference`` parses into
+    """The ``cmd``-shaped descriptor ``record_inference_telemetry`` parses into
     ``(tool, model)``. For an OpenAI-compatible backend the 'tool' is the
     provider name (``openrouter`` / ``zai``) so the cost dashboard attributes
-    each backend distinctly from the CLI tools."""
-    head = provider if provider in _OPENAI_COMPAT_BACKENDS else tool
+    each backend distinctly from the CLI tools. Gateway-routed CLI calls use
+    ``gateway`` so coverage can exclude their duplicate prompt-telemetry row."""
+    head = telemetry_tool_for_transport(provider, tool)
     return [head, "--model", model]
+
+
+def telemetry_tool_for_transport(provider: str, tool: str) -> str:
+    """Return the telemetry tool marker without losing model attribution."""
+    if provider in _OPENAI_COMPAT_BACKENDS or provider == _GATEWAY:
+        return provider
+    return tool
+
+
+def _terminal_gateway_runner(
+    runner: SubprocessRunner,
+    config: HydraFlowConfig,
+    transport_provider: str,
+) -> tuple[SubprocessRunner, SubprocessRunner | None]:
+    """Replace a host runner with an owned isolated runner at terminal state."""
+
+    if transport_provider != _GATEWAY or not config.gateway_fleet_ratchet_enabled:
+        return runner, None
+
+    if not isinstance(runner, HostRunner):
+        return runner, None
+
+    isolated = get_docker_runner(config)
+    if isinstance(isolated, HostRunner):
+        raise RuntimeError(
+            "terminal gateway profile could not establish Docker isolation"
+        )
+    return isolated, isolated
 
 
 async def _claude_cli_complete(
@@ -925,6 +1460,9 @@ async def _claude_cli_complete(
     isolate_user_settings: bool,
     provider: str = "claude",
     config: HydraFlowConfig | None = None,
+    source: str = "unknown",
+    session_id: str | None = None,
+    gateway_client: GatewayControlClient | None = None,
 ) -> SimpleResult:
     """The Claude CLI backend (today's behaviour). Credit-out surfaces as
     ``rc != 0`` output text, so it is detected and raised here.
@@ -944,11 +1482,31 @@ async def _claude_cli_complete(
         isolate_user_settings=isolate_user_settings,
     )
     env = make_clean_env(gh_token)
-    if config is not None:
-        env.update(resolve_harness_env(provider, config))
-    result = await runner.run_simple(cmd, env=env, input=cmd_input, timeout=timeout)
-    raise_if_credit_exhausted(result.stdout, result.stderr, tool, provider=provider)
-    return result
+    harness_env: dict[str, str] = {}
+    try:
+        if config is not None:
+            harness_env = await resolve_harness_env(
+                provider,
+                config,
+                model=model,
+                source=source,
+                session_id=session_id,
+                timeout_seconds=timeout,
+                gateway_client=gateway_client,
+            )
+            if provider == _GATEWAY:
+                env = scrub_gateway_spawn_env(env)
+            env.update(harness_env)
+        result = await runner.run_simple(cmd, env=env, input=cmd_input, timeout=timeout)
+        raise_if_credit_exhausted(
+            result.stdout,
+            result.stderr,
+            tool,
+            provider=harness_billing_provider(provider, model),
+        )
+        return result
+    finally:
+        await revoke_gateway_key(harness_env)
 
 
 async def _openai_compatible_complete(
@@ -1062,6 +1620,7 @@ async def run_lightweight_agent(
     issue_labels: Sequence[str] = (),
     provider: str = "claude",
     response_schema: dict[str, object] | None = None,
+    gateway_client: GatewayControlClient | None = None,
 ) -> SimpleResult:
     """One-shot lightweight LLM call with credit detection + telemetry.
 
@@ -1129,12 +1688,31 @@ async def run_lightweight_agent(
         return SimpleResult(stderr=str(exc), returncode=-1)
     prompt = gated.prompt
 
+    transport_provider = provider
+    if (
+        getattr(config, "gateway_fleet_ratchet_enabled", False) is True
+        and provider == "claude"
+        and tool == "claude"
+    ):
+        transport_provider = _GATEWAY
+    if transport_provider == _GATEWAY and tool != "claude":
+        msg = (
+            f"provider 'gateway' requires the Claude harness, got tool {tool!r} "
+            f"for source {source!r}"
+        )
+        raise ValueError(msg)
+    runner, owned_runner = _terminal_gateway_runner(
+        runner,
+        config,
+        transport_provider,
+    )
+
     # Backend selection (pluggable one-shot provider). The chosen backend owns
     # its own credit-exhaustion detection (CLI: output text; OpenRouter: HTTP
     # 429/402). Both spawns live in THIS seam module so the CH-6 gate (above)
     # and the telemetry record (below) always wrap them. ``cmd`` is only a
     # telemetry descriptor parsed into (tool, model).
-    cmd = _telemetry_cmd(provider, tool, model)
+    cmd = _telemetry_cmd(transport_provider, tool, model)
     start = time.monotonic()
     success = False
     record_row = False
@@ -1142,13 +1720,13 @@ async def run_lightweight_agent(
     # Real token usage from the OpenRouter API (None on the CLI path, which has
     # no usage stats and falls back to a char estimate).
     usage_stats: dict[str, object] | None = None
-    backend = _OPENAI_COMPAT_BACKENDS.get(provider)
+    backend = _OPENAI_COMPAT_BACKENDS.get(transport_provider)
     try:
         try:
             if backend is not None:
                 usage_stats = {}
                 result = await _openai_compatible_complete(
-                    provider=provider,
+                    provider=transport_provider,
                     base_url=backend.base_url(config),
                     api_key=backend.api_key(),
                     model=model,
@@ -1166,8 +1744,11 @@ async def run_lightweight_agent(
                     timeout=timeout,
                     gh_token=gh_token,
                     isolate_user_settings=isolate_user_settings,
-                    provider=provider,
+                    provider=transport_provider,
                     config=config,
+                    source=source,
+                    session_id=session_id,
+                    gateway_client=gateway_client,
                 )
         except TimeoutError:
             # ``asyncio.wait_for`` raises a *bare* TimeoutError whose ``str()``
@@ -1197,17 +1778,21 @@ async def run_lightweight_agent(
         record_row = True
         return result
     finally:
-        if record_row:
-            _record_inference(
-                config,
-                source=source,
-                cmd=cmd,
-                prompt=prompt,
-                transcript=result.stdout or "",
-                duration_s=time.monotonic() - start,
-                success=success,
-                issue_number=issue_number,
-                pr_number=pr_number,
-                session_id=session_id,
-                stats=usage_stats,
-            )
+        try:
+            if record_row:
+                record_inference_telemetry(
+                    config,
+                    source=source,
+                    cmd=cmd,
+                    prompt=prompt,
+                    transcript=result.stdout or "",
+                    duration_s=time.monotonic() - start,
+                    success=success,
+                    issue_number=issue_number,
+                    pr_number=pr_number,
+                    session_id=session_id,
+                    stats=usage_stats,
+                )
+        finally:
+            if owned_runner is not None:
+                await owned_runner.cleanup()

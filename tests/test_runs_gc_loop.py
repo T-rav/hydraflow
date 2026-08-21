@@ -494,6 +494,156 @@ class TestAuditChainCaretaker:
         assert chain.verify().ok
 
     @pytest.mark.asyncio
+    async def test_inference_retention_refreshes_source_health_anchor(
+        self, tmp_path: Path
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from prompt_telemetry import (
+            prompt_telemetry_health_path,
+            prompt_telemetry_source_complete,
+            refresh_prompt_telemetry_health_after_retention,
+        )
+
+        loop, deps = _make_audit_loop(
+            tmp_path,
+            audit_retention_days_inference_telemetry=30,
+        )
+        fresh = datetime.now(UTC).isoformat()
+        stale = (datetime.now(UTC) - timedelta(days=90)).isoformat()
+        spec, _chain = _seed_stream(
+            deps.config,
+            "inference_telemetry",
+            [stale, fresh],
+        )
+        assert refresh_prompt_telemetry_health_after_retention(spec.path) is True
+        assert prompt_telemetry_source_complete(spec.path) is True
+
+        result = await loop._do_work()
+
+        assert result is not None
+        assert result["audit_pruned"]["inference_telemetry"] == 1
+        assert prompt_telemetry_source_complete(spec.path) is True
+        marker = json.loads(prompt_telemetry_health_path(spec.path).read_text())
+        assert marker["record_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_inference_retention_never_clears_dropped_write_degradation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        import runs_gc_loop as runs_gc_loop_module
+        from audit_chain import AuditChain, audit_streams
+        from gateway_coverage import build_coverage_for_configs, gateway_ledger_path
+        from hydraflow_gateway.ledger import GatewayLedger, GatewayLedgerRow
+        from hydraflow_gateway.models import (
+            BodyCapturePolicy,
+            GatewayRequestStatus,
+            Principal,
+            PrincipalKind,
+            ProviderBinding,
+            RepoClass,
+        )
+        from prompt_telemetry import (
+            prompt_telemetry_health_path,
+            prompt_telemetry_source_complete,
+            refresh_prompt_telemetry_health_after_retention,
+        )
+
+        loop, deps = _make_audit_loop(
+            tmp_path,
+            audit_retention_days_inference_telemetry=30,
+        )
+        now = datetime.now(UTC)
+        stale = (now - timedelta(days=90)).isoformat()
+        fresh = now.isoformat()
+        spec = next(
+            stream
+            for stream in audit_streams(deps.config)
+            if stream.name == "inference_telemetry"
+        )
+        chain = AuditChain(spec.path)
+        for timestamp in (stale, fresh):
+            chain.append(
+                {
+                    spec.timestamp_key: timestamp,
+                    "source": "wiki_compilation",
+                    "tool": "openrouter",
+                    "model": "openrouter/test",
+                    "estimated_cost_usd": 1.0,
+                }
+            )
+        verification = chain.verify()
+        health_path = prompt_telemetry_health_path(spec.path)
+        degraded_marker = {
+            "status": "degraded",
+            "updated_at": fresh,
+            "dropped_writes": 1,
+            "first_failure_at": fresh,
+            "chain_head": verification.head,
+            "record_count": verification.total_records,
+        }
+        health_path.write_text(json.dumps(degraded_marker, sort_keys=True) + "\n")
+
+        GatewayLedger(gateway_ledger_path(deps.config)).append(
+            GatewayLedgerRow(
+                request_id="retention-latch",
+                key_id="key-retention-latch",
+                principal=Principal(
+                    kind=PrincipalKind.SPAWN,
+                    id="reviewer",
+                    spawn_id="spawn-retention-latch",
+                ),
+                repo_slug=deps.config.repo_slug,
+                repo_class=RepoClass.HYDRAFLOW,
+                body_capture_policy=BodyCapturePolicy.METADATA_ONLY,
+                timestamp=now,
+                latency_ms=1.0,
+                status_code=200,
+                status=GatewayRequestStatus.COMPLETED,
+                upstream_provider=ProviderBinding.ANTHROPIC,
+                completed=True,
+                client_aborted=False,
+                cost_usd=1.0,
+                cost_unknown=False,
+            )
+        )
+        refresh_attempts: list[Path] = []
+
+        def track_refresh(path: Path) -> bool:
+            refresh_attempts.append(path)
+            return refresh_prompt_telemetry_health_after_retention(path)
+
+        monkeypatch.setattr(
+            runs_gc_loop_module,
+            "refresh_prompt_telemetry_health_after_retention",
+            track_refresh,
+        )
+
+        result = await loop._do_work()
+        snapshot = build_coverage_for_configs(
+            [deps.config],
+            since=now - timedelta(days=1),
+            until=now + timedelta(minutes=1),
+            window_label="24h",
+            scope="global",
+            repo_slug=None,
+        )
+
+        assert result is not None
+        assert result["audit_pruned"]["inference_telemetry"] == 1
+        assert refresh_attempts == [spec.path]
+        assert json.loads(health_path.read_text()) == degraded_marker
+        assert prompt_telemetry_source_complete(spec.path) is False
+        assert snapshot.status == "partial"
+        assert snapshot.source_data_complete is False
+        assert snapshot.coverage_percent is None
+        assert snapshot.known_spend_coverage_percent == 50.0
+        assert snapshot.gateway_requests == 1
+        assert snapshot.bypass_requests == 1
+
+    @pytest.mark.asyncio
     async def test_default_retention_none_keeps_everything(
         self, tmp_path: Path
     ) -> None:

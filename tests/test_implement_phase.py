@@ -3371,3 +3371,130 @@ class TestBlockingSkillFailureDoesNotCreatePR:
         mock_prs.create_pr.assert_awaited_once()
         mock_prs.transition.assert_awaited_once()
         mock_prs.update_pr_title.assert_not_awaited()
+
+
+class TestResolvedIssueGate:
+    """Unit coverage for the selection→branch-cut issue-state re-check (#11457).
+
+    The work-picker validates issue state at selection only; between pick and
+    branch-cut another PR can close the issue, and building anyway produces a
+    duplicate PR (#11443/#11451). ``_issue_resolved_elsewhere`` is the GitHub
+    re-read; ``_abandon_resolved_issue`` is the terminal no-build exit. The
+    fail-open branches below are load-bearing: a dark-factory Port read may
+    fail transiently, and that must never block a build.
+    """
+
+    @pytest.mark.asyncio
+    async def test_issue_resolved_elsewhere_true_for_completed(
+        self, config: HydraFlowConfig
+    ) -> None:
+        issue = TaskFactory.create()
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+        mock_prs.get_issue_state = AsyncMock(return_value="COMPLETED")
+
+        assert await phase._issue_resolved_elsewhere(issue.id) is True
+        mock_prs.get_issue_state.assert_awaited_once_with(issue.id)
+
+    @pytest.mark.asyncio
+    async def test_issue_resolved_elsewhere_true_for_not_planned(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A duplicate/wontfix close is just as resolved (#10025)."""
+        issue = TaskFactory.create()
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+        mock_prs.get_issue_state = AsyncMock(return_value="NOT_PLANNED")
+
+        assert await phase._issue_resolved_elsewhere(issue.id) is True
+
+    @pytest.mark.asyncio
+    async def test_issue_resolved_elsewhere_false_for_open(
+        self, config: HydraFlowConfig
+    ) -> None:
+        issue = TaskFactory.create()
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+        mock_prs.get_issue_state = AsyncMock(return_value="OPEN")
+
+        assert await phase._issue_resolved_elsewhere(issue.id) is False
+
+    @pytest.mark.asyncio
+    async def test_issue_resolved_elsewhere_fails_open_on_read_error(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A transient Port failure reads as 'not resolved' — the build runs.
+
+        The fail-open branch: only a positive resolved read may abandon.
+        Swallowing the build behind a GitHub hiccup would trade a rare
+        duplicate PR for a guaranteed stuck factory.
+        """
+        issue = TaskFactory.create()
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+        mock_prs.get_issue_state = AsyncMock(side_effect=RuntimeError("gh down"))
+
+        assert await phase._issue_resolved_elsewhere(issue.id) is False
+
+    @pytest.mark.asyncio
+    async def test_issue_resolved_elsewhere_reraises_credit_exhausted(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """``reraise_on_credit_or_bug`` contract: billing/auth errors propagate.
+
+        Without the reraise, CreditExhaustedError would be silently eaten and
+        the loop would burn attempt budget against an exhausted billing
+        signal (CLAUDE.md dark-factory §2.2).
+        """
+        from subprocess_util import CreditExhaustedError
+
+        issue = TaskFactory.create()
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+        mock_prs.get_issue_state = AsyncMock(
+            side_effect=CreditExhaustedError("no credits")
+        )
+
+        with pytest.raises(CreditExhaustedError):
+            await phase._issue_resolved_elsewhere(issue.id)
+
+    @pytest.mark.asyncio
+    async def test_abandon_resolved_issue_returns_terminal_completed_result(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Abandon marks the issue 'completed' and returns a non-success result.
+
+        'completed' (not 'failed') is the terminal, workspace-clearing status
+        — no retry sweeper targets it, and ``_WORKSPACE_CLEAR_STATUSES``
+        drops the stale branch/workspace entries.
+        """
+        issue = TaskFactory.create()
+        phase, _, _ = make_implement_phase(config, [issue])
+
+        result = await phase._abandon_resolved_issue(
+            issue, "agent/issue-42", at="branch-cut"
+        )
+
+        assert result.issue_number == issue.id
+        assert result.branch == "agent/issue-42"
+        assert result.success is False
+        assert result.pr_info is None
+        assert "branch-cut" in (result.error or "")
+        assert "resolved" in (result.error or "").lower()
+        assert phase._state.to_dict()["processed_issues"].get("42") == "completed"
+
+    @pytest.mark.asyncio
+    async def test_abandon_resolved_issue_neither_reenqueues_nor_strips_labels(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Abandon touches nothing on GitHub or the queue.
+
+        The issue is closed — ``IssueFetcher._is_open`` drops it on the next
+        refresh and ``LabelDriftWatcherLoop`` reconciles stray labels
+        (ADR-0088); re-enqueueing or label-swapping here would fight both.
+        """
+        issue = TaskFactory.create()
+        phase, _, mock_prs = make_implement_phase(config, [issue])
+
+        await phase._abandon_resolved_issue(issue, "agent/issue-42", at="open-pr")
+
+        phase._store.enqueue_transition.assert_not_called()
+        mock_prs.swap_pipeline_labels.assert_not_called()
+        mock_prs.remove_label.assert_not_called()
+        mock_prs.post_comment.assert_not_awaited()
+        assert phase._state.get_hitl_cause(issue.id) is None

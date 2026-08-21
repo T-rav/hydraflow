@@ -28,6 +28,7 @@ dependencies = [
 
 [project.scripts]
 hydraflow = "server:main"
+hydraflow-gateway = "hydraflow_gateway.__main__:main"
 
 [project.optional-dependencies]
 test = [

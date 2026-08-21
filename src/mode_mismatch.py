@@ -179,8 +179,48 @@ def summarize(verdicts: Iterable[ModeMismatchVerdict]) -> MismatchReport:
     return MismatchReport(total=total, wrong=wrong, by_mode=dict(counts))
 
 
-def decision(report: MismatchReport) -> str:
-    """The go/no-go sentence the roadmap gates on — rendered, never implied."""
+def discriminating(traces: Sequence[IssueTrace]) -> bool:
+    """Could this population have produced a NON-build verdict at all?
+
+    Every non-build rule keys off a signal that may simply be absent from
+    the exhaust (no HITL events emitted, route-backs not yet captured,
+    give-up not recorded). When NO trace carries ANY discriminating
+    signal, a 0% wrong-DAG rate measures the instrument, not the factory —
+    and "FIXED DAG VINDICATED" would close a 12-month roadmap on a
+    tautology. This is the anti-vacuity gate: rate is only meaningful when
+    a non-build verdict was reachable.
+    """
+    return any(
+        trace.gave_up
+        or trace.closed_unmerged
+        or trace.decomposed_after_attempt
+        or trace.hitl_escalations > 0
+        or trace.route_backs > 0
+        # Only the CLASSIFIED population counts: a signal on a trace that
+        # never reaches classify() (not terminal, or never worked) cannot
+        # produce a non-build verdict, so counting it would re-open the
+        # tautology this gate exists to close.
+        for trace in traces
+        if trace.terminal and trace.work_started
+    )
+
+
+def decision(report: MismatchReport, *, discriminating_signals: bool = True) -> str:
+    """The go/no-go sentence the roadmap gates on — rendered, never implied.
+
+    *discriminating_signals* comes from :func:`discriminating`. False means
+    the classifier could only ever have said "build", so no verdict about
+    the FACTORY can be drawn — only about the instrument.
+    """
+    if not discriminating_signals:
+        return (
+            "INSTRUMENT NOT DISCRIMINATING — no terminal issue carried any "
+            "non-build signal (HITL escalations, route-backs, give-up, "
+            "closed-unmerged, late decomposition), so a 0% wrong-DAG rate "
+            "measures the EXHAUST, not the pipeline. Neither vindication nor "
+            "proceed may be read from this run: capture the missing signals "
+            "(flow-of-record, #11027 family) and re-run."
+        )
     if report.total < MIN_DECISIVE_SAMPLE:
         return (
             f"INSUFFICIENT EVIDENCE — {report.total} terminal issues "
@@ -206,7 +246,9 @@ def decision(report: MismatchReport) -> str:
     )
 
 
-def render_report(report: MismatchReport) -> str:
+def render_report(
+    report: MismatchReport, *, discriminating_signals: bool = True
+) -> str:
     """Markdown report: headline rate, decomposition, decision rule, honesty notes."""
     out = "# Mode-Mismatch Report (five-modes rung 0, #11055)\n\n"
     out += (
@@ -219,7 +261,10 @@ def render_report(report: MismatchReport) -> str:
     out += f"- **Terminal issues classified:** {report.total}\n"
     out += f"- **Wrong-DAG count:** {report.wrong}\n"
     out += f"- **Wrong-DAG rate:** {report.rate:.1%}\n\n"
-    out += f"**Decision:** {decision(report)}\n\n"
+    out += (
+        "**Decision:** "
+        f"{decision(report, discriminating_signals=discriminating_signals)}\n\n"
+    )
     out += "## Decomposition\n\n| Needed | Issues |\n|---|---:|\n"
     for mode in Mode:
         if mode in report.by_mode:

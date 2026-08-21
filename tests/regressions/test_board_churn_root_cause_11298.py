@@ -54,7 +54,8 @@ import pytest  # noqa: E402
 @pytest.mark.asyncio
 async def test_valve_dry_run_closes_nothing() -> None:
     """BLOCKING review finding: dry-run (global or loop-level) must log
-    picks and close nothing — _run_gh has no dry-run awareness of its own."""
+    picks and close nothing — the loop's own dry_run OR gate must fire
+    before close_issue is ever called."""
     from datetime import UTC, datetime, timedelta
     from unittest.mock import AsyncMock
 
@@ -73,11 +74,10 @@ async def test_valve_dry_run_closes_nothing() -> None:
         }
         for n in (1, 2, 3)
     ]
-    import json as _json
 
     loop._prs = SimpleNamespace(
-        _repo="o/r",
-        _run_gh=AsyncMock(return_value=_json.dumps(issues)),
+        list_all_issues=AsyncMock(return_value=issues),
+        close_issue=AsyncMock(return_value=True),
         post_comment=AsyncMock(),
     )
     loop._state = SimpleNamespace(
@@ -86,6 +86,4 @@ async def test_valve_dry_run_closes_nothing() -> None:
     stats = await loop._scan_backlog_budget()
     assert stats["retired"] == 0
     loop._prs.post_comment.assert_not_awaited()
-    # Only the LIST call happened — never a close.
-    for call in loop._prs._run_gh.await_args_list:
-        assert "close" not in call.args
+    loop._prs.close_issue.assert_not_awaited()

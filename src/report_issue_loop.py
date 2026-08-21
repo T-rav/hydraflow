@@ -11,7 +11,6 @@ import asyncio
 import base64
 import binascii
 import contextlib
-import json
 import logging
 import os
 import re
@@ -557,19 +556,8 @@ class ReportIssueLoop(BaseBackgroundLoop):
         Fixes up the issue if the agent missed either requirement.
         """
         try:
-            output = await self._pr_manager._run_gh(
-                "gh",
-                "issue",
-                "view",
-                str(issue_number),
-                "--repo",
-                self._pr_manager._repo,
-                "--json",
-                "labels,body",
-            )
-            data = json.loads(output)
-            labels = [lb.get("name", "") for lb in data.get("labels", [])]
-            body = data.get("body", "")
+            labels = await self._pr_manager.get_issue_labels(issue_number)
+            body = await self._pr_manager.get_issue_body(issue_number)
 
             # Fix missing label
             if expected_label not in labels:
@@ -587,17 +575,9 @@ class ReportIssueLoop(BaseBackgroundLoop):
                     issue_number,
                 )
                 appendix = f"\n\n## Screenshot\n\n![Screenshot]({screenshot_url})\n"
-                await self._pr_manager._run_gh(
-                    "gh",
-                    "issue",
-                    "edit",
-                    str(issue_number),
-                    "--repo",
-                    self._pr_manager._repo,
-                    "--body",
-                    body + appendix,
-                )
-        except Exception:
+                await self._pr_manager.update_issue_body(issue_number, body + appendix)
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
             logger.warning(
                 "Post-creation verification failed for issue #%d — "
                 "issue was created but may need manual label/screenshot fix",

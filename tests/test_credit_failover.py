@@ -141,6 +141,20 @@ def test_apply_reroutes_to_zai_glm_when_active(
     assert "glm-5.2" in new_cmd and "claude-opus-4-8" not in new_cmd
 
 
+def test_gateway_failover_keeps_transport_and_needs_no_real_zai_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_CODING_PLAN_KEY", raising=False)
+    credit_failover.engage(now=NOW, resume_at=None, cooldown_minutes=15)
+    cmd = ["claude", "--model", "claude-opus-4-8", "-p", "x"]
+
+    provider, new_cmd = apply_credit_failover("gateway", cmd, _cfg(tmp_path))
+
+    assert provider == "gateway"
+    assert "glm-5.2" in new_cmd and "claude-opus-4-8" not in new_cmd
+
+
 def test_apply_noop_when_disabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

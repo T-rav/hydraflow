@@ -44,20 +44,29 @@ def mean_moving_range(baseline: list[float]) -> float:
     return _mean(diffs)
 
 
+def sigma_hat(baseline: list[float]) -> float:
+    """Dispersion estimate ``σ̂ = MR̄ / d₂`` for an individuals-chart baseline.
+
+    Public so other instrument families (e.g. ``token_drift``, which composes
+    its own widened ``centre + L·σ̂`` limit) can reuse this exact estimate
+    without a cross-module import of a private symbol.
+    """
+    return mean_moving_range(baseline) / _D2_N2
+
+
 def individuals_limits(baseline: list[float]) -> tuple[float, float]:
     """Return ``(centre, upper_control_limit)`` for an individuals chart.
 
     ``centre`` is the baseline mean; ``ucl = centre + 3·σ̂`` with σ̂ derived from
-    the mean moving range. An empty baseline yields ``(0.0, 0.0)``; a single
-    point yields ``(x, x)`` (no dispersion estimable yet). These degenerate
-    limits never fire on their own because :func:`breaches_upper` also gates on
-    ``min_windows``.
+    the mean moving range via :func:`sigma_hat`. An empty baseline yields
+    ``(0.0, 0.0)``; a single point yields ``(x, x)`` (no dispersion estimable
+    yet). These degenerate limits never fire on their own because
+    :func:`breaches_upper` also gates on ``min_windows``.
     """
     if not baseline:
         return (0.0, 0.0)
     centre = _mean(baseline)
-    sigma_hat = mean_moving_range(baseline) / _D2_N2
-    return (centre, centre + 3.0 * sigma_hat)
+    return (centre, centre + 3.0 * sigma_hat(baseline))
 
 
 def breaches_upper(value: float, baseline: list[float], *, min_windows: int) -> bool:

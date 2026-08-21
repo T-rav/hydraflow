@@ -42,6 +42,12 @@ _GATED_SPAWN_SEAMS = frozenset(
     }
 )
 
+# This recorder's prompt is the internal constant ``"ping"`` and contains no
+# repo/user content to classify. ContractRefreshLoop disables the legacy host
+# subprocess in the terminal profile because environment scrubbing cannot hide
+# host OAuth/keychain state.
+_FIXED_PROMPT_SPAWN_EXEMPT = frozenset({"contract_recording.py"})
+
 # Assembly seams: no backend in scope, redaction-only gate.
 _ASSEMBLY_SEAMS = frozenset(
     {
@@ -52,13 +58,7 @@ _ASSEMBLY_SEAMS = frozenset(
 # Named gaps (rel paths): known spawners that cannot gate yet because no
 # HydraFlowConfig reaches their constructor (same blocker as their telemetry
 # grandfathering). Ratchet: MUST shrink toward empty, MUST NOT grow.
-_NAMED_GAPS = frozenset(
-    {
-        # term_proposer_runtime.py graduated: ClaudeCLIClient now takes a
-        # HydraFlowConfig and routes through run_lightweight_agent (gated).
-        "adversarial_agent_runner.py",  # SubprocessAgentRunner @dataclass, no config
-    }
-)
+_NAMED_GAPS = frozenset()
 
 
 def test_every_gated_seam_calls_the_gate() -> None:
@@ -78,11 +78,14 @@ def test_no_spawner_bypasses_the_gated_seams() -> None:
     """A module spawning outside the gated seams must be a named gap."""
     offenders: set[str] = set()
     for facts in iter_module_facts():
-        if facts.rel in _GATED_SPAWN_SEAMS:
+        if facts.rel in _GATED_SPAWN_SEAMS or facts.rel in _FIXED_PROMPT_SPAWN_EXEMPT:
             continue
         bypasses_primitive = bool(facts.calls & _RAW_PRIMITIVES)
         hand_rolled_argv = "run_simple" in facts.calls and facts.has_agent_argv
-        if bypasses_primitive or hand_rolled_argv:
+        raw_agent_spawn = (
+            facts.has_agent_inference_argv and facts.has_raw_subprocess_run
+        )
+        if bypasses_primitive or hand_rolled_argv or raw_agent_spawn:
             offenders.add(facts.rel)
     unexpected = sorted(offenders - _NAMED_GAPS)
     assert not unexpected, (

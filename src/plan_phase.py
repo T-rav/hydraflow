@@ -1168,7 +1168,7 @@ class PlanPhase(PlanWikiIngestMixin):
                     issue.id,
                     review.error or "reviewer returned no result",
                 )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "Plan reviewer raised for issue #%d — leaving plan "
                 "without a review record",
@@ -1432,9 +1432,11 @@ class PlanPhase(PlanWikiIngestMixin):
         if replan_match:
             replan_text = replan_match.group(1).strip()
             if replan_text.lower() != "none":
-                review.replan_issues = [
-                    int(m.group(1)) for m in re.finditer(r"#(\d+)", replan_text)
-                ]
+                review.replan_issues = list(
+                    dict.fromkeys(
+                        int(m.group(1)) for m in re.finditer(r"#(\d+)", replan_text)
+                    )
+                )
 
         # Extract guidance
         guidance_match = re.search(
@@ -2112,6 +2114,76 @@ class PlanPhase(PlanWikiIngestMixin):
         )
         await self._transitioner.post_comment(epic_number, comment)
 
+    async def _claim_live_epic_replan(
+        self,
+        epic_number: int,
+        issue: Task,
+    ) -> Task | None:
+        """Reserve *issue* only while both GitHub and the store still own PLAN.
+
+        Gap review retains the cohort's original ``Task`` objects. A child may
+        advance to READY or be claimed by implement while the review provider
+        is running, so that snapshot cannot authorize another planner. The
+        awaited reads establish durable GitHub state; ``try_claim_stage`` is
+        the synchronous post-read compare-and-set that closes the local race.
+        """
+        try:
+            live_state, live_labels = await asyncio.gather(
+                self._prs.get_issue_state(issue.id),
+                self._prs.get_issue_labels(issue.id),
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Epic #%d: could not revalidate #%d before re-plan — skipping",
+                epic_number,
+                issue.id,
+                exc_info=True,
+            )
+            return None
+
+        if str(live_state).upper() != "OPEN":
+            logger.info(
+                "Epic #%d: skipping re-plan of #%d — live state is %s",
+                epic_number,
+                issue.id,
+                live_state,
+            )
+            return None
+
+        labels = {str(label).lower() for label in live_labels}
+        plan_labels = {label.lower() for label in self._config.planner_label}
+        allowed_labels = plan_labels | {
+            label.lower() for label in self._config.find_label
+        }
+        blocking_labels = {
+            label.lower() for label in self._config.all_pipeline_labels
+        } - allowed_labels
+        conflicts = sorted(labels & blocking_labels)
+        if not labels.intersection(plan_labels) or conflicts:
+            reason = (
+                f"conflicting live labels {conflicts}"
+                if conflicts
+                else "PLAN label is absent"
+            )
+            logger.info(
+                "Epic #%d: skipping re-plan of #%d — %s",
+                epic_number,
+                issue.id,
+                reason,
+            )
+            return None
+
+        live_issue = issue.model_copy(update={"tags": list(live_labels)})
+        if not self._store.try_claim_stage(live_issue, "plan"):
+            logger.info(
+                "Epic #%d: skipping re-plan of #%d — "
+                "local stage or worker ownership changed",
+                epic_number,
+                issue.id,
+            )
+            return None
+        return live_issue
+
     async def _plan_epic_group(
         self,
         epic_number: int,
@@ -2187,6 +2259,7 @@ class PlanPhase(PlanWikiIngestMixin):
             await self._post_gap_review_comment(epic_number, review, iteration)
 
             # Re-plan flagged children with gap context
+            eligible_replans = 0
             for issue_number in review.replan_issues:
                 if self._stop_event.is_set():
                     break
@@ -2199,8 +2272,27 @@ class PlanPhase(PlanWikiIngestMixin):
                     )
                     continue
 
-                enriched = self._plan_one_with_context(issue, review.guidance, plan_map)
-                replan_result = await self._plan_one(0, enriched, semaphore)
+                live_issue = await self._claim_live_epic_replan(epic_number, issue)
+                if live_issue is None:
+                    continue
+
+                eligible_replans += 1
+                enriched = self._plan_one_with_context(
+                    live_issue,
+                    review.guidance,
+                    plan_map,
+                )
+                try:
+                    replan_result = await self._plan_one(0, enriched, semaphore)
+                finally:
+                    # _plan_one normally consumes the PLAN reservation through
+                    # store_lifecycle. Its early-stop/exception paths may not.
+                    # Never release a later READY worker's claim.
+                    release_batch_in_flight(
+                        self._store,
+                        {issue_number},
+                        expected_stage="plan",
+                    )
                 if replan_result.success and replan_result.plan:
                     plan_map[issue_number] = replan_result.plan
                     replan_result.epic_number = epic_number
@@ -2209,6 +2301,14 @@ class PlanPhase(PlanWikiIngestMixin):
                     replan_result if r.issue_number == issue_number else r
                     for r in results
                 ]
+
+            if eligible_replans == 0:
+                logger.info(
+                    "Epic #%d: no requested re-plans remain eligible — "
+                    "ending gap review",
+                    epic_number,
+                )
+                break
 
         return results
 
@@ -2229,10 +2329,14 @@ class PlanPhase(PlanWikiIngestMixin):
         # If epic grouping is enabled, drain a batch first to identify
         # epic children, then plan them as groups.
         epic_results: list[PlanResult] = []
+        handled_epic_children: set[int] = set()
         if self._config.epic_group_planning:
             batch = self._store.get_plannable(2 * self._config.max_planners)
             if batch:
                 epic_groups, standalone = self._group_by_epic(batch)
+                handled_epic_children = {
+                    child.id for children in epic_groups.values() for child in children
+                }
                 # Re-queue standalone issues for the pool below
                 for issue in standalone:
                     self._store.enqueue_transition(issue, "plan")
@@ -2253,7 +2357,11 @@ class PlanPhase(PlanWikiIngestMixin):
                                         epic_number, r.issue_number
                                     )
                     finally:
-                        release_batch_in_flight(self._store, {c.id for c in children})
+                        release_batch_in_flight(
+                            self._store,
+                            {c.id for c in children},
+                            expected_stage="plan",
+                        )
 
         async def _plan_worker(idx: int, issue: Task) -> PlanResult:
             try:
@@ -2261,8 +2369,30 @@ class PlanPhase(PlanWikiIngestMixin):
             finally:
                 release_batch_in_flight(self._store, {issue.id})
 
+        def _supply_standalone() -> list[Task]:
+            """Exclude cohort children already handled by this plan cycle."""
+            while candidates := self._store.get_plannable(1):
+                candidate = candidates[0]
+                if candidate.id not in handled_epic_children:
+                    return candidates
+                # A fail-closed gap replan may leave the child's original PLAN
+                # queue entry for the next reconciled poll. Consume only this
+                # PLAN dispatch claim so it cannot bypass the epic guard via
+                # the same call's standalone refill pool.
+                release_batch_in_flight(
+                    self._store,
+                    {candidate.id},
+                    expected_stage="plan",
+                )
+                logger.info(
+                    "Skipping standalone re-dispatch of epic child #%d "
+                    "already handled in this plan cycle",
+                    candidate.id,
+                )
+            return []
+
         standalone_results = await run_refilling_pool(
-            supply_fn=lambda: self._store.get_plannable(1),
+            supply_fn=_supply_standalone,
             worker_fn=_plan_worker,
             max_concurrent=self._config.max_planners,
             stop_event=self._stop_event,
