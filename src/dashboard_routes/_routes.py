@@ -29,6 +29,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from admin_tasks import TaskResult
@@ -1453,7 +1454,7 @@ def create_router(
     ) -> JSONResponse:
         """Return the full state tracker snapshot as JSON."""
         _cfg, _state, _bus, _get_orch = _resolve_runtime(repo)
-        return JSONResponse(_state.to_dict())
+        return JSONResponse(jsonable_encoder(_state.to_dict()))
 
     @router.get("/api/give-up")
     async def get_give_up_state(
