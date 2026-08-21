@@ -86,7 +86,11 @@ from audit.sampling import select_sample
 from audit.store import AuditSampleLedger
 from audit.stratify import classify_blast_radius
 from base_background_loop import BaseBackgroundLoop, LoopDeps
-from config import HydraFlowConfig
+from config import (
+    HydraFlowConfig,
+    resolve_maintenance_model,
+    resolve_maintenance_tool,
+)
 from control_register import regulate, setpoint_for
 from dedup_store import DedupStore
 from escape.ledger import ESCAPE_LEDGER_FILENAME, EscapeLedger
@@ -132,16 +136,22 @@ class _CLIAuditLLM:
     all unit + scenario coverage, and the sandbox pins the spawn off entirely.
     """
 
-    def __init__(self, config: HydraFlowConfig, model: str) -> None:
+    def __init__(self, config: HydraFlowConfig) -> None:
         self._config = config
-        self._model = model
+
+    def _resolve_model(self) -> str:
+        return resolve_maintenance_model(
+            role_model=self._config.sampled_audit_model,
+            maintenance_model=self._config.maintenance_model,
+            background_model=self._config.background_model,
+        )
 
     async def audit(self, *, prompt: str) -> str:
         result = await run_lightweight_agent(
             runner=get_default_runner(),
             config=self._config,
-            tool="claude",
-            model=self._model,
+            tool=resolve_maintenance_tool(self._config),
+            model=self._resolve_model(),
             prompt=prompt,
             source="sampled_audit",
             timeout=float(_AUDIT_LLM_TIMEOUT_S),
@@ -162,16 +172,22 @@ class _CLIAdjudicatorLLM:
     adjudication — off entirely).
     """
 
-    def __init__(self, config: HydraFlowConfig, model: str) -> None:
+    def __init__(self, config: HydraFlowConfig) -> None:
         self._config = config
-        self._model = model
+
+    def _resolve_model(self) -> str:
+        return resolve_maintenance_model(
+            role_model=self._config.sampled_audit_model,
+            maintenance_model=self._config.maintenance_model,
+            background_model=self._config.background_model,
+        )
 
     async def adjudicate(self, *, prompt: str) -> str:
         result = await run_lightweight_agent(
             runner=get_default_runner(),
             config=self._config,
-            tool="claude",
-            model=self._model,
+            tool=resolve_maintenance_tool(self._config),
+            model=self._resolve_model(),
             prompt=prompt,
             source="sampled_audit_adjudicate",
             timeout=float(_AUDIT_LLM_TIMEOUT_S),
@@ -493,7 +509,7 @@ class SampledAuditLoop(BaseBackgroundLoop):
     async def _audit(self, prompt: str) -> str:
         """Complete *prompt* via the injected fake or a lazily-built CLI client."""
         if self._auditor is None:
-            self._auditor = _CLIAuditLLM(self._config, self._auditor_model())
+            self._auditor = _CLIAuditLLM(self._config)
         return await self._auditor.audit(prompt=prompt)
 
     def _auditor_model(self) -> str:
@@ -501,12 +517,13 @@ class SampledAuditLoop(BaseBackgroundLoop):
 
         Uses the explicit ``sampled_audit_model`` when set (an operator points it
         at a different family from the implementing agent), else falls back to
-        the background model / sonnet for a fresh same-family context.
+        the maintenance model, background model, then sonnet for a fresh
+        same-family context.
         """
-        return (
-            self._config.sampled_audit_model
-            or self._config.background_model
-            or "sonnet"
+        return resolve_maintenance_model(
+            role_model=self._config.sampled_audit_model,
+            maintenance_model=self._config.maintenance_model,
+            background_model=self._config.background_model,
         )
 
     # --- finding filing (bounded) ---------------------------------------
@@ -670,7 +687,7 @@ class SampledAuditLoop(BaseBackgroundLoop):
     async def _adjudicate(self, prompt: str) -> str:
         """Complete *prompt* via the injected fake or a lazily-built CLI client."""
         if self._adjudicator is None:
-            self._adjudicator = _CLIAdjudicatorLLM(self._config, self._auditor_model())
+            self._adjudicator = _CLIAdjudicatorLLM(self._config)
         return await self._adjudicator.adjudicate(prompt=prompt)
 
     # --- adjudication reconcile -----------------------------------------

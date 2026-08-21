@@ -49,7 +49,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
-from config import HydraFlowConfig
+from config import (
+    HydraFlowConfig,
+    resolve_maintenance_model,
+    resolve_maintenance_tool,
+)
 from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
@@ -110,16 +114,22 @@ class _CLIClassifier:
     OFF there — the ``config_disable`` sandbox seam).
     """
 
-    def __init__(self, config: HydraFlowConfig, model: str) -> None:
+    def __init__(self, config: HydraFlowConfig) -> None:
         self._config = config
-        self._model = model
+
+    def _resolve_model(self) -> str:
+        return resolve_maintenance_model(
+            role_model=self._config.intervention_tally_model,
+            maintenance_model=self._config.maintenance_model,
+            background_model=self._config.background_model,
+        )
 
     async def complete(self, prompt: str) -> str:
         result = await run_lightweight_agent(
             runner=get_default_runner(),
             config=self._config,
-            tool="claude",
-            model=self._model,
+            tool=resolve_maintenance_tool(self._config),
+            model=self._resolve_model(),
             prompt=prompt,
             source="intervention_tally",
             timeout=float(_CLASSIFY_LLM_TIMEOUT_SECONDS),
@@ -270,12 +280,7 @@ class InterventionTallyLoop(BaseBackgroundLoop):
     ) -> tuple[InterventionClass, Confidence] | None:
         """One cheap-LLM classification; ``None`` on any failure (keeps default)."""
         if self._classifier_llm is None:
-            model = (
-                self._config.intervention_tally_model
-                or self._config.background_model
-                or "sonnet"
-            )
-            self._classifier_llm = _CLIClassifier(self._config, model)
+            self._classifier_llm = _CLIClassifier(self._config)
         try:
             raw = await self._classifier_llm.complete(
                 build_classification_prompt(free_text)
@@ -339,10 +344,10 @@ class InterventionTallyLoop(BaseBackgroundLoop):
 
     def _current_model(self) -> str:
         """The active model-version context stamped on every recorded row."""
-        return (
-            self._config.intervention_tally_model
-            or self._config.background_model
-            or "sonnet"
+        return resolve_maintenance_model(
+            role_model=self._config.intervention_tally_model,
+            maintenance_model=self._config.maintenance_model,
+            background_model=self._config.background_model,
         )
 
 

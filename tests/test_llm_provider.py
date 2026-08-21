@@ -612,6 +612,72 @@ class TestRunLightweightAgentDispatch:
         assert cli_called["n"] == 1
         assert http_called["n"] == 0
 
+    async def test_omitted_provider_inherits_maintenance_gateway(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from config import HydraFlowConfig
+        from execution import SimpleResult
+        from runner_utils import run_lightweight_agent
+
+        cli_kwargs: dict = {}
+        recorded: dict = {}
+
+        async def _fake_cli(**kwargs):
+            cli_kwargs.update(kwargs)
+            return SimpleResult(stdout="gateway", returncode=0)
+
+        def _fake_record(_config, **kwargs):
+            recorded.update(kwargs)
+
+        monkeypatch.setattr("runner_utils._claude_cli_complete", _fake_cli)
+        monkeypatch.setattr("runner_utils.record_inference_telemetry", _fake_record)
+
+        result = await run_lightweight_agent(
+            runner=AsyncMock(),
+            config=HydraFlowConfig(
+                maintenance_provider="gateway",
+                maintenance_model="glm-5.2",
+            ),
+            tool="claude",
+            model="glm-5.2",
+            prompt="p",
+            source="sampled_audit",
+            timeout=10.0,
+        )
+
+        assert result.stdout == "gateway"
+        assert cli_kwargs["provider"] == "gateway"
+        assert recorded["cmd"] == ["gateway", "--model", "glm-5.2"]
+
+    async def test_explicit_provider_overrides_maintenance_provider(self, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        from config import HydraFlowConfig
+        from execution import SimpleResult
+        from runner_utils import run_lightweight_agent
+
+        cli_kwargs: dict = {}
+
+        async def _fake_cli(**kwargs):
+            cli_kwargs.update(kwargs)
+            return SimpleResult(stdout="direct", returncode=0)
+
+        monkeypatch.setattr("runner_utils._claude_cli_complete", _fake_cli)
+
+        result = await run_lightweight_agent(
+            runner=AsyncMock(),
+            config=HydraFlowConfig(maintenance_provider="gateway"),
+            tool="claude",
+            model="sonnet",
+            prompt="p",
+            source="unit_test",
+            timeout=10.0,
+            provider="claude",
+        )
+
+        assert result.stdout == "direct"
+        assert cli_kwargs["provider"] == "claude"
+
     async def test_terminal_gateway_replaces_host_runner_with_owned_docker_runner(
         self, monkeypatch
     ):

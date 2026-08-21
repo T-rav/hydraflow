@@ -1618,18 +1618,20 @@ async def run_lightweight_agent(
     session_id: str | None = None,
     isolate_user_settings: bool = True,
     issue_labels: Sequence[str] = (),
-    provider: str = "claude",
+    provider: str | None = None,
     response_schema: dict[str, object] | None = None,
     gateway_client: GatewayControlClient | None = None,
 ) -> SimpleResult:
     """One-shot lightweight LLM call with credit detection + telemetry.
 
-    *provider* selects the backend: ``"claude"`` (the CLI harness, default) or a
-    direct OpenAI-compatible HTTP call — ``"openrouter"`` or ``"zai"`` — for the
-    one-shot, no-tools loops that don't need the harness. Point a role's dial at
-    whichever backend the operator has credits for. All return the same
-    ``SimpleResult`` and own their own credit-exhaustion detection, so the
-    credit + telemetry contract below holds regardless of backend.
+    *provider* selects the backend. An omitted provider inherits
+    ``config.maintenance_provider``; callers with a dedicated role dial pass it
+    explicitly and therefore take precedence. The resolved backend is either
+    ``"claude"`` (the CLI harness), ``"gateway"``, or a direct
+    OpenAI-compatible HTTP provider such as ``"openrouter"`` or ``"zai"``.
+    All return the same ``SimpleResult`` and own their own credit-exhaustion
+    detection, so the credit + telemetry contract below holds regardless of
+    backend.
     *response_schema*, when given, drives native strict-JSON output on the
     OpenAI-compatible path (the CLI path uses prompt-based JSON).
 
@@ -1688,10 +1690,10 @@ async def run_lightweight_agent(
         return SimpleResult(stderr=str(exc), returncode=-1)
     prompt = gated.prompt
 
-    transport_provider = provider
+    transport_provider = config.maintenance_provider if provider is None else provider
     if (
         getattr(config, "gateway_fleet_ratchet_enabled", False) is True
-        and provider == "claude"
+        and transport_provider == "claude"
         and tool == "claude"
     ):
         transport_provider = _GATEWAY

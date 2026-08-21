@@ -144,6 +144,35 @@ class TestLoopProviders:
             "review": "zai",
         }
 
+    def test_shared_maintenance_loops_use_effective_gateway_glm_route(self) -> None:
+        orch = HydraFlowOrchestrator(
+            ConfigFactory.create().model_copy(
+                update={
+                    "maintenance_provider": "gateway",
+                    "maintenance_model": "glm-5.2",
+                    "background_model": "glm-5.2",
+                }
+            )
+        )
+
+        providers = orch._loop_providers(
+            [
+                "intervention_tally",
+                "sampled_audit",
+                "issue_refinement",
+                "skill_prompt_eval",
+                "plan",
+            ]
+        )
+
+        assert providers == {
+            "intervention_tally": "zai",
+            "sampled_audit": "zai",
+            "issue_refinement": "zai",
+            "skill_prompt_eval": "zai",
+            "plan": PROVIDER_ANTHROPIC,
+        }
+
 
 class TestAffectedLoops:
     def test_anthropic_cap_spares_backend_routed_loop(self) -> None:
@@ -168,6 +197,35 @@ class TestAffectedLoops:
         affected, terminate = orch._affected_loops("kimi", _LOOPS, "repo_wiki")
         assert affected == {"repo_wiki"}
         assert terminate is False  # harness pools (Anthropic) left running
+
+    def test_gateway_maintenance_cap_pauses_only_shared_caretakers(self) -> None:
+        caretaker_loops = {
+            "intervention_tally",
+            "sampled_audit",
+            "issue_refinement",
+            "skill_prompt_eval",
+        }
+        loops = [*caretaker_loops, "plan"]
+        orch = HydraFlowOrchestrator(
+            ConfigFactory.create().model_copy(
+                update={
+                    "maintenance_provider": "gateway",
+                    "maintenance_model": "glm-5.2",
+                }
+            )
+        )
+
+        zai_affected, terminate_zai = orch._affected_loops(
+            "zai", loops, "sampled_audit"
+        )
+        anthropic_affected, terminate_anthropic = orch._affected_loops(
+            PROVIDER_ANTHROPIC, loops, "plan"
+        )
+
+        assert zai_affected == caretaker_loops
+        assert terminate_zai is False
+        assert anthropic_affected == {"plan"}
+        assert terminate_anthropic is True
 
     def test_backend_cap_always_includes_source(self) -> None:
         # A backend signal raised by a loop the table doesn't map (e.g. a shared
