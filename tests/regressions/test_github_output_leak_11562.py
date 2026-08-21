@@ -14,6 +14,11 @@ process whose environment carries ``GITHUB_OUTPUT`` pointing at a probe file —
 runs the real CLI test modules inside it, and asserts they pass AND the probe
 stays empty. It cannot be an in-process test: the session scrub has already
 removed the variable by the time any test body runs.
+
+Cost: the nested session collects ~20 small CLI tests and its CALL phase is
+~2s locally — far inside the 60s duration ratchet in ``tests/conftest.py``.
+CI runs ``tests/regressions`` in the serial pytest leg (``ci.yml``), outside
+the ``-n auto`` bulk, so runner contention does not stack on top of it.
 """
 
 from __future__ import annotations
@@ -51,7 +56,7 @@ def test_runner_github_output_never_reaches_in_process_cli_mains(
         env=env,
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=120,
         check=False,
     )
 
