@@ -78,7 +78,7 @@ Quality: No issues — <justification>
    - Code quality (SRP, type hints, naming, complexity) and test quality (3As structure, factories, edge cases)
    - **Security** — injection, unsafe deserialization, crypto misuse, auth/authz gaps, secret/credential exposure, unsafe `subprocess`/shell
    - **Test-value standards (merge gate)** — request changes for:
-     - Skipped, xfailed, commented-out, or placeholder tests in active coverage — file deferred work in bd instead
+     - Skipped, xfailed, commented-out, or placeholder tests in active coverage — record deferred work through the active issue/PR workflow instead
      - Unit tests that bypass documented factories or world-building helpers (for HydraFlow: `ConfigFactory`, `TaskFactory`, `make_pr_manager`, MockWorld helpers)
      - Integration tests that mock behavior-changing collaborators or assert only mock call shape — wire real business logic; mock only external boundaries that cannot run in the test environment
      - MockWorld scenarios that replace FakeGitHub/Fake* side effects with raw `AsyncMock`/`MagicMock` call-count assertions instead of asserting state through `world.<fake>`

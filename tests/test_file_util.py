@@ -19,7 +19,9 @@ from file_util import (
     append_jsonl,
     atomic_write,
     compact_jsonl_latest_by_key,
+    descriptor_lock,
     file_lock,
+    file_lock_fd,
     is_newer_timestamp,
 )
 
@@ -220,6 +222,69 @@ class TestFileLock:
         # Lock must be released: re-acquiring immediately must not block.
         with file_lock(lock_path, timeout=1.0):
             pass
+
+
+class TestFileLockFd:
+    def test_locks_regular_file_relative_to_open_directory(
+        self, tmp_path: Path
+    ) -> None:
+        directory_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with file_lock_fd(
+                directory_fd,
+                "store.lock",
+                display_path=tmp_path / "store.lock",
+            ) as lock_fd:
+                assert os.fstat(lock_fd).st_mode & 0o777 == 0o600
+        finally:
+            os.close(directory_fd)
+
+    def test_rejects_symlink_without_touching_external_target(
+        self, tmp_path: Path
+    ) -> None:
+        external = tmp_path / "external"
+        external.write_bytes(b"preserve")
+        external.chmod(0o640)
+        lock = tmp_path / "store.lock"
+        lock.symlink_to(external)
+        directory_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with (
+                pytest.raises(OSError),
+                file_lock_fd(
+                    directory_fd,
+                    "store.lock",
+                    display_path=lock,
+                ),
+            ):
+                pass
+        finally:
+            os.close(directory_fd)
+
+        assert external.read_bytes() == b"preserve"
+        assert external.stat().st_mode & 0o777 == 0o640
+
+
+class TestDescriptorLock:
+    def test_same_directory_inode_serializes_distinct_descriptors(
+        self, tmp_path: Path
+    ) -> None:
+        first_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+        second_fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with (
+                descriptor_lock(first_fd, display_path=tmp_path / "first"),
+                pytest.raises(FileLockTimeout),
+                descriptor_lock(
+                    second_fd,
+                    display_path=tmp_path / "second",
+                    timeout=0.05,
+                ),
+            ):
+                pass
+        finally:
+            os.close(first_fd)
+            os.close(second_fd)
 
 
 class TestRotateBackups:

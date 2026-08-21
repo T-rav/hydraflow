@@ -55,7 +55,9 @@ See the full product walkthrough and visuals at [hydraflow.ai](https://hydraflow
 - [GitHub CLI](https://cli.github.com/) authenticated (`gh auth login`)
 - Claude CLI and/or Codex CLI available on PATH
 - Node.js 20.19+ or 22.12+ (dashboard only)
-- [Beads](https://www.npmjs.com/package/@beads/bd) (optional — auto-installed when needed for task decomposition)
+- Beads task decomposition uses each factory worktree's isolated
+  `.beads/issues.jsonl` directly. The database-backed `bd` CLI and Dolt
+  migration/sync commands are not part of the supported HydraFlow runtime.
 
 ### Claude Authentication (Docker Mode)
 

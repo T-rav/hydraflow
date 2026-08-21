@@ -237,15 +237,12 @@ src/ui/src/test/shims/generated/
 
 .hydraflow/prep
 
-# Dolt database files (added by bd init)
-.dolt/
+# Local database artifacts
 *.db
 
 # Local superpowers drafts (plans, specs)
 docs/superpowers/
 
-# Beads / Dolt files (added by bd init)
-.beads-credential-key
 MagicMock/
 
 # Visual brainstorming companion artifacts

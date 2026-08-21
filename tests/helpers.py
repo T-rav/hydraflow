@@ -1411,6 +1411,7 @@ def make_implement_phase(
         return await _original_run(*bound.args, **bound.kwargs)
 
     mock_agents.run = _kwargs_absorbing_run
+    mock_agents.commit_pending = AsyncMock(return_value=True)
     mock_agents.hindsight = None
     # set_tracing_context / clear_tracing_context are synchronous on the real
     # runner; override the auto-generated async mocks with plain MagicMocks so

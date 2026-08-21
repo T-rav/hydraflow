@@ -251,7 +251,7 @@ class MockWorld:
         self._clock = FakeClock(start=time.time())
         if clock_start is not None:
             self._clock.freeze(clock_start)
-        self._docker = FakeDocker(beads=beads_manager)
+        self._docker = FakeDocker()
         self._git = FakeGit()
         self._fs = FakeFS()
         self._http = FakeHTTP()
@@ -304,6 +304,7 @@ class MockWorld:
         target.planners.plan = self._llm.planners.plan
         target.planners.run_gap_review = self._llm.planners.run_gap_review
         target.agents.run = self._llm.agents.run
+        target.agents.commit_pending = self._llm.agents.commit_pending
         target.reviewers.review = self._llm.reviewers.review
         target.reviewers.fix_ci = self._llm.reviewers.fix_ci
         target.reviewers.fix_review_findings = self._llm.reviewers.fix_review_findings

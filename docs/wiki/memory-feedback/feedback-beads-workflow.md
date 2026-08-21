@@ -1,8 +1,8 @@
 ---
 source: feedback_beads_workflow.md
-name: Use beads for issue tracking
-description: User wants all work tracked in beads (bd CLI) — claim issues, add notes,
-  close on PR merge
+name: Keep factory task state in worktree JSONL
+description: HydraFlow owns phase-task lifecycle in each implementation worktree;
+  agents never invoke a database-backed task CLI
 status: issue-open
 issue: 26
 promoted_in: null
@@ -10,13 +10,14 @@ wontfix_reason: null
 created: '2026-03-28'
 ---
 
-Always use beads (`bd` CLI) for tracking work on hydraflow issues:
-1. `beads create` for new issues with labels, external-refs, types
-2. `beads update <id> --claim` before starting work
-3. `beads note <id> "..."` to log progress and PR numbers
-4. `beads update <id> -s closed` when PR merges
-5. `beads list` to show status
+HydraFlow stores phase-task state only in the implementation worktree's
+`.beads/issues.jsonl`. `BeadsManager` creates, validates, claims, and closes
+those records. Agents must not invoke a task-tracking CLI, connect to a shared
+database, or edit the JSONL file themselves.
 
-**Why:** User explicitly requested beads workflow. It's Steve Yegge's tool — installed via `brew install beads`. The `.beads/` dir in the repo holds the Dolt database.
+**Why:** Per-worktree JSONL keeps concurrent factory runs isolated and makes
+the committed task lifecycle travel with the implementation branch.
 
-**How to apply:** Every sprint/task should be tracked in beads alongside GitHub issues and PRs.
+**How to apply:** Treat phase IDs in prompts as informational. Record broader
+follow-up work through the active issue/PR workflow; leave task-store mutations
+to the factory.
