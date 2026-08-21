@@ -102,6 +102,11 @@ class SelfSolveOutcome(StrEnum):
     # The issue was routed to the auto-agent diagnose path for
     # resolve-or-dismiss-with-evidence — still a machine self-solve, NOT a human.
     DIAGNOSED = "diagnose"
+    # A fix for the issue has already landed or is in flight (#11480): the
+    # decompose terminal found the evidence before asking the council. There is
+    # nothing left to solve — no relabel, no diagnose, no human. The issue stays
+    # in the pipeline and closes with its fix.
+    ALREADY_SATISFIED = "already-satisfied"
     # The self-solve path itself exhausted (decompose declined AND diagnose
     # unavailable). Only now is ``human-required`` the correct move — a rare,
     # logged break.

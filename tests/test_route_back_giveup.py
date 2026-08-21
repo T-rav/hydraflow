@@ -3,6 +3,8 @@
 Proves the corrected escalation ladder at the coordinator seam:
   * count < N within T → ROUTED (convergent retry untouched);
   * N-in-T exhausted + self-solve decomposes/diagnoses → SELF_SOLVED, NO human;
+  * N-in-T exhausted + the fix already landed (#11480) → SELF_SOLVED, no relabel
+    at all — the issue stays in the pipeline and closes with its fix;
   * self-solve exhausted → human-required (ESCALATED), logged as a break;
   * reset_window (called on convergence) clears the window.
 """
@@ -131,6 +133,26 @@ class TestExhaustedDecomposesNotHuman:
         swapped_labels = [c.args[1] for c in prs.swap_pipeline_labels.await_args_list]
         assert "human-required" not in swapped_labels
         assert state.get_give_up_snapshot(42)["plan_retry"]["last_action"] == "diagnose"
+
+    @pytest.mark.asyncio
+    async def test_already_satisfied_self_solves_without_human(
+        self, tmp_path: Path
+    ) -> None:
+        """#11480: the self-solver found the fix already landed. Nothing to
+        route: no plan, no diagnose, and above all no human-required — the
+        issue stays where it is and closes with its fix."""
+        ss = _FakeSelfSolve(SelfSolveOutcome.ALREADY_SATISFIED)
+        coordinator, prs, state = _coordinator(tmp_path, self_solve=ss, n=1)
+
+        result = await _route(coordinator)
+
+        assert result.outcome == RouteBackOutcome.SELF_SOLVED
+        assert "already-satisfied" in result.reason
+        prs.swap_pipeline_labels.assert_not_awaited()
+        assert (
+            state.get_give_up_snapshot(42)["plan_retry"]["last_action"]
+            == "already-satisfied"
+        )
 
 
 class TestSelfSolveExhaustedGoesToHumanAsLastResort:
