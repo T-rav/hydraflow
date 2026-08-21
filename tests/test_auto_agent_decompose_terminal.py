@@ -26,6 +26,7 @@ from models import EpicDecompResult, EpicState, NewIssueSpec
 from preflight.context import PreflightContext
 from preflight.decision import PreflightResult, apply_decision
 from preflight.decompose_terminal import decompose_or_escalate
+from subprocess_util import CreditExhaustedError
 from tests.helpers import ConfigFactory, make_bg_loop_deps, make_tracker
 
 # ---------------------------------------------------------------------------
@@ -714,6 +715,119 @@ class TestAlreadySatisfiedGate:
         )
 
         assert outcome == "decomposed"
+
+
+# ---------------------------------------------------------------------------
+# #11480: every landed-fix read fails OPEN — and still lets a credit cap escape
+# ---------------------------------------------------------------------------
+
+# The six ``gh`` reads behind ``_find_landed_fix`` / ``_is_landing_fix_pr``,
+# each wrapped in its own ``except Exception`` block. ``needs_landing_pr``
+# says whether the read is only reached once an open PR declaring the fix
+# exists (the four PR-detail reads) or only when no PR qualifies (the commit
+# scan) — the issue-state read runs first regardless.
+_LANDED_FIX_READS: list[tuple[str, bool]] = [
+    ("get_issue_state", False),
+    ("get_pr_title_and_body", True),
+    ("get_pr_mergeable", True),
+    ("get_pr_reviews", True),
+    ("get_pr_checks", True),
+    ("list_branch_commits", False),
+]
+_LANDED_FIX_READ_IDS = [seam for seam, _ in _LANDED_FIX_READS]
+
+
+def _arm_landed_fix_read(
+    prs, config, *, seam: str, needs_landing_pr: bool, exc: Exception
+) -> None:
+    """Make exactly *seam* raise *exc*, seeding a viable fix PR when the seam
+    is only reachable through one."""
+    if needs_landing_pr:
+        _seed_open_pr(
+            prs,
+            branch=config.auto_agent_branch_for_issue(7),
+            pr_number=42,
+            title="Fixes #7: the landing fix",
+        )
+    setattr(prs, seam, AsyncMock(side_effect=exc))
+
+
+class TestLandedFixReadsFailOpen:
+    """An unreadable signal is "no evidence", not a verdict: the gate must
+    fall through to today's decomposition path, or a flaky ``gh`` call would
+    silently park a stalled issue forever."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("seam", "needs_landing_pr"), _LANDED_FIX_READS, ids=_LANDED_FIX_READ_IDS
+    )
+    async def test_read_failure_falls_through_to_decomposition(
+        self, tmp_path: Path, seam: str, needs_landing_pr: bool
+    ) -> None:
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(return_value=_decomp_result())
+        decomposer.create_epic_from_result = AsyncMock(return_value=501)
+        _arm_landed_fix_read(
+            prs,
+            config,
+            seam=seam,
+            needs_landing_pr=needs_landing_pr,
+            exc=RuntimeError("gh api failed"),
+        )
+
+        outcome = await decompose_or_escalate(
+            issue_number=7,
+            ctx=_ctx(issue_number=7),
+            config=config,
+            decomposer=decomposer,
+            council=council,
+            state=state,
+            prs=prs,
+        )
+
+        assert outcome == "decomposed"
+        # The failing read was genuinely reached — the gate did not skip it.
+        getattr(prs, seam).assert_awaited()
+        decomposer.create_epic_from_result.assert_awaited_once()
+
+
+class TestLandedFixReadsReraiseCredit:
+    """``reraise_on_credit_or_bug`` is honoured at every seam: a credit cap
+    raised by a read must reach the loop's pause handler, not be eaten as
+    "no evidence" and then spent again on the council."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("seam", "needs_landing_pr"), _LANDED_FIX_READS, ids=_LANDED_FIX_READ_IDS
+    )
+    async def test_credit_exhaustion_propagates(
+        self, tmp_path: Path, seam: str, needs_landing_pr: bool
+    ) -> None:
+        config, state, prs, decomposer, council = _make_deps(tmp_path)
+        council.decide = AsyncMock(
+            side_effect=AssertionError("council must not run after a credit cap")
+        )
+        _arm_landed_fix_read(
+            prs,
+            config,
+            seam=seam,
+            needs_landing_pr=needs_landing_pr,
+            exc=CreditExhaustedError("weekly limit reached"),
+        )
+
+        with pytest.raises(CreditExhaustedError):
+            await decompose_or_escalate(
+                issue_number=7,
+                ctx=_ctx(issue_number=7),
+                config=config,
+                decomposer=decomposer,
+                council=council,
+                state=state,
+                prs=prs,
+            )
+
+        council.decide.assert_not_called()
+        decomposer.create_epic_from_result.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
