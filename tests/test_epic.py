@@ -1617,6 +1617,38 @@ class TestNarrowedExceptionHandling:
         assert len(alert_events) == 2
 
     @pytest.mark.asyncio
+    async def test_release_epic_never_mints_tag_or_release(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-0011 Decision 2: the dashboard release action merges the bundle and
+        flips ``released`` — it never tags or creates a GitHub Release.
+
+        Sibling of ``tests/test_release.py::TestEpicCompletionWithRelease::
+        test_no_release_on_epic_close``, which pins the epic-close half of the
+        same decision (#11569).
+        """
+        manager, prs, _ = _make_epic_manager(tmp_path)
+        manager._state.upsert_epic_state(
+            EpicState(epic_number=100, child_issues=[1], approved_children=[1])
+        )
+        mock_progress = MagicMock()
+        mock_progress.ready_to_merge = True
+        manager.get_progress = MagicMock(return_value=mock_progress)
+        prs.find_pr_for_issue = AsyncMock(return_value=10)
+        prs.merge_pr = AsyncMock(return_value=True)
+
+        result = await manager.release_epic(100)
+
+        assert "error" not in result
+        assert result["merges"][0]["status"] == "merged"
+        epic = manager._state.get_epic_state(100)
+        assert epic is not None
+        assert epic.released is True
+        prs.resolve_remote_branch_sha.assert_not_called()
+        prs.create_tag.assert_not_called()
+        prs.create_release.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_release_epic_merge_loop_catches_runtime_error(
         self, tmp_path: Path
     ) -> None:

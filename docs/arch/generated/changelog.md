@@ -9,6 +9,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `845ba5a` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop (Fixes #11442) *(2026-08-21)*
 - `651dfb8` — fix(implement): tier build timeout by complexity, route zero-commit attempts to diagnose *(2026-08-21)*
 - `2e6e13d` — chore(release): bump to 1.0.0, CHANGELOG, pinned-install docs (refs #11520) (#11584) (#11584) *(2026-08-21)*
+- `fc22a36` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) *(2026-08-21)*
+- `f698417` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) *(2026-08-21)*
 - `28338b9` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop — one issue per source per ISO week (Fixes #11442) (#11578) (#11578) *(2026-08-21)*
 - `112ec85` — fix(release): tag the promoted main SHA, never the factory checkout HEAD (Fixes #11517) (#11576) (#11576) *(2026-08-21)*
 - `91c83ee` — fix(telemetry): one-shot claude spawns report usage — issue_refinement / sampled_audit / sampled_audit_adjudicate (Fixes #11514, Fixes #11515, Fixes #11516) (#11579) (#11579) *(2026-08-21)*

@@ -160,7 +160,7 @@ def test_classification_still_discriminates(classified) -> None:
 # or repoint the ADR at a test that names it) and drop the entry, never grow it.
 _UNATTRIBUTED_BASELINE: frozenset[str] = frozenset(
     {
-        "0002", "0004", "0005", "0007", "0008", "0010", "0011", "0012",
+        "0002", "0004", "0005", "0007", "0008", "0010", "0012",
         "0014", "0015", "0016", "0017", "0018", "0019", "0022", "0024",
         "0028", "0029", "0032", "0034", "0037", "0041", "0043", "0045",
         "0047", "0050", "0052", "0057", "0058", "0060", "0061", "0064",
@@ -168,7 +168,7 @@ _UNATTRIBUTED_BASELINE: frozenset[str] = frozenset(
         "0106", "0109", "0111", "0117", "0119",
     }
 )  # fmt: skip
-_UNATTRIBUTED_MAX = 45
+_UNATTRIBUTED_MAX = 44
 
 
 @pytest.fixture(scope="module")
