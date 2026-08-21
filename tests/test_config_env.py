@@ -597,7 +597,9 @@ class TestDotenvLoading:
         ):
             from server import main
 
-            main()
+            # Explicit argv: main() parses the console-script CLI (#11580) and
+            # would otherwise read pytest's own sys.argv (SystemExit 2 on CI).
+            main([])
             fake_dotenv.load_dotenv.assert_called_once()
 
 
