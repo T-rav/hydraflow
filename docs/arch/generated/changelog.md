@@ -6,7 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `818670a` — Merge branch 'staging' into agent/auto-agent-11279 *(2026-08-17)*
+- `6b5099d` — docs(erosion): spec, wiki term, and regenerated arch artifacts for the new sensors *(2026-08-21)*
+- `b91594d` — Fix factory task graphs to per-worktree JSONL (#11527) (#11527) *(2026-08-21)*
+- `54795e2` — fix: inherit maintenance routing for shared caretakers (#11525) (#11525) *(2026-08-21)*
+- `4474b1a` — fix: fail closed on wrong-branch worktree reuse (#11523) (#11523) *(2026-08-21)*
 - `3c6d708` — fix(pipeline): gate /api/pipeline snapshot on IssueStore's first refresh (#11349) (#11349) *(2026-08-21)*
 - `9e85063` — Fixes #11441: token-drift engine + API drift block (read-only salvage) (#11495) (#11495) *(2026-08-20)*
 - `1ae1c2e` — Fixes #11425: land the true remainder of the fake-fidelity hardening pass (#11488) (#11488) *(2026-08-20)*
@@ -446,8 +449,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `72eae73` — Refs #8933: add repo metrics dashboard payload *(2026-05-23)*
 - `43b1e0a` — Refs #8933: wire onboarding format upgrade *(2026-05-23)*
 - `bab9837` — Fixes #8933: wire onboarding continue plan *(2026-05-23)*
-- `553bd1d` — Refs #8932: add Claude design provider fallback *(2026-05-23)*
-- `adbcc6a` — Refs #8931: add onboarding push endpoint *(2026-05-23)*
 
 
 <!-- arch:generated -->

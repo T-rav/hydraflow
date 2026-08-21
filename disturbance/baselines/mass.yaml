@@ -6,13 +6,16 @@ classes:
     loc: 642
     methods: 22
   src/agent.py:AgentRunner:
-    loc: 1346
-    methods: 35
+    loc: 1408
+    methods: 36
   src/auto_agent_preflight_loop.py:AutoAgentPreflightLoop:
     loc: 611
     methods: 17
+  src/beads_manager.py:BeadsManager:
+    loc: 713
+    methods: 40
   src/config.py:HydraFlowConfig:
-    loc: 4894
+    loc: 4898
     methods: 39
   src/contract_refresh_loop.py:ContractRefreshLoop:
     loc: 671
@@ -24,8 +27,8 @@ classes:
     loc: 1489
     methods: 36
   src/implement_phase.py:ImplementPhase:
-    loc: 1587
-    methods: 55
+    loc: 1672
+    methods: 56
   src/issue_store.py:IssueStore:
     loc: 710
     methods: 48
@@ -33,7 +36,7 @@ classes:
     loc: 1561
     methods: 125
   src/orchestrator.py:HydraFlowOrchestrator:
-    loc: 1969
+    loc: 1978
     methods: 84
   src/plan_phase.py:PlanPhase:
     loc: 1895
@@ -89,16 +92,16 @@ classes:
 comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC or\
   \ method count >= class thresholds) \u2014 the mass sensor (erosion.mass). The gate\
   \ flags NEW entries beyond this set; the ErosionMetricsLoop files the burn-down\
-  \ roster. Last moved: initial baseline at sensor introduction (erosion mass + suite\
-  \ hygiene PR)"
+  \ roster. Last moved: initial baseline at sensor introduction (rebased onto staging\
+  \ b91594d)"
 files:
-  src/config.py: 7134
+  src/config.py: 7198
   src/dashboard_routes/_routes.py: 2103
   src/health_monitor_loop.py: 1736
-  src/implement_phase.py: 1665
+  src/implement_phase.py: 1750
   src/mockworld/fakes/fake_github.py: 1672
   src/models.py: 2844
-  src/orchestrator.py: 2074
+  src/orchestrator.py: 2087
   src/plan_phase.py: 1975
   src/pr_manager.py: 3307
   src/repo_wiki.py: 1589
