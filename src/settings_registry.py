@@ -103,6 +103,9 @@ SETTINGS: dict[str, SettingSpec] = {
     # --- PR Unsticker ----------------------------------------------------
     "unstick_auto_merge": SettingSpec("PR Unsticker", live=True, order=0),
     "unstick_all_causes": SettingSpec("PR Unsticker", live=True, order=1),
+    # Live: PRAutoRebase reads config.pr_autorebase_enabled on every
+    # MergeStateWatcher attempt, so flipping it applies on the next tick.
+    "pr_autorebase_enabled": SettingSpec("PR Unsticker", live=True, order=2),
     # --- Branching & Release --------------------------------------------
     # Structural — captured into loop wiring at startup; change then restart.
     "staging_enabled": SettingSpec("Branching & Release", live=False, order=0),

@@ -2,9 +2,10 @@
 # list_conflicting_prs returns PRs GitHub flagged mergeable=CONFLICTING
 # (`gh pr list --json mergeable ...`) as ConflictingPR dataclasses
 # (number/branch/labels) for merge_state_watcher. A mergeable PR is
-# excluded. NOTE: FakePR exposes no head_ref attribute, so the fake's
-# ConflictingPR.branch is always "" (getattr fallback) -- a fidelity
-# gap vs the real PRManager, which populates branch from headRefName.
+# excluded. The fake populates ConflictingPR.branch from FakePR.branch
+# (the headRefName mirror) — the former always-"" fidelity gap was fixed
+# for #11595, where the auto-rebase actuator's factory-namespace scoping
+# made the head branch load-bearing.
 adapter: github
 interaction: list_conflicting_prs
 recorded_at: '2026-07-21T00:00:00Z'
@@ -17,7 +18,7 @@ input:
   env: {}
 output:
   exit_code: 0
-  stdout: '[{"number": 782, "branch": "", "labels": []}]
+  stdout: '[{"number": 782, "branch": "feat/conf", "labels": []}]
 
     '
   stderr: ''

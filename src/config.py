@@ -1005,6 +1005,10 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_MERGE_STATE_WATCHER_LOOP_ENABLED",
         True,
     ),
+    # #11595: auto-rebase actuator for the factory's own dirty PRs. Default
+    # OFF — a branch-rewriting actuator is armed by the operator, not shipped
+    # hot.
+    ("pr_autorebase_enabled", "HYDRAFLOW_PR_AUTOREBASE_ENABLED", False),
     ("pr_unsticker_loop_enabled", "HYDRAFLOW_PR_UNSTICKER_LOOP_ENABLED", True),
     ("pricing_refresh_loop_enabled", "HYDRAFLOW_PRICING_REFRESH_LOOP_ENABLED", True),
     ("rc_budget_loop_enabled", "HYDRAFLOW_RC_BUDGET_LOOP_ENABLED", True),
@@ -5923,6 +5927,18 @@ class HydraFlowConfig(BaseModel):
     merge_state_watcher_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for MergeStateWatcherLoop.",
+    )
+    pr_autorebase_enabled: bool = Field(
+        default=False,
+        description=(
+            "Arm the MergeStateWatcher auto-rebase actuator (#11595): when a "
+            "factory-owned (agent/*) PR goes CONFLICTING because the base "
+            "branch advanced, merge the base + regenerate docs/arch/generated "
+            "in an ephemeral worktree and push, so CI re-dispatches without "
+            "an operator. One attempt per PR per base head; source-file "
+            "conflicts abort untouched and escalate to HITL. Default OFF — "
+            "the operator arms a branch-rewriting actuator deliberately."
+        ),
     )
     pr_unsticker_loop_enabled: bool = Field(
         default=True,

@@ -1581,7 +1581,12 @@ class FakeGitHub:
             results.append(
                 ConflictingPR(
                     number=pr.number,
-                    branch=getattr(pr, "head_ref", "") or "",
+                    # FakePR's field is ``branch`` (mirrors headRefName). The
+                    # old ``getattr(pr, "head_ref", "")`` read a field that
+                    # never existed, so every conflicting PR came back with an
+                    # empty branch — masked until the auto-rebase actuator
+                    # (#11595) made the head-branch namespace load-bearing.
+                    branch=pr.branch or "",
                     labels=list(getattr(pr, "labels", []) or []),
                 )
             )

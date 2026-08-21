@@ -120,3 +120,28 @@ def test_from_seed_honors_pr_mergeable() -> None:
     assert [pr.number for pr in conflicting] == [8801]
     # Absent ``mergeable`` key still defaults to True — back-compat preserved.
     assert gh._prs[8802].mergeable is True
+
+
+def test_conflicting_pr_carries_its_head_branch() -> None:
+    """#11595: ConflictingPR.branch mirrors headRefName like the real adapter.
+
+    The fake used to read a nonexistent ``head_ref`` attribute and always
+    returned ``""`` — masked until the auto-rebase actuator made the head
+    branch namespace load-bearing for factory-owned scoping."""
+    import asyncio
+
+    seed = MockWorldSeed(
+        prs=[
+            {
+                "number": 8801,
+                "issue_number": 8800,
+                "branch": "agent/issue-8800",
+                "mergeable": False,
+            },
+        ],
+    )
+
+    gh = FakeGitHub.from_seed(seed)
+
+    (conflicting,) = asyncio.run(gh.list_conflicting_prs())
+    assert conflicting.branch == "agent/issue-8800"
