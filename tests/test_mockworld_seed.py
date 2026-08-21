@@ -17,6 +17,7 @@ def test_default_seed_is_empty() -> None:
     assert seed.loops_enabled is None
     assert seed.plan_hold_seconds == 0.0
     assert seed.rulesets == {}
+    assert seed.prompt_telemetry_source_initialized is False
 
 
 def test_seed_round_trips_through_json() -> None:
@@ -49,6 +50,16 @@ def test_seed_round_trips_plan_hold_seconds_through_json() -> None:
 
     assert parsed == original
     assert parsed.plan_hold_seconds == 3.0
+
+
+def test_seed_round_trips_prompt_telemetry_source_initialization() -> None:
+    """The gateway sandbox can opt into an observed-empty spend source."""
+    original = MockWorldSeed(prompt_telemetry_source_initialized=True)
+
+    parsed = MockWorldSeed.from_json(original.to_json())
+
+    assert parsed == original
+    assert parsed.prompt_telemetry_source_initialized is True
 
 
 def test_default_seed_has_empty_rulesets() -> None:

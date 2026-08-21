@@ -89,7 +89,7 @@ By declared `**Enforcement:**` kind: `enforced` 78 · `manual` 3 · `decision-of
 | ADR-0106 | REAL | — | enforced | `pytest:tests/regressions/test_issue_9552.py` |
 | ADR-0107 | REAL | — | enforced | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0109 | REAL | — | enforced | `pytest:tests/test_ultra_review.py` |
-| ADR-0110 | REAL | — | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
+| ADR-0110 | REAL | — | enforced | `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` |
 | ADR-0111 | REAL | — | enforced | `pytest:tests/test_flows.py` |
 | ADR-0112 | REAL | — | enforced | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 | ADR-0113 | REAL | — | enforced | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
@@ -169,7 +169,6 @@ REAL ADRs whose cited test resolves and asserts, but whose text never names the 
 | ADR-0104 | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0106 | `pytest:tests/regressions/test_issue_9552.py` |
 | ADR-0109 | `pytest:tests/test_ultra_review.py` |
-| ADR-0110 | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
 | ADR-0111 | `pytest:tests/test_flows.py` |
 | ADR-0117 | `pytest:tests/test_prompt_observatory.py` |
 | ADR-0119 | `pytest:tests/test_credit_failover.py` |

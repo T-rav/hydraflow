@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11424
 source_phase: plan
 created_at: 2026-08-18T04:14:44.048823+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: source issue #11424 closed
 ---
 
 # Use table-driven recurrence guards for multi-site wiring fixes

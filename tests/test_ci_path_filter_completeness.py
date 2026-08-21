@@ -89,6 +89,16 @@ def _core_python_filter_globs() -> list[str]:
     return globs
 
 
+def _named_positive_filter_globs(name: str) -> set[str]:
+    """Return literal positive globs from a named primary filter block."""
+    text = _CI.read_text(encoding="utf-8")
+    block = re.search(
+        rf"^            {re.escape(name)}:\n((?:              .*\n)+)", text, re.M
+    )
+    assert block, f"could not find the `{name}:` paths-filter block in ci.yml"
+    return set(re.findall(r"^              - '([^'!][^']*)'", block.group(1), re.M))
+
+
 def _covered(top: str, globs: list[str]) -> bool:
     return any(g == top or g.startswith(f"{top}/") for g in globs)
 
@@ -147,3 +157,74 @@ def test_the_two_paths_that_caused_incidents_stay_covered() -> None:
             f"'{path}' is no longer in the CI `core_python` filter. It was "
             f"added because: {incident}. Removing it re-opens that exact hole."
         )
+
+
+def test_gateway_runtime_changes_trigger_the_fast_sandbox() -> None:
+    """The s91 container boundary runs for every source layer it integrates."""
+    globs = _named_positive_filter_globs("sandbox_scenarios")
+    required = {
+        "gateway/**",
+        "src/hydraflow_gateway/**",
+        "src/gateway_coverage.py",
+        "src/gateway_coverage_loop.py",
+        "src/state/_gateway_coverage.py",
+        "src/adversarial_agent_runner.py",
+        "src/base_runner.py",
+        "src/docker_runner.py",
+        "src/credit_failover.py",
+        "src/repo_backend.py",
+        "src/runner_utils.py",
+        "src/subprocess_util.py",
+        "src/runners/base_subprocess_runner.py",
+    }
+    missing = sorted(required - globs)
+    assert not missing, (
+        "gateway production paths no longer trigger sandbox-fast/s91: "
+        f"{missing}. Unit-green transport changes can still break the Docker "
+        "network or final worker environment."
+    )
+
+
+def test_gateway_package_coverage_is_a_path_triggered_ci_gate() -> None:
+    """#11470: package branch coverage is required whenever its seam changes."""
+    text = _CI.read_text(encoding="utf-8")
+    assert "gateway_package: ${{ steps.filter.outputs.gateway_package }}" in text, (
+        "the changes job must export the gateway_package paths-filter result"
+    )
+
+    globs = _named_positive_filter_globs("gateway_package")
+    required = {
+        "gateway/**",
+        "src/hydraflow_gateway/**",
+        "tests/test_gateway_*.py",
+        "tests/fixtures/gateway/**",
+        "Makefile",
+        "pyproject.toml",
+        "uv.lock",
+    }
+    assert required <= globs, (
+        "gateway package coverage filter lost contract paths: "
+        f"{sorted(required - globs)}"
+    )
+
+    job_match = re.search(
+        r"^  gateway-package-coverage:\n(.*?)(?=^  [a-z][a-z0-9-]*:\n)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert job_match, "CI lost the gateway-package-coverage job"
+    job = job_match.group(1)
+    assert "needs.changes.outputs.gateway_package == 'true'" in job
+    assert "needs.changes.outputs.ci == 'true'" in job
+    assert "run: make gateway-coverage" in job
+
+    gate_match = re.search(
+        r"^  ci-gate:\n.*?^    needs: \[([^]]+)]",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert gate_match, "could not find CI Gate needs list"
+    gate_needs = {item.strip() for item in gate_match.group(1).split(",")}
+    assert "gateway-package-coverage" in gate_needs, (
+        "gateway package coverage must remain a required CI Gate dependency"
+    )

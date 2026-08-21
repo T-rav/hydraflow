@@ -123,6 +123,9 @@ def retirement_picks(
     """
     if budget <= 0:
         return []
+    # ``is not None`` (not truthiness): an explicitly-empty advisory set
+    # means "retire nothing", and a truthy check would silently substitute
+    # the module default — retiring issues the caller excluded (#11408).
     advisory_set = (
         advisory_labels if advisory_labels is not None else ADVISORY_STAGE_LABELS
     )

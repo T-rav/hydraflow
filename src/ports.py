@@ -403,6 +403,30 @@ class PRPort(Protocol):
         """Return whether *branch* has commits ahead of configured main branch."""
         ...
 
+    async def list_branch_refs(self, prefix: str) -> list[tuple[str, str]]:
+        """Return ``[(branch_name, sha), ...]`` for ``refs/heads/<prefix>*``.
+
+        Thin translation of ``gh api .../git/matching-refs/heads/<prefix>``
+        — propagates read/parse failures rather than swallowing them, so
+        each caller applies its own resilience policy (``list_rc_branches``
+        chains a per-sha commit-date lookup; ``StaleIssueLoop``'s branch-GC
+        skips a prefix and moves on). Matches
+        ``pr_manager.PRManager.list_branch_refs`` exactly.
+        """
+        ...
+
+    async def list_branch_commits(
+        self, branch: str, *, limit: int = 30
+    ) -> list[dict[str, str]]:
+        """Return ``[{"date": iso, "message": msg}, ...]`` newest-first for *branch*.
+
+        Thin translation of ``gh api .../commits`` — propagates read/parse
+        failures rather than swallowing them (mirrors
+        :meth:`list_branch_refs`). Matches
+        ``pr_manager.PRManager.list_branch_commits`` exactly.
+        """
+        ...
+
     @staticmethod
     def expected_pr_title(issue_number: int, issue_title: str) -> str:
         """Return the canonical PR title for an issue: ``Fixes #N: <title>``."""
@@ -620,6 +644,41 @@ class PRPort(Protocol):
         """Update the body of a GitHub issue."""
         ...
 
+    async def get_issue_body(self, issue_number: int) -> str:
+        """Return the body text of a GitHub issue.
+
+        Propagates read failures (does not swallow) — mirrors
+        :meth:`get_issue_labels`'s fail-closed contract (#9575) so callers
+        like ``ReportIssueLoop._verify_issue`` see a raised error rather
+        than an empty string mistaken for a genuinely blank body.
+        """
+        ...
+
+    async def list_all_issues(
+        self, *, state: str = "all", limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """Return issues in *state* (``"open"``/``"closed"``/``"all"``) as
+        raw gh-wire dicts: ``number``, ``title``, ``state``, ``labels``,
+        ``createdAt``, ``updatedAt``, ``closedAt``.
+
+        Union of the fields the fitness issue fetcher (``service_registry``)
+        and ``StaleIssueLoop``'s stale-scan / backlog-budget reads need from
+        one gh invocation shape. Propagates read/parse failures rather than
+        swallowing them.
+        """
+        ...
+
+    async def list_all_prs(
+        self, *, state: str = "all", limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """Return PRs in *state* as raw gh-wire dicts: ``number``, ``state``,
+        ``labels``, ``createdAt``, ``closedAt``, ``mergedAt``.
+
+        Used by the fitness issue fetcher (``service_registry``).
+        Propagates read/parse failures rather than swallowing them.
+        """
+        ...
+
     # --- CI / repo operations ---
 
     async def get_latest_ci_status(self) -> tuple[str, str]:
@@ -750,6 +809,10 @@ class IssueStorePort(Protocol):
         """Immediately route *task* into *next_stage* in-memory."""
         ...
 
+    def try_claim_stage(self, task: Task, expected_stage: str) -> bool:
+        """Atomically reserve *task* only when it is queued in *expected_stage*."""
+        ...
+
     def mark_active(self, issue_number: int, stage: str) -> None:
         """Mark a task as actively being processed in *stage*."""
         ...
@@ -762,8 +825,13 @@ class IssueStorePort(Protocol):
         """Record an issue as merged so it appears in the pipeline snapshot."""
         ...
 
-    def release_in_flight(self, issue_numbers: set[int]) -> None:
-        """Remove *issue_numbers* from the in-flight protection set."""
+    def release_in_flight(
+        self,
+        issue_numbers: set[int],
+        *,
+        expected_stage: str | None = None,
+    ) -> None:
+        """Release matching in-flight claims for *issue_numbers*."""
         ...
 
     def is_active(self, issue_number: int) -> bool:

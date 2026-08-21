@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -512,6 +512,135 @@ _DOCKER_ENV_PASSTHROUGH_KEYS = (
     "CODEX_HOME",
     "CLAUDE_CONFIG_DIR",
 )
+
+# Provider credentials are derived from the same allow-list Docker uses rather
+# than maintained as a second hand-written copy.  The HYDRAFLOW_* aliases and
+# the z.ai coding-plan key are read by the in-process backend registry but are
+# intentionally not part of Docker's normal passthrough allow-list, so they are
+# folded into the scrub surface here.
+_PROVIDER_CREDENTIAL_MARKERS = ("API_KEY", "OAUTH_TOKEN", "CODING_PLAN_KEY")
+PROVIDER_CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(
+    key
+    for key in _DOCKER_ENV_PASSTHROUGH_KEYS
+    if any(marker in key for marker in _PROVIDER_CREDENTIAL_MARKERS)
+) | frozenset(
+    {
+        "HYDRAFLOW_OPENROUTER_API_KEY",
+        "HYDRAFLOW_ZAI_API_KEY",
+        "HYDRAFLOW_ZAI_CODING_PLAN_KEY",
+        "HYDRAFLOW_KIMI_API_KEY",
+        "ZAI_CODING_PLAN_KEY",
+    }
+)
+
+# Gateway control/upstream configuration belongs to the control plane only.
+# A HydraFlow worker receives the virtual ANTHROPIC_* route triple and none of
+# these real/admin credentials or server storage settings.
+GATEWAY_CONTROL_PLANE_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        "HYDRAFLOW_GATEWAY_CONTROL_TOKEN",
+        "GATEWAY_CONTROL_TOKEN",
+        "GATEWAY_ANTHROPIC_BASE_URL",
+        "GATEWAY_ANTHROPIC_API_KEY",
+        "GATEWAY_ZAI_HARNESS_BASE_URL",
+        "GATEWAY_ZAI_HARNESS_API_KEY",
+        "GATEWAY_LEDGER_PATH",
+        "GATEWAY_BODY_DIR",
+        "GATEWAY_BODY_CAPTURE_REPOS",
+        "GATEWAY_MAX_KEY_TTL_SECONDS",
+        "GATEWAY_MAX_REQUEST_BYTES",
+        "GATEWAY_MAX_CONTROL_REQUEST_BYTES",
+        "GATEWAY_BODY_RETENTION_SECONDS",
+    }
+)
+
+_GATEWAY_CLOUD_CREDENTIAL_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_PROFILE",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AZURE_CLIENT_ID",
+        "AZURE_CLIENT_SECRET",
+        "AZURE_TENANT_ID",
+    }
+)
+_GATEWAY_PROVIDER_ROUTING_ENV_KEYS: frozenset[str] = frozenset(
+    {
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "ANTHROPIC_VERTEX_PROJECT_ID",
+        "ANTHROPIC_FOUNDRY_RESOURCE",
+        "ANTHROPIC_FOUNDRY_BASE_URL",
+        "CLOUD_ML_REGION",
+        "GOOGLE_GENAI_USE_VERTEXAI",
+        "GOOGLE_GENAI_USE_GCA",
+        "GOOGLE_CLOUD_PROJECT",
+    }
+)
+_GATEWAY_CREDENTIAL_SUFFIXES: tuple[str, ...] = (
+    "_API_KEY",
+    "_AUTH_TOKEN",
+    "_OAUTH_TOKEN",
+    "_ACCESS_TOKEN",
+    "_SESSION_TOKEN",
+    "_SECRET",
+    "_SECRET_KEY",
+    "_SECRET_ACCESS_KEY",
+    "_CLIENT_SECRET",
+    "_CODING_PLAN_KEY",
+    "_ADMIN_KEY",
+    "_ADMIN_TOKEN",
+    "_CREDENTIALS_FILE",
+)
+_GATEWAY_SENSITIVE_ENV_KEYS = (
+    PROVIDER_CREDENTIAL_ENV_KEYS
+    | GATEWAY_CONTROL_PLANE_ENV_KEYS
+    | _GATEWAY_CLOUD_CREDENTIAL_ENV_KEYS
+    | _GATEWAY_PROVIDER_ROUTING_ENV_KEYS
+    | frozenset({"ANTHROPIC_AUTH_TOKEN"})
+)
+
+
+def gateway_sensitive_env_keys() -> frozenset[str]:
+    """Return every real provider or gateway-control env key a routed worker
+    must not inherit.
+
+    ``ANTHROPIC_AUTH_TOKEN`` is included because an ambient host token may be a
+    real subscription credential.  The resolver overlays the freshly minted
+    virtual token only *after* this scrub.
+    """
+
+    return _GATEWAY_SENSITIVE_ENV_KEYS
+
+
+def _is_gateway_sensitive_env_key(key: str) -> bool:
+    """Defensively recognize credentials added outside HydraFlow's registries."""
+
+    if key == "GH_TOKEN":
+        return False
+    return key in _GATEWAY_SENSITIVE_ENV_KEYS or key.endswith(
+        _GATEWAY_CREDENTIAL_SUFFIXES
+    )
+
+
+def scrub_gateway_spawn_env(env: Mapping[str, str]) -> dict[str, str]:
+    """Copy *env* without any real provider/admin credential material.
+
+    This is deliberately gateway-only.  Native Claude and direct z.ai spawns
+    retain their historical credential behavior during the opt-in rollout.
+    """
+
+    return {
+        key: value
+        for key, value in env.items()
+        if not _is_gateway_sensitive_env_key(key)
+    }
 
 
 def is_credit_exhaustion(text: str) -> bool:

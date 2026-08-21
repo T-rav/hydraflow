@@ -114,6 +114,23 @@ export const WS_RECONNECT_BASE_MS = 1_000
 export const WS_RECONNECT_MAX_MS = 30_000
 
 /**
+ * WS event batching (#11221, second half of the #100 console-slowness fix;
+ * first half: the now-tick PR #11220). Every WS frame previously dispatched
+ * its own reducer action, rebuilding the O(MAX_EVENTS) events array and
+ * changing the context value once per frame — fanning a full re-render out
+ * to every consumer (classic dashboard + operator console) at event rate.
+ * Live frames are queued in a ref and flushed through the reducer as one
+ * WS_BATCH action at this cadence — or immediately once WS_BATCH_MAX_QUEUE
+ * frames are pending — so a burst of N events produces one context-value
+ * change instead of N. Throttled (fixed cadence from the first queued
+ * frame), not debounced (re-armed per frame): worst-case added latency is
+ * bounded at WS_BATCH_FLUSH_MS no matter how fast frames keep arriving.
+ * 220ms sits in the issue's 200-250ms "invisible to the operator" band.
+ */
+export const WS_BATCH_FLUSH_MS = 220
+export const WS_BATCH_MAX_QUEUE = 25
+
+/**
  * Canonical pipeline stage definitions.
  * All stage metadata lives here to prevent drift across components.
  * Components derive their own views (uppercase labels, filtered subsets, etc.) from this array.
@@ -449,6 +466,7 @@ export const BACKGROUND_WORKERS = [
   { key: 'disturbance_dampener', label: 'Violation Burn-Down', term: 'Disturbance Dampener', description: 'Burns down disturbance backlog by selecting units per dimension+file, dispatching an auto-agent fix, and opening one PR per file. See ADR-0095.', color: theme.purple, group: 'autonomy', tags: ['scaffold'] },
   { key: 'human_steering', label: 'Human Directives', term: 'Human Steering', description: 'Senses per-issue GitHub-comment steering directives (/steer, /pause, /resume, /redo, /abort) each tick and writes the steering reference. See ADR-0099 #4.', color: theme.purple, group: 'autonomy', tags: ['scaffold'] },
   { key: 'detector_calibration', label: 'Auditor Tuning', term: 'Detector Calibration', description: 'Mines escalation history for repeat-offender subjects — same subject escalated repeatedly means the DETECTOR is miscalibrated, not the code', color: theme.purple, group: 'autonomy', tags: ['scaffold'] },
+  { key: 'gateway_coverage', label: 'Gateway Coverage', description: 'Measures the share of priced LLM spend transiting the gateway and identifies direct one-shot bypass families.', color: theme.cyan, system: true, group: 'operations', tags: ['monitoring', 'cost'] },
   { key: 'diagram_loop', label: 'Diagram Loop (L24)', description: 'Self-documenting architecture caretaker. Walks src/, tests/, docs/adr/ every 4h; emits regenerated docs/arch/generated/ markdown + opens a PR when the live truth has drifted. Per ADR-0029 (caretaker pattern) and the Architecture Knowledge System spec.', color: theme.cyan, group: 'governance', tags: ['drift'] },
   { key: 'pricing_refresh', label: 'Pricing Refresh', description: 'Daily upstream-pricing refresh caretaker. Fetches LiteLLM\'s structured pricing JSON, diffs against src/assets/model_pricing.json, opens a PR if upstream has new or changed Claude models. Bounds-guard rejects suspicious price moves (>+100% or <-50%). Always human-reviewed; never auto-merges.', color: theme.cyan, group: 'learning', tags: ['cost'] },
   { key: 'cost_budget_watcher', label: 'Cost Budget Watcher', description: 'Polls rolling-24h LLM spend every 5 min; disables caretaker loops when daily cap exceeded; auto-recovers as the rolling window drops below the cap. Default unlimited (cap=None).', color: theme.cyan, group: 'operations', tags: ['monitoring'] },

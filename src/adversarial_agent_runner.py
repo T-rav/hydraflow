@@ -4,10 +4,10 @@ The earlier-adversarial pipeline (AssumptionSurfacer, PlanCouncil,
 DiscoveryCouncil, ShapeChallenger, ShapeExpertCouncil, SpecACGenerator,
 SpecJudge) each take an agent satisfying the two-string-in,
 JSON-string-out contract in :mod:`src.adversarial_agents`. This adapter
-wraps the existing one-shot CLI invocation path
-(:func:`agent_cli.build_lightweight_command` + ``SubprocessRunner``) so
-the adversarial pipeline can drive real ``claude -p`` (or
-``codex``/``gemini``/``pi``) subprocesses in production.
+wraps the centralized one-shot execution seam
+(:func:`runner_utils.run_lightweight_agent`) so the adversarial pipeline can
+drive real agent subprocesses in production without bypassing prompt policy,
+gateway routing, credit detection, or inference telemetry.
 
 Design notes
 ------------
@@ -37,17 +37,11 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from agent_cli import AgentTool, build_lightweight_command
-from exception_classify import reraise_on_credit_or_bug
-from subprocess_util import (
-    CreditExhaustedError,
-    is_credit_exhaustion,
-    make_clean_env,
-    parse_credit_resume_time,
-)
+from agent_cli import AgentTool
+from runner_utils import run_lightweight_agent
 
 if TYPE_CHECKING:
-    from config import Credentials
+    from config import Credentials, HydraFlowConfig
     from execution import SubprocessRunner
 
 logger = logging.getLogger("hydraflow.adversarial_agent_runner")
@@ -67,6 +61,10 @@ class SubprocessAgentRunner:
     runner:
         The :class:`execution.SubprocessRunner` used to invoke the CLI.
         Production paths inject the Docker runner; tests inject fakes.
+    config:
+        The active repository configuration. Required so this adapter follows
+        the same prompt-policy, provider, gateway, and telemetry contracts as
+        every other one-shot LLM spawn.
     tool:
         Which agent CLI to invoke. Defaults to ``"claude"``.
     model:
@@ -79,15 +77,19 @@ class SubprocessAgentRunner:
         deliberately shorter than the planner/implement timeout.
     credentials:
         Optional :class:`config.Credentials`; when provided, the
-        ``gh_token`` is injected into the subprocess env via
-        :func:`make_clean_env`.
+        ``gh_token`` is passed to the centralized spawn seam.
+    provider:
+        Harness transport for these planning critics. Production wiring uses
+        the planner's provider dial so the sub-spawns cannot escape its route.
     """
 
     runner: SubprocessRunner
+    config: HydraFlowConfig
     tool: AgentTool = "claude"
     model: str = "claude-haiku-4-5-20251001"
     timeout: float = 180.0
     credentials: Credentials | None = None
+    provider: str = "claude"
 
     async def run(self, system_prompt: str, user_message: str) -> str:
         """Send the prompts to the CLI and return raw stdout.
@@ -110,55 +112,29 @@ class SubprocessAgentRunner:
             empty reply.
         """
         prompt = self._compose_prompt(system_prompt, user_message)
-        cmd, cmd_input = build_lightweight_command(
+        gh_token = self.credentials.gh_token if self.credentials is not None else ""
+        result = await run_lightweight_agent(
+            runner=self.runner,
+            config=self.config,
             tool=self.tool,
             model=self.model,
             prompt=prompt,
+            source="adversarial_planner",
+            timeout=self.timeout,
+            gh_token=gh_token,
             # Adversarial judges (SpecJudge, PlanCouncil, …) emit strict JSON.
-            # Isolate from host user plugins/hooks (e.g. a superpowers
-            # SessionStart hook) that would derail the JSON contract.
+            # Isolate from host user plugins/hooks that would derail the
+            # machine-readable response contract.
             isolate_user_settings=True,
+            provider=self.provider,
+            # AgentLike's contract carries only the two prompt strings; it has
+            # no Task/issue object from which to derive labels. The repository
+            # data class is still enforced by the prompt gate.
+            issue_labels=(),
         )
-        gh_token = self.credentials.gh_token if self.credentials is not None else ""
-        env = make_clean_env(gh_token)
-
-        try:
-            result = await self.runner.run_simple(
-                cmd,
-                env=env,
-                input=cmd_input,
-                timeout=self.timeout,
-            )
-        except Exception as exc:
-            # Dark-factory contract: bug + credit exceptions must
-            # propagate so the outer loop can react. Everything else
-            # (TimeoutError, OSError, transient network blips) becomes
-            # a soft empty reply so the adversarial stage doesn't crash
-            # the host pipeline.
-            reraise_on_credit_or_bug(exc)
-            logger.warning(
-                "SubprocessAgentRunner(%s) subprocess failed: %s", self.tool, exc
-            )
-            return ""
 
         stdout = result.stdout or ""
         stderr = result.stderr or ""
-
-        # Credit-exhaustion detection: the lightweight CLI path can
-        # surface "usage limit reached" in stdout or stderr without
-        # raising. Convert to CreditExhaustedError so the outer loop
-        # can pause on the billing signal.
-        for blob in (stdout, stderr):
-            if blob and is_credit_exhaustion(blob):
-                resume_at = parse_credit_resume_time(blob)
-                # The voter CLI's own output is the process termination signal
-                # (no analysis loop quoting a prior cap) — authoritative so the
-                # orchestrator pauses without the weekly-blind probe (#10558).
-                raise CreditExhaustedError(
-                    f"{self.tool} CLI signaled credit exhaustion",
-                    resume_at=resume_at,
-                    authoritative=True,
-                )
 
         if result.returncode != 0:
             # The CLI exited nonzero but it wasn't a credit-exhaustion

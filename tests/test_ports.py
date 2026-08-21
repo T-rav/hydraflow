@@ -183,6 +183,12 @@ class TestPRPortMethods:
         "find_open_resolving_pr",
         # Closed-issue stale stage-label caretaker (#10394)
         "find_closed_stage_labeled_issues",
+        # Branch-GC / fitness-fetcher reach-through retirement (#11418)
+        "list_branch_refs",
+        "list_branch_commits",
+        "get_issue_body",
+        "list_all_issues",
+        "list_all_prs",
     ]
 
     @pytest.mark.parametrize("method", _REQUIRED_METHODS)
@@ -327,6 +333,12 @@ class TestPRPortSignatures:
         "find_open_resolving_pr",
         # Closed-issue stale stage-label caretaker (#10394)
         "find_closed_stage_labeled_issues",
+        # Branch-GC / fitness-fetcher reach-through retirement (#11418)
+        "list_branch_refs",
+        "list_branch_commits",
+        "get_issue_body",
+        "list_all_issues",
+        "list_all_prs",
     ]
 
     @pytest.mark.parametrize("method", _SIGNED_METHODS)
@@ -408,6 +420,7 @@ class TestIssueStorePortMethods:
         "get_implementable",
         "get_reviewable",
         "enqueue_transition",
+        "try_claim_stage",
         "mark_active",
         "mark_complete",
         "mark_merged",
@@ -434,6 +447,7 @@ class TestIssueStorePortSignatures:
         "get_implementable",
         "get_reviewable",
         "enqueue_transition",
+        "try_claim_stage",
         "mark_active",
         "mark_complete",
         "mark_merged",

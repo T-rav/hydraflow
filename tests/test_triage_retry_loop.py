@@ -298,7 +298,7 @@ async def test_reconcile_clears_counter_for_closed_issue(env) -> None:
     _, state, pr = env
     # Pretend issue 555 was tracked but is now closed; issue 666 is open.
     state._data.triage_retry_attempts = {"555": 2, "666": 1}
-    pr.get_issue_state = AsyncMock(side_effect=["CLOSED", "OPEN"])
+    pr.get_issue_state = AsyncMock(side_effect=["COMPLETED", "OPEN"])
     pr.list_issues_by_label.return_value = []
     loop = _make_loop(env)
 

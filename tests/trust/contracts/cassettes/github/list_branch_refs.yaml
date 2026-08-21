@@ -1,0 +1,22 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# list_branch_refs returns [(branch_name, sha), ...] for refs/heads/<prefix>*
+# branches, mirroring `gh api .../git/matching-refs/heads/<prefix>`. Used by
+# StaleIssueLoop's branch-GC scan and by list_rc_branches (#11418). A fresh
+# fake has no matching branches, so the contract pins the empty-list shape.
+adapter: github
+interaction: list_branch_refs
+recorded_at: "2026-08-18T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: list_branch_refs
+  args:
+    - "agent/issue-"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "[]\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

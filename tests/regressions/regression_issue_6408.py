@@ -62,8 +62,9 @@ def _make_loop(
     pr_manager.upload_screenshot = AsyncMock(return_value="")
     pr_manager.create_issue = AsyncMock(return_value=123)
     pr_manager.add_labels = AsyncMock()
-    pr_manager._run_gh = AsyncMock(return_value='{"labels":[],"body":""}')
-    pr_manager._repo = "owner/repo"
+    pr_manager.get_issue_labels = AsyncMock(return_value=[])
+    pr_manager.get_issue_body = AsyncMock(return_value="")
+    pr_manager.update_issue_body = AsyncMock()
 
     loop = ReportIssueLoop(
         config=deps.config,

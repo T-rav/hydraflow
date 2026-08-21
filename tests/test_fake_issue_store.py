@@ -7,6 +7,7 @@ import pytest
 from events import EventBus
 from mockworld.fakes import FakeGitHub
 from mockworld.fakes.fake_issue_store import FakeIssueStore
+from tests.conftest import TaskFactory
 
 
 @pytest.mark.asyncio
@@ -31,6 +32,91 @@ async def test_transition_updates_label() -> None:
 
     assert "hydraflow-ready" not in gh._issues[1].labels
     assert "hydraflow-planning" in gh._issues[1].labels
+
+
+def test_try_claim_stage_requires_matching_unowned_stage() -> None:
+    gh = FakeGitHub()
+    gh.add_issue(2, "planned", "body", labels=["hydraflow-plan"])
+    store = FakeIssueStore(github=gh, event_bus=EventBus())
+    task = store.get_plannable(1)[0]
+    store.release_in_flight({2})
+
+    assert store.try_claim_stage(task, "plan") is True
+    assert store.try_claim_stage(task, "plan") is False
+
+
+def test_try_claim_stage_rejects_nonmatching_fake_stage() -> None:
+    gh = FakeGitHub()
+    gh.add_issue(4, "planned", "body", labels=["hydraflow-plan"])
+    store = FakeIssueStore(github=gh, event_bus=EventBus())
+    task = store.get_plannable(1)[0]
+    store.release_in_flight({4})
+
+    assert store.try_claim_stage(task, "ready") is False
+
+
+def test_try_claim_stage_rejects_hitl_like_production_store() -> None:
+    gh = FakeGitHub()
+    gh.add_issue(8, "escalated", "body", labels=["hydraflow-hitl"])
+    store = FakeIssueStore(github=gh, event_bus=EventBus())
+    task = TaskFactory.create(id=8, tags=["hydraflow-hitl"])
+
+    assert store.try_claim_stage(task, "hitl") is False
+    assert store.get_worker_held_issues() == {}
+
+
+def test_try_claim_stage_rejects_merged_fake_issue() -> None:
+    gh = FakeGitHub()
+    gh.add_issue(5, "merged", "body", labels=["hydraflow-plan"])
+    store = FakeIssueStore(github=gh, event_bus=EventBus())
+    task = store.get_plannable(1)[0]
+    store.release_in_flight({5})
+    store.mark_merged(5)
+
+    assert store.try_claim_stage(task, "plan") is False
+
+
+def test_scoped_release_preserves_different_fake_stage_claim() -> None:
+    gh = FakeGitHub()
+    gh.add_issue(3, "ready", "body", labels=["hydraflow-ready"])
+    store = FakeIssueStore(github=gh, event_bus=EventBus())
+    assert [task.id for task in store.get_implementable(1)] == [3]
+
+    store.release_in_flight({3}, expected_stage="plan")
+
+    assert store.get_worker_held_issues() == {3: "ready"}
+
+
+@pytest.mark.asyncio
+async def test_matching_scoped_release_stays_dequeued_until_refresh() -> None:
+    gh = FakeGitHub()
+    gh.add_issue(6, "planned", "body", labels=["hydraflow-plan"])
+    store = FakeIssueStore(github=gh, event_bus=EventBus())
+    initial = store.get_plannable(1)
+    assert [task.id for task in initial] == [6]
+
+    store.release_in_flight({6}, expected_stage="plan")
+
+    assert store.get_plannable(1) == []
+    assert store.try_claim_stage(initial[0], "plan") is False
+    await store.refresh()
+    refreshed = store.get_plannable(1)
+    assert [task.id for task in refreshed] == [6]
+    store.release_in_flight({6})
+    assert store.try_claim_stage(refreshed[0], "plan") is True
+
+
+def test_clear_active_removes_fake_stage_release_suppression() -> None:
+    gh = FakeGitHub()
+    gh.add_issue(7, "planned", "body", labels=["hydraflow-plan"])
+    store = FakeIssueStore(github=gh, event_bus=EventBus())
+    assert [task.id for task in store.get_plannable(1)] == [7]
+    store.release_in_flight({7}, expected_stage="plan")
+    assert store.get_plannable(1) == []
+
+    store.clear_active()
+
+    assert [task.id for task in store.get_plannable(1)] == [7]
 
 
 # ── Pipeline snapshot status + hitl_visited (#10509) ────────────────────

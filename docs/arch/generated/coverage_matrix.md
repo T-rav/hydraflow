@@ -39,6 +39,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `FlakeTrackerLoop` | ✅ [0045, 0056, 0065, 0089, 0099, 0120] | ✅ [flake-tracker-loop.md, git-hub-data-cache.md] | ✅ loops.md | ✅ README.md | ✅ `test_flake_tracker_loop.py` | ✅ in catalog | ❌ |
 | `GateActivatorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_gate_activator_loop.py` | ✅ in catalog | ✅ `s45_gate_activator_no_proposals.py` |
 | `GateHealthLoop` | ✅ [0120] | ✅ [dark-factory.md, feedback-workstream-fixes-over-loops.md, testing.md] | ✅ loops.md | ❌ | ✅ `test_gate_health_loop.py` | ✅ in catalog | ❌ |
+| `GatewayCoverageLoop` | ✅ [0110] | ✅ [architecture.md] | ✅ loops.md | ❌ | ✅ `test_gateway_coverage_loop.py` | ✅ in catalog | ✅ `s91_gateway_session_tap.py` |
 | `GitHubCacheLoop` | ✅ [0076] | ✅ [git-hub-cache-loop.md, git-hub-data-cache.md, hitl-item.md] | ✅ loops.md | ✅ README.md | ✅ `test_github_cache_loop.py` | ✅ in catalog | ✅ `s44_github_cache_idle_poll.py` |
 | `GoalSupervisorLoop` | ✅ [0124] | ✅ [goal-supervisor-loop.md] | ✅ loops.md | ❌ | ✅ `test_goal_supervisor_loop.py` | ✅ in catalog | ❌ |
 | `HealthMonitorLoop` | ✅ [0045, 0046, 0093, 0106, 0124] | ✅ [goal-supervisor-loop.md, gotchas.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_health_monitor_loop_primary_cycle.py` | ✅ in catalog | ✅ `s48_health_monitor_idle_poll.py` |

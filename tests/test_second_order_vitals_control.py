@@ -14,6 +14,7 @@ from vitals.control import (
     breaches_upper,
     individuals_limits,
     mean_moving_range,
+    sigma_hat,
 )
 
 
@@ -28,6 +29,15 @@ class TestMeanMovingRange:
     def test_alternating_series(self) -> None:
         # |12-10| = 2 each step → mean 2.0
         assert mean_moving_range([10.0, 12.0, 10.0, 12.0]) == 2.0
+
+
+class TestSigmaHat:
+    def test_matches_mean_moving_range_over_d2(self) -> None:
+        baseline = [10.0, 12.0, 10.0, 12.0]
+        assert math.isclose(sigma_hat(baseline), 2.0 / 1.128, rel_tol=1e-9)
+
+    def test_empty_baseline_is_zero(self) -> None:
+        assert sigma_hat([]) == 0.0
 
 
 class TestIndividualsLimits:

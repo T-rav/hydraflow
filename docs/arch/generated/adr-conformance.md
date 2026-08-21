@@ -78,7 +78,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py` |
 | ADR-0107 | enforced | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0109 | enforced | `pytest:tests/test_ultra_review.py` |
-| ADR-0110 | enforced | `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` |
+| ADR-0110 | enforced | `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` |
 | ADR-0111 | enforced | `pytest:tests/test_flows.py` |
 | ADR-0112 | enforced | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` |
 | ADR-0113 | enforced | `pytest:tests/test_audit_lineage_check.py::test_control_plane_adr_missing_both_lines_fails` |
@@ -146,7 +146,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_base_runner_repo_provider.py` | ADR-0134 |
 | `pytest:tests/test_base_subprocess_runner_repo_provider.py` | ADR-0134 |
 | `pytest:tests/test_caretaker_loop_wiring.py` | ADR-0029 |
-| `pytest:tests/test_config_combo_env.py::test_reject_glm_model_on_claude_provider` | ADR-0110 |
+| `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` | ADR-0110 |
 | `pytest:tests/test_config_env.py` | ADR-0103 |
 | `pytest:tests/test_config_repo_provider.py` | ADR-0134 |
 | `pytest:tests/test_convergence_gate.py` | ADR-0094 |

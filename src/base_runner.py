@@ -27,8 +27,13 @@ from repo_backend import apply_repo_provider
 from runner_utils import (
     AuthenticationRetryError,
     StreamConfig,
+    _terminal_gateway_runner,
+    harness_billing_provider,
+    renew_gateway_key_if_needed,
     resolve_harness_env,
+    revoke_gateway_key,
     stream_claude_process,
+    telemetry_tool_for_transport,
     terminate_processes,
 )
 from tracing_context import TracingContext
@@ -249,6 +254,13 @@ class BaseRunner:
         # credit-scoping provider). Default "claude" (native Anthropic) is a
         # no-op; a runner whose role dial is "zai" runs on the GLM harness.
         provider = self._resolve_provider()
+        cmd_tool, _ = parse_command_tool_model(cmd)
+        if (
+            getattr(self._config, "gateway_fleet_ratchet_enabled", False) is True
+            and provider == "claude"
+            and cmd_tool == "claude"
+        ):
+            provider = "gateway"
         # Repo-wide backend override (#11211): a still-Claude spawn reroutes to
         # this repo's zai dial (config.repo_provider) when the role itself
         # hasn't already routed off Claude. No-op unless repo_provider == "zai"
@@ -276,9 +288,25 @@ class BaseRunner:
                 self._config.credit_failover_model,
             )
             provider = rerouted
-        harness_env = resolve_harness_env(provider, self._config)
+        _, resolved_model = parse_command_tool_model(cmd)
+        harness_env = await resolve_harness_env(
+            provider,
+            self._config,
+            model=resolved_model,
+            source=str(event_data.get("source", self._phase_name)),
+            session_id=getattr(self._bus, "current_session_id", None),
+            timeout_seconds=self._config.agent_timeout,
+        )
+        billing_provider = harness_billing_provider(provider, resolved_model)
+        spawn_runner = self._runner
+        owned_runner: SubprocessRunner | None = None
 
         try:
+            spawn_runner, owned_runner = _terminal_gateway_runner(
+                spawn_runner,
+                self._config,
+                provider,
+            )
             last_auth_error: AuthenticationRetryError | None = None
             for attempt in range(1, self._AUTH_RETRY_MAX + 1):
                 try:
@@ -293,13 +321,14 @@ class BaseRunner:
                         config=StreamConfig(
                             on_output=on_output,
                             timeout=self._config.agent_timeout,
-                            runner=self._runner,
+                            runner=spawn_runner,
                             usage_stats=usage_stats,
                             gh_token=self._credentials.gh_token,
                             trace_collector=trace_collector,
                             credit_prose_scan=self.CREDIT_PROSE_SCAN,
                             harness_env=harness_env,
-                            provider=provider,
+                            harness_transport=provider,
+                            provider=billing_provider,
                         ),
                     )
                     succeeded = True
@@ -318,6 +347,10 @@ class BaseRunner:
                             exc,
                         )
                         await asyncio.sleep(delay)
+                        await renew_gateway_key_if_needed(
+                            harness_env,
+                            min_validity_seconds=self._config.agent_timeout,
+                        )
                     else:
                         self._log.error(
                             "Auth failed after %d attempts: %s",
@@ -339,29 +372,37 @@ class BaseRunner:
                 trace_collector.finalize(success=False)
             raise
         finally:
-            duration = time.monotonic() - start
-            source = telemetry_source or str(event_data.get("source", "unknown"))
-            issue_number = event_data.get("issue")
-            pr_number = event_data.get("pr")
-            tool, model = parse_command_tool_model(cmd)
-            merged_stats = {
-                **self._consume_context_stats(),
-                **usage_stats,
-                **(telemetry_stats or {}),
-            }
-            self._prompt_telemetry.record(
-                source=source,
-                tool=tool,
-                model=model,
-                issue_number=issue_number,
-                pr_number=pr_number,
-                session_id=self._bus.current_session_id,
-                prompt_chars=len(prompt),
-                transcript_chars=len(transcript),
-                duration_seconds=duration,
-                success=succeeded,
-                stats=merged_stats,
-            )
+            try:
+                duration = time.monotonic() - start
+                source = telemetry_source or str(event_data.get("source", "unknown"))
+                issue_number = event_data.get("issue")
+                pr_number = event_data.get("pr")
+                tool, model = parse_command_tool_model(cmd)
+                tool = telemetry_tool_for_transport(provider, tool)
+                merged_stats = {
+                    **self._consume_context_stats(),
+                    **usage_stats,
+                    **(telemetry_stats or {}),
+                }
+                self._prompt_telemetry.record(
+                    source=source,
+                    tool=tool,
+                    model=model,
+                    issue_number=issue_number,
+                    pr_number=pr_number,
+                    session_id=self._bus.current_session_id,
+                    prompt_chars=len(prompt),
+                    transcript_chars=len(transcript),
+                    duration_seconds=duration,
+                    success=succeeded,
+                    stats=merged_stats,
+                )
+            finally:
+                try:
+                    await revoke_gateway_key(harness_env)
+                finally:
+                    if owned_runner is not None:
+                        await owned_runner.cleanup()
 
     def _save_transcript(self, prefix: str, identifier: int, transcript: str) -> None:
         """Write a transcript to ``.hydraflow/logs/<prefix>-<identifier>.txt``."""

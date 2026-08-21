@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `818670a` — Merge branch 'staging' into agent/auto-agent-11279 *(2026-08-17)*
+- `7cba8c3` — Fixes #11416: MockWorld repo_wiki loop registration never wires a w... (#11428) (#11428) *(2026-08-17)*
+- `ecbe348` — Merge remote-tracking branch 'origin/staging' into pipefix-heal *(2026-08-17)*
 - `b0aa945` — feat(quality): host-wide advisory lock so concurrent suites queue, not race (#11219) (#11400) (#11400) *(2026-08-17)*
 
 ## 2026-W33
@@ -13,6 +16,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `9bbae16` — feat(supervisor): fleet-vitals shadow alarms — bands, mechanical diagnosis, closed-menu proposals (#11391) (#11392) (#11392) *(2026-08-16)*
 - `49df312` — feat(light-lane): route simple issues to the single-session auto-agent — one spawn, issue to PR (#11298) (#11389) (#11389) *(2026-08-16)*
 - `4610eb2` — fix(diagnostic): opt DiagnosticLoop into the LLM watchdog bound (#11262) (#11369) (#11369) *(2026-08-16)*
+- `a0ca56f` — fix(pipeline): gate /api/pipeline snapshot on IssueStore's first refresh (#11279) (#11279) *(2026-08-16)*
 - `a08bf72` — feat(find-filing): class-key fold layer for pattern-shaped find-issues (#11292) (#11324) (#11324) *(2026-08-16)*
 - `9d7bf33` — feat(providers): ZAI_CODING_PLAN_KEY — plan vs API billing lane split (#11267) (#11267) *(2026-08-15)*
 - `66b3cff` — Fixes #11208: make factory should auto-start the orchestrator (#11257) (#11257) *(2026-08-15)*
@@ -446,37 +450,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `e5e3dbd` — Refs #8930: add onboarding draft API foundation *(2026-05-22)*
 - `52784fb` — Fixes #8368: resolve dashboard a11y violations *(2026-05-22)*
 - `3381e36` — Refs #8475: preserve managed repo config models *(2026-05-22)*
-- `22b8cee` — Fixes #8617: expose repo pipeline enabled state *(2026-05-22)*
-- `90279ad` — Fixes #8651: collapse crowded pipeline dots *(2026-05-22)*
-- `1e94520` — Fixes #8674: refresh arch artifacts before bot push *(2026-05-22)*
-- `700bc6b` — Fixes #8658: update Opus 4.7 pricing *(2026-05-22)*
-- `72fea53` — Fixes #8979: fold epic sweep into monitor *(2026-05-22)*
-- `527bea0` — Fixes #8928: make issue creation failure explicit *(2026-05-22)*
-- `e7d4296` — Fixes #8481: register caretaker escalation labels *(2026-05-22)*
-- `60d07b4` — feat(mockworld): FakeDocker bd-CLI emulation for bead lifecycle coverage (closes #8367) (#9053) (#9053) *(2026-05-21)*
-- `4afc722` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `2efdbb1` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `fecc6a8` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `10e9737` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `81ce3ea` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `ffd5f38` — chore(arch): regen post-rebase against staging *(2026-05-20)*
-- `049ec06` — test(sandbox): ADR-0063 W3a/W3b/W4/W5 recovery-path scenarios (s36/s37/s39/s40 rewrite) *(2026-05-20)*
-- `23def6e` — feat(mockworld): FakeLLM scripting hooks for discover/plan-review/shape-council/spec-review failure paths *(2026-05-20)*
-- `3b9ea23` — test(sandbox): ADR-0063 workstream e2e coverage (s35-s40) *(2026-05-20)*
-- `6981598` — chore(arch): regen post-rebase round 3 *(2026-05-20)*
-- `21b59db` — chore(arch): regen post-rebase round 2 *(2026-05-20)*
-- `0b33086` — chore(arch): regen post-rebase + ADR renumber *(2026-05-20)*
-- `9843c52` — chore(arch): regen after lint pass *(2026-05-20)*
-- `6da9a75` — docs(wiki+standards+adr): bulk backfill 3 — 12 wiki terms, standards wiring, 2 ADR drafts *(2026-05-20)*
-- `cd44f14` — chore(arch): regen post-rebase round 2 *(2026-05-20)*
-- `d483b28` — chore(arch): regen post-rebase *(2026-05-20)*
-- `cda3bd4` — chore(arch): regenerate arch artifacts post-backfill *(2026-05-20)*
-- `e788dcb` — docs(standards,adr): backfill standards refs and ADR drafts for 9 ports/loops *(2026-05-20)*
-- `ac80bb8` — docs(wiki): backfill missing wiki entries for 8 ports/loops *(2026-05-20)*
-- `75ad1a4` — chore(arch): regen after rebase against staging *(2026-05-20)*
-- `a8e86d7` — chore: ruff format + arch-regen refresh *(2026-05-20)*
-- `4ff3f88` — chore(arch): regen after rebase against staging *(2026-05-20)*
-- `d15e32a` — style(trust-fleet-sanity): ruff lint + format fixes on breach-path tests *(2026-05-20)*
 
 
 <!-- arch:generated -->

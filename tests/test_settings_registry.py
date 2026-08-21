@@ -189,7 +189,7 @@ class TestRepoBackendOverride:
         assert "repo_provider" in mutable_field_names()
         row = self._schema()["repo_provider"]
         assert row["type"] == "enum"
-        assert set(row["choices"]) == {"claude", "zai"}
+        assert set(row["choices"]) == {"claude", "gateway", "zai"}
         assert row["live"] is True
         assert row["default"] == "claude"
         assert row["description"]

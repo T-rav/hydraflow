@@ -374,6 +374,18 @@ def _reset_gh_semaphore():
 
 
 @pytest.fixture(autouse=True)
+def _reset_prompt_telemetry_health_state():
+    """Clear the in-process prompt-ledger health latch between tests."""
+    import prompt_telemetry
+
+    with prompt_telemetry._HEALTH_LOCK:
+        prompt_telemetry._HEALTH_STATE.clear()
+    yield
+    with prompt_telemetry._HEALTH_LOCK:
+        prompt_telemetry._HEALTH_STATE.clear()
+
+
+@pytest.fixture(autouse=True)
 def _hermetic_credentials(monkeypatch):
     """Strip live provider credentials from every test's environment (#11302).
 

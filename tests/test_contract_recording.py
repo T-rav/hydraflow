@@ -33,6 +33,7 @@ import pytest
 import yaml
 
 from contract_recording import (
+    CLAUDE_STREAM_MODEL,
     record_claude_stream,
     record_docker,
     record_git,
@@ -275,6 +276,23 @@ def test_record_claude_stream_invokes_claude_with_ping(tmp_path: Path) -> None:
     assert len(paths) == 1
     assert paths[0].parent == tmp_path
     assert paths[0].suffix == ".jsonl"
+
+
+def test_record_claude_stream_uses_recorder_owned_native_model(tmp_path: Path) -> None:
+    captured: list[str] = []
+
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        captured.extend(argv)
+        return _completed(
+            argv=argv,
+            stdout='{"type": "result", "result": "pong"}\n',
+        )
+
+    with patch("contract_recording.subprocess.run", side_effect=fake_run):
+        paths = record_claude_stream(tmp_stream_dir=tmp_path)
+
+    assert captured[captured.index("--model") + 1] == CLAUDE_STREAM_MODEL
+    assert len(paths) == 1
 
 
 def test_record_claude_stream_writes_raw_jsonl(tmp_path: Path) -> None:

@@ -1,0 +1,18 @@
+---
+id: 0288
+topic: dependencies
+source_issue: synthesis
+source_phase: synthesis
+created_at: 2026-08-18T13:47:37.728361+00:00
+status: active
+corroborations: 1
+supersedes: 0270
+---
+
+# Use public symbols for cross-module env logic
+
+Do not use `_`-prefixed imports for environment keys or helper functions shared across `src/subprocess_util.py` and `src/runner_utils.py`.
+
+Example: Export `HARNESS_ROUTING_ENV_KEYS` and `declared_harness_env_keys()` as public symbols. Derive downstream sets from the constant rather than hand-listing them.
+
+**Why:** Private cross-module imports obscure the dependency graph and make the env-build invariant harder to enforce.

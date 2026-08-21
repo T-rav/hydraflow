@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from config import HydraFlowConfig
 from preflight.auto_agent_runner import AutoAgentRunner
 from tests.helpers import ConfigFactory
 
@@ -187,6 +188,51 @@ async def test_run_passes_worktree_as_cwd(tmp_path: Path) -> None:
     ):
         await runner.run(prompt="x", worktree_path=str(tmp_path), issue_number=1)
     assert captured["cwd"] == tmp_path
+
+
+@pytest.mark.asyncio
+async def test_terminal_gateway_auto_agent_uses_owned_isolated_runner(
+    tmp_path: Path,
+) -> None:
+    config = HydraFlowConfig(
+        repo_root=tmp_path,
+        execution_mode="docker",
+        gateway_fleet_ratchet_enabled=True,
+    )
+    bus = MagicMock()
+    bus.current_session_id = "terminal-auto-agent"
+    runner = AutoAgentRunner(config=config, event_bus=bus)
+    isolated_runner = AsyncMock()
+
+    with (
+        patch(
+            "runners.base_subprocess_runner.resolve_harness_env",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "runners.base_subprocess_runner._terminal_gateway_runner",
+            return_value=(isolated_runner, isolated_runner),
+        ),
+        patch(
+            "runners.base_subprocess_runner.stream_claude_process",
+            new_callable=AsyncMock,
+            return_value="<status>resolved</status>",
+        ) as stream_mock,
+        patch(
+            "runners.base_subprocess_runner.revoke_gateway_key",
+            new_callable=AsyncMock,
+        ),
+    ):
+        spawn = await runner.run(
+            prompt="terminal gateway prompt",
+            worktree_path=str(tmp_path),
+            issue_number=42,
+        )
+
+    assert spawn.crashed is False
+    assert stream_mock.await_args.kwargs["config"].runner is isolated_runner
+    isolated_runner.cleanup.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

@@ -2252,6 +2252,8 @@ class StateData(BaseModel):
     # SandboxFailureFixerLoop state
     # DetectorCalibrationLoop state
     detector_calibration_attempts: dict[str, int] = Field(default_factory=dict)
+    # GatewayCoverageLoop state
+    gateway_coverage_attempts: dict[str, int] = Field(default_factory=dict)
     flake_attempts: dict[str, int] = Field(default_factory=dict)
     skill_prompt_last_green: dict[str, str] = Field(default_factory=dict)
     skill_prompt_attempts: dict[str, int] = Field(default_factory=dict)

@@ -1,0 +1,82 @@
+// Issue #11446 — scenario catalog dedup fidelity
+specification {
+  element system
+  element container
+  element component
+  element store
+}
+
+model {
+  hydraflow = system 'HydraFlow' {
+
+    prod = container 'Production composition root' {
+      registry = component 'service_registry.build_services' {
+        description 'Wires 19 loops with real DedupStore instances'
+      }
+      prodStore = store 'DedupStore' {
+        description 'data_root/dedup/<name>.json — file-backed, read-your-writes'
+      }
+      registry -> prodStore 'constructs (set_name, path)'
+    }
+
+    scen = container 'Scenario tier (MockWorld)' {
+      catalog = component 'LoopCatalog.instantiate'
+      builders = component 'loop_registrations._build_*' {
+        description '19 builders auto-populate a *dedup port'
+      }
+      helper = component '_scenario_dedup helper (NEW)' {
+        description 'ports.get(key) or DedupStore(set_name, config.data_root/dedup/<file>)'
+      }
+      fake = store 'MagicMock dedup (DEFECT)' {
+        description 'get()->set() pinned; add/set_all are no-ops'
+      }
+      scenStore = store 'Real DedupStore (FIX)' {
+        description 'tmp-scoped: ConfigFactory data_root = repo_root/.hydraflow'
+      }
+      catalog -> builders 'name -> builder(ports, config, deps)'
+      builders -> helper 'delegates dedup default'
+      helper -> fake 'today'
+      helper -> scenStore 'after fix'
+    }
+
+    loop = container 'BaseBackgroundLoop subclass' {
+      filer = component '_file_findings / reconcile' {
+        description 'seen = dedup.get(); skip if fingerprint in seen; dedup.set_all/add'
+      }
+    }
+
+    tests = container 'Tests' {
+      pin = component 'tests/regressions/test_issue_11446.py' {
+        description 'contract probe + class sweep over every *dedup port'
+      }
+      scenTest = component 'tests/scenarios/test_erosion_metrics_scenario.py'
+      inst = component 'tests/scenarios/catalog/test_loop_instantiation.py' {
+        description 'permanent per-builder dedup contract guard (NEW)'
+      }
+    }
+
+    builders -> loop 'injects dedup=' 
+    loop -> filer
+    pin -> catalog 'sweeps every builder'
+    inst -> catalog 'parametrized contract check'
+    scenTest -> catalog 'two ticks, same range'
+    helper -> prodStore 'mirrors set_name + filename'
+  }
+}
+
+views {
+  view index {
+    title 'Dedup wiring: production vs scenario catalog'
+    include *
+  }
+
+  dynamic view refileRegression {
+    title 'Why a re-filing regression passes silently today'
+    catalog -> builders 'instantiate("erosion_metrics")'
+    builders -> fake 'MagicMock(); get.return_value = set()'
+    builders -> loop 'dedup=fake'
+    loop -> filer 'tick 1: seen = {} -> file finding'
+    filer -> fake 'set_all({fingerprint})  // no-op'
+    loop -> filer 'tick 2: seen = {} again -> RE-FILE'
+  }
+}

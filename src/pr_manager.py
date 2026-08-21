@@ -574,6 +574,65 @@ class PRManager(PRManagerPromotionMixin):
             )
         return True
 
+    async def list_branch_refs(self, prefix: str) -> list[tuple[str, str]]:
+        """Return ``[(branch_name, sha), ...]`` for ``refs/heads/<prefix>*``.
+
+        Thin translation of ``gh api .../git/matching-refs/heads/<prefix>``
+        — propagates read/parse failures rather than swallowing them, so
+        each caller applies its own resilience policy: :meth:`list_rc_branches`
+        (via ``pr_manager_promotion``) chains a per-sha commit-date lookup
+        and swallows failures itself; ``StaleIssueLoop``'s branch-GC skips a
+        prefix and moves on.
+        """
+        self._assert_repo()
+        raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/git/matching-refs/heads/{prefix}",
+            "--jq",
+            "[.[] | {ref: .ref, sha: .object.sha}]",
+        )
+        refs = json.loads(raw) if raw.strip() else []
+        results: list[tuple[str, str]] = []
+        for ref in refs:
+            branch = str(ref.get("ref", "")).removeprefix("refs/heads/")
+            sha = str(ref.get("sha", ""))
+            if branch and sha:
+                results.append((branch, sha))
+        return results
+
+    async def list_branch_commits(
+        self, branch: str, *, limit: int = 30
+    ) -> list[dict[str, str]]:
+        """Return ``[{"date": iso, "message": msg}, ...]`` newest-first for *branch*.
+
+        Thin translation of ``gh api .../commits`` — propagates read/parse
+        failures rather than swallowing them (mirrors
+        :meth:`list_branch_refs`). Used by ``StaleIssueLoop``'s branch-GC to
+        age a candidate branch and search its history for a ``Fixes #N``
+        reference.
+        """
+        self._assert_repo()
+        raw = await self._run_gh(
+            "gh",
+            "api",
+            f"repos/{self._repo}/commits",
+            "--method",
+            "GET",
+            "--field",
+            f"sha={branch}",
+            "--field",
+            f"per_page={limit}",
+            "--jq",
+            "[.[] | {date: .commit.committer.date, message: .commit.message}]",
+        )
+        commits = json.loads(raw) if raw.strip() else []
+        return [
+            {"date": str(c.get("date", "")), "message": str(c.get("message", ""))}
+            for c in commits
+            if isinstance(c, dict)
+        ]
+
     async def merge_pr(self, pr_number: int, *, auto_rebase: bool = False) -> bool:
         """Merge PR immediately via squash merge with branch deletion.
 
@@ -1040,6 +1099,34 @@ class PRManager(PRManagerPromotionMixin):
             )
         return summaries
 
+    async def list_all_issues(
+        self, *, state: str = "all", limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """Return issues in *state* as raw gh-wire dicts.
+
+        Fields: ``number``, ``title``, ``state``, ``labels``, ``createdAt``,
+        ``updatedAt``, ``closedAt`` — the union of what the fitness issue
+        fetcher (``service_registry``, state="all") and ``StaleIssueLoop``'s
+        stale-scan / backlog-budget reads (state="open") need from one gh
+        invocation shape. Propagates read/parse failures rather than
+        swallowing them.
+        """
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "issue",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            state,
+            "--limit",
+            str(limit),
+            "--json",
+            "number,title,state,labels,createdAt,updatedAt,closedAt",
+        )
+        return json.loads(output) if output else []
+
     async def list_open_issue_numbers(self, limit: int = 500) -> list[int]:
         """Return the numbers of ALL open issues (no label filter). #9905.
 
@@ -1367,6 +1454,29 @@ class PRManager(PRManagerPromotionMixin):
             ".labels[].name",
         )
         return [line.strip() for line in output.splitlines() if line.strip()]
+
+    async def get_issue_body(self, issue_number: int) -> str:
+        """Return the body text of a GitHub issue.
+
+        Delegates to ``gh issue view <n> --json body``, mirroring
+        :meth:`get_issue_labels`'s fail-closed contract (#9575): read
+        failures propagate rather than being swallowed, so
+        ``ReportIssueLoop._verify_issue`` sees a raised error rather than
+        an empty string mistaken for a genuinely blank body.
+        """
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "issue",
+            "view",
+            str(issue_number),
+            "--repo",
+            self._repo,
+            "--json",
+            "body",
+        )
+        data = json.loads(output)
+        return str(data.get("body") or "")
 
     async def get_pr_labels(self, pr_number: int) -> list[str]:
         """Return the label names carried by a GitHub pull request.
@@ -3300,6 +3410,32 @@ class PRManager(PRManagerPromotionMixin):
                 )
             )
         return prs
+
+    async def list_all_prs(
+        self, *, state: str = "all", limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """Return PRs in *state* as raw gh-wire dicts.
+
+        Fields: ``number``, ``state``, ``labels``, ``createdAt``,
+        ``closedAt``, ``mergedAt``. Used by the fitness issue fetcher
+        (``service_registry``, state="all"). Propagates read/parse
+        failures rather than swallowing them.
+        """
+        self._assert_repo()
+        output = await self._run_gh(
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            self._repo,
+            "--state",
+            state,
+            "--limit",
+            str(limit),
+            "--json",
+            "number,state,labels,createdAt,closedAt,mergedAt",
+        )
+        return json.loads(output) if output else []
 
     async def _fetch_hitl_raw_issues(
         self, hitl_labels: list[str]

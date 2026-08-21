@@ -39,6 +39,7 @@ from mockworld.seed import MockWorldSeed
 from models import BackgroundWorkerStatusPayload, EpicState
 from orchestrator import HydraFlowOrchestrator
 from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
+from prompt_telemetry import refresh_prompt_telemetry_health_after_retention
 from repo_wiki import RepoWikiStore, WikiEntry
 from runtime_config import load_runtime_config
 from service_registry import (
@@ -103,6 +104,11 @@ SANDBOX_SEAMS: dict[str, str] = {
     # ``runners=fake_llm``; every other build_services BaseRunner gets the
     # injected FakeSubprocessRunner via ``runner=subprocess_runner``.
     "base_runner": "fake_llm_runner",
+    # The adversarial planning councils share one SubprocessAgentRunner built
+    # with ``subprocess_runner`` from this composition root. Sandbox main passes
+    # FakeSubprocessRunner, so its centralized ``run_lightweight_agent`` call
+    # never constructs or reaches a real CLI process.
+    "adversarial_agent_runner": "fake_subprocess_runner",
     # ADR-0063 runners (discover/plan-review/council/spec-review/diagnostic/
     # decompose) consult the ``_mockworld_fake_llm`` sentinel before their
     # BaseSubprocessRunner.run spawn; sentinels are attached in main().
@@ -564,6 +570,29 @@ def materialize_health_metrics(config: HydraFlowConfig, seed: MockWorldSeed) -> 
         )
     for rec in metrics.get("harness_failures") or []:
         append_jsonl(config.repo_memory_dir / "harness_failures.jsonl", json.dumps(rec))
+
+
+def materialize_prompt_telemetry_source(
+    config: HydraFlowConfig, seed: MockWorldSeed
+) -> None:
+    """Establish an observed-empty PromptTelemetry denominator for a scenario.
+
+    The sandbox's FakeLLM runners deliberately do not emit production spend
+    telemetry. A gateway-only scenario therefore needs an explicit zero-row
+    source before coverage can distinguish "observed no bypasses" from "the
+    bypass source is missing". The regular audit-chain verifier and durable
+    health marker remain authoritative: existing rows are preserved, and a
+    corrupt or previously degraded source fails closed instead of being reset.
+    """
+
+    if not seed.prompt_telemetry_source_initialized:
+        return
+    path = config.cost_inferences_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch(exist_ok=True)
+    if not refresh_prompt_telemetry_health_after_retention(path):
+        msg = f"Could not initialize healthy prompt telemetry source: {path}"
+        raise RuntimeError(msg)
 
 
 def materialize_worker_heartbeats(state: Any, seed: MockWorldSeed) -> None:
@@ -1035,6 +1064,7 @@ async def main() -> None:
     # HealthMonitorLoop over them; empty seed fields are no-ops.
     materialize_epic_states(state, seed)
     materialize_health_metrics(config, seed)
+    materialize_prompt_telemetry_source(config, seed)
     materialize_worker_heartbeats(state, seed)
     # Worker-status event HISTORY (#10133) — pairs with the event_bus/EventLog
     # wiring above; empty seed field writes nothing.

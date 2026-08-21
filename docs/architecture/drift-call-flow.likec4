@@ -1,0 +1,25 @@
+specification {
+  element actor
+  element component
+}
+
+model {
+  phase      = actor 'Pipeline phase' 'review_phase/_phase.py'
+  registry   = component 'service_registry.build()' 'runners override'
+  fakeReview = component '_FakeReviewRunner' 'MockWorld stand-in'
+  realReview = component 'reviewer.ReviewRunner' 'production'
+
+  phase -> registry 'resolves self._reviewers'
+  registry -> fakeReview 'MockWorld / sandbox run'
+  registry -> realReview 'production run'
+  phase -> realReview 'review(pr, issue, worktree_path, diff, worker_id, ...) — all positional accepted'
+  phase -> fakeReview 'same call now: verbatim-mirrored signature — positional form accepted'
+}
+
+views {
+  view drift of phase {
+    title 'Positional call-shape parity: real runner vs MockWorld stand-in (#11420)'
+    include *
+    autoLayout LeftRight
+  }
+}

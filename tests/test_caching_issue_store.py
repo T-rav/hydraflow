@@ -62,6 +62,10 @@ class _FakeInnerStore:
     def enqueue_transition(self, task: Task, next_stage: str) -> None:
         self.calls.append(("enqueue_transition", (task.id, next_stage)))
 
+    def try_claim_stage(self, task: Task, expected_stage: str) -> bool:
+        self.calls.append(("try_claim_stage", (task.id, expected_stage)))
+        return True
+
     def mark_active(self, issue_number: int, stage: str) -> None:
         self.calls.append(("mark_active", (issue_number, stage)))
 
@@ -71,8 +75,15 @@ class _FakeInnerStore:
     def mark_merged(self, issue_number: int) -> None:
         self.calls.append(("mark_merged", (issue_number,)))
 
-    def release_in_flight(self, issue_numbers: set[int]) -> None:
-        self.calls.append(("release_in_flight", (frozenset(issue_numbers),)))
+    def release_in_flight(
+        self,
+        issue_numbers: set[int],
+        *,
+        expected_stage: str | None = None,
+    ) -> None:
+        self.calls.append(
+            ("release_in_flight", (frozenset(issue_numbers), expected_stage))
+        )
 
     def is_active(self, issue_number: int) -> bool:
         self.calls.append(("is_active", (issue_number,)))
@@ -204,6 +215,18 @@ class TestLifecyclePassThrough:
         decorator, inner, _ = _build(tmp_path)
         decorator.enqueue_transition(_task(1), "plan")
         assert ("enqueue_transition", (1, "plan")) in inner.calls
+
+    def test_stage_claim_and_scoped_release_pass_through(self, tmp_path: Path) -> None:
+        decorator, inner, _ = _build(tmp_path)
+
+        assert decorator.try_claim_stage(_task(1), "plan") is True
+        decorator.release_in_flight({1}, expected_stage="plan")
+
+        assert ("try_claim_stage", (1, "plan")) in inner.calls
+        assert (
+            "release_in_flight",
+            (frozenset({1}), "plan"),
+        ) in inner.calls
 
     def test_mark_methods_pass_through(self, tmp_path: Path) -> None:
         decorator, inner, _ = _build(tmp_path)

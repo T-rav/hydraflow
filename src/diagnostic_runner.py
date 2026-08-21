@@ -240,6 +240,14 @@ class DiagnosticRunner(BaseRunner):
                 issue_number,
                 parsed,
             )
+            # #11412 (sampled re-audit of #11370): this is the SECOND,
+            # equally-reachable parse-failure path — a JSON block that
+            # parses but violates the schema, which is exactly the weak
+            # structured-output compliance the failover lane exhibits.
+            # Without the same infra classification it escalates to HITL
+            # just as before the fix, reproducing the live incident.
+            from credit_failover import is_active as _failover_active
+
             return DiagnosisResult(
                 root_cause=str(
                     parsed.get("root_cause", transcript[:500] if transcript else "")
@@ -248,6 +256,7 @@ class DiagnosticRunner(BaseRunner):
                 fixable=False,
                 fix_plan=str(parsed.get("fix_plan", "")),
                 human_guidance="Agent output did not validate. Manual review required.",
+                infra_failure=_failover_active(),
             )
 
     async def fix(

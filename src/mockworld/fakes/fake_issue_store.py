@@ -77,6 +77,8 @@ _LABEL_TO_STAGE: dict[str, str] = {
     "hydraflow-diagnose": STAGE_DIAGNOSE,
 }
 
+_CLAIMABLE_STAGES = frozenset({STAGE_FIND, STAGE_PLAN, STAGE_READY, STAGE_REVIEW})
+
 
 @dataclass
 class FakeIssueRecord:
@@ -115,6 +117,9 @@ class FakeIssueStore:
         self._active: dict[int, str] = {}
         # In-flight (between dequeue and mark_active) tracking
         self._in_flight: dict[int, str] = {}
+        # Stage-scoped release mirrors the real store, where dequeue removes
+        # the queue entry until the next refresh reconciles GitHub labels.
+        self._released_stage_claims: set[tuple[int, str]] = set()
         # Merged issues for snapshot reporting
         self._merged_numbers: set[int] = set()
         # Issues ever observed in HITL, even after they've since left it
@@ -198,6 +203,8 @@ class FakeIssueStore:
                 continue
             if self._stage_for(issue) != stage:
                 continue
+            if (issue.number, stage) in self._released_stage_claims:
+                continue
             if issue.number in self._active or issue.number in self._in_flight:
                 continue
             out.append(self._issue_to_task(issue))
@@ -226,6 +233,7 @@ class FakeIssueStore:
 
     async def refresh(self) -> None:
         """Publish a queue-update event to keep the dashboard in sync."""
+        self._released_stage_claims.clear()
         self._last_poll_ts = datetime.now(UTC).isoformat()
         self._has_completed_initial_refresh = True
         try:
@@ -278,6 +286,27 @@ class FakeIssueStore:
         self._in_flight.pop(issue_number, None)
         self._active[issue_number] = stage
 
+    def try_claim_stage(self, task: Task, expected_stage: str) -> bool:
+        """Reserve a task only when FakeGitHub still exposes that stage."""
+        if expected_stage not in _CLAIMABLE_STAGES:
+            return False
+        if (
+            task.id in self._active
+            or task.id in self._in_flight
+            or task.id in self._merged_numbers
+            or (task.id, expected_stage) in self._released_stage_claims
+        ):
+            return False
+        issue = self._github._issues.get(task.id)
+        if (
+            issue is None
+            or issue.state != "open"
+            or self._stage_for(issue) != expected_stage
+        ):
+            return False
+        self._in_flight[task.id] = expected_stage
+        return True
+
     def mark_complete(self, issue_number: int) -> None:
         self._in_flight.pop(issue_number, None)
         stage = self._active.pop(issue_number, None)
@@ -322,10 +351,19 @@ class FakeIssueStore:
     def clear_active(self) -> None:
         self._active.clear()
         self._in_flight.clear()
+        self._released_stage_claims.clear()
 
-    def release_in_flight(self, issue_numbers: set[int]) -> None:
+    def release_in_flight(
+        self,
+        issue_numbers: set[int],
+        *,
+        expected_stage: str | None = None,
+    ) -> None:
         for n in issue_numbers:
-            self._in_flight.pop(n, None)
+            if expected_stage is None or self._in_flight.get(n) == expected_stage:
+                self._in_flight.pop(n, None)
+                if expected_stage is not None:
+                    self._released_stage_claims.add((n, expected_stage))
 
     def get_cached(self, issue_number: int) -> Task | None:
         issue = self._github._issues.get(issue_number)
@@ -351,6 +389,9 @@ class FakeIssueStore:
         issue = self._github._issues.get(task.id)
         if issue is None:
             return
+        self._released_stage_claims = {
+            claim for claim in self._released_stage_claims if claim[0] != task.id
+        }
         issue.labels = [lbl for lbl in issue.labels if lbl not in _LABEL_TO_STAGE]
         issue.labels.append(new_label)
         self._in_flight.pop(task.id, None)

@@ -15,6 +15,7 @@ Code subprocess is spawned. Verifies:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -98,6 +99,59 @@ async def test_happy_path_yields_outcome(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_gateway_routed_spawn_marks_prompt_telemetry_transport(
+    tmp_path: Path,
+) -> None:
+    class _GatewayRunner(_FakeRunner):
+        def _build_command(self, prompt: str, worktree: Path) -> list[str]:
+            return ["claude", "--model", self._config.model, "-p"]
+
+    config = ConfigFactory.create()
+    object.__setattr__(config, "gateway_fleet_ratchet_enabled", True)
+    bus = MagicMock()
+    bus.current_session_id = "gateway-session"
+    runner = _GatewayRunner(config=config, event_bus=bus)
+    isolated_runner = AsyncMock()
+
+    with (
+        patch(
+            "runners.base_subprocess_runner.resolve_harness_env",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "runners.base_subprocess_runner.stream_claude_process",
+            new_callable=AsyncMock,
+            return_value="complete",
+        ) as stream_mock,
+        patch(
+            "runners.base_subprocess_runner._terminal_gateway_runner",
+            return_value=(isolated_runner, isolated_runner),
+        ),
+        patch(
+            "runners.base_subprocess_runner.revoke_gateway_key",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await runner.run(
+            prompt="gateway prompt",
+            worktree_path=str(tmp_path),
+            issue_number=1,
+        )
+
+    rows = [
+        json.loads(line)
+        for line in config.cost_inferences_path.read_text().splitlines()
+        if line
+    ]
+    assert result.crashed is False
+    assert rows[-1]["tool"] == "gateway"
+    assert rows[-1]["model"] == config.model
+    assert stream_mock.await_args.kwargs["config"].runner is isolated_runner
+    isolated_runner.cleanup.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
 async def test_auth_retry_then_success(tmp_path: Path) -> None:
     """Two transient AuthenticationRetryErrors retry; third call succeeds."""
     from runner_utils import AuthenticationRetryError
@@ -121,12 +175,23 @@ async def test_auth_retry_then_success(tmp_path: Path) -> None:
             "runners.base_subprocess_runner.asyncio.sleep",
             new_callable=AsyncMock,
         ),
+        patch(
+            "runners.base_subprocess_runner.renew_gateway_key_if_needed",
+            new_callable=AsyncMock,
+            return_value=False,
+        ) as renew_mock,
+        patch(
+            "runners.base_subprocess_runner.revoke_gateway_key",
+            new_callable=AsyncMock,
+        ) as revoke_mock,
     ):
         result = await runner.run(
             prompt="x", worktree_path=str(tmp_path), issue_number=1
         )
     assert call_count == 3
     assert result.crashed is False
+    assert renew_mock.await_count == 2
+    assert revoke_mock.await_count == 1
 
 
 @pytest.mark.asyncio

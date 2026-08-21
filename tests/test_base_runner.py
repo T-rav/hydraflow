@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from base_runner import BaseRunner
 from events import EventBus
+from execution import HostRunner
 from runner_utils import AuthenticationRetryError
 
 # ---------------------------------------------------------------------------
@@ -249,6 +250,176 @@ class TestExecute:
         assert result == "transcript output"
         assert mock.await_count == 2
         assert sleep_mock.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_gateway_env_is_resolved_once_across_auth_retries(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """A retry reuses one spawn key instead of minting a second session."""
+        runner = _TestRunner(config, event_bus)
+        runner._resolve_provider = lambda: "gateway"  # type: ignore[method-assign]
+
+        with (
+            patch(
+                "base_runner.resolve_harness_env",
+                new_callable=AsyncMock,
+                return_value={
+                    "ANTHROPIC_BASE_URL": "http://gateway:8080",
+                    "ANTHROPIC_AUTH_TOKEN": "hfgw_once",
+                    "ANTHROPIC_API_KEY": "",
+                },
+            ) as resolve_mock,
+            patch(
+                "base_runner.stream_claude_process",
+                new_callable=AsyncMock,
+                side_effect=[
+                    AuthenticationRetryError("transient"),
+                    "transcript output",
+                ],
+            ) as stream_mock,
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch(
+                "base_runner.renew_gateway_key_if_needed",
+                new_callable=AsyncMock,
+                return_value=False,
+            ) as renew_mock,
+            patch(
+                "base_runner.revoke_gateway_key",
+                new_callable=AsyncMock,
+            ) as revoke_mock,
+        ):
+            result = await runner._execute(
+                ["claude", "--model", "sonnet", "-p"],
+                "prompt",
+                tmp_path,
+                {"issue": 42, "source": "test_runner"},
+            )
+
+        assert result == "transcript output"
+        assert resolve_mock.await_count == 1
+        assert stream_mock.await_count == 2
+        assert renew_mock.await_count == 1
+        assert revoke_mock.await_count == 1
+        revoke_mock.assert_awaited_once_with(resolve_mock.return_value)
+        telemetry_rows = [
+            json.loads(line)
+            for line in config.cost_inferences_path.read_text().splitlines()
+            if line
+        ]
+        assert telemetry_rows[-1]["tool"] == "gateway"
+        assert telemetry_rows[-1]["model"] == "sonnet"
+
+    @pytest.mark.asyncio
+    async def test_terminal_gateway_uses_owned_isolated_runner_for_stream(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """The terminal fleet profile must never stream through ``HostRunner``."""
+        object.__setattr__(config, "execution_mode", "docker")
+        object.__setattr__(config, "gateway_fleet_ratchet_enabled", True)
+        host_runner = HostRunner()
+        isolated_runner = AsyncMock()
+        runner = _TestRunner(config, event_bus, runner=host_runner)
+
+        with (
+            patch(
+                "base_runner.resolve_harness_env",
+                new_callable=AsyncMock,
+                return_value={
+                    "ANTHROPIC_BASE_URL": "http://gateway:8080",
+                    "ANTHROPIC_AUTH_TOKEN": "hfgw_terminal",
+                    "ANTHROPIC_API_KEY": "",
+                },
+            ),
+            patch(
+                "runner_utils.get_docker_runner",
+                return_value=isolated_runner,
+            ) as docker_runner_mock,
+            patch.object(
+                host_runner,
+                "cleanup",
+                new_callable=AsyncMock,
+            ) as host_cleanup_mock,
+            patch(
+                "base_runner.stream_claude_process",
+                new_callable=AsyncMock,
+                return_value="terminal gateway transcript",
+            ) as stream_mock,
+            patch(
+                "base_runner.revoke_gateway_key",
+                new_callable=AsyncMock,
+            ),
+        ):
+            result = await runner._execute(
+                ["claude", "--model", "sonnet", "-p"],
+                "terminal gateway prompt",
+                tmp_path,
+                {"issue": 42, "source": "test_runner"},
+            )
+
+        stream_config = stream_mock.await_args.kwargs["config"]
+        assert result == "terminal gateway transcript"
+        assert stream_config.runner is isolated_runner
+        assert stream_config.runner is not host_runner
+        docker_runner_mock.assert_called_once_with(config)
+        isolated_runner.cleanup.assert_awaited_once_with()
+        host_cleanup_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_terminal_gateway_cleans_owned_resources_on_stream_failure(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """A stream failure must not bypass key revocation or runner cleanup."""
+        object.__setattr__(config, "execution_mode", "docker")
+        object.__setattr__(config, "gateway_fleet_ratchet_enabled", True)
+        host_runner = HostRunner()
+        isolated_runner = AsyncMock()
+        runner = _TestRunner(config, event_bus, runner=host_runner)
+        harness_env = {
+            "ANTHROPIC_BASE_URL": "http://gateway:8080",
+            "ANTHROPIC_AUTH_TOKEN": "hfgw_terminal_failure",
+            "ANTHROPIC_API_KEY": "",
+        }
+        stream_failure = RuntimeError("terminal gateway stream failed")
+
+        with (
+            patch(
+                "base_runner.resolve_harness_env",
+                new_callable=AsyncMock,
+                return_value=harness_env,
+            ) as resolve_mock,
+            patch(
+                "runner_utils.get_docker_runner",
+                return_value=isolated_runner,
+            ),
+            patch.object(
+                host_runner,
+                "cleanup",
+                new_callable=AsyncMock,
+            ) as host_cleanup_mock,
+            patch(
+                "base_runner.stream_claude_process",
+                new_callable=AsyncMock,
+                side_effect=stream_failure,
+            ) as stream_mock,
+            patch(
+                "base_runner.revoke_gateway_key",
+                new_callable=AsyncMock,
+            ) as revoke_mock,
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            await runner._execute(
+                ["claude", "--model", "sonnet", "-p"],
+                "terminal gateway prompt",
+                tmp_path,
+                {"issue": 42, "source": "test_runner"},
+            )
+
+        assert exc_info.value is stream_failure
+        resolve_mock.assert_awaited_once()
+        assert stream_mock.await_args.kwargs["config"].runner is isolated_runner
+        revoke_mock.assert_awaited_once_with(harness_env)
+        isolated_runner.cleanup.assert_awaited_once_with()
+        host_cleanup_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_non_finite_usage_payload_does_not_fail_the_run(

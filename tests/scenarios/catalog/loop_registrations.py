@@ -32,6 +32,32 @@ def _scenario_github_cache(ports: dict[str, Any], config: Any, pr_manager: Any) 
     return github_cache
 
 
+def _scenario_dedup(
+    ports: dict[str, Any],
+    config: Any,
+    port_key: str,
+    set_name: str,
+    filename: str,
+) -> Any:
+    """Shared real ``DedupStore`` for scenario dedup ports (#11446).
+
+    A REAL ``DedupStore`` instance (not a ``MagicMock``) rooted at
+    ``config.data_root / "dedup" / filename``, mirroring production wiring
+    in ``src/service_registry.py``, so unseeded scenarios that run a loop
+    twice can observe its dedup behavior — a re-filing regression would
+    otherwise pass silently against a mock whose ``get()`` always returns a
+    fixed value. Tests may override by seeding the ``port_key`` port with a
+    stateful fake or pre-populated store.
+    """
+    dedup = ports.get(port_key)
+    if dedup is None:
+        from dedup_store import DedupStore  # noqa: PLC0415
+
+        dedup = DedupStore(set_name, config.data_root / "dedup" / filename)
+        ports[port_key] = dedup
+    return dedup
+
+
 def _build_ci_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     from ci_monitor_loop import CIMonitorLoop  # noqa: PLC0415
 
@@ -92,8 +118,8 @@ def _build_erosion_metrics(ports: dict[str, Any], config: Any, deps: Any) -> Any
     ``state`` defaults to a MagicMock whose last-processed-SHA cursor is a
     simple in-memory string starting empty (clean slate — the first tick
     primes the baseline, matching production's fresh-install behavior).
-    ``dedup`` defaults to a clean-slate MagicMock (no prior filed
-    fingerprints), mirroring GateActivatorLoop's builder. Both this
+    ``dedup`` defaults to a real ``DedupStore`` (#11446) so scenarios that
+    run this loop twice can observe its dedup behavior. Both this
     loop's git-range analysis (``changed_files_for_range`` /
     ``added_symbols_for_range``) run against ``config.repo_root`` on disk,
     not through the ``github`` port, so scenarios exercising the
@@ -117,11 +143,13 @@ def _build_erosion_metrics(ports: dict[str, Any], config: Any, deps: Any) -> Any
         state.set_erosion_last_processed_sha.side_effect = _set_sha
         ports["erosion_metrics_state"] = state
 
-    dedup = ports.get("erosion_metrics_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["erosion_metrics_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "erosion_metrics_dedup",
+        "erosion_metrics_filed_findings",
+        "erosion_metrics_filed.json",
+    )
 
     return ErosionMetricsLoop(
         config=config,
@@ -135,8 +163,8 @@ def _build_erosion_metrics(ports: dict[str, Any], config: Any, deps: Any) -> Any
 def _build_fail_open_monitor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build FailOpenMonitorLoop for scenarios (#10371).
 
-    ``dedup`` defaults to a clean-slate MagicMock (no prior filed breach
-    fingerprints), mirroring the ErosionMetricsLoop builder. The loop reads the
+    ``dedup`` defaults to a real ``DedupStore`` (#11446), mirroring the
+    ErosionMetricsLoop builder. The loop reads the
     fail-open ledger from ``config.diagnostics_dir`` on disk (written by the
     PostVerifyAdvisor), not through the ``github`` port, so scenarios exercising
     the breach path seed that ledger file directly — see
@@ -144,11 +172,13 @@ def _build_fail_open_monitor(ports: dict[str, Any], config: Any, deps: Any) -> A
     """
     from fail_open_monitor_loop import FailOpenMonitorLoop
 
-    dedup = ports.get("fail_open_monitor_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["fail_open_monitor_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "fail_open_monitor_dedup",
+        "fail_open_monitor_filed_breaches",
+        "fail_open_monitor_filed.json",
+    )
 
     return FailOpenMonitorLoop(
         config=config,
@@ -164,8 +194,8 @@ def _build_escape_ledger(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     Mirrors ``_build_erosion_metrics``: ``state`` defaults to a MagicMock
     whose last-processed-SHA cursor is a clean-slate in-memory string (the
     first tick primes the baseline, matching production's fresh-install
-    behavior), and ``dedup`` defaults to a clean-slate MagicMock. The loop's
-    escape detection (``commits_for_range``) and erosion trend datapoints run
+    behavior), and ``dedup`` defaults to a real ``DedupStore`` (#11446). The
+    loop's escape detection (``commits_for_range``) and erosion trend datapoints run
     against ``config.repo_root`` on disk, not through the ``github`` port, so
     scenarios exercising detection need a real git repo fixture there — see
     ``tests/scenarios/test_escape_ledger_scenario.py``. ``auto_diagnoser``
@@ -191,11 +221,13 @@ def _build_escape_ledger(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         state.set_escape_ledger_last_processed_sha.side_effect = _set_sha
         ports["escape_ledger_state"] = state
 
-    dedup = ports.get("escape_ledger_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["escape_ledger_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "escape_ledger_dedup",
+        "escape_ledger_recorded",
+        "escape_ledger.json",
+    )
 
     return EscapeLedgerLoop(
         config=config,
@@ -213,7 +245,7 @@ def _build_sampled_audit(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     Mirrors ``_build_escape_ledger``: ``state`` defaults to a MagicMock whose
     SHA cursor + governed-rate + disagreement-history are clean-slate in-memory
     values (the first tick primes the cursor, matching a fresh install), and
-    ``dedup`` defaults to a clean-slate MagicMock. The loop samples merged PRs
+    ``dedup`` defaults to a real ``DedupStore`` (#11446). The loop samples merged PRs
     from ``config.repo_root`` on disk (``merged_changes_for_range``); its
     adversarial re-audit is an injected ``auditor`` fake so no scenario shells
     out to a real ``claude`` — see ``tests/scenarios/test_sampled_audit_scenario.py``.
@@ -241,11 +273,13 @@ def _build_sampled_audit(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         )
         ports["sampled_audit_state"] = state
 
-    dedup = ports.get("sampled_audit_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["sampled_audit_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "sampled_audit_dedup",
+        "sampled_audit_filed_findings",
+        "sampled_audit.json",
+    )
 
     return SampledAuditLoop(
         config=config,
@@ -264,7 +298,7 @@ def _build_intervention_tally(ports: dict[str, Any], config: Any, deps: Any) -> 
     clean-slate in-memory string (the first tick primes the baseline, matching
     production's fresh-install behavior) and whose ``get_all_human_steering``
     returns any seeded steering map (default empty). ``dedup`` defaults to a
-    clean-slate MagicMock. The loop senses steering from state and HITL /
+    real ``DedupStore`` (#11446). The loop senses steering from state and HITL /
     governor actions from ``config.event_log_path`` on disk, not through the
     ``github`` port — see ``tests/scenarios/test_intervention_tally_scenario.py``.
     The free-text cheap-LLM path is injected as a fake so no scenario shells
@@ -290,11 +324,13 @@ def _build_intervention_tally(ports: dict[str, Any], config: Any, deps: Any) -> 
         )
         ports["intervention_tally_state"] = state
 
-    dedup = ports.get("intervention_tally_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["intervention_tally_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "intervention_tally_dedup",
+        "intervention_tally_recorded",
+        "intervention_tally.json",
+    )
 
     classifier = ports.get("intervention_tally_classifier")
 
@@ -367,10 +403,11 @@ def _build_second_order_vitals(ports: dict[str, Any], config: Any, deps: Any) ->
 def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build IssueRefinementLoop for scenarios (#9957).
 
-    ``state`` and ``dedup`` default to MagicMocks that behave like a clean
-    slate (empty index, no judged pairs, no full sweep yet, no digest issue,
-    no open proposals, no prior dedup keys) — mirrors the FlakeTrackerLoop /
-    SkillPromptEvalLoop pattern. ``issue_refinement_llm`` defaults to a
+    ``state`` defaults to a MagicMock that behaves like a clean slate (empty
+    index, no judged pairs, no full sweep yet, no digest issue, no open
+    proposals) — mirrors the FlakeTrackerLoop / SkillPromptEvalLoop pattern.
+    ``dedup`` defaults to a real ``DedupStore`` (#11446).
+    ``issue_refinement_llm`` defaults to a
     duck-typed client whose ``complete`` resolves to ``""`` — the loop's
     fail-soft degrade path (unparseable verdict -> low-confidence proposal,
     no crash) so a scenario never needs a real LLM call.
@@ -387,11 +424,13 @@ def _build_issue_refinement(ports: dict[str, Any], config: Any, deps: Any) -> An
         state.get_refinement_open_proposals.return_value = []
         ports["issue_refinement_state"] = state
 
-    dedup = ports.get("issue_refinement_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["issue_refinement_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "issue_refinement_dedup",
+        "issue_refinement",
+        "issue_refinement.json",
+    )
 
     llm = ports.get("issue_refinement_llm")
     if llm is None:
@@ -620,8 +659,19 @@ def _build_adr_reviewer(ports: dict[str, Any], config: Any, deps: Any) -> Any:
 
     adr_reviewer = ports.get("adr_reviewer")
     if adr_reviewer is None:
-        adr_reviewer = MagicMock()
-        adr_reviewer.review_proposed_adrs = AsyncMock(return_value={"reviewed": 0})
+        runner = ports.get("adr_reviewer_runner")
+        if runner is not None:
+            from adr_reviewer import ADRCouncilReviewer  # noqa: PLC0415
+
+            adr_reviewer = ADRCouncilReviewer(
+                config,
+                deps.event_bus,
+                runner,
+                credentials=ports.get("credentials"),
+            )
+        else:
+            adr_reviewer = MagicMock()
+            adr_reviewer.review_proposed_adrs = AsyncMock(return_value={"reviewed": 0})
         ports["adr_reviewer"] = adr_reviewer
     return ADRReviewerLoop(config=config, adr_reviewer=adr_reviewer, deps=deps)
 
@@ -822,9 +872,10 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     The xdist-audit seams default to an EMPTY audit (no gh, no quarantine)
     so the detection is a no-op unless a test seeds them.
 
-    ``state`` and ``dedup`` default to MagicMocks that behave like a clean
-    slate (no prior flake counts, no prior dedup keys). Tests may override
-    by seeding ``flake_state`` / ``flake_dedup`` explicitly.
+    ``state`` defaults to a MagicMock that behaves like a clean slate (no
+    prior flake counts). ``dedup`` defaults to a real ``DedupStore``
+    (#11446). Tests may override by seeding ``flake_state`` / ``flake_dedup``
+    explicitly.
     """
     from flake_tracker_loop import FlakeTrackerLoop  # noqa: PLC0415
 
@@ -836,11 +887,9 @@ def _build_flake_tracker(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         state.inc_flake_attempts.return_value = 1
         ports["flake_state"] = state
 
-    dedup = ports.get("flake_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["flake_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports, config, "flake_dedup", "flake_tracker", "flake_tracker.json"
+    )
 
     pr_manager = ports.get("pr_manager") or ports["github"]
     github_cache = _scenario_github_cache(ports, config, pr_manager)
@@ -890,11 +939,11 @@ def _build_skill_prompt_eval(ports: dict[str, Any], config: Any, deps: Any) -> A
     * ``skill_corpus_runner`` → ``_run_corpus``
     * ``skill_reconcile_closed`` → ``_reconcile_closed_escalations``
 
-    ``state`` and ``dedup`` default to MagicMocks that behave like a
-    clean slate (empty last-green snapshot, zero attempts, no prior
-    dedup keys). Tests may override by seeding ``skill_prompt_state`` /
-    ``skill_prompt_dedup`` explicitly — mirrors the F7 FlakeTracker
-    pattern. ``refine_llm`` forwards the ``skill_prompt_refine_llm`` port
+    ``state`` defaults to a MagicMock that behaves like a clean slate
+    (empty last-green snapshot, zero attempts). ``dedup`` defaults to a
+    real ``DedupStore`` (#11446). Tests may override by seeding
+    ``skill_prompt_state`` / ``skill_prompt_dedup`` explicitly — mirrors
+    the F7 FlakeTracker pattern. ``refine_llm`` forwards the ``skill_prompt_refine_llm`` port
     so scenarios can inject a fake instead of silently building a real
     ``_CLIRefineLLM`` that spawns a ``claude`` subprocess (#11416).
     """
@@ -908,11 +957,13 @@ def _build_skill_prompt_eval(ports: dict[str, Any], config: Any, deps: Any) -> A
         state.inc_skill_prompt_attempts.return_value = 1
         ports["skill_prompt_state"] = state
 
-    dedup = ports.get("skill_prompt_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["skill_prompt_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "skill_prompt_dedup",
+        "skill_prompt_eval",
+        "skill_prompt_eval.json",
+    )
 
     pr_manager = ports.get("pr_manager") or ports["github"]
 
@@ -952,9 +1003,10 @@ def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
       * ``rc_budget_fetch_junit`` → ``_fetch_junit_tests``
       * ``rc_budget_reconcile_closed`` → ``_reconcile_closed_escalations``
 
-    ``state`` and ``dedup`` default to MagicMocks with clean-slate return
-    values; tests may override by seeding ``rc_budget_state`` /
-    ``rc_budget_dedup`` explicitly — mirrors the F7 FlakeTracker
+    ``state`` defaults to a MagicMock with clean-slate return values;
+    ``dedup`` defaults to a real ``DedupStore`` (#11446). Tests may override
+    by seeding ``rc_budget_state`` / ``rc_budget_dedup`` explicitly —
+    mirrors the F7 FlakeTracker
     (``eac5fc72``), S6 SkillPromptEval (``93ebf387``), and C6
     FakeCoverageAuditor (``32b43ab0``) patterns.
     """
@@ -968,11 +1020,9 @@ def _build_rc_budget(ports: dict[str, Any], config: Any, deps: Any) -> Any:
         state.inc_rc_budget_attempts.return_value = 1
         ports["rc_budget_state"] = state
 
-    dedup = ports.get("rc_budget_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["rc_budget_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports, config, "rc_budget_dedup", "rc_budget", "rc_budget.json"
+    )
 
     pr_manager = ports.get("pr_manager") or ports["github"]
     github_cache = _scenario_github_cache(ports, config, pr_manager)
@@ -1016,8 +1066,9 @@ def _build_wiki_rot_detector(ports: dict[str, Any], config: Any, deps: Any) -> A
     * ``wiki_rot_dedup`` → ``dedup``
     * ``wiki_store`` → ``wiki_store``
 
-    All default to MagicMocks with clean-slate return values (zero
-    attempts, no prior dedup keys, no seeded repos). Tests may override
+    ``state`` and ``wiki_store`` default to MagicMocks with clean-slate
+    return values (zero attempts, no seeded repos); ``dedup`` defaults to a
+    real ``DedupStore`` (#11446). Tests may override
     by seeding any of the port keys explicitly — mirrors the F7
     FlakeTracker (``eac5fc72``), S6 SkillPromptEval (``93ebf387``), C6
     FakeCoverageAuditor (``32b43ab0``), and rc-budget T9 (``20a4a177``)
@@ -1032,11 +1083,13 @@ def _build_wiki_rot_detector(ports: dict[str, Any], config: Any, deps: Any) -> A
         state.inc_wiki_rot_attempts.return_value = 1
         ports["wiki_rot_state"] = state
 
-    dedup = ports.get("wiki_rot_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["wiki_rot_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "wiki_rot_dedup",
+        "wiki_rot_detector",
+        "wiki_rot_detector.json",
+    )
 
     wiki_store = ports.get("wiki_store")
     if wiki_store is None:
@@ -1067,10 +1120,11 @@ def _build_fake_coverage_auditor(ports: dict[str, Any], config: Any, deps: Any) 
     * ``fake_coverage_reconcile_closed`` → ``_reconcile_closed_escalations``
     * ``fake_coverage_grep`` → ``_grep_scenario_for_helper``
 
-    ``state`` and ``dedup`` default to MagicMocks that behave like a
-    clean slate (empty last-known catalog, zero attempts, no prior
-    dedup keys). Tests may override by seeding ``fake_coverage_state`` /
-    ``fake_coverage_dedup`` explicitly — mirrors the F7 FlakeTracker
+    ``state`` defaults to a MagicMock that behaves like a clean slate
+    (empty last-known catalog, zero attempts); ``dedup`` defaults to a real
+    ``DedupStore`` (#11446). Tests may override by seeding
+    ``fake_coverage_state`` / ``fake_coverage_dedup`` explicitly — mirrors
+    the F7 FlakeTracker
     (``eac5fc72``) and S6 SkillPromptEval (``93ebf387``) patterns.
     """
     from fake_coverage_auditor_loop import FakeCoverageAuditorLoop  # noqa: PLC0415
@@ -1088,11 +1142,13 @@ def _build_fake_coverage_auditor(ports: dict[str, Any], config: Any, deps: Any) 
         state.get_fake_coverage_rollup_issue.return_value = None
         ports["fake_coverage_state"] = state
 
-    dedup = ports.get("fake_coverage_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["fake_coverage_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "fake_coverage_dedup",
+        "fake_coverage_auditor",
+        "fake_coverage_auditor.json",
+    )
 
     pr_manager = ports.get("pr_manager") or ports["github"]
 
@@ -1132,8 +1188,9 @@ def _build_adr_touchpoint_auditor(ports: dict[str, Any], config: Any, deps: Any)
     * ``adr_touchpoint_reconcile_closed`` → replaces ``_reconcile_closed_escalations``.
     * ``adr_touchpoint_index`` → an ``ADRIndex`` (or duck-typed substitute).
 
-    State + dedup default to MagicMocks behaving like a clean slate (empty
-    cursor → seed-and-return on first tick). Tests override via
+    ``state`` defaults to a MagicMock behaving like a clean slate (empty
+    cursor → seed-and-return on first tick); ``dedup`` defaults to a real
+    ``DedupStore`` (#11446). Tests override via
     ``adr_touchpoint_state`` / ``adr_touchpoint_dedup``.
     """
     from adr_touchpoint_auditor_loop import (  # noqa: PLC0415
@@ -1148,11 +1205,13 @@ def _build_adr_touchpoint_auditor(ports: dict[str, Any], config: Any, deps: Any)
         state.inc_adr_audit_attempts.return_value = 1
         ports["adr_touchpoint_state"] = state
 
-    dedup = ports.get("adr_touchpoint_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["adr_touchpoint_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "adr_touchpoint_dedup",
+        "adr_touchpoint_auditor",
+        "adr_touchpoint_auditor.json",
+    )
 
     pr_manager = ports.get("pr_manager") or ports["github"]
     adr_index = ports.get("adr_touchpoint_index") or MagicMock(
@@ -1189,8 +1248,8 @@ def _build_adr_drift_resolver(ports: dict[str, Any], config: Any, deps: Any) -> 
     * ``adr_drift_resolver_state`` — MagicMock whose ``all_adr_rollups()``
       returns the open ``{rollup_key: {issue_number, pr_numbers}}`` map to
       triage; defaults to a clean slate (empty dict — nothing to triage).
-    * ``adr_drift_resolver_dedup`` — MagicMock behaving like a clean-slate
-      dedup set.
+    * ``adr_drift_resolver_dedup`` — a real ``DedupStore`` (#11446) by
+      default.
     * ``adr_drift_resolver_index`` — an ``ADRIndex`` (or duck-typed
       substitute); defaults to one reporting no ADRs (unmatched candidates
       are skipped, never crash the tick).
@@ -1207,11 +1266,13 @@ def _build_adr_drift_resolver(ports: dict[str, Any], config: Any, deps: Any) -> 
         state.all_adr_rollups.return_value = {}
         ports["adr_drift_resolver_state"] = state
 
-    dedup = ports.get("adr_drift_resolver_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["adr_drift_resolver_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "adr_drift_resolver_dedup",
+        "adr_drift_resolver",
+        "adr_drift_resolver.json",
+    )
 
     pr_manager = ports.get("pr_manager") or ports["github"]
     adr_index = ports.get("adr_drift_resolver_index") or MagicMock(adrs=lambda: [])
@@ -1252,8 +1313,9 @@ def _build_adr_conformance(ports: dict[str, Any], config: Any, deps: Any) -> Any
       without shelling out).
     * ``adr_conformance_index`` → an ``ADRIndex`` (or duck-typed substitute).
 
-    State + dedup default to MagicMocks behaving like a clean slate (no
-    rollup recorded, zero attempts, empty dedup set). Tests override via
+    ``state`` defaults to a MagicMock behaving like a clean slate (no
+    rollup recorded, zero attempts); ``dedup`` defaults to a real
+    ``DedupStore`` (#11446). Tests override via
     ``adr_conformance_state`` / ``adr_conformance_dedup``.
     """
     from adr_conformance_loop import AdrConformanceLoop  # noqa: PLC0415
@@ -1266,11 +1328,13 @@ def _build_adr_conformance(ports: dict[str, Any], config: Any, deps: Any) -> Any
         state.inc_adr_conformance_attempts.return_value = 1
         ports["adr_conformance_state"] = state
 
-    dedup = ports.get("adr_conformance_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["adr_conformance_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "adr_conformance_dedup",
+        "adr_conformance",
+        "adr_conformance.json",
+    )
 
     pr_manager = ports.get("pr_manager") or ports["github"]
     adr_index = ports.get("adr_conformance_index") or MagicMock(adrs=lambda: [])
@@ -1344,7 +1408,7 @@ def _build_branch_protection_auditor(
     * ``branch_protection_audit`` → an async auditor returning an ``AuditReport``
       (replaces the gh-backed live-vs-canonical audit).
 
-    ``dedup`` defaults to a clean-slate MagicMock; override via
+    ``dedup`` defaults to a real ``DedupStore`` (#11446); override via
     ``branch_protection_dedup``.
     """
     from branch_protection_audit import AuditReport  # noqa: PLC0415
@@ -1352,11 +1416,13 @@ def _build_branch_protection_auditor(
         BranchProtectionAuditorLoop,
     )
 
-    dedup = ports.get("branch_protection_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["branch_protection_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "branch_protection_dedup",
+        "branch_protection_auditor",
+        "branch_protection_auditor.json",
+    )
 
     auditor = ports.get("branch_protection_audit")
     if auditor is None:
@@ -1415,18 +1481,20 @@ def _build_rails_drift_caretaker(ports: dict[str, Any], config: Any, deps: Any) 
       ``list[RailsDriftReport]`` (replaces the checkout-observing auditor).
       Defaults to ``[]`` (no managed repos ⇒ nothing to audit).
 
-    ``dedup`` defaults to a clean-slate MagicMock; override via
+    ``dedup`` defaults to a real ``DedupStore`` (#11446); override via
     ``rails_drift_caretaker_dedup``.
     """
     from rails_drift_caretaker_loop import (  # noqa: PLC0415
         RailsDriftCaretakerLoop,
     )
 
-    dedup = ports.get("rails_drift_caretaker_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["rails_drift_caretaker_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "rails_drift_caretaker_dedup",
+        "rails_drift_caretaker",
+        "rails_drift_caretaker.json",
+    )
 
     auditor = ports.get("rails_drift_audit")
     if auditor is None:
@@ -1452,16 +1520,14 @@ def _build_gate_activator(ports: dict[str, Any], config: Any, deps: Any) -> Any:
       ``list[ActivationProposal]`` (replaces the contract/workflow/Makefile
       read). Defaults to ``[]`` (steady state: nothing to activate).
 
-    ``dedup`` defaults to a clean-slate MagicMock; override via
+    ``dedup`` defaults to a real ``DedupStore`` (#11446); override via
     ``gate_activator_dedup``.
     """
     from gate_activator_loop import GateActivatorLoop  # noqa: PLC0415
 
-    dedup = ports.get("gate_activator_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["gate_activator_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports, config, "gate_activator_dedup", "gate_activator", "gate_activator.json"
+    )
 
     detector = ports.get("gate_activation_detect")
     if detector is None:
@@ -1600,9 +1666,10 @@ def _build_disturbance_dampener(ports: dict[str, Any], config: Any, deps: Any) -
     (FakeGitHub satisfies the PRPort contract) and ``ports['auto_agent_runner']``
     (an AsyncMock-style object whose ``run`` returns a ``PreflightSpawn``-like
     namespace). Scenarios that only need scaffold-wiring smoke can omit both;
-    the loop falls back to a no-op tick. ``state`` and ``dedup`` default to
-    MagicMocks that behave like a clean slate (no prior attempts, no prior
-    dedup keys), mirroring FlakeTrackerLoop's builder.
+    the loop falls back to a no-op tick. ``state`` defaults to a MagicMock
+    that behaves like a clean slate (no prior attempts), mirroring
+    FlakeTrackerLoop's builder. ``dedup`` defaults to a real ``DedupStore``
+    (#11446).
     """
     from disturbance_dampener_loop import DisturbanceDampenerLoop  # noqa: PLC0415
 
@@ -1613,11 +1680,13 @@ def _build_disturbance_dampener(ports: dict[str, Any], config: Any, deps: Any) -
         state.bump_disturbance_dampener_attempts.return_value = 1
         ports["disturbance_dampener_state"] = state
 
-    dedup = ports.get("disturbance_dampener_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["disturbance_dampener_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "disturbance_dampener_dedup",
+        "disturbance_dampener",
+        "disturbance_dampener.json",
+    )
 
     return DisturbanceDampenerLoop(
         config=config,
@@ -1685,6 +1754,15 @@ def _build_detector_calibration(ports: dict[str, Any], config: Any, deps: Any) -
         deps=deps,
         github_cache=github_cache,
     )
+
+
+def _build_gateway_coverage(ports: dict[str, Any], config: Any, deps: Any) -> Any:
+    """Build GatewayCoverageLoop for scenarios."""
+    from gateway_coverage_loop import GatewayCoverageLoop  # noqa: PLC0415
+
+    state = ports.get("gateway_coverage_state") or MagicMock()
+    ports.setdefault("gateway_coverage_state", state)
+    return GatewayCoverageLoop(config=config, state=state, deps=deps)
 
 
 def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -1820,11 +1898,13 @@ def _build_trust_fleet_sanity(ports: dict[str, Any], config: Any, deps: Any) -> 
         state.get_trust_fleet_sanity_last_seen_counts.return_value = {}
         ports["trust_fleet_sanity_state"] = state
 
-    dedup = ports.get("trust_fleet_sanity_dedup")
-    if dedup is None:
-        dedup = MagicMock()
-        dedup.get.return_value = set()
-        ports["trust_fleet_sanity_dedup"] = dedup
+    dedup = _scenario_dedup(
+        ports,
+        config,
+        "trust_fleet_sanity_dedup",
+        "trust_fleet_sanity",
+        "trust_fleet_sanity.json",
+    )
 
     pr_manager = ports.get("pr_manager") or ports["github"]
     event_bus = ports.get("event_bus") or MagicMock()
@@ -2389,6 +2469,7 @@ _BUILDERS: dict[str, Any] = {
     "cost_budget_watcher": _build_cost_budget_watcher_loop,
     # auto-agent (spec §1–§11; ADR-0050)
     "auto_agent_preflight": _build_auto_agent_preflight,
+    "gateway_coverage": _build_gateway_coverage,
     "detector_calibration": _build_detector_calibration,
     "sandbox_failure_fixer": _build_sandbox_failure_fixer,
     # disturbance dampener burn-down actuator (ADR-0095, Pattern A)
