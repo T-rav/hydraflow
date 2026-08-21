@@ -49,9 +49,11 @@ jobs:
 
   # The RC sandbox suite fanned across the same round-robin shards the RC gate
   # uses (#10308). Each runner boots its own docker sandbox, so shards are fully
-  # isolated. Every shard pins the SAME resolved SHA so the report names one
-  # exact commit. Shards are allowed to go red — this is advisory; the signal is
-  # the aggregated issue, plus the red matrix in the Actions tab.
+  # isolated. Every shard checks out the literal `staging` ref and then asserts
+  # (pin step) its HEAD equals the SHA `resolve` captured, so the report names
+  # one exact commit without any shard checking out a job-output expression
+  # (CodeQL #108). Shards are allowed to go red — this is advisory; the signal
+  # is the aggregated issue, plus the red matrix in the Actions tab.
   dryrun-shard:
     name: Staging RC dry-run shard
     runs-on: ubuntu-latest
@@ -61,15 +63,46 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
+      # TRUST: the checkout ref is the literal protected default branch
+      # (`staging` is the GitHub default branch, ADR-0042), never a job-output
+      # expression. CodeQL alert #108 (cache-poisoning/poisonable-step) fired
+      # on the old `ref: needs.resolve.outputs.sha` shape — a job output
+      # CodeQL must treat as untrusted ahead of the privileged build/test
+      # steps below. The SHA is safe by construction: the `resolve` job
+      # derives it via `git rev-parse HEAD` on this same literal `staging`
+      # ref. The `pin` step right below re-asserts that identity at shard
+      # time and skips the tick if staging advanced between the two jobs.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: staging
+      - name: Pin shard to the resolved staging HEAD
+        id: pin
+        run: |
+          head="$(git rev-parse HEAD)"
+          if [ "$head" = "${{ needs.resolve.outputs.sha }}" ]; then
+            echo "matched=true" >> "$GITHUB_OUTPUT"
+          else
+            # Staging advanced between `resolve` and this shard's checkout, so
+            # the resolved SHA no longer names the tip a run now would test.
+            # Skip the tick: exit 0 with a notice (a sensor must not go red on
+            # a superseded tick; the next cadence tick re-resolves), and leave
+            # a skip-marker summary so the reporter's artifact download still
+            # finds one file per shard and reads zero failures from it.
+            echo "matched=false" >> "$GITHUB_OUTPUT"
+            printf '{"shard": "%s/6", "scenarios": [], "failed": [], "skipped": "staging advanced between resolve and shard"}\n' \
+              "${{ matrix.shard }}" > /tmp/summary.json
+            echo "::notice::Staging advanced between resolve and shard ${{ matrix.shard }}/6 — resolved ${{ needs.resolve.outputs.sha }} is now HEAD $head; skipping this tick"
+          fi
       - uses: actions/setup-python@v5
+        if: steps.pin.outputs.matched == 'true'
         with:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
+        if: steps.pin.outputs.matched == 'true'
       - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
+        if: steps.pin.outputs.matched == 'true'
       - name: Run shard ${{ matrix.shard }}/6 against staging HEAD
+        if: steps.pin.outputs.matched == 'true'
         run: |
           python scripts/sandbox_scenario.py run-all \
             --shard ${{ matrix.shard }}/6 \
@@ -104,10 +137,16 @@ jobs:
       contents: read
       issues: write
     steps:
+      # TRUST: `needs.resolve.outputs.sha` is not an external input — the
+      # `resolve` job derives it via `git rev-parse HEAD` on the literal
+      # protected `staging` ref, so it always names a commit that passed the
+      # branch-protection rulesets (ADR-0042). Unlike the shard checkout this
+      # ref stays an expression on purpose: the reporter script must come from
+      # the exact commit the shards tested, not a possibly-advanced staging
+      # tip. This job runs no cache-writing steps after checkout, so there is
+      # no poisonable-step surface (CodeQL #108 fired only on the shard).
       - uses: actions/checkout@v4
         with:
-          # Pin the reporter to the exact commit the shards tested, not a
-          # possibly-advanced staging tip.
           ref: ${{ needs.resolve.outputs.sha }}
       - uses: actions/setup-python@v5
         with:
