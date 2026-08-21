@@ -24,6 +24,7 @@ logger = logging.getLogger("hydraflow.workspace_gc_loop")
 
 # Maximum worktrees to GC per cycle to avoid long-running passes.
 _MAX_GC_PER_CYCLE = 20
+_GIT_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 class _WorktreeEntry(NamedTuple):
@@ -31,6 +32,13 @@ class _WorktreeEntry(NamedTuple):
 
     path: Path
     branch: str | None  # short name (``refs/heads/`` stripped); None if detached
+
+
+class _ActiveWorkspaceSnapshot(NamedTuple):
+    """Lossless, path-aware active-workspace state for one GC cycle."""
+
+    workspaces: dict[int, str]
+    path_owners: dict[Path, set[int]]
 
 
 def _path_within(path: Path, root: Path) -> bool:
@@ -79,12 +87,44 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         errors = 0
 
         # Phase 1: GC workspaces tracked in state
-        active_workspaces = self._state.get_active_workspaces()
+        active_snapshot = self._active_workspace_snapshot()
+        if active_snapshot is None:
+            logger.warning(
+                "GC: active workspace state identity is malformed or ambiguous — skipping cycle"
+            )
+            return {"collected": 0, "skipped": 0, "errors": 1}
+        active_workspaces = active_snapshot.workspaces
+        active_branches = self._state.get_active_branches()
         for issue_number in list(active_workspaces.keys()):
             if self._stop_event.is_set() or collected >= _MAX_GC_PER_CYCLE:
                 break
             try:
                 if await self._is_safe_to_gc(issue_number):
+                    destroy_path = self._config.workspace_path_for_issue(issue_number)
+                    recorded_path = Path(active_workspaces[issue_number])
+                    if not self._tracked_path_matches_destroy_target(
+                        recorded_path, destroy_path
+                    ):
+                        skipped += 1
+                        logger.warning(
+                            "GC: tracked path %s for issue #%d does not match destroy target %s — skipping",
+                            recorded_path,
+                            issue_number,
+                            destroy_path,
+                        )
+                        continue
+                    if not await self._worktree_work_has_landed(
+                        destroy_path,
+                        expected_branch=active_branches.get(issue_number),
+                        expected_issue=issue_number,
+                    ):
+                        skipped += 1
+                        logger.debug(
+                            "GC: tracked worktree %s for issue #%d has unlanded work — skipping",
+                            destroy_path,
+                            issue_number,
+                        )
+                        continue
                     # Remove from state first so a crash between steps
                     # leaves the entry gone (destroy is idempotent).
                     self._state.remove_workspace(issue_number)
@@ -106,7 +146,9 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         # Phase 2: scan filesystem for orphaned issue-* dirs not in state
         if not self._stop_event.is_set():
             orphan_count = await self._collect_orphaned_dirs(
-                active_workspaces, _MAX_GC_PER_CYCLE - collected
+                active_workspaces,
+                _MAX_GC_PER_CYCLE - collected,
+                active_path_owners=active_snapshot.path_owners,
             )
             collected += orphan_count
 
@@ -131,7 +173,8 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         # genpr, and factory-operational worktrees that leaked forever.
         if not self._stop_event.is_set() and self._config.worktree_gc_all_roots_enabled:
             reaped = await self._collect_orphaned_worktrees(
-                _MAX_GC_PER_CYCLE - collected
+                _MAX_GC_PER_CYCLE - collected,
+                active_snapshot=active_snapshot,
             )
             collected += reaped
 
@@ -294,8 +337,21 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             return True  # Assume PR exists on error — don't GC
         return pr is not None and pr.number > 0
 
-    async def _collect_orphaned_dirs(self, tracked: dict[int, str], budget: int) -> int:
+    async def _collect_orphaned_dirs(
+        self,
+        tracked: dict[int, str],
+        budget: int,
+        *,
+        active_path_owners: dict[Path, set[int]] | None = None,
+    ) -> int:
         """Scan filesystem for orphaned issue-* dirs not tracked in state."""
+        if active_path_owners is None:
+            active_path_owners = self._canonical_active_path_owners(tracked)
+            if active_path_owners is None:
+                logger.warning(
+                    "GC: active workspace path identity is ambiguous — skipping orphan scan"
+                )
+                return 0
         collected = 0
         repo_wt_base = self._config.workspace_base / self._config.repo_slug
         if not repo_wt_base.exists():
@@ -320,6 +376,20 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             if not child.is_dir() or not child.name.startswith("issue-"):
                 continue
             try:
+                canonical_child = child.expanduser().resolve()
+            except (OSError, RuntimeError):
+                logger.debug(
+                    "GC: could not resolve orphan candidate %s — skipping", child
+                )
+                continue
+            if canonical_child in active_path_owners:
+                logger.debug(
+                    "GC: orphan candidate %s is state-owned by issue(s) %s — skipping",
+                    child,
+                    sorted(active_path_owners[canonical_child]),
+                )
+                continue
+            try:
                 issue_number = int(child.name.split("-", 1)[1])
             except (ValueError, IndexError):
                 continue
@@ -327,6 +397,17 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 continue
             try:
                 if await self._is_safe_to_gc(issue_number):
+                    if not await self._worktree_work_has_landed(
+                        child,
+                        expected_branch=None,
+                        expected_issue=issue_number,
+                    ):
+                        logger.debug(
+                            "GC: orphaned worktree %s for issue #%d has unlanded work — skipping",
+                            child,
+                            issue_number,
+                        )
+                        continue
                     await self._workspaces.destroy(issue_number)
                     collected += 1
                     logger.info(
@@ -470,7 +551,12 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
     # Phase 5: enumerate-and-reap orphan worktrees on ALL roots (#10698)
     # ------------------------------------------------------------------
 
-    async def _collect_orphaned_worktrees(self, budget: int = _MAX_GC_PER_CYCLE) -> int:
+    async def _collect_orphaned_worktrees(
+        self,
+        budget: int = _MAX_GC_PER_CYCLE,
+        *,
+        active_snapshot: _ActiveWorkspaceSnapshot | None = None,
+    ) -> int:
         """Reap orphan worktrees discovered via ``git worktree list``.
 
         Authoritative enumeration across every registered worktree root — not
@@ -497,7 +583,15 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             root.expanduser().resolve()
             for root in self._config.worktree_gc_root_paths()
         ]
-        active_workspaces = self._state.get_active_workspaces()
+        if active_snapshot is None:
+            active_snapshot = self._active_workspace_snapshot()
+        if active_snapshot is None:
+            logger.warning(
+                "GC: active workspace state identity is malformed or ambiguous — skipping all-root sweep"
+            )
+            return 0
+        active_workspaces = active_snapshot.workspaces
+        active_path_owners = active_snapshot.path_owners
 
         collected = 0
         for entry in worktrees:
@@ -509,6 +603,16 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 continue
             # Blast-radius gate: only sweep configured/known factory roots.
             if not any(_path_within(path, root) for root in roots):
+                continue
+            # State owns paths independently of whichever branch happens to be
+            # checked out there. Branch parsing must never relabel a live path
+            # as orphaned (#11507 wrong/unparseable-branch safety).
+            if path in active_path_owners:
+                logger.debug(
+                    "GC: worktree %s is state-owned by issue(s) %s — skipping",
+                    path,
+                    sorted(active_path_owners[path]),
+                )
                 continue
             issue_number = self._parse_issue_from_branch(entry.branch)
             # Leave the standard factory issue-<N> path to phases 1-2 so their
@@ -533,6 +637,51 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 )
         return collected
 
+    @staticmethod
+    def _canonical_active_path_owners(
+        active_workspaces: dict[int, str],
+    ) -> dict[Path, set[int]] | None:
+        """Reverse active state into canonical path → owning issue IDs.
+
+        A malformed state path makes ownership unknowable, so the whole cycle
+        stops before any destructive phase rather than risk treating an owned
+        path as an orphan. Multiple issue IDs may conservatively own one path.
+        """
+        owners: dict[Path, set[int]] = {}
+        try:
+            for issue_number, raw_path in active_workspaces.items():
+                if (
+                    type(raw_path) is not str
+                    or not raw_path.strip()
+                    or "\0" in raw_path
+                ):
+                    return None
+                candidate = Path(raw_path)
+                if not candidate.is_absolute():
+                    return None
+                canonical = candidate.resolve()
+                owners.setdefault(canonical, set()).add(issue_number)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return None
+        return owners
+
+    def _active_workspace_snapshot(self) -> _ActiveWorkspaceSnapshot | None:
+        """Validate active-workspace keys and paths once for a GC cycle.
+
+        StateTracker's ordinary normalized accessor is intentionally lossy:
+        malformed keys are dropped and int-equivalent spellings collapse.
+        Destructive GC instead takes one raw-validated snapshot and reuses its
+        reverse path ownership in phases 1, 2, and 5. Any ambiguous key or
+        path disables the cycle before workspace, branch, or state mutation.
+        """
+        workspaces = self._state.get_active_workspaces_validated()
+        if workspaces is None:
+            return None
+        path_owners = self._canonical_active_path_owners(workspaces)
+        if path_owners is None:
+            return None
+        return _ActiveWorkspaceSnapshot(workspaces, path_owners)
+
     async def _reap_worktree_if_safe(
         self, path: Path, branch: str | None, issue_number: int | None
     ) -> bool:
@@ -541,40 +690,24 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         Never reaps a worktree that: is younger than ``min_age``; has
         uncommitted changes; belongs to an active/HITL/in-pipeline/in-retry
         issue or an issue whose state is unknown (via ``_is_safe_to_gc``); or
-        has unique commits not yet on the integration branch. A worktree whose
-        branch cannot be attributed to an issue is reaped only when it is
-        provably empty (0 unique commits + clean) and older than ``min_age``.
+        has work that cannot be proven landed by the canonical, HEAD-aware
+        ``_worktree_work_has_landed`` predicate. Issue closure never bypasses
+        that proof (#11503), and unattributable worktrees use the same proof.
         """
         # min_age guard — never reap a worktree created mid-run.
         if self._worktree_too_new(path):
             logger.debug("GC: worktree %s younger than min_age — skipping", path)
             return False
-        # NEVER reap a worktree with uncommitted changes.
-        if await self._worktree_is_dirty(path):
-            logger.debug("GC: worktree %s has uncommitted changes — skipping", path)
+
+        if issue_number is not None and not await self._is_safe_to_gc(issue_number):
             return False
 
-        if issue_number is not None:
-            # Reuse the battle-tested reap policy verbatim.
-            if not await self._is_safe_to_gc(issue_number):
-                return False
-            # A closed issue is authoritatively merged/abandoned. An
-            # open-but-abandoned issue still needs the unmerged-commit guard so
-            # unpushed work is never destroyed (#10459/#6413 invariant).
-            state = await self._get_issue_state(issue_number)
-            if state != "closed" and await self._worktree_has_unmerged_commits(path):
-                logger.debug(
-                    "GC: worktree %s (open issue #%d) has unmerged commits — skipping",
-                    path,
-                    issue_number,
-                )
-                return False
-        # Un-parseable / detached: reap only if provably empty.
-        elif await self._worktree_has_unmerged_commits(path):
-            logger.debug(
-                "GC: unattributable worktree %s has unique commits — skipping",
-                path,
-            )
+        if not await self._worktree_work_has_landed(
+            path,
+            expected_branch=branch,
+            expected_issue=issue_number,
+        ):
+            logger.debug("GC: worktree %s has unlanded work — skipping", path)
             return False
 
         await self._reap_worktree(path, branch, issue_number)
@@ -638,43 +771,253 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             return True
         return (time.time() - mtime) < min_age
 
-    async def _worktree_is_dirty(self, path: Path) -> bool:
-        """True when the worktree has uncommitted changes (fail-closed on error)."""
-        try:
-            status = await run_subprocess(
-                "git",
-                "status",
-                "--porcelain",
-                cwd=path,
-                gh_token=self._credentials.gh_token,
-            )
-        except RuntimeError:
-            return True
-        return bool(status.strip())
+    @staticmethod
+    def _tracked_path_matches_destroy_target(
+        recorded_path: Path, destroy_path: Path
+    ) -> bool:
+        """True when phase 1 inspected the path ``WorkspacePort`` will delete.
 
-    async def _worktree_has_unmerged_commits(self, path: Path) -> bool:
-        """True when the worktree has commits not on the integration branch.
-
-        Compares ``origin/<base>..HEAD`` where ``<base>`` is
-        ``config.base_branch()``. Any failure (unknown ref, detached, git
-        error) fails closed — assume unmerged work exists and skip.
+        ``WorkspacePort.destroy(issue)`` derives its target from config, not
+        the StateTracker value.  A stale/mismatched mapping must therefore
+        fail closed rather than inspect one directory and delete another.
         """
+        try:
+            recorded = recorded_path.expanduser().resolve()
+            target = destroy_path.expanduser().resolve()
+            return recorded == target
+        except OSError:
+            return False
+
+    @staticmethod
+    def _parse_worktree_status(
+        output: str,
+    ) -> tuple[str, str | None, bool] | None:
+        """Parse ``git status --porcelain=v2 --branch`` identity + dirtiness."""
+        head_sha: str | None = None
+        branch: str | None = None
+        saw_branch = False
+        dirty = False
+        for line in output.splitlines():
+            if line.startswith("# branch.oid "):
+                if head_sha is not None:
+                    return None
+                head_sha = line.removeprefix("# branch.oid ").strip().lower()
+            elif line.startswith("# branch.head "):
+                if saw_branch:
+                    return None
+                raw_branch = line.removeprefix("# branch.head ").strip()
+                if not raw_branch or (
+                    raw_branch.startswith("(") and raw_branch != "(detached)"
+                ):
+                    return None
+                branch = None if raw_branch == "(detached)" else raw_branch
+                saw_branch = True
+            elif line and not line.startswith("# "):
+                dirty = True
+        if (
+            not saw_branch
+            or head_sha is None
+            or _GIT_OID_RE.fullmatch(head_sha) is None
+        ):
+            return None
+        return head_sha, branch, dirty
+
+    async def _worktree_work_has_landed(
+        self,
+        path: Path,
+        *,
+        expected_branch: str | None,
+        expected_issue: int | None,
+    ) -> bool:
+        """Prove the exact clean worktree HEAD landed, or fail closed.
+
+        The ladder is deliberately HEAD-aware and ordered cheapest-first:
+
+        1. a HEAD already ancestral to ``origin/<base>`` is landed;
+        2. an identical two-rev tree diff covers a fresh squash merge;
+        3. after the base advances, GitHub must report one merged PR whose
+           base, branch, and historical ``head.sha`` match this worktree.
+
+        Branch name alone is never authoritative because names are reusable.
+        Dirty worktrees, branch/issue/path identity mismatches, missing refs,
+        malformed git output, GitHub errors, and ambiguous PR rows all return
+        ``False``. Local comparisons use the initially captured OID, then
+        status is re-read so a concurrent HEAD move cannot mix identities.
+        An absent registered path is not landed proof: phase 5 could otherwise
+        prune its registry entry and delete the only branch carrying the work.
+        An attributed candidate must have a ``.git`` marker and must report
+        its own canonical path from ``git rev-parse --show-toplevel`` before
+        status is read, so parent-repository discovery or a misdirected
+        gitfile cannot prove one tree while GC deletes another. Empty,
+        existing, unattributed non-git directories are the sole non-git
+        candidates considered provably empty.
+        """
+        if not path.exists():
+            return False
+        if not path.is_dir():
+            return False
+        git_marker = path / ".git"
+        if not git_marker.exists():
+            if expected_branch is not None or expected_issue is not None:
+                return False
+            empty = False
+            with contextlib.suppress(OSError):
+                empty = next(path.iterdir(), None) is None
+            return empty
+
+        try:
+            candidate_root = path.expanduser().resolve()
+        except (OSError, RuntimeError):
+            return False
+
         base = self._config.base_branch()
-        try:
-            out = await run_subprocess(
-                "git",
-                "rev-list",
-                "--count",
-                f"origin/{base}..HEAD",
-                cwd=path,
-                gh_token=self._credentials.gh_token,
-            )
-        except RuntimeError:
-            return True
-        try:
-            return int(out.strip()) > 0
-        except ValueError:
-            return True
+        commands: list[tuple[str, tuple[str, ...]]] = [
+            ("top-level", ("rev-parse", "--show-toplevel")),
+        ]
+        head_sha = ""
+        actual_branch: str | None = None
+        local_result: bool | None = None
+        while commands and local_result is None:
+            kind, args = commands.pop(0)
+            if kind == "pr":
+                if actual_branch is None:
+                    local_result = False
+                    continue
+                pr_state = "UNKNOWN"
+                try:
+                    pr_state = await self._prs.get_branch_pr_state(
+                        actual_branch,
+                        head_sha,
+                        base,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    reraise_on_credit_or_bug(exc)
+                if pr_state == "MERGED":
+                    commands.append(
+                        (
+                            "verify-status",
+                            ("status", "--porcelain=v2", "--branch"),
+                        )
+                    )
+                else:
+                    local_result = False
+                continue
+
+            try:
+                output = await run_subprocess(
+                    "git",
+                    *args,
+                    cwd=path,
+                    gh_token=self._credentials.gh_token,
+                )
+            except (RuntimeError, OSError):
+                local_result = False
+                break
+
+            if kind == "top-level":
+                reported_root = output.strip()
+                try:
+                    reported_path = Path(reported_root)
+                    if (
+                        not reported_root
+                        or "\0" in reported_root
+                        or len(output.splitlines()) != 1
+                        or not reported_path.is_absolute()
+                        or reported_path.expanduser().resolve() != candidate_root
+                    ):
+                        local_result = False
+                    else:
+                        commands.append(
+                            ("status", ("status", "--porcelain=v2", "--branch"))
+                        )
+                except (OSError, RuntimeError, ValueError):
+                    local_result = False
+                continue
+
+            if kind in {"status", "verify-status"}:
+                parsed = self._parse_worktree_status(output)
+                if parsed is None:
+                    local_result = False
+                elif kind == "verify-status":
+                    verified_head, verified_branch, verified_dirty = parsed
+                    local_result = (
+                        not verified_dirty
+                        and verified_head == head_sha
+                        and verified_branch == actual_branch
+                    )
+                else:
+                    head_sha, actual_branch, dirty = parsed
+                    normalized_expected = (
+                        expected_branch.removeprefix("refs/heads/")
+                        if expected_branch
+                        else None
+                    )
+                    if (
+                        dirty
+                        or (
+                            normalized_expected is not None
+                            and actual_branch != normalized_expected
+                        )
+                        or (
+                            expected_issue is not None
+                            and self._parse_issue_from_branch(actual_branch)
+                            != expected_issue
+                        )
+                    ):
+                        local_result = False
+                    else:
+                        commands.append(
+                            (
+                                "rev-list",
+                                (
+                                    "rev-list",
+                                    "--count",
+                                    f"origin/{base}..{head_sha}",
+                                ),
+                            )
+                        )
+                continue
+
+            if kind == "rev-list":
+                try:
+                    unique_commits = int(output.strip())
+                except ValueError:
+                    local_result = False
+                else:
+                    if unique_commits < 0:
+                        local_result = False
+                    elif unique_commits == 0:
+                        commands.append(
+                            (
+                                "verify-status",
+                                ("status", "--porcelain=v2", "--branch"),
+                            )
+                        )
+                    else:
+                        commands.append(
+                            (
+                                "diff",
+                                (
+                                    "diff",
+                                    "--name-only",
+                                    f"origin/{base}",
+                                    head_sha,
+                                ),
+                            )
+                        )
+                continue
+
+            if not output.strip():
+                commands.append(
+                    (
+                        "verify-status",
+                        ("status", "--porcelain=v2", "--branch"),
+                    )
+                )
+            else:
+                commands.append(("pr", ()))
+
+        return local_result is True
 
     async def _reap_worktree(
         self, path: Path, branch: str | None, issue_number: int | None

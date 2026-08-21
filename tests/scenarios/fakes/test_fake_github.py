@@ -63,6 +63,111 @@ class TestFakeGitHubPRs:
         assert r2[0] is True
 
 
+class TestFakeGitHubBranchPrState:
+    """Exact branch HEAD identity guards destructive GC reads (#11502)."""
+
+    async def test_merged_exact_head_reports_merged(self) -> None:
+        gh = FakeGitHub()
+        gh.add_pr(
+            number=1,
+            issue_number=1,
+            branch="fix/reused",
+            head_sha="a" * 40,
+            merged=True,
+        )
+
+        state = await gh.get_branch_pr_state("fix/reused", "a" * 40, "main")
+
+        assert state == "MERGED"
+
+    async def test_sha256_merged_exact_head_reports_merged(self) -> None:
+        gh = FakeGitHub()
+        gh.add_pr(
+            number=1,
+            issue_number=1,
+            branch="fix/reused",
+            head_sha="a" * 64,
+            merged=True,
+        )
+
+        state = await gh.get_branch_pr_state("fix/reused", "a" * 64, "main")
+
+        assert state == "MERGED"
+
+    async def test_old_merged_pr_on_reused_branch_does_not_match_new_head(
+        self,
+    ) -> None:
+        gh = FakeGitHub()
+        gh.add_pr(
+            number=1,
+            issue_number=1,
+            branch="fix/reused",
+            head_sha="a" * 40,
+            merged=True,
+        )
+
+        state = await gh.get_branch_pr_state("fix/reused", "b" * 40, "main")
+
+        assert state == "NONE"
+
+    async def test_multiple_exact_head_rows_fail_closed(self) -> None:
+        gh = FakeGitHub()
+        for number in (1, 2):
+            gh.add_pr(
+                number=number,
+                issue_number=number,
+                branch="fix/ambiguous",
+                head_sha="c" * 40,
+                merged=number == 1,
+            )
+
+        state = await gh.get_branch_pr_state("fix/ambiguous", "c" * 40, "main")
+
+        assert state == "UNKNOWN"
+
+    @pytest.mark.parametrize(
+        ("closed", "expected"),
+        [(False, "OPEN"), (True, "CLOSED")],
+    )
+    async def test_unmerged_exact_head_reports_current_state(
+        self, *, closed: bool, expected: str
+    ) -> None:
+        gh = FakeGitHub()
+        gh.add_pr(
+            number=1,
+            issue_number=1,
+            branch="fix/current",
+            head_sha="d" * 40,
+        )
+        gh.pr(1).closed = closed
+
+        state = await gh.get_branch_pr_state("fix/current", "d" * 40, "main")
+
+        assert state == expected
+
+    async def test_exact_head_merged_into_other_base_does_not_match(self) -> None:
+        gh = FakeGitHub()
+        gh.add_pr(
+            number=1,
+            issue_number=1,
+            branch="fix/reused",
+            head_sha="e" * 40,
+            base_branch="release",
+            merged=True,
+        )
+
+        state = await gh.get_branch_pr_state("fix/reused", "e" * 40, "main")
+
+        assert state == "NONE"
+
+    async def test_malformed_head_identity_reports_unknown(self) -> None:
+        gh = FakeGitHub()
+
+        state = await gh.get_branch_pr_state("fix/reused", "a" * 41, "main")
+
+        assert state == "UNKNOWN"
+
+
 class TestFakeGitHubListAllPrs:
     """list_all_prs must reflect distinct per-PR dates (#11418 review finding).
 

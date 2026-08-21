@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# The destructive GC read is keyed by both branch and exact historical PR
+# head SHA; the dispatcher seeds that one matching merged PR.
+adapter: github
+interaction: get_branch_pr_state
+recorded_at: '2026-08-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_branch_pr_state
+  args:
+  - fix/reused
+  - aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - main
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: 'MERGED
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

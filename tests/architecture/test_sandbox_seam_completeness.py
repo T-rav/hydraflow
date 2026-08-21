@@ -87,8 +87,10 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     # is reachable there. Cannot be a module-level SANDBOX_SEAMS config_disable
     # because Phases 1-4 of the same module still run in the sandbox (s46/s65).
     "src/workspace_gc_loop.py::WorkspaceGCLoop._list_git_worktrees::run_subprocess": 1,
-    "src/workspace_gc_loop.py::WorkspaceGCLoop._worktree_is_dirty::run_subprocess": 1,
-    "src/workspace_gc_loop.py::WorkspaceGCLoop._worktree_has_unmerged_commits::run_subprocess": 1,
+    # #11502/#11503/#11507: one HEAD-aware landed predicate now owns every
+    # worktree-destruction decision. It still uses one lexical local-git seam;
+    # the loop executes status/rev-list/two-rev-diff through that call site.
+    "src/workspace_gc_loop.py::WorkspaceGCLoop._worktree_work_has_landed::run_subprocess": 1,
     "src/workspace_gc_loop.py::WorkspaceGCLoop._reap_worktree::run_subprocess": 2,
 }
 

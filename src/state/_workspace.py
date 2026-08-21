@@ -29,6 +29,29 @@ class WorkspaceStateMixin:
         """Return ``{issue_number: workspace_path}`` mapping."""
         return self._int_keys(self._data.active_workspaces)
 
+    def get_active_workspaces_validated(self) -> dict[int, str] | None:
+        """Return active workspaces only when every raw key is canonical.
+
+        Destructive consumers cannot use ``_int_keys`` because it drops bad
+        keys and collapses int-equivalent spellings such as ``"1"`` and
+        ``"01"``. Either case can hide an owned path. ``None`` is the
+        fail-closed validity signal; no malformed entry is silently coerced.
+        """
+        validated: dict[int, str] = {}
+        for raw_key, path in self._data.active_workspaces.items():
+            try:
+                issue_number = int(raw_key)
+            except (TypeError, ValueError):
+                return None
+            if (
+                issue_number <= 0
+                or str(issue_number) != raw_key
+                or issue_number in validated
+            ):
+                return None
+            validated[issue_number] = path
+        return validated
+
     def set_workspace(self, issue_number: int, path: str) -> None:
         """Record the workspace filesystem *path* for *issue_number*."""
         self._data.active_workspaces[self._key(issue_number)] = path

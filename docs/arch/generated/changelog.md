@@ -6,7 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `818670a` — Merge branch 'staging' into agent/auto-agent-11279 *(2026-08-17)*
+- `4474b1a` — fix: fail closed on wrong-branch worktree reuse (#11523) (#11523) *(2026-08-21)*
+- `3c6d708` — fix(pipeline): gate /api/pipeline snapshot on IssueStore's first refresh (#11349) (#11349) *(2026-08-21)*
 - `9e85063` — Fixes #11441: token-drift engine + API drift block (read-only salvage) (#11495) (#11495) *(2026-08-20)*
 - `1ae1c2e` — Fixes #11425: land the true remainder of the fake-fidelity hardening pass (#11488) (#11488) *(2026-08-20)*
 - `d729b3b` — fix(planner): guard epic replans against stale ownership (#11482) (#11484) (#11484) *(2026-08-20)*
@@ -14,7 +15,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `daa3c82` — Fixes #11418: promote StaleIssueLoop/ReportIssueLoop/service_registry reach-throughs to PRPort methods *(2026-08-18)*
 - `cfa3338` — Fixes #11420: FakeLLM's nested runner stand-ins have drifted from t... (#11445) (#11445) *(2026-08-17)*
 - `7cba8c3` — Fixes #11416: MockWorld repo_wiki loop registration never wires a w... (#11428) (#11428) *(2026-08-17)*
-- `ecbe348` — Merge remote-tracking branch 'origin/staging' into pipefix-heal *(2026-08-17)*
 - `b0aa945` — feat(quality): host-wide advisory lock so concurrent suites queue, not race (#11219) (#11400) (#11400) *(2026-08-17)*
 
 ## 2026-W33
@@ -22,7 +22,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `9bbae16` — feat(supervisor): fleet-vitals shadow alarms — bands, mechanical diagnosis, closed-menu proposals (#11391) (#11392) (#11392) *(2026-08-16)*
 - `49df312` — feat(light-lane): route simple issues to the single-session auto-agent — one spawn, issue to PR (#11298) (#11389) (#11389) *(2026-08-16)*
 - `4610eb2` — fix(diagnostic): opt DiagnosticLoop into the LLM watchdog bound (#11262) (#11369) (#11369) *(2026-08-16)*
-- `a0ca56f` — fix(pipeline): gate /api/pipeline snapshot on IssueStore's first refresh (#11279) (#11279) *(2026-08-16)*
 - `a08bf72` — feat(find-filing): class-key fold layer for pattern-shaped find-issues (#11292) (#11324) (#11324) *(2026-08-16)*
 - `9d7bf33` — feat(providers): ZAI_CODING_PLAN_KEY — plan vs API billing lane split (#11267) (#11267) *(2026-08-15)*
 - `66b3cff` — Fixes #11208: make factory should auto-start the orchestrator (#11257) (#11257) *(2026-08-15)*
@@ -447,15 +446,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `72eae73` — Refs #8933: add repo metrics dashboard payload *(2026-05-23)*
 - `43b1e0a` — Refs #8933: wire onboarding format upgrade *(2026-05-23)*
 - `bab9837` — Fixes #8933: wire onboarding continue plan *(2026-05-23)*
-- `553bd1d` — Refs #8932: add Claude design provider fallback *(2026-05-23)*
-- `adbcc6a` — Refs #8931: add onboarding push endpoint *(2026-05-23)*
-- `f4915b8` — Refs #8933: add onboarding dashboard repo slice *(2026-05-22)*
-- `6b74497` — Refs #8932: add onboarding design chat slice *(2026-05-22)*
-- `091f166` — Refs #8931: add onboarding wizard UI slice *(2026-05-22)*
-- `e439049` — Refs #8930: add onboarding materialize API slice *(2026-05-22)*
-- `e5e3dbd` — Refs #8930: add onboarding draft API foundation *(2026-05-22)*
-- `52784fb` — Fixes #8368: resolve dashboard a11y violations *(2026-05-22)*
-- `3381e36` — Refs #8475: preserve managed repo config models *(2026-05-22)*
 
 
 <!-- arch:generated -->
