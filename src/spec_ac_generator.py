@@ -13,8 +13,8 @@ import json
 import logging
 from dataclasses import dataclass
 
+from adversarial_agents import AgentLike, extract_json
 from exception_classify import reraise_on_credit_or_bug
-from src.adversarial_agents import AgentLike, extract_json
 
 logger = logging.getLogger(__name__)
 

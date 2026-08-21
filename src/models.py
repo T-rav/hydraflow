@@ -32,7 +32,7 @@ from pydantic.alias_generators import (
 )
 from typing_extensions import TypedDict
 
-from src.pending_concerns import AdversarialState
+from pending_concerns import AdversarialState
 
 if TYPE_CHECKING:
     from pathlib import Path

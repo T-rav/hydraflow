@@ -9,6 +9,13 @@ package-dir = {"" = "src"}
 where = ["src"]
 exclude = ["ui*", "templates*", "tests*"]
 
+# The ~340 flat top-level modules under src/ (server.py, config.py, ...) are
+# enumerated by setup.py at build time — packages.find sees directories only
+# and py-modules cannot be a glob (#11580). Runtime data read relative to
+# __file__ must be declared here or the wheel boots and fails on first use.
+[tool.setuptools.package-data]
+assets = ["*.json"]
+
 [project]
 name = "hydraflow"
 version = "1.0.0"
@@ -54,6 +61,11 @@ test = [
     # advisory lane before real time detonates them on an RC. Two RC-blocking
     # detonations in 48h motivated this (PRs #11045, #11053).
     "freezegun>=1.5.0",
+    # The packaging regression (tests/regressions/test_issue_11580.py) builds
+    # the real wheel with the venv's own build backend — no network, no
+    # `uv build` isolation — so the backend must be present in every lane
+    # that runs tests/regressions/, including the `--extra test`-only ones.
+    "setuptools>=83.0.0",
 ]
 dev = [
     "ruff==0.15.0",

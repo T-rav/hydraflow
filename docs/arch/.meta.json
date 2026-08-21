@@ -7,22 +7,22 @@
       "content_sha": "fd0deec8a876e39973acb39ef32525dba6808fff6ee8716eace20cee1a6ae55c"
     },
     "adr-enforcement.md": {
-      "content_sha": "fe3c17be4a9d05050347890098b4191e71dca8adb5cb54f3c1796960498d81ce"
+      "content_sha": "b0f446e129197ab91f7cff79d49e7efbb7fe457b03b551bee136493dae9f1bba"
     },
     "adr-falsifiability.md": {
-      "content_sha": "abca280cc7c6557dc5f875d409e6981801b82ebcb9c6b580166e4f95bed97ced"
+      "content_sha": "7481667a0aab92994894a2637f3a65ef8a55f1ccdd45f9b2bce821e0c1e89bec"
     },
     "adr_xref.md": {
-      "content_sha": "0a545742c2c9328307ec14f3d0a6eb1e6a54222d2d7c2c2be62946884914b8ab"
+      "content_sha": "0b7c4900c7601565d291d966c6ba01001351d6adb4b882b653dac88e8361a070"
     },
     "ai_system_inventory.md": {
       "content_sha": "620e119bd8eb42a5a4a5a4aa6d3ec217a376cbbe19318474776188ab3cd3b197"
     },
     "changelog.md": {
-      "content_sha": "13ed0724fd44a00eb0cc53c8bc3c6e1d653645ba5ba78ab9311698470a171f39"
+      "content_sha": "331031ee33bea8d5d8295e58d5fdce2e39f125920ec22b4077f7fe4d477de888"
     },
     "coverage_matrix.md": {
-      "content_sha": "95e62eb055194f3e7049f755bf1ea0e1a573ab2084c002292c2261b516c99774"
+      "content_sha": "62198ae76c5aa74dd7193710a1f3d68326645f238aa13bd92fc979d616c3e745"
     },
     "events.md": {
       "content_sha": "4102b85691d1dc25c404bfb332aab10a8aa42c2f95ff43d6dac94513ff41aebe"
@@ -43,7 +43,7 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "e622197209698046fb31553f28af70192d55510fc99ac1180f3a8c5c3907a05d"
+      "content_sha": "dbfa22ccf57694643aa5594cce58f7a41f39c4e99704dfd5eebbacfa44abf775"
     },
     "ports.md": {
       "content_sha": "c5694cc02e165570a5196a4f9443170f984d254d68710cbe41856bdd4da64cc0"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "1b68222e8c380214851330270f4710423025bd77de07afc213fd99d599052f18"
+  "content_sha": "d5c360ee4f8d2f03f408ba6a166f80d8867e9b6ebcb94207605ed1602801597b"
 }

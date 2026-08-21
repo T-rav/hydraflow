@@ -1021,11 +1021,11 @@ class ReviewPhase(VisualGateMixin):
         # (Task 10 of earlier-adversarial-pipeline). These labels are
         # intra-stage issue markers, not review work — if one ever leaks
         # onto a PR, the agent reviewer should not process it.
-        from edge_proposer_loop import EDGE_PROPOSER_PR_LABEL  # noqa: PLC0415
-        from entry_evidence_loop import ENTRY_EVIDENCE_PR_LABEL  # noqa: PLC0415
-        from src.adversarial_labels import (  # noqa: PLC0415
+        from adversarial_labels import (  # noqa: PLC0415
             LABELS_ADVERSARIAL_TRANSIENT,
         )
+        from edge_proposer_loop import EDGE_PROPOSER_PR_LABEL  # noqa: PLC0415
+        from entry_evidence_loop import ENTRY_EVIDENCE_PR_LABEL  # noqa: PLC0415
         from term_proposer_loop import TERM_PROPOSER_PR_LABEL  # noqa: PLC0415
         from term_pruner_loop import TERM_PRUNER_PR_LABEL  # noqa: PLC0415
 
