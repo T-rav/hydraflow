@@ -2,7 +2,7 @@
 
 **Status:** Proposed
 **Date:** 2026-05-19
-**Enforced by:** tests/test_workspace_gc_loop.py, tests/regressions/test_workspace_gc_landed_safety.py, tests/regressions/test_issue_11503.py, tests/regressions/test_issue_11507.py, tests/regressions/test_issue_11570.py, tests/regressions/test_issue_11571.py
+**Enforced by:** tests/test_workspace_gc_loop.py, tests/regressions/test_workspace_gc_landed_safety.py, tests/regressions/test_issue_11503.py, tests/regressions/test_issue_11507.py, tests/regressions/test_issue_11570.py, tests/regressions/test_issue_11571.py, tests/architecture/test_workspace_gc_landed_guard.py, tests/scenarios/test_workspace_gc_landed_guard_scenario.py
 
 ## Context
 

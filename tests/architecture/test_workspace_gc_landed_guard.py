@@ -82,23 +82,48 @@ def test_every_landed_predicate_call_coordinates_issue_identity() -> None:
     )
 
 
+def _attribute_call_linenos(node: ast.AST, attr: str) -> list[int]:
+    return [
+        child.lineno
+        for child in ast.walk(node)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Attribute)
+        and child.func.attr == attr
+    ]
+
+
+def _force_delete_linenos(node: ast.AST) -> list[int]:
+    return [
+        child.lineno
+        for child in ast.walk(node)
+        if isinstance(child, ast.Call)
+        and isinstance(child.func, ast.Name)
+        and child.func.id == "run_subprocess"
+        and tuple(arg.value for arg in child.args[:3] if isinstance(arg, ast.Constant))
+        == _FORCE_DELETE
+    ]
+
+
 def test_every_branch_force_delete_is_post_proof() -> None:
-    """#11571: ``git branch -D`` only runs after the branch-tip proof (phase 3)
-    or after the worktree proof authorized a reap (``_reap_worktree``, which
-    only ``_reap_worktree_if_safe`` may call)."""
+    """#11571: a branch force-delete only runs after the branch-tip proof
+    (phase 3) or after the worktree proof authorized a reap (``_reap_worktree``,
+    which only ``_reap_worktree_if_safe`` may call). "After" is pinned on
+    source order inside phase 3, not on mere co-presence."""
     functions = _functions()
     calls = _method_calls()
     force_delete_sites = {
-        name
-        for name, node in functions.items()
-        if any(prefix[:3] == _FORCE_DELETE for prefix in _subprocess_prefixes(node))
+        name for name, node in functions.items() if _force_delete_linenos(node)
     }
     reap_callers = {
         method for method, names in calls.items() if "_reap_worktree" in names
     }
+    phase3 = functions["_collect_orphaned_branches"]
+    proof_linenos = _attribute_call_linenos(phase3, _BRANCH_PREDICATE)
+    delete_linenos = _force_delete_linenos(phase3)
 
     assert force_delete_sites == {"_collect_orphaned_branches", "_reap_worktree"}
-    assert _BRANCH_PREDICATE in calls["_collect_orphaned_branches"]
+    assert (len(proof_linenos), len(delete_linenos)) == (1, 1)
+    assert proof_linenos[0] < delete_linenos[0]
     assert reap_callers == {"_reap_worktree_if_safe"}
     assert _PREDICATE in calls["_reap_worktree_if_safe"]
 
