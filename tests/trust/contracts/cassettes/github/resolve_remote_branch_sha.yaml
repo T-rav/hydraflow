@@ -1,0 +1,24 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# resolve_remote_branch_sha fetches origin/<branch> with an explicit refspec
+# and returns the remote-tracking ref's commit OID (`git rev-parse --verify
+# refs/remotes/origin/<branch>^{commit}`) — the promoted main SHA the
+# ADR-0011 release path tags (#11517, ADR-0042). The dispatcher seeds the
+# branch head via set_branch_head so the fake's answer is a fixed full OID;
+# an unseeded branch would answer the synthetic `sha-<branch>` instead.
+adapter: github
+interaction: resolve_remote_branch_sha
+recorded_at: "2026-08-21T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: resolve_remote_branch_sha
+  args:
+    - "main"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "9f2c0d4e8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# create_tag runs `git tag <tag> <ref>` then `git push origin <tag>`; the
+# ref is keyword-only with no default (#11517) so a release tag always
+# names the promoted main SHA, never the factory checkout HEAD. Neither
+# git command writes to stdout on success (push progress goes to stderr and
+# is not modelled). The dispatcher asserts the recorded tag -> ref pairing
+# because the bool alone would pass for a fake that ignored `ref`.
+adapter: github
+interaction: create_tag
+recorded_at: "2026-08-21T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: create_tag
+  args:
+    - "v1.0.0"
+    - "9f2c0d4e8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: ""
+  stderr: ""
+normalizers: []
+baseline_only: true

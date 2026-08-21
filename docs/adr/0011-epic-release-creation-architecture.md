@@ -41,7 +41,8 @@ PostMergeHandler.handle_approved()
                  └─ _try_close_epic(epic, title, body, sub_issues)
                       ├─ _create_release_for_epic()
                       │    ├─ extract_version_from_title(epic_title)
-                      │    ├─ PRManager.create_tag(tag)
+                      │    ├─ PRManager.resolve_remote_branch_sha(main_branch)  # promoted main SHA (ADR-0042)
+                      │    ├─ PRManager.create_tag(tag, ref=<main sha>)
                       │    ├─ PRManager.create_release(tag, title, changelog)
                       │    └─ StateTracker.upsert_release(release)
                       ├─ post close comment (with release URL if created)
@@ -81,6 +82,12 @@ Key implementation details:
   stay in the epic subsystem.
 - State persistence enables idempotent retries and dashboard visibility.
 - The two-step tag/release flow allows fine-grained error handling and logging.
+- Tags target the promoted `main` SHA (`origin/<main_branch>` per ADR-0042,
+  fetched and resolved at release time via
+  `PRManager.resolve_remote_branch_sha`), never the factory checkout `HEAD` —
+  which under ADR-0042 is `staging` or an agent branch. `create_tag`'s `ref`
+  is keyword-only with no default, and an unresolvable `origin/main` skips the
+  release fail-closed (#11517).
 
 **Trade-offs:**
 - Release creation depends on version being parseable from the epic title; epics
@@ -111,6 +118,7 @@ Key implementation details:
 
 - Source memory: Issue #1682 — *[Memory] Epic release creation architecture*
 - `src/epic.py:EpicManager._try_auto_close`, `src/epic.py:EpicCompletionChecker._create_release_for_epic` — the epic-close entry point and the release side-effect it triggers
+- `src/pr_manager.py:PRManager.resolve_remote_branch_sha` — resolves the promoted `main` SHA the tag targets (#11517)
 - `src/pr_manager.py:PRManager.create_tag`, `src/pr_manager.py:PRManager.create_release` — the two-step tag-then-release operations
 - `src/models.py:Release`, `src/models.py:StateData.releases` — the release model and where release state is persisted
 - PR #1690 — *feat: create GitHub Release with changelog when epic closes*

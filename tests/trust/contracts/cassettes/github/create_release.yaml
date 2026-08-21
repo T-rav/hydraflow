@@ -1,0 +1,25 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# create_release runs `gh release create <tag> --repo <repo> --title <title>
+# --notes-file <tmp>` and returns True; gh prints the release URL. The fake
+# returns only the bool, so the dispatcher synthesises the URL line the way
+# merge_pr.yaml does, and asserts the recorded (title, body) side-effect
+# because that is what pins fidelity (#9436 plan).
+adapter: github
+interaction: create_release
+recorded_at: "2026-08-21T00:00:00Z"
+recorder_sha: "00000000"
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: create_release
+  args:
+    - "v1.0.0"
+    - "Release v1.0.0"
+    - "## v1.0.0\n\n- Initial stable base"
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: "https://github.com/test-org/test-repo/releases/tag/v1.0.0\n"
+  stderr: ""
+normalizers: []
+baseline_only: true

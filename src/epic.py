@@ -544,8 +544,24 @@ class EpicCompletionChecker:
         )
         release_title = f"Release {tag}"
 
-        # Create the git tag
-        tag_ok = await self._prs.create_tag(tag)
+        # #11517: tag the promoted main SHA (ADR-0042's promotion target —
+        # ``main_branch``, NOT ``base_branch()``), resolved fresh at release
+        # time. The factory checkout's HEAD is ``staging`` or an agent branch
+        # and has not passed the RC gate; if main cannot be resolved, skip
+        # the release fail-closed rather than fall back to HEAD.
+        main_branch = self._config.main_branch
+        main_sha = await self._prs.resolve_remote_branch_sha(main_branch)
+        if main_sha is None:
+            logger.warning(
+                "Could not resolve origin/%s for %s — skipping release "
+                "(never tagging the factory checkout HEAD)",
+                main_branch,
+                tag,
+            )
+            return "", changelog  # preserve changelog so caller can still write to file
+
+        # Create the git tag on the promoted main SHA
+        tag_ok = await self._prs.create_tag(tag, ref=main_sha)
         if not tag_ok:
             logger.warning("Tag creation failed for %s — skipping release", tag)
             return "", changelog  # preserve changelog so caller can still write to file

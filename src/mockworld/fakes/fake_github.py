@@ -232,6 +232,15 @@ class FakeGitHub:
         # newest first. Distinct from _rc_branches (rc/* has its own
         # lifecycle via create_rc_branch/delete_branch).
         self._branch_commits: dict[str, list[dict[str, str]]] = {}
+        # #11517: release tagging (ADR-0011). ``_branch_heads`` seeds what
+        # ``resolve_remote_branch_sha`` answers per branch (``None`` = the
+        # branch cannot be resolved, driving the fail-closed skip); unseeded
+        # branches resolve to the synthetic ``sha-<branch>`` that
+        # ``list_branch_refs`` also reports. ``_tags`` / ``_releases`` record
+        # create_tag / create_release so scenarios can assert the tag ref.
+        self._branch_heads: dict[str, str | None] = {}
+        self._tags: dict[str, str] = {}
+        self._releases: dict[str, tuple[str, str]] = {}
         self._ci_scripts: dict[int, deque[tuple[bool, str]]] = {}
         self._comments: list[tuple[int, str]] = []
         self._ci_main_status: tuple[str, str] = ("success", "")
@@ -459,6 +468,15 @@ class FakeGitHub:
         self._branch_commits[branch] = commits or [
             {"date": "2026-01-01T00:00:00Z", "message": f"chore: seed {branch}"}
         ]
+
+    def set_branch_head(self, branch: str, sha: str | None) -> None:
+        """Seed-API helper: pin what ``resolve_remote_branch_sha`` returns (#11517).
+
+        ``None`` marks *branch* unresolvable (a fetch / rev-parse failure),
+        so a scenario can prove the release path skips fail-closed instead
+        of falling back to the checkout ``HEAD``.
+        """
+        self._branch_heads[branch] = sha
 
     def add_alerts(self, *, branch: str, alerts: list[Any]) -> None:
         """Script code-scanning alerts returned by fetch_code_scanning_alerts."""
@@ -1584,6 +1602,44 @@ class FakeGitHub:
     async def upload_screenshot(self, **_kw: Any) -> str:
         self._maybe_rate_limit()
         return ""
+
+    # --- Release tagging (ADR-0011, #11517) ---
+    #
+    # Mirrors PRManager.resolve_remote_branch_sha / create_tag /
+    # create_release: the epic release path resolves the promoted main SHA
+    # (ADR-0042) and tags THAT, never the factory checkout HEAD. The fake
+    # records the ``tag -> ref`` pairing so scenarios can assert the target.
+
+    async def resolve_remote_branch_sha(self, branch: str) -> str | None:
+        """Seeded head for *branch* (``None`` = unresolvable), else ``sha-<branch>``."""
+        self._maybe_rate_limit()
+        if branch in self._branch_heads:
+            return self._branch_heads[branch]
+        return f"sha-{branch}"
+
+    async def create_tag(self, tag: str, *, ref: str) -> bool:
+        """Record *tag* -> *ref*; a duplicate tag fails like ``git tag`` does."""
+        self._maybe_rate_limit()
+        if tag in self._tags:
+            return False
+        self._tags[tag] = ref
+        return True
+
+    async def create_release(self, tag: str, title: str, body: str) -> bool:
+        """Record the GitHub Release for *tag*."""
+        self._maybe_rate_limit()
+        self._releases[tag] = (title, body)
+        return True
+
+    @property
+    def tags(self) -> dict[str, str]:
+        """``{tag: ref}`` recorded by :meth:`create_tag` (a copy)."""
+        return dict(self._tags)
+
+    @property
+    def releases(self) -> dict[str, tuple[str, str]]:
+        """``{tag: (title, body)}`` recorded by :meth:`create_release` (a copy)."""
+        return dict(self._releases)
 
     # --- Staging / RC promotion PRPort methods ---
     #

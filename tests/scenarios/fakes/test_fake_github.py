@@ -438,3 +438,46 @@ class TestFakeGitHubCodeScanningAlerts:
         out2 = await gh.fetch_code_scanning_alerts(branch="agent/issue-2")
         assert out1 == [a1]
         assert out2 == [a2]
+
+
+class TestFakeGitHubReleaseTagging:
+    """#11517: the release primitives mirror PRManager's tag-the-promoted-main path."""
+
+    _SHA = "9f2c0d4e8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d"
+
+    async def test_resolve_remote_branch_sha_defaults_to_synthetic_sha(self):
+        gh = FakeGitHub()
+        assert await gh.resolve_remote_branch_sha("main") == "sha-main"
+
+    async def test_resolve_remote_branch_sha_returns_seeded_head(self):
+        gh = FakeGitHub()
+        gh.set_branch_head("main", self._SHA)
+        assert await gh.resolve_remote_branch_sha("main") == self._SHA
+
+    async def test_resolve_remote_branch_sha_seeded_none_is_unresolvable(self):
+        gh = FakeGitHub()
+        gh.set_branch_head("main", None)
+        assert await gh.resolve_remote_branch_sha("main") is None
+
+    async def test_create_tag_records_tag_to_ref(self):
+        gh = FakeGitHub()
+        assert await gh.create_tag("v1.0.0", ref=self._SHA) is True
+        assert gh.tags == {"v1.0.0": self._SHA}
+
+    async def test_create_tag_duplicate_returns_false_and_keeps_first_ref(self):
+        gh = FakeGitHub()
+        await gh.create_tag("v1.0.0", ref=self._SHA)
+        assert await gh.create_tag("v1.0.0", ref="sha-other") is False
+        assert gh.tags == {"v1.0.0": self._SHA}
+
+    async def test_create_release_records_title_and_body(self):
+        gh = FakeGitHub()
+        await gh.create_tag("v1.0.0", ref=self._SHA)
+        assert await gh.create_release("v1.0.0", "Release v1.0.0", "## notes") is True
+        assert gh.releases == {"v1.0.0": ("Release v1.0.0", "## notes")}
+
+    async def test_release_reads_are_copies(self):
+        gh = FakeGitHub()
+        await gh.create_tag("v1.0.0", ref=self._SHA)
+        gh.tags["v1.0.0"] = "tampered"
+        assert gh.tags == {"v1.0.0": self._SHA}

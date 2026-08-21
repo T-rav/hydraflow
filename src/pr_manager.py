@@ -1804,8 +1804,52 @@ class PRManager(PRManagerPromotionMixin):
                 exc,
             )
 
-    async def create_tag(self, tag: str, *, ref: str = "HEAD") -> bool:
-        """Create a git tag on the given *ref* and push it to origin.
+    async def resolve_remote_branch_sha(self, branch: str) -> str | None:
+        """Fetch ``origin/<branch>`` and return its current commit SHA.
+
+        The release path (ADR-0011) uses this to pin a tag to the promoted
+        ``main`` (ADR-0042) rather than whatever the factory checkout's
+        ``HEAD`` happens to be (#11517). The fetch uses an explicit refspec
+        so the remote-tracking ref is refreshed even in a single-branch
+        clone, and the result is verified to be a full commit OID.
+
+        Returns ``None`` when the fetch or the resolve fails so callers can
+        fail closed. In dry-run nothing is fetched and the symbolic
+        ``origin/<branch>`` ref is returned so downstream dry-run logs still
+        name the intended target.
+        """
+        self._assert_repo()
+        if self._config.dry_run:
+            logger.info("[dry-run] Would fetch and resolve origin/%s", branch)
+            return f"origin/{branch}"
+        remote_ref = f"refs/remotes/origin/{branch}"
+        try:
+            await self._run_gh(
+                "git", "fetch", "origin", f"+refs/heads/{branch}:{remote_ref}"
+            )
+            raw = await self._run_gh(
+                "git", "rev-parse", "--verify", "--quiet", f"{remote_ref}^{{commit}}"
+            )
+        except RuntimeError as exc:
+            logger.warning("Could not resolve origin/%s: %s", branch, exc)
+            return None
+        sha = raw.strip()
+        if _GIT_OID_RE.fullmatch(sha) is None:
+            logger.warning(
+                "origin/%s resolved to %r, not a commit OID — refusing to use it",
+                branch,
+                sha,
+            )
+            return None
+        return sha
+
+    async def create_tag(self, tag: str, *, ref: str) -> bool:
+        """Create a git tag on the explicit *ref* and push it to origin.
+
+        *ref* is keyword-only with no default on purpose (#11517): a release
+        tag must name the commit it targets — the promoted ``main`` SHA from
+        :meth:`resolve_remote_branch_sha` — never an implicit ``HEAD``, which
+        under ADR-0042 is the ``staging`` checkout or an agent branch.
 
         Returns *True* on success, *False* on failure.
         """
