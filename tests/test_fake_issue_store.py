@@ -199,3 +199,31 @@ def test_get_hitl_issues_persists_visited_history() -> None:
 
     assert store.get_hitl_issues() == set()
     assert 55 in store._hitl_visited
+
+
+def test_mark_active_with_dashboard_name_counts_against_its_stage() -> None:
+    """Parity with IssueStore (#11551): ``"implement"`` is the READY counter."""
+    gh = FakeGitHub()
+    store = FakeIssueStore(github=gh, event_bus=EventBus())
+
+    store.mark_active(5, "implement")
+    assert store.get_queue_stats().active_count["ready"] == 1
+
+    store.mark_complete(5)
+    stats = store.get_queue_stats()
+    assert stats.active_count["ready"] == 0
+    assert stats.total_processed["ready"] == 1
+
+
+def test_fake_display_name_map_mirrors_the_real_store() -> None:
+    """The Fake keeps its own stage vocabulary; it must not drift (#11551)."""
+    from issue_store import STAGE_NAME_MAP, IssueStoreStage, resolve_issue_store_stage
+    from mockworld.fakes import fake_issue_store
+
+    real_inverse = {display: str(stage) for stage, display in STAGE_NAME_MAP.items()}
+    assert real_inverse == fake_issue_store._DISPLAY_NAME_TO_STAGE
+    for name in [*STAGE_NAME_MAP.values(), *(s.value for s in IssueStoreStage), "x"]:
+        real = resolve_issue_store_stage(name)
+        assert fake_issue_store._resolve_stage(name) == (
+            None if real is None else str(real)
+        )
