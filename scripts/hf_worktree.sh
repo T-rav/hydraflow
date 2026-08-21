@@ -24,6 +24,7 @@
 #   <dir> on a DIFFERENT branch  -> fail: expected vs actual +
 #                                   the `git worktree remove` cmd  (exit 3)
 #   <dir> exists, unregistered   -> fail, nothing touched          (exit 4)
+#   add fails / verify mismatch  -> fail, git's error surfaced      (exit 5)
 #   bad args / outside a repo    -> usage / error                  (exit 2)
 set -euo pipefail
 

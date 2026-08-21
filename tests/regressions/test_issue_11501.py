@@ -288,7 +288,12 @@ def _make_sandbox(path: Path) -> Path:
     test is exactly what ships — this is what pins the DIR/BRANCH wiring.
     """
     if shutil.which("make") is None:
-        pytest.skip("make not available")
+        # Not pytest.skip: active tests must assert real contracts, so an
+        # environment that cannot run make fails loudly (this suite itself
+        # runs via `make quality`).
+        pytest.fail(
+            "make is required on PATH to pin the `make worktree` wiring"
+        )
     repo = _sandbox(path)
     shutil.copy2(REPO_ROOT / "Makefile", repo / "Makefile")
     (repo / "scripts").mkdir()
