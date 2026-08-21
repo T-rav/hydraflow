@@ -41,6 +41,21 @@ class TestExtractIssueNumber:
         assert extract_issue_number("fix/x", ["Closes #42"]) == 42
         assert extract_issue_number("fix/y", ["resolves #43"]) == 43
 
+    def test_fix_branch_accepts_past_tense_verb_forms(self) -> None:
+        """GitHub also auto-closes on ``Fixed``/``Closed``/``Resolved`` — the
+        original ``_FIXES_RE`` only covered third-person-singular forms
+        (#11481)."""
+        assert extract_issue_number("fix/x", ["Fixed #1234"]) == 1234
+        assert extract_issue_number("fix/y", ["Closed #1235"]) == 1235
+        assert extract_issue_number("fix/z", ["Resolved #1236"]) == 1236
+
+    def test_fix_branch_accepts_bare_verb_forms(self) -> None:
+        """GitHub also auto-closes on bare ``Fix``/``Close``/``Resolve``
+        (#11481)."""
+        assert extract_issue_number("fix/x", ["Fix #1237"]) == 1237
+        assert extract_issue_number("fix/y", ["Close #1238"]) == 1238
+        assert extract_issue_number("fix/z", ["Resolve #1239"]) == 1239
+
     def test_fix_branch_newest_first_order_wins(self) -> None:
         # commit_messages is newest-first; the first match found wins.
         messages = ["Fixes #2: latest", "Fixes #1: original"]

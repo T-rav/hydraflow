@@ -29,9 +29,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-# `Fixes #N` / `Closes #N` / `Resolves #N` — same convention as
-# ``PRManager.find_label_drift``'s ``fixes_re``.
-_FIXES_RE = re.compile(r"(?:fixes|closes|resolves)\s+#(\d+)", re.IGNORECASE)
+from false_close import CLOSE_KEYWORD_RE
 
 # `agent/issue-1234` encodes its issue number in the branch name — the
 # canonical namespace also parsed by
@@ -57,7 +55,7 @@ def extract_issue_number(branch: str, commit_messages: list[str]) -> int:
     if m:
         return int(m.group(1))
     for message in commit_messages:
-        fm = _FIXES_RE.search(message)
+        fm = CLOSE_KEYWORD_RE.search(message)
         if fm:
             return int(fm.group(1))
     return 0
