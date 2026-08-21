@@ -539,6 +539,11 @@ def _build_merge_state_watcher(ports: dict[str, Any], config: Any, deps: Any) ->
         prs=ports["github"],
         deps=deps,
         approval_reconciler=reconciler,
+        # #11595: scenarios may seed a PRAutoRebase (e.g. one whose refresh_fn
+        # targets a real tiny git repo); None lets the loop build its default,
+        # which stays inert while ``pr_autorebase_enabled`` is OFF (the test
+        # config default).
+        autorebase=ports.get("autorebase"),
     )
 
 

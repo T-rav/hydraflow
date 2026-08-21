@@ -17,6 +17,7 @@ from config import HydraFlowConfig
 from dedup_store import DedupStore
 from events import EventType, HydraFlowEvent
 from merge_state_watcher import MergeStateWatcher
+from pr_autorebase import PRAutoRebase
 
 if TYPE_CHECKING:
     from ports import PRPort
@@ -49,10 +50,23 @@ class MergeStateWatcherLoop(BaseBackgroundLoop):
         prs: PRPort,
         deps: LoopDeps,
         approval_reconciler: ApprovalRecordReconciler | None = None,
+        autorebase: PRAutoRebase | None = None,
     ) -> None:
         super().__init__(worker_name="merge_state_watcher", config=config, deps=deps)
         hitl_label = (config.hitl_label or ["hydraflow-hitl"])[0]
-        self._watcher = MergeStateWatcher(prs=prs, hitl_label=hitl_label)
+        # #11595: the auto-rebase actuator rides this loop (no new loop
+        # wiring). Always constructed — arming is the LIVE
+        # ``pr_autorebase_enabled`` flag (default OFF), read per attempt, so
+        # the operator can flip it in the settings screen without a restart.
+        self._watcher = MergeStateWatcher(
+            prs=prs,
+            hitl_label=hitl_label,
+            autorebase=(
+                autorebase
+                if autorebase is not None
+                else PRAutoRebase(config=config, prs=prs)
+            ),
+        )
         self._approvals = (
             approval_reconciler
             if approval_reconciler is not None
