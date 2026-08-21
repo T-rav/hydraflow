@@ -9,23 +9,23 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | Fake | Implements | Used in scenarios |
 |---|---|---|
 | **FakeAgent** | `AgentPort` | — |
-| **FakeBeads** | `BeadsPort` | `tests/scenarios/fakes/test_fake_beads.py`<br>`tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_bead_workflow.py` |
+| **FakeBeads** | `BeadsPort` | `tests/scenarios/fakes/test_fake_beads.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_bead_workflow.py` |
 | **FakeBotPR** | `BotPRPort` | — |
 | **FakeClock** | `ClockPort` | `tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/fakes/test_fake_clock.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakeDocker** | `DockerPort` | `tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeFS** | `FSPort` | `tests/scenarios/fakes/test_fake_fs.py` |
-| **FakeGit** | `GitPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_git.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_find_class_fold_scenario.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
-| **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_find_class_fold_scenario.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
+| **FakeGit** | `GitPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_git.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_find_class_fold_scenario.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py`<br>`tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
+| **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_find_class_fold_scenario.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py`<br>`tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
 | **FakeHTTP** | `HTTPPort` | `tests/scenarios/fakes/test_fake_http.py` |
 | **FakeIssueFetcher** | `IssueFetcherPort` | — |
-| **FakeIssueStore** | `IssueStorePort` | `tests/scenarios/test_epic_replan_ownership_scenario.py`<br>`tests/scenarios/test_pipeline_snapshot_terminal_status_scenario.py` |
+| **FakeIssueStore** | `IssueStorePort` | `tests/scenarios/test_epic_replan_ownership_scenario.py`<br>`tests/scenarios/test_pipeline_boot_readiness_scenario.py`<br>`tests/scenarios/test_pipeline_snapshot_terminal_status_scenario.py` |
 | **FakeLLM** | `LLMPort` | `tests/scenarios/behaviors/test_quota.py`<br>`tests/scenarios/fakes/test_fake_llm.py`<br>`tests/scenarios/fakes/test_fake_llm_streaming.py`<br>`tests/scenarios/fakes/test_prior_failure_propagation.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakeObservability** | `ObservabilityPort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
 | **FakeReviewInsightStore** | `ReviewInsightStorePort` | — |
 | **FakeRouteBackCounter** | `RouteBackCounterPort` | — |
 | **FakeSubprocessRunner** | `SubprocessRunnerPort` | `tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeWikiCompiler** | `WikiCompilerPort` | `tests/scenarios/test_repo_wiki_compile_scenario.py` |
-| **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
+| **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
 
 ## Wiring
 
@@ -34,8 +34,8 @@ graph LR
     FakeAgent -.-> AgentPort
     FakeBeads -.-> BeadsPort
     tests_scenarios_fakes_test_fake_beads_py([tests/scenarios/fakes/test_fake_beads.py]) --> FakeBeads
-    tests_scenarios_fakes_test_fake_docker_py([tests/scenarios/fakes/test_fake_docker.py]) --> FakeBeads
     tests_scenarios_fakes_test_mock_world_py([tests/scenarios/fakes/test_mock_world.py]) --> FakeBeads
+    tests_scenarios_fuzz_test_invariants_py([tests/scenarios/fuzz/test_invariants.py]) --> FakeBeads
     FakeBotPR -.-> BotPRPort
     FakeClock -.-> ClockPort
     tests_scenarios_behaviors_test_latency_py([tests/scenarios/behaviors/test_latency.py]) --> FakeClock
@@ -59,6 +59,7 @@ graph LR
     FakeIssueFetcher -.-> IssueFetcherPort
     FakeIssueStore -.-> IssueStorePort
     tests_scenarios_test_epic_replan_ownership_scenario_py([tests/scenarios/test_epic_replan_ownership_scenario.py]) --> FakeIssueStore
+    tests_scenarios_test_pipeline_boot_readiness_scenario_py([tests/scenarios/test_pipeline_boot_readiness_scenario.py]) --> FakeIssueStore
     tests_scenarios_test_pipeline_snapshot_terminal_status_scenario_py([tests/scenarios/test_pipeline_snapshot_terminal_status_scenario.py]) --> FakeIssueStore
     FakeLLM -.-> LLMPort
     tests_scenarios_behaviors_test_quota_py([tests/scenarios/behaviors/test_quota.py]) --> FakeLLM
@@ -74,6 +75,7 @@ graph LR
     tests_scenarios_test_repo_wiki_compile_scenario_py([tests/scenarios/test_repo_wiki_compile_scenario.py]) --> FakeWikiCompiler
     FakeWorkspace -.-> WorkspacePort
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeWorkspace
+    tests_scenarios_test_workspace_gc_landed_guard_scenario_py([tests/scenarios/test_workspace_gc_landed_guard_scenario.py]) --> FakeWorkspace
 ```
 
 <!-- arch:generated -->

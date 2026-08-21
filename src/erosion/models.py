@@ -150,3 +150,87 @@ class ConcentrationFinding:
     def is_flagged(self) -> bool:
         """True when at least one module met the god-file threshold."""
         return len(self.god_modules) > 0
+
+
+@dataclass(frozen=True)
+class GodFile:
+    """One oversized source file — a mass (size) reading.
+
+    ``loc`` counts non-blank, non-comment lines. Size is the third god-file
+    axis next to fan-in (``GodModule``) and change-spread: a file nobody
+    depends on can still be too big to hold in one head.
+    """
+
+    path: str  # repo-relative posix path under src/
+    loc: int
+
+
+@dataclass(frozen=True)
+class GodClass:
+    """One oversized class — the god-class reading the mass sensor files against.
+
+    Flagged when ``loc`` or ``methods`` meets its threshold; either axis alone
+    is enough (a 40-method facade and a 600-line two-method class are both
+    hard to decompose safely, for different reasons).
+    """
+
+    path: str
+    name: str
+    loc: int
+    methods: int
+
+    @property
+    def key(self) -> str:
+        """Stable ``path:ClassName`` identity used by the baseline and the roster."""
+        return f"{self.path}:{self.name}"
+
+
+@dataclass(frozen=True)
+class MassFinding:
+    """The repo-wide size reading: god files and god classes, largest first."""
+
+    god_files: tuple[GodFile, ...]
+    god_classes: tuple[GodClass, ...]
+    total_files: int
+    file_loc_threshold: int
+    class_loc_threshold: int
+    class_method_threshold: int
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.god_files and not self.god_classes
+
+
+@dataclass(frozen=True)
+class ParametrizeGroup:
+    """Tests in ONE file whose normalized bodies are identical — a parametrize candidate."""
+
+    path: str
+    names: tuple[str, ...]  # source order
+
+
+@dataclass(frozen=True)
+class CrossFileDuplicate:
+    """The same test name with an identical normalized body in two or more files."""
+
+    name: str
+    paths: tuple[str, ...]  # sorted
+
+
+@dataclass(frozen=True)
+class SuiteHygieneFinding:
+    """The test-suite mass reading: totals plus the two structural-redundancy signals."""
+
+    total_files: int
+    total_tests: int
+    parametrize_groups: tuple[ParametrizeGroup, ...]  # largest first, then path
+    cross_file_duplicates: tuple[CrossFileDuplicate, ...]  # sorted by name
+
+    @property
+    def parametrize_copies(self) -> int:
+        """Tests that would disappear if every group collapsed to one parametrized test."""
+        return sum(len(group.names) - 1 for group in self.parametrize_groups)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.parametrize_groups and not self.cross_file_duplicates

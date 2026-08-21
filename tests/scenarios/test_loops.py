@@ -7,7 +7,7 @@ subclasses via ``run_with_loops()``, and asserts on the world's final state.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -86,23 +86,29 @@ class TestL2WorkspaceGCCleansStale:
         await world._workspace.create(100, "agent/issue-100")
         await world._workspace.create(200, "agent/issue-200")
 
-        state = MagicMock()
-        state.get_active_workspaces.return_value = {
-            100: "agent/issue-100",
-            200: "agent/issue-200",
-        }
-        state.get_active_issue_numbers.return_value = {200}
-        state.get_active_branches.return_value = {}
-        state.get_hitl_cause.return_value = None
-        state.get_issue_attempts.return_value = 0
-        state.get_auto_agent_attempts.return_value = 0
+        state = world.harness.state
+        stale_path = world.harness.config.workspace_path_for_issue(100)
+        active_path = world.harness.config.workspace_path_for_issue(200)
+        stale_path.mkdir(parents=True)
+        active_path.mkdir(parents=True)
+        state.set_workspace(100, str(stale_path))
+        state.set_workspace(200, str(active_path))
+        state.set_branch(100, "agent/issue-100")
+        state.set_branch(200, "agent/issue-200")
+        state.set_active_issue_numbers([200])
         _seed_ports(world, workspace_gc_state=state)
 
         run_subprocess = AsyncMock(return_value="")
-        run_subprocess.side_effect = ["closed", ""]
+        landed = AsyncMock(return_value=True)
 
         # Run workspace_gc — it should GC issue 100's worktree but not 200's
-        with patch("workspace_gc_loop.run_subprocess", run_subprocess):
+        with (
+            patch("workspace_gc_loop.run_subprocess", run_subprocess),
+            patch(
+                "workspace_gc_loop.WorkspaceGCLoop._worktree_work_has_landed",
+                landed,
+            ),
+        ):
             await world.run_with_loops(["workspace_gc"], cycles=1)
 
         # After GC: issue 100 destroyed, 200 still active
@@ -111,6 +117,11 @@ class TestL2WorkspaceGCCleansStale:
         )
         assert 200 not in world._workspace.destroyed, (
             "workspace_gc should NOT destroy the active-issue worktree"
+        )
+        landed.assert_awaited_once_with(
+            stale_path,
+            expected_branch="agent/issue-100",
+            expected_issue=100,
         )
 
     async def test_active_auto_agent_worktree_preserved(self, tmp_path):
@@ -129,25 +140,31 @@ class TestL2WorkspaceGCCleansStale:
         await world._workspace.create(300, "agent/issue-300")
         await world._workspace.create(400, "agent/auto-agent-400")
 
-        state = MagicMock()
-        state.get_active_workspaces.return_value = {
-            300: "agent/issue-300",
-            400: "agent/auto-agent-400",
-        }
+        state = world.harness.state
+        stale_path = world.harness.config.workspace_path_for_issue(300)
+        active_path = world.harness.config.workspace_path_for_issue(400)
+        stale_path.mkdir(parents=True)
+        active_path.mkdir(parents=True)
+        state.set_workspace(300, str(stale_path))
+        state.set_workspace(400, str(active_path))
+        state.set_branch(300, "agent/issue-300")
+        state.set_branch(400, "agent/auto-agent-400")
         # NOTE: 400 is deliberately NOT in the active set — the guard must rely
         # solely on the auto-agent attempt counter to preserve it.
-        state.get_active_issue_numbers.return_value = set()
-        state.get_active_branches.return_value = {}
-        state.get_hitl_cause.return_value = None
-        state.get_issue_attempts.return_value = 0
         # In-flight auto-agent attempt for 400 only (max default is 3).
-        state.get_auto_agent_attempts.side_effect = lambda n: 1 if n == 400 else 0
+        state.bump_auto_agent_attempts(400)
         _seed_ports(world, workspace_gc_state=state)
 
         run_subprocess = AsyncMock(return_value="")
-        run_subprocess.side_effect = ["closed", ""]
+        landed = AsyncMock(return_value=True)
 
-        with patch("workspace_gc_loop.run_subprocess", run_subprocess):
+        with (
+            patch("workspace_gc_loop.run_subprocess", run_subprocess),
+            patch(
+                "workspace_gc_loop.WorkspaceGCLoop._worktree_work_has_landed",
+                landed,
+            ),
+        ):
             await world.run_with_loops(["workspace_gc"], cycles=1)
 
         assert 300 in world._workspace.destroyed, (
@@ -155,6 +172,11 @@ class TestL2WorkspaceGCCleansStale:
         )
         assert 400 not in world._workspace.destroyed, (
             "workspace_gc must NOT destroy the active auto-agent worktree (#10459)"
+        )
+        landed.assert_awaited_once_with(
+            stale_path,
+            expected_branch="agent/issue-300",
+            expected_issue=300,
         )
 
 

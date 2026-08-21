@@ -586,3 +586,33 @@ class TestBuildCommand:
         runner = _TestRunner(config, event_bus)
         cmd = runner._build_command()
         assert cmd[0] == "claude"
+
+
+class TestGatewayAttribution:
+    @pytest.mark.asyncio
+    async def test_execute_threads_issue_and_pr_into_harness_env(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """The gateway mint attributes spend to the issue/PR in event_data."""
+        runner = _TestRunner(config, event_bus)
+        with (
+            patch(
+                "base_runner.resolve_harness_env",
+                new_callable=AsyncMock,
+                return_value={},
+            ) as resolve_mock,
+            patch(
+                "base_runner.stream_claude_process",
+                new_callable=AsyncMock,
+                return_value="transcript output",
+            ),
+        ):
+            await runner._execute(
+                ["claude", "--model", "sonnet", "-p"],
+                "prompt",
+                tmp_path,
+                {"issue": 42, "pr": "77", "source": "test_runner"},
+            )
+
+        assert resolve_mock.await_args.kwargs["issue_number"] == 42
+        assert resolve_mock.await_args.kwargs["pr_number"] == 77

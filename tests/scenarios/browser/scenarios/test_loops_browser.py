@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from playwright.async_api import expect
@@ -149,23 +149,29 @@ async def test_l2_workspace_gc_cleans_stale(world, page) -> None:
     await world._workspace.create(100, "agent/issue-100")
     await world._workspace.create(200, "agent/issue-200")
 
-    state = MagicMock()
-    state.get_active_workspaces.return_value = {
-        100: "agent/issue-100",
-        200: "agent/issue-200",
-    }
-    state.get_active_issue_numbers.return_value = {200}
-    state.get_active_branches.return_value = {}
-    state.get_hitl_cause.return_value = None
-    state.get_issue_attempts.return_value = 0
-    state.get_auto_agent_attempts.return_value = 0
+    state = world.harness.state
+    stale_path = world.harness.config.workspace_path_for_issue(100)
+    active_path = world.harness.config.workspace_path_for_issue(200)
+    stale_path.mkdir(parents=True)
+    active_path.mkdir(parents=True)
+    state.set_workspace(100, str(stale_path))
+    state.set_workspace(200, str(active_path))
+    state.set_branch(100, "agent/issue-100")
+    state.set_branch(200, "agent/issue-200")
+    state.set_active_issue_numbers([200])
     _seed_ports(world, workspace_gc_state=state)
 
     run_subprocess = AsyncMock(return_value="")
-    run_subprocess.side_effect = ["closed", ""]
+    landed = AsyncMock(return_value=True)
 
     # --- Step 2: run loop ---
-    with patch("workspace_gc_loop.run_subprocess", run_subprocess):
+    with (
+        patch("workspace_gc_loop.run_subprocess", run_subprocess),
+        patch(
+            "workspace_gc_loop.WorkspaceGCLoop._worktree_work_has_landed",
+            landed,
+        ),
+    ):
         await world.run_with_loops(["workspace_gc"], cycles=1)
 
     # --- Step 3: Python-side assertions ---
@@ -174,6 +180,11 @@ async def test_l2_workspace_gc_cleans_stale(world, page) -> None:
     )
     assert 200 not in world._workspace.destroyed, (
         "workspace_gc should NOT destroy the active-issue worktree"
+    )
+    landed.assert_awaited_once_with(
+        stale_path,
+        expected_branch="agent/issue-100",
+        expected_issue=100,
     )
 
     # --- Step 4-5: boot dashboard + navigate ---

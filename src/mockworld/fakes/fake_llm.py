@@ -176,6 +176,8 @@ class _FakeAgentRunner(_ScriptedRunner):
         super().__init__()
         self._streams: dict[int, list[Any]] = {}
         self._prior_failures: dict[int, list[str]] = {}
+        self.commit_pending_snapshots: list[tuple[int, bytes]] = []
+        self._fail_next_commit_pending = False
 
     async def run(
         self,
@@ -212,6 +214,24 @@ class _FakeAgentRunner(_ScriptedRunner):
 
     def prior_failures_seen_for(self, issue_number: int) -> list[str]:
         return list(self._prior_failures.get(issue_number, []))
+
+    def fail_next_commit_pending(self) -> None:
+        """Make the next factory-owned JSONL persistence boundary fail."""
+        self._fail_next_commit_pending = True
+
+    async def commit_pending(self, task: Any, worktree_path: Path) -> bool:
+        """Capture the exact JSONL bytes present at the persistence boundary."""
+        issues_path = worktree_path / ".beads" / "issues.jsonl"
+        try:
+            payload = issues_path.read_bytes()
+        except OSError:
+            return False
+        issue_number = int(getattr(task, "id", getattr(task, "number", 0)))
+        self.commit_pending_snapshots.append((issue_number, payload))
+        if self._fail_next_commit_pending:
+            self._fail_next_commit_pending = False
+            return False
+        return True
 
 
 class _FakeReviewRunner(_ScriptedRunner):

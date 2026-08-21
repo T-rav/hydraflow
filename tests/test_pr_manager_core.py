@@ -1105,6 +1105,166 @@ async def test_create_pr_failure_recovers_existing_open_pr(config, event_bus, is
     )
 
 
+class TestGetBranchPrState:
+    """Historical PR reads are keyed by branch and exact HEAD (#11502)."""
+
+    @staticmethod
+    def _row(
+        *,
+        sha: str,
+        branch: str = "fix/reused",
+        base_branch: str = "main",
+        state: str = "closed",
+        merged_at: str | None = "2026-08-21T00:00:00Z",
+    ) -> dict[str, object]:
+        return {
+            "number": 42,
+            "state": state,
+            "merged_at": merged_at,
+            "head_sha": sha,
+            "head_ref": branch,
+            "base_ref": base_branch,
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("stored_sha", "queried_sha", "expected"),
+        [
+            pytest.param("a" * 40, "a" * 40, "MERGED", id="sha1-merged"),
+            pytest.param("a" * 64, "a" * 64, "MERGED", id="sha256-merged"),
+            pytest.param("a" * 40, "b" * 40, "NONE", id="reused-branch"),
+        ],
+    )
+    async def test_exact_head_state(
+        self,
+        config,
+        event_bus,
+        stored_sha: str,
+        queried_sha: str,
+        expected: str,
+    ) -> None:
+        manager = make_pr_manager(config, event_bus)
+        manager._run_gh = AsyncMock(  # type: ignore[method-assign]
+            return_value=json.dumps([self._row(sha=stored_sha)])
+        )
+
+        state = await manager.get_branch_pr_state("fix/reused", queried_sha, "main")
+
+        assert state == expected
+
+    @pytest.mark.asyncio
+    async def test_duplicate_exact_head_rows_report_unknown(
+        self, config, event_bus
+    ) -> None:
+        manager = make_pr_manager(config, event_bus)
+        row = self._row(sha="a" * 40)
+        manager._run_gh = AsyncMock(  # type: ignore[method-assign]
+            return_value=json.dumps([row, row])
+        )
+
+        state = await manager.get_branch_pr_state("fix/reused", "a" * 40, "main")
+
+        assert state == "UNKNOWN"
+
+    @pytest.mark.asyncio
+    async def test_full_page_reports_unknown_instead_of_trusting_truncation(
+        self, config, event_bus
+    ) -> None:
+        manager = make_pr_manager(config, event_bus)
+        manager._run_gh = AsyncMock(  # type: ignore[method-assign]
+            return_value=json.dumps(
+                [self._row(sha=f"{number:040x}") for number in range(100)]
+            )
+        )
+
+        state = await manager.get_branch_pr_state("fix/reused", f"{1:040x}", "main")
+
+        assert state == "UNKNOWN"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            ("not json", "UNKNOWN"),
+            (json.dumps({"state": "closed"}), "UNKNOWN"),
+            (json.dumps([]), "NONE"),
+        ],
+    )
+    async def test_read_shapes_fail_closed(
+        self, config, event_bus, payload: str, expected: str
+    ) -> None:
+        manager = make_pr_manager(config, event_bus)
+        manager._run_gh = AsyncMock(return_value=payload)  # type: ignore[method-assign]
+
+        state = await manager.get_branch_pr_state("fix/reused", "a" * 40, "main")
+
+        assert state == expected
+
+    @pytest.mark.asyncio
+    async def test_query_requests_all_history_for_owner_branch(
+        self, config, event_bus
+    ) -> None:
+        manager = make_pr_manager(config, event_bus)
+        manager._run_gh = AsyncMock(return_value="[]")  # type: ignore[method-assign]
+
+        await manager.get_branch_pr_state("fix/reused", "a" * 40, "main")
+
+        args = manager._run_gh.await_args.args
+        assert ("state=all" in args, "base=main" in args) == (True, True)
+
+    @pytest.mark.asyncio
+    async def test_exact_head_merged_into_other_base_reports_none(
+        self, config, event_bus
+    ) -> None:
+        manager = make_pr_manager(config, event_bus)
+        manager._run_gh = AsyncMock(  # type: ignore[method-assign]
+            return_value=json.dumps([self._row(sha="a" * 40, base_branch="release")])
+        )
+
+        state = await manager.get_branch_pr_state("fix/reused", "a" * 40, "main")
+
+        assert state == "UNKNOWN"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mutations",
+        [
+            {"merged_at": True},
+            {"merged_at": "not-a-timestamp"},
+            {"state": "open"},
+            {"number": None},
+        ],
+    )
+    async def test_malformed_exact_merged_row_reports_unknown(
+        self, config, event_bus, mutations: dict[str, object]
+    ) -> None:
+        manager = make_pr_manager(config, event_bus)
+        row = self._row(sha="a" * 40)
+        row.update(mutations)
+        manager._run_gh = AsyncMock(  # type: ignore[method-assign]
+            return_value=json.dumps([row])
+        )
+
+        state = await manager.get_branch_pr_state("fix/reused", "a" * 40, "main")
+
+        assert state == "UNKNOWN"
+
+    @pytest.mark.asyncio
+    async def test_malformed_sibling_row_cannot_hide_exact_head_ambiguity(
+        self, config, event_bus
+    ) -> None:
+        manager = make_pr_manager(config, event_bus)
+        malformed = self._row(sha="b" * 40)
+        malformed["head_sha"] = None
+        manager._run_gh = AsyncMock(  # type: ignore[method-assign]
+            return_value=json.dumps([self._row(sha="a" * 40), malformed])
+        )
+
+        state = await manager.get_branch_pr_state("fix/reused", "a" * 40, "main")
+
+        assert state == "UNKNOWN"
+
+
 @pytest.mark.asyncio
 async def test_branch_has_diff_from_main_false_when_not_ahead(config, event_bus):
     manager = make_pr_manager(config, event_bus)

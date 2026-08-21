@@ -37,10 +37,10 @@ NPM_127_LOG = """\
 
 # Classic (non-buildkit) exit-127 rendering.
 NPM_127_CLASSIC_LOG = """\
-Step 8/12 : RUN npm install -g @beads/bd@1.0.4 --no-fund --no-audit
+Step 8/12 : RUN npm install -g @openai/codex --no-fund --no-audit
  ---> Running in a1b2c3d4e5f6
 /bin/sh: npm: command not found
-The command '/bin/sh -c npm install -g @beads/bd@1.0.4 --no-fund --no-audit' returned a non-zero code: 127
+The command '/bin/sh -c npm install -g @openai/codex --no-fund --no-audit' returned a non-zero code: 127
 """
 
 # apt could not find a package (stale/unreachable index).

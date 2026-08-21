@@ -1590,13 +1590,26 @@ def create_router(
         repo: RepoSlugParam = None,
     ) -> JSONResponse:
         """Return the pipeline snapshot — issues per stage, unioned across repos
-        for ``repo=__all__`` with each issue tagged by its repo slug."""
+        for ``repo=__all__`` with each issue tagged by its repo slug.
+
+        A repo whose ``IssueStore`` hasn't completed its first background
+        refresh yet (the boot window right after a restart) is skipped
+        rather than contributing an empty-but-keyed snapshot, and the
+        response is marked ``ready=False`` — an empty snapshot from a store
+        that hasn't polled GitHub yet is indistinguishable in shape from a
+        genuinely empty pipeline, so the client must not treat it as
+        authoritative and wipe its rail (#11279).
+        """
         merged_stages: dict[str, list[PipelineIssue]] = {}
+        ready = True
         for _cfg, _st, _bus, get_orch, slug in _resolve_runtimes(repo):
             if not _is_pipeline_active(slug):
                 continue
             orch = get_orch()
             if orch is None:
+                continue
+            if not orch.issue_store.has_completed_initial_refresh:
+                ready = False
                 continue
             raw = orch.issue_store.get_pipeline_snapshot()
             for backend_stage, issues in raw.items():
@@ -1608,7 +1621,9 @@ def create_router(
                             update={"repo": slug}
                         )
                     )
-        return JSONResponse(PipelineSnapshot(stages=merged_stages).model_dump())
+        return JSONResponse(
+            PipelineSnapshot(stages=merged_stages, ready=ready).model_dump()
+        )
 
     @router.get("/api/pipeline/stats")
     async def get_pipeline_stats(

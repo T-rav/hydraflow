@@ -501,8 +501,9 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
         concrete per-phase RED/GREEN/REFACTOR sub-agent instructions with
         the actual files, tests, and dependency info from each phase.
 
-        When *bead_mapping* is provided, injects ``bd`` claim/close
-        lifecycle commands into each phase.
+        When *bead_mapping* is provided, identifies each phase's factory-owned
+        JSONL task. HydraFlow owns its lifecycle around the verified agent run;
+        agents must not invoke the host ``bd`` CLI or edit the store directly.
         """
         phases = topological_sort(extract_phases(plan_comment))
         max_fix = self._config.tdd_max_remediation_loops
@@ -522,6 +523,10 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
             "retry silently\n"
             f"- REFACTOR sub-agent may attempt up to **{max_fix}** fix cycles "
             "before reporting failure\n\n"
+            "**Example:** If a phase shows `Bead: #task-123`, launch its "
+            "RED, GREEN, and REFACTOR sub-agents as specified. Do not claim or "
+            "close that task; HydraFlow updates its JSONL lifecycle after the "
+            "verified run.\n\n"
         )
 
         phase_sections: list[str] = []
@@ -532,17 +537,16 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
             )
             deps_str = ", ".join(phase.depends_on) or "none"
 
-            # Bead lifecycle instructions
+            # The mapping is informational inside an agent session. HydraFlow
+            # owns lifecycle transitions; the database-backed host bd CLI must
+            # never be pointed at this worktree-local JSONL store.
             bead_id = (bead_mapping or {}).get(phase.id)
             bead_header = ""
-            bead_claim = ""
-            bead_close = ""
             if bead_id:
-                bead_header = f"**Bead:** #{bead_id}\n"
-                bead_claim = f"\n> First run: `bd update {bead_id} --claim`\n"
-                bead_close = (
-                    f"\n> After all tests pass, run: "
-                    f'`bd close {bead_id} --reason "Phase complete"`\n'
+                bead_header = (
+                    f"**Bead:** #{bead_id}  \n"
+                    "> Factory-owned JSONL record; do not run `bd` in this "
+                    "worktree or edit it directly. HydraFlow owns lifecycle.\n"
                 )
 
             phase_sections.append(
@@ -551,7 +555,6 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
                 f"**Files:** {files_str}  \n"
                 f"**Depends on:** {deps_str}\n\n"
                 f"**1. RED sub-agent** \u2014 Launch with prompt:\n"
-                f"{bead_claim}"
                 f'> "Write FAILING tests for {phase.name}. '
                 f"Test these behavioral specs:\n{tests_str}\n"
                 f"ONLY create/modify files in `tests/`. Do NOT touch source files. "
@@ -564,8 +567,7 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
                 f"**3. REFACTOR sub-agent** \u2014 Launch with prompt:\n"
                 f'> "Run `make test`. If tests fail, fix implementation code '
                 f"(not tests). Repeat until the full suite passes (max "
-                f'{max_fix} attempts). Commit fixes."\n'
-                f"{bead_close}\n"
+                f'{max_fix} attempts). Commit fixes."\n\n'
             )
 
         # If parsing found no phases, include the raw plan as fallback
@@ -1499,7 +1501,13 @@ SUMMARY: <one-line summary>
 
         return LoopResult(passed=False, summary=last_error, attempts=max_attempts)
 
-    async def _force_commit_uncommitted(self, task: Task, worktree_path: Path) -> bool:
+    async def _force_commit_uncommitted(
+        self,
+        task: Task,
+        worktree_path: Path,
+        *,
+        paths: Sequence[str] | None = None,
+    ) -> bool:
         """Stage and commit any uncommitted changes the agent left behind.
 
         Always runs on the **host** (not inside Docker) since the workspace
@@ -1525,10 +1533,11 @@ SUMMARY: <one-line summary>
         # produced the blank "force-commit failed:" log the bug report cites.
         active_op = "git status"
         active_timeout: int = git_timeout
+        pathspec = ["--", *paths] if paths else []
 
         try:
             status = await host.run_simple(
-                ["git", "status", "--porcelain"],
+                ["git", "status", "--porcelain", *pathspec],
                 cwd=cwd,
                 timeout=git_timeout,
             )
@@ -1541,7 +1550,7 @@ SUMMARY: <one-line summary>
             )
             active_op, active_timeout = "git add", git_timeout
             add_result = await host.run_simple(
-                ["git", "add", "-A"],
+                ["git", "add", "-A", *pathspec],
                 cwd=cwd,
                 timeout=git_timeout,
             )
@@ -1561,6 +1570,7 @@ SUMMARY: <one-line summary>
                     "-m",
                     f"Fixes #{task.id}: {task.title}\n\n"
                     "Auto-committed by HydraFlow (agent did not commit)",
+                    *pathspec,
                 ],
                 cwd=cwd,
                 timeout=commit_timeout,
@@ -1595,7 +1605,14 @@ SUMMARY: <one-line summary>
             return False
 
     async def _count_commits(self, worktree_path: Path, branch: str) -> int:
-        """Count commits on *branch* ahead of the base branch."""
+        """Count delivery commits on *branch* ahead of the base branch.
+
+        The factory creates ``.beads/issues.jsonl`` before the agent starts so
+        phase IDs can be included in its prompt.  That runtime task state may
+        be committed alongside implementation work, but a commit which changes
+        only the task store is not implementation delivery and must not satisfy
+        the zero-commit gate.
+        """
         try:
             result = await self._runner.run_simple(
                 [
@@ -1603,6 +1620,10 @@ SUMMARY: <one-line summary>
                     "rev-list",
                     "--count",
                     f"origin/{self._config.base_branch()}..{branch}",
+                    "--",
+                    ".",
+                    ":(exclude).beads/issues.jsonl",
+                    ":(exclude).beads/.issues.jsonl.lock",
                 ],
                 cwd=str(worktree_path),
                 timeout=self._config.git_command_timeout,
@@ -1610,6 +1631,55 @@ SUMMARY: <one-line summary>
             return int(result.stdout)
         except (TimeoutError, ValueError, FileNotFoundError):
             return 0
+
+    async def commit_pending(self, task: Task, worktree_path: Path) -> bool:
+        """Commit factory-owned state written after the agent's verified run.
+
+        ImplementPhase uses this after finalizing its worktree-local JSONL task
+        lifecycle. Reusing the normal salvage path preserves hook execution,
+        host-runner timeouts, and git error handling without a second subprocess
+        implementation in the phase layer.
+        """
+
+        await self._force_commit_uncommitted(
+            task,
+            worktree_path,
+            paths=[".beads/issues.jsonl"],
+        )
+
+        from execution import get_default_runner
+
+        try:
+            host = get_default_runner()
+            status = await host.run_simple(
+                [
+                    "git",
+                    "status",
+                    "--porcelain",
+                    "--",
+                    ".beads/issues.jsonl",
+                ],
+                cwd=str(worktree_path),
+                timeout=self._config.git_command_timeout,
+            )
+            tracked = await host.run_simple(
+                [
+                    "git",
+                    "ls-files",
+                    "--error-unmatch",
+                    "--",
+                    ".beads/issues.jsonl",
+                ],
+                cwd=str(worktree_path),
+                timeout=self._config.git_command_timeout,
+            )
+        except (TimeoutError, FileNotFoundError, OSError):
+            return False
+        return (
+            status.returncode == 0
+            and not status.stdout.strip()
+            and tracked.returncode == 0
+        )
 
     # AgentPort public interface (hexagonal contract).
     # The underscore implementations remain for internal BaseRunner use; these

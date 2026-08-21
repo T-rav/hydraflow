@@ -124,6 +124,22 @@ class TestRouting:
 
         assert len(store._queues[STAGE_FIND]) == 1
 
+    def test_same_stage_refresh_replaces_metadata_without_reordering(self) -> None:
+        store = _make_store()
+        stale = TaskFactory.create(id=20, title="Stale", tags=["hydraflow-find"])
+        sibling = TaskFactory.create(id=21, tags=["hydraflow-find"])
+        fresh = TaskFactory.create(
+            id=20,
+            title="Fresh",
+            tags=["hydraflow-find", "P0"],
+            metadata={"source": "authoritative-refresh"},
+        )
+        store._route_issues([stale, sibling])
+
+        store._route_issues([fresh, sibling])
+
+        assert list(store._queues[STAGE_FIND]) == [fresh, sibling]
+
     def test_active_issues_not_requeued(self) -> None:
         store = _make_store()
         issue = TaskFactory.create(id=21, tags=["hydraflow-find"])
@@ -363,17 +379,16 @@ class TestQueueAccessors:
         # present. Once _release_claim (build abandoned/failed) or an operator
         # clears it, a fresh ingest of that ready issue is pickable again — the
         # claim never permanently strands an issue.
-        claimed = _make_store()
-        claimed._route_issues(
+        store = _make_store()
+        store._route_issues(
             [TaskFactory.create(id=33, tags=["test-label", "hydraflow-in-progress"])]
         )
-        assert claimed.get_implementable(10) == []
+        assert store.get_implementable(10) == []
 
-        # A foreign actor that ingests the same issue after the claim cleared
-        # sees a plain ready issue and picks it.
-        cleared = _make_store()
-        cleared._route_issues([TaskFactory.create(id=33, tags=["test-label"])])
-        assert [t.id for t in cleared.get_implementable(10)] == [33]
+        # The same long-lived factory ingests the authoritative label change
+        # without requiring a restart or a stage transition.
+        store._route_issues([TaskFactory.create(id=33, tags=["test-label"])])
+        assert [t.id for t in store.get_implementable(10)] == [33]
 
     def test_get_implementable_excludes_active_issues(self) -> None:
         store = _make_store()

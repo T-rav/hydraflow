@@ -226,6 +226,7 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
                 source=self._telemetry_source(),
                 session_id=getattr(self._bus, "current_session_id", None),
                 timeout_seconds=timeout_s,
+                issue_number=issue_number,
             )
         except Exception as exc:
             # A failed gateway mint is a pre-spawn crash, never permission to

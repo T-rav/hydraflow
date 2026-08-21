@@ -120,6 +120,7 @@ help:
 	@echo "  make dry-run        Dry run (log actions without executing)"
 	@echo "  make clean          Remove all worktrees and state (API with offline fallback)"
 	@echo "  make status         Show current HydraFlow state"
+	@echo "  make worktree       Safely create a worktree: DIR=<dir> BRANCH=<branch> (wrong-branch guard, #11501)"
 	@echo "  make test           Run unit tests"
 	@echo "  make test-fast      Run unit tests (-x --tb=short)"
 	@echo "  make coverage [MIN] Run coverage-focused test command (default 70)"
@@ -1046,3 +1047,16 @@ adopt:
 building-code-update:
 	@test -n "$(DIR)" || { echo "Usage: make building-code-update DIR=<stamped-child>" >&2; exit 2; }
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python -m scripts.building_code_update $(DIR) $(ARGS)
+
+# Safe agent worktree creation (#11501): a bare `git worktree add <dir>
+# <branch>` fails on a reused directory name, but the chained `cd` + merge
+# that follow still run — against whatever stale branch the directory was
+# left on. hf_worktree.sh refuses instead: creates when absent, idempotent
+# when already on the branch, fails loudly (expected vs actual) on a
+# mismatch, never deletes existing work. Deliberately NOT cd'ed: the helper
+# resolves the repo from the CALLER's cwd, so this works from any
+# subdirectory of any checkout.
+.PHONY: worktree
+worktree:
+	@test -n "$(DIR)" && test -n "$(BRANCH)" || { echo "Usage: make worktree DIR=<dir> BRANCH=<branch>" >&2; exit 2; }
+	$(HYDRAFLOW_DIR)scripts/hf_worktree.sh "$(DIR)" "$(BRANCH)"

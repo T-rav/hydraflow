@@ -164,6 +164,10 @@ class TestCountCommits:
             "rev-list",
             "--count",
             "origin/main..agent/issue-42",
+            "--",
+            ".",
+            ":(exclude).beads/issues.jsonl",
+            ":(exclude).beads/.issues.jsonl.lock",
             cwd=str(tmp_path),
             stdin=None,
             stdout=asyncio.subprocess.PIPE,
@@ -224,6 +228,66 @@ class TestCountCommits:
             result = await runner._count_commits(tmp_path, "agent/issue-42")
 
         assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_count_commits_ignores_factory_task_store_only_commit(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """Worktree lifecycle state alone must not satisfy delivery verification."""
+        import subprocess
+
+        from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
+
+        repo = tmp_path / "worktree"
+        init_test_worktree(repo)
+        issues = repo / ".beads" / "issues.jsonl"
+        issues.parent.mkdir()
+        issues.write_text('{"id":"phase-1","status":"in_progress"}\n')
+        subprocess.run(
+            ["git", "add", ".beads/issues.jsonl"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "record phase state"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+
+        result = await AgentRunner(config, event_bus)._count_commits(
+            repo, "agent/issue-1"
+        )
+
+        assert result == 0
+
+
+# ---------------------------------------------------------------------------
+# AgentRunner.commit_pending
+# ---------------------------------------------------------------------------
+
+
+class TestCommitPending:
+    @pytest.mark.asyncio()
+    async def test_rejects_ignored_untracked_task_store(
+        self, config, event_bus: EventBus, tmp_path: Path
+    ) -> None:
+        """A clean status is insufficient unless the finalized JSONL is tracked."""
+        from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
+
+        repo = tmp_path / "worktree"
+        init_test_worktree(repo)
+        (repo / ".git" / "info" / "exclude").write_text(".beads/issues.jsonl\n")
+        issues = repo / ".beads" / "issues.jsonl"
+        issues.parent.mkdir()
+        issues.write_text('{"id":"phase-1","status":"closed"}\n')
+
+        persisted = await AgentRunner(config, event_bus).commit_pending(
+            TaskFactory.create(id=42), repo
+        )
+
+        assert persisted is False
 
 
 # ---------------------------------------------------------------------------

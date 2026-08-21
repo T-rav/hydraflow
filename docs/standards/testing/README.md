@@ -104,11 +104,10 @@ wrong. Canonicalised here so the generator slice and future audits agree.
   the Ports section marks both the Cassette and Contract columns **N/A**;
   those columns belong only to the per-adapter section. A generator that
   emits per-port cassette/contract cells is wrong.
-- **Bead filing uses `bd create --silent`, not `bd q --description`.**
-  `bd q --description "..."` does not exist. The working command is
-  `bd create --silent --title "..." --description "..."`. Bead IDs are short
-  alphanumeric strings (e.g. `advisor-bpl`), not sequential integers — any
-  tooling that parses or generates bead IDs must not assume numeric IDs.
+- **Factory Beads state is not a follow-up filing channel.** HydraFlow alone
+  manages per-worktree `.beads/issues.jsonl`; tests and agents must not invoke
+  `bd` or edit that file. Record follow-up work through the active issue/PR
+  workflow instead.
 
 ## Anti-patterns
 
@@ -117,8 +116,8 @@ wrong. Canonicalised here so the generator slice and future audits agree.
 - **Skipped, xfailed, commented-out, or placeholder tests in active coverage.**
   A skipped or expected-failing test is not a test; it is deferred work. If the
   behavior is required, make the test active and fix the code. If the behavior is
-  not ready to implement, file the work in `bd` and keep the placeholder out of
-  the runnable suite.
+  not ready to implement, record the follow-up through the active issue workflow
+  and keep the placeholder out of the runnable suite.
 
 - **Asserting against state shapes that don't exist.** Scenarios authored against fields that aren't in `StateData` will pass at write-time (Python dicts are tolerant) but fail in CI when the missing key raises `KeyError`. Always `grep` the source-of-truth model file for the field name before asserting on it.
 
@@ -128,8 +127,9 @@ wrong. Canonicalised here so the generator slice and future audits agree.
   the runnable catalog until it can assert real behavior.
 
 - **Placeholder sandbox scenarios.** Printing "tracking issue" and returning
-  success is an ignored test by another name. File the follow-up in `bd`; do not
-  keep a green scenario file without a load-bearing assertion.
+  success is an ignored test by another name. Record the follow-up through the
+  active issue workflow; do not keep a green scenario file without a
+  load-bearing assertion.
 
 - **Scenario tests that just unit-test through a fake.** Pattern B is fine when the loop's reaction surface is what matters — but if the test could equivalently be written as a unit test of one method, it's not really a scenario test.
 
@@ -159,5 +159,6 @@ should request changes when it adds or preserves ignored tests (`skip`, `xfail`,
 commented-out tests/assertions, or placeholder smoke tests), labels mock-backed
 tests as integration, bypasses documented unit factories/world-building helpers,
 or asserts MockWorld side effects through raw mock call counts where a stateful
-fake adapter exists. New exceptions must be tracked in `bd` and removed from the
-active runnable suite until they can assert real behavior.
+fake adapter exists. New exceptions must be tracked through the active issue
+workflow and removed from the active runnable suite until they can assert real
+behavior.

@@ -2435,7 +2435,8 @@ class HydraFlowConfig(BaseModel):
             "Model the SampledAuditLoop adversarial re-auditor runs on "
             "(#10370/#10371 independence policy). Point it at a DIFFERENT family "
             "from the implementing agent when the roster allows; empty falls "
-            "back to the background model (a fresh same-family context)."
+            "back to the maintenance model, then the background model (a fresh "
+            "same-family context)."
         ),
     )
     second_order_vitals_interval: int = Field(
@@ -2939,9 +2940,12 @@ class HydraFlowConfig(BaseModel):
     # One knob to route ALL maintenance loops to a backend, coherently. Unlike
     # the old background_model (which back-filled *_model only and could strand a
     # glm model on a claude-provider role), this sets provider AND model together
-    # on the maintenance role-set (wiki, adr-review, transcript, drift-resolver,
-    # term-proposer, triage-honeypot, pr-unstick) and NEVER touches implement/
-    # review/plan/triage. Leave at claude/"" to configure roles individually.
+    # on the maintenance role-set. Dedicated dials cover wiki, ADR review,
+    # transcript, drift resolver, term proposer, triage honeypot, and PR
+    # unsticker; sampled audit, issue refinement, intervention tally, and skill
+    # prompt refinement inherit these values at their lightweight seam. It NEVER
+    # touches implement/review/plan/triage. Leave at claude/"" to configure
+    # dedicated roles individually.
     maintenance_provider: Literal["claude", "gateway", "zai"] = Field(
         default="claude",
         description=(
@@ -4729,7 +4733,8 @@ class HydraFlowConfig(BaseModel):
         default="",
         description=(
             "Model override for skill-prompt refinement generation. "
-            "Empty string = use the background_model default."
+            "Empty falls back to the maintenance model, then the background "
+            "model, then 'sonnet'."
         ),
     )
     skill_prompt_refine_live_validation_budget: int = Field(
@@ -6009,8 +6014,9 @@ class HydraFlowConfig(BaseModel):
         default="",
         description=(
             "Model for InterventionTallyLoop's free-text steering "
-            "classification (#10369); empty falls back to background_model, "
-            "then 'sonnet'. Also stamped as each row's model_version_context."
+            "classification (#10369); empty falls back to the maintenance "
+            "model, then the background model, then 'sonnet'. Also stamped "
+            "as each row's model_version_context."
         ),
     )
     sampled_audit_loop_enabled: bool = Field(
@@ -6138,7 +6144,8 @@ class HydraFlowConfig(BaseModel):
         default="",
         description=(
             "Model override for IssueRefinementLoop judgment calls. Empty "
-            "string = use the background_model default."
+            "falls back to the maintenance model, then the background model, "
+            "then 'sonnet'."
         ),
     )
 
@@ -6670,7 +6677,7 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
     # (provider AND model together), never the work loops. A model is only
     # applied where the role actually has a *_model field (pr_unstick has none).
     if config.maintenance_provider != "claude" or config.maintenance_model.strip():
-        for role in _MAINTENANCE_ROLES:
+        for role in _MAINTENANCE_DIALED_ROLES:
             if config.maintenance_provider != "claude":
                 _apply_if_default(f"{role}_provider", config.maintenance_provider)
             model_field = f"{role}_model"
@@ -6689,8 +6696,9 @@ def _apply_profile_overrides(config: HydraFlowConfig) -> None:
             _apply_if_default(field, "gateway")
 
 
-# The maintenance role-set the maintenance_* knob routes (never the work loops).
-_MAINTENANCE_ROLES: tuple[str, ...] = (
+# Maintenance roles with dedicated provider/model fields. Four additional
+# caretaker roles inherit maintenance_* dynamically at their lightweight seam.
+_MAINTENANCE_DIALED_ROLES: tuple[str, ...] = (
     "wiki_compilation",
     "adr_review",
     "transcript_summary",
@@ -6715,7 +6723,7 @@ GATEWAY_AGENTIC_PROVIDER_FIELDS: tuple[str, ...] = (
     "repo_provider",
 )
 GATEWAY_ONE_SHOT_PROVIDER_FIELDS: tuple[str, ...] = tuple(
-    f"{role}_provider" for role in _MAINTENANCE_ROLES
+    f"{role}_provider" for role in _MAINTENANCE_DIALED_ROLES
 )
 GATEWAY_CAPABLE_PROVIDER_FIELDS: tuple[str, ...] = (
     *GATEWAY_AGENTIC_PROVIDER_FIELDS,
@@ -6746,18 +6754,41 @@ _MODEL_PROVIDER_REQUIRED: list[tuple[str, str]] = [
     ("glm", "zai"),
 ]
 
-# Sub-spawn stages have no *_provider dial of their own — they run on the harness
-# of the outer runner(s) that spawn them. Map each to the config field(s) holding
-# those runners' providers so its model is validated against EVERY backend it can
-# actually run on (see _harmonize_tool_model_defaults). subskill/debug are
-# multi-caller: the AC precheck closures run them on ac_provider, while the
-# reviewer + verification-judge prechecks run them on review_provider — so their
-# model must be coherent with BOTH.
-_SUBSPAWN_PROVIDER_SOURCE: dict[str, tuple[str, ...]] = {
+# Stages without a dedicated *_provider dial inherit a provider from another
+# config field. Map each to that source so its effective model is validated
+# against EVERY backend it can actually run on. Subskill/debug are multi-caller:
+# the AC precheck closures run them on ac_provider, while reviewer +
+# verification-judge prechecks run them on review_provider. The one-shot
+# caretaker roles inherit maintenance_provider at the central lightweight seam.
+_STAGE_PROVIDER_SOURCE: dict[str, tuple[str, ...]] = {
     "test_adequacy_verifier": ("implementation_provider",),
     "subskill": ("ac_provider", "review_provider"),
     "debug": ("ac_provider", "review_provider"),
+    # These one-shot caretaker roles share maintenance_provider rather than
+    # exposing dead per-role dials. Their run_lightweight_agent calls omit the
+    # provider deliberately so the central seam performs the same inheritance.
+    "sampled_audit": ("maintenance_provider",),
+    "issue_refinement": ("maintenance_provider",),
+    "intervention_tally": ("maintenance_provider",),
+    "skill_prompt_refine": ("maintenance_provider",),
 }
+
+
+def resolve_maintenance_model(
+    *,
+    role_model: str,
+    maintenance_model: str,
+    background_model: str,
+) -> str:
+    """Resolve a shared-provider caretaker's effective model."""
+    return role_model or maintenance_model or background_model or "sonnet"
+
+
+def resolve_maintenance_tool(
+    config: HydraFlowConfig,
+) -> Literal["claude", "codex"]:
+    """Resolve the CLI tool shared-provider caretaker roles execute."""
+    return "claude" if config.background_tool == "inherit" else config.background_tool
 
 
 def _required_tool_for_model(model: str) -> str | None:
@@ -6824,6 +6855,13 @@ def _validate_gateway_fleet_profile(config: HydraFlowConfig) -> None:
             "credential homes inside an otherwise isolated worker"
         )
         raise ValueError(msg)
+    if resolve_maintenance_tool(config) != "claude":
+        msg = (
+            "gateway fleet ratchet requires background_tool='claude' or 'inherit'; "
+            "shared caretaker Codex spawns cannot use the gateway's isolated "
+            "Claude-harness runner"
+        )
+        raise ValueError(msg)
     if direct := _gateway_direct_harness_roles(config):
         msg = (
             "gateway fleet ratchet forbids direct Claude/z.ai harness "
@@ -6886,6 +6924,42 @@ def _tool_model_stage_pairs(config: HydraFlowConfig) -> tuple[_StageToolModel, .
             config.adr_drift_resolver_tool,
             config.adr_drift_resolver_model,
         ),
+        (
+            "sampled_audit",
+            resolve_maintenance_tool(config),
+            resolve_maintenance_model(
+                role_model=config.sampled_audit_model,
+                maintenance_model=config.maintenance_model,
+                background_model=config.background_model,
+            ),
+        ),
+        (
+            "issue_refinement",
+            resolve_maintenance_tool(config),
+            resolve_maintenance_model(
+                role_model=config.issue_refinement_model,
+                maintenance_model=config.maintenance_model,
+                background_model=config.background_model,
+            ),
+        ),
+        (
+            "intervention_tally",
+            resolve_maintenance_tool(config),
+            resolve_maintenance_model(
+                role_model=config.intervention_tally_model,
+                maintenance_model=config.maintenance_model,
+                background_model=config.background_model,
+            ),
+        ),
+        (
+            "skill_prompt_refine",
+            resolve_maintenance_tool(config),
+            resolve_maintenance_model(
+                role_model=config.skill_prompt_refine_model,
+                maintenance_model=config.maintenance_model,
+                background_model=config.background_model,
+            ),
+        ),
     )
 
 
@@ -6940,10 +7014,10 @@ def _validate_stage_tool_model(
         )
         raise ValueError(msg)
 
-    # Sub-spawn stages have no dial of their own — they run on the harness of
-    # the outer runner(s) that spawn them, so validate against every provider
-    # they can inherit. Roles without a dial default to the Claude harness.
-    provider_fields = _SUBSPAWN_PROVIDER_SOURCE.get(stage, (f"{stage}_provider",))
+    # Some stages inherit another role's provider rather than owning a dial, so
+    # validate against every provider they can inherit. Roles without a mapping
+    # or dedicated dial default to the Claude harness.
+    provider_fields = _STAGE_PROVIDER_SOURCE.get(stage, (f"{stage}_provider",))
     providers = {getattr(config, field, "claude") for field in provider_fields}
     required_provider = _required_provider_for_model(model)
     for provider in providers:

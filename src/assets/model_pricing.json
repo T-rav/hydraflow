@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "currency": "USD",
-  "updated_at": "2026-08-14",
+  "updated_at": "2026-08-21",
   "source": "https://docs.anthropic.com/en/docs/about-claude/models",
   "models": {
     "claude-haiku-4-5-20251001": {
@@ -225,6 +225,19 @@
         "glm-5p2"
       ],
       "pricing_source": "https://docs.z.ai/guides/capabilities/cache (GLM-5.2: $1.40/M input, $4.40/M output, $0.26/M cached input)",
+      "input_cost_per_million": 1.4,
+      "output_cost_per_million": 4.4,
+      "cache_write_cost_per_million": 1.4,
+      "cache_read_cost_per_million": 0.26,
+      "input_includes_cache": true
+    },
+    "glm-5.3": {
+      "provider": "zai",
+      "aliases": [
+        "zai/glm-5.3",
+        "glm-5p3"
+      ],
+      "pricing_source": "https://docs.z.ai/guides/overview/pricing (GLM-5.3: $1.40/M input, $4.40/M output, $0.26/M cached input; identical to GLM-5.2. z.ai serves glm-5.3 for glm-5.2 requests, observed on the live gateway ledger 2026-08-20)",
       "input_cost_per_million": 1.4,
       "output_cost_per_million": 4.4,
       "cache_write_cost_per_million": 1.4,

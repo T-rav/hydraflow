@@ -576,6 +576,21 @@ class PRPort(Protocol):
         """Return the resolved state of a GitHub issue (``'COMPLETED'``, ``'OPEN'``, etc.)."""
         ...
 
+    async def get_branch_pr_state(
+        self, branch: str, head_sha: str, base_branch: str
+    ) -> str:
+        """Return PR state for the exact branch, HEAD, and integration base.
+
+        Values are ``MERGED``, ``OPEN``, ``CLOSED``, ``NONE``, or
+        ``UNKNOWN``. The HEAD identity is load-bearing for destructive
+        callers: branch names can be deleted and reused, so an older merged
+        PR on the same branch must not prove that a newer local HEAD landed;
+        likewise, a PR merged into another base does not prove the configured
+        integration branch contains the work. ``UNKNOWN`` includes malformed,
+        truncated, or ambiguous reads and must be handled fail-closed.
+        """
+        ...
+
     async def list_workflow_runs(self, limit: int = 50) -> list[dict[str, Any]]:
         """Return recent workflow runs, newest first (#9974, read-only).
 

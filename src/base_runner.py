@@ -27,6 +27,7 @@ from repo_backend import apply_repo_provider
 from runner_utils import (
     AuthenticationRetryError,
     StreamConfig,
+    _as_opt_int,
     _terminal_gateway_runner,
     harness_billing_provider,
     renew_gateway_key_if_needed,
@@ -296,6 +297,8 @@ class BaseRunner:
             source=str(event_data.get("source", self._phase_name)),
             session_id=getattr(self._bus, "current_session_id", None),
             timeout_seconds=self._config.agent_timeout,
+            issue_number=_as_opt_int(raw_issue),
+            pr_number=_as_opt_int(event_data.get("pr")),
         )
         billing_provider = harness_billing_provider(provider, resolved_model)
         spawn_runner = self._runner
