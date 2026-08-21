@@ -73,6 +73,8 @@ SETTINGS: dict[str, SettingSpec] = {
     "test_adequacy_coverage_timeout_secs": SettingSpec(
         "CI & Quality", live=True, order=7
     ),
+    # Live: AgentRunner._verify_quality reads it on every post-build gate.
+    "implement_full_quality_gate": SettingSpec("CI & Quality", live=True, order=8),
     # Independent test-adequacy verifier (#9546). Live: AgentRunner._run_skill
     # re-reads all three via getattr(config, ...) on every skill dispatch.
     "test_adequacy_verifier_enabled": SettingSpec("CI & Quality", live=True, order=20),

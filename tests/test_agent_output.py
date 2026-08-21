@@ -46,32 +46,32 @@ class TestVerifyResult:
         assert "commit" in result.summary.lower()
 
     @pytest.mark.asyncio
-    async def test_verify_runs_make_quality(
+    async def test_verify_runs_lock_free_gate_not_full_make_quality(
         self, config, event_bus: EventBus, tmp_path: Path
     ) -> None:
-        """_verify_result should run make quality and return OK on success."""
+        """_verify_result runs quality-lite + tests, never the host-locked full suite (#11568)."""
         runner = AgentRunner(config, event_bus)
 
-        quality_proc = make_proc(returncode=0, stdout=b"All checks passed")
+        procs = [
+            make_proc(returncode=0, stdout=b"[lint OK]"),
+            make_proc(returncode=0, stdout=b"All tests passed"),
+        ]
 
         with (
             patch.object(
                 runner, "_count_commits", new_callable=AsyncMock, return_value=1
             ),
-            patch(
-                "asyncio.create_subprocess_exec",
-                return_value=quality_proc,
-            ) as mock_exec,
+            patch("asyncio.create_subprocess_exec", side_effect=procs) as mock_exec,
         ):
             result = await runner._verify_result(tmp_path, "agent/issue-42")
 
         assert result.passed is True
         assert result.summary == "OK"
-        # Should call make quality exactly once
-        mock_exec.assert_called_once()
-        call_args = mock_exec.call_args[0]
-        assert "make" in call_args
-        assert "quality" in call_args
+        argvs = [list(call.args) for call in mock_exec.call_args_list]
+        assert ["make", "quality"] not in argvs
+        assert argvs[0] == ["make", "quality-lite"]
+        # No ``test-impacted`` target in an empty tmp worktree -> test_command.
+        assert argvs[1] == config.test_command.split()
 
     @pytest.mark.asyncio
     async def test_verify_returns_false_when_quality_fails(
@@ -93,7 +93,7 @@ class TestVerifyResult:
             result = await runner._verify_result(tmp_path, "agent/issue-42")
 
         assert result.passed is False
-        assert "make quality" in result.summary.lower()
+        assert "make quality-lite" in result.summary.lower()
 
     @pytest.mark.asyncio
     async def test_verify_includes_output_on_failure(

@@ -14,6 +14,7 @@ from base_runner import BaseRunner
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import exc_detail, is_likely_bug, reraise_on_credit_or_bug
 from human_steering import fenced_steering_guidance
+from implement_quality_gate import run_implement_quality_gate
 from models import LoopResult, Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
 from plugin_skill_registry import (
     discover_plugin_skills,
@@ -892,18 +893,33 @@ commit with: "Fixes #{issue.id}: <concise summary>"
             claude_md.write_text(snapshot)
 
     async def _verify_result(self, worktree_path: Path, branch: str) -> LoopResult:
-        """Check that the agent produced commits and ``make quality`` passes.
+        """Check that the agent produced commits and the quality gate passes.
 
         Returns a :class:`LoopResult`.  On failure the summary contains
-        the last 3000 characters of combined stdout/stderr.
+        the last ``error_output_max_chars`` characters of combined
+        stdout/stderr of the step that failed.
         """
         # Check for commits on the branch
         commit_count = await self._count_commits(worktree_path, branch)
         if commit_count == 0:
             return LoopResult(passed=False, summary="No commits found on branch")
 
-        # Run the full quality gate
+        # Run the implement-path quality gate (lock-free; see _verify_quality)
         return await self._verify_quality(worktree_path)
+
+    async def _verify_quality(self, worktree_path: Path) -> LoopResult:
+        """Implement-path gate (#11568): lock-free quality-lite + impacted tests.
+
+        ``BaseRunner._verify_quality`` (HITL / diagnostic runners) runs the
+        full ``make quality`` under the host-wide lock; the implementer must
+        not — see ``implement_quality_gate`` for the rationale. The
+        ``implement_full_quality_gate`` kill-switch restores the locked run.
+        """
+        if self._config.implement_full_quality_gate:
+            return await super()._verify_quality(worktree_path)
+        return await run_implement_quality_gate(
+            self._runner, self._config, worktree_path
+        )
 
     def _build_quality_fix_prompt(
         self,

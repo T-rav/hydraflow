@@ -26,7 +26,7 @@ async def test_A0_happy_path_realistic_agent(tmp_path) -> None:
     The FakeDocker script commits a file into the worktree so that
     AgentRunner._count_commits sees 1 commit ahead of origin/main, which
     lets _verify_result pass the commit-check gate.  All other quality checks
-    (make quality, skills, pre-quality review) use FakeDocker defaults which
+    (the implement gate, skills, pre-quality review) use FakeDocker defaults which
     return success with an empty transcript, causing skill parsers to default
     to passed=True.
     """
@@ -307,7 +307,7 @@ async def test_A8_find_stage_to_done_realistic_agent(tmp_path) -> None:
 
 
 async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
-    """make quality fails → fix agent runs → second make quality passes.
+    """quality-lite fails → fix agent runs → second quality-lite passes.
 
     Proves the realistic path exercises production `AgentRunner._run_quality_fix_loop`.
     `max_quality_fix_attempts` defaults to 2 in ConfigFactory, so one retry is
@@ -315,7 +315,7 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
 
     FakeDocker scripts are consumed FIFO by ALL run_agent calls (both
     create_streaming_process for agent _execute calls and run_simple for
-    make-quality calls). The post-implementation pipeline after the initial agent
+    ``make`` calls). The post-implementation pipeline after the initial agent
     run is:
 
       1. Initial agent _execute (streaming) — commits broken code
@@ -323,17 +323,22 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
       3. scope-check skill _execute — default success (auto-pass, no plan)
          plan-compliance is SKIPPED (empty prompt when no plan → no _execute call)
       4. test-adequacy skill _execute — default success
-      5. pre-quality review _execute, attempt 1, review pass — default success
-      6. pre-quality run-tool _execute, attempt 1, run_tool pass — default success
-      7. First `make quality` (run_simple) — FAILS with exit_code=1
-      8. Quality-fix agent _execute (streaming) — commits fix
-      9. Second `make quality` (run_simple) — PASSES with exit_code=0
+      5. test-adequacy's ``make coverage 0`` probe (run_simple) — default success
+      6. pre-quality review _execute, attempt 1, review pass — default success
+      7. pre-quality run-tool _execute, attempt 1, run_tool pass — default success
+      8. First `make quality-lite` (run_simple) — FAILS with exit_code=1
+      9. Quality-fix agent _execute (streaming) — commits fix
+     10. Second `make quality-lite` (run_simple) — PASSES with exit_code=0
+     11. Test step (`make test`: no ``test-impacted`` target in this worktree)
+         (run_simple) — default success
 
+    The implement gate never runs the host-locked `make quality` (#11568).
     plan-compliance returns an empty prompt string when no plan is present,
     causing _run_skill to return early without calling _execute. Only 3 of the
-    4 registered skills consume a FakeDocker slot. All skill/pre-quality slots
-    must be explicitly queued in FIFO order so that the fail/fix scripts land
-    in the correct positions.
+    4 registered skills consume an agent slot; test-adequacy also spends one
+    on its coverage probe. All skill/pre-quality slots must be explicitly
+    queued in FIFO order so that the fail/fix scripts land in the correct
+    positions.
     """
     world = MockWorld(tmp_path, use_real_agent_runner=True)
     world.add_issue(1, "t", "b", labels=["hydraflow-ready"])
@@ -348,24 +353,26 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
         commits=[("x.py", "broken")],
         cwd=worktree_cwd,
     )
-    # 2–4) Three post-implementation skill _execute calls — default success
+    # 2–5) Three post-implementation skill _execute calls + test-adequacy's
+    # ``make coverage 0`` probe — default success
     # (diff-sanity, scope-check, test-adequacy)
     # plan-compliance is skipped: returns empty prompt with no plan → no _execute
-    for _ in range(3):
+    for _ in range(4):
         world.docker.script_run(_ok)
-    # 5–6) Pre-quality review loop attempt 1: review + run_tool — both default success
+    # 6–7) Pre-quality review loop attempt 1: review + run_tool — both default success
     world.docker.script_run(_ok)  # review pass
     world.docker.script_run(_ok)  # run_tool pass
-    # 7) First `make quality` via run_simple — FAILS
+    # 8) First `make quality-lite` via run_simple — FAILS
     world.docker.script_run([{"type": "result", "success": False, "exit_code": 1}])
-    # 8) Quality-fix agent: commits the fix
+    # 9) Quality-fix agent: commits the fix
     world.docker.script_run_with_commits(
         events=[{"type": "result", "success": True, "exit_code": 0}],
         commits=[("x.py", "fixed")],
         cwd=worktree_cwd,
     )
-    # 9) Second `make quality` via run_simple — PASSES
+    # 10) Second `make quality-lite` via run_simple — PASSES
     world.docker.script_run(_ok)
+    # 11) Test step (`make test`) — default success (queue exhausted)
 
     result = await world.run_pipeline()
 
@@ -375,10 +382,14 @@ async def test_A10_quality_fix_loop_retries_then_passes(tmp_path) -> None:
         f"docker_invocations={len(world.docker.invocations)}"
     )
     # FakeDocker invocations:
-    # 1 agent + 2 skills + 2 pre-quality + 1 make-quality-fail + 1 fix-agent +
-    # 1 make-quality-pass = 8. (Was 9: discover-completeness no longer spends
-    # a subprocess turn when no Discover brief exists — #9817.)
-    assert len(world.docker.invocations) >= 8
+    # 1 agent + 3 skills + 1 coverage probe + 2 pre-quality + 1 quality-lite-fail
+    # + 1 fix-agent + 1 quality-lite-pass + 1 test step = 11.
+    assert len(world.docker.invocations) >= 11
+    make_cmds = [
+        inv.command for inv in world.docker.invocations if inv.command[:1] == ["make"]
+    ]
+    assert ["make", "quality"] not in make_cmds  # off the host lock (#11568)
+    assert make_cmds.count(["make", "quality-lite"]) == 2
 
 
 async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
@@ -392,14 +403,16 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
     (ConfigFactory default is 0, which skips wait_for_ci entirely in
     PostMergeHandler._run_ci_gate). We pass a custom config so the CI gate runs.
 
-    FakeDocker invocations (7 total — quality passes first attempt):
+    FakeDocker invocations (9 total — the gate passes first attempt):
       1. Initial agent _execute (streaming) — commits code
       2–4. Three post-implementation skill _execute calls — default success
            (diff-sanity, scope-check, test-adequacy;
            plan-compliance is skipped: empty prompt with no plan)
-      5. Pre-quality review _execute, attempt 1 — default success
-      6. Pre-quality run-tool _execute, attempt 1 — default success
-      7. make quality (run_simple) — PASSES
+      5. test-adequacy's ``make coverage 0`` probe (run_simple) — default success
+      6. Pre-quality review _execute, attempt 1 — default success
+      7. Pre-quality run-tool _execute, attempt 1 — default success
+      8. make quality-lite (run_simple) — PASSES
+      9. Test step, `make test` (run_simple) — PASSES
 
     CI fail/fix is handled by FakeGitHub.script_ci + FakeLLM.reviewers.fix_ci
     and does NOT consume FakeDocker slots.
@@ -431,15 +444,16 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
         commits=[("x.py", "ok")],
         cwd=worktree_cwd,
     )
-    # 2–4) Three post-implementation skill _execute calls — default success
-    # (diff-sanity, scope-check, test-adequacy)
+    # 2–5) Three post-implementation skill _execute calls + the coverage probe
+    # (diff-sanity, scope-check, test-adequacy) — default success
     # plan-compliance is skipped: returns empty prompt with no plan → no _execute
-    for _ in range(3):
+    for _ in range(4):
         world.docker.script_run(_ok)
-    # 5–6) Pre-quality review loop attempt 1: review + run_tool — both default success
+    # 6–7) Pre-quality review loop attempt 1: review + run_tool — both default success
     world.docker.script_run(_ok)  # review pass
     world.docker.script_run(_ok)  # run_tool pass
-    # 7) make quality via run_simple — PASSES first attempt (no quality-fix loop)
+    # 8–9) make quality-lite, then the test step — both PASS (no quality-fix loop)
+    world.docker.script_run(_ok)
     world.docker.script_run(_ok)
 
     # CI scripted: fail first, pass second.
@@ -462,8 +476,9 @@ async def test_A11_review_fix_ci_loop_resolves(tmp_path) -> None:
     assert pr is not None
     assert pr.merged is True
 
-    # 7 FakeDocker invocations: 1 agent + 3 skills + 2 pre-quality + 1 make-quality
-    assert len(world.docker.invocations) >= 7
+    # 9 FakeDocker invocations: 1 agent + 3 skills + 1 coverage probe
+    # + 2 pre-quality + quality-lite + test step
+    assert len(world.docker.invocations) >= 9
 
     # Defense: if PR numbering changes, wait_for_ci returns default success and
     # the scripted fail/pass queue stays full. Assert it was consumed.
@@ -1163,7 +1178,7 @@ async def test_A25_test_adequacy_verifier_second_opinion_on_explicit_ok(
       5. ``make coverage 0`` (run_simple via FakeDocker) — exit 0, no
          coverage.xml → coverage delta gracefully preserves the pass
       6. VERIFIER _execute — CONCUR via assistant event  ← the new dispatch
-      7–9. pre-quality review / run-tool / make quality — default success
+      7–9. pre-quality review / run-tool / implement gate — default success
 
     The AgentRunner in scenarios builds its own default config
     (``build_real_agent_runner`` → ``ConfigFactory.create()``), so this test
@@ -1207,7 +1222,7 @@ async def test_A25_test_adequacy_verifier_second_opinion_on_explicit_ok(
             "TEST_ADEQUACY_VERIFIER_RESULT: CONCUR\nSUMMARY: independently confirmed"
         )
     )
-    # 7–9) pre-quality review, run-tool, make quality — default success
+    # 7–9) pre-quality review, run-tool, implement gate — default success
     world.docker.script_run(_ok)
     world.docker.script_run(_ok)
     world.docker.script_run(_ok)

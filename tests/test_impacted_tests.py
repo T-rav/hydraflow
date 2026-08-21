@@ -344,3 +344,67 @@ def test_smoke_and_architecture_constants_exist_in_repo() -> None:
     assert not missing, f"SMOKE_TESTS drifted (missing): {missing}"
     arch = [m for g in impacted_tests.ARCHITECTURE_GLOBS for m in fs.glob(g)]
     assert arch, "no tests/architecture/test_*.py found — floor would be empty"
+
+
+# ── bounded mode (#11568): the implement-path gate never runs the full suite ─
+#
+# The implementer's post-build gate runs off the host quality lock, so it
+# must never expand to an (unlocked) full suite — N concurrent full suites on
+# one box is exactly what the lock exists to prevent (#11219). In bounded
+# mode a would-be full-suite trigger keeps the name-mapped tests plus the
+# always-on floor and defers the full run to CI, which is the real gate.
+
+
+def test_bounded_high_fanout_keeps_mapped_tests_and_floor(
+    fs: InMemoryFileIndex,
+) -> None:
+    result = select_tests(["src/widget.py", "src/config.py"], fs, bounded=True)
+    assert result.full_suite is False
+    assert "tests/test_widget.py" in result.test_files
+    assert set(impacted_tests.SMOKE_TESTS) <= set(result.test_files)
+    assert any("config.py" in r and "deferred to CI" in r for r in result.reasons)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["Makefile", ".githooks/pre-push", "tests/helpers.py", "src/orphan_module.py"],
+)
+def test_bounded_never_returns_full_suite(path: str, fs: InMemoryFileIndex) -> None:
+    result = select_tests([path], fs, bounded=True)
+    assert result.full_suite is False
+    assert result.test_files  # the floor is always present
+
+
+def test_bounded_matches_unbounded_when_nothing_forces_the_full_suite(
+    fs: InMemoryFileIndex,
+) -> None:
+    assert select_tests(["src/widget.py"], fs, bounded=True) == select_tests(
+        ["src/widget.py"], fs
+    )
+
+
+def test_cli_bounded_flag_never_prints_the_sentinel(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = impacted_tests.main(["--bounded", "src/config.py"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert FULL_SUITE_SENTINEL not in out.splitlines()
+    assert out.strip(), "bounded selection must still run the floor"
+
+
+def test_bounded_high_fanout_src_keeps_its_name_mapped_tests() -> None:
+    """A high-fanout module still runs its own ``test_<mod>*`` files in bounded mode."""
+    fs = InMemoryFileIndex(
+        frozenset(
+            {
+                "src/config.py",
+                "tests/test_config_extra.py",
+                "tests/architecture/test_guard.py",
+                *impacted_tests.SMOKE_TESTS,
+            }
+        )
+    )
+    result = select_tests(["src/config.py"], fs, bounded=True)
+    assert result.full_suite is False
+    assert "tests/test_config_extra.py" in result.test_files
