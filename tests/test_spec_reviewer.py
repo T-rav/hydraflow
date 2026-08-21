@@ -15,6 +15,7 @@ from spec_intake_gate import (
 from spec_reviewer import (
     CLISpecReviewer,
     build_spec_review_prompt,
+    cli_spec_reviewer,
     parse_spec_review,
 )
 
@@ -101,6 +102,28 @@ class TestCLISpecReviewer:
         # Reviewer findings empty, but the deterministic metric still landed.
         assert verdict.contradictions == ()
         assert verdict.falsifiability.total_statements > 0
+
+    def test_manual_cli_keeps_explicit_claude_route(self, monkeypatch) -> None:
+        from config import HydraFlowConfig
+        from execution import SimpleResult
+
+        captured: dict[str, object] = {}
+
+        async def _complete(**kwargs):
+            captured.update(kwargs)
+            return SimpleResult(stdout=_FULL_PAYLOAD, returncode=0)
+
+        monkeypatch.setattr("spec_reviewer.run_lightweight_agent", _complete)
+        config = HydraFlowConfig(
+            maintenance_provider="zai",
+            maintenance_model="glm-5.2",
+        )
+
+        review = cli_spec_reviewer(config, "opus").review("doc", subject_id="s")
+
+        assert review.contradictions
+        assert captured["provider"] == "claude"
+        assert captured["model"] == "opus"
 
 
 class TestRenderVerdict:

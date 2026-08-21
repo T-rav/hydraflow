@@ -13,8 +13,8 @@ The **claim density** of each Accepted ADR — the fraction of its statements ca
 
 | ADR | Density | Checkable | Statements |
 |-----|--------:|----------:|-----------:|
-| ADR-0083 | 27% | 12 | 45 |
 | ADR-0035 | 28% | 23 | 83 |
+| ADR-0083 | 29% | 14 | 48 |
 | ADR-0024 | 30% | 33 | 110 |
 | ADR-0019 | 31% | 29 | 95 |
 | ADR-0113 | 31% | 38 | 123 |

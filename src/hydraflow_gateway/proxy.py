@@ -47,6 +47,7 @@ _HOP_BY_HOP_HEADERS = {
     b"upgrade",
 }
 _CLIENT_AUTH_HEADERS = {b"authorization", b"x-api-key"}
+_MAX_LEDGER_PATH_CHARS = 2048
 
 
 class GatewayCredentialError(ValueError):
@@ -66,6 +67,7 @@ class _GatewayAttempt:
     request_observer: RequestMetadataObserver
     started_epoch: float
     started_monotonic: float
+    path: str | None = None
     capture: GatewayBodyCapture | None = None
     capture_failed: bool = False
     finalized: bool = False
@@ -91,6 +93,7 @@ class _GatewayAttempt:
             usage=usage or UsageSnapshot(),
             started_epoch=self.started_epoch,
             started_monotonic=self.started_monotonic,
+            path=self.path,
             status_code=status_code,
             completed=completed,
             client_aborted=client_aborted,
@@ -170,6 +173,7 @@ class GatewayProxy:
             request_observer=RequestMetadataObserver(),
             started_epoch=self._wall_clock(),
             started_monotonic=self._monotonic(),
+            path=sanitized_request_path(request),
         )
         try:
             self.ensure_telemetry_healthy()
@@ -353,6 +357,7 @@ class GatewayProxy:
         usage: UsageSnapshot,
         started_epoch: float,
         started_monotonic: float,
+        path: str | None,
         status_code: int,
         completed: bool,
         client_aborted: bool,
@@ -364,6 +369,9 @@ class GatewayProxy:
             except OSError:
                 capture_failed = True
                 self.mark_telemetry_unhealthy()
+        # Partial usage is never a price: an aborted or unfinished stream, or
+        # one whose usage event never arrived, is cost-unknown rather than $0.
+        usage_complete = completed and not client_aborted and usage.usage_observed
         cost_usd = (
             self._pricing.estimate_cost(
                 usage.model_served,
@@ -371,8 +379,13 @@ class GatewayProxy:
                 output_tokens=usage.output_tokens,
                 cache_write_tokens=usage.cache_write_tokens,
                 cache_read_tokens=usage.cache_read_tokens,
+                # Every gateway upstream speaks the Anthropic stream shape,
+                # whose ``input_tokens`` EXCLUDES cache — regardless of the
+                # model's table flag, which describes its one-shot
+                # OpenAI-compat face (prompt_tokens INCLUDES cache).
+                input_includes_cache=False,
             )
-            if usage.model_served is not None
+            if usage.model_served is not None and usage_complete
             else None
         )
         request_status = GatewayRequestStatus.COMPLETED
@@ -392,6 +405,7 @@ class GatewayProxy:
             status_code=status_code,
             status=request_status,
             upstream_provider=identity.provider_binding,
+            path=path,
             model_requested=request_observer.model_requested(),
             model_served=usage.model_served,
             input_tokens=usage.input_tokens,
@@ -403,6 +417,7 @@ class GatewayProxy:
             observer_malformed_events=usage.malformed_events,
             body_capture_id=capture.capture_id if capture is not None else None,
             body_capture_complete=(None if capture is None else not capture_failed),
+            usage_complete=usage_complete,
             cost_usd=cost_usd,
             cost_unknown=cost_usd is None,
         )
@@ -439,6 +454,12 @@ def extract_virtual_token(raw_headers: Sequence[tuple[bytes, bytes]]) -> str:
         return token_bytes.decode("ascii")
     except UnicodeDecodeError as exc:
         raise GatewayCredentialError("gateway credential must be ASCII") from exc
+
+
+def sanitized_request_path(request: Request) -> str:
+    """Return the decoded request path, query string stripped and bounded."""
+    path = request.url.path.split("?", maxsplit=1)[0]
+    return path[:_MAX_LEDGER_PATH_CHARS]
 
 
 def enforce_request_size(request: Request, max_request_bytes: int) -> None:

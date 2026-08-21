@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeGuard
 
 _DEFAULT_MAX_OBSERVED_BYTES = 1_048_576
 _JSON_OBSERVER_ERRORS = (UnicodeDecodeError, ValueError, RecursionError)
@@ -20,6 +20,20 @@ class UsageSnapshot:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     malformed_events: int = 0
+    # Whether any usage event carrying at least one valid count was seen. z.ai
+    # sends ``message_start`` with ``usage: {}`` and every count only in the
+    # final ``message_delta``, so zero counts alone cannot distinguish "usage
+    # not yet observed" from "zero usage"; the ledger needs that distinction to
+    # mark a client-aborted stream's usage incomplete honestly.
+    usage_observed: bool = False
+
+
+_USAGE_KEYS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
 
 
 class RequestMetadataObserver:
@@ -76,6 +90,7 @@ class SseUsageObserver:
         self._cache_read_tokens = 0
         self._cache_write_tokens = 0
         self._malformed_events = 0
+        self._usage_observed = False
 
     def feed(self, chunk: bytes) -> None:
         """Consume zero or more arbitrarily split SSE lines."""
@@ -129,6 +144,7 @@ class SseUsageObserver:
             cache_read_tokens=self._cache_read_tokens,
             cache_write_tokens=self._cache_write_tokens,
             malformed_events=self._malformed_events,
+            usage_observed=self._usage_observed,
         )
 
     def _consume_line(self, line: bytes) -> None:
@@ -211,6 +227,8 @@ class SseUsageObserver:
     def _observe_usage(self, raw: object) -> None:
         if not isinstance(raw, dict):
             return
+        if any(_is_count(raw.get(key)) for key in _USAGE_KEYS):
+            self._usage_observed = True
         self._input_tokens = _latest_nonnegative(
             raw.get("input_tokens"), self._input_tokens
         )
@@ -225,7 +243,11 @@ class SseUsageObserver:
         )
 
 
+def _is_count(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 def _latest_nonnegative(value: object, current: int) -> int:
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+    if _is_count(value):
         return value
     return current

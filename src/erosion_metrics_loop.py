@@ -28,6 +28,18 @@ adjacent baseline-governance precedent this loop's baseline usage mirrors
 without itself being a tightening actuator — this loop only files, it does
 not lock in gains.
 
+**Whole-tree class issues (mass + suite hygiene).** Two readings are not
+change-scoped — ``erosion.mass`` (god files / god classes by size) and
+``erosion.suite_hygiene`` (parametrize candidates / cross-file duplicate
+tests) measure the tree as it is. Each files ONE standing ``hydraflow-find``
+class issue carrying the ``find_class_key`` marker and a ``## Folded sites``
+roster: open + unchanged roster → nothing; open + changed roster → body
+refreshed in place; closed while the reading is still non-empty → re-filed
+(closing without fixing brings it back). The PR-time ratchets
+(``tests/architecture/test_mass_ratchet.py``,
+``test_suite_hygiene_ratchet.py``) stop NEW offenders; this loop keeps the
+burn-down of the grandfathered ones on the board.
+
 **Cursor + dedup design.** ``state.get_erosion_last_processed_sha()``
 persists the base-branch HEAD SHA this loop last finished analyzing
 (``state/_erosion_metrics.py``). Each tick reads the CURRENT HEAD sha of
@@ -80,6 +92,7 @@ bind: a reasonably tight interval keeps each tick's commit range small.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import subprocess
 from pathlib import Path
@@ -91,13 +104,20 @@ from config import HydraFlowConfig
 from dedup_store import DedupStore
 from erosion.baseline import is_flagged as spread_is_flagged
 from erosion.baseline import load_spread_baseline
+from erosion.mass import collect_sources
+from erosion.mass import compute as mass_compute
+from erosion.mass_baseline import grown as mass_grown
+from erosion.mass_baseline import load_mass_baseline
 from erosion.scatter import DEFAULT_SCATTER_THRESHOLD, added_symbols_for_range
 from erosion.scatter import compute as scatter_compute
 from erosion.scatter_baseline import diff as scatter_diff
 from erosion.scatter_baseline import load_scatter_baseline
 from erosion.spread import changed_files_for_range
 from erosion.spread import compute as spread_compute
+from erosion.suite_hygiene import collect_tests
+from erosion.suite_hygiene import compute as suite_compute
 from exception_classify import reraise_on_credit_or_bug
+from find_class_key import compute_class_key, render_marker
 from git_timeouts import GIT_READONLY_TIMEOUT_S
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
 
@@ -162,6 +182,53 @@ def scatter_finding_fingerprint(commit_range: str, symbol: str) -> str:
     return f"scatter:{commit_range}:{symbol}"
 
 
+# Repo-wide (not change-scoped) readings filed as ONE class issue per kind — the
+# mass sensor (god files / god classes) and the suite-hygiene sensor
+# (parametrize candidates / cross-file duplicate tests). Each carries the
+# ``find_class_key`` marker + a ``## Folded sites`` roster so human finders and
+# ``scripts/find_class_check.py`` fold into it rather than filing siblings.
+_MASS_BASELINE_REL = Path("disturbance") / "baselines" / "mass.yaml"
+_CLASS_SOURCE = "erosion_metrics"
+_CLASS_NEEDLES: dict[str, str] = {
+    "mass": "god class god file mass decomposition oversized",
+    "suite_hygiene": "test suite structural redundancy parametrize duplicate tests",
+}
+#: Roster lines per class issue body — bounded so a body can never approach
+#: GitHub's 65k limit; the counts in the evidence table stay exact.
+_ROSTER_LIMIT = 60
+_CLOSED_STATES = frozenset({"COMPLETED", "NOT_PLANNED"})
+
+
+def class_issue_fingerprint(kind: str, issue_number: int, digest: str) -> str:
+    """Dedup entry for the one open class issue of *kind*: ``kind:class:#N:<roster digest>``."""
+    return f"{kind}:class:#{issue_number}:{digest}"
+
+
+def find_class_issue_entry(seen: set[str], kind: str) -> tuple[int, str] | None:
+    """Return ``(issue_number, digest)`` for *kind*'s recorded class issue, or None."""
+    prefix = f"{kind}:class:#"
+    for entry in sorted(seen):
+        if not entry.startswith(prefix):
+            continue
+        number, _, digest = entry[len(prefix) :].partition(":")
+        if number.isdigit():
+            return int(number), digest
+    return None
+
+
+def _roster_digest(lines: list[str]) -> str:
+    """Stable 12-hex digest of a roster — changes iff the rendered roster changes."""
+    payload = "\n".join(lines).encode("utf-8")
+    return hashlib.sha1(payload, usedforsecurity=False).hexdigest()[:12]
+
+
+def _site_line(title: str, site: str) -> str:
+    """One ``## Folded sites`` bullet in the exact shape ``find_class_key`` parses back."""
+    clean_title = " ".join(title.replace("`", "'").split())
+    clean_site = " ".join(site.replace("`", "'").split())
+    return f"- {clean_title} (site: `{clean_site}`)"
+
+
 class ErosionMetricsLoop(BaseBackgroundLoop):
     """Files change-spread/concept-scatter drift on merged commits to triage.
 
@@ -213,20 +280,30 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
         candidates = self._compute_candidates(
             commit_range, changed_files, added_symbols, module_graph
         )
+        class_candidates = self._repo_wide_candidates(repo_root)
         filed, capped = await self._file_findings(candidates)
+        class_filed, refreshed, class_capped = await self._reconcile_class_issues(
+            class_candidates, already_filed=filed
+        )
+        filed += class_filed
+        capped = capped or class_capped
 
         # Advance the cursor unconditionally: this range has been fully
         # analyzed (dedup by SHA), independent of the per-tick filing cap.
         self._state.set_erosion_last_processed_sha(current_sha)
 
-        return {
+        result: dict[str, Any] = {
             "status": "ok",
             "range": commit_range,
             "changed_files": len(changed_files),
-            "candidates": len(candidates),
+            "candidates": len(candidates) + len(class_candidates),
             "filed": filed,
+            "refreshed": refreshed,
             "capped": capped,
         }
+        for candidate in class_candidates:
+            result[candidate["kind"]] = candidate["summary"]
+        return result
 
     def _resolve_range(
         self,
@@ -310,6 +387,161 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
 
         return candidates
 
+    def _repo_wide_candidates(self, repo_root: Path) -> list[dict[str, Any]]:
+        """Whole-repo mass + suite-hygiene readings, one class candidate per non-empty kind.
+
+        Not change-scoped like spread/scatter (size is a property of the tree,
+        not of a diff), but tied to the same cursor so each runs at most once
+        per tick that saw new commits.
+        """
+        candidates: list[dict[str, Any]] = []
+        src_dir = repo_root / "src"
+        if src_dir.is_dir():
+            mass = mass_compute(collect_sources(src_dir))
+            if not mass.is_empty:
+                baseline = load_mass_baseline(repo_root / _MASS_BASELINE_REL)
+                roster = [
+                    _site_line(f"{c.key} — {c.loc} LOC, {c.methods} methods", c.key)
+                    for c in mass.god_classes
+                ] + [
+                    _site_line(f"{g.path} — {g.loc} LOC (file)", g.path)
+                    for g in mass.god_files
+                ]
+                candidates.append(
+                    {
+                        "kind": "mass",
+                        "class_issue": True,
+                        "finding": mass,
+                        "growth": mass_grown(mass, baseline),
+                        "roster": roster,
+                        "digest": _roster_digest(roster),
+                        "summary": {
+                            "digest": _roster_digest(roster),
+                            "god_classes": len(mass.god_classes),
+                            "god_files": len(mass.god_files),
+                        },
+                    }
+                )
+        tests_dir = repo_root / "tests"
+        if tests_dir.is_dir():
+            suite = suite_compute(collect_tests(tests_dir))
+            if not suite.is_empty:
+                roster = [
+                    _site_line(
+                        f"{g.path}: {', '.join(g.names)}", f"{g.path}::{g.names[0]}"
+                    )
+                    for g in suite.parametrize_groups
+                ] + [
+                    _site_line(
+                        f"{d.name} duplicated in {', '.join(d.paths)}",
+                        f"{d.paths[0]}::{d.name}",
+                    )
+                    for d in suite.cross_file_duplicates
+                ]
+                candidates.append(
+                    {
+                        "kind": "suite_hygiene",
+                        "class_issue": True,
+                        "finding": suite,
+                        "roster": roster,
+                        "digest": _roster_digest(roster),
+                        "summary": {
+                            "digest": _roster_digest(roster),
+                            "parametrize_copies": suite.parametrize_copies,
+                            "cross_file_duplicates": len(suite.cross_file_duplicates),
+                            "total_tests": suite.total_tests,
+                        },
+                    }
+                )
+        return candidates
+
+    async def _reconcile_class_issues(
+        self, candidates: list[dict[str, Any]], *, already_filed: int
+    ) -> tuple[int, int, bool]:
+        """File, refresh, or leave alone the one class issue per kind; return (filed, refreshed, capped).
+
+        Three-way dedup on the recorded ``kind:class:#N:<digest>`` entry:
+        OPEN with the same roster digest → nothing; OPEN with a changed
+        digest → rewrite the body (roster refresh, no new issue); CLOSED while
+        the reading is still non-empty → file again (closing without fixing
+        brings it back next tick). An unreadable state (``""`` on a gh
+        error) is a no-op for this tick — a reporter fails quiet, not loud.
+        """
+        max_issues = int(self._config.erosion_metrics_max_issues_per_tick)
+        filed = 0
+        refreshed = 0
+        capped = False
+        for candidate in candidates:
+            kind = candidate["kind"]
+            digest = candidate["digest"]
+            seen = self._dedup.get()
+            entry = find_class_issue_entry(seen, kind)
+            title, body = _render_finding(candidate)
+            if entry is not None:
+                number, recorded_digest = entry
+                state = await self._prs.get_issue_state(number)
+                if state == "OPEN" and recorded_digest == digest:
+                    continue
+                if state == "OPEN":
+                    try:
+                        await self._prs.update_issue_body(number, body)
+                    except Exception as exc:
+                        reraise_on_credit_or_bug(exc)
+                        logger.warning(
+                            "ErosionMetrics: failed to refresh class issue #%d",
+                            number,
+                            exc_info=True,
+                        )
+                        continue
+                    self._dedup.set_all(
+                        (
+                            seen
+                            - {class_issue_fingerprint(kind, number, recorded_digest)}
+                        )
+                        | {class_issue_fingerprint(kind, number, digest)}
+                    )
+                    refreshed += 1
+                    logger.info(
+                        "ErosionMetrics: refreshed %s class issue #%d", kind, number
+                    )
+                    continue
+                if state not in _CLOSED_STATES:
+                    continue  # unknown / error: leave the entry, retry next tick
+            if already_filed + filed >= max_issues:
+                capped = True
+                continue
+            try:
+                number = await self._prs.create_issue(title, body, labels=_ISSUE_LABELS)
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.warning(
+                    "ErosionMetrics: failed to file %s class issue", kind, exc_info=True
+                )
+                continue
+            if not number:
+                # PRManager.create_issue returns 0 on failure without raising.
+                # Recording "#0" would make every later tick read an unresolvable
+                # issue as "open, unreadable" and never file this kind again.
+                logger.warning(
+                    "ErosionMetrics: create_issue returned no number for %s class "
+                    "issue; retrying next tick",
+                    kind,
+                )
+                continue
+            stale = {e for e in seen if e.startswith(f"{kind}:class:#")}
+            self._dedup.set_all(
+                (seen - stale) | {class_issue_fingerprint(kind, number, digest)}
+            )
+            filed += 1
+            logger.info("ErosionMetrics: filed %s class issue #%d", kind, number)
+        if capped:
+            logger.warning(
+                "ErosionMetrics: per-tick cap (%d) reached before every class issue "
+                "was filed; the rest retry next tick",
+                max_issues,
+            )
+        return filed, refreshed, capped
+
     async def _file_findings(
         self, candidates: list[dict[str, Any]]
     ) -> tuple[int, bool]:
@@ -355,6 +587,11 @@ def _short(sha: str) -> str:
 
 def _render_finding(candidate: dict[str, Any]) -> tuple[str, str]:
     """Render (title, body) for one erosion finding, evidence table included."""
+    if candidate["kind"] == "mass":
+        return _render_mass(candidate)
+    if candidate["kind"] == "suite_hygiene":
+        return _render_suite_hygiene(candidate)
+
     commit_range = candidate["commit_range"]
     last_sha, _, current_sha = commit_range.partition("..")
     short_range = f"{_short(last_sha)}..{_short(current_sha)}"
@@ -410,5 +647,109 @@ def _render_finding(candidate: dict[str, Any]) -> tuple[str, str]:
         "deliberate contrast with its own Pattern-A fix-PR actuator). "
         "Filed for human triage: whether these should be unified into one "
         "shared definition needs a human judgment call.\n"
+    )
+    return title, body
+
+
+def _roster_section(roster: list[str]) -> str:
+    shown = roster[:_ROSTER_LIMIT]
+    section = "## Folded sites\n" + "\n".join(shown) + "\n"
+    if len(roster) > len(shown):
+        section += (
+            f"\n_… and {len(roster) - len(shown)} more (counts above are exact)._\n"
+        )
+    return section
+
+
+def _render_mass(candidate: dict[str, Any]) -> tuple[str, str]:
+    finding = candidate["finding"]
+    growth = candidate["growth"]
+    classes = len(finding.god_classes)
+    files = len(finding.god_files)
+    largest = finding.god_classes[0] if finding.god_classes else None
+    largest_text = (
+        f"{largest.name}, {largest.loc} LOC"
+        if largest
+        else f"{finding.god_files[0].path}"
+    )
+    title = (
+        f"Erosion: {classes} god class{'' if classes == 1 else 'es'}, "
+        f"{files} god file{'' if files == 1 else 's'} above the mass threshold "
+        f"(largest: {largest_text})"
+    )
+    marker = render_marker(compute_class_key(_CLASS_SOURCE, _CLASS_NEEDLES["mass"]))
+    grown_lines = "\n".join(
+        f"- `{g.key}` ({g.kind}): {g.baseline_loc} → {g.loc} LOC" for g in growth
+    )
+    body = (
+        "## Evidence (ErosionMetricsLoop, automated)\n\n"
+        "| metric | value |\n|---|---|\n"
+        f"| god classes (≥{finding.class_loc_threshold} LOC or "
+        f"≥{finding.class_method_threshold} methods) | {classes} |\n"
+        f"| god files (≥{finding.file_loc_threshold} LOC) | {files} |\n"
+        f"| source files measured | {finding.total_files} |\n"
+        f"| grown >10% since baseline | {len(growth)} |\n"
+        f"| largest | {largest_text} |\n\n"
+        f"{marker}\n\n"
+        f"{_roster_section(candidate['roster'])}\n"
+        + (f"## Grown since baseline\n{grown_lines}\n\n" if growth else "")
+        + "## How to decompose safely (one class per PR, largest first)\n\n"
+        "Extract one cohesive cluster of methods into a new module and "
+        "**re-export** the moved symbols from the original file so every "
+        "existing `from x import Y` keeps working — zero caller changes and "
+        "ONE class identity (precedent: `pr_manager_promotion.py`, "
+        "`plan_phase_wiki_ingest.py` from #10840; ADR-0030 for route "
+        "packages). Move any `# noqa` with the code it annotates (the "
+        "suppressions ratchet counts per file). When the class shrinks, run "
+        '`python scripts/regen_mass_baseline.py --reason "decomposed <Class>"` '
+        "so `tests/architecture/test_mass_ratchet.py` records the smaller "
+        "size and the next growth is caught.\n\n"
+        "This is a standing class issue (mass sensor, `erosion.mass`): the "
+        "roster refreshes in place while it is open and the issue is re-filed "
+        "if closed while the reading is still non-empty. Pattern B outer-loop "
+        "finding — it reports, it never opens a fix PR.\n"
+    )
+    return title, body
+
+
+def _render_suite_hygiene(candidate: dict[str, Any]) -> tuple[str, str]:
+    finding = candidate["finding"]
+    copies = finding.parametrize_copies
+    dups = len(finding.cross_file_duplicates)
+    title = (
+        f"Erosion: test suite carries {copies} parametrize "
+        f"{'copy' if copies == 1 else 'copies'} and {dups} cross-file duplicate "
+        f"test{'' if dups == 1 else 's'} ({finding.total_tests} tests)"
+    )
+    marker = render_marker(
+        compute_class_key(_CLASS_SOURCE, _CLASS_NEEDLES["suite_hygiene"])
+    )
+    body = (
+        "## Evidence (ErosionMetricsLoop, automated)\n\n"
+        "| metric | value |\n|---|---|\n"
+        f"| tests | {finding.total_tests} |\n"
+        f"| test files | {finding.total_files} |\n"
+        f"| parametrize groups (≥3 identical bodies in one file) | "
+        f"{len(finding.parametrize_groups)} |\n"
+        f"| parametrize copies (tests that collapse away) | {copies} |\n"
+        f"| cross-file duplicates (same name + body in ≥2 files) | {dups} |\n\n"
+        f"{marker}\n\n"
+        f"{_roster_section(candidate['roster'])}\n"
+        "## How to prune safely\n\n"
+        "For each parametrize group, keep one test and turn the variations "
+        "into `@pytest.mark.parametrize` cases — the assertions stay, the "
+        "copies go. For each cross-file duplicate, keep the copy that lives "
+        "next to the code under test and delete the other. Bodies compare "
+        "structurally (names, literals and docstrings normalized), so two "
+        "listed tests can still assert different *values* — that is exactly "
+        "what parametrize is for. After a pass, run "
+        '`python scripts/regen_suite_hygiene_baseline.py --reason "pruned <area>"` '
+        "so `tests/architecture/test_suite_hygiene_ratchet.py` locks in the "
+        "lower mark.\n\n"
+        "This is a standing class issue (suite-hygiene sensor, "
+        "`erosion.suite_hygiene`): the roster refreshes in place while it is "
+        "open and the issue is re-filed if closed while the reading is still "
+        "non-empty. Pattern B outer-loop finding — it reports, it never opens "
+        "a fix PR.\n"
     )
     return title, body

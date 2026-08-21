@@ -20,6 +20,18 @@ check() {
     fi
 }
 
+check_absent() {
+    local label="$1"
+    shift
+    if "$@" >/dev/null 2>&1; then
+        echo "  [FAIL] $label"
+        FAIL=$((FAIL + 1))
+    else
+        echo "  [PASS] $label"
+        PASS=$((PASS + 1))
+    fi
+}
+
 echo "=== Hydra Agent Image Smoke Test ==="
 echo ""
 
@@ -28,7 +40,6 @@ echo "--- Tool Versions ---"
 check "claude --version"    claude --version
 check "codex --version"     codex --version
 check "pi --version"        pi --version
-check "bd --version"        bd --version
 check "git --version"       git --version
 check "gh --version"        gh --version
 check "python3 --version"   python3 --version
@@ -40,11 +51,16 @@ check "pyright --version"   pyright --version
 check "pytest --version"    pytest --version
 
 echo ""
+echo "--- Task Store Isolation ---"
+check_absent "database task CLI absent" command -v bd
+check_absent "database task npm module absent" test -e /usr/lib/node_modules/@beads/bd
+check_absent "local-prefix database task npm module absent" test -e /usr/local/lib/node_modules/@beads/bd
+
+echo ""
 echo "--- Version Details ---"
 echo "  claude:  $(claude --version 2>/dev/null || echo 'N/A')"
 echo "  codex:   $(codex --version 2>/dev/null || echo 'N/A')"
 echo "  pi:      $(pi --version 2>/dev/null || echo 'N/A')"
-echo "  bd:      $(bd --version 2>/dev/null || echo 'N/A')"
 echo "  git:     $(git --version 2>/dev/null || echo 'N/A')"
 echo "  gh:      $(gh --version 2>/dev/null | head -1 || echo 'N/A')"
 echo "  python:  $(python3 --version 2>/dev/null || echo 'N/A')"

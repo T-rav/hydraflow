@@ -685,6 +685,16 @@ async def stream_claude_with_telemetry(
             f"provider 'gateway' requires the Claude harness, got {gate_tool!r}"
         )
 
+    # Work attribution for the gateway mint AND the telemetry row below: an
+    # explicit kwarg wins, else the event payload's ``issue`` / ``pr``.
+    attributed_issue = (
+        issue_number
+        if issue_number is not None
+        else _as_opt_int(event_data.get("issue"))
+    )
+    attributed_pr = (
+        pr_number if pr_number is not None else _as_opt_int(event_data.get("pr"))
+    )
     # Point the CLI at the role's harness backend for this spawn only (empty for
     # native Anthropic — the main workers stay pristine), and carry the resolved
     # provider so a credit-out is scoped to the right backend.
@@ -695,6 +705,8 @@ async def stream_claude_with_telemetry(
         source=str(event_data.get("source", "unknown")),
         session_id=getattr(event_bus, "current_session_id", None),
         timeout_seconds=stream_config.timeout,
+        issue_number=attributed_issue,
+        pr_number=attributed_pr,
     )
     stream_config = replace(
         stream_config,
@@ -741,16 +753,8 @@ async def stream_claude_with_telemetry(
                 transcript=transcript,
                 duration_s=time.monotonic() - start,
                 success=success,
-                issue_number=(
-                    issue_number
-                    if issue_number is not None
-                    else _as_opt_int(event_data.get("issue"))
-                ),
-                pr_number=(
-                    pr_number
-                    if pr_number is not None
-                    else _as_opt_int(event_data.get("pr"))
-                ),
+                issue_number=attributed_issue,
+                pr_number=attributed_pr,
                 session_id=getattr(event_bus, "current_session_id", None),
                 stats=stats,
             )
@@ -792,6 +796,30 @@ class GatewayMintRequest:
     provider_binding: Literal["anthropic", "zai-harness"]
     capture_bodies: bool
     ttl_seconds: int
+    # Optional work attribution stamped onto the key's principal and hence
+    # every ledger row it produces. Omitted from the wire when unset.
+    issue_number: int | None = None
+    pr_number: int | None = None
+
+    def wire_payload(self) -> dict[str, object]:
+        """JSON body for ``POST /control/v1/keys``; attribution only when set
+        so an older gateway (``extra="forbid"``) keeps accepting the mint."""
+        payload: dict[str, object] = {
+            "principal_kind": self.principal_kind,
+            "principal_id": self.principal_id,
+            "spawn_id": self.spawn_id,
+            "session_id": self.session_id,
+            "repo_slug": self.repo_slug,
+            "repo_class": self.repo_class,
+            "provider_binding": self.provider_binding,
+            "capture_bodies": self.capture_bodies,
+            "ttl_seconds": self.ttl_seconds,
+        }
+        if self.issue_number is not None:
+            payload["issue_number"] = self.issue_number
+        if self.pr_number is not None:
+            payload["pr_number"] = self.pr_number
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -838,17 +866,7 @@ class _HttpGatewayControlClient:
                 response = await client.post(
                     f"{base_url.rstrip('/')}/control/v1/keys",
                     headers={"Authorization": f"Bearer {control_token}"},
-                    json={
-                        "principal_kind": request.principal_kind,
-                        "principal_id": request.principal_id,
-                        "spawn_id": request.spawn_id,
-                        "session_id": request.session_id,
-                        "repo_slug": request.repo_slug,
-                        "repo_class": request.repo_class,
-                        "provider_binding": request.provider_binding,
-                        "capture_bodies": request.capture_bodies,
-                        "ttl_seconds": request.ttl_seconds,
-                    },
+                    json=request.wire_payload(),
                 )
                 response.raise_for_status()
                 payload = response.json()
@@ -1325,6 +1343,8 @@ async def resolve_harness_env(
     spawn_id: str | None = None,
     timeout_seconds: float | None = None,
     gateway_client: GatewayControlClient | None = None,
+    issue_number: int | None = None,
+    pr_number: int | None = None,
 ) -> dict[str, str]:
     """Per-spawn env overrides that point the Claude CLI at a harness backend.
 
@@ -1372,6 +1392,8 @@ async def resolve_harness_env(
             ),
             capture_bodies=bool(getattr(config, "gateway_capture_bodies", False)),
             ttl_seconds=_gateway_ttl_seconds(config, timeout_seconds),
+            issue_number=issue_number,
+            pr_number=pr_number,
         )
         client = gateway_client or _HttpGatewayControlClient()
         credential = await client.mint_key(
@@ -1618,18 +1640,20 @@ async def run_lightweight_agent(
     session_id: str | None = None,
     isolate_user_settings: bool = True,
     issue_labels: Sequence[str] = (),
-    provider: str = "claude",
+    provider: str | None = None,
     response_schema: dict[str, object] | None = None,
     gateway_client: GatewayControlClient | None = None,
 ) -> SimpleResult:
     """One-shot lightweight LLM call with credit detection + telemetry.
 
-    *provider* selects the backend: ``"claude"`` (the CLI harness, default) or a
-    direct OpenAI-compatible HTTP call — ``"openrouter"`` or ``"zai"`` — for the
-    one-shot, no-tools loops that don't need the harness. Point a role's dial at
-    whichever backend the operator has credits for. All return the same
-    ``SimpleResult`` and own their own credit-exhaustion detection, so the
-    credit + telemetry contract below holds regardless of backend.
+    *provider* selects the backend. An omitted provider inherits
+    ``config.maintenance_provider``; callers with a dedicated role dial pass it
+    explicitly and therefore take precedence. The resolved backend is either
+    ``"claude"`` (the CLI harness), ``"gateway"``, or a direct
+    OpenAI-compatible HTTP provider such as ``"openrouter"`` or ``"zai"``.
+    All return the same ``SimpleResult`` and own their own credit-exhaustion
+    detection, so the credit + telemetry contract below holds regardless of
+    backend.
     *response_schema*, when given, drives native strict-JSON output on the
     OpenAI-compatible path (the CLI path uses prompt-based JSON).
 
@@ -1688,10 +1712,10 @@ async def run_lightweight_agent(
         return SimpleResult(stderr=str(exc), returncode=-1)
     prompt = gated.prompt
 
-    transport_provider = provider
+    transport_provider = config.maintenance_provider if provider is None else provider
     if (
         getattr(config, "gateway_fleet_ratchet_enabled", False) is True
-        and provider == "claude"
+        and transport_provider == "claude"
         and tool == "claude"
     ):
         transport_provider = _GATEWAY

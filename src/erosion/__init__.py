@@ -8,4 +8,13 @@ which that repo-static protocol can't express. See #10105 for the first
 sensor (change-spread / shotgun-surgery) and #10106 for the second
 (concept-scatter / duplication — a v1, provisional heuristic; see
 `erosion.scatter`'s module docstring).
+
+Two whole-tree sensors sit beside the change-scoped ones: `erosion.mass`
+(god files / god classes by size, ratcheted by
+`tests/architecture/test_mass_ratchet.py`) and `erosion.suite_hygiene`
+(parametrize candidates / cross-file duplicate tests, ratcheted by
+`tests/architecture/test_suite_hygiene_ratchet.py`). Both file ONE standing
+class issue each through `ErosionMetricsLoop` — the "always keep decomposing /
+always keep pruning" pressure — while the ratchets stop new offenders at PR
+time.
 """

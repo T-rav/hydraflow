@@ -898,7 +898,7 @@ def build_services(
         config, state, prs, fetcher, event_bus, issue_store=store
     )
 
-    # Beads manager (always active — fails hard if bd not installed)
+    # Per-worktree JSONL task manager (always active, no external service/CLI)
     beads_mgr = BeadsManager()
 
     # Phase coordinators

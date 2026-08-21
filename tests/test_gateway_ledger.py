@@ -218,3 +218,104 @@ class TestGatewayBodyStore:
         with pytest.raises(ValueError, match="safe body capture id"):
             GatewayBodyStore(tmp_path / "bodies").start("../escape", _identity())
         assert not (tmp_path / "escape.request.body").exists()
+
+
+class TestGatewayLedgerRowUsageHonesty:
+    """A row never claims a numeric price for usage it did not fully observe."""
+
+    def test_legacy_row_without_usage_complete_is_derived_from_completion(
+        self,
+    ) -> None:
+        payload = _row("request-1").model_dump(mode="json")
+        payload.pop("usage_complete", None)
+
+        assert GatewayLedgerRow.model_validate(payload).usage_complete is True
+
+    def test_legacy_aborted_row_derives_incomplete_usage(self) -> None:
+        payload = _row("request-1").model_dump(mode="json")
+        payload.pop("usage_complete", None)
+        payload.update(
+            status="client-aborted",
+            status_code=499,
+            completed=False,
+            client_aborted=True,
+            cost_usd=None,
+            cost_unknown=True,
+        )
+
+        assert GatewayLedgerRow.model_validate(payload).usage_complete is False
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {
+                "client_aborted": True,
+                "completed": False,
+                "status": "client-aborted",
+                "status_code": 499,
+            },
+            {"completed": False, "status": "upstream-error", "status_code": 502},
+            {"usage_complete": False},
+        ],
+        ids=["client-aborted", "upstream-error", "explicit-incomplete"],
+    )
+    def test_incomplete_usage_never_carries_a_numeric_cost(
+        self, overrides: dict[str, object]
+    ) -> None:
+        payload = _row("request-1").model_dump(mode="json")
+        payload.update(overrides)  # still cost_usd=0.001, cost_unknown=False
+
+        with pytest.raises(ValueError, match="cost_unknown"):
+            GatewayLedgerRow.model_validate(payload)
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {
+                "client_aborted": True,
+                "completed": False,
+                "status": "client-aborted",
+                "status_code": 499,
+            },
+            {"completed": False, "status": "upstream-error", "status_code": 502},
+        ],
+        ids=["client-aborted", "upstream-error"],
+    )
+    def test_usage_complete_cannot_be_claimed_for_an_unfinished_row(
+        self, overrides: dict[str, object]
+    ) -> None:
+        payload = _row("request-1").model_dump(mode="json")
+        payload.update(overrides, cost_usd=None, cost_unknown=True, usage_complete=True)
+
+        with pytest.raises(ValueError, match="usage_complete"):
+            GatewayLedgerRow.model_validate(payload)
+
+    def test_path_defaults_to_none_for_legacy_rows(self) -> None:
+        payload = _row("request-1").model_dump(mode="json")
+        payload.pop("path", None)
+
+        assert GatewayLedgerRow.model_validate(payload).path is None
+
+    def test_path_and_attribution_roundtrip(self, tmp_path: Path) -> None:
+        row = _row("request-1").model_copy(
+            update={
+                "path": "/v1/messages",
+                "principal": Principal(
+                    kind=PrincipalKind.SPAWN,
+                    id="implementer",
+                    spawn_id="spawn-1",
+                    issue_number=11464,
+                    pr_number=11500,
+                ),
+            }
+        )
+        ledger = GatewayLedger(tmp_path / "gateway.jsonl")
+
+        ledger.append(row)
+        (loaded,) = ledger.read_all()
+
+        assert loaded.path == "/v1/messages"
+        assert loaded.usage_complete is True
+        assert loaded.principal.issue_number == 11464
+        assert loaded.principal.pr_number == 11500
+        assert loaded.to_json_dict()["principal"]["issue_number"] == 11464

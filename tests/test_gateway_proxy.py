@@ -27,7 +27,11 @@ from hydraflow_gateway.models import (
     ProviderBinding,
     RepoClass,
 )
-from hydraflow_gateway.proxy import GatewayProxy, build_upstream_url
+from hydraflow_gateway.proxy import (
+    GatewayProxy,
+    build_upstream_url,
+    sanitized_request_path,
+)
 from hydraflow_gateway.settings import (
     GatewaySettings,
     UpstreamAuthStyle,
@@ -49,6 +53,24 @@ _SSE_BYTES = (
 
 _CONTROL_TOKEN = "test-control-token-0123456789abcdef"
 
+# z.ai's Anthropic-compatible stream: ``message_start`` carries ``usage: {}``
+# and every count arrives only in the final ``message_delta``. The served
+# model (glm-5.3) differs from the requested one (glm-5.2), as observed live.
+_ZAI_SSE_BYTES = (
+    b'event: message_start\ndata: {"type":"message_start","message":'
+    b'{"id":"msg-zai","model":"glm-5.3","usage":{}}}\n\n'
+    b'event: content_block_delta\ndata: {"type":"content_block_delta",'
+    b'"index":0,"delta":{"type":"text_delta","text":"ok"}}\n\n'
+    b'event: message_delta\ndata: {"type":"message_delta","delta":'
+    b'{"stop_reason":"end_turn"},"usage":{"input_tokens":1244,'
+    b'"output_tokens":532,"cache_read_input_tokens":46784,'
+    b'"cache_creation_input_tokens":0}}\n\n'
+    b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+)
+# GLM-5.3 published rate ($1.40/M in, $4.40/M out, $0.26/M cached) applied to
+# the Anthropic-shaped counts above: input is billed in FULL, cache excluded.
+_ZAI_EXPECTED_COST = (1.4 * 1244 + 4.4 * 532 + 0.26 * 46784) / 1_000_000
+
 
 class _ChunkStream(httpx.AsyncByteStream):
     def __init__(self, chunks: list[bytes]) -> None:
@@ -63,17 +85,38 @@ class _ChunkStream(httpx.AsyncByteStream):
         self.closed = True
 
 
+class _BlockingStream(httpx.AsyncByteStream):
+    """Yield one chunk, then block until closed — a stream the client abandons."""
+
+    def __init__(self, first_chunk: bytes) -> None:
+        self._first_chunk = first_chunk
+        self._released = asyncio.Event()
+        self.closed = False
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield self._first_chunk
+        await self._released.wait()
+
+    async def aclose(self) -> None:
+        self.closed = True
+        self._released.set()
+
+
 def _mint_request(
     *,
     provider: ProviderBinding = ProviderBinding.ANTHROPIC,
     capture_bodies: bool = True,
     repo_class: RepoClass = RepoClass.HYDRAFLOW,
+    issue_number: int | None = None,
+    pr_number: int | None = None,
 ) -> MintKeyRequest:
     return MintKeyRequest(
         principal_kind="spawn",
         principal_id="implementer",
         spawn_id="spawn-1",
         session_id="session-1",
+        issue_number=issue_number,
+        pr_number=pr_number,
         repo_slug="acme/hydraflow",
         repo_class=repo_class,
         provider_binding=provider,
@@ -113,6 +156,8 @@ def _gateway_client(
     capture_bodies: bool = True,
     repo_class: RepoClass = RepoClass.HYDRAFLOW,
     max_request_bytes: int = 33_554_432,
+    issue_number: int | None = None,
+    pr_number: int | None = None,
 ) -> tuple[httpx.AsyncClient, str, GatewayLedger]:
     settings = _settings(tmp_path, max_request_bytes=max_request_bytes)
     store = VirtualKeyStore(
@@ -126,6 +171,8 @@ def _gateway_client(
             provider=provider,
             capture_bodies=capture_bodies,
             repo_class=repo_class,
+            issue_number=issue_number,
+            pr_number=pr_number,
         )
     )
     ledger = GatewayLedger(settings.ledger_path)
@@ -270,6 +317,8 @@ class TestGatewayProxy:
         assert row.cache_creation_input_tokens == 3
         assert row.cost_unknown is False
         assert row.cost_usd == 0.00030045
+        assert row.usage_complete is True
+        assert row.path == "/v1/messages/special/part"
         assert row.timestamp.tzinfo is not None
         assert row.request_id
         assert row.source == "gateway"
@@ -478,8 +527,120 @@ class TestGatewayProxy:
         assert response.status_code == 200
         row = ledger.read_all()[0]
         assert row.model_served == "future-model-99"
+        assert row.usage_complete is True
         assert row.cost_usd is None
         assert row.cost_unknown is True
+
+    async def test_zai_shaped_stream_is_priced_exclusive_with_attribution(
+        self, tmp_path: Path
+    ) -> None:
+        async def upstream(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                stream=_ChunkStream([_ZAI_SSE_BYTES[:40], _ZAI_SSE_BYTES[40:]]),
+            )
+
+        client, token, ledger = _gateway_client(
+            tmp_path,
+            upstream,
+            provider=ProviderBinding.ZAI_HARNESS,
+            capture_bodies=False,
+            issue_number=11464,
+            pr_number=11500,
+        )
+        try:
+            response = await client.post(
+                "/v1/messages?beta=true",
+                headers={"authorization": f"Bearer {token}"},
+                json={"model": "glm-5.2", "messages": []},
+            )
+        finally:
+            await client.aclose()
+
+        assert response.status_code == 200
+        assert response.content == _ZAI_SSE_BYTES
+        (row,) = ledger.read_all()
+        assert row.upstream_provider == "zai-harness"
+        assert row.model_requested == "glm-5.2"
+        assert row.model_served == "glm-5.3"
+        assert row.input_tokens == 1244
+        assert row.output_tokens == 532
+        assert row.cache_read_input_tokens == 46784
+        assert row.cache_creation_input_tokens == 0
+        assert row.usage_complete is True
+        assert row.cost_unknown is False
+        assert row.cost_usd == pytest.approx(_ZAI_EXPECTED_COST)
+        assert row.path == "/v1/messages"
+        assert row.principal.issue_number == 11464
+        assert row.principal.pr_number == 11500
+        assert row.to_json_dict()["principal"]["pr_number"] == 11500
+
+    @pytest.mark.parametrize(
+        "first_event, partial_input_tokens",
+        [
+            pytest.param(
+                _ZAI_SSE_BYTES.split(b"\n\n", 1)[0] + b"\n\n", 0, id="zai-empty-usage"
+            ),
+            pytest.param(
+                _SSE_BYTES.split(b"\r\n\r\n", 1)[0] + b"\r\n\r\n",
+                11,
+                id="anthropic-partial-usage",
+            ),
+        ],
+    )
+    async def test_client_abort_after_message_start_is_incomplete_and_cost_unknown(
+        self, tmp_path: Path, first_event: bytes, partial_input_tokens: int
+    ) -> None:
+        first_body_sent = asyncio.Event()
+        upstream_stream = _BlockingStream(first_event)
+        request_messages: list[Message] = [
+            {
+                "type": "http.request",
+                "body": b'{"model":"glm-5.2"}',
+                "more_body": False,
+            }
+        ]
+
+        async def upstream(request: httpx.Request) -> httpx.Response:
+            await request.aread()
+            return httpx.Response(200, stream=upstream_stream)
+
+        async def receive() -> Message:
+            if request_messages:
+                return request_messages.pop(0)
+            return {"type": "http.disconnect"}
+
+        async def send(message: Message) -> None:
+            if message["type"] == "http.response.body" and message.get("body"):
+                first_body_sent.set()
+
+        request = _streaming_request(receive)
+        proxy, identity, ledger, upstream_client = _direct_gateway_proxy(
+            tmp_path, upstream
+        )
+        try:
+            response = await proxy.forward(request, identity)
+            response_task = asyncio.create_task(response(request.scope, receive, send))
+            await asyncio.wait_for(first_body_sent.wait(), timeout=1)
+            response_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await response_task
+        finally:
+            await upstream_client.aclose()
+
+        (row,) = ledger.read_all()
+        assert row.status == "client-aborted"
+        assert row.status_code == 499
+        assert row.client_aborted is True
+        assert row.completed is False
+        assert row.model_served is not None
+        assert row.input_tokens == partial_input_tokens
+        assert row.usage_complete is False
+        assert row.cost_usd is None
+        assert row.cost_unknown is True
+        assert row.path == "/v1/messages"
+        assert upstream_stream.closed is True
 
     @pytest.mark.parametrize("repo_class", [RepoClass.CLIENT, RepoClass.PERSONAL])
     async def test_sensitive_repo_request_never_creates_body_artifacts(
@@ -1043,3 +1204,30 @@ def test_build_upstream_url_rejects_decoded_dot_segments(raw_path: bytes) -> Non
 
     with pytest.raises(HTTPException, match="invalid upstream path"):
         build_upstream_url("https://upstream.test/prefix", request)
+
+
+def test_sanitized_request_path_strips_query_and_bounds_length() -> None:
+    long_path = "/v1/" + "a" * 5000
+    scope = cast(
+        Scope,
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": long_path,
+            "raw_path": long_path.encode(),
+            "query_string": b"x=1&secret=must-not-surface",
+            "headers": [],
+            "server": ("gateway.test", 80),
+            "client": ("127.0.0.1", 12345),
+        },
+    )
+
+    path = sanitized_request_path(Request(scope))
+
+    assert "must-not-surface" not in path
+    assert "?" not in path
+    assert len(path) == 2048
+    assert path.startswith("/v1/aaaa")

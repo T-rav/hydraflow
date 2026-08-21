@@ -49,7 +49,7 @@ def test_active_tests_do_not_skip_xfail_or_comment_out_coverage() -> None:
                     offenders.append(f"{rel}:{line_no}: {label}: {line.strip()}")
 
     assert not offenders, (
-        "Active tests must assert real contracts. Move deferred work to bd or "
-        "out of pytest collection; do not hide it behind skip/xfail/commented "
-        "tests:\n  " + "\n  ".join(offenders)
+        "Active tests must assert real contracts. Move deferred work into the "
+        "active issue/PR workflow or out of pytest collection; do not hide it "
+        "behind skip/xfail/commented tests:\n  " + "\n  ".join(offenders)
     )

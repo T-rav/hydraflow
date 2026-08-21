@@ -180,7 +180,6 @@ entries:
   src/memory_backlog_loop.py::noqa:TCH001: 2
   src/merge_state_watcher.py::noqa:BLE001: 3
   src/metrics_manager.py::noqa:PLC0415: 1
-  src/mockworld/fakes/fake_beads.py::noqa:PLC0415: 1
   src/mockworld/fakes/fake_clock.py::noqa:PLC0415: 3
   src/mockworld/fakes/fake_github.py::noqa:PLC0415: 1
   src/mockworld/fakes/fake_github.py::type-ignore[arg-type]: 1

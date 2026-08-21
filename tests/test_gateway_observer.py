@@ -188,3 +188,53 @@ class TestSseUsageObserver:
         assert usage.model_served is None
         assert usage.output_tokens == 0
         assert usage.malformed_events == 1
+
+
+class TestUsageObserved:
+    """``usage_observed`` distinguishes "no usage event arrived" from "zero
+    usage" so the ledger can mark a row's usage incomplete honestly."""
+
+    def test_zai_empty_message_start_usage_is_not_observed_until_delta(self) -> None:
+        observer = SseUsageObserver()
+        observer.feed(
+            b'event: message_start\ndata: {"type":"message_start","message":'
+            b'{"model":"glm-5.3","usage":{}}}\n\n'
+        )
+
+        assert observer.snapshot.model_served == "glm-5.3"
+        assert observer.snapshot.usage_observed is False
+
+        observer.feed(
+            b'event: message_delta\ndata: {"type":"message_delta","usage":'
+            b'{"input_tokens":1244,"output_tokens":532,'
+            b'"cache_read_input_tokens":46784}}\n\n'
+        )
+        usage = observer.finish()
+
+        assert usage.usage_observed is True
+        assert (usage.input_tokens, usage.output_tokens, usage.cache_read_tokens) == (
+            1244,
+            532,
+            46784,
+        )
+
+    def test_usage_with_only_invalid_values_is_not_observed(self) -> None:
+        observer = SseUsageObserver()
+        observer.feed(
+            b'data: {"usage":{"input_tokens":true,"output_tokens":-1,'
+            b'"cache_read_input_tokens":"7"}}\n\n'
+        )
+
+        assert observer.finish().usage_observed is False
+
+    def test_zero_counts_are_an_observed_usage_event(self) -> None:
+        observer = SseUsageObserver()
+        observer.feed(b'data: {"usage":{"input_tokens":0,"output_tokens":0}}\n\n')
+
+        assert observer.finish().usage_observed is True
+
+    def test_nonstream_json_usage_is_observed(self) -> None:
+        observer = SseUsageObserver()
+        observer.feed(b'{"model":"claude-sonnet-4-6","usage":{"input_tokens":3}}')
+
+        assert observer.finish().usage_observed is True

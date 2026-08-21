@@ -284,7 +284,9 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "agent_pre_quality_review": frozenset({3, 5, 8}),
     "agent_pre_quality_run_tool": frozenset({1, 2, 3, 5, 8}),
     "agent_quality_fix": frozenset({2, 3, 5, 8}),
-    "agent_tdd_subagent": frozenset({2, 3, 5}),
+    # The JSONL lifecycle boundary names the concrete task artifact and its
+    # owner, while the supported lifecycle example preserves example coverage.
+    "agent_tdd_subagent": frozenset({3, 5}),
     "audit_adjudicate": frozenset({3, 4, 7, 8}),
     "bug_reproducer": frozenset({3, 8}),
     "conflict_build": frozenset({1, 3, 8}),
