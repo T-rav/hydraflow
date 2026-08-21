@@ -150,6 +150,22 @@ def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> 
         )
 
 
+@pytest.hookimpl(hookwrapper=True, tryfirst=True, specname="pytest_runtest_teardown")
+def pytest_cleanup_config_factory_temp_roots():
+    """Release this pytest process's implicit config roots after fixture teardown."""
+
+    try:
+        yield
+    finally:
+        # pytest-forked terminates each child with os._exit(), bypassing atexit.
+        # The runtest teardown still executes in that child, so release only the
+        # roots owned by its PID here; the registered atexit cleanup remains the
+        # fallback for ordinary interpreter shutdown outside pytest.
+        from tests.helpers import _cleanup_owned_config_factory_temp_roots
+
+        _cleanup_owned_config_factory_temp_roots()
+
+
 # --- Test-duration ratchet (CI-speedup Tier 4a) -----------------------------
 # Prevent the suite from silently accumulating slow / hung tests. A test whose
 # CALL phase exceeds a deliberately generous budget FAILS with a clear message,
