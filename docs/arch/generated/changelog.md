@@ -7,6 +7,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W34
 
 - `845ba5a` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop (Fixes #11442) *(2026-08-21)*
+- `112ec85` — fix(release): tag the promoted main SHA, never the factory checkout HEAD (Fixes #11517) (#11576) (#11576) *(2026-08-21)*
+- `91c83ee` — fix(telemetry): one-shot claude spawns report usage — issue_refinement / sampled_audit / sampled_audit_adjudicate (Fixes #11514, Fixes #11515, Fixes #11516) (#11579) (#11579) *(2026-08-21)*
+- `eac96f2` — Fixes #11480: never re-slice an issue whose fix already landed (#11566) (#11566) *(2026-08-21)*
+- `e1aa0d8` — test(workspace-gc): real-git pins for the closed-issue landed guard on phases 1-2 and 5 (refs #11503, #11507; fix shipped in #11530) (#11572) (#11572) *(2026-08-21)*
 - `0cce8a7` — Fixes #11481: fold sixth site, and widen the class-closure guard to find it *(2026-08-21)*
 - `53b4905` — fix(workspace-gc): prove exact HEAD landed before cleanup (#11530) (#11530) *(2026-08-21)*
 - `b91594d` — Fix factory task graphs to per-worktree JSONL (#11527) (#11527) *(2026-08-21)*
@@ -441,10 +445,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `3c87f71` — feat(gates): branch-protection drift caretaker loop (Slice 4) *(2026-05-29)*
 - `79a1ada` — docs(adr): ADR-0082 declarative gate contract (extends ADR-0042 enforcement) *(2026-05-29)*
 - `0afd876` — feat(gates): gen-gates CLI + make targets; generate README table; scrub stale prose *(2026-05-29)*
-
-## 2026-W21
-
-- `1d9c95f` — Fixes #8931: stream onboarding activity in dashboard *(2026-05-23)*
 
 
 <!-- arch:generated -->

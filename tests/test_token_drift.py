@@ -1,19 +1,24 @@
 """Tests for token_drift.py — the read-only drift engine (#11441).
 
 Baseline pinning, drift computation, control-band edge cases, sigma
-thresholds, the JSONL ledger round-trip, and the fail-soft error path an
-unreadable/corrupt baseline ledger must degrade through (never raise).
+thresholds, the JSONL ledger round-trip, the by-window telemetry loader
+(#11581 — bounded by ISO week, never by row count, honest about a window
+it could not cover), and the fail-soft error path an unreadable/corrupt
+baseline ledger must degrade through (never raise).
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from prompt_telemetry import PromptTelemetry
 from token_drift import (
     MAX_BASELINE_AGE,
     MEDIAN_TOKENS_SOURCE,
@@ -26,8 +31,10 @@ from token_drift import (
     check_drift,
     iso_week_windows,
     load_and_check_drift,
+    load_window_rows,
     pin_baseline,
     token_baseline_path,
+    trailing_complete_weeks,
 )
 from vitals_methodology import widened_sigma_multiplier
 
@@ -121,6 +128,148 @@ class TestIsoWeekWindows:
         ]
         windows = iso_week_windows(rows, now=_NOW, windows=2)
         assert len(windows) == 2
+
+
+# --- trailing_complete_weeks ---------------------------------------------------
+
+
+class TestTrailingCompleteWeeks:
+    def test_names_the_complete_weeks_before_now_oldest_first(self) -> None:
+        assert trailing_complete_weeks(_NOW, 2) == ("2026-W09", "2026-W10")
+
+    def test_zero_or_negative_windows_is_empty(self) -> None:
+        assert trailing_complete_weeks(_NOW, 0) == ()
+        assert trailing_complete_weeks(_NOW, -1) == ()
+
+    def test_a_monday_now_still_excludes_its_own_week(self) -> None:
+        monday = datetime(2026, 3, 9, tzinfo=UTC)  # Monday 00:00 of 2026-W11
+        assert trailing_complete_weeks(monday, 1) == ("2026-W10",)
+
+    def test_agrees_with_iso_week_windows_on_the_same_rows(self) -> None:
+        """The loader's span and the rollup's buckets are one definition of
+        'trailing complete week' — a row the loader keeps is a row the
+        rollup buckets, and vice versa.
+        """
+        rows = [
+            _row(
+                k, "implementer", 10_000, ts=(_NOW - timedelta(days=7 * k)).isoformat()
+            )
+            for k in range(4)
+        ]
+        bucketed = [week for week, _ in iso_week_windows(rows, now=_NOW, windows=3)]
+        assert list(trailing_complete_weeks(_NOW, 3)) == bucketed
+
+
+# --- load_window_rows ----------------------------------------------------------
+
+
+def _write_rows(config: MagicMock, rows: list[dict[str, Any]]) -> None:
+    config.cost_inferences_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config.cost_inferences_path, "w") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
+
+
+class TestLoadWindowRows:
+    def test_keeps_only_the_requested_weeks_in_file_order(self, tmp_path: Path) -> None:
+        config = _fake_config(tmp_path)
+        w08 = _row(1, "implementer", 1, ts="2026-02-17T12:00:00+00:00")  # before span
+        w09 = _row(2, "implementer", 2, ts=_OLDER_WEEK_TS)
+        w10 = _row(3, "implementer", 3, ts=_TRAILING_WEEK_TS)
+        open_week = _row(4, "implementer", 4, ts=_NOW.isoformat())
+        _write_rows(config, [w08, w10, w09, open_week])
+
+        window = load_window_rows(config, now=_NOW, windows=2)
+
+        assert window.weeks == ("2026-W09", "2026-W10")
+        assert window.rows == [w10, w09]
+        assert window.truncation is None
+        assert window.truncated is False
+
+    def test_missing_file_is_an_empty_complete_window(self, tmp_path: Path) -> None:
+        window = load_window_rows(_fake_config(tmp_path), now=_NOW, windows=1)
+        assert window.rows == []
+        assert window.truncation is None
+
+    def test_drops_rows_without_a_parseable_timestamp(self, tmp_path: Path) -> None:
+        config = _fake_config(tmp_path)
+        _write_rows(
+            config,
+            [
+                _row(1, "implementer", 1, ts="not-a-timestamp"),
+                {"issue_number": 2, "source": "implementer", "total_tokens": 1},
+                _row(3, "implementer", 3),
+            ],
+        )
+        window = load_window_rows(config, now=_NOW, windows=1)
+        assert [r["issue_number"] for r in window.rows] == [3]
+
+    def test_has_no_row_cap(self, tmp_path: Path) -> None:
+        config = _fake_config(tmp_path)
+        _write_rows(config, [_row(n, "implementer", 1) for n in range(1, 5002)])
+        assert len(load_window_rows(config, now=_NOW, windows=1).rows) == 5001
+
+    def test_unset_retention_never_truncates(self, tmp_path: Path) -> None:
+        config = _fake_config(tmp_path)
+        config.audit_retention_days_inference_telemetry = None
+        assert load_window_rows(config, now=_NOW, windows=52).truncation is None
+
+    def test_retention_floor_older_than_the_span_is_complete(
+        self, tmp_path: Path
+    ) -> None:
+        config = _fake_config(tmp_path)
+        config.audit_retention_days_inference_telemetry = 30
+        assert load_window_rows(config, now=_NOW, windows=2).truncation is None
+
+    def test_retention_floor_inside_the_oldest_week_is_truncation(
+        self, tmp_path: Path
+    ) -> None:
+        """now - 10d = 2026-02-28, inside W09 (Feb 23 – Mar 1): a two-week
+        span's head may already be pruned; a one-week span (W10 from Mar 2)
+        is untouched by the same floor.
+        """
+        config = _fake_config(tmp_path)
+        config.audit_retention_days_inference_telemetry = 10
+        _write_rows(config, _two_source_window(0.5))
+
+        two_weeks = load_window_rows(config, now=_NOW, windows=2)
+        one_week = load_window_rows(config, now=_NOW, windows=1)
+
+        assert two_weeks.truncated is True
+        assert two_weeks.truncation is not None
+        assert "2026-W09" in two_weeks.truncation
+        assert "retention" in two_weeks.truncation
+        assert one_week.truncation is None
+
+    def test_retention_floor_exactly_at_the_oldest_monday_is_complete(
+        self, tmp_path: Path
+    ) -> None:
+        """The prune drops rows strictly older than the cutoff: a cutoff of
+        Monday 00:00 leaves the week whole; one day later it does not.
+        """
+        config = _fake_config(tmp_path)
+        config.audit_retention_days_inference_telemetry = 8  # 2026-03-02 = Monday W10
+        assert load_window_rows(config, now=_NOW, windows=1).truncation is None
+        config.audit_retention_days_inference_telemetry = 7  # 2026-03-03
+        assert load_window_rows(config, now=_NOW, windows=1).truncated is True
+
+    def test_os_error_mid_stream_marks_the_window_truncated(
+        self, tmp_path: Path
+    ) -> None:
+        config = _fake_config(tmp_path)
+        kept = _row(1, "implementer", 1)
+
+        def _dies_after_first_row(self: PromptTelemetry) -> Iterator[dict[str, Any]]:
+            yield kept
+            raise OSError("boom")
+
+        with patch.object(PromptTelemetry, "iter_inferences", _dies_after_first_row):
+            window = load_window_rows(config, now=_NOW, windows=1)
+
+        assert window.rows == [kept]
+        assert window.truncated is True
+        assert window.truncation is not None
+        assert "unreadable" in window.truncation
 
 
 # --- pin_baseline ------------------------------------------------------------
@@ -224,6 +373,39 @@ class TestCheckDriftGuardrails:
         report = check_drift(baseline, tiny_rows, now=_NOW)
         assert report.status is DriftStatus.INSUFFICIENT_DATA
         assert report.window_key == "2026-W10"
+
+    def test_truncated_window_is_insufficient_data_never_a_verdict(self) -> None:
+        """Rows that would read as DRIFTING are not judged when the caller
+        knows they do not cover the window (#11581): a partial window is
+        not a smaller window, it is no window.
+        """
+        baseline = _baseline(source_share_series={"target": [0.5] * 8})
+        report = check_drift(
+            baseline,
+            _two_source_window(0.9),
+            now=_NOW,
+            truncation="telemetry unreadable (boom)",
+        )
+        assert report.status is DriftStatus.INSUFFICIENT_DATA
+        assert report.window_key == "2026-W10"
+        assert "telemetry unreadable (boom)" in report.reason
+        assert report.sources == []
+
+    def test_baseline_guardrails_still_precede_truncation(self) -> None:
+        """No baseline / a stale baseline is the more actionable fact — it
+        is reported even when the telemetry window is also truncated.
+        """
+        no_baseline = check_drift(
+            None, _two_source_window(0.9), now=_NOW, truncation="x"
+        )
+        stale = check_drift(
+            _baseline(pinned_at=_NOW - MAX_BASELINE_AGE - timedelta(days=1)),
+            [],
+            now=_NOW,
+            truncation="x",
+        )
+        assert no_baseline.status is DriftStatus.NO_BASELINE
+        assert stale.status is DriftStatus.STALE
 
 
 # --- check_drift: payload -----------------------------------------------------
@@ -433,12 +615,30 @@ def _fake_config(tmp_path: Path) -> MagicMock:
     prompt_dir = tmp_path / "metrics" / "prompt"
     config.cost_inferences_path = prompt_dir / "inferences.jsonl"
     config.pr_stats_path = prompt_dir / "pr_stats.json"
+    # Keep forever (the HydraFlowConfig default) — a bare MagicMock attribute
+    # is not an int and would be ignored anyway, but say so explicitly.
+    config.audit_retention_days_inference_telemetry = None
     return config
 
 
 class TestLoadAndCheckDrift:
     def test_no_ledger_file_yields_no_baseline(self, tmp_path: Path) -> None:
         report = load_and_check_drift(_fake_config(tmp_path), now=_NOW)
+        assert report.status is DriftStatus.NO_BASELINE
+
+    def test_no_baseline_is_reported_without_needing_the_telemetry(
+        self, tmp_path: Path
+    ) -> None:
+        """Guardrail order holds across the seam: with nothing pinned the
+        answer is NO_BASELINE whether or not the telemetry file is readable.
+        """
+
+        def _unreadable(self: PromptTelemetry) -> Iterator[dict[str, Any]]:
+            raise OSError("boom")
+
+        with patch.object(PromptTelemetry, "iter_inferences", _unreadable):
+            report = load_and_check_drift(_fake_config(tmp_path), now=_NOW)
+
         assert report.status is DriftStatus.NO_BASELINE
 
     def test_degrades_to_no_baseline_on_naive_pinned_at(self, tmp_path: Path) -> None:
@@ -523,3 +723,21 @@ class TestLoadAndCheckDrift:
         assert report.status is DriftStatus.OK
         target = next(s for s in report.sources if s.source == "target")
         assert target.verdict is DriftVerdict.DRIFTING
+
+    def test_truncated_window_degrades_through_the_seam(self, tmp_path: Path) -> None:
+        """The diagnostics route's never-500 contract also means never a
+        verdict on a window the loader could not cover (#11581).
+        """
+        config = _fake_config(tmp_path)
+        TokenBaselineLedger(token_baseline_path(config.data_root)).record(
+            _baseline(source_share_series={"target": [0.5] * 8})
+        )
+        _write_rows(config, _two_source_window(0.6))
+        config.audit_retention_days_inference_telemetry = 3
+
+        report = load_and_check_drift(config, now=_NOW)
+
+        assert report.status is DriftStatus.INSUFFICIENT_DATA
+        assert report.window_key == "2026-W10"
+        assert "retention" in report.reason
+        assert report.sources == []

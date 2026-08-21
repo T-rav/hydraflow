@@ -43,7 +43,15 @@ def _fake_config(tmp_path: Path) -> MagicMock:
     prompt_dir = tmp_path / "metrics" / "prompt"
     config.cost_inferences_path = prompt_dir / "inferences.jsonl"
     config.pr_stats_path = prompt_dir / "pr_stats.json"
+    config.audit_retention_days_inference_telemetry = None  # keep forever
     return config
+
+
+def _write_rows(config: MagicMock, rows: list[dict[str, object]]) -> None:
+    config.cost_inferences_path.parent.mkdir(parents=True, exist_ok=True)
+    config.cost_inferences_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
 
 
 def _write_weeks_of_telemetry(config: MagicMock, *, weeks: int) -> None:
@@ -51,14 +59,16 @@ def _write_weeks_of_telemetry(config: MagicMock, *, weeks: int) -> None:
     ISO weeks.
 
     The script reads the real clock, so timestamps are spaced 7 days back from
-    a test-computed ``now`` (each lands in a distinct ISO week). One extra
-    safety week beyond *weeks* absorbs the midnight race where the test's
-    ``now`` and the script's ``now`` straddle a week boundary and the newest
-    row drops into the still-open current week.
+    a test-computed ``now`` (each lands in a distinct ISO week). One extra row
+    in the test's own still-open week (``k = 0``) absorbs the midnight race
+    where the test's ``now`` and the script's ``now`` straddle a week boundary:
+    the loader scans the *weeks* complete calendar weeks before the script's
+    ``now`` (#11581), so that row is dropped as open-week data on a normal run
+    and counted as the newest complete week when the race shifts the span.
     """
     now = datetime.now(UTC)
-    rows = []
-    for k in range(1, weeks + 2):
+    rows: list[dict[str, object]] = []
+    for k in range(weeks, -1, -1):  # oldest first, as the live file is appended
         ts = (now - timedelta(days=7 * k)).isoformat()
         for source, tokens in (("target", 600), ("other", 400)):
             rows.append(
@@ -69,10 +79,7 @@ def _write_weeks_of_telemetry(config: MagicMock, *, weeks: int) -> None:
                     "timestamp": ts,
                 }
             )
-    config.cost_inferences_path.parent.mkdir(parents=True, exist_ok=True)
-    config.cost_inferences_path.write_text(
-        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
-    )
+    _write_rows(config, rows)
 
 
 # --- dry run vs apply -----------------------------------------------------------
@@ -135,6 +142,77 @@ def test_too_few_windows_refuses_to_pin(
     err = capsys.readouterr().err
     assert "window(s) of telemetry available" in err
     assert not token_baseline_path(config.data_root).exists()
+
+
+def test_retention_floor_inside_the_span_refuses_to_pin(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Telemetry older than the retention floor may already be pruned by
+    RunsGCLoop: a span reaching past it would pin a partial oldest week as if
+    it were whole (#11581). Refuse, and say why, rather than pin a lie.
+    """
+    cli = _load_cli()
+    config = _fake_config(tmp_path)
+    _write_weeks_of_telemetry(config, weeks=MIN_BASELINE_WINDOWS)
+    config.audit_retention_days_inference_telemetry = 14
+
+    code = cli.run(
+        config, windows=MIN_BASELINE_WINDOWS, reason="post-lever re-pin", apply=True
+    )
+
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "retention" in err
+    assert "Not pinning" in err
+    assert not token_baseline_path(config.data_root).exists()
+
+
+def test_busy_weeks_past_the_old_row_cap_pin_from_every_row(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Eight weeks of 700 rows (5,600 — past the removed 5,000-row cap),
+    oldest first as the live file is appended. Each week is heavy-then-light
+    in FILE order (target share .9 then .3; the whole week is .6): a
+    row-capped read saw only the tail of the oldest week and pinned .3 for
+    it as though that were the week (#11581).
+    """
+    cli = _load_cli()
+    config = _fake_config(tmp_path)
+    now = datetime.now(UTC)
+    rows: list[dict[str, object]] = []
+    for k in range(MIN_BASELINE_WINDOWS, -1, -1):  # k = 0 absorbs the midnight race
+        ts = (now - timedelta(days=7 * k)).isoformat()
+        for i in range(350):
+            target, other = (900, 100) if i < 175 else (300, 700)
+            issue = 10_000 * (k + 1) + i
+            rows.append(
+                {
+                    "issue_number": issue,
+                    "source": "target",
+                    "total_tokens": target,
+                    "timestamp": ts,
+                }
+            )
+            rows.append(
+                {
+                    "issue_number": issue,
+                    "source": "other",
+                    "total_tokens": other,
+                    "timestamp": ts,
+                }
+            )
+    assert len(rows) > 5000
+    _write_rows(config, rows)
+
+    code = cli.run(
+        config, windows=MIN_BASELINE_WINDOWS, reason="post-lever re-pin", apply=True
+    )
+
+    assert code == 0, capsys.readouterr().err
+    baseline = TokenBaselineLedger(token_baseline_path(config.data_root)).latest()
+    assert isinstance(baseline, TokenBaseline)
+    assert baseline.windows_counted == MIN_BASELINE_WINDOWS
+    assert baseline.source_share_series["target"] == [0.6] * MIN_BASELINE_WINDOWS
 
 
 def test_reason_is_required() -> None:

@@ -25,6 +25,42 @@ def telemetry(tmp_path):
     return PromptTelemetry(config)
 
 
+class TestIterInferences:
+    """The streaming reader window loaders build on (#11581): file order,
+    tolerant of blank/corrupt lines, and LOUD about a read it could not
+    finish — rows already yielded cannot be retracted, so an OSError must
+    reach the caller rather than dress a truncated prefix as a full read.
+    """
+
+    def test_streams_rows_in_file_order_skipping_blank_and_corrupt_lines(
+        self, telemetry
+    ):
+        path = telemetry._config.cost_inferences_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            '{"issue_number": 1}\n\nnot json\n[1, 2]\n{"issue_number": 2}\n',
+            encoding="utf-8",
+        )
+        assert [r["issue_number"] for r in telemetry.iter_inferences()] == [1, 2]
+
+    def test_missing_file_yields_nothing(self, telemetry):
+        assert list(telemetry.iter_inferences()) == []
+
+    def test_os_error_propagates_instead_of_truncating_silently(
+        self, telemetry, monkeypatch: pytest.MonkeyPatch
+    ):
+        path = telemetry._config.cost_inferences_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"issue_number": 1}\n', encoding="utf-8")
+
+        def _deny(*_args: object, **_kwargs: object) -> None:
+            raise OSError("disk denied")
+
+        monkeypatch.setattr("prompt_telemetry.open", _deny, raising=False)
+        with pytest.raises(OSError, match="disk denied"):
+            list(telemetry.iter_inferences())
+
+
 class TestParseCommandToolModel:
     def test_parses_claude_model(self):
         tool, model = parse_command_tool_model(
@@ -525,6 +561,33 @@ class TestGetSourceRegimes:
         rows = telemetry.load_inferences(limit=1)
         assert len(rows) == 1
         assert rows[0]["issue_number"] == 11
+
+    def test_load_inferences_keeps_the_newest_limit_rows_oldest_first(self, telemetry):
+        path = telemetry._config.cost_inferences_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "".join(json.dumps({"issue_number": n}) + "\n" for n in range(1, 8)),
+            encoding="utf-8",
+        )
+        assert [r["issue_number"] for r in telemetry.load_inferences(limit=3)] == [
+            5,
+            6,
+            7,
+        ]
+        assert telemetry.load_inferences(limit=0) == []
+
+    def test_load_inferences_degrades_to_empty_when_unreadable(
+        self, telemetry, monkeypatch: pytest.MonkeyPatch
+    ):
+        path = telemetry._config.cost_inferences_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"issue_number": 1}\n', encoding="utf-8")
+
+        def _deny(*_args: object, **_kwargs: object) -> None:
+            raise OSError("disk denied")
+
+        monkeypatch.setattr("prompt_telemetry.open", _deny, raising=False)
+        assert telemetry.load_inferences() == []
 
     def test_failed_empty_run_does_not_estimate_tokens(self, telemetry):
         telemetry.record(

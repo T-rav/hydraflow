@@ -9,6 +9,14 @@ have materially changed, or when the existing baseline goes STALE
 
     python scripts/pin_token_baseline.py --reason "..."           # dry-run report
     python scripts/pin_token_baseline.py --reason "..." --apply   # writes the ledger
+
+Telemetry is loaded by WINDOW — every row of the ``--windows`` trailing
+complete ISO weeks, however many there are — never by row count (#11581): a
+fixed cap silently sampled an 8-week pin from whatever the newest rows
+happened to cover. A span the loader knows it cannot cover completely
+(``audit_retention_days_inference_telemetry`` shorter than the span, or a
+read that died mid-stream) refuses to pin rather than pin a partial week as
+if it were whole.
 """
 
 from __future__ import annotations
@@ -21,21 +29,27 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from config import HydraFlowConfig  # noqa: E402
-from prompt_telemetry import PromptTelemetry  # noqa: E402
 from token_drift import (  # noqa: E402
-    DRIFT_LOAD_LIMIT,
     MIN_BASELINE_WINDOWS,
     TokenBaselineLedger,
     iso_week_windows,
+    load_window_rows,
     pin_baseline,
     token_baseline_path,
 )
 
 
 def run(config: HydraFlowConfig, *, windows: int, reason: str, apply: bool) -> int:
-    rows = PromptTelemetry(config).load_inferences(limit=DRIFT_LOAD_LIMIT)
     now = datetime.now(UTC)
-    buckets = iso_week_windows(rows, now=now, windows=windows)
+    window = load_window_rows(config, now=now, windows=windows)
+    if window.truncated:
+        print(
+            f"error: telemetry for the trailing {windows} window(s) is incomplete — "
+            f"{window.truncation}. Not pinning.",
+            file=sys.stderr,
+        )
+        return 1
+    buckets = iso_week_windows(window.rows, now=now, windows=windows)
     if len(buckets) < MIN_BASELINE_WINDOWS:
         print(
             f"error: only {len(buckets)} complete window(s) of telemetry available; "
@@ -69,7 +83,10 @@ def main(argv: list[str] | None = None) -> int:
         "--windows",
         type=int,
         default=MIN_BASELINE_WINDOWS,
-        help=f"trailing complete ISO weeks to pin from (default: {MIN_BASELINE_WINDOWS})",
+        help=(
+            "trailing complete ISO calendar weeks to scan; a week with no "
+            f"telemetry yields no window (default: {MIN_BASELINE_WINDOWS})"
+        ),
     )
     parser.add_argument(
         "--apply",

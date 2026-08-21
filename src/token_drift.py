@@ -17,16 +17,20 @@ filing actuator (#11442) imports — do not rename or relocate the public names.
 I/O is isolated to :class:`TokenBaselineLedger` (an
 :class:`jsonl_ledger.AppendOnlyJsonlLedger` over
 ``<data_root>/calibration/token_baseline.jsonl``, mirroring
-``finder_calibration.CalibrationLedger``) and :func:`load_and_check_drift`,
-which is the fail-soft seam the diagnostics route calls: an unreadable or
-corrupt ledger degrades to ``DriftStatus.NO_BASELINE``, never an exception.
+``finder_calibration.CalibrationLedger``), :func:`load_window_rows` (the
+telemetry reader — bounded by ISO week, never by row count, #11581) and
+:func:`load_and_check_drift`, which is the fail-soft seam the diagnostics
+route calls: an unreadable or corrupt ledger degrades to
+``DriftStatus.NO_BASELINE``, a telemetry window the loader could not cover
+completely degrades to ``DriftStatus.INSUFFICIENT_DATA`` — never an
+exception, never a verdict on a partial window.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -60,11 +64,6 @@ MIN_BASELINE_WINDOWS = VitalsThresholds().min_baseline_windows
 MAX_BASELINE_AGE = timedelta(days=90)
 
 TOKEN_BASELINE_FILENAME = "token_baseline.jsonl"
-
-#: Rows loaded per drift check — comfortably covers the single trailing
-#: complete ISO week :func:`check_drift` examines, matching the existing
-#: ``/token-report`` route's telemetry cap.
-DRIFT_LOAD_LIMIT = 5000
 
 
 class DriftStatus(StrEnum):
@@ -216,7 +215,7 @@ class DriftReport:
 # --- windowing -----------------------------------------------------------------
 
 
-def _iso_week_key(dt: datetime) -> str:
+def _iso_week_key(dt: date) -> str:
     year, week, _weekday = dt.isocalendar()
     return f"{year}-W{week:02d}"
 
@@ -235,6 +234,21 @@ def _parse_timestamp(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def trailing_complete_weeks(now: datetime, windows: int) -> tuple[str, ...]:
+    """ISO-week keys of the *windows* complete weeks before *now*'s own
+    (still-open) week, oldest-first; empty when *windows* is not positive.
+
+    The one definition of "trailing complete week" shared by the loader
+    (:func:`load_window_rows` keeps exactly these weeks) and the verdict
+    (:func:`check_drift` demands the newest of them), so the two can never
+    disagree about which calendar week is under comparison.
+    """
+    this_monday = now.date() - timedelta(days=now.weekday())
+    return tuple(
+        _iso_week_key(this_monday - timedelta(weeks=k)) for k in range(windows, 0, -1)
+    )
 
 
 def iso_week_windows(
@@ -415,7 +429,11 @@ def _baseline_guardrail(
 
 
 def check_drift(
-    baseline: TokenBaseline | None, rows: list[dict[str, Any]], *, now: datetime
+    baseline: TokenBaseline | None,
+    rows: list[dict[str, Any]],
+    *,
+    now: datetime,
+    truncation: str | None = None,
 ) -> DriftReport:
     """Compare the latest trailing complete ISO week against *baseline*.
 
@@ -424,8 +442,11 @@ def check_drift(
     no baseline; a baseline pinned from too few windows; a structurally corrupt
     baseline (series that disagree with the row's ``windows_counted`` — the
     self-report is never trusted as a substitute for the actual series); a
-    baseline old enough that "clean" no longer means what it meant; and an
-    empty trailing window (nothing to compare). The trailing window is the
+    baseline old enough that "clean" no longer means what it meant; a
+    *truncation* — the caller's statement that *rows* are known NOT to cover
+    the trailing window completely (see :class:`TelemetryWindow`; a partial
+    window is not a smaller window, it is no window, #11581); and an empty
+    trailing window (nothing to compare). The trailing window is the
     calendar's latest complete week, not merely the newest week with data: a
     fleet idle last week gets ``insufficient_data``, never an ``ok`` verdict
     computed on older data as if the instrument were still watching.
@@ -438,7 +459,13 @@ def check_drift(
     blocked = _baseline_guardrail(baseline, now=now)
     if blocked is not None:
         return blocked
-    expected_week = _iso_week_key(now - timedelta(days=7))
+    expected_week = trailing_complete_weeks(now, 1)[0]
+    if truncation is not None:
+        return DriftReport(
+            status=DriftStatus.INSUFFICIENT_DATA,
+            reason=f"trailing window {expected_week} is incomplete: {truncation}",
+            window_key=expected_week,
+        )
     trailing = iso_week_windows(rows, now=now, windows=1)
     if not trailing or trailing[-1][0] != expected_week:
         latest = trailing[-1][0] if trailing else "none"
@@ -514,16 +541,109 @@ class TokenBaselineLedger:
         return rows[-1] if rows else None
 
 
+# --- telemetry window loading ----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TelemetryWindow:
+    """The telemetry rows of a span of trailing complete ISO weeks (#11581).
+
+    ``weeks`` names the span (oldest-first), ``rows`` carries every row whose
+    ``timestamp`` falls in it — bounded by the window, never by a row count —
+    and ``truncation`` is the loader's honest statement of why the span is
+    known to be incomplete (``None`` when its coverage can be trusted). A
+    consumer must treat a truncated span as NO window: the rows that are
+    present would roll up into confident, wrong shares.
+    """
+
+    weeks: tuple[str, ...]
+    rows: list[dict[str, Any]]
+    truncation: str | None = None
+
+    @property
+    def truncated(self) -> bool:
+        return self.truncation is not None
+
+
+def _retention_truncation(
+    config: HydraFlowConfig, weeks: tuple[str, ...], *, now: datetime
+) -> str | None:
+    """Why *weeks* may already have lost rows to the telemetry retention floor.
+
+    ``RunsGCLoop`` prunes ``inferences.jsonl`` records strictly older than
+    ``now - audit_retention_days_inference_telemetry`` (``None`` = keep
+    forever). A floor that falls after the oldest week's Monday 00:00 UTC
+    may have taken that week's head; whether the prune has actually run is
+    unknowable here, so the span is reported truncated either way.
+    """
+    days = config.audit_retention_days_inference_telemetry
+    if not weeks or not isinstance(days, int):
+        return None
+    cutoff = now - timedelta(days=days)
+    oldest_monday = datetime.combine(
+        _iso_week_bounds(weeks[0])[0], time.min, tzinfo=UTC
+    )
+    if oldest_monday >= cutoff:
+        return None
+    return (
+        f"window {weeks[0]} starts before the {days}-day telemetry retention "
+        f"floor ({cutoff.date().isoformat()}); its rows may already be pruned"
+    )
+
+
+def load_window_rows(
+    config: HydraFlowConfig, *, now: datetime, windows: int
+) -> TelemetryWindow:
+    """Stream ``inferences.jsonl`` and keep the rows of the *windows* trailing
+    complete ISO weeks before *now* — bounded by WINDOW, never by row count.
+
+    A fixed row cap is a blind instrument that reports confidently: live
+    telemetry carried 24,434 rows in one ISO week (2026-W25), so a 5,000-row
+    tail either lost the trailing week entirely (``insufficient_data`` in
+    exactly the high-burn weeks the sensor exists for) or kept a mid-week
+    slice and mis-sampled the shares (#11581). Rows outside the span — older
+    weeks, the still-open week — and rows with no parseable ``timestamp`` are
+    skipped as they stream, so memory holds the span, not the file.
+
+    The span's coverage is reported honestly via ``truncation``: a read that
+    died mid-stream (rows already kept cannot be un-kept) or a retention floor
+    inside the oldest week (:func:`_retention_truncation`). A missing file is
+    an empty, complete span — nothing was cut from it.
+    """
+    weeks = trailing_complete_weeks(now, windows)
+    wanted = frozenset(weeks)
+    rows: list[dict[str, Any]] = []
+    try:
+        for row in PromptTelemetry(config).iter_inferences():
+            ts = _parse_timestamp(row.get("timestamp"))
+            if ts is not None and _iso_week_key(ts) in wanted:
+                rows.append(row)
+    except OSError as exc:
+        logger.warning("token-drift: telemetry unreadable: %s", exc)
+        return TelemetryWindow(
+            weeks=weeks,
+            rows=rows,
+            truncation=f"telemetry unreadable ({exc.strerror or exc})",
+        )
+    return TelemetryWindow(
+        weeks=weeks, rows=rows, truncation=_retention_truncation(config, weeks, now=now)
+    )
+
+
 def load_and_check_drift(
     config: HydraFlowConfig, *, now: datetime | None = None
 ) -> DriftReport:
-    """Load the pinned baseline + recent telemetry and compute drift.
+    """Load the pinned baseline + the trailing week's telemetry and compute drift.
 
     The fail-soft seam the diagnostics route (and #11442) call: a ledger read
     failure — missing file, malformed JSON, or a row missing a required field
     (:meth:`TokenBaseline.from_json_dict` raises on those) — degrades to
-    ``DriftStatus.NO_BASELINE`` rather than propagating, matching the rest of
-    the diagnostics surface's never-500 contract.
+    ``DriftStatus.NO_BASELINE`` rather than propagating, and a telemetry
+    window the loader could not cover completely (:class:`TelemetryWindow`)
+    degrades to ``DriftStatus.INSUFFICIENT_DATA`` rather than a verdict,
+    matching the rest of the diagnostics surface's never-500 contract.
+    Nothing pinned short-circuits before the telemetry is streamed — the
+    answer is ``no_baseline`` regardless of what the file holds.
     """
     now = now or datetime.now(UTC)
     try:
@@ -534,5 +654,7 @@ def load_and_check_drift(
             status=DriftStatus.NO_BASELINE,
             reason="baseline ledger unreadable; run scripts/pin_token_baseline.py --apply",
         )
-    rows = PromptTelemetry(config).load_inferences(limit=DRIFT_LOAD_LIMIT)
-    return check_drift(baseline, rows, now=now)
+    if baseline is None:
+        return check_drift(None, [], now=now)
+    window = load_window_rows(config, now=now, windows=1)
+    return check_drift(baseline, window.rows, now=now, truncation=window.truncation)
