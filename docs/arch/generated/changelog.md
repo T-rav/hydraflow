@@ -34,6 +34,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `83b0f29` — fix(implement): take make quality off the host lock on the implement path (#11568 seam 3) (#11592) (#11592) *(2026-08-21)*
 - `b3ff35a` — fix(implement): tier build timeout by complexity, route zero-commit attempts to diagnose (#11568) (#11585) (#11585) *(2026-08-21)*
 - `e25d020` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof (Fixes #11570, Fixes #11571) (#11582) (#11582) *(2026-08-21)*
+- `fae7e6f` — feat(sandbox): air-gap the light-lane auto-agent spawn behind a seed-scripted fake *(2026-08-21)*
 - `1b9e118` — fix(token-drift): load telemetry by window, not by row count (Fixes #11581) (#11586) (#11586) *(2026-08-21)*
 - `2e6e13d` — chore(release): bump to 1.0.0, CHANGELOG, pinned-install docs (refs #11520) (#11584) (#11584) *(2026-08-21)*
 - `28338b9` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop — one issue per source per ISO week (Fixes #11442) (#11578) (#11578) *(2026-08-21)*

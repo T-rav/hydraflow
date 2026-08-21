@@ -437,3 +437,17 @@ _Source: #10883 (plan)_
 ```json:entry
 {"id":"01KRCHRONICTIMEOUT10883HANG","title":"Cancelled-at-timeout: continuous progress means capacity, not a hang (#10883)","topic":null,"source_type":"plan","source_issue":10883,"source_repo":null,"created_at":"2026-07-31T00:00:00.000000+00:00","updated_at":"2026-07-31T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+## Light lane sandbox air-gap — AutoAgentPreflightLoop spawns through the seed-scripted fake
+
+With the #11298 auto-agent light lane ON by default (#11590), any sandbox scenario whose issue is triage-scored at complexity ≤ `auto_agent_light_max_complexity` routes to `AutoAgentPreflightLoop` instead of the staged plan pipeline. The loop's `_build_spawn_fn` constructs its `AutoAgentRunner` inside the method — not injected — so none of the existing air-gaps (the `subprocess_runner=` injection, the `_mockworld_fake_llm` sentinels) could reach it. `mockworld.sandbox_main.air_gap_runner_sentinels` now rebinds `_build_spawn_fn` to `build_seeded_auto_agent_spawn_builder`: the spawn pops `seed.scripts["auto_agent"]` entries via `FakeLLM.next_auto_agent_spawn` (a `resolved` entry mints the PR through the PRPort on the auto-agent branch so review discovers it like a real one); an UNSCRIPTED issue gets a deterministic crashed spawn, logged — never a real subprocess. The same builder is wired in `MockWorld.run_with_loops` (the `auto_agent_spawn_builder` port), so both tiers share one seam. Prerequisite for any in-container auto-agent behavior at all: `Dockerfile.agent` ships `prompts/` into `/opt/hydraflow` — before #11590 the image had no playbooks and every in-container spawn died on `FileNotFoundError` before it could even fail auth.
+
+**Why:** the first lane-on runs of s54/s55 wedged on `Agent CLI authentication failed` retries — the decomposed children routed to the lane and spawned a real `claude` inside the air-gapped container; the seam-completeness ratchet never flagged it because the loop module has no lexical spawn call (the spawn lives in the runner it constructs). Scenario recipe: script `{"status": "resolved"}` per light-lane issue (s92, s54, s55), or a failure shape (`needs_human`/`crashed`) to drive the unhappy path.
+
+_Source: #11590 (build)_
+
+
+```json:entry
+{"id":"01M0K5AREKCQMM12BWRNEC6KJW","title":"Light lane sandbox air-gap — AutoAgentPreflightLoop spawns through the seed-scripted fake","topic":null,"source_type":"manual","source_issue":11590,"source_repo":null,"created_at":"2026-08-21T22:30:00.000000+00:00","updated_at":"2026-08-21T22:30:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
+

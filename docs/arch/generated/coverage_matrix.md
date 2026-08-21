@@ -14,7 +14,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `AdrConformanceLoop` | ✅ [0100, 0104] | ❌ | ✅ loops.md | ❌ | ✅ `test_adr_conformance_loop.py` | ✅ in catalog | ❌ |
 | `AdrDriftResolverLoop` | ✅ [0056] | ✅ [feedback-backlog-to-loop-reflection.md] | ✅ loops.md | ❌ | ✅ `test_adr_drift_resolver_loop.py` | ✅ in catalog | ❌ |
 | `AdrTouchpointAuditorLoop` | ✅ [0056, 0089, 0099, 0100, 0126] | ✅ [adr-index.md, adr-touchpoint-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ✅ `s33_adr_touchpoint_auditor_no_drift.py` |
-| `AutoAgentPreflightLoop` | ✅ [0050, 0063, 0084] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
+| `AutoAgentPreflightLoop` | ✅ [0050, 0063, 0084] | ✅ [dark-factory.md, gotchas.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
 | `AutoTightenLoop` | ✅ [0104] | ❌ | ✅ loops.md | ❌ | ✅ `test_auto_tighten_loop.py` | ✅ in catalog | ❌ |
 | `BranchProtectionAuditorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_branch_protection_auditor_loop.py` | ✅ in catalog | ✅ `s41_branch_protection_auditor_no_drift.py` |
 | `CIMonitorLoop` | ✅ [0029, 0065] | ✅ [ci-monitor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_ci_monitor_loop.py` | ✅ in catalog | ✅ `s15_ci_monitor_main_branch_red.py` |
