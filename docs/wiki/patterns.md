@@ -490,3 +490,39 @@ Expose a deep multi-reviewer "ultra" pass as an opt-in review-phase option (#105
 ```json:entry
 {"id":"01KYEF98BHWVZEC1S5YEBDJPK3","title":"Opt-in ultra deep-review tier (ADR-0109)","topic":null,"source_type":"compiled","source_issue":10555,"source_repo":null,"created_at":"2026-07-25T00:00:00.000000+00:00","updated_at":"2026-07-25T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+
+## Release policy — stable tags vs the rolling main tip
+
+HydraFlow ships two things that are easy to confuse. **`main` is the rolling integration tip**: `StagingPromotionLoop` cuts an `rc/YYYY-MM-DD-HHMM` PR every `rc_cadence_hours` (default 4h) and merges it once the RC gate (`RC Promotion Scenario` + sandbox shards) is green (ADR-0042). Every `main` SHA has passed that gate, but `main` carries no compatibility promise between promotions and is not a release. **A stable tag (`vX.Y.Z`) is a promise**: the milestone that names it has zero open issues (no open data-loss or wrong-branch paths, no false-close blind spots), `main` CI and the last `RC Promotion Scenario` run are green on the tagged SHA, zero open high-severity code-scanning alerts, no open P0, and the version in `pyproject.toml` / `src/__init__.py` / `src/ui/package.json` matches the tag. Downstream HydraFlow-format repos (amplifier, harvestd, Signal Room, every `make stamp` bootstrap) pin a tag — `git checkout vX.Y.Z` — never `main` (README → "Install a pinned release"; per-release notes in `CHANGELOG.md`). The tag always points at a **promoted `main` SHA**: never at `staging`, never at whatever `HEAD` the operator's checkout happens to be on.
+
+**The cut recipe** (first used for v1.0.0, #11520):
+
+```bash
+# (a) preconditions — every line must come back clean
+gh issue list --milestone "<milestone>" --state open --json number --jq length                     # 0
+gh run list --branch main --workflow CI --limit 1 --json conclusion --jq '.[0].conclusion'          # success
+gh run list --workflow "RC Promotion Scenario" --limit 1 --json conclusion --jq '.[0].conclusion'   # success
+gh api 'repos/{owner}/{repo}/code-scanning/alerts?state=open&severity=high' --jq length             # 0
+gh issue list --label P0 --state open --json number --jq length                                     # 0
+
+# (b) version-bump + CHANGELOG PR → staging; merge it; let the next RC promote it to main
+#     touches pyproject.toml, src/__init__.py, src/ui/package.json (+ package-lock.json), uv.lock, CHANGELOG.md
+gh pr create --base staging --title "chore(release): vX.Y.Z — <name>: version bump, CHANGELOG, pinned-install docs (refs #<release issue>)"
+
+# (c) tag the PROMOTED main SHA and publish the release — by hand
+git fetch origin main
+git log -1 --format='%H %s' origin/main          # confirm this SHA carries the bump (RC promotion of the bump PR)
+git tag -a vX.Y.Z <promoted main sha> -m "vX.Y.Z — <name>"
+git push origin vX.Y.Z
+gh release create vX.Y.Z --title "vX.Y.Z — <name>" --notes-file <the CHANGELOG section for vX.Y.Z>
+```
+
+**Nothing cuts the tag for you.** ADR-0011 describes a release-on-epic-close trigger, but `EpicCompletionChecker._do_close_epic` stopped calling `_create_release_for_epic` in #2689 (pinned by `tests/test_release.py::test_no_release_on_epic_close`), and `EpicManager.release_epic` only merges the bundle and flips `released` — the primitive has no production caller (#11569), and before #11517 it would have tagged the factory checkout `HEAD` rather than `main`. Until #11569 re-attaches the primitive to a chosen trigger, step (c) is manual: run it in a checkout whose `origin/main` was just fetched and pass the SHA explicitly — a bare `git tag vX.Y.Z` tags the current `HEAD`, which on a factory host is `staging` or an agent branch.
+
+**Why:** Downstream repos need a SHA they can name and trust; "latest main" moves every 4h, and the only automatic tagging path was found to be caller-less and pointed at the wrong ref class (#11517, #11569). Making the promise explicit (milestone clear + gates green + tag on promoted `main`) and the mechanism manual-until-wired keeps the tag honest.
+
+
+```json:entry
+{"id":"RELEASE-POLICY-STABLE-TAG-001","source_type":"manual","topic":"patterns","tags":["release","tag","semver","main","staging","rc-promotion","downstream","adr-0042","adr-0011","changelog"],"rule":"main is the rolling integration tip (RC-promoted every rc_cadence_hours, ADR-0042), not a release. A stable vX.Y.Z tag promises: milestone at 0 open, main CI + last RC Promotion Scenario green, zero open high code-scanning alerts, no open P0, version files match the tag. Cut it by hand on the promoted main SHA after the bump PR lands via RC: fetch origin main, tag -a <main sha>, push the tag, gh release create with the CHANGELOG section. The ADR-0011 epic-close trigger has not fired since #2689 (#11569) — nothing tags automatically.","anti_pattern":"Telling downstream repos to build on main, or running a bare `git tag vX.Y.Z` without an explicit ref so the tag lands on staging / a checkout HEAD instead of the promoted main SHA","code_refs":["CHANGELOG.md","README.md","pyproject.toml","src/__init__.py","src/epic.py:EpicCompletionChecker._create_release_for_epic","docs/adr/0042-two-tier-branch-release-promotion.md","docs/adr/0011-epic-release-creation-architecture.md"],"source_issue":11520,"added":"2026-08-21"}
+```

@@ -106,9 +106,10 @@ Reply directly from WhatsApp — no computer needed.
 
 ```bash
 # in your project root
-git submodule add https://github.com/T-rav/hydra.git hydraflow
+git submodule add https://github.com/T-rav/hydraflow.git hydraflow
 git submodule update --init --recursive
 cd hydraflow
+git checkout v1.0.0   # pin to a stable release — see "Install a pinned release" below
 
 # install deps + bootstrap target repo hooks/assets/labels
 make setup
@@ -119,6 +120,42 @@ make prep
 # run orchestrator + dashboard (http://localhost:5556)
 make run
 ```
+
+### Install a pinned release
+
+Downstream HydraFlow-format repos (anything bootstrapped with `make stamp`, or that
+vendors HydraFlow as a submodule — amplifier, harvestd, Signal Room) should build on a
+**tagged release, not on `main`**. `main` is the rolling integration tip: it advances
+every ~4h by RC promotion ([ADR-0042](docs/adr/0042-two-tier-branch-release-promotion.md))
+and is green at each promotion, but it is not a release and carries no compatibility
+promise between promotions. Stable tags (`vX.Y.Z`) are cut by hand on a promoted `main`
+SHA once the release milestone is clear. What a tag promises and how one is cut is in
+[`docs/wiki/patterns.md` → Release policy](docs/wiki/patterns.md#release-policy--stable-tags-vs-the-rolling-main-tip);
+the changes in each release are in [`CHANGELOG.md`](CHANGELOG.md).
+
+```bash
+# fresh clone, pinned to the release
+git clone --branch v1.0.0 https://github.com/T-rav/hydraflow.git hydraflow
+cd hydraflow && make setup
+
+# or pin an existing submodule
+git -C hydraflow fetch --tags origin
+git -C hydraflow checkout v1.0.0
+git add hydraflow && git commit -m "chore: pin hydraflow to v1.0.0"
+
+# verify what you are on
+git -C hydraflow describe --tags --exact-match   # → v1.0.0
+```
+
+To move to the next release, repeat the `fetch --tags` + `checkout vX.Y.Z` step and
+commit the new submodule pointer. Do not track `main` from a downstream repo.
+
+`uv pip install git+https://github.com/T-rav/hydraflow@v1.0.0` is **not** a supported
+install path today: the wheel built from `pyproject.toml` packages only the `src/`
+sub-packages (`[tool.setuptools.packages.find]`), not the flat top-level modules
+(`server.py`, `config.py`, …) that the `hydraflow` console script imports, so the
+installed entry point fails at import time. Run HydraFlow from a checkout — the Makefile
+targets set `PYTHONPATH=src`.
 
 ### Dashboard Mode (multi-repo)
 
