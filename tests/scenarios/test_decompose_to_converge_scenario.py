@@ -33,6 +33,11 @@ Four cases (per ``.superpowers/sdd/task-8-brief.md``):
     in ``EpicState``) is why nesting is capped off by default; a follow-up
     tracked in ADR-0105 adds the lineage link so the default can safely
     rise back to 2.
+(e) #11480: an exhausted stuck issue whose fix is already in flight on the
+    auto-agent's own branch is NOT re-sliced — no epic is registered with
+    ``EpicManager``, no children are filed, the in-flight PR is not closed as
+    superseded, and the issue is not paged out to a human either. The council
+    is scripted to APPROVE a split here too, so the assertion is non-vacuous.
 (d) The Task-5 intake-vector skip guard: an issue already labelled
     ``auto-decomposed-child`` does NOT get re-split via the *intake* triage
     path, even when triage's complexity gate and the decomposition seam are
@@ -549,6 +554,80 @@ class TestNestedDecompositionCascadesToRoot:
         await world.run_with_loops(["epic_sweeper"], cycles=2)
         assert world.github.issue(e2).state == "closed"
         assert world.github.issue(e1).state == "closed"
+
+
+# ---------------------------------------------------------------------------
+# (e) A stuck issue whose fix is already in flight is not re-sliced (#11480).
+# ---------------------------------------------------------------------------
+
+
+class TestLandedFixIsNeverReSliced:
+    async def test_in_flight_fix_on_auto_agent_branch_creates_no_epic(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        world = MockWorld(tmp_path)
+        cfg = world.harness.config
+        issue_number = 11427
+        world.add_issue(
+            issue_number,
+            "Root issue: the frobnicator never converges",
+            "The frobnicator keeps failing CI no matter what the auto-agent tries.",
+            labels=["hitl-escalation", "flaky-test-stuck"],
+        )
+        _exhaust_attempts(world, issue_number)
+
+        # The auto-agent's final attempt DID produce a fix — on its own
+        # branch, with CI still running. The attempt cap trips on count, not
+        # outcome, so this issue still arrives at the decompose terminal.
+        pr_number = 11461
+        world.github.add_pr(
+            number=pr_number,
+            issue_number=issue_number,
+            branch=cfg.auto_agent_branch_for_issue(issue_number),
+            title=f"Fixes #{issue_number}: stop the frobnicator from stalling",
+            body=f"Fixes #{issue_number}",
+            checks=[("quality", "IN_PROGRESS")],
+        )
+
+        epic_manager = _make_epic_manager(world)
+        _wire_decompose(world, epic_manager)
+        # Scripted to APPROVE: if the #11480 gate is removed, this exact test
+        # starts creating an epic + children, proving the assertions below
+        # are non-vacuous.
+        _script_council(
+            monkeypatch,
+            [
+                _direction_reply(),
+                _validation_reply(decision="approve", confidence="high"),
+            ],
+        )
+
+        results = await world.run_with_loops(["auto_agent_preflight"], cycles=1)
+
+        assert results["auto_agent_preflight"] == {
+            "status": "ok",
+            "issues_processed": 1,
+            "result_status": "skipped_already_satisfied",
+            "suppressed": 0,
+        }
+
+        # No epic anywhere: not on GitHub, and not registered with EpicManager.
+        assert _find_epic_numbers(world, cfg.epic_label[0]) == []
+        assert world.harness.state.get_all_epic_states() == {}
+        assert list(world.github._issues) == [issue_number]
+
+        # The in-flight fix survives, the issue keeps its place in the
+        # pipeline, and no human was paged.
+        assert world.github._prs[pr_number].closed is False
+        assert world.github.issue(issue_number).state == "open"
+        assert "human-required" not in world.github.issue(issue_number).labels
+        assert world.harness.state.get_issue_status(issue_number) != "decomposed"
+
+        # The skip is announced once, naming the evidence.
+        comments = [str(c) for c in world.github.issue(issue_number).comments]
+        skips = [c for c in comments if "already landed" in c]
+        assert len(skips) == 1
+        assert f"#{pr_number}" in skips[0]
 
 
 # ---------------------------------------------------------------------------

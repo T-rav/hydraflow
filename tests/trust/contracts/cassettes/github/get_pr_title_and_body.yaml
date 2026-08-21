@@ -1,0 +1,26 @@
+# Hand-authored baseline (recorder_sha: "00000000").
+# get_pr_title_and_body returns a PR's (title, body) pair (`gh pr view <n>
+# --json title,body`), ("", "") on failure. HydraFlow's canonical PR title is
+# `Fixes #N: <title>`, so this is the PR's own declaration of what it closes:
+# preflight.decompose_terminal reads it to tell a landing fix from a stalled
+# one before re-slicing or superseding an issue (#11480). The dispatcher
+# seeds that canonical shape, so stdout is the seeded pair as a JSON list.
+adapter: github
+interaction: get_pr_title_and_body
+recorded_at: '2026-08-21T00:00:00Z'
+recorder_sha: '00000000'
+fixture_repo: T-rav-Hydra-Ops/hydraflow-contracts-sandbox
+input:
+  command: get_pr_title_and_body
+  args:
+  - '531'
+  stdin: null
+  env: {}
+output:
+  exit_code: 0
+  stdout: '["Fixes #1: real bug", "Fixes #1\n\nThe whole fix."]
+
+    '
+  stderr: ''
+normalizers: []
+baseline_only: true

@@ -440,5 +440,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `79a1ada` — docs(adr): ADR-0082 declarative gate contract (extends ADR-0042 enforcement) *(2026-05-29)*
 - `0afd876` — feat(gates): gen-gates CLI + make targets; generate README table; scrub stale prose *(2026-05-29)*
 
+## 2026-W21
+
+- `1d9c95f` — Fixes #8931: stream onboarding activity in dashboard *(2026-05-23)*
+
 
 <!-- arch:generated -->

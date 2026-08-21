@@ -463,6 +463,17 @@ class PRPort(Protocol):
         """
         ...
 
+    async def get_pr_title_and_body(self, pr_number: int) -> tuple[str, str]:
+        """Return ``(title, body)`` for *pr_number*, ``("", "")`` when unreadable.
+
+        The PR's own declaration of what it closes: HydraFlow's canonical PR
+        title is ``Fixes #N: <title>``, so this is what
+        `preflight.decompose_terminal` reads to tell a landing fix from a
+        stalled one before it re-slices or supersedes an issue (#11480).
+        Matches ``pr_manager.PRManager.get_pr_title_and_body`` exactly.
+        """
+        ...
+
     async def get_pr_approvers(self, pr_number: int) -> list[str]:
         """Fetch the list of GitHub usernames that approved *pr_number*."""
         ...

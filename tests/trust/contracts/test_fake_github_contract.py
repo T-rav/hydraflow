@@ -738,6 +738,25 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         messages = await fake.get_pr_commit_messages(pr_number)
         return FakeOutput(exit_code=0, stdout=f"{messages}\n", stderr="")
 
+    if method == "get_pr_title_and_body":
+        import json as _json
+
+        pr_number = int(args[0])
+        # Seed HydraFlow's canonical PR title shape (``Fixes #N: <title>``) —
+        # the exact input the decompose terminal reads to tell a landing fix
+        # from a stalled one (#11480).
+        fake.add_pr(
+            number=pr_number,
+            issue_number=1,
+            branch="b",
+            title="Fixes #1: real bug",
+            body="Fixes #1\n\nThe whole fix.",
+        )
+        title, body = await fake.get_pr_title_and_body(pr_number)
+        return FakeOutput(
+            exit_code=0, stdout=_json.dumps([title, body]) + "\n", stderr=""
+        )
+
     # --- Workflow-run / CI-log / git-op / alerts cluster (#9768 slice 5) ---
 
     if method == "list_workflow_runs":
