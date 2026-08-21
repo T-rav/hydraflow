@@ -4,8 +4,9 @@ topic: gotchas
 source_issue: 11518
 source_phase: plan
 created_at: 2026-08-21T09:08:16.052885+00:00
-status: active
+status: stale
 corroborations: 1
+stale_reason: no repo-specific anchor (generic best-practice)
 ---
 
 # Workflow pin gating: unset output must skip, never build (fail-safe if:)

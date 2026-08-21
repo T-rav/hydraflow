@@ -1,13 +1,12 @@
 ---
-id: 0288
+id: 0305
 topic: dependencies
 source_issue: synthesis
 source_phase: synthesis
-created_at: 2026-08-18T13:47:37.728361+00:00
-status: superseded
+created_at: 2026-08-21T11:38:32.621221+00:00
+status: active
 corroborations: 1
-supersedes: 0270
-superseded_by: 0305
+supersedes: 0288
 ---
 
 # Use public symbols for cross-module env logic
