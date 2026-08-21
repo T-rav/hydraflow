@@ -51,6 +51,9 @@ def render_ruleset(contract: Contract, branch: str) -> dict[str, Any]:
                 "require_code_owner_review": False,
                 "require_last_push_approval": False,
                 "required_review_thread_resolution": False,
+                "require_extra_approval_for_unattributed_changes": (
+                    env.require_extra_approval_for_unattributed_changes
+                ),
                 "allowed_merge_methods": env.allowed_merge_methods,
             },
         },
