@@ -41,6 +41,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PIN_SCRIPT = REPO_ROOT / "scripts" / "staging_rc_dryrun_pin.py"
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_github_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the *runner's* ``$GITHUB_OUTPUT`` out of the code under test.
+
+    ``main`` defaults ``--github-output`` to the env var, and Actions always
+    sets it. Without this, an in-process ``main`` call that omits the flag
+    appends to the runner's real output file on CI while printing to stdout
+    locally — so the suite passes on a laptop and fails in CI. Tests that need
+    the variable set pass ``env=`` to a subprocess explicitly.
+    """
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+
+
 def _read_outputs(path: Path) -> dict[str, str]:
     """Parse a ``$GITHUB_OUTPUT`` file the way the Actions runner does."""
     outputs: dict[str, str] = {}
@@ -117,7 +130,9 @@ class TestGithubOutput:
     def test_missing_output_path_does_not_crash(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # Local/manual runs have no $GITHUB_OUTPUT; the verdict still prints.
+        # With no `--github-output` and no $GITHUB_OUTPUT (stripped by the
+        # autouse fixture — a hand-run of the script off-runner), the verdict
+        # falls back to stdout instead of crashing on a None path.
         assert main(["--expected-sha", _SHA_A, "--actual-sha", _SHA_A]) == 0
         assert "matched=true" in capsys.readouterr().out
 
