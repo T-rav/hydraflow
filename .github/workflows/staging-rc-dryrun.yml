@@ -61,19 +61,55 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
+      # TRUST: this ref is the literal protected branch `staging` — never a job
+      # output. It used to be `ref: ${{ needs.resolve.outputs.sha }}`, which
+      # CodeQL reported as actions/cache-poisoning/poisonable-step (alert #108,
+      # issue #11518): the analysis cannot see that `resolve` produces that SHA
+      # by running `git rev-parse HEAD` on protected `staging`, so a privileged,
+      # cache-writing job appeared to check out attacker-influenced code.
+      #
+      # Checking out the branch tip re-opens a different hole — staging can
+      # advance between `resolve` and this job, which would break the sensor's
+      # "one SHA per report" property. The `pin` step below closes it by
+      # asserting in-job that HEAD *is* the resolved SHA, and every step after
+      # it is gated on that assertion, so nothing builds, caches, or executes
+      # repo code on an unverified commit.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: staging
+      # Verified for real (not just shape-checked) in
+      # tests/test_staging_rc_dryrun_pin.py; the wiring below is pinned by
+      # tests/architecture/test_staging_rc_dryrun_workflow_shape.py. Runs on the
+      # image's system python3 — `setup-python` is itself behind the gate.
+      - name: Pin shard to the resolved staging HEAD
+        id: pin
+        env:
+          # Passed through the environment, not interpolated into the shell
+          # body: a `${{ }}` job output inside `run:` is a script-injection sink.
+          EXPECTED_SHA: ${{ needs.resolve.outputs.sha }}
+          SHARD: ${{ matrix.shard }}/6
+        run: |
+          python3 scripts/staging_rc_dryrun_pin.py \
+            --expected-sha "$EXPECTED_SHA" \
+            --shard "$SHARD" \
+            --skip-summary-json /tmp/summary.json
       - uses: actions/setup-python@v5
+        if: steps.pin.outputs.matched == 'true'
         with:
           python-version: "3.11"
-      - run: pip install uv && uv pip install --system -e ".[dev]"
-      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
+      - if: steps.pin.outputs.matched == 'true'
+        run: pip install uv && uv pip install --system -e ".[dev]"
+      - if: steps.pin.outputs.matched == 'true'
+        run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
       - name: Run shard ${{ matrix.shard }}/6 against staging HEAD
+        if: steps.pin.outputs.matched == 'true'
         run: |
           python scripts/sandbox_scenario.py run-all \
             --shard ${{ matrix.shard }}/6 \
             --summary-json /tmp/summary.json
+      # Unconditional on purpose: when the shard skipped, this uploads the pin
+      # step's skip marker instead, so the reporter reads a well-formed
+      # zero-failure summary rather than scanning an absent artifact.
       - name: Upload shard run summary
         if: always()
         uses: actions/upload-artifact@v4
@@ -104,10 +140,14 @@ jobs:
       contents: read
       issues: write
     steps:
+      # TRUST: this job keeps the job-output ref on purpose — the reporter must
+      # name the exact commit the shards tested, not a possibly-advanced staging
+      # tip. It is not the poisonable shape the shard was: no pip/docker/cache
+      # step runs here, so there is no cache for a checkout to poison. The SHA
+      # itself is `git rev-parse HEAD` on protected `staging` (see `resolve`).
+      # Pinned by tests/architecture/test_staging_rc_dryrun_workflow_shape.py.
       - uses: actions/checkout@v4
         with:
-          # Pin the reporter to the exact commit the shards tested, not a
-          # possibly-advanced staging tip.
           ref: ${{ needs.resolve.outputs.sha }}
       - uses: actions/setup-python@v5
         with:
