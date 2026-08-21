@@ -771,18 +771,23 @@ class FakeGitHub:
         number = self._pr_counter
         self._pr_counter += 1
         issue_number = getattr(issue, "id", getattr(issue, "number", 0))
+        url = f"https://github.com/test/repo/pull/{number}"
         self._prs[number] = FakePR(
             number=number,
             issue_number=issue_number,
             branch=branch,
             draft=draft,
-            url=f"https://github.com/test/repo/pull/{number}",
+            url=url,
         )
+        # Return the URL the fake actually stores — production ``PRInfo.url``
+        # is the created PR's URL, and the light-lane spawn seam renders it
+        # into the ``<pr_url>`` tag the auto-agent decision parses (#11298).
         return PRInfoFactory.create(
             number=number,
             issue_number=issue_number,
             branch=branch,
             draft=draft,
+            url=url,
         )
 
     async def find_open_pr_for_branch(

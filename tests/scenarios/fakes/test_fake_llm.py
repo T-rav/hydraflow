@@ -278,3 +278,78 @@ async def test_fix_ci_scripted_result_overrides_default() -> None:
     assert result.fixes_made is False
     assert result.ci_passed is False
     assert result.verdict == ReviewVerdict.REQUEST_CHANGES
+
+
+class TestFakeLLMAutoAgentQueue:
+    """#11298 light lane: ``script_auto_agent`` / ``next_auto_agent_spawn``."""
+
+    def test_pops_in_call_order_and_records_every_call(self) -> None:
+        from mockworld.fakes.fake_llm import FakeLLM
+
+        llm = FakeLLM()
+        llm.script_auto_agent(7, [{"status": "retry"}, {"status": "resolved"}])
+
+        first = llm.next_auto_agent_spawn(7)
+        second = llm.next_auto_agent_spawn(7)
+
+        assert first is not None and first["status"] == "retry"
+        assert second is not None and second["status"] == "resolved"
+        assert llm.next_auto_agent_spawn(7) is None  # drained — no repeat
+        assert llm.auto_agent_calls == [7, 7, 7]
+        assert llm.auto_agent_spawn_count(7) == 3
+        assert llm.auto_agent_spawn_count() == 3
+
+    def test_unscripted_issue_returns_none_but_is_counted(self) -> None:
+        from mockworld.fakes.fake_llm import FakeLLM
+
+        llm = FakeLLM()
+        assert llm.next_auto_agent_spawn(99) is None
+        assert llm.auto_agent_calls == [99]
+
+    def test_dict_entry_is_filled_with_defaults(self) -> None:
+        from mockworld.fakes.fake_llm import FakeLLM
+
+        llm = FakeLLM()
+        llm.script_auto_agent(1, [{"status": "needs_human", "tokens": 12}])
+        entry = llm.next_auto_agent_spawn(1)
+        assert entry == {
+            "status": "needs_human",
+            "pr_url": None,
+            "diagnosis": "",
+            "confidence": "high",
+            "blocked_reason": "none",
+            "cost_usd": 0.0,
+            "tokens": 12,
+            "crashed": False,
+            "output_text": None,
+        }
+
+    def test_string_entry_is_a_raw_transcript(self) -> None:
+        from mockworld.fakes.fake_llm import FakeLLM
+
+        llm = FakeLLM()
+        llm.script_auto_agent(1, ["<status>resolved</status><pr_url>u</pr_url>"])
+        entry = llm.next_auto_agent_spawn(1)
+        assert entry is not None
+        assert entry["output_text"] == "<status>resolved</status><pr_url>u</pr_url>"
+
+    def test_unknown_key_fails_at_script_time(self) -> None:
+        from mockworld.fakes.fake_llm import FakeLLM
+
+        llm = FakeLLM()
+        with pytest.raises(ValueError, match="statsu"):
+            llm.script_auto_agent(1, [{"statsu": "resolved"}])
+        with pytest.raises(TypeError):
+            llm.script_auto_agent(1, [42])
+
+    def test_accumulates_across_calls_like_every_script_method(self) -> None:
+        """sandbox_main scripts the whole list at once; MockWorld.apply_seed
+        replays one entry per call — both must build the same FIFO."""
+        from mockworld.fakes.fake_llm import FakeLLM
+
+        whole = FakeLLM()
+        whole.script_auto_agent(3, [{"status": "retry"}, {"status": "resolved"}])
+        one_by_one = FakeLLM()
+        one_by_one.script_auto_agent(3, [{"status": "retry"}])
+        one_by_one.script_auto_agent(3, [{"status": "resolved"}])
+        assert list(whole.auto_agent[3]) == list(one_by_one.auto_agent[3])

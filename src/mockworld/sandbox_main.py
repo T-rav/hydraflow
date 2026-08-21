@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import sys
@@ -36,9 +37,10 @@ from mockworld.fakes import (
 from mockworld.fakes.fake_docker import FakeDocker
 from mockworld.fakes.fake_subprocess_runner import FakeSubprocessRunner
 from mockworld.seed import MockWorldSeed
-from models import BackgroundWorkerStatusPayload, EpicState
+from models import BackgroundWorkerStatusPayload, EpicState, GitHubIssue
 from orchestrator import HydraFlowOrchestrator
 from ports import IssueFetcherPort, IssueStorePort, PRPort, WorkspacePort
+from preflight.agent import PreflightSpawn, hash_prompt
 from prompt_telemetry import refresh_prompt_telemetry_health_after_retention
 from repo_wiki import RepoWikiStore, WikiEntry
 from runtime_config import load_runtime_config
@@ -51,6 +53,8 @@ from service_registry import (
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
+
+logger = logging.getLogger("hydraflow.sandbox_main")
 
 # --- Air-gap seam registry (#10012) ----------------------------------------
 #
@@ -112,6 +116,17 @@ SANDBOX_SEAMS: dict[str, str] = {
     # ADR-0063 runners (discover/plan-review/council/spec-review/diagnostic/
     # decompose) consult the ``_mockworld_fake_llm`` sentinel before their
     # BaseSubprocessRunner.run spawn; sentinels are attached in main().
+    #
+    # EXCEPTION — ``preflight.auto_agent_runner.AutoAgentRunner`` (#11298 light
+    # lane + HITL auto-fix) is a BaseSubprocessRunner subclass that carries NO
+    # sentinel hook and is constructed INSIDE ``AutoAgentPreflightLoop.
+    # _build_spawn_fn`` per attempt — not injected, so neither this sentinel
+    # nor the ``subprocess_runner=`` seam can reach it. ``air_gap_runner_
+    # sentinels`` therefore rebinds ``_build_spawn_fn`` wholesale to the
+    # seed-scripted fake (``seed.scripts["auto_agent"]`` →
+    # ``FakeLLM.next_auto_agent_spawn``; unscripted = deterministic crashed
+    # spawn). The loop module itself has no lexical spawn call, so it has no
+    # row here — the seam is recorded on this runner's entry instead.
     "base_subprocess_runner": "mockworld_sentinel",
     # ``get_docker_runner`` is the default only when no ``subprocess_runner``
     # is injected; main() always injects FakeSubprocessRunner.
@@ -431,9 +446,7 @@ def _load_phase_script(
             )
     else:
         # Unknown phase name — log and skip so a typo can't silently break.
-        import logging  # noqa: PLC0415
-
-        logging.getLogger("hydraflow.sandbox_main").warning(
+        logger.warning(
             "Unknown phase_scripts phase %r for issue #%d — ignored",
             phase_name,
             issue_number,
@@ -944,6 +957,111 @@ def build_seeded_branch_protection_auditor(
     return _audit
 
 
+def _render_tag(name: str, value: Any) -> str:
+    return f"<{name}>{value}</{name}>" if value not in (None, "") else ""
+
+
+async def _render_scripted_auto_agent_spawn(
+    scripted: dict[str, Any],
+    *,
+    issue_number: int,
+    prs: PRPort,
+    config: HydraFlowConfig,
+    prompt_hash: str,
+) -> PreflightSpawn:
+    """Turn one ``FakeLLM.script_auto_agent`` entry into the ``PreflightSpawn``
+    a real ``AutoAgentRunner.run`` would have returned.
+
+    A ``resolved`` entry without an explicit ``pr_url`` mints the PR through
+    the PRPort (FakeGitHub) on the auto-agent branch — the real auto-agent
+    opens its PR with ``gh pr create`` from inside the session, so the review
+    stage must be able to discover a light-lane PR exactly as it would a real
+    one. The minted URL is what the rendered ``<pr_url>`` tag carries.
+    """
+    output_text = scripted.get("output_text")
+    if output_text is None:
+        status = str(scripted.get("status") or "resolved")
+        pr_url = scripted.get("pr_url")
+        if status == "resolved" and not pr_url:
+            branch = config.auto_agent_branch_for_issue(issue_number)
+            info = await prs.create_pr(
+                GitHubIssue(number=issue_number, title=f"Issue #{issue_number}"),
+                branch,
+            )
+            pr_url = str(getattr(info, "url", "") or "")
+        output_text = "".join(
+            (
+                _render_tag("status", status),
+                _render_tag("pr_url", pr_url),
+                _render_tag("confidence", scripted.get("confidence")),
+                _render_tag("blocked_reason", scripted.get("blocked_reason")),
+                _render_tag("diagnosis", scripted.get("diagnosis")),
+            )
+        )
+    return PreflightSpawn(
+        process=None,
+        output_text=str(output_text),
+        cost_usd=float(scripted.get("cost_usd") or 0.0),
+        tokens=int(scripted.get("tokens") or 0),
+        crashed=bool(scripted.get("crashed", False)),
+        prompt_hash=prompt_hash,
+    )
+
+
+def build_seeded_auto_agent_spawn_builder(
+    fake_llm: FakeLLM, *, prs: PRPort, config: HydraFlowConfig
+) -> Callable[[int], Callable[..., Any]]:
+    """Air-gapped stand-in for ``AutoAgentPreflightLoop._build_spawn_fn`` (#11298).
+
+    Returns a builder with the same ``(issue_number) -> spawn_fn`` shape the
+    loop expects; the spawn pops ``seed.scripts["auto_agent"]`` entries from
+    *fake_llm* (``next_auto_agent_spawn``) instead of constructing an
+    ``AutoAgentRunner`` and spawning a real ``claude``. An unscripted issue
+    gets a deterministic CRASHED spawn (logged) — ``run_preflight`` maps it to
+    ``fatal`` — so a scenario that unexpectedly routes an issue to the light
+    lane fails loudly in-world rather than wedging the air-gapped container on
+    CLI auth retries. Shared by ``sandbox_main`` (docker) and MockWorld's
+    catalog builder / wired orchestrator (in-process) so the two air-gaps
+    cannot drift (dual-loader parity).
+    """
+
+    def _build(issue_number: int) -> Callable[..., Any]:
+        async def _spawn(prompt: str, worktree_path: str) -> PreflightSpawn:
+            _ = worktree_path  # the fake never touches the worktree
+            prompt_hash = hash_prompt(prompt)
+            scripted = fake_llm.next_auto_agent_spawn(issue_number)
+            if scripted is None:
+                logger.warning(
+                    "sandbox air-gap: no scripted auto-agent spawn for issue #%d "
+                    "— returning a crashed spawn (script seed.scripts"
+                    "['auto_agent'][%d] to drive the light lane)",
+                    issue_number,
+                    issue_number,
+                )
+                return PreflightSpawn(
+                    process=None,
+                    output_text=(
+                        "sandbox air-gap: unscripted auto-agent spawn for issue "
+                        f"#{issue_number} (seed.scripts['auto_agent'] is empty)"
+                    ),
+                    cost_usd=0.0,
+                    tokens=0,
+                    crashed=True,
+                    prompt_hash=prompt_hash,
+                )
+            return await _render_scripted_auto_agent_spawn(
+                scripted,
+                issue_number=issue_number,
+                prs=prs,
+                config=config,
+                prompt_hash=prompt_hash,
+            )
+
+        return _spawn
+
+    return _build
+
+
 def air_gap_runner_sentinels(svc: ServiceRegistry, fake_llm: FakeLLM) -> None:
     """Route every remaining raw ``claude``/``git`` spawn on ``svc`` to the fakes.
 
@@ -966,6 +1084,12 @@ def air_gap_runner_sentinels(svc: ServiceRegistry, fake_llm: FakeLLM) -> None:
       diagnostic/decompose-council) each consult ``getattr(self,
       "_mockworld_fake_llm", None)`` in their subprocess-dispatch method before
       the real ``claude`` spawn (#9796).
+    - ``AutoAgentPreflightLoop._build_spawn_fn`` (#11298 light lane) builds
+      its ``AutoAgentRunner`` INSIDE the method — not injected, no sentinel
+      hook — so an un-rebound loop spawns a real ``claude`` in the container
+      (observed as ``Agent CLI authentication failed`` retries wedging s54
+      once decomposed children routed to the lane). Rebound wholesale to the
+      seed-scripted fake (``build_seeded_auto_agent_spawn_builder``).
 
     Shared by :func:`main` (the docker sandbox entrypoint) and
     ``tests.scenarios.fakes.mock_world.MockWorld._build_wired_orchestrator``
@@ -993,6 +1117,12 @@ def air_gap_runner_sentinels(svc: ServiceRegistry, fake_llm: FakeLLM) -> None:
     decompose_council = getattr(svc.auto_agent_preflight_loop, "_council", None)
     if decompose_council is not None:
         decompose_council._mockworld_fake_llm = fake_llm  # type: ignore[attr-defined]
+    # vars() assignment: instance-level seam (same idiom as the skill-prompt
+    # ``_run_corpus`` seam in main()) — shadows the method for this loop only.
+    preflight_loop = svc.auto_agent_preflight_loop
+    vars(preflight_loop)["_build_spawn_fn"] = build_seeded_auto_agent_spawn_builder(
+        fake_llm, prs=preflight_loop._prs, config=preflight_loop._config
+    )
 
 
 async def main() -> None:
