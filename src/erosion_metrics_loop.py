@@ -631,7 +631,8 @@ class ErosionMetricsLoop(BaseBackgroundLoop):
         if capped:
             logger.warning(
                 "ErosionMetrics: per-tick cap (%d) reached; some candidates "
-                "were not filed this tick and are not carried over",
+                "were not filed this tick — change-scoped ones are not carried "
+                "over, whole-repo ones (token drift) are re-derived next tick",
                 max_issues,
             )
         return filed, capped

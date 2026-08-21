@@ -111,8 +111,9 @@ def render_token_drift(candidate: dict[str, Any]) -> tuple[str, str]:
         "usually a prompt that grew, a retry loop, or a phase spawning more "
         'often than it used to; "σ n/a" means the baseline was perfectly '
         "flat, so any rise breaches. Filed once per chart per ISO week "
-        "(fingerprint `token_drift:<source>:<week>`); a filing that fails "
-        "retries on the next daily tick. Pattern B outer-loop finding: it "
+        "(fingerprint `token_drift:<source>:<week>`); a filing that fails is "
+        "re-derived and retried on the loop's next tick. Pattern B outer-loop "
+        "finding: it "
         "reports, it never prunes a prompt or edits config — if the new level "
         "is intended, re-pin the baseline.\n"
     )
