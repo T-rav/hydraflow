@@ -6,11 +6,13 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `6b5099d` — docs(erosion): spec, wiki term, and regenerated arch artifacts for the new sensors *(2026-08-21)*
+- `e692acf` — Merge remote-tracking branch 'origin/staging' into codex/fix-workspace-gc-landed-safety *(2026-08-21)*
+- `6923db5` — Fixes #11502: harden WorkspaceGC landed proof *(2026-08-21)*
 - `b91594d` — Fix factory task graphs to per-worktree JSONL (#11527) (#11527) *(2026-08-21)*
 - `54795e2` — fix: inherit maintenance routing for shared caretakers (#11525) (#11525) *(2026-08-21)*
 - `4474b1a` — fix: fail closed on wrong-branch worktree reuse (#11523) (#11523) *(2026-08-21)*
 - `3c6d708` — fix(pipeline): gate /api/pipeline snapshot on IssueStore's first refresh (#11349) (#11349) *(2026-08-21)*
+- `cd84a92` — feat(erosion): mass + suite-hygiene sensors — repeatable god-class breakup and test-suite pruning (#11522) (#11522) *(2026-08-20)*
 - `9e85063` — Fixes #11441: token-drift engine + API drift block (read-only salvage) (#11495) (#11495) *(2026-08-20)*
 - `1ae1c2e` — Fixes #11425: land the true remainder of the fake-fidelity hardening pass (#11488) (#11488) *(2026-08-20)*
 - `d729b3b` — fix(planner): guard epic replans against stale ownership (#11482) (#11484) (#11484) *(2026-08-20)*
@@ -448,7 +450,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `9362727` — Refs #8932: harden design chat extraction *(2026-05-23)*
 - `72eae73` — Refs #8933: add repo metrics dashboard payload *(2026-05-23)*
 - `43b1e0a` — Refs #8933: wire onboarding format upgrade *(2026-05-23)*
-- `bab9837` — Fixes #8933: wire onboarding continue plan *(2026-05-23)*
 
 
 <!-- arch:generated -->

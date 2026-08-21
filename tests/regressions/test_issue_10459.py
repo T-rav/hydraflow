@@ -36,13 +36,15 @@ from workspace_gc_loop import WorkspaceGCLoop  # noqa: E402
 def _make_loop(
     tmp_path: Path,
     *,
-    active_workspaces: dict[int, str] | None = None,
+    active_workspace_issues: set[int] | None = None,
 ) -> tuple[WorkspaceGCLoop, StateTracker]:
     """Build a WorkspaceGCLoop backed by a real StateTracker."""
     deps = make_bg_loop_deps(tmp_path)
     state = StateTracker(deps.config.state_file)
-    for num, path in (active_workspaces or {}).items():
-        state.set_workspace(num, path)
+    for issue_number in active_workspace_issues or set():
+        path = deps.config.workspace_path_for_issue(issue_number)
+        path.mkdir(parents=True)
+        state.set_workspace(issue_number, str(path))
 
     workspaces = MagicMock()
     workspaces.destroy = AsyncMock()
@@ -58,6 +60,8 @@ def _make_loop(
     )
     loop._issue_has_pipeline_label = AsyncMock(return_value=False)  # type: ignore[method-assign]
     loop._collect_orphaned_branches = AsyncMock(return_value=0)  # type: ignore[method-assign]
+    loop._collect_orphaned_worktrees = AsyncMock(return_value=0)  # type: ignore[method-assign]
+    loop._worktree_work_has_landed = AsyncMock(return_value=True)  # type: ignore[method-assign]
     return loop, state
 
 
@@ -69,10 +73,12 @@ class TestActiveAutoAgentWorktreePreserved:
         """Issue absent from active sets but holding an in-window auto-agent
         attempt (0<attempts<max) must NOT be swept, even though the issue is
         open with no PR (otherwise-collectable)."""
-        loop, state = _make_loop(tmp_path, active_workspaces={42: "/p/42"})
+        loop, state = _make_loop(tmp_path, active_workspace_issues={42})
         # In-flight auto-agent session: bumped before the run, not yet cleared.
         state.bump_auto_agent_attempts(42)
-        assert 0 < state.get_auto_agent_attempts(42) < loop._config.auto_agent_max_attempts
+        assert (
+            0 < state.get_auto_agent_attempts(42) < loop._config.auto_agent_max_attempts
+        )
         # Implementation counter untouched — only the auto-agent guard can save it.
         assert state.get_issue_attempts(42) == 0
         loop._get_issue_state = AsyncMock(return_value="open")  # type: ignore[method-assign]
@@ -80,6 +86,7 @@ class TestActiveAutoAgentWorktreePreserved:
         result = await loop._do_work()
 
         loop._workspaces.destroy.assert_not_awaited()
+        loop._worktree_work_has_landed.assert_not_awaited()
         assert result["skipped"] == 1
         assert 42 in state.get_active_workspaces()
 
@@ -87,7 +94,7 @@ class TestActiveAutoAgentWorktreePreserved:
     async def test_stale_worktree_still_swept(self, tmp_path: Path) -> None:
         """A genuinely-stale worktree (no attempts, closed issue) is still GC'd —
         the guard must not freeze all collection."""
-        loop, state = _make_loop(tmp_path, active_workspaces={99: "/p/99"})
+        loop, state = _make_loop(tmp_path, active_workspace_issues={99})
         # No auto-agent attempts recorded.
         assert state.get_auto_agent_attempts(99) == 0
         loop._get_issue_state = AsyncMock(return_value="closed")  # type: ignore[method-assign]
@@ -95,6 +102,11 @@ class TestActiveAutoAgentWorktreePreserved:
         result = await loop._do_work()
 
         loop._workspaces.destroy.assert_awaited_once_with(99)
+        loop._worktree_work_has_landed.assert_awaited_once_with(
+            loop._config.workspace_path_for_issue(99),
+            expected_branch=None,
+            expected_issue=99,
+        )
         assert result["collected"] >= 1
 
     @pytest.mark.asyncio
@@ -103,7 +115,7 @@ class TestActiveAutoAgentWorktreePreserved:
     ) -> None:
         """Once the auto-agent counter is exhausted (==max) the worktree is no
         longer session-owned; the guard must release it so it can't leak."""
-        loop, state = _make_loop(tmp_path, active_workspaces={7: "/p/7"})
+        loop, state = _make_loop(tmp_path, active_workspace_issues={7})
         for _ in range(loop._config.auto_agent_max_attempts):
             state.bump_auto_agent_attempts(7)
         assert state.get_auto_agent_attempts(7) == loop._config.auto_agent_max_attempts
@@ -112,6 +124,11 @@ class TestActiveAutoAgentWorktreePreserved:
         result = await loop._do_work()
 
         loop._workspaces.destroy.assert_awaited_once_with(7)
+        loop._worktree_work_has_landed.assert_awaited_once_with(
+            loop._config.workspace_path_for_issue(7),
+            expected_branch=None,
+            expected_issue=7,
+        )
         assert result["collected"] >= 1
 
     @pytest.mark.asyncio

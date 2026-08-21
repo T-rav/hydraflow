@@ -14,7 +14,7 @@ import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, TypeVar
 from urllib.parse import quote
 
 import ci_sentinels
@@ -55,6 +55,51 @@ logger = logging.getLogger("hydraflow.pr_manager")
 
 # Cache TTL for label-count queries (seconds).
 _LABEL_CACHE_TTL: int = 30
+_GIT_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+
+class _BranchPRRow(NamedTuple):
+    """Validated projection of one historical PR list row."""
+
+    head_sha: str
+    state: str
+    merged: bool
+
+
+def _parse_branch_pr_row(
+    payload: dict[str, Any], *, expected_branch: str, expected_base: str
+) -> _BranchPRRow | None:
+    """Validate one GitHub branch-history row, rejecting shape ambiguity."""
+    number = payload.get("number")
+    raw_state = payload.get("state")
+    raw_head_sha = payload.get("head_sha")
+    head_ref = payload.get("head_ref")
+    base_ref = payload.get("base_ref")
+    merged_at = payload.get("merged_at")
+    state = raw_state.upper() if isinstance(raw_state, str) else ""
+    head_sha = raw_head_sha.lower() if isinstance(raw_head_sha, str) else ""
+    required_fields_valid = (
+        type(number) is int
+        and number > 0
+        and state in {"OPEN", "CLOSED"}
+        and _GIT_OID_RE.fullmatch(head_sha) is not None
+        and head_ref == expected_branch
+        and base_ref == expected_base
+    )
+
+    merged = False
+    timestamp_valid = merged_at is None
+    if isinstance(merged_at, str) and merged_at:
+        try:
+            timestamp = datetime.fromisoformat(merged_at.replace("Z", "+00:00"))
+        except ValueError:
+            timestamp_valid = False
+        else:
+            timestamp_valid = timestamp.tzinfo is not None and state == "CLOSED"
+            merged = timestamp_valid
+    if not required_fields_valid or not timestamp_valid:
+        return None
+    return _BranchPRRow(head_sha=head_sha, state=state, merged=merged)
 
 
 def _gh_wire_labels(r: BoundaryParseResult[GhIssueListItem]) -> list[dict[str, str]]:
@@ -549,6 +594,95 @@ class PRManager(PRManagerPromotionMixin):
                 "Could not resolve open PR for branch %s", branch, exc_info=True
             )
             return None
+
+    async def get_branch_pr_state(
+        self, branch: str, head_sha: str, base_branch: str
+    ) -> str:
+        """Return PR state for the exact branch HEAD (fail-closed, #11502).
+
+        GitHub is authoritative for squash-merge history, but a branch name
+        alone is not an identity: deleted branch names can be reused after an
+        older PR merged, and the same HEAD can target another base. Query PR
+        history for the branch + integration base and accept a result only
+        when exactly one validated row carries the worktree's current
+        ``head.sha``. A full page is treated as truncated/ambiguous rather
+        than silently trusting an incomplete search.
+        """
+        resolved_state = "UNKNOWN"
+        if self._config.dry_run:
+            return resolved_state
+        normalized_branch = branch.removeprefix("refs/heads/")
+        normalized_sha = head_sha.strip().lower()
+        normalized_base = base_branch.removeprefix("refs/heads/")
+        if (
+            not normalized_branch
+            or _GIT_OID_RE.fullmatch(normalized_sha) is None
+            or not normalized_base
+        ):
+            return resolved_state
+        head_filter = (
+            f"{self._repo_owner}:{normalized_branch}"
+            if self._repo_owner
+            else normalized_branch
+        )
+        page_size = 100
+        try:
+            raw = await self._run_gh(
+                "gh",
+                "api",
+                f"repos/{self._repo}/pulls",
+                "--method",
+                "GET",
+                "--field",
+                "state=all",
+                "--field",
+                f"head={head_filter}",
+                "--field",
+                f"base={normalized_base}",
+                "--field",
+                f"per_page={page_size}",
+                "--jq",
+                (
+                    "[.[] | {number, state, merged_at, "
+                    "head_sha: .head.sha, head_ref: .head.ref, "
+                    "base_ref: .base.ref}]"
+                ),
+            )
+            results = json.loads(raw)
+            # ``per_page`` is the only page requested. Hitting the ceiling
+            # means an older exact-head row could have been omitted.
+            if (
+                isinstance(results, list)
+                and len(results) < page_size
+                and all(isinstance(row, dict) for row in results)
+            ):
+                parsed_rows = [
+                    _parse_branch_pr_row(
+                        row,
+                        expected_branch=normalized_branch,
+                        expected_base=normalized_base,
+                    )
+                    for row in results
+                ]
+                matches = [
+                    row
+                    for row in parsed_rows
+                    if row is not None and row.head_sha == normalized_sha
+                ]
+                if all(row is not None for row in parsed_rows):
+                    if not matches:
+                        resolved_state = "NONE"
+                    elif len(matches) == 1:
+                        match = matches[0]
+                        resolved_state = "MERGED" if match.merged else match.state
+        except (RuntimeError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            logger.debug(
+                "Could not resolve PR state for branch %s at HEAD %s",
+                normalized_branch,
+                normalized_sha,
+                exc_info=True,
+            )
+        return resolved_state
 
     async def branch_has_diff_from_main(self, branch: str) -> bool:
         """Return whether *branch* has commits ahead of configured main branch."""

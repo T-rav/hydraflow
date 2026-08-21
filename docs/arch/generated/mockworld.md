@@ -14,8 +14,8 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeClock** | `ClockPort` | `tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/fakes/test_fake_clock.py`<br>`tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_fidelity.py` |
 | **FakeDocker** | `DockerPort` | `tests/scenarios/fakes/test_fake_docker.py`<br>`tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeFS** | `FSPort` | `tests/scenarios/fakes/test_fake_fs.py` |
-| **FakeGit** | `GitPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_git.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_find_class_fold_scenario.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
-| **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_find_class_fold_scenario.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py` |
+| **FakeGit** | `GitPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_git.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_find_class_fold_scenario.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py`<br>`tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
+| **FakeGitHub** | `GitHubPort` | `tests/scenarios/behaviors/test_eventual_consistency.py`<br>`tests/scenarios/behaviors/test_flaky.py`<br>`tests/scenarios/behaviors/test_latency.py`<br>`tests/scenarios/behaviors/test_rate_limit.py`<br>`tests/scenarios/browser/scenarios/test_loops_browser.py`<br>`tests/scenarios/fakes/test_fake_github.py`<br>`tests/scenarios/fakes/test_mock_world.py`<br>`tests/scenarios/fuzz/test_invariants.py`<br>`tests/scenarios/test_auto_agent_redrive_scenario.py`<br>`tests/scenarios/test_caretaker_loops_part2.py`<br>`tests/scenarios/test_fidelity.py`<br>`tests/scenarios/test_find_class_fold_scenario.py`<br>`tests/scenarios/test_loops.py`<br>`tests/scenarios/test_memory_backlog_scenario.py`<br>`tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
 | **FakeHTTP** | `HTTPPort` | `tests/scenarios/fakes/test_fake_http.py` |
 | **FakeIssueFetcher** | `IssueFetcherPort` | — |
 | **FakeIssueStore** | `IssueStorePort` | `tests/scenarios/test_epic_replan_ownership_scenario.py`<br>`tests/scenarios/test_pipeline_boot_readiness_scenario.py`<br>`tests/scenarios/test_pipeline_snapshot_terminal_status_scenario.py` |
@@ -25,7 +25,7 @@ All Fake adapters under `src/mockworld/fakes/` (classes with ``_is_fake_adapter 
 | **FakeRouteBackCounter** | `RouteBackCounterPort` | — |
 | **FakeSubprocessRunner** | `SubprocessRunnerPort` | `tests/scenarios/fakes/test_fake_subprocess_runner.py` |
 | **FakeWikiCompiler** | `WikiCompilerPort` | `tests/scenarios/test_repo_wiki_compile_scenario.py` |
-| **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_supporting_fakes.py` |
+| **FakeWorkspace** | `WorkspacePort` | `tests/scenarios/fakes/test_supporting_fakes.py`<br>`tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
 
 ## Wiring
 
@@ -75,6 +75,7 @@ graph LR
     tests_scenarios_test_repo_wiki_compile_scenario_py([tests/scenarios/test_repo_wiki_compile_scenario.py]) --> FakeWikiCompiler
     FakeWorkspace -.-> WorkspacePort
     tests_scenarios_fakes_test_supporting_fakes_py([tests/scenarios/fakes/test_supporting_fakes.py]) --> FakeWorkspace
+    tests_scenarios_test_workspace_gc_landed_guard_scenario_py([tests/scenarios/test_workspace_gc_landed_guard_scenario.py]) --> FakeWorkspace
 ```
 
 <!-- arch:generated -->

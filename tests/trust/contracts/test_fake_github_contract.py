@@ -575,6 +575,21 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         stdout = _json.dumps(info.model_dump(mode="json")) + "\n"
         return FakeOutput(exit_code=0, stdout=stdout, stderr="")
 
+    if method == "get_branch_pr_state":
+        branch = str(args[0])
+        head_sha = str(args[1])
+        base_branch = str(args[2])
+        fake.add_pr(
+            number=776,
+            issue_number=1,
+            branch=branch,
+            head_sha=head_sha,
+            base_branch=base_branch,
+            merged=True,
+        )
+        state = await fake.get_branch_pr_state(branch, head_sha, base_branch)
+        return FakeOutput(exit_code=0, stdout=f"{state}\n", stderr="")
+
     if method == "list_prs_by_label":
         import json as _json
 

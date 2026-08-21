@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -41,6 +42,7 @@ _DISPATCHABLE_STAGE_LABELS = frozenset(
         "hydraflow-in-progress",
     }
 )
+_GIT_OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 class RateLimitError(Exception):
@@ -127,6 +129,10 @@ class FakePR:
     number: int
     issue_number: int
     branch: str
+    # Historical PR HEAD identity. Branch names can be reused; destructive
+    # consumers must match this SHA as well as ``branch`` (#11502).
+    head_sha: str = ""
+    base_branch: str = "main"
     merged: bool = False
     closed: bool = False
     ci_status: str = "pass"
@@ -375,6 +381,8 @@ class FakeGitHub:
         number: int,
         issue_number: int,
         branch: str,
+        head_sha: str = "",
+        base_branch: str = "main",
         ci_status: str = "pass",
         merged: bool = False,
         author: str = "fake-author",
@@ -398,6 +406,8 @@ class FakeGitHub:
             number=number,
             issue_number=issue_number,
             branch=branch,
+            head_sha=head_sha,
+            base_branch=base_branch,
             merged=merged,
             ci_status=ci_status,
             author=author,
@@ -763,6 +773,41 @@ class FakeGitHub:
             issue_number=issue_number or 0,
             branch=branch,
         )
+
+    async def get_branch_pr_state(
+        self, branch: str, head_sha: str, base_branch: str
+    ) -> str:
+        """Mirror production's exact-HEAD historical PR lookup (#11502).
+
+        A merged PR on a reused branch is deliberately ignored unless its
+        seeded base and ``head_sha`` match the caller's current integration
+        target and HEAD. Multiple exact matches are ambiguous and fail closed.
+        """
+        self._maybe_rate_limit()
+        normalized_branch = branch.removeprefix("refs/heads/")
+        normalized_sha = head_sha.strip().lower()
+        normalized_base = base_branch.removeprefix("refs/heads/")
+        if (
+            not normalized_branch
+            or _GIT_OID_RE.fullmatch(normalized_sha) is None
+            or not normalized_base
+        ):
+            return "UNKNOWN"
+        matches = [
+            pr
+            for pr in self._prs.values()
+            if pr.branch == normalized_branch
+            and pr.head_sha.lower() == normalized_sha
+            and pr.base_branch == normalized_base
+        ]
+        if not matches:
+            return "NONE"
+        if len(matches) != 1:
+            return "UNKNOWN"
+        pr = matches[0]
+        if pr.merged:
+            return "MERGED"
+        return "CLOSED" if pr.closed else "OPEN"
 
     async def branch_has_diff_from_main(self, branch: str) -> bool:
         self._maybe_rate_limit()

@@ -11,6 +11,9 @@ regression in either loader's seam wiring reddens here, without docker.
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 
 from events import EventType
@@ -64,7 +67,26 @@ async def _run(mock_world, scenario):
 
 @pytest.mark.asyncio
 async def test_s65_workspace_gc_collects_seeded_stale_worktree(mock_world) -> None:
-    _seed, stats = await _run(mock_world, s65)
+    worktree = mock_world.harness.config.workspace_path_for_issue(s65._ISSUE)
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text("gitdir: fake\n")
+
+    async def git_identity(*cmd: str, cwd: object = None, **_kwargs: object) -> str:
+        if cmd[:3] == ("git", "rev-parse", "--show-toplevel"):
+            return str(Path(str(cwd)).resolve())
+        if cmd[:3] == ("git", "status", "--porcelain=v2"):
+            return f"# branch.oid {'a' * 40}\n# branch.head agent/issue-{s65._ISSUE}\n"
+        if cmd[:2] == ("git", "rev-list"):
+            return "0\n"
+        if cmd[:3] in {
+            ("git", "branch", "--list"),
+            ("git", "worktree", "list"),
+        }:
+            return ""
+        raise AssertionError(f"unexpected git command: {cmd}")
+
+    with patch("workspace_gc_loop.run_subprocess", side_effect=git_identity):
+        _seed, stats = await _run(mock_world, s65)
 
     assert stats["workspace_gc"]["collected"] >= 1
     # The world shows the side effect, not just the counter.
