@@ -15,7 +15,7 @@ from config import AUTO_AGENT_BRANCH_PREFIX, Credentials, HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
 from issue_state import issue_state_is_resolved
 from state import StateTracker
-from subprocess_util import run_subprocess
+from subprocess_util import run_subprocess, run_subprocess_result
 
 if TYPE_CHECKING:
     from ports import PRPort, WorkspacePort
@@ -541,9 +541,17 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         Never reaps a worktree that: is younger than ``min_age``; has
         uncommitted changes; belongs to an active/HITL/in-pipeline/in-retry
         issue or an issue whose state is unknown (via ``_is_safe_to_gc``); or
-        has unique commits not yet on the integration branch. A worktree whose
-        branch cannot be attributed to an issue is reaped only when it is
-        provably empty (0 unique commits + clean) and older than ``min_age``.
+        has work that has not landed on the integration branch. The unlanded-
+        work guard applies uniformly regardless of issue state — a closed
+        issue (including closed-as-not-planned/duplicate/wontfix) is not
+        proof its branch's commits were pushed or merged (#11503). "Landed"
+        tolerates squash merges: ``_worktree_has_unmerged_commits`` compares
+        ancestry (misses squash merges forever, since the squashed commit
+        hash never lands on the integration branch); when it reports unique
+        commits, ``_worktree_work_has_landed`` falls back to a content
+        comparison before the worktree is kept. A worktree whose branch
+        cannot be attributed to an issue is reaped only when it is provably
+        empty (0 unique commits + clean) and older than ``min_age``.
         """
         # min_age guard — never reap a worktree created mid-run.
         if self._worktree_too_new(path):
@@ -554,27 +562,14 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             logger.debug("GC: worktree %s has uncommitted changes — skipping", path)
             return False
 
-        if issue_number is not None:
+        if issue_number is not None and not await self._is_safe_to_gc(issue_number):
             # Reuse the battle-tested reap policy verbatim.
-            if not await self._is_safe_to_gc(issue_number):
-                return False
-            # A closed issue is authoritatively merged/abandoned. An
-            # open-but-abandoned issue still needs the unmerged-commit guard so
-            # unpushed work is never destroyed (#10459/#6413 invariant).
-            state = await self._get_issue_state(issue_number)
-            if state != "closed" and await self._worktree_has_unmerged_commits(path):
-                logger.debug(
-                    "GC: worktree %s (open issue #%d) has unmerged commits — skipping",
-                    path,
-                    issue_number,
-                )
-                return False
-        # Un-parseable / detached: reap only if provably empty.
-        elif await self._worktree_has_unmerged_commits(path):
-            logger.debug(
-                "GC: unattributable worktree %s has unique commits — skipping",
-                path,
-            )
+            return False
+
+        if await self._worktree_has_unmerged_commits(
+            path
+        ) and not await self._worktree_work_has_landed(path):
+            logger.debug("GC: worktree %s has unlanded work — skipping", path)
             return False
 
         await self._reap_worktree(path, branch, issue_number)
@@ -675,6 +670,33 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             return int(out.strip()) > 0
         except ValueError:
             return True
+
+    async def _worktree_work_has_landed(self, path: Path) -> bool:
+        """True when the worktree's tree content is already reflected on the
+        integration branch, via ``git diff --quiet origin/<base> HEAD``.
+
+        Content comparison (not ancestry) so a squash-merged branch — whose
+        original commits never appear in ``origin/<base>``'s history, so
+        ``_worktree_has_unmerged_commits`` reports them as unmerged forever —
+        is still recognized as landed once its content converges to zero
+        diff. Any failure (unknown ref, timeout, git error) fails closed —
+        assume NOT landed, so the caller keeps treating the worktree as
+        carrying live, unlanded work.
+        """
+        base = self._config.base_branch()
+        try:
+            result = await run_subprocess_result(
+                "git",
+                "diff",
+                "--quiet",
+                f"origin/{base}",
+                "HEAD",
+                cwd=path,
+                gh_token=self._credentials.gh_token,
+            )
+        except RuntimeError:
+            return False
+        return result.returncode == 0
 
     async def _reap_worktree(
         self, path: Path, branch: str | None, issue_number: int | None

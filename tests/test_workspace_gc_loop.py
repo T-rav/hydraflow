@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from events import EventType
+from execution import SimpleResult
 from mockworld.fakes.fake_github import FakeGitHub
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
@@ -1552,6 +1553,36 @@ class TestWorktreeGuards:
         ):
             assert await loop._worktree_has_unmerged_commits(Path("/wt")) is True
 
+    @pytest.mark.asyncio
+    async def test_landed_true_when_diff_clean(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        with patch(
+            "workspace_gc_loop.run_subprocess_result",
+            new_callable=AsyncMock,
+            return_value=SimpleResult(returncode=0),
+        ):
+            assert await loop._worktree_work_has_landed(Path("/wt")) is True
+
+    @pytest.mark.asyncio
+    async def test_landed_false_when_diff_nonempty(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        with patch(
+            "workspace_gc_loop.run_subprocess_result",
+            new_callable=AsyncMock,
+            return_value=SimpleResult(returncode=1),
+        ):
+            assert await loop._worktree_work_has_landed(Path("/wt")) is False
+
+    @pytest.mark.asyncio
+    async def test_landed_fails_closed_on_error(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        with patch(
+            "workspace_gc_loop.run_subprocess_result",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("git boom"),
+        ):
+            assert await loop._worktree_work_has_landed(Path("/wt")) is False
+
     def test_too_new_false_when_min_age_zero(self, tmp_path: Path) -> None:
         loop, _s, _e = _make_loop(tmp_path, worktree_gc_min_age_seconds=0)
         assert loop._worktree_too_new(tmp_path) is False
@@ -1648,6 +1679,84 @@ class TestCollectOrphanedWorktrees:
             count = await loop._collect_orphaned_worktrees()
         assert count == 0
         assert removed == []
+
+    @staticmethod
+    def _diff_mock(returncode: int) -> AsyncMock:
+        """A fake run_subprocess_result returning a fixed SimpleResult.returncode
+        for the ``git diff --quiet`` landed-check call."""
+
+        async def _fn(*_cmd: str, **_kw: object) -> SimpleResult:
+            return SimpleResult(returncode=returncode)
+
+        return AsyncMock(side_effect=_fn)
+
+    @pytest.mark.asyncio
+    async def test_keeps_closed_issue_with_unlanded_commits(
+        self, tmp_path: Path
+    ) -> None:
+        """#11503: a closed issue must NOT bypass the unmerged-commit guard.
+
+        An issue closed as not-planned/duplicate/wontfix is not proof its
+        branch's commits were pushed or merged — the worktree must still be
+        kept when its content has not landed on the integration branch.
+        """
+        root = tmp_path / "roots"
+        wt = root / "unlanded"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/fix/thing-10698\n"
+        removed: list[str] = []
+        with (
+            patch(
+                "workspace_gc_loop.run_subprocess",
+                self._dispatch(worktrees=porcelain, revlist="2", removed=removed),
+            ),
+            patch(
+                "workspace_gc_loop.run_subprocess_result",
+                self._diff_mock(returncode=1),  # diff exists — not landed
+            ),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 0
+        assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_reaps_closed_issue_with_squash_landed_commits(
+        self, tmp_path: Path
+    ) -> None:
+        """A squash-merged branch has unique commits by ancestry (rev-list)
+        that never appear in ``origin/<base>``, but its content is fully
+        landed — the content-based landed check must still allow the reap.
+        """
+        root = tmp_path / "roots"
+        wt = root / "squashed"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        loop._is_safe_to_gc = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        porcelain = f"worktree {wt}\nHEAD abc\nbranch refs/heads/fix/thing-10698\n"
+        removed: list[str] = []
+        deleted: list[str] = []
+        with (
+            patch(
+                "workspace_gc_loop.run_subprocess",
+                self._dispatch(
+                    worktrees=porcelain,
+                    revlist="2",
+                    removed=removed,
+                    deleted_branches=deleted,
+                ),
+            ),
+            patch(
+                "workspace_gc_loop.run_subprocess_result",
+                self._diff_mock(returncode=0),  # no diff — landed via squash
+            ),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 1
+        assert removed == [str(wt.resolve())]
 
     @pytest.mark.asyncio
     async def test_keeps_open_issue_with_unmerged_commits(self, tmp_path: Path) -> None:
@@ -1801,13 +1910,48 @@ class TestCollectOrphanedWorktrees:
         self._real_phase5(loop)
         porcelain = f"worktree {wt}\nHEAD abc\ndetached\n"
         removed: list[str] = []
-        with patch(
-            "workspace_gc_loop.run_subprocess",
-            self._dispatch(worktrees=porcelain, revlist="2", removed=removed),
+        with (
+            patch(
+                "workspace_gc_loop.run_subprocess",
+                self._dispatch(worktrees=porcelain, revlist="2", removed=removed),
+            ),
+            patch(
+                "workspace_gc_loop.run_subprocess_result",
+                self._diff_mock(returncode=1),  # diff exists — not landed
+            ),
         ):
             count = await loop._collect_orphaned_worktrees()
         assert count == 0
         assert removed == []
+
+    @pytest.mark.asyncio
+    async def test_reaps_unparseable_with_squash_landed_commits(
+        self, tmp_path: Path
+    ) -> None:
+        """The collapsed guard (#11503) extends the content-based landed
+        fallback to the unattributed path too — a detached/unparseable
+        worktree with unique commits by ancestry, but zero content diff, is
+        reaped rather than kept forever."""
+        root = tmp_path / "roots"
+        wt = root / "spike"
+        wt.mkdir(parents=True)
+        loop, _s, _e = _make_loop(tmp_path, worktree_gc_roots=[str(root)])
+        self._real_phase5(loop)
+        porcelain = f"worktree {wt}\nHEAD abc\ndetached\n"
+        removed: list[str] = []
+        with (
+            patch(
+                "workspace_gc_loop.run_subprocess",
+                self._dispatch(worktrees=porcelain, revlist="2", removed=removed),
+            ),
+            patch(
+                "workspace_gc_loop.run_subprocess_result",
+                self._diff_mock(returncode=0),  # no diff — landed via squash
+            ),
+        ):
+            count = await loop._collect_orphaned_worktrees()
+        assert count == 1
+        assert removed == [str(wt.resolve())]
 
     @pytest.mark.asyncio
     async def test_skips_worktree_outside_allowed_roots(self, tmp_path: Path) -> None:

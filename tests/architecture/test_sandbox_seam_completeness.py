@@ -89,6 +89,10 @@ GRANDFATHERED_SPAWN_BASELINE: dict[str, int] = {
     "src/workspace_gc_loop.py::WorkspaceGCLoop._list_git_worktrees::run_subprocess": 1,
     "src/workspace_gc_loop.py::WorkspaceGCLoop._worktree_is_dirty::run_subprocess": 1,
     "src/workspace_gc_loop.py::WorkspaceGCLoop._worktree_has_unmerged_commits::run_subprocess": 1,
+    # #11503: content-based landed check (git diff --quiet), added alongside
+    # _worktree_has_unmerged_commits above — same tolerated local-git class
+    # (no network reach), same Phase 5 config-disable in the sandbox.
+    "src/workspace_gc_loop.py::WorkspaceGCLoop._worktree_work_has_landed::run_subprocess_result": 1,
     "src/workspace_gc_loop.py::WorkspaceGCLoop._reap_worktree::run_subprocess": 2,
 }
 
