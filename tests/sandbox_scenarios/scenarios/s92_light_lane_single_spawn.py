@@ -115,13 +115,20 @@ def _merged_outcome(payload: dict) -> dict | None:
 
 
 async def assert_outcome(api, page) -> None:
-    # 1. The fake spawn ran: the attempt counter only the preflight loop bumps
-    #    went from 0 to 1 (claim label → spawn).
-    await api.wait_until(
+    # 1. The fake spawn ran EXACTLY once: the attempt counter only the
+    #    preflight loop bumps went 0 → 1 (claim label → spawn). Assert on the
+    #    first observation carrying it — the merged handler prunes the
+    #    issue's convergence ledger (state/_convergence.py), so a post-merge
+    #    re-read shows 0 again. A second spawn can't follow this read: the
+    #    resolve released the claim label, so the intake poll no longer sees
+    #    the issue.
+    state = await api.wait_until(
         "/api/state",
         lambda payload: _auto_agent_attempts(payload) >= 1,
         timeout=150.0,
     )
+    attempts = _auto_agent_attempts(state)
+    assert attempts == 1, f"expected exactly one light-lane spawn, saw {attempts}"
 
     # 2. The PR the spawn minted went through review and merged — the same
     #    IssueHistoryEntry payload the Outcomes UI consumes (as in s01).
@@ -136,13 +143,7 @@ async def assert_outcome(api, page) -> None:
         f"merged outcome carries no PR number (no PR existed?): {outcome!r}"
     )
 
-    # 3. Exactly ONE spawn, re-read after the merge so a late re-poll of the
-    #    claim label (crash-recovery path) would be visible as a second bump.
-    state = await api.get("/api/state")
-    attempts = _auto_agent_attempts(state)
-    assert attempts == 1, f"expected exactly one light-lane spawn, saw {attempts}"
-
-    # 4. No human hand-off: the issue never entered the HITL stage.
+    # 3. No human hand-off: the issue never entered the HITL stage.
     pipeline = await api.get("/api/pipeline")
     hitl = (pipeline.get("stages") or {}).get("hitl") or []
     assert all(entry.get("issue_number") != _ISSUE for entry in hitl), (
