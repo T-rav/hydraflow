@@ -106,7 +106,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover gateway-coverage smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
+.PHONY: help run dev factory worktree env dry-run clean clean-assets compact coverage cover gateway-coverage smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -119,6 +119,7 @@ help:
 	@echo "  make dev            Alias for make run"
 	@echo "  make dry-run        Dry run (log actions without executing)"
 	@echo "  make clean          Remove all worktrees and state (API with offline fallback)"
+	@echo "  make worktree DIR= BRANCH=  Safely create/verify a git worktree (scripts/hf_worktree.sh)"
 	@echo "  make status         Show current HydraFlow state"
 	@echo "  make test           Run unit tests"
 	@echo "  make test-fast      Run unit tests (-x --tb=short)"
@@ -195,6 +196,12 @@ dev: run
 factory:
 	@echo "$(BLUE)Starting HydraFlow factory in an isolated workspace (dev checkout stays clean)$(RESET)"
 	@$(HYDRAFLOW_DIR)scripts/run-factory-isolated.sh
+
+# Safe `git worktree add` wrapper (#11501) -- fails loudly instead of
+# silently proceeding on the wrong branch when DIR already exists on a
+# different branch. See scripts/hf_worktree.sh for the full contract.
+worktree:
+	@$(HYDRAFLOW_DIR)scripts/hf_worktree.sh $(DIR) $(BRANCH)
 
 dry-run:
 	@echo "$(BLUE)HydraFlow dry run (server mode)$(RESET)"
