@@ -168,6 +168,19 @@ class BaseRunner:
     _AUTH_RETRY_MAX = 3
     _AUTH_RETRY_BASE_DELAY = 5.0  # seconds
 
+    def _spawn_timeout(self, timeout_s: int | None) -> int:
+        """Resolve the wall-clock budget for one spawn (#11568).
+
+        ``config.agent_timeout`` is both the default (``timeout_s`` is
+        ``None``/0) and the ceiling (anything larger is clamped). Callers
+        that tier the budget — the implement phase, from triage's
+        complexity score — can only ever shorten it here.
+        """
+        ceiling = int(self._config.agent_timeout)
+        if not timeout_s:
+            return ceiling
+        return min(int(timeout_s), ceiling)
+
     async def _execute(
         self,
         cmd: list[str],
@@ -179,6 +192,7 @@ class BaseRunner:
         telemetry_stats: Mapping[str, object] | None = None,
         issue_labels: Sequence[str] | None = None,
         telemetry_source: str | None = None,
+        timeout_s: int | None = None,
     ) -> str:
         """Run a claude subprocess and stream its output.
 
@@ -203,6 +217,13 @@ class BaseRunner:
         on any ``self._execute(...)`` call in a runner module that omits the
         kwarg. Omitting it silently disables label-based elevation for that
         spawn; the repo-declared class is enforced either way.
+
+        *timeout_s* (#11568) is a per-spawn wall-clock budget — the implement
+        phase passes its complexity-tiered value here. ``None`` (every other
+        caller) means ``config.agent_timeout``, which also stays the hard
+        ceiling: a larger *timeout_s* is clamped, never honoured. The same
+        value bounds the stream, the harness-env credential lease, and the
+        gateway-key renewal so a short spawn never holds a long lease.
         """
         # CH-6 data-governance gate (#9734): redact/block BEFORE any content
         # reaches the vendor subprocess. Regulated-class blocks raise
@@ -291,13 +312,14 @@ class BaseRunner:
             )
             provider = rerouted
         _, resolved_model = parse_command_tool_model(cmd)
+        spawn_timeout = self._spawn_timeout(timeout_s)
         harness_env = await resolve_harness_env(
             provider,
             self._config,
             model=resolved_model,
             source=str(event_data.get("source", self._phase_name)),
             session_id=getattr(self._bus, "current_session_id", None),
-            timeout_seconds=self._config.agent_timeout,
+            timeout_seconds=spawn_timeout,
             issue_number=_as_opt_int(raw_issue),
             pr_number=_as_opt_int(event_data.get("pr")),
         )
@@ -324,7 +346,7 @@ class BaseRunner:
                         logger=self._log,
                         config=StreamConfig(
                             on_output=on_output,
-                            timeout=self._config.agent_timeout,
+                            timeout=spawn_timeout,
                             runner=spawn_runner,
                             usage_stats=usage_stats,
                             gh_token=self._credentials.gh_token,
@@ -353,7 +375,7 @@ class BaseRunner:
                         await asyncio.sleep(delay)
                         await renew_gateway_key_if_needed(
                             harness_env,
-                            min_validity_seconds=self._config.agent_timeout,
+                            min_validity_seconds=spawn_timeout,
                         )
                     else:
                         self._log.error(

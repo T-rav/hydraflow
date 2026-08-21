@@ -434,6 +434,7 @@ class TestSpecReviewFeedsNextAttempt:
             human_guidance: str = "",
             attempt_number: int = 0,
             known_traps: str = "",
+            timeout_s: int | None = None,
         ) -> WorkerResult:
             captured.append(prior_failure)
             return WorkerResultFactory.create(
@@ -484,6 +485,7 @@ class TestSpecReviewFeedsNextAttempt:
             human_guidance: str = "",
             attempt_number: int = 0,
             known_traps: str = "",
+            timeout_s: int | None = None,
         ) -> WorkerResult:
             captured.append(prior_failure)
             return WorkerResultFactory.create(
@@ -515,6 +517,10 @@ class TestHandleImplementationResultDispatchesReview:
     async def test_zero_commit_failure_triggers_reviewer(self, tmp_path: Path) -> None:
         """The end-to-end failure-result handler dispatches the reviewer for
         zero-commit failures (the canonical zero-diff failure mode).
+
+        With the zero-commit abort enabled (the #11568 default) the first
+        zero-commit result routes to diagnose instead and the reviewer is
+        never spawned; this pins the abort-disabled W5 path.
         """
         from implement_spec_reviewer import SpecReviewResult
 
@@ -523,7 +529,7 @@ class TestHandleImplementationResultDispatchesReview:
             repo_root=tmp_path / "repo",
             workspace_base=tmp_path / "worktrees",
             state_file=tmp_path / "state.json",
-        )
+        ).model_copy(update={"implement_no_progress_abort_attempts": 0})
         issue = TaskFactory.create(id=4242)
         result = WorkerResultFactory.create(
             issue_number=4242,

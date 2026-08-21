@@ -168,6 +168,7 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
         human_guidance: str = "",
         attempt_number: int = 0,
         known_traps: str = "",
+        timeout_s: int | None = None,
     ) -> WorkerResult:
         """Run the implementation agent for *task*.
 
@@ -179,6 +180,11 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
         ``attempt_number`` is the 1-based issue attempt this run represents
         (0 = unknown); on cycling retries it feeds the diverse-retry
         directive in the prior-failure prompt section.
+
+        ``timeout_s`` (#11568) is the complexity-tiered wall-clock budget
+        for the main build spawn, resolved by the implement phase from
+        triage's complexity score. ``None`` means ``agent_timeout`` — which
+        stays the ceiling either way (``BaseRunner._execute`` clamps).
 
         Returns a :class:`WorkerResult` with success/failure info.
         """
@@ -221,6 +227,7 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
                 {"issue": task.id, "source": "implementer"},
                 telemetry_stats=prompt_stats,
                 issue_labels=task.tags,
+                timeout_s=timeout_s,
             )
             result.transcript = transcript
 

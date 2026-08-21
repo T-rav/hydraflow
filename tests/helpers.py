@@ -909,6 +909,12 @@ class PipelineHarness:
         self.fetcher = AsyncMock()
         self.store = IssueStore(self.config, self.fetcher, self.bus)
         self.stop_event = asyncio.Event()
+        # The same single cache production wires into ImplementPhase (#11568):
+        # scenarios record a triage classification here and the real phase
+        # reads the complexity tier back through it.
+        from issue_cache import IssueCache
+
+        self.issue_cache = IssueCache(self.config.data_path("cache"), enabled=True)
 
         self.prs = AsyncMock()
         self._setup_pr_manager_mocks()
@@ -984,6 +990,7 @@ class PipelineHarness:
             "store": self.store,
             "stop_event": self.stop_event,
             "beads_manager": beads_manager,
+            "issue_cache": self.issue_cache,
         }
         self.implement_phase = ImplementPhase(
             agents=self.agents,
@@ -1353,6 +1360,7 @@ def make_implement_phase(
     push_return=True,
     create_pr_return=None,
     spec_reviewer=None,
+    issue_cache=None,
 ):
     """Build an ImplementPhase with standard mocks.
 
@@ -1460,6 +1468,7 @@ def make_implement_phase(
         store=mock_store,
         stop_event=stop_event,
         spec_reviewer=spec_reviewer,
+        issue_cache=issue_cache,
     )
 
     return phase, mock_wt, mock_prs

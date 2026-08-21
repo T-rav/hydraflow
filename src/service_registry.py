@@ -1126,6 +1126,9 @@ def build_services(
         transcript_summarizer=summarizer,
         precondition_gate=precondition_gate,
         spec_reviewer=spec_reviewer,
+        # #11568: the same single IssueCache (see #8790 F1 note above) sizes
+        # the implement timeout from triage's complexity score.
+        issue_cache=issue_cache,
     )
 
     from metrics_manager import MetricsManager

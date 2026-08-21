@@ -536,3 +536,29 @@ class IssueCache:
                 issue_id,
                 exc_info=True,
             )
+
+
+def classification_complexity(cache: IssueCache | None, issue_id: int) -> int | None:
+    """Triage's ``complexity_score`` for *issue_id* from *cache*; ``None`` if unknown.
+
+    The ONE reader every size-tiered consumer shares — plan review tiering
+    (#11304), lite planning (#11305) and the tiered implement timeout
+    (#11568) — so "how complex did triage say this is" has a single
+    definition. ``None`` (never a sentinel int) marks no cache / no
+    classification record / an unreadable payload, so each consumer fails
+    toward its own conservative default (full review, full plan, full
+    timeout). A non-cache double that lacks the method reads as unknown.
+    """
+    if cache is None:
+        return None
+    try:
+        record = cache.latest_classification(issue_id)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    payload = getattr(record, "payload", None)
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return int(payload["complexity_score"])
+    except (KeyError, TypeError, ValueError):
+        return None

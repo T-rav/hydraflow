@@ -176,6 +176,9 @@ class _FakeAgentRunner(_ScriptedRunner):
         super().__init__()
         self._streams: dict[int, list[Any]] = {}
         self._prior_failures: dict[int, list[str]] = {}
+        # #11568: every ``run`` spawn's kwargs, keyed by issue — scenarios
+        # count attempts and assert the tiered ``timeout_s`` reached the seam.
+        self._run_calls: dict[int, list[dict[str, Any]]] = {}
         self.commit_pending_snapshots: list[tuple[int, bytes]] = []
         self._fail_next_commit_pending = False
 
@@ -191,11 +194,20 @@ class _FakeAgentRunner(_ScriptedRunner):
         human_guidance: str = "",
         attempt_number: int = 0,
         known_traps: str = "",
+        timeout_s: int | None = None,
     ) -> Any:
         issue_number = getattr(task, "id", getattr(task, "number", 0))
         if prior_failure:
             self._prior_failures.setdefault(issue_number, []).append(prior_failure)
-        return self._pop(
+        self._run_calls.setdefault(issue_number, []).append(
+            {
+                "branch": branch,
+                "attempt_number": attempt_number,
+                "timeout_s": timeout_s,
+                "prior_failure": prior_failure,
+            }
+        )
+        result = self._pop(
             issue_number,
             lambda: WorkerResultFactory.create(
                 issue_number=issue_number,
@@ -205,6 +217,20 @@ class _FakeAgentRunner(_ScriptedRunner):
                 commits=1,
             ),
         )
+        # A scripted exception instance is raised rather than returned, so a
+        # scenario can script the credit-cap / auth-failure spawn outcomes
+        # (``CreditExhaustedError`` etc.) the real runner re-raises (#11568).
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    def run_calls_for(self, issue_number: int) -> list[dict[str, Any]]:
+        """Every ``run`` spawn recorded for *issue_number*, in order (#11568)."""
+        return list(self._run_calls.get(issue_number, []))
+
+    def timeouts_seen_for(self, issue_number: int) -> list[int | None]:
+        """The ``timeout_s`` each ``run`` spawn for *issue_number* received."""
+        return [call["timeout_s"] for call in self._run_calls.get(issue_number, [])]
 
     def script_stream(self, issue_number: int, events: list[Any]) -> None:
         self._streams[issue_number] = list(events)

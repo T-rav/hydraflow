@@ -58,6 +58,7 @@ class AgentRunnerPort(Protocol):
         human_guidance: str = "",
         attempt_number: int = 0,
         known_traps: str = "",
+        timeout_s: int | None = None,
     ) -> Any: ...
 
 
