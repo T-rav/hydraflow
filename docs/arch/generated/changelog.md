@@ -6,16 +6,18 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `08c8553` — Fixes #11441: Drift detection engine + API drift block (salvage) *(2026-08-20)*
+- `7838527` — chore(rc): merge main into rc/2026-08-21-0200 to clear the DIRTY promotion *(2026-08-20)*
+- `9e85063` — Fixes #11441: token-drift engine + API drift block (read-only salvage) (#11495) (#11495) *(2026-08-20)*
 - `1ae1c2e` — Fixes #11425: land the true remainder of the fake-fidelity hardening pass (#11488) (#11488) *(2026-08-20)*
 - `d729b3b` — fix(planner): guard epic replans against stale ownership (#11482) (#11484) (#11484) *(2026-08-20)*
 - `6013271` — feat: add LLM gateway session tap (#11477) (#11477) *(2026-08-20)*
 - `daa3c82` — Fixes #11418: promote StaleIssueLoop/ReportIssueLoop/service_registry reach-throughs to PRPort methods *(2026-08-18)*
-- `cfa3338` — Fixes #11420: FakeLLM's nested runner stand-ins have drifted from t... (#11445) (#11445) *(2026-08-17)*
+- `6e036a0` — chore(arch): refresh generated artifacts after the main merge *(2026-08-18)*
 - `5280a46` — chore(arch): refresh generated artifacts after the main merge *(2026-08-18)*
 - `194befa` — chore(rc): merge main into rc/2026-08-18-0649 to clear the DIRTY promotion *(2026-08-18)*
 - `a3eef8b` — chore(arch): refresh generated artifacts after the main merge *(2026-08-18)*
 - `9ef92ab` — chore(rc): merge main into rc/2026-08-18-0220 to clear the DIRTY promotion *(2026-08-18)*
+- `cfa3338` — Fixes #11420: FakeLLM's nested runner stand-ins have drifted from t... (#11445) (#11445) *(2026-08-17)*
 - `7cba8c3` — Fixes #11416: MockWorld repo_wiki loop registration never wires a w... (#11428) (#11428) *(2026-08-17)*
 - `b0aa945` — feat(quality): host-wide advisory lock so concurrent suites queue, not race (#11219) (#11400) (#11400) *(2026-08-17)*
 
@@ -518,16 +520,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `6b74497` — Refs #8932: add onboarding design chat slice *(2026-05-22)*
 - `091f166` — Refs #8931: add onboarding wizard UI slice *(2026-05-22)*
 - `e439049` — Refs #8930: add onboarding materialize API slice *(2026-05-22)*
-- `e5e3dbd` — Refs #8930: add onboarding draft API foundation *(2026-05-22)*
-- `52784fb` — Fixes #8368: resolve dashboard a11y violations *(2026-05-22)*
-- `3381e36` — Refs #8475: preserve managed repo config models *(2026-05-22)*
-- `22b8cee` — Fixes #8617: expose repo pipeline enabled state *(2026-05-22)*
-- `90279ad` — Fixes #8651: collapse crowded pipeline dots *(2026-05-22)*
-- `1e94520` — Fixes #8674: refresh arch artifacts before bot push *(2026-05-22)*
-- `700bc6b` — Fixes #8658: update Opus 4.7 pricing *(2026-05-22)*
-- `72fea53` — Fixes #8979: fold epic sweep into monitor *(2026-05-22)*
-- `527bea0` — Fixes #8928: make issue creation failure explicit *(2026-05-22)*
-- `e7d4296` — Fixes #8481: register caretaker escalation labels *(2026-05-22)*
 
 
 <!-- arch:generated -->
