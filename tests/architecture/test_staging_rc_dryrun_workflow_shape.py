@@ -59,6 +59,9 @@ CACHE_WRITING_RUN_MARKERS = (
 CACHE_WRITING_ACTIONS = ("actions/cache",)
 #: Inputs that turn a setup-* action into a cache writer.
 CACHE_ENABLING_INPUTS = ("cache", "enable-cache", "cache-dependency-path")
+#: setup-* actions whose caching defaults to ON — unlike setup-python/setup-node
+#: (opt-in via ``cache:``), these write a cache unless explicitly disabled.
+DEFAULT_CACHING_ACTIONS = ("actions/setup-go@",)
 
 
 def _load(path: Path) -> dict:
@@ -89,6 +92,12 @@ def _is_cache_writing(step: dict) -> bool:
     uses = str(step.get("uses", ""))
     if uses.startswith(CACHE_WRITING_ACTIONS):
         return True
+    if uses.startswith(DEFAULT_CACHING_ACTIONS):
+        # Authoritative for this prefix: presence of `cache:` alone isn't
+        # enough here (unlike the generic setup-* branch below) — the default
+        # is ON, so only an explicit `false` turns it off.
+        inputs = step.get("with") or {}
+        return str(inputs.get("cache", "true")).strip().lower() != "false"
     if "setup-" in uses:
         inputs = step.get("with") or {}
         if any(key in inputs for key in CACHE_ENABLING_INPUTS):
@@ -353,6 +362,36 @@ class TestReportJobStaysPinnedToTheTestedCommit:
             raw_workflow, _job_line_span(raw_workflow, "report")
         )
         assert marked and all(marked)
+
+
+class TestCacheWritingClassifier:
+    """The fleet sweep is only as good as what it recognizes as cache-writing."""
+
+    def test_setup_go_is_cache_writing_with_no_explicit_input(self) -> None:
+        # actions/setup-go defaults `cache: true` — unlike setup-python/
+        # setup-node, it writes a cache with no `with:` block at all.
+        assert _is_cache_writing({"uses": "actions/setup-go@v5"})
+
+    def test_setup_go_with_cache_explicitly_disabled_is_not_cache_writing(
+        self,
+    ) -> None:
+        assert not _is_cache_writing(
+            {"uses": "actions/setup-go@v5", "with": {"cache": False}}
+        )
+
+    def test_real_fleet_setup_go_usage_is_classified_as_cache_writing(self) -> None:
+        # Guard against the classifier testing only synthetic cases: this must
+        # actually catch the setup-go step already living in quality.yml.
+        quality = _load(WORKFLOW_DIR / "quality.yml")
+        offenders = [
+            s
+            for job in quality["jobs"].values()
+            if isinstance(job, dict)
+            for s in _steps(job)
+            if str(s.get("uses", "")).startswith("actions/setup-go@")
+        ]
+        assert offenders, "sanity: quality.yml must still use actions/setup-go"
+        assert all(_is_cache_writing(s) for s in offenders)
 
 
 class TestFleetSweep:
