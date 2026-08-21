@@ -74,13 +74,12 @@ async def test_claimed_ready_issue_is_skipped_by_a_second_actor(tmp_path) -> Non
     )
 
     # Build ends: Actor A releases the claim (real code). The issue is now a
-    # plain ready issue again, and a fresh actor picks it.
+    # plain ready issue again, and the already-running actor refreshes it.
     await impl._release_claim(_ISSUE)
     assert _CLAIM not in world.github.issue(_ISSUE).labels
 
-    actor_c = _second_actor_store()
-    actor_c._route_issues([_read_from_github(world, _ISSUE)])
-    assert [t.id for t in actor_c.get_implementable(10)] == [_ISSUE], (
+    actor_b._route_issues([_read_from_github(world, _ISSUE)])
+    assert [t.id for t in actor_b.get_implementable(10)] == [_ISSUE], (
         "once the claim is cleared the issue must be re-pickable — never stuck"
     )
 

@@ -324,6 +324,7 @@ class IssueStore:
                 continue
             current_stage = self._find_queue_stage(issue_number)
             if current_stage == stage:
+                self._refresh_queued_task(stage, task)
                 continue
             if current_stage is not None:
                 self._remove_from_queue(current_stage, issue_number)
@@ -337,8 +338,9 @@ class IssueStore:
         - Each task goes to the most advanced stage matching its tags.
         - Tasks already active are not re-queued.
         - Tasks that changed tags are moved between queues.
-        - Existing queued items are never evicted by polling.  The pipeline
-          itself (mark_complete / enqueue_transition) handles removal.
+        - Same-stage queued items receive fresh authoritative metadata without
+          changing position. Polling never evicts them; the pipeline itself
+          (mark_complete / enqueue_transition) handles removal.
         """
         stage_map = self._compute_stage_map(tasks)
         incoming_ids = set(stage_map.keys())
@@ -386,6 +388,14 @@ class IssueStore:
                 t for t in self._queues[stage] if t.id != issue_number
             )
             self._queue_members[stage].discard(issue_number)
+
+    def _refresh_queued_task(self, stage: IssueStoreStage, task: Task) -> None:
+        """Replace one queued task's authoritative payload without moving it."""
+        queue = self._queues[stage]
+        for index, queued in enumerate(queue):
+            if queued.id == task.id:
+                queue[index] = task
+                return
 
     def _remove_from_all_queues(self, issue_number: int) -> None:
         """Remove an issue from all regular queues."""
