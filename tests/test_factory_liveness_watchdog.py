@@ -651,11 +651,12 @@ class TestRebootFactoryViaLaunchdLabel:
             dry_run=False,
         )
         assert ok is True
-        assert runs == [
-            ["launchctl", "kickstart", "-k", "gui/501/com.hydraflow.factory"]
-        ]
-        assert terminated == []  # launchd owns the kill
-        assert spawned is False  # and the relaunch
+        # One kickstart; launchd owns both the kill and the relaunch.
+        assert (runs, terminated, spawned) == (
+            [["launchctl", "kickstart", "-k", "gui/501/com.hydraflow.factory"]],
+            [],
+            False,
+        )
 
     def test_label_kickstart_failure_returns_false(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

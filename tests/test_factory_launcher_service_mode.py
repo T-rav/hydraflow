@@ -141,17 +141,26 @@ def test_service_mode_runs_in_place_and_syncs_to_origin(service_env) -> None:
     result = _run_service(service_env)
 
     assert result.returncode == 0, result.stderr
-    # DEV_ROOT == WORKSPACE was accepted (no "dev checkout itself" abort) ...
-    assert "dev checkout itself" not in result.stderr
-    # ... the workspace was force-synced to origin/staging ...
-    assert _git(workspace, "rev-parse", "HEAD").stdout.strip() == origin_head
-    assert (workspace / "README").read_text() == "v2\n"
-    assert not (workspace / "review_logs").exists()
-    # ... the workspace's own gitignored .env is kept (nothing to copy from) ...
-    assert (workspace / ".env").read_text() == "TOKEN=secret\n"
-    # ... and the launch path ran: `make env` then `exec make run`.
+    # In one snapshot: DEV_ROOT == WORKSPACE accepted (no in-place abort),
+    # force-synced to the origin tip, untracked leftovers dropped, the
+    # gitignored .env preserved, and `make env` then `exec make run` ran.
     make_log: Path = service_env["make_log"]  # type: ignore[assignment]
-    assert make_log.read_text().split() == ["env", "run"]
+    observed = (
+        "dev checkout itself" in result.stderr,
+        _git(workspace, "rev-parse", "HEAD").stdout.strip(),
+        (workspace / "README").read_text(),
+        (workspace / "review_logs").exists(),
+        (workspace / ".env").read_text(),
+        make_log.read_text().split(),
+    )
+    assert observed == (
+        False,
+        origin_head,
+        "v2\n",
+        False,
+        "TOKEN=secret\n",
+        ["env", "run"],
+    )
 
 
 def test_service_mode_refuses_workspace_outside_dot_hydraflow(
@@ -166,11 +175,14 @@ def test_service_mode_refuses_workspace_outside_dot_hydraflow(
     result = _run_service(service_env, workspace=elsewhere)
 
     assert result.returncode != 0
-    assert ".hydraflow" in result.stderr
-    # Untouched: still the original tip, nothing reset or cleaned.
-    assert (elsewhere / "README").read_text() == "v1\n"
     make_log: Path = service_env["make_log"]  # type: ignore[assignment]
-    assert not make_log.exists()
+    # Refusal names the invariant, and the clone is untouched: original tip,
+    # nothing reset or cleaned, no make ever ran.
+    assert (
+        ".hydraflow" in result.stderr,
+        (elsewhere / "README").read_text(),
+        make_log.exists(),
+    ) == (True, "v1\n", False)
 
 
 def test_service_mode_refuses_missing_workspace_instead_of_cloning(
@@ -182,11 +194,14 @@ def test_service_mode_refuses_missing_workspace_instead_of_cloning(
     result = _run_service(service_env, workspace=missing)
 
     assert result.returncode != 0
-    assert "does not exist" in result.stderr
-    assert "install_factory_service" in result.stderr
-    assert not missing.exists()  # the service never clones
     make_log: Path = service_env["make_log"]  # type: ignore[assignment]
-    assert not make_log.exists()
+    # Clear message pointing at the installer; nothing cloned, no make ran.
+    assert (
+        "does not exist" in result.stderr,
+        "install_factory_service" in result.stderr,
+        missing.exists(),
+        make_log.exists(),
+    ) == (True, True, False, False)
 
 
 def test_non_service_guard_is_untouched_by_the_env_default(service_env) -> None:

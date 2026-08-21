@@ -131,10 +131,9 @@ class TestOperatorStoppedLatch:
             operator_stopped=True,
         )
         assert d.action is BootAction.NO_ACTION
-        assert d.action is not BootAction.START
-        assert "operator stopped" in d.reason
-        # A deliberate stop is not an incident — no notification spam.
-        assert d.notify is False
+        # Latch reason, and no notification spam — a deliberate stop is not
+        # an incident.
+        assert ("operator stopped" in d.reason, d.notify) == (True, False)
 
     def test_done_status_under_latch_is_no_action(self) -> None:
         d = boot_guard.decide_boot_action(

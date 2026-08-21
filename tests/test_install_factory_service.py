@@ -84,34 +84,35 @@ class TestRenderPlist:
         self, tmp_path: Path
     ) -> None:
         env = _plist_dict(_render(tmp_path))["EnvironmentVariables"]
-        assert isinstance(env, dict)
-        assert env["HYDRAFLOW_FACTORY_SERVICE"] == "1"
-        assert env["HYDRAFLOW_FACTORY_WORKSPACE"] == str(tmp_path / "ws")
-        assert env["HYDRAFLOW_FACTORY_BRANCH"] == "staging"
-        assert env["HOME"] == str(tmp_path / "home")
-        # launchd's default PATH lacks uv/node/gh/docker — the pin must carry
-        # Homebrew + the user-local bin, and only absolute entries.
-        path = env["PATH"]
-        assert isinstance(path, str)
-        parts = path.split(":")
-        assert parts[0] == "/opt/homebrew/bin"
-        assert "/usr/local/bin" in parts
-        assert "/usr/bin" in parts
-        assert "/bin" in parts
-        # launchd's own default PATH is /usr/bin:/bin:/usr/sbin:/sbin — the
-        # pin must be a superset of it, never a regression.
-        assert "/usr/sbin" in parts
-        assert "/sbin" in parts
-        assert parts[-1] == str(tmp_path / "home" / ".local" / "bin")
-        assert all(p.startswith("/") for p in parts)
+        # One exact-equality pin: service-mode flag, workspace, ADR-0042
+        # branch, HOME, and a PATH that prepends Homebrew, appends the
+        # user-local bin, and keeps every entry of launchd's own default
+        # (/usr/bin:/bin:/usr/sbin:/sbin) — launchd agents inherit neither a
+        # login profile nor Homebrew's bin, and the pin must never regress
+        # what the default PATH could find.
+        assert env == {
+            "HYDRAFLOW_FACTORY_SERVICE": "1",
+            "HYDRAFLOW_FACTORY_WORKSPACE": str(tmp_path / "ws"),
+            "HYDRAFLOW_FACTORY_BRANCH": "staging",
+            "HOME": str(tmp_path / "home"),
+            "PATH": (
+                "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:"
+                + str(tmp_path / "home" / ".local" / "bin")
+            ),
+        }
 
     def test_keepalive_runatload_throttle_and_log_paths(self, tmp_path: Path) -> None:
         d = _plist_dict(_render(tmp_path))
-        assert d["KeepAlive"] is True
-        assert d["RunAtLoad"] is True
-        assert d["ThrottleInterval"] == "60"
-        assert d["StandardOutPath"] == str(tmp_path / "out.log")
-        assert d["StandardErrorPath"] == str(tmp_path / "err.log")
+        lifecycle = {k: d[k] for k in ("KeepAlive", "RunAtLoad", "ThrottleInterval")}
+        assert lifecycle == {
+            "KeepAlive": True,
+            "RunAtLoad": True,
+            "ThrottleInterval": "60",
+        }
+        assert (d["StandardOutPath"], d["StandardErrorPath"]) == (
+            str(tmp_path / "out.log"),
+            str(tmp_path / "err.log"),
+        )
 
     def test_escapes_special_xml_characters(self, tmp_path: Path) -> None:
         xml_text = _render(tmp_path, workspace=tmp_path / "a&b<c>")
@@ -240,10 +241,13 @@ class TestInstallDryRun:
             origin_url="git@example.com:org/repo.git",
             dry_run=True,
         )
-        assert calls.argv == []
-        assert not plist_path.exists()
-        assert not knob.exists()
-        assert not ws.exists()
+        # No subprocess of any kind, and nothing written or cloned.
+        assert (calls.argv, plist_path.exists(), knob.exists(), ws.exists()) == (
+            [],
+            False,
+            False,
+            False,
+        )
 
     def test_uninstall_dry_run_never_calls_subprocess(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -280,12 +284,13 @@ class TestInstallRealPathWithFakeSubprocess:
             origin_url="git@example.com:org/repo.git",
             dry_run=False,
         )
-        assert plist_path.exists()
         assert "com.hydraflow.factory" in plist_path.read_text()
-        # No clone (workspace existed); bootout (idempotent unload) THEN bootstrap.
-        assert [c[0] for c in calls.argv] == ["launchctl", "launchctl"]
-        assert [c[1] for c in calls.argv] == ["bootout", "bootstrap"]
-        assert all(str(plist_path) in c for c in calls.argv)
+        # No clone (workspace existed); bootout (idempotent unload) THEN
+        # bootstrap, each addressed at this plist.
+        assert [(c[0], c[1], str(plist_path) in c) for c in calls.argv] == [
+            ("launchctl", "bootout", True),
+            ("launchctl", "bootstrap", True),
+        ]
 
     def test_install_clones_missing_workspace_before_rendering(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -303,10 +308,17 @@ class TestInstallRealPathWithFakeSubprocess:
             origin_url="git@example.com:org/repo.git",
             dry_run=False,
         )
-        assert calls.argv[0][:2] == ["git", "clone"]
-        assert calls.argv[0][-2:] == ["git@example.com:org/repo.git", str(ws)]
-        assert ws.parent.is_dir()  # parent created so clone can land
-        assert [c[1] for c in calls.argv[1:]] == ["bootout", "bootstrap"]
+        # Clone first (into a created parent), then bootout -> bootstrap.
+        assert calls.argv[0] == [
+            "git",
+            "clone",
+            "git@example.com:org/repo.git",
+            str(ws),
+        ]
+        assert (ws.parent.is_dir(), [c[1] for c in calls.argv[1:]]) == (
+            True,
+            ["bootout", "bootstrap"],
+        )
 
     def test_install_wires_restart_label_into_knob(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -422,12 +434,22 @@ class TestMainArgParsing:
             ]
         )
         assert rc == 0
-        assert captured["workspace"] == tmp_path / "ws"
-        assert captured["factory_branch"] == "staging"
-        assert captured["knob_path"] == tmp_path / "knob"
-        assert captured["log_dir"] == tmp_path / "logs"
-        assert captured["origin_url"] == "git@x:y/z.git"
-        assert captured["dry_run"] is True
+        keys = (
+            "workspace",
+            "factory_branch",
+            "knob_path",
+            "log_dir",
+            "origin_url",
+            "dry_run",
+        )
+        assert {k: captured[k] for k in keys} == {
+            "workspace": tmp_path / "ws",
+            "factory_branch": "staging",
+            "knob_path": tmp_path / "knob",
+            "log_dir": tmp_path / "logs",
+            "origin_url": "git@x:y/z.git",
+            "dry_run": True,
+        }
 
     def test_main_dry_run_uninstall_calls_no_launchctl(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -457,28 +479,36 @@ class TestMainArgParsing:
         # Defaults are computed at import against the real HOME; the test
         # conftest swaps HOME afterwards, so assert the LAYOUT, not Path.home().
         log_dir = installer._DEFAULT_LOG_DIR
-        assert installer._LABEL == "com.hydraflow.factory"
-        assert log_dir.name == ".hydraflow"
         assert (
-            log_dir / "factory-workspace" / "hydraflow" == installer._DEFAULT_WORKSPACE
+            installer._LABEL,
+            log_dir.name,
+            installer._DEFAULT_WORKSPACE,
+            installer._DEFAULT_FACTORY_BRANCH,
+            installer._DEFAULT_KNOB_PATH,
+            installer._DEFAULT_PLIST_PATH,
+        ) == (
+            "com.hydraflow.factory",
+            ".hydraflow",
+            log_dir / "factory-workspace" / "hydraflow",
+            "staging",
+            log_dir / "liveness" / "restart.knob",
+            log_dir.parent / "Library" / "LaunchAgents" / "com.hydraflow.factory.plist",
         )
-        assert installer._DEFAULT_FACTORY_BRANCH == "staging"
-        assert log_dir / "liveness" / "restart.knob" == installer._DEFAULT_KNOB_PATH
-        assert installer._DEFAULT_PLIST_PATH.parts[-3:] == (
-            "Library",
-            "LaunchAgents",
-            "com.hydraflow.factory.plist",
-        )
-        assert installer._DEFAULT_PLIST_PATH.parent.parent.parent == log_dir.parent
         # The earlier (failed) launchd attempt already logs to these names on
         # the host — reuse them rather than orphaning the old files.
-        assert installer._STDOUT_NAME == "factory-launchd.out.log"
-        assert installer._STDERR_NAME == "factory-launchd.err.log"
+        assert (installer._STDOUT_NAME, installer._STDERR_NAME) == (
+            "factory-launchd.out.log",
+            "factory-launchd.err.log",
+        )
 
 
 def test_makefile_wires_the_service_targets() -> None:
     makefile = (Path(__file__).parent.parent / "Makefile").read_text()
-    assert "\nfactory-service-install:" in makefile
-    assert "\nfactory-service-uninstall:" in makefile
-    assert "install_factory_service.py" in makefile
-    assert "factory-service-install factory-service-uninstall" in makefile  # .PHONY
+    needles = (
+        "\nfactory-service-install:",
+        "\nfactory-service-uninstall:",
+        "install_factory_service.py",
+        "factory-service-install factory-service-uninstall",  # .PHONY
+    )
+    missing = [n for n in needles if n not in makefile]
+    assert not missing, f"Makefile is missing service-target wiring: {missing}"
