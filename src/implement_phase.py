@@ -1098,16 +1098,18 @@ class ImplementPhase:
     ) -> dict[str, str] | None:
         """Create the issue's bead task graph in its own worktree store.
 
-        Beads are created, claimed, and closed in the same per-worktree store,
-        so the agent's prompt-injected ``bd update --claim`` / ``bd close``
-        operate on a populated store. This replaces the old split where the
-        planner created beads in a separate host store the agent's clone never
-        saw. Best-effort: a beads failure must never block implementation.
+        Beads are created in the same per-worktree JSONL store that owns their
+        lifecycle. The host ``bd`` CLI is deliberately excluded because its
+        storage engine is database-backed. This replaces the old split where
+        the planner created beads in a separate host store the agent's clone
+        never saw. Best-effort: a beads failure must never block implementation.
         """
         from agent import AgentRunner  # noqa: PLC0415
-        from task_graph import extract_phases  # noqa: PLC0415
+        from task_graph import extract_phases, topological_sort  # noqa: PLC0415
 
-        assert self._beads_manager is not None  # guarded by caller
+        manager = self._beads_manager
+        if manager is None:
+            return None
         # The plan lives in the issue's "## Implementation Plan" comment (the
         # same source the agent reads); the issue was enriched with comments
         # just above. Fall back to the on-disk plan for safety.
@@ -1116,15 +1118,33 @@ class ImplementPhase:
             plan = self._read_plan_for_recording(issue.id)
         if not plan:
             return None
-        phases = extract_phases(plan)
-        if not phases:
-            return None
+        mapping: dict[str, str] | None = None
         try:
-            await self._beads_manager.ensure_installed()
-            await self._beads_manager.init(wt_path)
-            mapping = await self._beads_manager.create_from_phases(
-                phases, issue.id, wt_path
-            )
+            phases = topological_sort(extract_phases(plan))
+            if not phases:
+                return None
+            await manager.ensure_installed()
+            await manager.init(wt_path)
+            # The state mapping is only a cache for downstream prompt/review
+            # context. It carries no stable task identity, so same-shaped IDs
+            # may refer to an unrelated graph. Always ask the canonical JSONL
+            # store to create-or-recover by issue/phase external refs.
+            mapping = await manager.create_from_phases(phases, issue.id, wt_path)
+            # Persist the identity of a successfully created/validated graph
+            # before claiming roots. If one claim fails part-way through, the
+            # next attempt can reuse this graph instead of appending another.
+            self._state.set_bead_mapping(issue.id, mapping)
+            if not self._config.dry_run:
+                for phase in phases:
+                    if not phase.depends_on:
+                        root = await manager.show(mapping[phase.id], wt_path)
+                        if root.status == "open":
+                            await manager.claim(root.id, wt_path)
+                        elif root.status not in {"in_progress", "closed"}:
+                            raise RuntimeError(
+                                f"root Beads task {root.id} has unexpected status "
+                                f"{root.status!r}"
+                            )
         except Exception as exc:  # noqa: BLE001
             from exception_classify import reraise_on_credit_or_bug  # noqa: PLC0415
 
@@ -1132,11 +1152,74 @@ class ImplementPhase:
             logger.warning(
                 "bead creation in worktree failed for #%d: %s", issue.id, exc
             )
-            return None
-        if not mapping:
-            return None
-        self._state.set_bead_mapping(issue.id, mapping)
+            return mapping
         return mapping
+
+    async def _complete_beads_after_success(
+        self,
+        mapping: dict[str, str],
+        wt_path: Path,
+    ) -> bool | None:
+        """Close a successful phase graph in dependency order.
+
+        AgentRunner is one opaque multi-phase session, so the factory can
+        observe only the overall verified result. Root tasks are claimed
+        before that session starts. Once it succeeds, this method repeatedly
+        claims and closes the ready frontier, preserving dependency order and
+        ensuring every task passes through ``in_progress``. Failed or
+        interrupted runs never call this method, leaving roots in progress and
+        untouched dependents open.
+        """
+
+        manager = self._beads_manager
+        if manager is None:
+            return None
+        remaining = set(mapping.values())
+        changed = False
+        try:
+            for bead_id in tuple(remaining):
+                task = await manager.show(bead_id, wt_path)
+                if task.status == "closed":
+                    remaining.remove(bead_id)
+                elif task.status not in {"open", "in_progress"}:
+                    raise RuntimeError(
+                        f"Beads task {task.id} has unexpected status {task.status!r}"
+                    )
+            while remaining:
+                ready = await manager.list_ready(wt_path)
+                frontier = [task for task in ready if task.id in remaining]
+                if not frontier:
+                    raise RuntimeError(
+                        "successful implementation has no ready Beads tasks "
+                        f"for remaining IDs: {sorted(remaining)}"
+                    )
+                for task in frontier:
+                    if task.status == "open":
+                        await manager.claim(task.id, wt_path)
+                        changed = True
+                    elif task.status != "in_progress":
+                        raise RuntimeError(
+                            f"ready Beads task {task.id} has unexpected status "
+                            f"{task.status!r}"
+                        )
+                    await manager.close(
+                        task.id,
+                        "Phase complete",
+                        wt_path,
+                    )
+                    changed = True
+                    remaining.remove(task.id)
+        except Exception as exc:  # noqa: BLE001
+            from exception_classify import reraise_on_credit_or_bug  # noqa: PLC0415
+
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "bead lifecycle completion failed in %s: %s",
+                wt_path,
+                exc,
+            )
+            return None
+        return changed
 
     def _build_cap_exceeded_comment(self, attempts: int, last_error: str) -> str:
         """Build the human-readable comment explaining why the cap was exceeded."""
@@ -1322,11 +1405,11 @@ class ImplementPhase:
         # does not include comment bodies.
         issue = await self._store.enrich_with_comments(issue)
 
-        # Create the bead task graph in THIS worktree so the agent's
-        # bd claim/close operate on a populated, per-worktree store (the
-        # planner no longer creates beads in a separate host store).
+        # Create the bead task graph in THIS worktree's canonical JSONL store.
+        # Agent prompts reference these IDs but never invoke the database-backed
+        # bd CLI; the planner no longer creates beads in a separate host store.
         bead_mapping: dict[str, str] | None = None
-        if self._beads_manager:
+        if self._beads_manager is not None:
             bead_mapping = await self._create_beads_in_worktree(issue, wt_path)
 
         run_kwargs: dict[str, object] = {
@@ -1383,6 +1466,22 @@ class ImplementPhase:
                     "Phase rollup failed for issue #%d", issue.id, exc_info=True
                 )
             self._state.end_trace_run(issue.id, phase)
+
+        if (
+            result.success
+            and bead_mapping
+            and self._beads_manager is not None
+            and not self._config.dry_run
+        ):
+            lifecycle_changed = await self._complete_beads_after_success(
+                bead_mapping, wt_path
+            )
+            if lifecycle_changed is None:
+                result.success = False
+                result.error = "Failed to finalize worktree Beads lifecycle"
+            elif not await self._agents.commit_pending(issue, wt_path):
+                result.success = False
+                result.error = "Failed to commit finalized worktree Beads lifecycle"
 
         await self._record_impl_metrics(issue, result, review_feedback)
 

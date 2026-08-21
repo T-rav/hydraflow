@@ -1,20 +1,22 @@
-"""FakeBeads — in-memory mock of BeadsManager's bd CLI surface.
+"""Observable fake for the per-worktree JSONL BeadsManager surface.
 
-Stores tasks in a dict keyed by task_id. Dependencies tracked as a
-parallel adjacency dict. No subprocess spawned — scenarios exercise
-the bead workflow entirely against in-memory state.
-
-Matches BeadsManager's async API signatures exactly so phases that
-accept a BeadsManager can accept FakeBeads without modification.
+The fake deliberately reuses the production JSONL store implementation. This
+keeps stable phase identity, validation, locking, and persistence semantics
+identical while exposing convenient in-memory snapshots and transition events
+for MockWorld assertions. No subprocess or database is involved.
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from beads_manager import BeadTask
+from beads_manager import BeadsManager, BeadTask
+
+if TYPE_CHECKING:
+    from task_graph import TaskGraphPhase
 
 
 @dataclass
@@ -24,169 +26,102 @@ class _FakeTask:
     status: str = "open"
     priority: int = 2
     depends_on: list[str] = field(default_factory=list)
+    external_ref: str | None = None
+    close_reason: str | None = None
 
 
-class FakeBeads:
-    """In-memory BeadsManager lookalike.
-
-    Implements the same async API surface as ``BeadsManager`` so that
-    scenario tests can drive the bead workflow (create → claim → close →
-    list_ready → show) without spawning a real ``bd`` process.
-    """
+class FakeBeads(BeadsManager):
+    """Production-parity JSONL manager with scenario-observable snapshots."""
 
     _is_fake_adapter = True
 
     def __init__(self) -> None:
         self._tasks: dict[str, _FakeTask] = {}
-        self._next_id: int = 1
-        self._initialized: bool = False
-
-    # ------------------------------------------------------------------
-    # Script / test-helper API
-    # ------------------------------------------------------------------
+        self._initialized = False
+        self.transitions: list[tuple[str, str]] = []
 
     def task_ids(self) -> list[str]:
-        """Return all task IDs currently tracked."""
+        """Return task IDs from the most recently observed worktree store."""
         return list(self._tasks)
 
     def task_count(self) -> int:
         return len(self._tasks)
 
-    # ------------------------------------------------------------------
-    # BeadsManager public async API (mirror signatures exactly)
-    # ------------------------------------------------------------------
-
     async def ensure_installed(self) -> None:
-        """Always succeeds — no real CLI in the fake."""
-        return
+        await super().ensure_installed()
 
     async def init(self, cwd: Path) -> None:
-        """Mark the fake as initialised (idempotent)."""
-        _ = cwd
+        await super().init(cwd)
         self._initialized = True
+        await self._refresh(cwd)
 
     async def export(self, cwd: Path) -> None:
-        """Write in-memory tasks to ``.beads/issues.jsonl`` (mirrors BeadsManager)."""
-        target = cwd / ".beads" / "issues.jsonl"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        lines = [
-            json.dumps(
-                {
-                    "_type": "issue",
-                    "id": t.task_id,
-                    "title": t.title,
-                    "status": t.status,
-                    "priority": t.priority,
-                }
-            )
-            for t in self._tasks.values()
-        ]
-        target.write_text("\n".join(lines) + ("\n" if lines else ""))
+        await super().export(cwd)
+        await self._refresh(cwd)
 
     async def create_task(self, title: str, priority: str, cwd: Path) -> str:
-        """Create an in-memory bead task and return its generated ID."""
-        _ = cwd
-        task_id = f"bd-fake-{self._next_id}"
-        self._next_id += 1
-        self._tasks[task_id] = _FakeTask(
-            task_id=task_id,
-            title=title,
-            priority=int(priority),
-        )
+        task_id = await super().create_task(title, priority, cwd)
+        await self._refresh(cwd)
         return task_id
 
     async def add_dependency(self, child: str, parent: str, cwd: Path) -> None:
-        """Record that *child* depends on *parent*.
-
-        Raises ``KeyError`` if either task does not exist.
-        """
-        _ = cwd
-        if child not in self._tasks:
-            msg = f"FakeBeads: unknown task {child!r}"
-            raise KeyError(msg)
-        if parent not in self._tasks:
-            msg = f"FakeBeads: unknown task {parent!r}"
-            raise KeyError(msg)
-        self._tasks[child].depends_on.append(parent)
+        await super().add_dependency(child, parent, cwd)
+        await self._refresh(cwd)
 
     async def claim(self, bead_id: str, cwd: Path) -> None:
-        """Set task status to ``'in_progress'`` (claimed)."""
-        _ = cwd
-        task = self._tasks[bead_id]
-        task.status = "in_progress"
+        await super().claim(bead_id, cwd)
+        await self._refresh(cwd)
+        self.transitions.append(("claim", bead_id))
 
     async def close(self, bead_id: str, reason: str, cwd: Path) -> None:
-        """Set task status to ``'closed'``."""
-        _ = (cwd, reason)
-        task = self._tasks[bead_id]
-        task.status = "closed"
+        await super().close(bead_id, reason, cwd)
+        await self._refresh(cwd)
+        self.transitions.append(("close", bead_id))
 
     async def list_ready(self, cwd: Path) -> list[BeadTask]:
-        """Return tasks whose dependencies are all closed and are not yet closed."""
-        _ = cwd
-        ready: list[BeadTask] = []
-        for task in self._tasks.values():
-            if task.status == "closed":
-                continue
-            deps_done = all(
-                self._tasks[dep].status == "closed"
-                for dep in task.depends_on
-                if dep in self._tasks
-            )
-            if deps_done:
-                ready.append(self._to_bead_task(task))
+        ready = await super().list_ready(cwd)
+        await self._refresh(cwd)
         return ready
 
     async def show(self, bead_id: str, cwd: Path) -> BeadTask:
-        """Return a :class:`BeadTask` for the requested ID.
-
-        Raises ``KeyError`` if the task does not exist.
-        """
-        _ = cwd
-        task = self._tasks[bead_id]
-        return self._to_bead_task(task)
+        task = await super().show(bead_id, cwd)
+        await self._refresh(cwd)
+        return task
 
     async def create_from_phases(
         self,
-        phases: list,  # list[TaskGraphPhase] — avoid import cycle in tests
+        phases: list[TaskGraphPhase],
         issue_number: int,
         cwd: Path,
     ) -> dict[str, str]:
-        """Create bead tasks from Task Graph phases with dependency wiring.
-
-        Returns ``{phase_id: bead_id}``.  Mirrors ``BeadsManager.create_from_phases``
-        exactly — same two-pass algorithm (create then wire deps).
-        """
-        from beads_manager import _PRIORITY_HAS_DEPS, _PRIORITY_NO_DEPS  # noqa: PLC0415
-
-        mapping: dict[str, str] = {}
-
-        for phase in phases:
-            title = f"Issue #{issue_number} — {phase.name}"
-            priority = _PRIORITY_NO_DEPS if not phase.depends_on else _PRIORITY_HAS_DEPS
-            bead_id = await self.create_task(title, priority, cwd)
-            mapping[phase.id] = bead_id
-
-        for phase in phases:
-            child_bead = mapping[phase.id]
-            for dep_id in phase.depends_on:
-                parent_bead = mapping[dep_id]
-                await self.add_dependency(child_bead, parent_bead, cwd)
-
-        await self.export(cwd)
-
+        mapping = await super().create_from_phases(phases, issue_number, cwd)
+        await self._refresh(cwd)
         return mapping
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    async def _refresh(self, cwd: Path) -> None:
+        await asyncio.to_thread(self._refresh_sync, cwd)
 
-    @staticmethod
-    def _to_bead_task(task: _FakeTask) -> BeadTask:
-        return BeadTask(
-            id=task.task_id,
-            title=task.title,
-            status=task.status,
-            priority=task.priority,
-            depends_on=list(task.depends_on),
-        )
+    def _refresh_sync(self, cwd: Path) -> None:
+        with self._locked_store(cwd) as handle:
+            records = self._read_validated_records(handle)
+        self._tasks = {
+            str(record["id"]): _FakeTask(
+                task_id=str(record["id"]),
+                title=str(record["title"]),
+                status=str(record.get("status", "open")),
+                priority=int(record.get("priority", 2)),
+                depends_on=self._dependency_ids(record),
+                external_ref=(
+                    str(record["external_ref"])
+                    if isinstance(record.get("external_ref"), str)
+                    else None
+                ),
+                close_reason=(
+                    str(record["close_reason"])
+                    if isinstance(record.get("close_reason"), str)
+                    else None
+                ),
+            )
+            for record in records
+            if self._is_issue(record)
+        }

@@ -7,11 +7,10 @@ Prod-code bead lifecycle
   calls ``extract_phases``; if phases are found it inits beads in THIS worktree
   and calls ``create_from_phases`` (one bead per phase + dependency wiring),
   stores the ``{phase_id: bead_id}`` mapping via ``set_bead_mapping`` and passes
-  it to the agent. Creating beads in the worktree (not a separate planner host
-  store) is what lets the agent's ``bd update --claim`` / ``bd close`` hit a
-  populated per-worktree store. ``claim``/``close`` run in the real ``bd``
-  subprocess inside the container; ``FakeDocker`` does not emulate them, so
-  tasks stay in their created state after the pipeline.
+  it to the agent. The mapping is informational to the agent: factory prompts
+  prohibit the database-backed CLI. Production claims root tasks before the
+  run and, only after a verified success, claims and closes each ready frontier
+  through the direct JSONL manager API. Failure closes nothing.
 - **Plan phase**: does NOT create beads (moved to implement phase).
 - **Review phase** (`review_phase.py`): reads the mapping from state and builds
   a ``bead_tasks`` context list (hardcoded ``status='closed'`` — an assumption,
@@ -25,12 +24,13 @@ must be explicitly set.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from mockworld.fakes.fake_beads import FakeBeads
-from tests.conftest import PlanResultFactory
+from tests.conftest import PlanResultFactory, WorkerResultFactory
 from tests.scenarios.fakes.mock_world import MockWorld
-from tests.scenarios.helpers.git_worktree_fixture import init_test_worktree
 
 pytestmark = pytest.mark.scenario
 
@@ -65,13 +65,12 @@ async def test_B1_bead_workflow_end_to_end(tmp_path) -> None:
     Pipeline bead behaviour (matched to prod reality):
 
     1. FakeBeads is wired into MockWorld/PipelineHarness.
-    2. Plan phase detects Task Graph phases in the plan text and calls
+    2. Implement phase detects Task Graph phases in the plan text and calls
        ``create_from_phases`` → one bead per phase is stored in FakeBeads.
     3. Implement phase calls ``beads_manager.init`` (because a bead mapping
        now exists in state).
-    4. ``claim``/``close`` are NOT called by prod code — those are agent
-       subprocess concerns.  After the pipeline the tasks remain in their
-       created state.
+    4. The factory claims P1 before the run. On verified success it closes P1,
+       then claims and closes newly ready P2.
     5. Review phase reads the mapping from state but calls no FakeBeads
        methods, so bead state is unchanged.
 
@@ -79,11 +78,8 @@ async def test_B1_bead_workflow_end_to_end(tmp_path) -> None:
     fails with a diagnostic message pointing to the relevant prod-code site.
     """
     beads = FakeBeads()
-    world = MockWorld(tmp_path, use_real_agent_runner=True, beads_manager=beads)
+    world = MockWorld(tmp_path, beads_manager=beads)
     world.add_issue(1, "add feature X", "body", labels=["hydraflow-ready"])
-
-    worktree_cwd = tmp_path / "worktrees" / "issue-1"
-    init_test_worktree(worktree_cwd)
 
     # Beads are now created by the IMPLEMENT phase in its own worktree, reading
     # the plan from plans_dir/issue-N.md (written by the planner in prod via
@@ -99,14 +95,6 @@ async def test_B1_bead_workflow_end_to_end(tmp_path) -> None:
         plan=_TASK_GRAPH_PLAN,
     )
     world._llm.script_plan(1, [plan])
-
-    # Script the Docker fake so the agent runner sees a successful run with
-    # at least one commit (required by AgentRunner._verify_result).
-    world.docker.script_run_with_commits(
-        events=[{"type": "result", "success": True, "exit_code": 0}],
-        commits=[("x.py", "ok")],
-        cwd=worktree_cwd,
-    )
 
     result = await world.run_pipeline()
 
@@ -147,17 +135,31 @@ async def test_B1_bead_workflow_end_to_end(tmp_path) -> None:
     )
 
     # ------------------------------------------------------------------
-    # Assertion 4: Tasks remain in 'open' state after the pipeline.
-    # claim/close are NOT called by prod pipeline code — they are bd CLI
-    # subprocess calls made inside the container, which FakeDocker does not
-    # emulate.  If status is not 'open', the fake or prod code changed.
+    # Assertion 4: The successful graph advances in dependency order and every
+    # task passes through claim before close.
     # ------------------------------------------------------------------
-    for tid, task in beads._tasks.items():
-        assert task.status == "open", (
-            f"Bead {tid} status is {task.status!r}; expected 'open' because "
-            "prod code never calls BeadsManager.claim/close — those are agent "
-            "subprocess calls (bd CLI inside container)."
-        )
+    assert beads.transitions == [
+        ("claim", p1_bead_id),
+        ("close", p1_bead_id),
+        ("claim", p2_bead_id),
+        ("close", p2_bead_id),
+    ]
+    assert {task.status for task in beads._tasks.values()} == {"closed"}
+
+    # The scenario observes the actual production-format worktree store, not
+    # merely the fake's cache. Stable refs/dependencies survive and the exact
+    # bytes captured at commit_pending already contain the finalized lifecycle,
+    # proving persistence happens after every claim/close transition.
+    issues_path = tmp_path / "worktrees" / "issue-1" / ".beads" / "issues.jsonl"
+    persisted = [json.loads(line) for line in issues_path.read_text().splitlines()]
+    assert {record["status"] for record in persisted} == {"closed"}
+    assert {record["external_ref"] for record in persisted} == {
+        "hydraflow-factory:issue:1:phase:P1",
+        "hydraflow-factory:issue:1:phase:P2",
+    }
+    p2_record = next(record for record in persisted if record["id"] == p2_bead_id)
+    assert p2_record["dependencies"][0]["depends_on_id"] == p1_bead_id
+    assert world._llm.agents.commit_pending_snapshots == [(1, issues_path.read_bytes())]
 
     # ------------------------------------------------------------------
     # Assertion 5: Pipeline completed (issue is tracked in result).
@@ -173,11 +175,8 @@ async def test_B1_no_beads_without_task_graph_headers(tmp_path) -> None:
     task_count() stays at 0 and _initialized stays False.
     """
     beads = FakeBeads()
-    world = MockWorld(tmp_path, use_real_agent_runner=True, beads_manager=beads)
+    world = MockWorld(tmp_path, beads_manager=beads)
     world.add_issue(2, "plain task", "body", labels=["hydraflow-ready"])
-
-    worktree_cwd = tmp_path / "worktrees" / "issue-2"
-    init_test_worktree(worktree_cwd)
 
     # Default plan text — no "### P{N} — ..." headers → extract_phases → []
     plain_plan = PlanResultFactory.create(
@@ -186,12 +185,6 @@ async def test_B1_no_beads_without_task_graph_headers(tmp_path) -> None:
         plan="## Plan\n\n1. Do the thing\n2. Test the thing",
     )
     world._llm.script_plan(2, [plain_plan])
-
-    world.docker.script_run_with_commits(
-        events=[{"type": "result", "success": True, "exit_code": 0}],
-        commits=[("y.py", "ok")],
-        cwd=worktree_cwd,
-    )
 
     result = await world.run_pipeline()
 
@@ -207,49 +200,83 @@ async def test_B1_no_beads_without_task_graph_headers(tmp_path) -> None:
     assert result.issue(2) is not None, "Pipeline returned no outcome for issue #2"
 
 
-async def test_B2_agent_bd_claim_close_lifecycle_through_pipeline(tmp_path) -> None:
-    """The agent's in-container ``bd claim`` / ``bd close`` calls run against
-    FakeBeads through a full pipeline (#8367).
-
-    `claim`/`close` are agent-driven (the implement agent runs the bd CLI
-    inside the container), so they were previously validated only by FakeBeads'
-    own unit tests — never exercised through the pipeline. FakeDocker's
-    ``script_run_with_beads`` now emulates those CLI calls: scripting the
-    implement-phase agent run with ``bead_ops`` routes claim/close to the
-    injected FakeBeads, giving the lifecycle pipeline-level coverage.
-
-    A bead is pre-seeded as ``open``; the scripted implement run claims it
-    (→ in_progress) then closes it (→ closed) alongside a real commit so the
-    issue still merges. After the pipeline the bead is ``closed``.
-    """
+async def test_B2_failed_run_does_not_close_unfinished_phases(tmp_path) -> None:
+    """A failed run leaves the active root claimed and its dependent open."""
     beads = FakeBeads()
-    bead_id = await beads.create_task("implement the fix", "1", tmp_path)
-    assert beads._tasks[bead_id].status == "open"
-
-    world = MockWorld(tmp_path, use_real_agent_runner=True, beads_manager=beads)
+    world = MockWorld(tmp_path, beads_manager=beads)
     world.add_issue(1, "add feature X", "body", labels=["hydraflow-ready"])
 
-    worktree_cwd = tmp_path / "worktrees" / "issue-1"
-    init_test_worktree(worktree_cwd)
-
-    # Implement-phase agent run: emulate `bd claim <id>` then
-    # `bd close <id> --reason ...`, plus a commit so _verify_result passes.
-    world.docker.script_run_with_beads(
-        events=[{"type": "result", "success": True, "exit_code": 0}],
-        bead_ops=[
-            {"action": "claim", "bead_id": bead_id},
-            {"action": "close", "bead_id": bead_id, "reason": "feature implemented"},
+    plans_dir = world.harness.config.plans_dir
+    plans_dir.mkdir(parents=True, exist_ok=True)
+    (plans_dir / "issue-1.md").write_text(_TASK_GRAPH_PLAN)
+    world._llm.script_plan(
+        1,
+        [
+            PlanResultFactory.create(
+                issue_number=1,
+                success=True,
+                plan=_TASK_GRAPH_PLAN,
+            )
         ],
-        commits=[("x.py", "ok")],
-        cwd=worktree_cwd,
+    )
+
+    world.set_phase_result(
+        "implement",
+        1,
+        WorkerResultFactory.create(
+            issue_number=1,
+            success=False,
+            commits=0,
+            error="implementation interrupted",
+        ),
     )
 
     result = await world.run_pipeline()
 
-    # The agent-driven claim → close lifecycle ran through the pipeline.
-    assert beads._tasks[bead_id].status == "closed", (
-        f"expected bead {bead_id} closed via the agent's scripted bd calls; "
-        f"got status={beads._tasks[bead_id].status!r}"
+    p1_bead_id, p2_bead_id = beads.task_ids()
+    assert beads.transitions == [("claim", p1_bead_id)]
+    assert beads._tasks[p1_bead_id].status == "in_progress"
+    assert beads._tasks[p2_bead_id].status == "open"
+    persisted = [
+        json.loads(line)
+        for line in (tmp_path / "worktrees" / "issue-1" / ".beads" / "issues.jsonl")
+        .read_text()
+        .splitlines()
+    ]
+    assert {record["id"]: record["status"] for record in persisted} == {
+        p1_bead_id: "in_progress",
+        p2_bead_id: "open",
+    }
+    assert world._llm.agents.commit_pending_snapshots == []
+    assert not result.issue(1).merged
+
+
+async def test_B3_finalized_jsonl_commit_failure_blocks_pipeline_success(
+    tmp_path,
+) -> None:
+    """A failed persistence boundary prevents a PR after lifecycle finalization."""
+    beads = FakeBeads()
+    world = MockWorld(tmp_path, beads_manager=beads)
+    world.add_issue(1, "add feature X", "body", labels=["hydraflow-ready"])
+    plans_dir = world.harness.config.plans_dir
+    plans_dir.mkdir(parents=True, exist_ok=True)
+    (plans_dir / "issue-1.md").write_text(_TASK_GRAPH_PLAN)
+    world._llm.script_plan(
+        1,
+        [
+            PlanResultFactory.create(
+                issue_number=1,
+                success=True,
+                plan=_TASK_GRAPH_PLAN,
+            )
+        ],
     )
-    # The issue still merged (commit gate satisfied by the scripted commit).
-    assert result.issue(1).merged, f"expected merge; outcome={result.issue(1)}"
+    world._llm.agents.fail_next_commit_pending()
+
+    result = await world.run_pipeline()
+
+    issues_path = tmp_path / "worktrees" / "issue-1" / ".beads" / "issues.jsonl"
+    persisted = [json.loads(line) for line in issues_path.read_text().splitlines()]
+    assert {record["status"] for record in persisted} == {"closed"}
+    assert world._llm.agents.commit_pending_snapshots == [(1, issues_path.read_bytes())]
+    assert not result.issue(1).merged

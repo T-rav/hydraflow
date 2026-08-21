@@ -37,8 +37,10 @@ Rules:
 3. Screenshot or pixel-baseline comparisons are not trusted quality oracles.
    UI coverage uses semantic DOM, accessibility role, API/state, event, and
    sandbox assertions.
-4. Missing coverage is tracked as work in `bd`; it is not represented as a
-   green placeholder test.
+4. Missing coverage is tracked in the active issue/PR workflow; it is not
+   represented as a green placeholder test. When HydraFlow decomposes that
+   implementation into phase tasks, `BeadsManager` records them only in the
+   implementation worktree's `.beads/issues.jsonl` store.
 
 ## Consequences
 

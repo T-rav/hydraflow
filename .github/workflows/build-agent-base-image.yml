@@ -45,17 +45,22 @@ jobs:
 
       - name: Verify base image tools
         run: |
-          docker run --rm ${{ env.IMAGE_NAME }}:test bash -c '
+          docker run --rm ${{ env.IMAGE_NAME }}:test bash -ec '
             echo "=== Checking tools ==="
             git --version
             gh --version
             node --version
             claude --version
-            bd --version
             uv --version
             python --version
             ruff --version
             pyright --version
+            if command -v bd >/dev/null 2>&1; then
+              echo "::error::Unsupported database task CLI is present"
+              exit 1
+            fi
+            test ! -e /usr/lib/node_modules/@beads/bd
+            test ! -e /usr/local/lib/node_modules/@beads/bd
             echo "=== All tools present ==="
           '
 

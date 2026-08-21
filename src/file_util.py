@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import tempfile
 import threading
 import time
@@ -109,6 +110,32 @@ class FileLockTimeout(TimeoutError):
     and degrades gracefully instead of hanging or crashing with an unexpected
     exception type.
     """
+
+
+@contextmanager
+def _bounded_flock(
+    fd: int,
+    *,
+    display_path: Path,
+    deadline: float,
+    bound: float,
+    poll_interval: float,
+) -> Iterator[None]:
+    """Acquire and release one descriptor's flock before *deadline*."""
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise FileLockTimeout(
+                    f"Timed out after {bound}s acquiring file lock: {display_path}"
+                ) from None
+            time.sleep(poll_interval)
+    try:
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
 
 
 def atomic_write(path: Path, data: str) -> None:
@@ -297,20 +324,102 @@ def file_lock(
     try:
         with open(path, "a+", encoding="utf-8") as lock_f:
             fd = lock_f.fileno()
-            while True:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() >= deadline:
-                        raise FileLockTimeout(
-                            f"Timed out after {bound}s acquiring file lock: {path}"
-                        ) from None
-                    time.sleep(poll_interval)
-            try:
+            with _bounded_flock(
+                fd,
+                display_path=path,
+                deadline=deadline,
+                bound=bound,
+                poll_interval=poll_interval,
+            ):
                 yield
-            finally:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        gate.release()
+
+
+@contextmanager
+def file_lock_fd(
+    directory_fd: int,
+    name: str,
+    *,
+    display_path: Path,
+    timeout: float | None = None,
+    poll_interval: float = 0.02,
+) -> Iterator[int]:
+    """Lock a regular file beneath an already-open directory without symlinks.
+
+    This is the descriptor-relative counterpart to :func:`file_lock`.  It is
+    intended for security boundaries which must not follow a replaced path
+    component between validation and ``open()``.  *name* must be one plain
+    filename; ``O_NOFOLLOW`` makes a symlink at that final component fail
+    closed.  The yielded descriptor remains open and locked for the context.
+
+    ``display_path`` is used only for the process-local fairness key and error
+    messages; all filesystem access is relative to *directory_fd*.
+    """
+    if not name or name in {".", ".."} or "/" in name:
+        raise ValueError("file_lock_fd name must be one path component")
+
+    bound = DEFAULT_FILE_LOCK_TIMEOUT if timeout is None else timeout
+    deadline = time.monotonic() + bound
+    gate = _thread_gate(display_path)
+    if not gate.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        raise FileLockTimeout(
+            f"Timed out after {bound}s acquiring file lock: {display_path}"
+        )
+
+    fd = -1
+    try:
+        flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW
+        fd = os.open(name, flags, 0o600, dir_fd=directory_fd)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"Lock target is not a regular file: {display_path}")
+        os.fchmod(fd, 0o600)
+        with _bounded_flock(
+            fd,
+            display_path=display_path,
+            deadline=deadline,
+            bound=bound,
+            poll_interval=poll_interval,
+        ):
+            yield fd
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        gate.release()
+
+
+@contextmanager
+def descriptor_lock(
+    fd: int,
+    *,
+    display_path: Path,
+    timeout: float | None = None,
+    poll_interval: float = 0.02,
+) -> Iterator[None]:
+    """Boundedly flock an already-open descriptor without opening a path.
+
+    Use this when a replaceable lock-file name cannot be the authoritative
+    serialization primitive.  The caller owns *fd* and must keep it open for
+    the whole context.  A process-local FIFO gate and the descriptor's inode
+    lock share one deadline, matching :func:`file_lock` and
+    :func:`file_lock_fd`.
+    """
+    bound = DEFAULT_FILE_LOCK_TIMEOUT if timeout is None else timeout
+    deadline = time.monotonic() + bound
+    gate = _thread_gate(display_path)
+    if not gate.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        raise FileLockTimeout(
+            f"Timed out after {bound}s acquiring file lock: {display_path}"
+        )
+    try:
+        with _bounded_flock(
+            fd,
+            display_path=display_path,
+            deadline=deadline,
+            bound=bound,
+            poll_interval=poll_interval,
+        ):
+            yield
     finally:
         gate.release()
 
