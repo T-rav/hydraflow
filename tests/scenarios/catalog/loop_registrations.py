@@ -1774,10 +1774,14 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
     """Build AutoAgentPreflightLoop for scenarios (spec §1–§11).
 
     Tests typically seed a FakeGitHub via the ``github`` port and may pre-seed
-    ``auto_agent_audit_store`` to inspect appended entries. The loop's
-    spawn_fn is a placeholder that returns a needs_human PreflightSpawn — the
-    full subprocess wiring lives in production deps; tests can monkeypatch
-    ``loop._build_spawn_fn`` to inject a cassette spawn for end-to-end coverage.
+    ``auto_agent_audit_store`` to inspect appended entries. When the
+    ``auto_agent_spawn_builder`` port is present (``MockWorld.run_with_loops``
+    always seeds it — #11298) the loop's ``_build_spawn_fn`` is rebound to
+    that builder, so the spawn pops the world's scripted
+    ``seed.scripts["auto_agent"]`` outcomes (``set_phase_results("auto_agent",
+    …)``) and never constructs a real ``AutoAgentRunner``; an unscripted
+    issue gets a deterministic crashed spawn. Tests that build the loop
+    directly can still monkeypatch ``loop._build_spawn_fn`` with a cassette.
 
     State defaults to a MagicMock with the auto_agent_* accessors stubbed; tests
     can override via the ``auto_agent_state`` port to use a real StateTracker.
@@ -1818,7 +1822,7 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
         state.get_escalation_context.return_value = None
         ports["auto_agent_state"] = state
 
-    return AutoAgentPreflightLoop(
+    loop = AutoAgentPreflightLoop(
         config=config,
         state=state,
         pr_manager=pr_manager,
@@ -1829,6 +1833,12 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
         epic_manager=ports.get("auto_agent_epic_manager"),
         runner=ports.get("auto_agent_decompose_runner"),
     )
+    spawn_builder = ports.get("auto_agent_spawn_builder")
+    if spawn_builder is not None:
+        # Instance-level seam — the same vars() idiom sandbox_main's
+        # ``air_gap_runner_sentinels`` uses, so both tiers rebind identically.
+        vars(loop)["_build_spawn_fn"] = spawn_builder
+    return loop
 
 
 def _build_corpus_learning(ports: dict[str, Any], config: Any, deps: Any) -> Any:

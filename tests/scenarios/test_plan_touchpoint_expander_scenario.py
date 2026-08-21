@@ -499,3 +499,79 @@ class TestS6LightLaneRoutesToAutoAgent:
         assert (306, "hydraflow-auto-light") in swaps
         assert planned == []
         assert reviewer.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Scenario 7: #11298 light lane, one step past S6 — the claimed issue is picked
+# up by the REAL AutoAgentPreflightLoop (catalog-built, FakeGitHub as the
+# PRPort — never an AsyncMock), the seed-scripted single-session spawn resolves,
+# and the decision lands: PR minted through the port on the auto-agent branch,
+# claim label released to review, no human hand-off. The spawn seam is the same
+# ``build_seeded_auto_agent_spawn_builder`` sandbox_main wires, so this is the
+# in-process twin of the s92 sandbox scenario (dual-loader parity).
+# ---------------------------------------------------------------------------
+
+
+class TestS7LightLanePreflightResolvesToPR:
+    """Claim label → preflight tick → scripted spawn → PR + review label."""
+
+    async def test_claimed_issue_spawns_once_and_lands_in_review(
+        self, mock_world
+    ) -> None:
+        world = mock_world
+        world.add_issue(
+            307,
+            "Fix typo in operator panel label",
+            "One-line copy fix.",
+            labels=["hydraflow-auto-light"],
+        )
+        # The seed-scripted outcome (what seed.scripts["auto_agent"] carries).
+        world.set_phase_results(
+            "auto_agent", 307, [{"status": "resolved", "diagnosis": "copy fixed"}]
+        )
+
+        stats = await world.run_with_loops(["auto_agent_preflight"], cycles=1)
+
+        assert stats["auto_agent_preflight"]["result_status"] == "resolved"
+        # Exactly one spawn, and it was the fake (recorded by FakeLLM).
+        assert world._llm.auto_agent_calls == [307]
+        # Decision applied through the port: claim released to review, no
+        # human hand-off.
+        labels = await world.github.get_issue_labels(307)
+        assert "hydraflow-review" in labels
+        assert "hydraflow-auto-light" not in labels
+        assert "human-required" not in labels
+        # The PR exists in FakeGitHub on the auto-agent branch — the review
+        # stage discovers it by issue number exactly as it would a real one.
+        pr = world.github.pr_for_issue(307)
+        assert pr is not None
+        assert pr.branch == world.harness.config.auto_agent_branch_for_issue(307)
+        assert pr.merged is False
+        comments = [body for number, body in world.github._comments if number == 307]
+        assert any("Auto-Agent resolved this issue" in c for c in comments), comments
+
+    async def test_unscripted_spawn_fails_closed_without_a_real_subprocess(
+        self, mock_world, monkeypatch
+    ) -> None:
+        """No script for the issue: the seam returns a crashed spawn — the
+        loop records ``fatal`` and the real runner is never reached."""
+        world = mock_world
+
+        async def _never(*_a: Any, **_kw: Any) -> None:
+            raise AssertionError("real AutoAgentRunner.run reached in MockWorld")
+
+        monkeypatch.setattr("preflight.auto_agent_runner.AutoAgentRunner.run", _never)
+        world.add_issue(
+            308,
+            "Unscripted light issue",
+            "no spawn script",
+            labels=["hydraflow-auto-light"],
+        )
+
+        stats = await world.run_with_loops(["auto_agent_preflight"], cycles=1)
+
+        assert stats["auto_agent_preflight"]["result_status"] == "fatal"
+        assert world._llm.auto_agent_calls == [308]
+        assert world.github.pr_for_issue(308) is None
+        labels = await world.github.get_issue_labels(308)
+        assert "hydraflow-review" not in labels
