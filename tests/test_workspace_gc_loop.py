@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -15,7 +16,11 @@ from events import EventType
 from mockworld.fakes.fake_github import FakeGitHub
 from state import StateTracker
 from tests.helpers import make_bg_loop_deps
-from workspace_gc_landed_safety import worktree_too_new
+from workspace_gc_landed_safety import (
+    parse_branch_list_line,
+    tracked_workspace_is_gone,
+    worktree_too_new,
+)
 from workspace_gc_loop import _MAX_GC_PER_CYCLE, WorkspaceGCLoop
 
 # Force-delete flag for branch deletion assertions
@@ -82,6 +87,50 @@ def _make_loop(
     # stay hermetic. Dedicated tests below exercise the real method.
     loop._collect_orphaned_worktrees = AsyncMock(return_value=0)  # type: ignore[method-assign]
     return loop, state, deps.stop_event
+
+
+def _branch_git(
+    listing: str,
+    *,
+    tip: str = "a" * 40,
+    revlist: str = "0",
+    diff: str = "",
+    tip_after: str | None = None,
+    tip_error: Exception | None = None,
+) -> AsyncMock:
+    """Command-aware local-git fake for phase 3 (#11571).
+
+    Answers the branch listing, the per-branch tip probe (``tip`` first,
+    ``tip_after`` on the re-read when given), the ladder rungs, and the
+    delete. Defaults model a tip already ancestral to ``origin/<base>`` —
+    the shape the pre-#11571 scripted ``[listing, ""]`` fakes implied.
+    """
+    tip_reads: dict[str, int] = {}
+
+    async def _run(*cmd: str, **_kw: object) -> str:
+        if cmd[:3] == ("git", "branch", "--list"):
+            return listing
+        if cmd[:3] == ("git", "rev-parse", "--verify"):
+            if tip_error is not None:
+                raise tip_error
+            tip_reads[cmd[3]] = tip_reads.get(cmd[3], 0) + 1
+            return tip if tip_reads[cmd[3]] == 1 or tip_after is None else tip_after
+        if cmd[:2] == ("git", "rev-list"):
+            return revlist
+        if cmd[:2] == ("git", "diff"):
+            return diff
+        return ""
+
+    return AsyncMock(side_effect=_run)
+
+
+def _deleted_branches(git: AsyncMock) -> list[str]:
+    """Branches ``git branch -D`` was invoked for, in order."""
+    return [
+        call.args[3]
+        for call in git.call_args_list
+        if call.args[:3] == ("git", "branch", _FORCE_DEL)
+    ]
 
 
 class TestWorkspaceGCLoopBasics:
@@ -501,11 +550,12 @@ class TestWorktreeGCOrphanedBranches:
         loop._collect_orphaned_branches = (
             WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
         )  # type: ignore[attr-defined]
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.side_effect = ["  agent/issue-99\n", ""]
+        with patch(
+            "workspace_gc_loop.run_subprocess", _branch_git("  agent/issue-99\n")
+        ) as m:
             count = await loop._collect_orphaned_branches()
         assert count == 1
-        assert m.call_args_list[1][0] == ("git", "branch", _FORCE_DEL, "agent/issue-99")
+        assert _deleted_branches(m) == ["agent/issue-99"]
 
     @pytest.mark.asyncio
     async def test_skips_branches_with_active_worktree(self, tmp_path: Path) -> None:
@@ -520,16 +570,20 @@ class TestWorktreeGCOrphanedBranches:
         assert m.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_starred_branch_parsed_correctly(self, tmp_path: Path) -> None:
+    async def test_starred_branch_is_checked_out_and_left_to_worktree_sweep(
+        self, tmp_path: Path
+    ) -> None:
+        """``*`` marks the branch checked out in the primary worktree; git
+        would refuse ``-D`` and phase 3 no longer tries (#11571)."""
         loop, _s, _e = _make_loop(tmp_path)
         loop._collect_orphaned_branches = (
             WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
         )  # type: ignore[attr-defined]
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.side_effect = ["* agent/issue-77\n", ""]
+        with patch(
+            "workspace_gc_loop.run_subprocess", _branch_git("* agent/issue-77\n")
+        ) as m:
             count = await loop._collect_orphaned_branches()
-        assert count == 1
-        assert m.call_args_list[1][0] == ("git", "branch", _FORCE_DEL, "agent/issue-77")
+        assert (count, m.await_count, _deleted_branches(m)) == (0, 1, [])
 
     @pytest.mark.asyncio
     async def test_branch_list_failure_returns_zero(self, tmp_path: Path) -> None:
@@ -576,11 +630,10 @@ class TestWorktreeGCOrphanedBranches:
             WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
         )  # type: ignore[attr-defined]
         branches = "\n".join(f"  agent/issue-{i}" for i in range(1, 10))
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.return_value = branches
+        with patch("workspace_gc_loop.run_subprocess", _branch_git(branches)) as m:
             count = await loop._collect_orphaned_branches(budget=3)
         assert count == 3
-        assert m.await_count == 4
+        assert _deleted_branches(m) == [f"agent/issue-{i}" for i in range(1, 4)]
 
 
 class TestWorktreeGCSubprocessArgs:
@@ -1076,8 +1129,9 @@ class TestGCRemovesBranchStateOnOrphanedBranchDeletion:
         loop._collect_orphaned_branches = (
             WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
         )  # type: ignore[attr-defined]
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.side_effect = ["  agent/issue-99\n", ""]
+        with patch(
+            "workspace_gc_loop.run_subprocess", _branch_git("  agent/issue-99\n")
+        ):
             await loop._collect_orphaned_branches()
         assert state.get_branch(99) is None
 
@@ -1100,12 +1154,13 @@ class TestGCRemovesBranchStateOnOrphanedBranchDeletion:
         loop._collect_orphaned_branches = (
             WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
         )  # type: ignore[attr-defined]
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            # Only the stale auto-agent branch is listed/deleted; agent/issue-99
-            # is untouched (it has a live worktree so it isn't even listed here).
-            m.side_effect = ["  agent/auto-agent-99\n", ""]
+        # Only the stale auto-agent branch is listed/deleted; agent/issue-99
+        # is untouched (it has a live worktree so it isn't even listed here).
+        with patch(
+            "workspace_gc_loop.run_subprocess", _branch_git("  agent/auto-agent-99\n")
+        ) as m:
             count = await loop._collect_orphaned_branches()
-        assert count == 1
+        assert (count, _deleted_branches(m)) == (1, ["agent/auto-agent-99"])
         assert state.get_branch(99) == "agent/issue-99"
 
 
@@ -1197,8 +1252,10 @@ class TestCollectOrphanedBranchesPerItemIsolation:
 
         loop._issue_has_pipeline_label = AsyncMock(side_effect=fail_for_first)  # type: ignore[method-assign]
 
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.side_effect = ["  agent/issue-10\n  agent/issue-20\n", ""]
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            _branch_git("  agent/issue-10\n  agent/issue-20\n"),
+        ):
             count = await loop._collect_orphaned_branches()
 
         # issue-10 raised — skipped; issue-20 succeeded — deleted
@@ -1230,8 +1287,10 @@ class TestCollectOrphanedBranchesPerItemIsolation:
         )
         loop._issue_has_pipeline_label = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.side_effect = ["  agent/issue-10\n  agent/issue-20\n", ""]
+        with patch(
+            "workspace_gc_loop.run_subprocess",
+            _branch_git("  agent/issue-10\n  agent/issue-20\n"),
+        ):
             count = await loop._collect_orphaned_branches()
 
         # issue-10 raised in pipeline check — skipped; issue-20 succeeded
@@ -1610,16 +1669,11 @@ class TestBroadenedBranchReaper:
     async def test_deletes_fix_namespace_branch(self, tmp_path: Path) -> None:
         loop, _s, _e = _make_loop(tmp_path)
         self._real_branch_reaper(loop)
-        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as m:
-            m.side_effect = ["  fix/broaden-gc-10698\n", ""]
+        with patch(
+            "workspace_gc_loop.run_subprocess", _branch_git("  fix/broaden-gc-10698\n")
+        ) as m:
             count = await loop._collect_orphaned_branches()
-        assert count == 1
-        assert m.call_args_list[1][0] == (
-            "git",
-            "branch",
-            _FORCE_DEL,
-            "fix/broaden-gc-10698",
-        )
+        assert (count, _deleted_branches(m)) == (1, ["fix/broaden-gc-10698"])
 
     @pytest.mark.asyncio
     async def test_lists_all_branches_no_pattern(self, tmp_path: Path) -> None:
@@ -2595,3 +2649,249 @@ class TestCollectOrphanedWorktrees:
         ):
             count = await loop._collect_orphaned_worktrees()
         assert count == 0
+
+
+class TestPhase3BranchLandedGuard:
+    """#11571: phase 3 deletes a branch only when its exact tip provably landed."""
+
+    @staticmethod
+    def _real_branch_reaper(loop: WorkspaceGCLoop) -> None:
+        loop._collect_orphaned_branches = (
+            WorkspaceGCLoop._collect_orphaned_branches.__get__(loop)
+        )  # type: ignore[attr-defined,method-assign]
+
+    @pytest.mark.asyncio
+    async def test_unlanded_tip_is_kept_and_unknown_pr_state_fails_closed(
+        self, tmp_path: Path
+    ) -> None:
+        """Unique commits, a real tree diff, and ``UNKNOWN`` from the
+        exact-HEAD PR read: every rung fails, the branch stays."""
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_branch_reaper(loop)
+        git = _branch_git("  agent/issue-99\n", revlist="1", diff="only-copy.py\n")
+        with patch("workspace_gc_loop.run_subprocess", git):
+            count = await loop._collect_orphaned_branches()
+        assert (count, _deleted_branches(git)) == (0, [])
+        loop._prs.get_branch_pr_state.assert_awaited_once_with(
+            "agent/issue-99", "a" * 40, loop._config.base_branch()
+        )
+
+    @pytest.mark.asyncio
+    async def test_exact_head_merged_pr_authorizes_delete(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_branch_reaper(loop)
+        loop._prs.get_branch_pr_state = AsyncMock(return_value="MERGED")
+        git = _branch_git("  agent/issue-99\n", revlist="2", diff="squashed.py\n")
+        with patch("workspace_gc_loop.run_subprocess", git):
+            count = await loop._collect_orphaned_branches()
+        assert (count, _deleted_branches(git)) == (1, ["agent/issue-99"])
+
+    @pytest.mark.asyncio
+    async def test_squash_tree_equal_tip_is_deleted_without_pr_read(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_branch_reaper(loop)
+        git = _branch_git("  agent/issue-99\n", revlist="2", diff="")
+        with patch("workspace_gc_loop.run_subprocess", git):
+            count = await loop._collect_orphaned_branches()
+        assert (count, _deleted_branches(git)) == (1, ["agent/issue-99"])
+        loop._prs.get_branch_pr_state.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_pr_read_failure_keeps_branch(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_branch_reaper(loop)
+        loop._prs.get_branch_pr_state = AsyncMock(side_effect=RuntimeError("gh down"))
+        git = _branch_git("  agent/issue-99\n", revlist="1", diff="x.py\n")
+        with patch("workspace_gc_loop.run_subprocess", git):
+            count = await loop._collect_orphaned_branches()
+        assert (count, _deleted_branches(git)) == (0, [])
+
+    @pytest.mark.asyncio
+    async def test_git_error_on_tip_probe_keeps_branch_as_a_decision_not_an_error(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_branch_reaper(loop)
+        git = _branch_git("  agent/issue-99\n", tip_error=RuntimeError("git failed"))
+        with (
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace_gc_loop"),
+            patch("workspace_gc_loop.run_subprocess", git),
+        ):
+            count = await loop._collect_orphaned_branches()
+        assert (count, _deleted_branches(git)) == (0, [])
+        assert [
+            record.levelno
+            for record in caplog.records
+            if "agent/issue-99" in record.getMessage()
+        ] == [logging.DEBUG]
+
+    @pytest.mark.asyncio
+    async def test_tip_moved_between_proof_and_delete_keeps_branch(
+        self, tmp_path: Path
+    ) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_branch_reaper(loop)
+        git = _branch_git("  agent/issue-99\n", tip_after="b" * 40)
+        with patch("workspace_gc_loop.run_subprocess", git):
+            count = await loop._collect_orphaned_branches()
+        assert (count, _deleted_branches(git)) == (0, [])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("marker", ["* ", "+ "])
+    async def test_checked_out_branch_is_skipped_quietly_without_a_probe(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, marker: str
+    ) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        self._real_branch_reaper(loop)
+        git = _branch_git(f"{marker}agent/issue-99\n")
+        with (
+            caplog.at_level(logging.DEBUG, logger="hydraflow.workspace_gc_loop"),
+            patch("workspace_gc_loop.run_subprocess", git),
+        ):
+            count = await loop._collect_orphaned_branches()
+        assert (count, git.await_count, _deleted_branches(git)) == (0, 1, [])
+        assert [(record.levelno, record.getMessage()) for record in caplog.records] == [
+            (
+                logging.DEBUG,
+                "GC: branch agent/issue-99 is checked out in a registered worktree"
+                " — leaving it to the worktree sweep",
+            )
+        ]
+
+    @pytest.mark.asyncio
+    async def test_branch_proof_probes_run_at_repo_root(self, tmp_path: Path) -> None:
+        loop, _s, _e = _make_loop(tmp_path)
+        git = _branch_git("")
+        with patch("workspace_gc_loop.run_subprocess", git):
+            landed = await loop._branch_work_has_landed("agent/issue-5")
+        assert landed is True
+        assert {call.kwargs["cwd"] for call in git.call_args_list} == {
+            loop._config.repo_root
+        }
+        assert [call.args[:3] for call in git.call_args_list] == [
+            ("git", "rev-parse", "--verify"),
+            ("git", "rev-list", "--count"),
+            ("git", "rev-parse", "--verify"),
+        ]
+
+
+class TestPhase1MissingDirectoryPrune:
+    """#11570: a tracked entry whose destroy target is gone is pruned, state only."""
+
+    @pytest.mark.asyncio
+    async def test_prunes_tracked_entry_whose_dir_is_gone(self, tmp_path: Path) -> None:
+        loop, state, _e = _make_loop(tmp_path, use_real_landed_guard=True)
+        path = loop._config.workspace_path_for_issue(42)
+        path.parent.mkdir(parents=True)  # workspace root present, directory absent
+        state.set_workspace(42, str(path))
+        state.set_branch(42, "agent/issue-42")
+        loop._get_issue_state = AsyncMock(return_value="closed")  # type: ignore[method-assign]
+
+        with patch("workspace_gc_loop.run_subprocess", new_callable=AsyncMock) as git:
+            result = await loop._do_work()
+
+        # Phase 1 prunes the workspace entry; phase 4 prunes the branch entry.
+        assert result == {"collected": 2, "skipped": 0, "errors": 0}
+        loop._workspaces.destroy.assert_not_awaited()
+        git.assert_not_awaited()
+        assert (42 in state.get_active_workspaces(), state.get_branch(42)) == (
+            False,
+            None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_keeps_tracked_entry_when_workspace_root_is_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """No ``workspace_base/<slug>`` at all is the transient-mount shape (#6413)."""
+        loop, state, _e = _make_loop(tmp_path, use_real_landed_guard=True)
+        path = loop._config.workspace_path_for_issue(42)
+        state.set_workspace(42, str(path))
+        loop._get_issue_state = AsyncMock(return_value="closed")  # type: ignore[method-assign]
+
+        result = await loop._do_work()
+
+        assert result == {"collected": 0, "skipped": 1, "errors": 0}
+        loop._workspaces.destroy.assert_not_awaited()
+        assert state.get_active_workspaces() == {42: str(path)}
+
+    @pytest.mark.asyncio
+    async def test_dangling_symlink_at_tracked_path_is_not_gone(
+        self, tmp_path: Path
+    ) -> None:
+        loop, state, _e = _make_loop(tmp_path, use_real_landed_guard=True)
+        path = loop._config.workspace_path_for_issue(42)
+        path.parent.mkdir(parents=True)
+        path.symlink_to(tmp_path / "nowhere")
+        state.set_workspace(42, str(path))
+        loop._get_issue_state = AsyncMock(return_value="closed")  # type: ignore[method-assign]
+
+        result = await loop._do_work()
+
+        assert result == {"collected": 0, "skipped": 1, "errors": 0}
+        loop._workspaces.destroy.assert_not_awaited()
+        assert (path.is_symlink(), 42 in state.get_active_workspaces()) == (True, True)
+
+    @pytest.mark.asyncio
+    async def test_prune_requires_issue_policy_safety_first(
+        self, tmp_path: Path
+    ) -> None:
+        """An active issue's entry is never pruned, directory or not — a
+        worktree mid-creation looks exactly like "gone"."""
+        loop, state, _e = _make_loop(
+            tmp_path, use_real_landed_guard=True, active_issue_numbers=[42]
+        )
+        path = loop._config.workspace_path_for_issue(42)
+        path.parent.mkdir(parents=True)
+        state.set_workspace(42, str(path))
+
+        result = await loop._do_work()
+
+        assert result == {"collected": 0, "skipped": 1, "errors": 0}
+        assert state.get_active_workspaces() == {42: str(path)}
+
+
+class TestParseBranchListLine:
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            ("  agent/issue-1", ("agent/issue-1", False)),
+            ("* staging", ("staging", True)),
+            ("+ agent/issue-2", ("agent/issue-2", True)),
+            ("+ fix/thing-3  ", ("fix/thing-3", True)),
+            ("", ("", False)),
+        ],
+    )
+    def test_marker_means_checked_out(
+        self, line: str, expected: tuple[str, bool]
+    ) -> None:
+        assert parse_branch_list_line(line) == expected
+
+
+class TestTrackedWorkspaceIsGone:
+    def test_absent_path_under_present_root_is_gone(self, tmp_path: Path) -> None:
+        root = tmp_path / "slug"
+        root.mkdir()
+        assert tracked_workspace_is_gone(root / "issue-1", root) is True
+
+    def test_existing_directory_is_not_gone(self, tmp_path: Path) -> None:
+        root = tmp_path / "slug"
+        (root / "issue-1").mkdir(parents=True)
+        assert tracked_workspace_is_gone(root / "issue-1", root) is False
+
+    def test_dangling_symlink_is_not_gone(self, tmp_path: Path) -> None:
+        root = tmp_path / "slug"
+        root.mkdir()
+        (root / "issue-1").symlink_to(tmp_path / "nowhere")
+        assert tracked_workspace_is_gone(root / "issue-1", root) is False
+
+    def test_missing_root_is_unavailable_not_gone(self, tmp_path: Path) -> None:
+        root = tmp_path / "slug"
+        assert tracked_workspace_is_gone(root / "issue-1", root) is False
+
+    def test_root_that_is_a_file_is_not_a_present_root(self, tmp_path: Path) -> None:
+        root = tmp_path / "slug"
+        root.write_text("not a directory\n")
+        assert tracked_workspace_is_gone(root / "issue-1", root) is False

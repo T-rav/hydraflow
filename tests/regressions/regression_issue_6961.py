@@ -19,6 +19,7 @@ an open-PR guard before deleting a branch.
 from __future__ import annotations
 
 import sys
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -31,6 +32,31 @@ from workspace_gc_loop import WorkspaceGCLoop
 
 # Force-delete flag for branch deletion assertions
 _FORCE_DEL = chr(45) + chr(68)
+
+
+def _landed_branch_git(listing: str) -> Callable[..., Awaitable[str]]:
+    """Command-aware local-git fake whose listed tips are ancestral to
+    ``origin/<base>``, so the #11571 branch-tip proof authorizes deletion."""
+
+    async def _run(*cmd: str, **_kw: object) -> str:
+        if cmd[:3] == ("git", "branch", "--list"):
+            return listing
+        if cmd[:3] == ("git", "rev-parse", "--verify"):
+            return "a" * 40
+        if cmd[:2] == ("git", "rev-list"):
+            return "0"
+        return ""
+
+    return _run
+
+
+def _delete_call(mock_sub: AsyncMock) -> tuple[str, ...]:
+    """Positional args of the branch-delete call, wherever it sits in the sequence."""
+    return next(
+        call.args
+        for call in mock_sub.call_args_list
+        if call.args[:2] == ("git", "branch") and call.args[2] != "--list"
+    )
 
 
 def _make_gc_loop(
@@ -69,7 +95,9 @@ class TestOrphanedBranchOpenPRGuard:
     """Issue #6961: _collect_orphaned_branches must skip branches with open PRs."""
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6961 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6961 — fix not yet landed", strict=False
+    )
     async def test_skips_branch_when_open_pr_exists(self, tmp_path: Path) -> None:
         """An orphaned branch with an open PR must NOT be deleted.
 
@@ -112,13 +140,12 @@ class TestOrphanedBranchOpenPRGuard:
         with patch(
             "workspace_gc_loop.run_subprocess", new_callable=AsyncMock
         ) as mock_sub:
-            # First call: branch list; second call: branch delete
-            mock_sub.side_effect = ["  agent/issue-99\n", ""]
+            mock_sub.side_effect = _landed_branch_git("  agent/issue-99\n")
             count = await loop._collect_orphaned_branches()
 
         assert count == 1
         # Verify the delete call used -D
-        assert mock_sub.call_args_list[1][0] == (
+        assert _delete_call(mock_sub) == (
             "git",
             "branch",
             _FORCE_DEL,
@@ -126,7 +153,9 @@ class TestOrphanedBranchOpenPRGuard:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6961 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6961 — fix not yet landed", strict=False
+    )
     async def test_branch_gc_uses_safe_delete_not_force(self, tmp_path: Path) -> None:
         """Branch deletion should use safe delete (-d) not force (-D).
 
@@ -143,11 +172,10 @@ class TestOrphanedBranchOpenPRGuard:
         with patch(
             "workspace_gc_loop.run_subprocess", new_callable=AsyncMock
         ) as mock_sub:
-            mock_sub.side_effect = ["  agent/issue-77\n", ""]
+            mock_sub.side_effect = _landed_branch_git("  agent/issue-77\n")
             await loop._collect_orphaned_branches()
 
-        # The delete call is the second invocation
-        delete_call_args = mock_sub.call_args_list[1][0]
+        delete_call_args = _delete_call(mock_sub)
         assert delete_call_args[2] == "-d", (
             f"Expected safe delete flag '-d' but got '{delete_call_args[2]}'. "
             "Force-delete (-D) risks discarding unmerged commits."

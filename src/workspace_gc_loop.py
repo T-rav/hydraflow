@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,12 +21,15 @@ from workspace_gc_landed_safety import (
     GitProbe,
     PRProbe,
     active_workspace_snapshot,
+    branch_landed_proof,
     canonical_active_path_owners,
     landed_proof,
+    parse_branch_list_line,
     parse_git_worktrees,
     parse_issue_from_branch,
     path_within,
     tracked_path_matches_destroy_target,
+    tracked_workspace_is_gone,
     worktree_too_new,
 )
 from workspace_gc_landed_safety import (
@@ -51,6 +54,87 @@ async def _read_pr_probe(prs: PRPort, probe: PRProbe) -> str | None:
     except (RuntimeError, OSError) as exc:
         reraise_on_credit_or_bug(exc)
         return None
+
+
+async def _drive_landed_proof(
+    proof: Generator[GitProbe | PRProbe, str, bool],
+    *,
+    cwd: Path,
+    prs: PRPort,
+    gh_token: str,
+) -> bool:
+    """Drive one pure proof generator over local git + PRPort, failing closed.
+
+    The single subprocess seam for every landed decision: both identity
+    front-ends (worktree HEAD, branch tip) share this driver and the ladder
+    behind it, so there is one place a proof can be wrong.
+    """
+    try:
+        probe = next(proof)
+        while True:
+            if isinstance(probe, GitProbe):
+                try:
+                    response = await run_subprocess(
+                        "git", *probe.args, cwd=cwd, gh_token=gh_token
+                    )
+                except (RuntimeError, OSError):
+                    return False
+            elif isinstance(probe, PRProbe):
+                response = await _read_pr_probe(prs, probe)
+                if response is None:
+                    return False
+            else:  # pragma: no cover - closed probe protocol
+                return False
+            probe = proof.send(response)
+    except StopIteration as result:
+        return result.value is True
+
+
+async def _reap_worktree(
+    path: Path,
+    branch: str | None,
+    issue_number: int | None,
+    *,
+    config: HydraFlowConfig,
+    state: StateTracker,
+    gh_token: str,
+) -> None:
+    """Remove the worktree at *path* and delete its branch — post-proof only.
+
+    Routed through local git (``git worktree remove --force`` + a branch
+    force-delete) mirroring phase 3. State entries for a resolved issue are
+    cleared idempotently. Only ``_reap_worktree_if_safe`` may call this.
+    """
+    if config.dry_run:
+        logger.info("[dry-run] Would reap orphan worktree %s (branch %s)", path, branch)
+        return
+    await run_subprocess(
+        "git",
+        "worktree",
+        "remove",
+        "--force",
+        str(path),
+        cwd=config.repo_root,
+        gh_token=gh_token,
+    )
+    if branch:
+        with contextlib.suppress(RuntimeError):
+            await run_subprocess(
+                "git",
+                "branch",
+                "-D",
+                branch,
+                cwd=config.repo_root,
+                gh_token=gh_token,
+            )
+    if issue_number is not None:
+        state.remove_workspace(issue_number)
+        # Cross-namespace aliasing guard (same as phase 3, #11182): the tracked
+        # ``active_branches`` entry may name a *different*, still-live branch
+        # for this issue — only evict it when it matches the branch just deleted.
+        if branch and state.get_active_branches().get(issue_number) == branch:
+            state.remove_branch(issue_number)
+    logger.info("GC: reaped orphan worktree %s (branch %s)", path, branch)
 
 
 class WorkspaceGCLoop(BaseBackgroundLoop):
@@ -101,6 +185,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             return {"collected": 0, "skipped": 0, "errors": 1}
         active_workspaces = active_snapshot.workspaces
         active_branches = self._state.get_active_branches()
+        workspace_root = self._config.workspace_base / self._config.repo_slug
         for issue_number in list(active_workspaces.keys()):
             if self._stop_event.is_set() or collected >= _MAX_GC_PER_CYCLE:
                 break
@@ -115,6 +200,23 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                         logger.warning(
                             "GC: tracked path %s for issue #%d does not match destroy target %s — skipping",
                             recorded_path,
+                            issue_number,
+                            destroy_path,
+                        )
+                        continue
+                    if tracked_workspace_is_gone(destroy_path, workspace_root):
+                        # Nothing to destroy and nothing to lose (#11570):
+                        # the directory went away out-of-band (cleanup crash
+                        # between destroy and state removal, operator rm).
+                        # Prune STATE only — the branch-state entry is phase
+                        # 4's, and the branch ref itself is phase 3's, each
+                        # under its own guard. A missing workspace root is
+                        # the transient-mount shape (#6413) and stays
+                        # fail-closed inside the landed proof below.
+                        self._state.remove_workspace(issue_number)
+                        collected += 1
+                        logger.info(
+                            "GC: pruned tracked workspace entry for issue #%d — %s no longer exists",
                             issue_number,
                             destroy_path,
                         )
@@ -432,12 +534,12 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
     _parse_issue_from_branch = staticmethod(parse_issue_from_branch)
 
     async def _collect_orphaned_branches(self, budget: int = _MAX_GC_PER_CYCLE) -> int:
-        """Delete local orphaned branches with no corresponding worktree.
+        """Delete local orphaned branches whose exact tip provably landed.
 
-        Covers every real branch namespace (``agent/issue-<N>``,
-        ``agent/auto-agent-<N>`` (#11182), and
-        ``fix|feat|refactor|chore|test|docs/<slug>-<N>``) — not just
-        ``agent/issue-*`` (#10698) — with the same skip guards as before.
+        Every issue-branch namespace (#10698, #11182). The active/pipeline/
+        retry/label guards are the liveness gate; the shared landed ladder on
+        the branch tip is the data-safety gate (#11571). Branches checked out
+        in any registered worktree (``*``/``+``) are the worktree sweep's.
         """
         collected = 0
         try:
@@ -459,9 +561,15 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         for line in output.strip().splitlines():
             if collected >= budget:
                 break
-            branch = line.strip().removeprefix("* ").removeprefix("+ ")
+            branch, checked_out = parse_branch_list_line(line)
             issue_number = self._parse_issue_from_branch(branch)
             if issue_number is None:
+                continue
+            if checked_out:
+                logger.debug(
+                    "GC: branch %s is checked out in a registered worktree — leaving it to the worktree sweep",
+                    branch,
+                )
                 continue
             try:
                 # Skip if worktree exists, issue is active, in pipeline,
@@ -473,6 +581,9 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
                 if self._in_retry_window(issue_number):
                     continue
                 if await self._issue_has_pipeline_label(issue_number):
+                    continue
+                if not await self._branch_work_has_landed(branch):
+                    logger.debug("GC: branch %s has unlanded work — skipping", branch)
                     continue
                 await run_subprocess(
                     "git",
@@ -647,7 +758,14 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             logger.debug("GC: worktree %s has unlanded work — skipping", path)
             return False
 
-        await self._reap_worktree(path, branch, issue_number)
+        await _reap_worktree(
+            path,
+            branch,
+            issue_number,
+            config=self._config,
+            state=self._state,
+            gh_token=self._credentials.gh_token,
+        )
         return True
 
     async def _list_git_worktrees(self) -> list[_WorktreeEntry]:
@@ -669,7 +787,7 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
         expected_branch: str | None,
         expected_issue: int | None,
     ) -> bool:
-        """Drive the single pure HEAD-aware proof ladder, failing closed."""
+        """Prove the worktree at *path* holds only landed work (phases 1, 2, 5)."""
         proof = landed_proof(
             path,
             base_branch=self._config.base_branch(),
@@ -677,70 +795,16 @@ class WorkspaceGCLoop(BaseBackgroundLoop):
             expected_issue=expected_issue,
             issue_from_branch=self._parse_issue_from_branch,
         )
-        try:
-            probe = next(proof)
-            while True:
-                if isinstance(probe, GitProbe):
-                    try:
-                        response = await run_subprocess(
-                            "git",
-                            *probe.args,
-                            cwd=path,
-                            gh_token=self._credentials.gh_token,
-                        )
-                    except (RuntimeError, OSError):
-                        return False
-                elif isinstance(probe, PRProbe):
-                    response = await _read_pr_probe(self._prs, probe)
-                    if response is None:
-                        return False
-                else:  # pragma: no cover - closed probe protocol
-                    return False
-                probe = proof.send(response)
-        except StopIteration as result:
-            return result.value is True
+        return await _drive_landed_proof(
+            proof, cwd=path, prs=self._prs, gh_token=self._credentials.gh_token
+        )
 
-    async def _reap_worktree(
-        self, path: Path, branch: str | None, issue_number: int | None
-    ) -> None:
-        """Remove the worktree at *path* and delete its branch.
-
-        Routed through local git (``git worktree remove --force`` +
-        ``git branch -D``) mirroring ``_collect_orphaned_branches``. State
-        entries for a resolved issue are cleared idempotently.
-        """
-        if self._config.dry_run:
-            logger.info(
-                "[dry-run] Would reap orphan worktree %s (branch %s)", path, branch
-            )
-            return
-        await run_subprocess(
-            "git",
-            "worktree",
-            "remove",
-            "--force",
-            str(path),
+    async def _branch_work_has_landed(self, branch: str) -> bool:
+        """Prove the local *branch* tip landed on ``origin/<base>`` (phase 3)."""
+        proof = branch_landed_proof(branch, base_branch=self._config.base_branch())
+        return await _drive_landed_proof(
+            proof,
             cwd=self._config.repo_root,
+            prs=self._prs,
             gh_token=self._credentials.gh_token,
         )
-        if branch:
-            with contextlib.suppress(RuntimeError):
-                await run_subprocess(
-                    "git",
-                    "branch",
-                    "-D",
-                    branch,
-                    cwd=self._config.repo_root,
-                    gh_token=self._credentials.gh_token,
-                )
-        if issue_number is not None:
-            self._state.remove_workspace(issue_number)
-            # Cross-namespace aliasing guard (same as phase 3, #11182): the
-            # tracked ``active_branches`` entry may name a *different*,
-            # still-live branch for this issue — only evict it when it
-            # matches the branch just deleted.
-            if branch and (
-                self._state.get_active_branches().get(issue_number) == branch
-            ):
-                self._state.remove_branch(issue_number)
-        logger.info("GC: reaped orphan worktree %s (branch %s)", path, branch)

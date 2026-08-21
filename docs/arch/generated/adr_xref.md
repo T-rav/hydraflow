@@ -75,7 +75,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0066 | `src.agent`, `src.base_runner`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0067 | `src.issue_fetcher`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0068 | `src.ports`, `src.term_proposer_loop`, `src.term_pruner_loop` | `(none) — structural subtype check planned in follow-up` |
-| ADR-0069 | `src.ports`, `src.workspace_gc_landed_safety`, `src.workspace_gc_loop` | `tests/test_workspace_gc_loop.py, tests/regressions/test_workspace_gc_landed_safety.py, tests/regressions/test_issue_11503.py, tests/regressions/test_issue_11507.py` |
+| ADR-0069 | `src.ports`, `src.workspace_gc_landed_safety`, `src.workspace_gc_loop` | `tests/test_workspace_gc_loop.py, tests/regressions/test_workspace_gc_landed_safety.py, tests/regressions/test_issue_11503.py, tests/regressions/test_issue_11507.py, tests/regressions/test_issue_11570.py, tests/regressions/test_issue_11571.py, tests/architecture/test_workspace_gc_landed_guard.py, tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
 | ADR-0070 | `src.ports`, `src.review_insights` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0071 | `src.route_back`, `src.state.__init__` | `pytest:tests/test_route_back.py` |
 | ADR-0072 | `src.stale_issue_gc_loop`, `src.stale_issue_loop` | `tests/test_stale_issue_loop.py` |

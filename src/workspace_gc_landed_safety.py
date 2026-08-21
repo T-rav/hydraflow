@@ -74,6 +74,22 @@ def parse_issue_from_branch(branch: str | None) -> int | None:
     return None
 
 
+def parse_branch_list_line(line: str) -> tuple[str, bool]:
+    """Split one ``git branch --list`` row into ``(name, checked_out)``.
+
+    ``*`` marks the branch checked out in the current worktree and ``+`` one
+    checked out in any other registered worktree — including prunable
+    (directory already gone) and locked registrations. ``git branch -D``
+    refuses exactly that set, so a checked-out branch is the worktree
+    sweep's to reap, never phase 3's.
+    """
+    stripped = line.strip()
+    for marker in ("* ", "+ "):
+        if stripped.startswith(marker):
+            return stripped[len(marker) :].strip(), True
+    return stripped, False
+
+
 def canonical_active_path_owners(
     active_workspaces: Mapping[int, str],
 ) -> dict[Path, set[int]] | None:
@@ -161,6 +177,23 @@ def tracked_path_matches_destroy_target(
         recorded = recorded_path.expanduser().resolve()
         target = destroy_path.expanduser().resolve()
         return recorded == target
+    except OSError:
+        return False
+
+
+def tracked_workspace_is_gone(destroy_path: Path, workspace_root: Path) -> bool:
+    """Return whether phase 1's destroy target is provably absent, not unavailable.
+
+    "Gone" means nothing exists at *destroy_path* — not even a dangling
+    symlink — while *workspace_root* (``workspace_base/<repo_slug>``) is a
+    present directory. A transiently unavailable mount (#6413) takes the
+    whole root away and is indistinguishable from "gone" at the path level,
+    so it stays fail-closed. Stat errors fail closed too.
+    """
+    try:
+        if destroy_path.is_symlink() or destroy_path.exists():
+            return False
+        return workspace_root.is_dir()
     except OSError:
         return False
 
@@ -280,6 +313,68 @@ def _nonnegative_int(output: str) -> int | None:
     return value if value >= 0 else None
 
 
+def _single_commit_oid(output: str) -> str | None:
+    """Parse exactly one object id from a ``rev-parse --verify`` read."""
+    lines = output.strip().splitlines()
+    if len(lines) != 1:
+        return None
+    oid = lines[0].strip().lower()
+    return oid if _GIT_OID_RE.fullmatch(oid) else None
+
+
+def _landed_ladder(
+    head_sha: str, branch: str | None, base_branch: str
+) -> Generator[GitProbe | PRProbe, str, bool]:
+    """The one proof ladder shared by every identity front-end.
+
+    Ancestry first, then squash-tree equality, then a merged PR whose base,
+    branch, and historical head SHA exactly match *head_sha*. Callers pin
+    the identity before and re-read it after; the rungs never do I/O.
+    """
+    rev_count = yield GitProbe(
+        ("rev-list", "--count", f"origin/{base_branch}..{head_sha}")
+    )
+    unique_commits = _nonnegative_int(rev_count)
+    if unique_commits is None:
+        return False
+    if unique_commits == 0:
+        return True
+    tree_diff = yield GitProbe(
+        ("diff", "--name-only", f"origin/{base_branch}", head_sha)
+    )
+    if not tree_diff.strip():
+        return True
+    if branch is None:
+        return False
+    pr_state = yield PRProbe(branch, head_sha, base_branch)
+    return pr_state == "MERGED"
+
+
+def branch_landed_proof(
+    branch: str, *, base_branch: str
+) -> Generator[GitProbe | PRProbe, str, bool]:
+    """Prove a local branch's exact tip landed on ``origin/<base>``, or fail closed.
+
+    The branch-ref front-end of :func:`landed_proof`: there is no worktree,
+    so no top-level or dirtiness to verify — the identity is the tip that
+    ``rev-parse --verify refs/heads/<branch>^{commit}`` reports. It climbs
+    the same ladder and re-reads the tip after positive proof so a commit
+    landing between proof and ``git branch -D`` cannot mix identities.
+    """
+    name = branch.strip().removeprefix("refs/heads/")
+    if not name or "\0" in name or name.startswith("-") or name.split() != [name]:
+        return False
+    tip_probe = GitProbe(("rev-parse", "--verify", f"refs/heads/{name}^{{commit}}"))
+    head_sha = _single_commit_oid((yield tip_probe))
+    if head_sha is None:
+        return False
+    proof_established = yield from _landed_ladder(head_sha, name, base_branch)
+    if not proof_established:
+        return False
+    verified = yield tip_probe
+    return _single_commit_oid(verified) == head_sha
+
+
 def landed_proof(
     path: Path,
     *,
@@ -291,8 +386,8 @@ def landed_proof(
     """Prove the exact clean worktree HEAD landed, or fail closed.
 
     The caller drives the yielded reads but this generator owns their order:
-    ancestry first, then squash-tree equality, then a merged PR whose base,
-    branch, and historical head SHA exactly match.  It re-reads status after
+    worktree identity first, then the shared :func:`_landed_ladder` (ancestry,
+    squash-tree equality, exact-HEAD merged PR).  It re-reads status after
     positive proof so a concurrent HEAD move cannot mix identities.
 
     An attributed candidate must exist, contain a ``.git`` marker, and report
@@ -320,22 +415,7 @@ def landed_proof(
         return False
     head_sha, actual_branch = identity
 
-    rev_count = yield GitProbe(
-        ("rev-list", "--count", f"origin/{base_branch}..{head_sha}")
-    )
-    unique_commits = _nonnegative_int(rev_count)
-    if unique_commits is None:
-        return False
-
-    proof_established = unique_commits == 0
-    if unique_commits > 0:
-        tree_diff = yield GitProbe(
-            ("diff", "--name-only", f"origin/{base_branch}", head_sha)
-        )
-        proof_established = not tree_diff.strip()
-        if not proof_established and actual_branch is not None:
-            pr_state = yield PRProbe(actual_branch, head_sha, base_branch)
-            proof_established = pr_state == "MERGED"
+    proof_established = yield from _landed_ladder(head_sha, actual_branch, base_branch)
     if not proof_established:
         return False
 
