@@ -140,15 +140,21 @@ jobs:
       contents: read
       issues: write
     steps:
-      # TRUST: this job keeps the job-output ref on purpose — the reporter must
-      # name the exact commit the shards tested, not a possibly-advanced staging
-      # tip. It is not the poisonable shape the shard was: no pip/docker/cache
-      # step runs here, so there is no cache for a checkout to poison. The SHA
-      # itself is `git rev-parse HEAD` on protected `staging` (see `resolve`).
-      # Pinned by tests/architecture/test_staging_rc_dryrun_workflow_shape.py.
+      # TRUST: literal protected branch, same as the shard. This job used to
+      # keep `ref: ${{ needs.resolve.outputs.sha }}` on the theory that a
+      # reporter with no pip/docker/cache step has nothing to poison — true,
+      # but it left the fleet with one checkout of a job-output ref, and
+      # tests/architecture/test_workflow_checkout_refs.py now forbids the
+      # shape outright (#11565). Nothing here depends on the checked-out
+      # commit: the tree only supplies scripts/staging_rc_dryrun_report.py,
+      # and the SHA the report names travels through the job output into
+      # `--sha` below (via env, never interpolated into the shell body). So a
+      # staging tip that advanced since `resolve` cannot make the report name
+      # the wrong commit — no pin step is needed and a mismatch is not an
+      # error. Pinned by tests/architecture/test_staging_rc_dryrun_workflow_shape.py.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: staging
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -160,10 +166,14 @@ jobs:
           merge-multiple: false
       - name: Aggregate failures into an issue body
         id: aggregate
+        env:
+          # The commit the shards tested. Through the environment, not `${{ }}`
+          # inside `run:` — same script-injection hygiene as the shard's pin.
+          RESOLVED_SHA: ${{ needs.resolve.outputs.sha }}
         run: |
           python scripts/staging_rc_dryrun_report.py \
             --results-dir /tmp/dryrun-summaries \
-            --sha "${{ needs.resolve.outputs.sha }}" \
+            --sha "$RESOLVED_SHA" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       - name: File or update rolling hydraflow-find issue on break
         if: steps.aggregate.outputs.has_failures == 'true'
