@@ -310,3 +310,26 @@ async def test_pre_spawn_hook_is_called(tmp_path: Path) -> None:
     ):
         await runner.run(prompt="hi", worktree_path=str(tmp_path), issue_number=1)
     assert pre_calls == ["hi"]
+
+
+@pytest.mark.asyncio
+async def test_run_threads_issue_number_into_harness_env(tmp_path: Path) -> None:
+    """The gateway mint attributes spend to the issue this spawn works on."""
+    runner = _make_runner()
+    with (
+        patch(
+            "runners.base_subprocess_runner.resolve_harness_env",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as resolve_mock,
+        patch(
+            "runners.base_subprocess_runner.stream_claude_process",
+            new_callable=AsyncMock,
+            return_value="<status>resolved</status>",
+        ),
+    ):
+        await runner.run(
+            prompt="hello", worktree_path=str(tmp_path), issue_number=11464
+        )
+
+    assert resolve_mock.await_args.kwargs["issue_number"] == 11464

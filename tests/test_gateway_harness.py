@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -547,3 +548,144 @@ async def test_gateway_lightweight_spawn_revokes_key_when_runner_raises(
         )
 
     assert client.revocations == [("http://gateway:8080", "control-secret", "key-1")]
+
+
+@pytest.mark.asyncio
+async def test_gateway_mint_threads_issue_and_pr_attribution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", "control-secret")
+    config = HydraFlowConfig(
+        gateway_base_url="http://gateway:8080", gateway_key_ttl_seconds=300
+    )
+    client = _FakeGatewayClient()
+
+    env = await resolve_harness_env(
+        "gateway",
+        config,
+        model="sonnet",
+        source="implementer",
+        spawn_id="spawn-9",
+        issue_number=11464,
+        pr_number=11500,
+        gateway_client=client,
+    )
+    await revoke_gateway_key(env)
+
+    (_, _, request) = client.calls[0]
+    assert request.issue_number == 11464
+    assert request.pr_number == 11500
+
+
+@pytest.mark.asyncio
+async def test_gateway_mint_attribution_defaults_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", "control-secret")
+    config = HydraFlowConfig(
+        gateway_base_url="http://gateway:8080", gateway_key_ttl_seconds=300
+    )
+    client = _FakeGatewayClient()
+
+    env = await resolve_harness_env(
+        "gateway", config, model="sonnet", spawn_id="spawn-9", gateway_client=client
+    )
+    await revoke_gateway_key(env)
+
+    (_, _, request) = client.calls[0]
+    assert request.issue_number is None
+    assert request.pr_number is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "attribution",
+    [
+        pytest.param({"issue_number": 11464, "pr_number": 11500}, id="attributed"),
+        pytest.param({}, id="unattributed-omits-keys"),
+    ],
+)
+async def test_http_mint_payload_carries_attribution_only_when_present(
+    monkeypatch: pytest.MonkeyPatch, attribution: dict[str, int]
+) -> None:
+    bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(
+            201,
+            json={
+                "key_id": "key-1",
+                "token": "hfgw_virtual",
+                "expires_at": "2099-01-01T00:00:00Z",
+            },
+        )
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+
+    credential = await _HttpGatewayControlClient().mint_key(
+        base_url="http://gateway:8080",
+        control_token="control-secret",
+        request=GatewayMintRequest(
+            principal_kind="spawn",
+            principal_id="implementer",
+            spawn_id="spawn-1",
+            session_id=None,
+            repo_slug="org/repo",
+            repo_class="personal",
+            provider_binding="anthropic",
+            capture_bodies=False,
+            ttl_seconds=300,
+            **attribution,
+        ),
+    )
+
+    assert credential.key_id == "key-1"
+    (body,) = bodies
+    # An older gateway rejects unknown keys (extra="forbid"): only send what is set.
+    for key in ("issue_number", "pr_number"):
+        if key in attribution:
+            assert body[key] == attribution[key]
+        else:
+            assert key not in body
+
+
+@pytest.mark.asyncio
+async def test_stream_with_telemetry_threads_attribution_into_gateway_mint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The central telemetry wrapper already knows the issue/PR; the mint must too."""
+    monkeypatch.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", "control-secret")
+    client = _FakeGatewayClient()
+    bus = MagicMock()
+    bus.current_session_id = "session-7"
+
+    with (
+        patch("runner_utils._HttpGatewayControlClient", return_value=client),
+        patch(
+            "runner_utils.stream_claude_process",
+            new_callable=AsyncMock,
+            return_value="transcript",
+        ),
+        patch("runner_utils.record_inference_telemetry"),
+    ):
+        await stream_claude_with_telemetry(
+            config=HydraFlowConfig(gateway_base_url="http://gateway:8080"),
+            cmd=["claude", "--model", "sonnet", "-p"],
+            prompt="prompt",
+            cwd=tmp_path,
+            active_procs=set(),
+            event_bus=bus,
+            event_data={"issue": 42, "pr": 77, "source": "implementer"},
+            logger=logging.getLogger("test"),
+            provider="gateway",
+        )
+
+    (_, _, request) = client.calls[0]
+    assert request.issue_number == 42
+    assert request.pr_number == 77

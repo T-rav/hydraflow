@@ -45,6 +45,9 @@ class GatewayLedgerRow(BaseModel):
     status_code: int = Field(ge=0, le=599)
     status: GatewayRequestStatus
     upstream_provider: ProviderBinding
+    # Decoded request path with the query string stripped (``/v1/messages``),
+    # bounded by the proxy; ``None`` on rows written before it was recorded.
+    path: str | None = None
     model_requested: str | None = None
     model_served: str | None = None
     input_tokens: int = Field(default=0, ge=0)
@@ -56,12 +59,37 @@ class GatewayLedgerRow(BaseModel):
     observer_malformed_events: int = Field(default=0, ge=0)
     body_capture_id: str | None = None
     body_capture_complete: bool | None = None
+    # False when the client aborted, the upstream stream did not finish, or no
+    # usage event with counts ever arrived (z.ai sends ``usage: {}`` in
+    # ``message_start`` and all counts only in the final ``message_delta``).
+    # The token columns may then hold PARTIAL counts; they are never priced.
+    usage_complete: bool
     cost_usd: float | None = Field(default=None, ge=0)
     cost_unknown: bool
 
+    @model_validator(mode="before")
+    @classmethod
+    def derive_legacy_usage_complete(cls, data: Any) -> Any:
+        """Rows written before ``usage_complete`` existed are complete iff the
+        stream finished and the client stayed — the pre-flag semantics."""
+        if isinstance(data, dict) and "usage_complete" not in data:
+            data = dict(data)
+            data["usage_complete"] = bool(data.get("completed")) and not bool(
+                data.get("client_aborted")
+            )
+        return data
+
     @model_validator(mode="after")
     def enforce_unknown_cost_semantics(self) -> GatewayLedgerRow:
-        """An unknown price is never serialized as a misleading numeric zero."""
+        """An unknown price is never serialized as a misleading numeric zero,
+        and partial usage (aborted / unfinished / no usage event) is never
+        priced — a client-aborted row is ``cost_unknown``, not ``$0``."""
+        if self.usage_complete and (self.client_aborted or not self.completed):
+            raise ValueError(
+                "usage_complete must be false for client-aborted or unfinished rows"
+            )
+        if not self.usage_complete and not self.cost_unknown:
+            raise ValueError("cost_unknown must be true when usage_complete is false")
         if self.cost_unknown and self.cost_usd is not None:
             raise ValueError("cost_usd must be null when cost_unknown is true")
         if not self.cost_unknown and self.cost_usd is None:
