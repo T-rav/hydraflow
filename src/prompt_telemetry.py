@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -667,34 +669,54 @@ class PromptTelemetry:
         except OSError:
             return 0.0
 
+    def iter_inferences(self) -> Iterator[dict[str, Any]]:
+        """Stream inference rows in file order (oldest first).
+
+        Blank and corrupt lines are skipped; a missing file yields nothing.
+        An ``OSError`` mid-read PROPAGATES: rows already yielded cannot be
+        retracted, so swallowing it would hand the caller a truncated prefix
+        dressed as a complete read (#11581). A caller that needs a calendar
+        window filters on ``timestamp`` as it streams, so memory holds the
+        window rather than the file; :meth:`load_inferences` is the
+        row-COUNT-bounded convenience over this for "recent activity" views.
+        """
+        if not self._inferences_file.is_file():
+            return
+        with open(self._inferences_file) as f:
+            for raw_line in f:
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    logger.debug(
+                        "Skipping corrupt inference line in %s",
+                        self._inferences_file,
+                        exc_info=True,
+                    )
+                    continue
+                if isinstance(parsed, dict):
+                    yield parsed
+
     def load_inferences(
         self,
         *,
         limit: int = 5000,
     ) -> list[dict[str, Any]]:
-        """Load recent inference rows from JSONL, newest last."""
+        """Load the newest *limit* inference rows, oldest first.
+
+        Bounded by row COUNT, which suits surfaces that want "the most recent
+        activity" and nothing else — never a calendar window: one busy ISO
+        week carried 24,434 rows (2026-W25), so any fixed cap silently loses
+        the head of the window (#11581). Window readers stream
+        :meth:`iter_inferences` instead. An unreadable file degrades to ``[]``
+        with a warning.
+        """
         if limit <= 0:
             return []
-        if not self._inferences_file.is_file():
-            return []
-        rows: list[dict[str, Any]] = []
         try:
-            with open(self._inferences_file) as f:
-                for raw_line in f:
-                    stripped = raw_line.strip()
-                    if not stripped:
-                        continue
-                    try:
-                        parsed = json.loads(stripped)
-                    except json.JSONDecodeError:
-                        logger.debug(
-                            "Skipping corrupt inference line in %s",
-                            self._inferences_file,
-                            exc_info=True,
-                        )
-                        continue
-                    if isinstance(parsed, dict):
-                        rows.append(parsed)
+            return list(deque(self.iter_inferences(), maxlen=limit))
         except OSError:
             logger.warning(
                 "Could not read prompt telemetry from %s",
@@ -702,9 +724,6 @@ class PromptTelemetry:
                 exc_info=True,
             )
             return []
-        if len(rows) > limit:
-            return rows[-limit:]
-        return rows
 
     @staticmethod
     def _accumulate_counter(
