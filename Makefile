@@ -106,7 +106,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover gateway-coverage smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
+.PHONY: help run dev factory factory-service-install factory-service-uninstall env dry-run clean clean-assets compact coverage cover gateway-coverage smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -196,6 +196,19 @@ dev: run
 factory:
 	@echo "$(BLUE)Starting HydraFlow factory in an isolated workspace (dev checkout stays clean)$(RESET)"
 	@$(HYDRAFLOW_DIR)scripts/run-factory-isolated.sh
+
+## factory-service-install — run the factory as a macOS launchd service (ADR-0135).
+## Renders ~/Library/LaunchAgents/com.hydraflow.factory.plist (KeepAlive,
+## in-place from ~/.hydraflow/factory-workspace/hydraflow) and gives the
+## liveness knob a RESTART_LABEL. Pair with `scripts/install_liveness_watchdog.py`.
+##   make factory-service-install ARGS="--dry-run"
+factory-service-install:
+	@echo "$(BLUE)Installing com.hydraflow.factory launchd agent (factory-as-service)$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(UV) python scripts/install_factory_service.py $(ARGS)
+
+factory-service-uninstall:
+	@echo "$(YELLOW)Uninstalling com.hydraflow.factory launchd agent$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(UV) python scripts/install_factory_service.py --uninstall $(ARGS)
 
 dry-run:
 	@echo "$(BLUE)HydraFlow dry run (server mode)$(RESET)"

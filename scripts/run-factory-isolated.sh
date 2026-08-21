@@ -13,18 +13,38 @@
 #   HYDRAFLOW_FACTORY_WORKSPACE   dir for the dedicated clone
 #                                 (default: ~/.hydraflow/factory-workspace/hydraflow)
 #   HYDRAFLOW_FACTORY_BRANCH      branch the factory runs (default: staging)
+#   HYDRAFLOW_FACTORY_SERVICE=1   SERVICE MODE (ADR-0135): run IN PLACE from the
+#                                 workspace itself. Set by the launchd plist
+#                                 that scripts/install_factory_service.py
+#                                 renders (label com.hydraflow.factory).
 #
 # Branch default is `staging`, not `main` (ADR-0042 two-tier model): the factory
 # runs on staging and `main` advances only via auto-promoted RC PRs. Defaulting
 # to `main` here booted the factory 90 commits behind, idle, after a restart
 # (2026-07-27) — the liveness kernel now also pins this via the launchd plist.
 #
+# Service mode: a launchd agent cannot run from ~/Documents (macOS TCC denies
+# launchd agents that folder — `make: getcwd: Operation not permitted`, then
+# `No rule to make target 'factory'`; the factory was down 15 of 31 days on
+# that), so the job runs THIS script from the workspace copy with DEV_ROOT ==
+# WORKSPACE. The "never reset --hard the dev checkout" guard below would refuse
+# that, so service mode replaces it with a NARROWER invariant instead of
+# weakening it: the resolved workspace must live under "$HOME/.hydraflow/"
+# (the only place a throwaway factory workspace may live) and must already
+# exist (the interactive installer clones it; the service never clones). The
+# origin URL then comes from the workspace's own remote, the .env copy is
+# skipped (the workspace's gitignored .env is the one in use), and the
+# fetch / force-discard / reset / `make env` / `exec make run` path runs
+# unchanged. The non-service path is untouched.
+#
 # Usage:  scripts/run-factory-isolated.sh        (or: make factory)
+#         HYDRAFLOW_FACTORY_SERVICE=1 ~/.hydraflow/factory-workspace/hydraflow/scripts/run-factory-isolated.sh
 set -euo pipefail
 
 DEV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 WORKSPACE="${HYDRAFLOW_FACTORY_WORKSPACE:-$HOME/.hydraflow/factory-workspace/hydraflow}"
 BRANCH="${HYDRAFLOW_FACTORY_BRANCH:-staging}"
+SERVICE_MODE="${HYDRAFLOW_FACTORY_SERVICE:-0}"
 
 # Canonicalize WORKSPACE to an absolute, symlink-resolved path BEFORE the
 # safety guard — otherwise a relative value ('.', '../hydraflow') would slip
@@ -46,21 +66,46 @@ _abort_in_place() {
   echo "[factory] Set HYDRAFLOW_FACTORY_WORKSPACE to a separate path." >&2
   exit 1
 }
-# Guard 1: resolved paths must differ.
-[ "$WORKSPACE" = "$DEV_ROOT" ] && _abort_in_place
-# Guard 2: even via symlink/nested layout, the workspace must not be the dev
-# repo's git toplevel.
-if [ -e "$WORKSPACE/.git" ]; then
-  _ws_top="$(git -C "$WORKSPACE" rev-parse --show-toplevel 2>/dev/null || true)"
-  [ -n "$_ws_top" ] && [ "$_ws_top" = "$DEV_ROOT" ] && _abort_in_place
-fi
 
-ORIGIN_URL="$(git -C "$DEV_ROOT" remote get-url origin)"
+if [ "$SERVICE_MODE" = "1" ]; then
+  # SERVICE MODE (ADR-0135): in-place launch from the workspace. DEV_ROOT ==
+  # WORKSPACE is expected here, so the dev-checkout guard is replaced by the
+  # narrower "must live under $HOME/.hydraflow/" invariant — compared against
+  # both the literal $HOME and its symlink-resolved form, since WORKSPACE was
+  # canonicalized above (macOS: /tmp -> /private/tmp, /var -> /private/var).
+  _home_real="$(cd "$HOME" && pwd -P)"
+  case "$WORKSPACE" in
+    "$HOME/.hydraflow/"*|"$_home_real/.hydraflow/"*) ;;
+    *)
+      echo "[factory] ERROR: service mode refuses workspace ($WORKSPACE):" >&2
+      echo "[factory] it must live under $HOME/.hydraflow/ — the only place a throwaway factory workspace may live." >&2
+      exit 1
+      ;;
+  esac
+  if [ ! -d "$WORKSPACE/.git" ]; then
+    echo "[factory] ERROR: service mode: workspace $WORKSPACE does not exist (or is not a git clone)." >&2
+    echo "[factory] The service never clones. Run scripts/install_factory_service.py from the dev checkout first." >&2
+    exit 1
+  fi
+  ORIGIN_URL="$(git -C "$WORKSPACE" remote get-url origin)"
+  echo "[factory] service mode: running in place from $WORKSPACE (origin $ORIGIN_URL)"
+else
+  # Guard 1: resolved paths must differ.
+  [ "$WORKSPACE" = "$DEV_ROOT" ] && _abort_in_place
+  # Guard 2: even via symlink/nested layout, the workspace must not be the dev
+  # repo's git toplevel.
+  if [ -e "$WORKSPACE/.git" ]; then
+    _ws_top="$(git -C "$WORKSPACE" rev-parse --show-toplevel 2>/dev/null || true)"
+    [ -n "$_ws_top" ] && [ "$_ws_top" = "$DEV_ROOT" ] && _abort_in_place
+  fi
 
-if [ ! -d "$WORKSPACE/.git" ]; then
-  echo "[factory] cloning $ORIGIN_URL -> $WORKSPACE"
-  mkdir -p "$(dirname "$WORKSPACE")"
-  git clone "$ORIGIN_URL" "$WORKSPACE"
+  ORIGIN_URL="$(git -C "$DEV_ROOT" remote get-url origin)"
+
+  if [ ! -d "$WORKSPACE/.git" ]; then
+    echo "[factory] cloning $ORIGIN_URL -> $WORKSPACE"
+    mkdir -p "$(dirname "$WORKSPACE")"
+    git clone "$ORIGIN_URL" "$WORKSPACE"
+  fi
 fi
 
 # Always start the factory on a clean, current base. The dedicated workspace is
@@ -84,7 +129,14 @@ git -C "$WORKSPACE" clean -fd
 
 # Reuse the dev checkout's .env (tokens + runtime config) so the factory has the
 # same credentials/settings. Copied each launch so the two stay in sync.
-if [ -f "$DEV_ROOT/.env" ]; then
+# Service mode has no dev checkout to copy from (and `cp` of a file onto
+# itself fails under set -e): the workspace's own gitignored .env — which
+# `clean -fd` (no -x) deliberately preserved above — is the one in use.
+if [ "$SERVICE_MODE" = "1" ]; then
+  if [ ! -f "$WORKSPACE/.env" ]; then
+    echo "[factory] WARNING: no .env in $WORKSPACE — the factory may lack credentials" >&2
+  fi
+elif [ -f "$DEV_ROOT/.env" ]; then
   echo "[factory] syncing .env from dev checkout"
   cp "$DEV_ROOT/.env" "$WORKSPACE/.env"
 else

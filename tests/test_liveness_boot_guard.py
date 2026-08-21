@@ -111,19 +111,86 @@ class TestDecideBootActionTruthTable:
         assert d.action is BootAction.START
 
 
+class TestOperatorStoppedLatch:
+    """An operator's Stop is a latch the kernel must honour (ADR-0135).
+
+    ``/api/control/status`` reports ``idle`` after ``POST /api/control/stop``
+    (the orchestrator is gone), so without the latch a verified-correct boot
+    would be kicked straight back up with ``/api/control/start`` on the next
+    5-minute tick — undoing the operator's deliberate stop.
+    """
+
+    def test_idle_verified_boot_under_latch_is_no_action_not_start(self) -> None:
+        d = boot_guard.decide_boot_action(
+            workspace_branch="staging",
+            factory_branch="staging",
+            origin_head=_ORIGIN,
+            boot_sha=_ORIGIN,
+            commits_behind=0,
+            status="idle",
+            operator_stopped=True,
+        )
+        assert d.action is BootAction.NO_ACTION
+        # Latch reason, and no notification spam — a deliberate stop is not
+        # an incident.
+        assert ("operator stopped" in d.reason, d.notify) == (True, False)
+
+    def test_done_status_under_latch_is_no_action(self) -> None:
+        d = boot_guard.decide_boot_action(
+            workspace_branch="staging",
+            factory_branch="staging",
+            origin_head=_ORIGIN,
+            boot_sha=_ORIGIN,
+            commits_behind=0,
+            status="done",
+            operator_stopped=True,
+        )
+        assert d.action is BootAction.NO_ACTION
+
+    def test_stale_boot_under_latch_still_resync_reboots(self) -> None:
+        # The latch suppresses START only. A stale boot is still healed: the
+        # relaunch boots INTO the latch (factory_autostart honours it too) and
+        # stays stopped — that is the designed behaviour.
+        d = boot_guard.decide_boot_action(
+            workspace_branch="staging",
+            factory_branch="staging",
+            origin_head=_ORIGIN,
+            boot_sha="b" * 40,
+            commits_behind=0,
+            status="idle",
+            operator_stopped=True,
+        )
+        assert d.action is BootAction.RESYNC_REBOOT
+
+    def test_running_under_latch_is_no_action_without_latch_reason(self) -> None:
+        # A latch with a still-running orchestrator is a transient (stop in
+        # flight) — the "already active" branch wins, never a START.
+        d = boot_guard.decide_boot_action(
+            workspace_branch="staging",
+            factory_branch="staging",
+            origin_head=_ORIGIN,
+            boot_sha=_ORIGIN,
+            commits_behind=0,
+            status="running",
+            operator_stopped=True,
+        )
+        assert d.action is BootAction.NO_ACTION
+
+
 class TestExtractStatusFields:
     def test_pulls_nested_config_fields(self) -> None:
         body = {
             "status": "idle",
             "config": {"boot_sha": _ORIGIN, "commits_behind": 3},
         }
-        assert boot_guard.extract_status_fields(body) == ("idle", _ORIGIN, 3)
+        assert boot_guard.extract_status_fields(body) == ("idle", _ORIGIN, 3, False)
 
     def test_missing_config_yields_none_facts(self) -> None:
         assert boot_guard.extract_status_fields({"status": "running"}) == (
             "running",
             None,
             None,
+            False,
         )
 
     def test_bool_commits_behind_is_rejected(self) -> None:
@@ -133,7 +200,21 @@ class TestExtractStatusFields:
 
     def test_wrong_typed_fields_become_none(self) -> None:
         body = {"status": 5, "config": {"boot_sha": 123, "commits_behind": "x"}}
-        assert boot_guard.extract_status_fields(body) == (None, None, None)
+        assert boot_guard.extract_status_fields(body) == (None, None, None, False)
+
+    def test_operator_stopped_true_is_read(self) -> None:
+        body = {"status": "idle", "operator_stopped": True}
+        assert boot_guard.extract_status_fields(body)[3] is True
+
+    def test_operator_stopped_missing_fails_open_to_false(self) -> None:
+        # A pre-ADR-0135 factory (no field) keeps the existing START behaviour.
+        assert boot_guard.extract_status_fields({"status": "idle"})[3] is False
+
+    def test_operator_stopped_non_bool_fails_open_to_false(self) -> None:
+        # Only a literal JSON true counts — "true"/1 must not latch the kernel.
+        for junk in ("true", 1, None, {"x": 1}):
+            body = {"status": "idle", "operator_stopped": junk}
+            assert boot_guard.extract_status_fields(body)[3] is False, junk
 
 
 class TestFetchControlStatus:
@@ -188,6 +269,30 @@ class TestProbeBootCorrectnessComposition:
             status_url="http://127.0.0.1:5555/api/control/status",
         )
         assert decision.action is BootAction.START
+
+    def test_clean_idle_boot_under_operator_latch_yields_no_action(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The exact post-Stop shape: verified-correct boot, orchestrator gone
+        # ("idle"), latch set. The kernel must not undo the operator's Stop.
+        monkeypatch.setattr(
+            boot_guard,
+            "fetch_control_status",
+            lambda *a, **k: {
+                "status": "idle",
+                "operator_stopped": True,
+                "config": {"boot_sha": _ORIGIN, "commits_behind": 0},
+            },
+        )
+        monkeypatch.setattr(boot_guard, "git_current_branch", lambda ws: "staging")
+        monkeypatch.setattr(boot_guard, "git_origin_head", lambda ws, br: _ORIGIN)
+        decision = boot_guard.probe_boot_correctness(
+            workspace=Path("/tmp/ws"),
+            factory_branch="staging",
+            status_url="http://127.0.0.1:5555/api/control/status",
+        )
+        assert decision.action is BootAction.NO_ACTION
+        assert decision.notify is False
 
     def test_unreadable_status_short_circuits_to_no_action(
         self, monkeypatch: pytest.MonkeyPatch

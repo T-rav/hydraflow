@@ -186,3 +186,100 @@ async def test_legacy_start_clears_operator_stopped_latch(
 
     assert json.loads(response.body)["status"] == "started"
     assert state.get_operator_stopped() is False
+
+
+# ---------------------------------------------------------------------------
+# GET /api/control/status exposes the latch (ADR-0135) so the external
+# liveness kernel — which cannot read StateTracker — can honour it too.
+# ---------------------------------------------------------------------------
+
+
+def _registry_router(config, event_bus, state, tmp_path: Path, *, running: bool):
+    registry = make_registry(
+        {
+            "slug": "org-a",
+            "config": _repo_cfg(tmp_path, "a"),
+            "state": make_state(tmp_path / "sa"),
+            "event_bus": event_bus,
+            "running": running,
+        },
+    )
+    host = registry.get("org-a")
+    host.stop = AsyncMock()
+    host.start = AsyncMock()
+    router, _ = make_dashboard_router(
+        config, event_bus, state, tmp_path, registry=registry, default_repo_slug="org-a"
+    )
+    return router
+
+
+@pytest.mark.asyncio
+async def test_status_defaults_operator_stopped_false(
+    config: HydraFlowConfig, event_bus, state, tmp_path: Path
+) -> None:
+    router = _registry_router(config, event_bus, state, tmp_path, running=False)
+    status = find_endpoint(router, "/api/control/status")
+
+    data = json.loads((await status()).body)
+
+    assert data["operator_stopped"] is False
+
+
+@pytest.mark.asyncio
+async def test_status_carries_operator_stopped_after_stop_and_clears_after_start(
+    config: HydraFlowConfig, event_bus, state, tmp_path: Path
+) -> None:
+    router = _registry_router(config, event_bus, state, tmp_path, running=True)
+    stop = find_endpoint(router, "/api/control/stop")
+    start = find_endpoint(router, "/api/control/start")
+    status = find_endpoint(router, "/api/control/status")
+
+    await stop()
+    after_stop = json.loads((await status()).body)
+    await start()
+    after_start = json.loads((await status()).body)
+
+    # The post-Stop shape the kernel sees: orchestrator gone ("idle") but the
+    # latch set — the two must be distinguishable from a never-started boot.
+    assert after_stop["operator_stopped"] is True
+    assert after_start["operator_stopped"] is False
+
+
+@pytest.mark.asyncio
+async def test_all_repos_rollup_reports_the_factory_level_latch(
+    config: HydraFlowConfig, event_bus, state, tmp_path: Path
+) -> None:
+    # Stop is factory-level (registry.stop_all) and persists the latch on the
+    # HOST state, never on a per-repo state — so the rollup reports that one
+    # host latch rather than OR-ing per-repo latches that are never set.
+    router = _registry_router(config, event_bus, state, tmp_path, running=True)
+    status = find_endpoint(router, "/api/control/status")
+
+    before = json.loads((await status(repo="__all__")).body)
+    state.set_operator_stopped(True)
+    after = json.loads((await status(repo="__all__")).body)
+
+    assert before["operator_stopped"] is False
+    assert after["operator_stopped"] is True
+    assert after["repos"], "rollup must still carry the per-repo breakdown"
+
+
+@pytest.mark.asyncio
+async def test_legacy_wiring_status_carries_latch(
+    config: HydraFlowConfig, event_bus, state, tmp_path: Path
+) -> None:
+    from types import SimpleNamespace
+
+    orch = SimpleNamespace(
+        running=True, request_stop=AsyncMock(), current_session_id=None
+    )
+    router, _ = make_dashboard_router(
+        config, event_bus, state, tmp_path, get_orch=lambda: orch, registry=None
+    )
+    stop = find_endpoint(router, "/api/control/stop")
+    status = find_endpoint(router, "/api/control/status")
+
+    await stop()
+    data = json.loads((await status()).body)
+
+    assert data["operator_stopped"] is True

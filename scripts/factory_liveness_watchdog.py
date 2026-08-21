@@ -457,30 +457,72 @@ def _terminate_pid_group(pid: int) -> None:
         logger.warning("Could not signal process group of pid %s", pid, exc_info=True)
 
 
+def _kickstart_launchd_label(label: str, *, factory_branch: str) -> bool:
+    """``launchctl kickstart -k gui/<uid>/<label>`` — True on exit 0. Never raises."""
+    argv = ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"]
+    try:
+        result = subprocess.run(  # noqa: S603
+            argv, check=False, capture_output=True, text=True, timeout=30
+        )
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("launchctl kickstart of %s failed", label, exc_info=True)
+        return False
+    if result.returncode != 0:
+        logger.warning(
+            "launchctl kickstart of %s exited %s: %s",
+            label,
+            result.returncode,
+            (result.stderr or "").strip(),
+        )
+        return False
+    logger.warning(
+        "Rebooted factory via launchctl kickstart -k %s (launchd re-runs the "
+        "service-mode launcher, which resyncs to origin/%s)",
+        label,
+        factory_branch,
+    )
+    return True
+
+
 def reboot_factory(
     *,
     workspace: Path,
     factory_branch: str,
     dashboard_port: int,
     launcher: Path = _LAUNCHER_SCRIPT,
+    restart_label: str | None = None,
     dry_run: bool,
 ) -> bool:
     """Force-resync + relaunch the isolated factory pinned to ``factory_branch``.
 
-    Kills the process group holding ``dashboard_port`` (there is no pidfile),
-    then spawns ``run-factory-isolated.sh`` **detached** — the launcher
-    ``exec make run``s and never returns, so it must not be waited on (a
-    ``subprocess.run`` with a timeout would kill the relaunch). Returns True when
-    a relaunch was spawned (or would be, in dry-run). Never raises.
+    When the knob names a ``restart_label`` (ADR-0135: the factory is the
+    ``com.hydraflow.factory`` KeepAlive launchd service), the reboot is a
+    single ``launchctl kickstart -k gui/<uid>/<label>`` — launchd kills the
+    job and re-runs the service-mode launcher, which re-syncs to
+    ``origin/<factory_branch>`` itself. Killing the port group and spawning
+    the dev-checkout launcher as well would race launchd's own restart of the
+    killed job (two factories contending for ``dashboard_port``), so under a
+    label this function does neither.
+
+    Without a label (legacy ``make factory`` in a terminal): kills the process
+    group holding ``dashboard_port`` (there is no pidfile), then spawns
+    ``run-factory-isolated.sh`` **detached** — the launcher ``exec make run``s
+    and never returns, so it must not be waited on (a ``subprocess.run`` with
+    a timeout would kill the relaunch). Returns True when a relaunch was
+    spawned/kickstarted (or would be, in dry-run). Never raises.
     """
+    label = (restart_label or "").strip()
     if dry_run:
         logger.info(
-            "[dry-run] would reboot factory on port %s -> branch %s (workspace %s)",
+            "[dry-run] would reboot factory on port %s -> branch %s (workspace %s%s)",
             dashboard_port,
             factory_branch,
             workspace,
+            f", via launchctl kickstart -k {label}" if label else "",
         )
         return True
+    if label:
+        return _kickstart_launchd_label(label, factory_branch=factory_branch)
     for pid in find_port_listener_pids(dashboard_port):
         _terminate_pid_group(pid)
     if not launcher.exists():
@@ -517,6 +559,7 @@ def run_boot_guard(
     prior_stale_reboot_at: str | None,
     now: datetime,
     dry_run: bool,
+    restart_label: str | None = None,
 ) -> tuple[str | None, list[str]]:
     """Boot-correctness guard for one tick.
 
@@ -549,6 +592,7 @@ def run_boot_guard(
             workspace=workspace,
             factory_branch=factory_branch,
             dashboard_port=dashboard_port,
+            restart_label=restart_label,
             dry_run=dry_run,
         )
         # Record the incident so the next tick does not re-spawn. In dry-run,
@@ -782,6 +826,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.workspace is not None:
         raw_sra = marker.get("stale_reboot_at") if marker else None
         prior_stale_reboot_at = raw_sra if isinstance(raw_sra, str) else None
+        # A RESTART_LABEL in the knob means the factory is a launchd service
+        # (ADR-0135): a stale-boot reboot is then a kickstart of that label,
+        # never a second spawn racing launchd's KeepAlive restart.
+        knob_label = knob.get("RESTART_LABEL", "").strip() or None
         new_stale_reboot_at, boot_notify = run_boot_guard(
             workspace=args.workspace,
             factory_branch=args.factory_branch,
@@ -789,6 +837,7 @@ def main(argv: list[str] | None = None) -> int:
             prior_stale_reboot_at=prior_stale_reboot_at,
             now=now,
             dry_run=args.dry_run,
+            restart_label=knob_label,
         )
 
         raw_ticks = marker.get("paused_ticks", 0) if marker else 0

@@ -194,6 +194,7 @@ cadence and files remediation issues on drift.
 | [0132](0132-cognitive-process-constitution.md) | The cognitive-process constitution — the harness as a governor of thought | Proposed |
 | [0133](0133-vitals-methodology-multiplicity-mde-tbe.md) | Vitals methodology — widened-limit multiplicity, published MDE, and time-between-events charts | Proposed |
 | [0134](0134-per-repo-model-harness-selection.md) | Per-repo model/harness selection — run Claude and GLM projects side by side | Accepted |
+| [0135](0135-factory-as-launchd-service-operator-stop-latch.md) | Factory runs as a launchd service; operator Stop is a latch honoured by autostart and the liveness kernel | Accepted |
 
 ## Adding a new ADR
 

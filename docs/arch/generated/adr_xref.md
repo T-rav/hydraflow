@@ -141,6 +141,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0132 | — | — |
 | ADR-0133 | `src.audit.governance`, `src.finder_calibration`, `src.judge_independence`, `src.vitals.control`, `src.vitals_methodology` | `'pytest:tests/test_vitals_methodology.py'` |
 | ADR-0134 | — | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
+| ADR-0135 | `src.dashboard_routes._control_routes`, `src.factory_autostart`, `src.models` | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
 
 ## Module → ADRs
 
@@ -189,6 +190,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.credit_failover` | ADR-0119 |
 | `src.dashboard` | ADR-0007, ADR-0008, ADR-0038 |
 | `src.dashboard_routes._atlas_routes` | ADR-0060, ADR-0090 |
+| `src.dashboard_routes._control_routes` | ADR-0135 |
 | `src.dashboard_routes._cost_rollups` | ADR-0045 |
 | `src.dashboard_routes._diagnostics_routes` | ADR-0050 |
 | `src.dashboard_routes._epic_routes` | ADR-0019 |
@@ -221,6 +223,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.event_loop_watchdog` | ADR-0106, ADR-0108 |
 | `src.events` | ADR-0006, ADR-0055, ADR-0064, ADR-0114 |
 | `src.exception_classify` | ADR-0055, ADR-0109 |
+| `src.factory_autostart` | ADR-0135 |
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |
 | `src.finder_calibration` | ADR-0126, ADR-0133 |
@@ -259,7 +262,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mockworld.fakes.fake_honeycomb` | ADR-0055 |
 | `src.mockworld.fakes.fake_llm` | ADR-0059 |
 | `src.mockworld.sandbox_main` | ADR-0052, ADR-0108 |
-| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098, ADR-0099, ADR-0103, ADR-0107, ADR-0108 |
+| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098, ADR-0099, ADR-0103, ADR-0107, ADR-0108, ADR-0135 |
 | `src.mutation_gauntlet` | ADR-0125 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0014, ADR-0044, ADR-0045, ADR-0103, ADR-0106 |
 | `src.pending_concerns` | ADR-0064 |
@@ -421,5 +424,6 @@ Non-blocking authoring aid (#10458): each ADR below bare-cites a high-churn shar
 | ADR-0106 | `src/config.py` | `src/config.py:<Symbol>` |
 | ADR-0108 | `src/models.py` | `src/models.py:<Symbol>` |
 | ADR-0109 | `src/review_phase/_phase.py` | `src/review_phase/_phase.py:<Symbol>` |
+| ADR-0135 | `src/models.py` | `src/models.py:<Symbol>` |
 
 <!-- arch:generated -->

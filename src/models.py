@@ -2841,6 +2841,16 @@ class ControlStatusResponse(BaseModel):
     # The React UI renders MockWorldBanner when this is True so operators
     # can never confuse a sandbox tab with a production tab.
     mockworld_active: bool = False
+    # ADR-0135: the persisted operator-stopped latch (``StateData.
+    # operator_stopped``) — True after ``POST /api/control/stop`` until the
+    # next ``POST /api/control/start``. After a Stop ``status`` reads ``idle``
+    # exactly like a never-started boot, so this is the ONLY signal that lets
+    # the external liveness kernel (``scripts/liveness/boot_guard.py``, which
+    # cannot read StateTracker) tell a deliberate Stop from a dead line and
+    # refrain from re-starting it. Factory-level, not per-repo: Stop halts
+    # every line and latches the HOST state, so the ``repo=__all__`` rollup
+    # and every per-repo response report that one host latch.
+    operator_stopped: bool = False
     # Per-repo breakdown for ``repo=__all__`` aggregate mode (empty for a single
     # repo). Each entry: ``{slug, status, credits_paused_until, mockworld_active,
     # config}``. The top-level fields above are a rollup; ``config`` is the

@@ -19,6 +19,12 @@ Two halves, mirroring ``scripts/gates/``:
 mismatch triggers RESYNC_REBOOT. An unreadable remote can therefore never spin
 the kernel into a reboot loop — it degrades to NO_ACTION plus a notify.
 
+**Operator Stop is a latch (ADR-0135):** ``/api/control/status`` also carries
+``operator_stopped`` — the persisted ``POST /api/control/stop`` intent that
+``src/factory_autostart.py`` already honours. A verified-correct *idle* boot
+under that latch is NO_ACTION, never START, so the kernel cannot undo a
+deliberate Stop on its next tick. The field is read fail-open (missing → False).
+
 Stdlib only — this is the error kernel; it must not import ``src/`` (the thing
 it watches) or it cannot run when that thing is broken.
 """
@@ -99,16 +105,26 @@ def decide_boot_action(
     boot_sha: str | None,
     commits_behind: int | None,
     status: str | None,
+    operator_stopped: bool = False,
 ) -> BootDecision:
     """Pure core: decide START / RESYNC_REBOOT / NO_ACTION from this tick's facts.
 
     START is returned *only* when every fact is affirmatively correct: the
     workspace is on ``factory_branch``, the reported ``boot_sha`` equals the
-    ``origin/<branch>`` tip, ``commits_behind`` is exactly ``0``, and the host
-    line is idle. Any *definite* mismatch (wrong branch, non-zero commits-behind,
-    or a boot_sha that differs from a known origin tip) returns RESYNC_REBOOT.
-    Everything else — unknown git facts, an unreadable status, or a correct boot
-    that is already running — returns NO_ACTION.
+    ``origin/<branch>`` tip, ``commits_behind`` is exactly ``0``, the host
+    line is idle, AND the operator has not latched it stopped. Any *definite*
+    mismatch (wrong branch, non-zero commits-behind, or a boot_sha that differs
+    from a known origin tip) returns RESYNC_REBOOT. Everything else — unknown
+    git facts, an unreadable status, or a correct boot that is already running
+    — returns NO_ACTION.
+
+    ``operator_stopped`` is the persisted ``POST /api/control/stop`` latch
+    (ADR-0135): after a Stop the status API reads ``idle`` — exactly like a
+    never-started boot — so without it a verified-correct boot would be kicked
+    straight back up on the next tick. The latch suppresses START only; a stale
+    boot is still healed (RESYNC_REBOOT) and relaunches INTO the latch, where
+    ``src/factory_autostart.py`` keeps it stopped. Defaults False so a factory
+    that predates the field keeps the prior behaviour (fail-open).
     """
     if status is None:
         # Status API unreadable: we cannot judge boot correctness at all. The
@@ -146,6 +162,11 @@ def decide_boot_action(
         )
 
     if status in STARTABLE_STATUSES:
+        if operator_stopped:
+            # A deliberate Stop is not an incident: no start, no notification.
+            return BootDecision(
+                BootAction.NO_ACTION, "operator stopped the factory — not starting"
+            )
         return BootDecision(BootAction.START, f"boot verified correct, status={status}")
     # running / stopping / credits_paused / auth_failed on a correct boot: the
     # factory is already alive on the right code — never redundantly start it.
@@ -229,14 +250,18 @@ def fetch_control_status(
 
 def extract_status_fields(
     status_json: dict,
-) -> tuple[str | None, str | None, int | None]:
-    """Pure: pull ``(status, boot_sha, commits_behind)`` from a status body.
+) -> tuple[str | None, str | None, int | None, bool]:
+    """Pure: pull ``(status, boot_sha, commits_behind, operator_stopped)``.
 
     ``boot_sha`` / ``commits_behind`` live under the nested ``config`` object
     (``ControlStatusConfig``); any missing or wrong-typed field becomes None.
+    ``operator_stopped`` is the top-level latch (``ControlStatusResponse``,
+    ADR-0135): only a literal JSON ``true`` counts — missing or any other type
+    fails open to ``False`` so an older factory keeps the prior START path.
     """
     raw_status = status_json.get("status")
     status = raw_status if isinstance(raw_status, str) else None
+    operator_stopped = status_json.get("operator_stopped") is True
 
     boot_sha: str | None = None
     commits_behind: int | None = None
@@ -249,7 +274,7 @@ def extract_status_fields(
         # as 1/0 commits behind.
         if isinstance(raw_behind, int) and not isinstance(raw_behind, bool):
             commits_behind = raw_behind
-    return status, boot_sha, commits_behind
+    return status, boot_sha, commits_behind, operator_stopped
 
 
 def probe_boot_correctness(
@@ -264,7 +289,9 @@ def probe_boot_correctness(
     status_json = fetch_control_status(status_url)
     if status_json is None:
         return BootDecision(BootAction.NO_ACTION, "status-unreadable")
-    status, boot_sha, commits_behind = extract_status_fields(status_json)
+    status, boot_sha, commits_behind, operator_stopped = extract_status_fields(
+        status_json
+    )
     return decide_boot_action(
         workspace_branch=git_current_branch(workspace),
         factory_branch=factory_branch,
@@ -272,4 +299,5 @@ def probe_boot_correctness(
         boot_sha=boot_sha,
         commits_behind=commits_behind,
         status=status,
+        operator_stopped=operator_stopped,
     )
