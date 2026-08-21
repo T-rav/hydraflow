@@ -351,6 +351,12 @@ class MockWorld:
             # board instead of the unwired PRManager method (a real ``gh``
             # subprocess).
             "get_issue_state",
+            # #11517: the ADR-0011 release path — resolve the promoted main
+            # SHA, tag it, publish the release — so a scenario's FakeGitHub
+            # records the tag ref instead of an unwired AsyncMock.
+            "resolve_remote_branch_sha",
+            "create_tag",
+            "create_release",
         ):
             setattr(prs, method, getattr(gh, method))
 
