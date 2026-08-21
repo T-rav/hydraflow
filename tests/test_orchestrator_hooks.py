@@ -1274,6 +1274,19 @@ class TestPipelineStatsEmission:
         assert stats.stages["review"].worker_cap == config.max_reviewers
         assert stats.stages["hitl"].worker_cap == config.max_hitl_workers
 
+    def test_build_pipeline_stats_includes_implement_failure_split(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """#11593 seam 3: the System tab sees WHY implement attempts die."""
+        from orchestrator import HydraFlowOrchestrator
+
+        orch = HydraFlowOrchestrator(config)
+        orch._state.increment_implement_failure("test_adequacy")
+        orch._state.increment_implement_failure("timeout")
+        orch._state.increment_implement_failure("test_adequacy")
+        stats = orch.build_pipeline_stats()
+        assert stats.implement_failures == {"test_adequacy": 2, "timeout": 1}
+
     def test_build_pipeline_stats_with_active_session(
         self, config: HydraFlowConfig
     ) -> None:

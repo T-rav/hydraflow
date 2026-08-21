@@ -1,0 +1,16 @@
+{
+  "builder": "test_adequacy.build_test_adequacy_repair_prompt",
+  "args": {
+    "issue_number": 42,
+    "issue_title": "Add S3 upload retry logic",
+    "verdict_source": "coverage-delta",
+    "summary": "Coverage delta: 2 uncovered changed line(s): src/upload.py:9; src/upload.py:14",
+    "findings": [
+      "src/upload.py:9",
+      "src/upload.py:14"
+    ],
+    "pass_number": 1,
+    "max_passes": 1
+  },
+  "faked_deps": {}
+}

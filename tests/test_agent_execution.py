@@ -1284,6 +1284,9 @@ class TestTestAdequacyLoop:
         self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:
         config.max_test_adequacy_attempts = 1
+        # Isolate the finder loop from repair-in-run (#11593); repair behavior
+        # is covered by tests/test_test_adequacy_repair.py.
+        config.test_adequacy_repair_passes = 0
         runner = AgentRunner(config, event_bus)
         with (
             patch.object(
@@ -1368,6 +1371,9 @@ class TestTestAdequacyVerifier:
 
     def _runner(self, config, event_bus: EventBus) -> AgentRunner:
         config.max_test_adequacy_attempts = 1
+        # Isolate verifier behavior from repair-in-run (#11593); repair is
+        # covered by tests/test_test_adequacy_repair.py.
+        config.test_adequacy_repair_passes = 0
         return AgentRunner(config, event_bus)
 
     def _patches(self, runner: AgentRunner, execute_mock: AsyncMock):
@@ -1663,6 +1669,9 @@ class TestCoverageDeltaIntegration:
         from skill_registry import BUILTIN_SKILLS
 
         config.max_test_adequacy_attempts = 1
+        # Isolate the coverage override from repair-in-run (#11593); repair is
+        # covered by tests/test_test_adequacy_repair.py.
+        config.test_adequacy_repair_passes = 0
         self._write_coverage_xml(
             tmp_path / "coverage.xml",
             source=str(tmp_path),

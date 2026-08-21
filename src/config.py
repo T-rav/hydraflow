@@ -127,6 +127,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_diff_sanity_attempts", "HYDRAFLOW_MAX_DIFF_SANITY_ATTEMPTS", 1),
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
+    ("test_adequacy_repair_passes", "HYDRAFLOW_TEST_ADEQUACY_REPAIR_PASSES", 1),
     (
         "test_adequacy_coverage_timeout_secs",
         "HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS",
@@ -1604,6 +1605,24 @@ class HydraFlowConfig(BaseModel):
         ge=0,
         le=3,
         description="Max test adequacy check passes (0 = disabled)",
+    )
+    test_adequacy_repair_passes: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description=(
+            "Bounded in-run repair passes when the test-adequacy gate fails "
+            "(#11593): the concrete findings (finder/verifier gaps + "
+            "coverage-delta uncovered lines) go back to the same implementer "
+            "worktree with a focused write-the-missing-tests prompt, then the "
+            "full check (coverage delta + independent verifier) re-runs. "
+            "Default 1: 61 of 105 failed August runs died at this gate and a "
+            "rejected run costs a median 29 min plus a whole restarted "
+            "attempt, so one bounded rescue pass is cheaper than rejection. "
+            "0 = today's straight-to-rejection behavior. "
+            "max_test_adequacy_attempts=0 still disables the whole gate, "
+            "repair included."
+        ),
     )
     test_adequacy_coverage_timeout_secs: int = Field(
         default=300,

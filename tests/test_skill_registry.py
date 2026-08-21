@@ -54,6 +54,38 @@ class TestAgentSkill:
             skill.name = "mutated"  # type: ignore[misc]
 
 
+class TestRepairSeam:
+    """Bounded repair-in-run declared on the registry (#11593 seam 1)."""
+
+    def test_only_test_adequacy_declares_a_repair_seam(self):
+        for skill in BUILTIN_SKILLS:
+            if skill.name == "test-adequacy":
+                assert skill.repair_config_key == "test_adequacy_repair_passes"
+            else:
+                assert skill.repair_config_key is None, (
+                    f"{skill.name} unexpectedly grew a repair seam"
+                )
+
+    def test_repair_config_key_names_a_real_hydraflow_config_field(self):
+        """Typo guard: getattr(config, key) at gate time must never miss."""
+        from config import HydraFlowConfig
+
+        skill = next(s for s in BUILTIN_SKILLS if s.name == "test-adequacy")
+        assert skill.repair_config_key in set(HydraFlowConfig.model_fields)
+
+    def test_repair_prompt_builder_is_the_repair_prompt(self):
+        from test_adequacy import build_test_adequacy_repair_prompt
+
+        skill = next(s for s in BUILTIN_SKILLS if s.name == "test-adequacy")
+        assert skill.repair_prompt_builder is build_test_adequacy_repair_prompt
+
+    def test_repair_passes_default_is_one_bounded_pass(self):
+        """#11593: default 1 — one rescue pass; 0 restores straight rejection."""
+        from config import HydraFlowConfig
+
+        assert HydraFlowConfig().test_adequacy_repair_passes == 1
+
+
 class TestVerifierSpec:
     """Independent second-opinion verifier attached to test-adequacy (#9546)."""
 

@@ -344,6 +344,9 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "spec_match_self_review": frozenset({1, 3, 5, 7, 8}),
     "term_proposer": frozenset({1, 3}),
     "test_adequacy": frozenset({2, 3, 5}),
+    # Repair-in-run prompt (#11593): pinned at its introduction score, in line
+    # with its finder/verifier siblings.
+    "test_adequacy_repair": frozenset({1, 3, 5, 7, 8}),
     "test_adequacy_verifier": frozenset({1, 3, 5, 7}),
     "triage_build_prompt": frozenset({1, 3}),
     "triage_decomposition": frozenset({1, 3, 4, 8}),

@@ -28,6 +28,14 @@ class RunManifest(BaseModel):
     error: str | None = None
     duration_seconds: float = 0.0
     files: list[str] = Field(default_factory=list)
+    #: Failure class for failed runs (#11593 seam 3): one of
+    #: ``implement_failure_class.FAILURE_CLASSES``. None on success and for
+    #: manifests recorded before the field existed.
+    failure_class: str | None = None
+    #: Test-adequacy gate telemetry (#11593): ``TestAdequacyOutcome`` dump —
+    #: verdict source, findings, repair passes — present whenever the gate
+    #: rejected the run or an in-run repair pass ran.
+    test_adequacy: dict[str, Any] | None = None
 
 
 class RunContext:
@@ -72,10 +80,16 @@ class RunContext:
         self,
         outcome: Literal["success", "failed", "stopped", ""],
         error: str | None = None,
+        *,
+        failure_class: str | None = None,
+        test_adequacy: dict[str, Any] | None = None,
     ) -> RunManifest:
         """Write transcript, manifest, and return the manifest.
 
         *outcome* should be ``"success"``, ``"failed"``, or ``"stopped"``.
+        *failure_class* and *test_adequacy* are the #11593 telemetry fields —
+        pass them for failed/repaired implement runs so manifest audits can
+        split failures by class without re-parsing error strings.
         """
         elapsed = time.monotonic() - self._start_time
 
@@ -93,6 +107,8 @@ class RunContext:
             error=error,
             duration_seconds=round(elapsed, 1),
             files=artifact_files,
+            failure_class=failure_class,
+            test_adequacy=test_adequacy,
         )
 
         # Write manifest (after collecting files so it includes itself)

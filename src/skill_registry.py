@@ -31,6 +31,7 @@ from shape_coherence import (
 )
 from test_adequacy import (
     build_test_adequacy_prompt,
+    build_test_adequacy_repair_prompt,
     build_test_adequacy_verifier_prompt,
     finder_asserted_adequate,
     parse_test_adequacy_result,
@@ -103,6 +104,18 @@ class AgentSkill:
     verifier:
         Optional :class:`VerifierSpec` for an independent second-opinion pass
         (#9546). ``None`` for every skill except test-adequacy.
+    repair_config_key:
+        Name of the ``HydraFlowConfig`` field bounding in-run repair passes
+        (#11593). When set (and the field > 0), a failing verdict dispatches
+        the concrete findings back to the implementer worktree via
+        ``repair_prompt_builder`` and re-runs the FULL check (coverage delta
+        + verifier included) before the run is rejected. ``None`` disables
+        repair for the skill. Only test-adequacy sets it today.
+    repair_prompt_builder:
+        ``(issue_number, issue_title, verdict_source, summary, findings,
+        pass_number, max_passes, **kwargs) -> str`` — builds the focused
+        "write exactly these missing tests" repair prompt. Required when
+        ``repair_config_key`` is set.
     """
 
     name: str
@@ -113,6 +126,8 @@ class AgentSkill:
     result_parser: Callable[[str], tuple[bool, str, list[str]]]
     coverage_check: bool = False
     verifier: VerifierSpec | None = None
+    repair_config_key: str | None = None
+    repair_prompt_builder: Callable[..., str] | None = None
 
 
 # Built-in skills — registered in execution order
@@ -165,6 +180,14 @@ BUILTIN_SKILLS: list[AgentSkill] = [
             enabled_config_key="test_adequacy_verifier_enabled",
             fail_closed_config_key="test_adequacy_verifier_fail_closed",
         ),
+        # Repair-in-run (#11593 seam 1): a failing verdict hands the concrete
+        # findings back to the implementer for a bounded fix pass before the
+        # run is rejected — 61 of 105 failed August runs died here, and the
+        # cheapest fix ("write the three missing tests") was unreachable
+        # without a full restart. Bounded by test_adequacy_repair_passes;
+        # max_test_adequacy_attempts=0 still disables the gate entirely.
+        repair_config_key="test_adequacy_repair_passes",
+        repair_prompt_builder=build_test_adequacy_repair_prompt,
     ),
     AgentSkill(
         name="discover-completeness",

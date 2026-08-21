@@ -6,16 +6,25 @@ import json
 import logging
 import re
 import time
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
+import skill_gate
 from agent_cli import build_agent_command
 from base_runner import BaseRunner
 from events import EventBus, EventType, HydraFlowEvent
 from exception_classify import exc_detail, is_likely_bug, reraise_on_credit_or_bug
 from human_steering import fenced_steering_guidance
 from implement_quality_gate import run_implement_quality_gate
-from models import LoopResult, Task, WorkerResult, WorkerStatus, WorkerUpdatePayload
+from models import (
+    LoopResult,
+    Task,
+    TestAdequacyOutcome,
+    WorkerResult,
+    WorkerStatus,
+    WorkerUpdatePayload,
+)
 from plugin_skill_registry import (
     discover_plugin_skills,
     format_plugin_skills_for_prompt,
@@ -28,6 +37,7 @@ from review_insights import (
     get_escalation_data,
 )
 from runner_constants import MEMORY_SUGGESTION_PROMPT
+from skill_gate import SkillCheckOutcome
 from skill_registry import (  # noqa: F401
     AgentSkill,
     discover_tools,
@@ -253,6 +263,10 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
                     worker_id,
                     plan_text=skill_plan_text,
                 )
+                if skill_result.test_adequacy is not None:
+                    # Rejection/repair telemetry (#11593 seam 3) — rides the
+                    # WorkerResult into the run manifest and failure counters.
+                    result.test_adequacy = skill_result.test_adequacy
                 if not skill_result.passed and skill.blocking:
                     logger.warning(
                         "%s flagged issues for #%d: %s",
@@ -1149,8 +1163,12 @@ SUMMARY: <one-line summary>
     ) -> LoopResult:
         """Run a registered post-implementation skill via the skill registry.
 
-        Gets max_attempts from config via ``skill.config_key``.
-        Returns a :class:`LoopResult`.
+        Gets max_attempts from config via ``skill.config_key``. When the
+        check fails and the skill declares a repair seam (#11593 — only
+        test-adequacy today), up to ``skill.repair_config_key`` bounded
+        repair passes hand the concrete findings back to the implementer
+        worktree and re-run the FULL check; the run is rejected only when
+        the verdict still fails afterwards. Returns a :class:`LoopResult`.
         """
         max_attempts = getattr(self._config, skill.config_key, 0)
         if max_attempts <= 0:
@@ -1160,102 +1178,17 @@ SUMMARY: <one-line summary>
         if commits == 0:
             return LoopResult(passed=True, summary="No commits to check")
 
-        full_diff = await self._get_branch_diff(worktree_path, branch)
-        if not full_diff.strip():
-            return LoopResult(passed=True, summary="Empty diff")
-
-        max_diff = self._config.max_review_diff_chars
-        prompt_diff = (
-            full_diff[:max_diff] + f"\n[Diff truncated at {max_diff:,} chars]"
-            if len(full_diff) > max_diff
-            else full_diff
-        )
-
-        prompt = skill.prompt_builder(
-            issue_number=issue.id,
-            issue_title=issue.title,
-            diff=prompt_diff,
-            plan_text=plan_text,
-        )
-        if not prompt.strip():
-            return LoopResult(passed=True, summary=f"{skill.name}: no input data")
-
-        cmd = self._build_pre_quality_review_command()
-        summary = ""
         skill_started = time.monotonic()
-        # The finder transcript feeds the verifier's explicit-OK trigger below.
-        # Initialised for the type checker; the attempt loop always runs at
-        # least once (max_attempts <= 0 returns early above), and an empty
-        # transcript can never carry the explicit OK marker.
-        transcript = ""
+        check = await self._run_skill_check(
+            skill, issue, worktree_path, branch, max_attempts, plan_text
+        )
+        if check.short_circuit:
+            return check.result
 
-        # Each iteration's _execute call allocates its own subprocess_idx
-        # from BaseRunner's monotonic counter, so retries and back-to-back
-        # skills never overwrite each other's subprocess-N.json files.
-        for attempt in range(1, max_attempts + 1):
-            transcript = await self._execute(
-                cmd,
-                prompt,
-                worktree_path,
-                {"issue": issue.id, "source": "implementer"},
-                issue_labels=issue.tags,
-                # #9998: tag telemetry with the skill name (not the coarse
-                # phase source) so prompt-efficiency ordering keys match the
-                # adversarial corpus's expected_catcher names.
-                telemetry_source=skill.name,
-            )
-            passed, summary, findings = skill.result_parser(transcript)
-            if passed:
-                result = LoopResult(passed=True, summary=summary, attempts=attempt)
-                break
-            if findings:
-                logger.info(
-                    "%s findings for #%d: %s",
-                    skill.name,
-                    issue.id,
-                    "; ".join(findings[:5]),
-                )
-        else:
-            result = LoopResult(passed=False, summary=summary, attempts=max_attempts)
-
-        # Coverage delta runs once after the LLM attempt loop — not per-attempt.
-        # Running make coverage on each retry is expensive and redundant because
-        # the worktree code doesn't change between LLM attempts.
-        if result.passed and skill.coverage_check:
-            uncovered = await self._run_coverage_delta_check(
-                worktree_path, full_diff, issue.id
-            )
-            if uncovered:
-                cov_summary = (
-                    f"Coverage delta: {len(uncovered)} uncovered changed line(s): "
-                    + "; ".join(uncovered[:5])
-                    + (f" (+ {len(uncovered) - 5} more)" if len(uncovered) > 5 else "")
-                )
-                logger.info(
-                    "coverage-delta findings for #%d: %s",
-                    issue.id,
-                    "; ".join(uncovered[:5]),
-                )
-                result = LoopResult(
-                    passed=False,
-                    summary=cov_summary,
-                    attempts=result.attempts,
-                )
-
-        # Independent verifier (#9546): a second-opinion pass with its own
-        # model, gated on the finder's EXPLICIT OK marker — never on the
-        # no-marker default-pass (empty fake/garbled transcripts must not grow
-        # an extra dispatch). Runs after the deterministic coverage check so a
-        # coverage override skips the extra LLM spend.
-        if (
-            result.passed
-            and skill.verifier is not None
-            and getattr(self._config, skill.verifier.enabled_config_key, False)
-            and skill.verifier.trigger(transcript)
-        ):
-            result = await self._run_skill_verifier(
-                skill, issue, worktree_path, prompt_diff, result
-            )
+        check, repair_outcomes = await self._run_skill_repair_loop(
+            skill, issue, worktree_path, branch, max_attempts, plan_text, check
+        )
+        result = check.result
 
         # Append the skill result to run-N/skill_results.json alongside
         # the parent run. This is the source of truth for skill-effectiveness
@@ -1271,7 +1204,74 @@ SUMMARY: <one-line summary>
                 blocking=skill.blocking,
             )
 
+        # Rejection telemetry (#11593 seam 3): record every failing verdict
+        # and every repair-pass outcome so the verifier can be calibrated
+        # later. A clean first-pass OK carries no record.
+        if skill.repair_config_key is not None and (
+            not result.passed or repair_outcomes
+        ):
+            result = replace(
+                result,
+                test_adequacy=TestAdequacyOutcome(
+                    passed=result.passed,
+                    verdict_source=check.verdict_source,
+                    findings=check.findings[:10],
+                    repair_passes_used=len(repair_outcomes),
+                    repair_outcomes=repair_outcomes,
+                ),
+            )
         return result
+
+    async def _run_skill_check(
+        self,
+        skill: AgentSkill,
+        issue: Task,
+        worktree_path: Path,
+        branch: str,
+        max_attempts: int,
+        plan_text: str,
+    ) -> SkillCheckOutcome:
+        """Delegate to :func:`skill_gate.run_skill_check` (patch seam)."""
+        return await skill_gate.run_skill_check(
+            self, skill, issue, worktree_path, branch, max_attempts, plan_text
+        )
+
+    async def _run_skill_repair_loop(
+        self,
+        skill: AgentSkill,
+        issue: Task,
+        worktree_path: Path,
+        branch: str,
+        max_attempts: int,
+        plan_text: str,
+        check: SkillCheckOutcome,
+    ) -> tuple[SkillCheckOutcome, list[str]]:
+        """Delegate to :func:`skill_gate.run_skill_repair_loop` (patch seam)."""
+        return await skill_gate.run_skill_repair_loop(
+            self, skill, issue, worktree_path, branch, max_attempts, plan_text, check
+        )
+
+    def _skill_repair_budget(self, skill: AgentSkill) -> int:
+        """Delegate to :func:`skill_gate.skill_repair_budget` (patch seam)."""
+        return skill_gate.skill_repair_budget(self, skill)
+
+    async def _run_skill_repair_pass(
+        self,
+        skill: AgentSkill,
+        issue: Task,
+        worktree_path: Path,
+        check: SkillCheckOutcome,
+        pass_number: int,
+        max_passes: int,
+    ) -> bool:
+        """Delegate to :func:`skill_gate.run_skill_repair_pass` (patch seam)."""
+        return await skill_gate.run_skill_repair_pass(
+            self, skill, issue, worktree_path, check, pass_number, max_passes
+        )
+
+    async def _git_head(self, worktree_path: Path) -> str:
+        """Delegate to :func:`skill_gate.git_head` (patch seam)."""
+        return await skill_gate.git_head(self, worktree_path)
 
     async def _run_skill_verifier(
         self,
@@ -1280,7 +1280,7 @@ SUMMARY: <one-line summary>
         worktree_path: Path,
         prompt_diff: str,
         finder_result: LoopResult,
-    ) -> LoopResult:
+    ) -> tuple[LoopResult, list[str]]:
         """Run the independent second-opinion pass for a skill (#9546).
 
         Dispatches the verifier prompt with the verifier's own tool/model
@@ -1289,10 +1289,13 @@ SUMMARY: <one-line summary>
         keeps the finder's pass; OVERRIDE flips it to a fail with the
         verifier's own gap list. Fail-soft by default: a degraded run (empty
         transcript) keeps the finder's OK unless the fail-closed knob is set.
+        Returns the (possibly overridden) result plus the verifier's gap
+        list — empty unless it overrode — for the repair prompt and the
+        rejection telemetry (#11593).
         """
         spec = skill.verifier
         if spec is None:  # pragma: no cover — caller-gated
-            return finder_result
+            return finder_result, []
 
         verifier_started = time.monotonic()
         verifier_cmd = build_agent_command(
@@ -1313,6 +1316,7 @@ SUMMARY: <one-line summary>
         )
 
         result = finder_result
+        gaps: list[str] = []
         if not verifier_transcript.strip():
             # Subprocess soft-failure — nothing to judge. Fail-soft keeps the
             # finder's OK; the opt-in fail-closed knob flips it to a retry.
@@ -1347,6 +1351,7 @@ SUMMARY: <one-line summary>
                     ),
                     attempts=finder_result.attempts,
                 )
+                gaps = v_gaps
 
         ctx = self._tracing_ctx
         if ctx is not None:
@@ -1360,7 +1365,7 @@ SUMMARY: <one-line summary>
                 role="verifier",
                 outcome=outcome,
             )
-        return result
+        return result, gaps
 
     async def _run_coverage_delta_check(
         self,
@@ -1368,59 +1373,10 @@ SUMMARY: <one-line summary>
         diff: str,
         issue_id: int,
     ) -> list[str]:
-        """Run ``make coverage 0`` and return uncovered changed-line refs.
-
-        Returns a list of ``path:line`` strings for changed production lines
-        that the test suite does not exercise.  Returns an empty list when
-        make fails, times out, or no coverage XML is produced — preserving
-        the LLM verdict in those cases.
-        """
-        from coverage_delta import (  # noqa: PLC0415
-            compute_uncovered_changed_lines,
-            parse_cobertura_covered_lines,
-            parse_diff_changed_lines,
+        """Delegate to :func:`skill_gate.run_coverage_delta_check` (patch seam)."""
+        return await skill_gate.run_coverage_delta_check(
+            self, worktree_path, diff, issue_id
         )
-
-        try:
-            timeout_secs = self._config.test_adequacy_coverage_timeout_secs
-            cov_result = await self._runner.run_simple(
-                ["make", "coverage", "0"],
-                cwd=str(worktree_path),
-                timeout=float(timeout_secs),
-            )
-        except (TimeoutError, FileNotFoundError):
-            logger.warning(
-                "Coverage delta check failed for #%d (timeout or make not found)",
-                issue_id,
-            )
-            return []
-        except Exception as exc:
-            reraise_on_credit_or_bug(exc)
-            logger.warning(
-                "Coverage delta check unexpected error for #%d: %s", issue_id, exc
-            )
-            return []
-
-        if cov_result.returncode != 0:
-            logger.warning(
-                "Coverage delta: make coverage 0 returned rc=%d for #%d",
-                cov_result.returncode,
-                issue_id,
-            )
-            return []
-
-        coverage_xml = worktree_path / "coverage.xml"
-        if not coverage_xml.is_file():
-            logger.warning(
-                "Coverage delta: coverage.xml not found at %s for #%d",
-                coverage_xml,
-                issue_id,
-            )
-            return []
-
-        changed = parse_diff_changed_lines(diff)
-        covered = parse_cobertura_covered_lines(coverage_xml, worktree_path)
-        return compute_uncovered_changed_lines(changed, covered)
 
     def _append_skill_result(
         self,
@@ -1434,51 +1390,18 @@ SUMMARY: <one-line summary>
         role: str = "finder",
         outcome: str | None = None,
     ) -> None:
-        """Append a skill result to <run-N>/skill_results.json.
-
-        *role* tags the entry for telemetry (#9546): ``"finder"`` for the
-        skill's own pass/fail loop, ``"verifier"`` for the independent
-        second-opinion pass. *outcome* is verifier-only detail
-        (``concur`` / ``override`` / ``degraded``).
-
-        Never raises — tracing must not crash the agent run.
-        """
-        try:
-            import json as _json  # noqa: PLC0415
-
-            from file_util import atomic_write  # noqa: PLC0415
-
-            run_dir = (
-                self._config.data_root
-                / "traces"
-                / str(ctx.issue_number)
-                / ctx.phase
-                / f"run-{ctx.run_id}"
-            )
-            run_dir.mkdir(parents=True, exist_ok=True)
-            results_path = run_dir / "skill_results.json"
-            existing: list[dict[str, Any]] = []
-            if results_path.exists():
-                try:
-                    existing = _json.loads(results_path.read_text(encoding="utf-8"))
-                except (ValueError, OSError):
-                    existing = []
-            existing.append(
-                {
-                    "skill_name": skill_name,
-                    "passed": passed,
-                    "attempts": attempts,
-                    "duration_seconds": round(duration_seconds, 3),
-                    "blocking": blocking,
-                    "role": role,
-                    "outcome": outcome,
-                }
-            )
-            atomic_write(results_path, _json.dumps(existing, indent=2))
-        except Exception:
-            logger.warning(
-                "Failed to append skill result for %s", skill_name, exc_info=True
-            )
+        """Delegate to :func:`skill_gate.append_skill_result` (patch seam)."""
+        skill_gate.append_skill_result(
+            self,
+            ctx,
+            skill_name=skill_name,
+            passed=passed,
+            attempts=attempts,
+            duration_seconds=duration_seconds,
+            blocking=blocking,
+            role=role,
+            outcome=outcome,
+        )
 
     async def _run_quality_fix_loop(
         self,

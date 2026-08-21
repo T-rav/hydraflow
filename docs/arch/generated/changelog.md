@@ -6,7 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `a8be8ee` — feat(factory): auto-rebase own dirty PRs when staging moves (#11595) (#11595) *(2026-08-21)*
+- `dcc5ba8` — refactor(agent): extract skill_gate module; register repair prompt; prune suppressions baseline *(2026-08-21)*
+- `55509a5` — feat(implement): test-adequacy gate repairs in-run before rejecting (#11593) (#11593) *(2026-08-21)*
+- `9cf6452` — feat(factory): auto-rebase own dirty PRs when staging moves (#11595) (#11598) (#11598) *(2026-08-21)*
 - `98d9393` — feat(factory): run as a launchd service; liveness kernel honours operator Stop (#11594) (#11594) *(2026-08-21)*
 - `e3e5665` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports (Fixes #11580) (#11591) (#11591) *(2026-08-21)*
 - `35f8b29` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) (#11583) (#11583) *(2026-08-21)*
