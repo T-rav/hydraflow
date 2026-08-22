@@ -973,6 +973,24 @@ calibrate-finders: deps
 	@echo "$(BLUE)Calibrating generative-finder noise floors...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/calibrate_finders.py $(ARGS)
 
+# --------------------------------------------------------------------------
+# calibrate-adequacy-gate — test-adequacy gate calibration (#11593 seam 2).
+# On-demand ONLY: reads the historical implement-run corpus
+# (<repo_data_root>/runs/*/*/manifest.json) plus the escape ledger and reports
+# what the evidence can and cannot establish about the gate's rejections.
+# READ-ONLY — it never writes into the factory data root and never touches the
+# gate's config. Deliberately NOT in `quality`/CI (operator-supplied window,
+# optional `gh` lookups). Read the IDENTIFIABILITY block first: while it says
+# UNDER-DETERMINED, the rates describe the corpus but do not license a
+# strictness change. See tests/test_adequacy_calibration.py +
+# tests/test_calibrate_adequacy_gate.py.
+#   ARGS='--since 2026-08-01 --fetch-closing-prs'   join outcomes via gh
+#   ARGS='--json --out /tmp/calibration.json'       machine-readable
+.PHONY: calibrate-adequacy-gate
+calibrate-adequacy-gate: deps
+	@echo "$(BLUE)Calibrating the test-adequacy gate...$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && PYTHONPATH=src $(UV) python scripts/calibrate_adequacy_gate.py $(ARGS)
+
 # quiet-week — stillness acceptance instrument (#10822). On-demand ONLY: run it
 # after a freeze week to ask whether mutating activity decayed to the sensing
 # floor (healthy) or self-sustained with no external input (hunting). Reads the

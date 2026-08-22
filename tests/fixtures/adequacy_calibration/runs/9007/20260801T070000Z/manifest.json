@@ -1,0 +1,10 @@
+{
+ "issue_number": 9007,
+ "timestamp": "20260801T070000Z",
+ "files": [
+  "manifest.json"
+ ],
+ "outcome": "failed",
+ "error": "No commits found on branch",
+ "duration_seconds": 600.0
+}

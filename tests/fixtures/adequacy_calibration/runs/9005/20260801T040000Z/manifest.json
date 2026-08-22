@@ -1,0 +1,10 @@
+{
+ "issue_number": 9005,
+ "timestamp": "20260801T040000Z",
+ "files": [
+  "manifest.json"
+ ],
+ "outcome": "failed",
+ "error": "test-adequacy failed: Independent verifier overrode OK: untested wiring in `_boot`; the fix itself is fully covered at all three layers",
+ "duration_seconds": 1320.0
+}
