@@ -193,20 +193,17 @@ def _report_text() -> str:
     return render_report(report, skipped=skipped)
 
 
-def test_render_report_leads_with_the_identifiability_verdict() -> None:
-    assert "IDENTIFIABILITY: UNDER-DETERMINED" in _report_text()
-
-
-def test_render_report_names_the_reject_arm_censoring() -> None:
-    assert "outcome-censored" in _report_text()
-
-
-def test_render_report_shows_the_demand_stationarity_line() -> None:
-    assert "demanded something entirely new" in _report_text()
-
-
-def test_render_report_lists_the_weak_justification_rejections() -> None:
-    assert "WEAK-JUSTIFICATION REJECTIONS (4)" in _report_text()
+@pytest.mark.parametrize(
+    "expected",
+    [
+        pytest.param("IDENTIFIABILITY: UNDER-DETERMINED", id="identifiability-verdict"),
+        pytest.param("outcome-censored", id="reject-arm-censoring"),
+        pytest.param("demanded something entirely new", id="demand-stationarity"),
+        pytest.param("WEAK-JUSTIFICATION REJECTIONS (4)", id="weak-justification-list"),
+    ],
+)
+def test_render_report_shows_the_calibration_sections(expected: str) -> None:
+    assert expected in _report_text()
 
 
 def test_main_writes_a_json_report(tmp_path: Path) -> None:

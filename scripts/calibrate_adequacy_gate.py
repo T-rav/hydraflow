@@ -210,9 +210,9 @@ def filter_since(
 
 def parse_since(text: str) -> datetime:
     """Parse ``--since`` as ``YYYY-MM-DD`` or ``YYYYMMDD``, UTC midnight."""
-    for fmt in ("%Y-%m-%d", "%Y%m%d"):
+    for fmt in ("%Y-%m-%d%z", "%Y%m%d%z"):
         try:
-            return datetime.strptime(text, fmt).replace(tzinfo=UTC)  # noqa: DTZ007
+            return datetime.strptime(f"{text}+0000", fmt)
         except ValueError:
             continue
     raise argparse.ArgumentTypeError(f"unparseable --since date: {text!r}")

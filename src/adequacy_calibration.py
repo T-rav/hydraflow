@@ -447,13 +447,15 @@ def parse_run_timestamp(raw: object) -> datetime | None:
     text = raw.strip()
     compact = _COMPACT_TIMESTAMP.match(text)
     if compact:
+        # The trailing "Z" is stripped by the pattern, so re-attach an explicit
+        # UTC offset and parse with %z — that keeps the result tz-aware without
+        # a naive intermediate.
         try:
-            parsed = datetime.strptime(  # noqa: DTZ007 — tz appended below
-                compact.group(1) + compact.group(2), "%Y%m%d%H%M%S"
+            return datetime.strptime(
+                f"{compact.group(1)}{compact.group(2)}+0000", "%Y%m%d%H%M%S%z"
             )
         except ValueError:
             return None
-        return parsed.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
