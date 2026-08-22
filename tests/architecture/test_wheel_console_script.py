@@ -51,10 +51,14 @@ from setuptools import find_namespace_packages
 
 _SKIP_DIRS = {"__pycache__", "node_modules"}
 
-#: ``Path(__file__)...`` walked up past its own directory — ``.parent.parent``
-#: or ``.parents[n]``. A single ``.parent`` (``model_pricing.py``'s
-#: ``Path(__file__).parent / "assets"``) is package-relative and correct.
-_WALK_UP = re.compile(r"__file__.*?(?:\.parent\.parent|\.parents\s*\[)")
+#: ``__file__`` walked up past its own directory — ``.parent.parent``,
+#: ``.parents[n]``, or nested ``dirname()``. A single ``.parent`` /
+#: ``dirname()`` (``model_pricing.py``'s ``Path(__file__).parent / "assets"``)
+#: is package-relative and correct, so only two-or-more levels are flagged.
+_WALK_UP = re.compile(
+    r"__file__.*?(?:\.parent\.parent|\.parents\s*\[)"
+    r"|dirname\([^()]*dirname\(.*?__file__"
+)
 
 #: Modules allowed to walk up from ``__file__``. ``package_resources`` is the
 #: one place the question is answered — grandfather nothing else: every site
@@ -346,7 +350,7 @@ def _walk_up_sites(path: Path, src: Path) -> list[str]:
     lines = {
         node.lineno
         for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute | ast.Subscript)
+        if isinstance(node, ast.Attribute | ast.Subscript | ast.Call)
         and _WALK_UP.search(ast.unparse(node))
     }
     return [f"{path.relative_to(src.parent)}:{line}" for line in sorted(lines)]
