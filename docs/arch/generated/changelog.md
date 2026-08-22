@@ -6,10 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `751d911` — fix(sandbox): pin the moved prompt-shipping invariant to the resolver (#11590, #11589) *(2026-08-21)*
-- `44a4f50` — test(arch): bind RESOURCE_TREES to the shipped trees in both directions (#11589) (#11589) *(2026-08-21)*
-- `32740b5` — chore(arch): regenerate generated artifacts after the resource move (#11589) (#11589) *(2026-08-21)*
-- `454d89c` — fix(packaging): resolve repo-root resources through a package-aware helper (#11589) (#11589) *(2026-08-21)*
+- `11d86a3` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0004 *(2026-08-22)*
+- `8fcd6a0` — fix(control): Start clears the pipeline-worker disable set on both branches (#11611) (#11623) (#11623) *(2026-08-21)*
+- `5c33050` — fix(packaging): resolve repo-root resources through a package-aware helper (#11589) (#11617) (#11617) *(2026-08-21)*
 - `72faffb` — feat(ci): cache the agent image and add a dispatchable sandbox-scenario run (#11601) (#11621) (#11621) *(2026-08-21)*
 - `faaaa9e` — fix(liveness): event-loop stall — attribute starvation vs block before hard restart (#11604) (#11622) (#11622) *(2026-08-21)*
 - `ca6f42c` — chore(loops): remove the retired activity-based ADR-drift loops (#11600) (#11620) (#11620) *(2026-08-21)*
@@ -33,6 +32,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `eac96f2` — Fixes #11480: never re-slice an issue whose fix already landed (#11566) (#11566) *(2026-08-21)*
 - `e1aa0d8` — test(workspace-gc): real-git pins for the closed-issue landed guard on phases 1-2 and 5 (refs #11503, #11507; fix shipped in #11530) (#11572) (#11572) *(2026-08-21)*
 - `0cce8a7` — Fixes #11481: fold sixth site, and widen the class-closure guard to find it *(2026-08-21)*
+- `1bffda8` — Merge remote-tracking branch 'origin/main' into rc/2026-08-21-1043 *(2026-08-21)*
 - `53b4905` — fix(workspace-gc): prove exact HEAD landed before cleanup (#11530) (#11530) *(2026-08-21)*
 - `b91594d` — Fix factory task graphs to per-worktree JSONL (#11527) (#11527) *(2026-08-21)*
 - `54795e2` — fix: inherit maintenance routing for shared caretakers (#11525) (#11525) *(2026-08-21)*
@@ -40,6 +40,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `3c6d708` — fix(pipeline): gate /api/pipeline snapshot on IssueStore's first refresh (#11349) (#11349) *(2026-08-21)*
 - `2f73247` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#11545) (#11545) *(2026-08-20)*
 - `cd84a92` — feat(erosion): mass + suite-hygiene sensors — repeatable god-class breakup and test-suite pruning (#11522) (#11522) *(2026-08-20)*
+- `418f2cb` — chore(arch): refresh generated artifacts after the main merge *(2026-08-20)*
 - `7838527` — chore(rc): merge main into rc/2026-08-21-0200 to clear the DIRTY promotion *(2026-08-20)*
 - `9e85063` — Fixes #11441: token-drift engine + API drift block (read-only salvage) (#11495) (#11495) *(2026-08-20)*
 - `1ae1c2e` — Fixes #11425: land the true remainder of the fake-fidelity hardening pass (#11488) (#11488) *(2026-08-20)*
@@ -536,24 +537,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `3c87f71` — feat(gates): branch-protection drift caretaker loop (Slice 4) *(2026-05-29)*
 - `79a1ada` — docs(adr): ADR-0082 declarative gate contract (extends ADR-0042 enforcement) *(2026-05-29)*
 - `0afd876` — feat(gates): gen-gates CLI + make targets; generate README table; scrub stale prose *(2026-05-29)*
-
-## 2026-W21
-
-- `1d9c95f` — Fixes #8931: stream onboarding activity in dashboard *(2026-05-23)*
-- `9dc0a8d` — Refs #8933: validate third-domain onboarding dashboard flow *(2026-05-23)*
-- `01b5854` — docs: refresh architecture artifacts *(2026-05-23)*
-- `66a1b1f` — Refs #8932: stream onboarding design chat *(2026-05-23)*
-- `8728fc2` — Refs #8932: persist wizard spec edits *(2026-05-23)*
-- `9362727` — Refs #8932: harden design chat extraction *(2026-05-23)*
-- `72eae73` — Refs #8933: add repo metrics dashboard payload *(2026-05-23)*
-- `43b1e0a` — Refs #8933: wire onboarding format upgrade *(2026-05-23)*
-- `bab9837` — Fixes #8933: wire onboarding continue plan *(2026-05-23)*
-- `553bd1d` — Refs #8932: add Claude design provider fallback *(2026-05-23)*
-- `adbcc6a` — Refs #8931: add onboarding push endpoint *(2026-05-23)*
-- `f4915b8` — Refs #8933: add onboarding dashboard repo slice *(2026-05-22)*
-- `6b74497` — Refs #8932: add onboarding design chat slice *(2026-05-22)*
-- `091f166` — Refs #8931: add onboarding wizard UI slice *(2026-05-22)*
-- `e439049` — Refs #8930: add onboarding materialize API slice *(2026-05-22)*
 
 
 <!-- arch:generated -->
