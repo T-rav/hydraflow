@@ -245,6 +245,13 @@ SETTINGS: dict[str, SettingSpec] = {
     # off stops the next spawn's recording without a restart. Observation only —
     # it can never change which provider or model a spawn uses.
     "gateway_route_shadow_enabled": SettingSpec("Model Routing", live=True, order=80),
+    # --- Routing policy workspace (#11538 / ADR-0140) ------------------------
+    # Live: every policy route reads the dial per request, so closing it takes
+    # effect on the next call without a restart. It gates the workspace only;
+    # no routing decision reads it.
+    "gateway_policy_workspace_enabled": SettingSpec(
+        "Model Routing", live=True, order=81
+    ),
     # --- Issue Refinement (backlog dedup + priority scoring, #9957) ----------
     "issue_refinement_enabled": SettingSpec("Issue Refinement", live=True, order=0),
     "issue_refinement_pair_budget": SettingSpec("Issue Refinement", live=True, order=1),

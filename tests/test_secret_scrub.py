@@ -218,3 +218,42 @@ def test_gateway_redaction_markers_do_not_re_match() -> None:
     once = scrub_secrets(f"{_VIRTUAL_KEY} GATEWAY_CONTROL_TOKEN={_CONTROL_TOKEN} tail")
 
     assert scrub_secrets(once) == once
+
+
+class TestOperatorToken:
+    """ADR-0140's dashboard operator credential (#11538).
+
+    Same pair of rules as the two gateway credentials above, and here for the
+    same reason: a credential only one test file's ``not in payload`` assertion
+    can catch is one the canonical detector is blind to everywhere else — the
+    audit chain and the transcript stream included.
+    """
+
+    def test_bare_operator_token_is_detected(self) -> None:
+        token = "hfop_" + "o" * 43
+
+        assert scan_for_secrets(f"Authorization: Bearer {token}") == [
+            "HydraFlow operator token"
+        ]
+
+    def test_bare_operator_token_is_scrubbed(self) -> None:
+        token = "hfop_" + "o" * 43
+
+        assert token not in scrub_secrets(f"Authorization: Bearer {token}")
+
+    def test_unquoted_operator_token_assignment_is_scrubbed(self) -> None:
+        """The realistic leak: an env dump the quoted-only generic rule misses."""
+        line = "HYDRAFLOW_OPERATOR_TOKEN=" + "z" * 40
+
+        assert "z" * 40 not in scrub_secrets(line)
+
+    def test_operator_scrubbing_is_idempotent(self) -> None:
+        once = scrub_secrets("HYDRAFLOW_OPERATOR_TOKEN=" + "z" * 40)
+
+        assert scrub_secrets(once) == once
+
+    def test_operator_prose_is_not_redacted(self) -> None:
+        """`hfop_` in prose, with no credential-length value, stays readable."""
+        line = "set hfop_x for the operator"
+
+        assert scrub_secrets(line) == line

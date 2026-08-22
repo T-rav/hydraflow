@@ -1,9 +1,16 @@
-"""No secret, credential, or credential fingerprint may reach a v2 read payload.
+"""No secret, credential, or credential fingerprint may reach a routing payload.
 
 This is the machine-checked proof behind ADR-0138's zero-disclosure rule: the
 account and route read models are asserted against realistic credential values,
 the canonical ``secret_scrub`` pattern set, the model schemas themselves, and an
 AST sweep proving the projection modules never unwrap a ``SecretStr``.
+
+ADR-0140 extends the same file rather than adding a second scanner, and adds the
+one thing a write plane has that a read plane does not: a payload an **operator**
+supplies. A policy is durable, is written without redaction (``atomic_write``,
+unlike the audit chain's ``append_jsonl``), and is served back over an
+unauthenticated read route — so a credential pasted into a policy body is refused
+at write time, and the refusal does not quote it back.
 """
 
 from __future__ import annotations
@@ -16,14 +23,21 @@ from pathlib import Path
 
 import httpx
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
+import dashboard_routes._gateway_policy_routes as gateway_policy_routes_module
 import hydraflow_gateway.accounts as accounts_module
 import hydraflow_gateway.active_routes as active_routes_module
 import hydraflow_gateway.routing_audit as routing_audit_module
 import hydraflow_gateway.routing_policy as routing_policy_module
 import hydraflow_gateway.routing_store as routing_store_module
+import hydraflow_gateway.routing_workspace as routing_workspace_module
+import operator_identity as operator_identity_module
 import route_shadow as route_shadow_module
+import routing_matrix as routing_matrix_module
+from dashboard_routes._gateway_policy_routes import build_gateway_policy_router
 from hydraflow_gateway.accounts import AccountView
 from hydraflow_gateway.active_routes import (
     ActiveRouteRegistry,
@@ -48,13 +62,16 @@ from hydraflow_gateway.routing_policy import (
     RouteExplanation,
     RoutingPolicy,
 )
+from hydraflow_gateway.routing_workspace import MutationIntent, PolicyMutation
 from hydraflow_gateway.settings import (
     GatewaySettings,
     UpstreamAuthStyle,
     UpstreamSettings,
 )
+from operator_identity import OPERATOR_ID_ENV, OPERATOR_TOKEN_ENV
 from route_shadow import RouteStage, ShadowDecision
 from secret_scrub import scan_for_secrets
+from tests.helpers import ConfigFactory
 
 # Every credential here is deliberately shaped like a real one, so the
 # ``scan_for_secrets`` assertion is a live detector rather than a formality.
@@ -288,6 +305,11 @@ async def test_every_payload_section_actually_returned_a_row(
         RoutingPolicy,
         RouteStage,
         ShadowDecision,
+        # ADR-0140's write plane. A mutation body and its write-ahead journal
+        # both cross a durable boundary, so they inherit the same schema guard
+        # rather than growing one of their own.
+        PolicyMutation,
+        MutationIntent,
     ],
 )
 def test_read_model_declares_no_credential_shaped_field(model: type) -> None:
@@ -311,6 +333,12 @@ def test_read_model_declares_no_credential_shaped_field(model: type) -> None:
         routing_store_module,
         routing_audit_module,
         route_shadow_module,
+        routing_workspace_module,
+        routing_matrix_module,
+        gateway_policy_routes_module,
+        # The one module that legitimately handles a credential: it must still
+        # never unwrap a ``SecretStr`` into anything it returns or records.
+        operator_identity_module,
     ],
 )
 def test_projection_module_never_unwraps_a_secret(module: object) -> None:
@@ -334,3 +362,134 @@ async def test_account_view_publishes_only_the_upstream_origin(
     origins = [account["base_origin"] for account in accounts]
 
     assert origins == ["https://upstream.test", "https://zai.test"]
+
+
+# --------------------------------------------------------------------------
+# ADR-0140's policy workspace: the same rule on the first WRITE surface
+# --------------------------------------------------------------------------
+
+_OPERATOR_TOKEN = "hfop_" + "o" * 40
+_POLICY_REPO = "acme/hydraflow"
+
+
+def _policy_body(
+    policy_id: str = "pin-zai", model: str = "glm-5.3"
+) -> dict[str, object]:
+    return {
+        "id": policy_id,
+        "match": {"repo_ids": [_POLICY_REPO]},
+        "action": {
+            "provider_lock": "zai-harness",
+            "requirement_map": [
+                {
+                    "requirement": {"kind": "capability", "value": "balanced"},
+                    "effective_model": model,
+                }
+            ],
+        },
+    }
+
+
+def _policy_client(tmp_path: Path) -> TestClient:
+    config = ConfigFactory.create(repo=_POLICY_REPO, dashboard_host="127.0.0.1")
+    object.__setattr__(config, "data_root", tmp_path / "policy-data")
+    object.__setattr__(config, "gateway_policy_workspace_enabled", True)
+    app = FastAPI()
+    app.include_router(
+        build_gateway_policy_router(
+            config,
+            env={OPERATOR_TOKEN_ENV: _OPERATOR_TOKEN, OPERATOR_ID_ENV: "operator"},
+            clock=lambda: _NOW,
+        )
+    )
+    return TestClient(app)
+
+
+def _policy_plane_payloads(tmp_path: Path) -> str:
+    """Every policy-plane response, including the authenticated write's own."""
+    client = _policy_client(tmp_path)
+    auth = {"Authorization": f"Bearer {_OPERATOR_TOKEN}"}
+    bodies = [
+        client.post(
+            "/api/gateway/policies/mutations",
+            json={
+                "kind": "create",
+                "expected_revision": 0,
+                "policy": _policy_body(),
+            },
+            headers=auth,
+        ).text,
+        client.post(
+            "/api/gateway/policies/preview",
+            json={
+                "kind": "create",
+                "expected_revision": 1,
+                "policy": _policy_body("second"),
+            },
+        ).text,
+    ]
+    bodies.extend(
+        client.get(f"/api/gateway/policies{suffix}").text
+        for suffix in ("", "/effective", "/audit")
+    )
+    return "\n".join(bodies)
+
+
+def test_policy_plane_payloads_carry_no_operator_token(tmp_path: Path) -> None:
+    """The credential that authorises a policy write is never echoed by one."""
+    payload = _policy_plane_payloads(tmp_path)
+
+    assert _OPERATOR_TOKEN not in payload
+
+
+def test_policy_plane_payloads_trip_no_canonical_secret_pattern(
+    tmp_path: Path,
+) -> None:
+    """The repo's canonical detector (ADR-0085) finds nothing to redact."""
+    payload = _policy_plane_payloads(tmp_path)
+
+    assert scan_for_secrets(payload) == []
+
+
+def test_policy_plane_payloads_publish_the_policy_they_are_meant_to(
+    tmp_path: Path,
+) -> None:
+    """The absence assertions are not vacuous: the policy IS on the wire."""
+    payload = _policy_plane_payloads(tmp_path)
+
+    assert payload.count("pin-zai") > 1
+
+
+def test_a_credential_shaped_policy_value_is_refused_before_it_is_stored(
+    tmp_path: Path,
+) -> None:
+    """The snapshot is not scrubbed on write and is served unauthenticated."""
+    response = _policy_client(tmp_path).post(
+        "/api/gateway/policies/mutations",
+        json={
+            "kind": "create",
+            "expected_revision": 0,
+            "policy": _policy_body(model=_ANTHROPIC_KEY),
+        },
+        headers={"Authorization": f"Bearer {_OPERATOR_TOKEN}"},
+    )
+
+    assert (response.status_code, response.json()["code"]) == (
+        422,
+        "credential-shaped-value",
+    )
+
+
+def test_the_refusal_does_not_quote_the_credential_back(tmp_path: Path) -> None:
+    """An error message that echoed the pasted key would itself be the leak."""
+    response = _policy_client(tmp_path).post(
+        "/api/gateway/policies/mutations",
+        json={
+            "kind": "create",
+            "expected_revision": 0,
+            "policy": _policy_body(model=_ANTHROPIC_KEY),
+        },
+        headers={"Authorization": f"Bearer {_OPERATOR_TOKEN}"},
+    )
+
+    assert _ANTHROPIC_KEY not in response.text

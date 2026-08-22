@@ -18,6 +18,7 @@ describe('readSelectionFromUrl — pure URL parse', () => {
       item: null,
       mode: 'focus',
       routingView: 'accounts',
+      routingSelection: null,
     })
   })
 
@@ -29,6 +30,7 @@ describe('readSelectionFromUrl — pure URL parse', () => {
       item: '42',
       mode: 'all-active',
       routingView: 'accounts',
+      routingSelection: null,
     })
   })
 
@@ -48,10 +50,28 @@ describe('readSelectionFromUrl — pure URL parse', () => {
     expect(readSelectionFromUrl('mode=routing&routingView=live').routingView).toBe('live')
   })
 
-  it('coerces an unimplemented routing sub-view back to accounts', () => {
-    // `policies` is reserved by the routing-control-plane design for a later
-    // phase; until it exists the URL must not select an empty workspace.
-    expect(readSelectionFromUrl('routingView=policies').routingView).toBe('accounts')
+  it('coerces an unknown routing sub-view back to accounts', () => {
+    // The design reserves exactly five sub-view keys; anything else in the URL
+    // must not select a view that does not exist.
+    expect(readSelectionFromUrl('routingView=bogus').routingView).toBe('accounts')
+  })
+
+  it('accepts every routing sub-view the design reserves (#11538)', () => {
+    // `effective`, `policies`, and `audit` were reserved by P0 and filled in by
+    // P2, so a link an operator shared against the reserved key still works.
+    const views = ['accounts', 'effective', 'policies', 'live', 'audit'].map(
+      view => readSelectionFromUrl(`routingView=${view}`).routingView,
+    )
+    expect(views).toEqual(['accounts', 'effective', 'policies', 'live', 'audit'])
+  })
+
+  it('restores a within-view selection from the query', () => {
+    expect(readSelectionFromUrl('routingSelection=pin-zai').routingSelection).toBe('pin-zai')
+  })
+
+  it('bounds a hand-edited within-view selection', () => {
+    const long = 'x'.repeat(400)
+    expect(readSelectionFromUrl(`routingSelection=${long}`).routingSelection).toHaveLength(128)
   })
 })
 
@@ -223,5 +243,20 @@ describe('routing sub-view selection (#11534)', () => {
     const { result } = renderHook(() => useOperatorSelection())
     act(() => result.current.select('routingView', 'live'))
     expect(result.current.item).toBe('42')
+  })
+
+  it('mirrors a within-view selection into the URL (#11538)', () => {
+    const { result } = renderHook(() => useOperatorSelection())
+    act(() => result.current.select('routingSelection', 'pin-zai'))
+    expect(new URLSearchParams(window.location.search).get('routingSelection')).toBe('pin-zai')
+  })
+
+  it('drops the within-view selection when the sub-view changes', () => {
+    // A policy id means nothing in the effective-routes grid; carrying it over
+    // would highlight nothing while still sitting in a shared URL.
+    const { result } = renderHook(() => useOperatorSelection())
+    act(() => result.current.select('routingSelection', 'pin-zai'))
+    act(() => result.current.select('routingView', 'effective'))
+    expect(result.current.routingSelection).toBeNull()
   })
 })

@@ -16,20 +16,13 @@ off entirely.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Sequence
-from dataclasses import asdict, dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
-from pydantic import SecretStr
 
-from execution import SimpleResult
-from gateway_coverage import gateway_ledger_path
-from hydraflow_gateway.app import create_app
-from hydraflow_gateway.keys import VirtualKeyStore
-from hydraflow_gateway.ledger import GatewayBodyStore, GatewayLedger
 from hydraflow_gateway.models import ProviderBinding
 from hydraflow_gateway.routing_audit import RoutingAuditLog
 from hydraflow_gateway.routing_policy import (
@@ -40,23 +33,14 @@ from hydraflow_gateway.routing_policy import (
     RoutingPolicy,
 )
 from hydraflow_gateway.routing_store import RoutingPolicyStore
-from hydraflow_gateway.settings import (
-    GatewaySettings,
-    UpstreamAuthStyle,
-    UpstreamSettings,
-)
 from route_shadow import (
     ShadowDivergence,
     policy_snapshot_path,
     requirement_for_model,
     shadow_decision_log_path,
 )
-from runner_utils import (
-    GatewayMintCredential,
-    GatewayMintRequest,
-    run_lightweight_agent,
-)
 from tests.helpers import ConfigFactory
+from tests.scenarios.helpers.gateway_turn import run_gateway_turn
 
 pytestmark = pytest.mark.scenario
 
@@ -64,100 +48,6 @@ _CONTROL_TOKEN = "shadow-scenario-control-token-0123456789"
 _PROVIDER_KEY = "shadow-scenario-real-provider-key"
 _VIRTUAL_SECRET = "shadow-scenario-virtual-secret"
 _REPO = "acme/project-x"
-_SSE_BODY = (
-    b'event: message_start\ndata: {"type":"message_start","message":'
-    b'{"model":"claude-sonnet-4-6","usage":{"input_tokens":11}}}\n\n'
-    b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
-)
-
-
-class _FixedStream(httpx.AsyncByteStream):
-    """Upstream body delivered as a stream, exactly as a real SSE origin would."""
-
-    async def __aiter__(self) -> AsyncIterator[bytes]:
-        yield _SSE_BODY
-
-
-@dataclass(slots=True)
-class _FakeAnthropicOrigin:
-    """Deterministic external HTTP boundary that records what it was sent."""
-
-    exchanges: list[tuple[str, bytes]] = field(default_factory=list)
-
-    async def __call__(self, request: httpx.Request) -> httpx.Response:
-        body = await request.aread()
-        self.exchanges.append((str(request.url), body))
-        return httpx.Response(
-            200,
-            headers={"content-type": "text/event-stream"},
-            stream=_FixedStream(),
-        )
-
-
-@dataclass(slots=True)
-class _InProcessGatewayControlClient:
-    """Runner control adapter that drives the gateway's real mint endpoint."""
-
-    client: httpx.AsyncClient
-
-    async def mint_key(
-        self, *, base_url: str, control_token: str, request: GatewayMintRequest
-    ) -> GatewayMintCredential:
-        response = await self.client.post(
-            f"{base_url.rstrip('/')}/control/v1/keys",
-            headers={"authorization": f"Bearer {control_token}"},
-            json=asdict(request),
-        )
-        response.raise_for_status()
-        payload = response.json()
-        return GatewayMintCredential(
-            key_id=str(payload["key_id"]),
-            token=str(payload["token"]),
-            expires_at=str(payload["expires_at"]),
-        )
-
-    async def revoke_key(
-        self, *, base_url: str, control_token: str, key_id: str
-    ) -> bool:
-        response = await self.client.delete(
-            f"{base_url.rstrip('/')}/control/v1/keys/{key_id}",
-            headers={"authorization": f"Bearer {control_token}"},
-        )
-        response.raise_for_status()
-        return bool(response.json()["revoked"])
-
-
-class _GatewayHarnessRunner:
-    """Claude stand-in that performs one streaming API turn using its derived env."""
-
-    def __init__(self, client: httpx.AsyncClient) -> None:
-        self._client = client
-
-    async def run_simple(
-        self,
-        _cmd: Sequence[str],
-        *,
-        env: dict[str, str] | None = None,
-        **_kwargs: Any,
-    ) -> SimpleResult:
-        worker_env = dict(env or {})
-        async with self._client.stream(
-            "POST",
-            "/v1/messages",
-            headers={
-                "authorization": f"Bearer {worker_env['ANTHROPIC_AUTH_TOKEN']}",
-                "anthropic-version": "2023-06-01",
-            },
-            json={
-                "model": "claude-sonnet-4-6",
-                "stream": True,
-                "messages": [{"role": "user", "content": "scenario"}],
-            },
-        ) as response:
-            response.raise_for_status()
-            async for _chunk in response.aiter_bytes():
-                pass
-        return SimpleResult(stdout="gateway session complete", returncode=0)
 
 
 @dataclass(slots=True)
@@ -189,58 +79,20 @@ async def _run_turn(
     if policies:
         RoutingPolicyStore(policy_snapshot_path(config)).save(policies)
 
-    ledger = GatewayLedger(gateway_ledger_path(config))
-    settings = GatewaySettings(
-        control_token=SecretStr(_CONTROL_TOKEN),
-        upstreams={
-            ProviderBinding.ANTHROPIC: UpstreamSettings(
-                base_url="https://anthropic.test",
-                api_key=SecretStr(_PROVIDER_KEY),
-                auth_style=UpstreamAuthStyle.X_API_KEY,
-            )
-        },
-        ledger_path=ledger.path,
-        body_dir=config.data_root / "gateway" / "bodies",
-        max_key_ttl_seconds=config.gateway_key_ttl_seconds,
+    turn = await run_gateway_turn(
+        config=config,
+        control_token=_CONTROL_TOKEN,
+        provider_key=_PROVIDER_KEY,
+        virtual_secret=_VIRTUAL_SECRET,
+        key_id="shadow-scenario-key",
     )
-    origin = _FakeAnthropicOrigin()
-    upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(origin))
-    app = create_app(
-        settings,
-        key_store=VirtualKeyStore(
-            max_ttl_seconds=config.gateway_key_ttl_seconds,
-            id_factory=lambda: "shadow-scenario-key",
-            secret_factory=lambda: _VIRTUAL_SECRET,
-        ),
-        client=upstream_client,
-        ledger=ledger,
-        body_store=GatewayBodyStore(settings.body_dir),
-    )
-    gateway_client = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url=config.gateway_base_url
-    )
-    try:
-        result = await run_lightweight_agent(
-            runner=_GatewayHarnessRunner(gateway_client),  # type: ignore[arg-type]
-            config=config,
-            tool="claude",
-            model="claude-sonnet-4-6",
-            prompt="Exercise one governed gateway turn.",
-            source="implementer",
-            timeout=10,
-            provider="gateway",
-            gateway_client=_InProcessGatewayControlClient(gateway_client),
-        )
-    finally:
-        await gateway_client.aclose()
-        await upstream_client.aclose()
 
     log = RoutingAuditLog(shadow_decision_log_path(config))
     path = shadow_decision_log_path(config)
     return _World(
         config=config,
-        returncode=result.returncode,
-        exchanges=origin.exchanges,
+        returncode=turn.returncode,
+        exchanges=turn.exchanges,
         decisions=[record.payload for record in log.read_all()]
         if path.exists()
         else [],
@@ -301,7 +153,9 @@ class TestGatewayRouteShadowScenario:
         dark = await _run_turn(tmp_path / "dark", monkeypatch, shadow=False)
         lit = await _run_turn(tmp_path / "lit", monkeypatch, shadow=True)
 
-        assert lit.exchanges == dark.exchanges
+        # Two empty lists compare equal, so the non-vacuity half is part of the
+        # assertion: the origin was reached, and it saw the same bytes.
+        assert (lit.exchanges, bool(dark.exchanges)) == (dark.exchanges, True)
 
     async def test_a_governed_spawn_records_exactly_one_shadow_decision(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -355,7 +209,7 @@ class TestGatewayRouteShadowScenario:
             tmp_path / "lit", monkeypatch, shadow=True, policies=[_zai_lock()]
         )
 
-        assert lit.exchanges == dark.exchanges
+        assert (lit.exchanges, bool(dark.exchanges)) == (dark.exchanges, True)
 
     async def test_that_policy_is_recorded_as_a_route_divergence(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

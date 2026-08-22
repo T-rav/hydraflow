@@ -146,6 +146,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0137 | `src.config`, `src.dashboard_routes._scheduling_routes`, `src.director_broker`, `src.director_sandbox`, `src.director_shadow_log`, `src.director_turn_runner`, `src.driver_contracts`, `src.driver_journal`, `src.driver_manager`, `src.driver_ownership`, `src.driver_phase_adapters`, `src.fable_director`, `src.hydraflow_gateway.keys`, `src.issue_driver`, `src.issue_driver_policy`, `src.issue_store`, `src.models`, `src.pr_manager`, `src.process_group`, `src.queue_strategy`, `src.scheduling_model`, `src.state._driver` | `pytest:tests/test_driver_contracts.py`, `pytest:tests/test_director_capability_probe.py`, `pytest:tests/regressions/test_issue_11533_stale_driver_states.py`, `pytest:tests/test_issue_driver.py`, `pytest:tests/test_issue_driver_policy.py`, `pytest:tests/test_driver_manager.py`, `pytest:tests/test_scheduling_default_off.py`, `pytest:tests/regressions/test_issue_11535_kill_mid_transition.py`, `pytest:tests/test_director_sandbox.py`, `pytest:tests/test_director_broker.py`, `pytest:tests/test_fable_director.py`, `pytest:tests/test_director_shadow_default_off.py`, `pytest:tests/test_director_turn_runner_env.py`, `pytest:tests/test_dashboard_routes_scheduling.py`, `pytest:tests/architecture/test_director_no_authority.py`, `pytest:tests/regressions/test_issue_11537_shadow_safety.py`, `pytest:tests/regressions/test_issue_11537_shadow_idle_spin.py` |
 | ADR-0138 | `src.driver_contracts`, `src.gateway_control_reader`, `src.hydraflow_gateway.accounts`, `src.hydraflow_gateway.active_routes`, `src.hydraflow_gateway.models` | `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/test_accounts.py`, `pytest:tests/test_active_routes.py`, `pytest:tests/test_gateway_control_v2_read_api.py`, `pytest:tests/test_gateway_control_reader.py`, `pytest:tests/test_dashboard_gateway_routes.py`, `pytest:tests/regressions/test_issue_11534_in_flight_route_leak.py`, `pytest:tests/scenarios/test_gateway_account_visibility_scenario.py` |
 | ADR-0139 | `src.driver_contracts`, `src.hydraflow_gateway.routing_audit`, `src.hydraflow_gateway.routing_policy`, `src.route_shadow` | `pytest:tests/test_routing_policy.py`, `pytest:tests/test_routing_store.py`, `pytest:tests/test_routing_audit.py`, `pytest:tests/test_route_shadow.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11536_shadow_route_is_inert.py`, `pytest:tests/scenarios/test_gateway_route_shadow_scenario.py` |
+| ADR-0140 | `src.dashboard_routes._gateway_policy_routes`, `src.driver_contracts`, `src.hydraflow_gateway.app`, `src.operator_identity`, `src.routing_matrix` | `pytest:tests/test_routing_workspace.py`, `pytest:tests/test_routing_matrix.py`, `pytest:tests/test_operator_identity.py`, `pytest:tests/test_dashboard_gateway_policy_routes.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/scenarios/test_gateway_policy_workspace_scenario.py` |
 
 ## Module → ADRs
 
@@ -199,6 +200,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.dashboard_routes._cost_rollups` | ADR-0045 |
 | `src.dashboard_routes._diagnostics_routes` | ADR-0050 |
 | `src.dashboard_routes._epic_routes` | ADR-0019 |
+| `src.dashboard_routes._gateway_policy_routes` | ADR-0140 |
 | `src.dashboard_routes._reports_routes` | ADR-0013 |
 | `src.dashboard_routes._routes` | ADR-0007, ADR-0008, ADR-0030, ADR-0038 |
 | `src.dashboard_routes._scheduling_routes` | ADR-0137 |
@@ -221,7 +223,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.disturbance.registry` | ADR-0101 |
 | `src.disturbance_dampener_loop` | ADR-0101 |
 | `src.docker_runner` | ADR-0010, ADR-0043 |
-| `src.driver_contracts` | ADR-0137, ADR-0138, ADR-0139 |
+| `src.driver_contracts` | ADR-0137, ADR-0138, ADR-0139, ADR-0140 |
 | `src.driver_journal` | ADR-0137 |
 | `src.driver_manager` | ADR-0137 |
 | `src.driver_ownership` | ADR-0137 |
@@ -261,7 +263,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.human_steering_loop` | ADR-0103 |
 | `src.hydraflow_gateway.accounts` | ADR-0138 |
 | `src.hydraflow_gateway.active_routes` | ADR-0138 |
-| `src.hydraflow_gateway.app` | ADR-0110 |
+| `src.hydraflow_gateway.app` | ADR-0110, ADR-0140 |
 | `src.hydraflow_gateway.keys` | ADR-0137 |
 | `src.hydraflow_gateway.models` | ADR-0138 |
 | `src.hydraflow_gateway.routing_audit` | ADR-0139 |
@@ -290,6 +292,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mockworld.sandbox_main` | ADR-0052, ADR-0108 |
 | `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098, ADR-0099, ADR-0103, ADR-0107, ADR-0108, ADR-0135, ADR-0137 |
 | `src.mutation_gauntlet` | ADR-0125 |
+| `src.operator_identity` | ADR-0140 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0044, ADR-0045, ADR-0106 |
 | `src.orchestrator_hitl` | ADR-0103 |
 | `src.orchestrator_stats` | ADR-0014 |
@@ -348,6 +351,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.reviewer` | ADR-0025, ADR-0027, ADR-0059, ADR-0103, ADR-0109 |
 | `src.route_back` | ADR-0041, ADR-0071 |
 | `src.route_shadow` | ADR-0139 |
+| `src.routing_matrix` | ADR-0140 |
 | `src.run_recorder` | ADR-0073 |
 | `src.runner_utils` | ADR-0110 |
 | `src.runs_gc_loop` | ADR-0073 |

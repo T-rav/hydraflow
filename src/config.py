@@ -854,6 +854,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_GATEWAY_ROUTE_SHADOW_ENABLED",
         True,
     ),
+    (
+        "gateway_policy_workspace_enabled",
+        "HYDRAFLOW_GATEWAY_POLICY_WORKSPACE_ENABLED",
+        True,
+    ),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
     ("auto_agent_redrive_enabled", "HYDRAFLOW_AUTO_AGENT_REDRIVE_ENABLED", True),
     (
@@ -3056,6 +3061,18 @@ class HydraFlowConfig(BaseModel):
             "policy resolver would have chosen versus what legacy routing did. "
             "Observation only — it never changes a provider, model, or command. "
             "Set false to stop writing the per-repo shadow decision chain."
+        ),
+    )
+    gateway_policy_workspace_enabled: bool = Field(
+        default=True,
+        description=(
+            "Serve the operator Routing policy workspace: read the per-repo "
+            "policy snapshot, effective-route matrix, and mutation audit, and "
+            "expose the revision-safe write plane. Routing behaviour is "
+            "unaffected either way — enforcement is a later phase. Writes need "
+            "an authenticated operator identity (env-only "
+            "HYDRAFLOW_OPERATOR_TOKEN) AND a loopback dashboard bind, so this "
+            "dial off is the third, blunt way to close them (ADR-0140)."
         ),
     )
     gateway_fleet_ratchet_enabled: bool = Field(

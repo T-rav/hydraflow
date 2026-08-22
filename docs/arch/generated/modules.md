@@ -43,7 +43,7 @@ graph LR
     src -- "23" --> src_erosion
     src -- "9" --> src_escape
     src -- "6" --> src_flows
-    src -- "11" --> src_hydraflow_gateway
+    src -- "14" --> src_hydraflow_gateway
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
     src -- "18" --> src_preflight
@@ -59,7 +59,7 @@ graph LR
     src_audit -- "1" --> src_escape
     src_dashboard_routes -- "2" --> src_audit
     src_dashboard_routes -- "1" --> src_escape
-    src_dashboard_routes -- "2" --> src_hydraflow_gateway
+    src_dashboard_routes -- "7" --> src_hydraflow_gateway
     src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "2" --> src_state
