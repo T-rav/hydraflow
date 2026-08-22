@@ -667,46 +667,38 @@ class TestCheckBareADRReferences:
         issue = next(i for i in result.issues if i.code == "bare_adr_reference")
         assert "ADR-0006" in issue.message
 
-    def test_parenthesized_title_passes(self, validator: ADRPreValidator) -> None:
-        """ADR-NNNN (Title) is not flagged."""
-        content = _valid_adr(
-            decision="See ADR-0006 (RepoRuntime Isolation Architecture) for details."
-        )
-        result = validator.validate(content)
-        codes = [i.code for i in result.issues]
-        assert "bare_adr_reference" not in codes
-
-    def test_em_dash_title_passes(self, validator: ADRPreValidator) -> None:
-        """ADR-NNNN — Title is not flagged."""
-        content = _valid_adr(
-            decision="See ADR-0006 — RepoRuntime Isolation Architecture for details."
-        )
-        result = validator.validate(content)
-        codes = [i.code for i in result.issues]
-        assert "bare_adr_reference" not in codes
-
-    def test_self_reference_skipped(self, validator: ADRPreValidator) -> None:
-        """References to the ADR's own number are not flagged."""
-        content = _valid_adr(decision="ADR-0001 intentionally does this.")
-        result = validator.validate(content)
-        codes = [i.code for i in result.issues]
-        assert "bare_adr_reference" not in codes
-
-    def test_heading_line_skipped(self, validator: ADRPreValidator) -> None:
-        """The ADR heading line '# ADR-NNNN: Title' is never flagged."""
-        content = _valid_adr(decision="Some text here.")
-        result = validator.validate(content)
-        codes = [i.code for i in result.issues]
-        assert "bare_adr_reference" not in codes
-
-    def test_table_row_skipped(self, validator: ADRPreValidator) -> None:
-        """ADR references inside markdown table rows are not flagged."""
-        content = _valid_adr(
-            decision="| **example** | ADR-0006 is used here |\n\nNormal text."
-        )
-        result = validator.validate(content)
-        codes = [i.code for i in result.issues]
-        assert "bare_adr_reference" not in codes
+    @pytest.mark.parametrize(
+        "decision",
+        [
+            # ADR-NNNN (Title) carries its annotation, so it is not "bare".
+            pytest.param(
+                "See ADR-0006 (RepoRuntime Isolation Architecture) for details.",
+                id="parenthesized_title_passes",
+            ),
+            # ADR-NNNN — Title is the other accepted annotation form.
+            pytest.param(
+                "See ADR-0006 — RepoRuntime Isolation Architecture for details.",
+                id="em_dash_title_passes",
+            ),
+            # References to the ADR's own number (0001, from _valid_adr) are skipped.
+            pytest.param(
+                "ADR-0001 intentionally does this.", id="self_reference_skipped"
+            ),
+            # The '# ADR-NNNN: Title' heading _valid_adr emits is never flagged,
+            # which is what this otherwise-unremarkable decision body pins.
+            pytest.param("Some text here.", id="heading_line_skipped"),
+            # ADR references inside markdown table rows are not flagged.
+            pytest.param(
+                "| **example** | ADR-0006 is used here |\n\nNormal text.",
+                id="table_row_skipped",
+            ),
+        ],
+    )
+    def test_annotated_or_exempt_reference_not_flagged(
+        self, validator: ADRPreValidator, decision: str
+    ) -> None:
+        result = validator.validate(_valid_adr(decision=decision))
+        assert "bare_adr_reference" not in [i.code for i in result.issues]
 
     def test_multiple_bare_refs_deduplicated(self, validator: ADRPreValidator) -> None:
         """Multiple bare references to the same ADR produce one issue."""
@@ -802,31 +794,61 @@ class TestMismatchedADRTitle:
         assert "Registry Lifecycle Tracker" in issue.message
         assert "Pipeline Integration Harness" in issue.message
 
-    def test_correct_title_not_flagged(self, validator: ADRPreValidator) -> None:
-        """A title annotation matching the real ADR title passes."""
-        content = _valid_adr(
-            decision="See ADR-0022 (Pipeline Integration Harness) for details."
-        )
-        all_adrs = [
-            (1, "Test ADR", "content", "0001-test.md"),
-            (22, "Pipeline Integration Harness", "content", "0022-harness.md"),
-        ]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "mismatched_adr_title" not in codes
-
-    def test_case_insensitive_title_match(self, validator: ADRPreValidator) -> None:
-        """Title comparison is case-insensitive."""
-        content = _valid_adr(
-            decision="See ADR-0022 (pipeline integration harness) for details."
-        )
-        all_adrs = [
-            (1, "Test ADR", "content", "0001-test.md"),
-            (22, "Pipeline Integration Harness", "content", "0022-harness.md"),
-        ]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "mismatched_adr_title" not in codes
+    @pytest.mark.parametrize(
+        ("decision", "all_adrs"),
+        [
+            pytest.param(
+                "See ADR-0022 (Pipeline Integration Harness) for details.",
+                [
+                    (1, "Test ADR", "content", "0001-test.md"),
+                    (22, "Pipeline Integration Harness", "content", "0022-harness.md"),
+                ],
+                id="correct_title_not_flagged",
+            ),
+            # Title comparison is case-insensitive.
+            pytest.param(
+                "See ADR-0022 (pipeline integration harness) for details.",
+                [
+                    (1, "Test ADR", "content", "0001-test.md"),
+                    (22, "Pipeline Integration Harness", "content", "0022-harness.md"),
+                ],
+                id="case_insensitive_title_match",
+            ),
+            # Em-dash annotations with the correct title also pass.
+            pytest.param(
+                "See ADR-0022 — Pipeline Integration Harness for details.",
+                [
+                    (1, "Test ADR", "content", "0001-test.md"),
+                    (22, "Pipeline Integration Harness", "content", "0022-harness.md"),
+                ],
+                id="em_dash_correct_title_passes",
+            ),
+            # Regression for #3241: the fix converts em-dash citations to the
+            # parenthesized form so the title is clearly delimited and trailing
+            # prose after the citation is not swallowed into it.
+            pytest.param(
+                "See ADR-0004 (agent cli as runtime) — related but distinct",
+                [
+                    (1, "Test ADR", "content", "0001-test.md"),
+                    (
+                        4,
+                        "agent cli as runtime",
+                        "content",
+                        "0004-agent-cli-as-runtime.md",
+                    ),
+                ],
+                id="paren_title_matching_filename_slug_passes",
+            ),
+        ],
+    )
+    def test_matching_title_not_flagged(
+        self,
+        validator: ADRPreValidator,
+        decision: str,
+        all_adrs: list[tuple[int, str, str, str]],
+    ) -> None:
+        result = validator.validate(_valid_adr(decision=decision), all_adrs)
+        assert "mismatched_adr_title" not in [i.code for i in result.issues]
 
     def test_em_dash_title_mismatch_detected(self, validator: ADRPreValidator) -> None:
         """Em-dash title annotations are also checked for accuracy."""
@@ -838,19 +860,6 @@ class TestMismatchedADRTitle:
         result = validator.validate(content, all_adrs)
         codes = [i.code for i in result.issues]
         assert "mismatched_adr_title" in codes
-
-    def test_em_dash_correct_title_passes(self, validator: ADRPreValidator) -> None:
-        """Em-dash title annotations with correct title pass."""
-        content = _valid_adr(
-            decision="See ADR-0022 — Pipeline Integration Harness for details."
-        )
-        all_adrs = [
-            (1, "Test ADR", "content", "0001-test.md"),
-            (22, "Pipeline Integration Harness", "content", "0022-harness.md"),
-        ]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "mismatched_adr_title" not in codes
 
     def test_mismatch_is_fixable(self, validator: ADRPreValidator) -> None:
         """Mismatched title issues are marked as fixable."""
@@ -902,25 +911,6 @@ class TestMismatchedADRTitle:
         result = validator.validate(content, all_adrs)
         codes = [i.code for i in result.issues]
         assert "mismatched_adr_title" in codes
-
-    def test_paren_title_matching_filename_slug_passes(
-        self, validator: ADRPreValidator
-    ) -> None:
-        """Parenthesized title matching the filename-derived slug passes validation.
-
-        Regression test for issue #3241: the fix converts em-dash citations
-        to the parenthesized format so the title is clearly delimited.
-        """
-        content = _valid_adr(
-            decision=("See ADR-0004 (agent cli as runtime) — related but distinct"),
-        )
-        all_adrs = [
-            (1, "Test ADR", "content", "0001-test.md"),
-            (4, "agent cli as runtime", "content", "0004-agent-cli-as-runtime.md"),
-        ]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "mismatched_adr_title" not in codes
 
 
 class TestCheckSourceFunctionRefs:
@@ -1097,23 +1087,53 @@ class TestCheckSourceFunctionRefs:
 
 
 class TestCheckCrossReferenceTitles:
-    def test_exact_title_match_passes(self, validator: ADRPreValidator) -> None:
-        """A cross-reference with the exact full title produces no issue."""
-        content = _valid_adr(
-            decision="See ADR-0023 (Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking)."
-        )
-        all_adrs = [
-            (1, "Test ADR", "content", "0001-test.md"),
-            (
-                23,
-                "Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking",
-                "c",
-                "0023-gate.md",
+    @pytest.mark.parametrize(
+        ("decision", "all_adrs"),
+        [
+            # The exact full title produces no issue.
+            pytest.param(
+                "See ADR-0023 (Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking).",
+                [
+                    (1, "Test ADR", "content", "0001-test.md"),
+                    (
+                        23,
+                        "Auto-Triage Toggle Must Gate Routing, Not Just Stat Tracking",
+                        "c",
+                        "0023-gate.md",
+                    ),
+                ],
+                id="exact_title_match_passes",
             ),
-        ]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "abbreviated_cross_ref_title" not in codes
+            # Cross-references inside markdown table rows are not checked, so an
+            # abbreviated title there must not be flagged.
+            pytest.param(
+                "| ADR-0023 (Short Title) | example |\n\nNormal text.",
+                [
+                    (1, "Test ADR", "content", "0001-test.md"),
+                    (23, "Short Title With More Words", "c", "0023-short.md"),
+                ],
+                id="table_row_skipped",
+            ),
+            # A parenthesized title containing inner parens is parsed whole, not
+            # truncated at the first ')' and then reported as abbreviated.
+            pytest.param(
+                "See ADR-0023 (Config (Mode) Architecture Pattern) for details.",
+                [
+                    (1, "Test ADR", "content", "0001-test.md"),
+                    (23, "Config (Mode) Architecture Pattern", "c", "0023-config.md"),
+                ],
+                id="paren_title_with_nested_parens_not_false_positive",
+            ),
+        ],
+    )
+    def test_cross_reference_title_not_flagged(
+        self,
+        validator: ADRPreValidator,
+        decision: str,
+        all_adrs: list[tuple[int, str, str, str]],
+    ) -> None:
+        result = validator.validate(_valid_adr(decision=decision), all_adrs)
+        assert "abbreviated_cross_ref_title" not in [i.code for i in result.issues]
 
     def test_abbreviated_title_flagged(self, validator: ADRPreValidator) -> None:
         """A cross-reference with an abbreviated title is flagged."""
@@ -1229,19 +1249,6 @@ class TestCheckCrossReferenceTitles:
         codes = [i.code for i in result.issues]
         assert "abbreviated_cross_ref_title" not in codes
 
-    def test_table_row_skipped(self, validator: ADRPreValidator) -> None:
-        """Cross-references in table rows are not checked."""
-        content = _valid_adr(
-            decision="| ADR-0023 (Short Title) | example |\n\nNormal text."
-        )
-        all_adrs = [
-            (1, "Test ADR", "content", "0001-test.md"),
-            (23, "Short Title With More Words", "c", "0023-short.md"),
-        ]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "abbreviated_cross_ref_title" not in codes
-
     def test_emdash_abbreviated_title_flagged(self, validator: ADRPreValidator) -> None:
         """An em-dash cross-reference with an abbreviated title is flagged."""
         content = _valid_adr(
@@ -1260,21 +1267,6 @@ class TestCheckCrossReferenceTitles:
         codes = [i.code for i in result.issues]
         assert "abbreviated_cross_ref_title" in codes
         assert "mismatched_adr_title" not in codes
-
-    def test_paren_title_with_nested_parens_not_false_positive(
-        self, validator: ADRPreValidator
-    ) -> None:
-        """A parenthesized title containing inner parens is not flagged as abbreviated."""
-        content = _valid_adr(
-            decision="See ADR-0023 (Config (Mode) Architecture Pattern) for details."
-        )
-        all_adrs = [
-            (1, "Test ADR", "content", "0001-test.md"),
-            (23, "Config (Mode) Architecture Pattern", "c", "0023-config.md"),
-        ]
-        result = validator.validate(content, all_adrs)
-        codes = [i.code for i in result.issues]
-        assert "abbreviated_cross_ref_title" not in codes
 
 
 class TestWordPrefixOverlap:

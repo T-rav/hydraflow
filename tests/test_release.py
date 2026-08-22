@@ -82,26 +82,32 @@ class TestReleaseModel:
 
 
 class TestExtractVersionFromTitle:
-    def test_extracts_semver_with_v_prefix(self) -> None:
-        assert extract_version_from_title("[Epic] v1.2.0 — Feature set") == "1.2.0"
-
-    def test_extracts_semver_without_prefix(self) -> None:
-        assert extract_version_from_title("[Epic] 2.0.0 release") == "2.0.0"
-
-    def test_extracts_two_part_version(self) -> None:
-        assert extract_version_from_title("Release 3.1") == "3.1"
-
-    def test_extracts_single_number(self) -> None:
-        assert extract_version_from_title("v5 release") == "5"
-
-    def test_returns_empty_for_no_version(self) -> None:
-        assert extract_version_from_title("[Epic] No version here") == ""
-
-    def test_returns_empty_for_empty_string(self) -> None:
-        assert extract_version_from_title("") == ""
-
-    def test_extracts_first_version_match(self) -> None:
-        assert extract_version_from_title("v1.0 and v2.0") == "1.0"
+    @pytest.mark.parametrize(
+        ("title", "expected"),
+        [
+            pytest.param(
+                "[Epic] v1.2.0 — Feature set",
+                "1.2.0",
+                id="extracts_semver_with_v_prefix",
+            ),
+            pytest.param(
+                "[Epic] 2.0.0 release", "2.0.0", id="extracts_semver_without_prefix"
+            ),
+            pytest.param("Release 3.1", "3.1", id="extracts_two_part_version"),
+            pytest.param("v5 release", "5", id="extracts_single_number"),
+            pytest.param(
+                "[Epic] No version here", "", id="returns_empty_for_no_version"
+            ),
+            pytest.param("", "", id="returns_empty_for_empty_string"),
+            pytest.param("v1.0 and v2.0", "1.0", id="extracts_first_version_match"),
+            # A bare number with no v-prefix must not create a spurious release.
+            pytest.param(
+                "5 Features", "", id="bare_integer_without_prefix_not_extracted"
+            ),
+        ],
+    )
+    def test_extract_version_from_title(self, title: str, expected: str) -> None:
+        assert extract_version_from_title(title) == expected
 
     def test_handles_complex_title(self) -> None:
         title = "[Epic] Release v0.9.1-beta — Improvements"
@@ -111,10 +117,6 @@ class TestExtractVersionFromTitle:
         # "Phase 3" or "Sprint 5" should NOT be treated as a release version
         assert extract_version_from_title("[Epic] Phase 3 Backend") == ""
         assert extract_version_from_title("[Epic] Sprint 5 improvements") == ""
-
-    def test_bare_integer_without_prefix_not_extracted(self) -> None:
-        # A bare number without v-prefix should not create a spurious release
-        assert extract_version_from_title("5 Features") == ""
 
 
 # ---------------------------------------------------------------------------

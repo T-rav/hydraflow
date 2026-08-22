@@ -186,65 +186,70 @@ class TestLoadMergePolicy:
         with pytest.raises(MergePolicyError, match="surprise"):
             load_merge_policy(path)
 
-    def test_unknown_entry_key_raises(self, tmp_path: Path) -> None:
-        text = _MINIMAL_POLICY.replace(
-            "    actions: [arch-regen-push]",
-            "    actions: [arch-regen-push]\n    blast_radius: huge",
-        )
-        with pytest.raises(MergePolicyError, match="blast_radius"):
-            load_merge_policy(_write_policy(tmp_path, text))
-
-    def test_bad_schema_version_raises(self, tmp_path: Path) -> None:
-        text = _MINIMAL_POLICY.replace("schema_version: 1", "schema_version: 99")
-        with pytest.raises(MergePolicyError, match="schema_version"):
-            load_merge_policy(_write_policy(tmp_path, text))
-
-    def test_bad_autonomy_value_raises(self, tmp_path: Path) -> None:
-        text = _MINIMAL_POLICY.replace("autonomy: act", "autonomy: yolo")
-        with pytest.raises(MergePolicyError, match="autonomy"):
-            load_merge_policy(_write_policy(tmp_path, text))
-
-    def test_ask_entry_without_required_approvals_raises(self, tmp_path: Path) -> None:
-        text = _MINIMAL_POLICY.replace(
-            "    required_approvals:\n      count: 1\n"
-            "      roles: [operator, orchestrator-reviewer]\n",
-            "",
-        )
-        with pytest.raises(MergePolicyError, match="required_approvals"):
-            load_merge_policy(_write_policy(tmp_path, text))
-
-    def test_zero_approval_count_raises(self, tmp_path: Path) -> None:
-        text = _MINIMAL_POLICY.replace("count: 1", "count: 0")
-        with pytest.raises(MergePolicyError, match="count"):
-            load_merge_policy(_write_policy(tmp_path, text))
-
-    def test_unknown_role_raises(self, tmp_path: Path) -> None:
-        text = _MINIMAL_POLICY.replace(
-            "roles: [operator, orchestrator-reviewer]", "roles: [ceo]"
-        )
-        with pytest.raises(MergePolicyError, match="role"):
-            load_merge_policy(_write_policy(tmp_path, text))
-
-    def test_duplicate_entry_id_raises(self, tmp_path: Path) -> None:
-        text = _MINIMAL_POLICY.replace(
-            "id: high-blast-radius", "id: tractable-reversible"
-        )
-        with pytest.raises(MergePolicyError, match="duplicate"):
-            load_merge_policy(_write_policy(tmp_path, text))
-
-    def test_missing_default_entry_raises(self, tmp_path: Path) -> None:
-        text = _MINIMAL_POLICY.replace("    default: true\n", "")
-        with pytest.raises(MergePolicyError, match="default"):
-            load_merge_policy(_write_policy(tmp_path, text))
-
-    def test_unapproved_merge_class_must_reference_an_ask_entry(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        ("old", "new", "match"),
+        [
+            pytest.param(
+                "    actions: [arch-regen-push]",
+                "    actions: [arch-regen-push]\n    blast_radius: huge",
+                "blast_radius",
+                id="unknown_entry_key_raises",
+            ),
+            pytest.param(
+                "schema_version: 1",
+                "schema_version: 99",
+                "schema_version",
+                id="bad_schema_version_raises",
+            ),
+            pytest.param(
+                "autonomy: act",
+                "autonomy: yolo",
+                "autonomy",
+                id="bad_autonomy_value_raises",
+            ),
+            # An `ask` entry with no approval requirement would authorize itself:
+            # the loader must reject it rather than fall back to "no approvals".
+            pytest.param(
+                "    required_approvals:\n      count: 1\n"
+                "      roles: [operator, orchestrator-reviewer]\n",
+                "",
+                "required_approvals",
+                id="ask_entry_without_required_approvals_raises",
+            ),
+            pytest.param(
+                "count: 1", "count: 0", "count", id="zero_approval_count_raises"
+            ),
+            pytest.param(
+                "roles: [operator, orchestrator-reviewer]",
+                "roles: [ceo]",
+                "role",
+                id="unknown_role_raises",
+            ),
+            pytest.param(
+                "id: high-blast-radius",
+                "id: tractable-reversible",
+                "duplicate",
+                id="duplicate_entry_id_raises",
+            ),
+            pytest.param(
+                "    default: true\n", "", "default", id="missing_default_entry_raises"
+            ),
+            # Pointing `unapproved_merge_class` at an `act` entry would make the
+            # merge gate a no-op, so the loader rejects it at load time.
+            pytest.param(
+                "unapproved_merge_class: high-blast-radius",
+                "unapproved_merge_class: tractable-reversible",
+                "unapproved_merge_class",
+                id="unapproved_merge_class_must_reference_an_ask_entry",
+            ),
+        ],
+    )
+    def test_invalid_policy_raises(
+        self, tmp_path: Path, old: str, new: str, match: str
     ) -> None:
-        text = _MINIMAL_POLICY.replace(
-            "unapproved_merge_class: high-blast-radius",
-            "unapproved_merge_class: tractable-reversible",
-        )
-        with pytest.raises(MergePolicyError, match="unapproved_merge_class"):
+        """Each single mutation of the minimal policy is rejected by the loader."""
+        text = _MINIMAL_POLICY.replace(old, new)
+        with pytest.raises(MergePolicyError, match=match):
             load_merge_policy(_write_policy(tmp_path, text))
 
 

@@ -466,51 +466,46 @@ class TestDockerConfigValidation(GitIdentityEnvMixin):
 
 
 class TestDockerSizeNotationValidator:
-    def test_valid_size_512m(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "size",
+        [
+            pytest.param("512m", id="valid_size_512m"),
+            pytest.param("1024k", id="valid_size_1024k"),
+            pytest.param("100b", id="valid_size_100b"),
+            # The validator regex is re.IGNORECASE, so uppercase units pass too.
+            pytest.param("4G", id="valid_size_uppercase_4G"),
+            pytest.param("512M", id="valid_size_uppercase_512M"),
+            pytest.param("4g", id="valid_size_4g"),
+        ],
+    )
+    def test_valid_size_accepted(self, tmp_path: Path, size: str) -> None:
         cfg = HydraFlowConfig(
-            docker_memory_limit="512m",
+            docker_memory_limit=size,
             repo_root=tmp_path,
             workspace_base=tmp_path / "wt",
             state_file=tmp_path / "s.json",
         )
-        assert cfg.docker_memory_limit == "512m"
+        assert cfg.docker_memory_limit == size
 
-    def test_valid_size_1024k(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            docker_memory_limit="1024k",
-            repo_root=tmp_path,
-            workspace_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.docker_memory_limit == "1024k"
-
-    def test_valid_size_100b(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            docker_memory_limit="100b",
-            repo_root=tmp_path,
-            workspace_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.docker_memory_limit == "100b"
-
-    def test_valid_size_uppercase_4G(self, tmp_path: Path) -> None:
-        """Validator uses re.IGNORECASE — uppercase units should be accepted."""
-        cfg = HydraFlowConfig(
-            docker_memory_limit="4G",
-            repo_root=tmp_path,
-            workspace_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.docker_memory_limit == "4G"
-
-    def test_valid_size_uppercase_512M(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            docker_memory_limit="512M",
-            repo_root=tmp_path,
-            workspace_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.docker_memory_limit == "512M"
+    @pytest.mark.parametrize(
+        "size",
+        [
+            pytest.param("", id="invalid_empty_string"),
+            pytest.param("4", id="invalid_digits_only"),
+            pytest.param("g", id="invalid_unit_only"),
+            # Only a single-char unit suffix is valid, so "4gb" must fail.
+            pytest.param("4gb", id="invalid_size_with_suffix_gb"),
+            pytest.param("abc", id="invalid_size_alpha_only"),
+        ],
+    )
+    def test_invalid_size_rejected(self, tmp_path: Path, size: str) -> None:
+        with pytest.raises(ValueError, match="Invalid Docker size notation"):
+            HydraFlowConfig(
+                docker_memory_limit=size,
+                repo_root=tmp_path,
+                workspace_base=tmp_path / "wt",
+                state_file=tmp_path / "s.json",
+            )
 
     def test_valid_docker_tmp_size(self, tmp_path: Path) -> None:
         """Validator applies to docker_tmp_size as well."""
@@ -521,61 +516,6 @@ class TestDockerSizeNotationValidator:
             state_file=tmp_path / "s.json",
         )
         assert cfg.docker_tmp_size == "512m"
-
-    def test_invalid_empty_string(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="Invalid Docker size notation"):
-            HydraFlowConfig(
-                docker_memory_limit="",
-                repo_root=tmp_path,
-                workspace_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_invalid_digits_only(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="Invalid Docker size notation"):
-            HydraFlowConfig(
-                docker_memory_limit="4",
-                repo_root=tmp_path,
-                workspace_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_invalid_unit_only(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="Invalid Docker size notation"):
-            HydraFlowConfig(
-                docker_memory_limit="g",
-                repo_root=tmp_path,
-                workspace_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_valid_size_4g(self, tmp_path: Path) -> None:
-        cfg = HydraFlowConfig(
-            docker_memory_limit="4g",
-            repo_root=tmp_path,
-            workspace_base=tmp_path / "wt",
-            state_file=tmp_path / "s.json",
-        )
-        assert cfg.docker_memory_limit == "4g"
-
-    def test_invalid_size_with_suffix_gb(self, tmp_path: Path) -> None:
-        """'4gb' should fail — only single-char unit suffix is valid."""
-        with pytest.raises(ValueError, match="Invalid Docker size notation"):
-            HydraFlowConfig(
-                docker_memory_limit="4gb",
-                repo_root=tmp_path,
-                workspace_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
-
-    def test_invalid_size_alpha_only(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="Invalid Docker size notation"):
-            HydraFlowConfig(
-                docker_memory_limit="abc",
-                repo_root=tmp_path,
-                workspace_base=tmp_path / "wt",
-                state_file=tmp_path / "s.json",
-            )
 
 
 # ---------------------------------------------------------------------------

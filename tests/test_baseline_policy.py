@@ -47,32 +47,53 @@ def policy(baseline_config, state, event_bus):
 
 
 class TestGlobMatch:
-    def test_standard_fnmatch_still_works(self):
-        assert glob_match("ui/dashboard.snap.png", "**/*.snap.png") is True
-
-    def test_double_star_leading_matches_zero_dirs(self):
-        """** at the start should match files in the root directory."""
-        assert glob_match("dashboard.snap.png", "**/*.snap.png") is True
-
-    def test_double_star_trailing_matches_zero_dirs(self):
-        """** at the end should match files without trailing path segments."""
-        assert glob_match("__snapshots__/file.png", "**/__snapshots__/**") is True
-
-    def test_double_star_both_sides_zero_dirs(self):
-        """** on both sides should match a single-segment __snapshots__ path."""
-        assert glob_match("__snapshots__/file.png", "**/__snapshots__/**") is True
-
-    def test_deep_nested_path(self):
-        assert glob_match("a/b/c/__snapshots__/d.png", "**/__snapshots__/**") is True
-
-    def test_no_match(self):
-        assert glob_match("src/app.py", "**/*.snap.png") is False
-
-    def test_exact_filename_pattern(self):
-        assert glob_match("file.golden", "*.golden") is True
-
-    def test_nested_with_no_double_star(self):
-        assert glob_match("a/file.golden", "*.golden") is True
+    @pytest.mark.parametrize(
+        ("path", "pattern", "expected"),
+        [
+            pytest.param(
+                "ui/dashboard.snap.png",
+                "**/*.snap.png",
+                True,
+                id="standard_fnmatch_still_works",
+            ),
+            # ** at the start must match files in the root directory.
+            pytest.param(
+                "dashboard.snap.png",
+                "**/*.snap.png",
+                True,
+                id="double_star_leading_matches_zero_dirs",
+            ),
+            # ** at the end must match a path with no trailing segments. The next
+            # case is the same call read from the other side (** on BOTH sides
+            # collapsing to zero dirs) — two rationales, one input, kept as two
+            # named cases so neither reading loses its record.
+            pytest.param(
+                "__snapshots__/file.png",
+                "**/__snapshots__/**",
+                True,
+                id="double_star_trailing_matches_zero_dirs",
+            ),
+            pytest.param(
+                "__snapshots__/file.png",
+                "**/__snapshots__/**",
+                True,
+                id="double_star_both_sides_zero_dirs",
+            ),
+            pytest.param(
+                "a/b/c/__snapshots__/d.png",
+                "**/__snapshots__/**",
+                True,
+                id="deep_nested_path",
+            ),
+            pytest.param("src/app.py", "**/*.snap.png", False, id="no_match"),
+            pytest.param("file.golden", "*.golden", True, id="exact_filename_pattern"),
+            pytest.param(
+                "a/file.golden", "*.golden", True, id="nested_with_no_double_star"
+            ),
+        ],
+    )
+    def test_glob_match(self, path: str, pattern: str, expected: bool):
+        assert glob_match(path, pattern) is expected
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 comment: 'High-water marks for structural test redundancy (erosion.suite_hygiene):
   parametrize copies (identical bodies in one file) and cross-file duplicate tests.
   The gate fails only when a count rises above its mark; falling is the point. Last
-  moved: #11533 follow-up: pins for the corrected B1 reconciliation rule, the hardened
-  admission fences, and the probe''s measured observations'
-cross_file_duplicates: 26
-parametrize_copies: 712
-total_tests: 20627
+  moved: test-hygiene batch 2 (#11548): collapsed 9 duplicate-test groups into parametrize
+  and deleted one cross-file duplicate'
+cross_file_duplicates: 22
+parametrize_copies: 650
+total_tests: 21580
