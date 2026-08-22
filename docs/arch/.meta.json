@@ -10,22 +10,22 @@
       "content_sha": "bdd78871ee82dc91c1cdbde3bbdcc57bb5cbb7c9600a2a5a4c756d6c02e17720"
     },
     "adr-falsifiability.md": {
-      "content_sha": "9c086f2c4c4ac7f61f193a476f6af255fb493d81f04f5e9eb52534788d6e233b"
+      "content_sha": "a44d915f68783a5ae14659c5358b14a550bbdb0dac59ff27da9c879cdcfbfdf0"
     },
     "adr_xref.md": {
-      "content_sha": "bbdf9aaa05159bca52d0ca33f99b557e32a3292e99688159700e6657bcf59346"
+      "content_sha": "0b60a3398847b84df56b79399031370d4dca842a33cc16c12d42e6c9025cbfff"
     },
     "ai_system_inventory.md": {
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
     "changelog.md": {
-      "content_sha": "8c67a589addd20e265644d6f7764002431ae8235ca446c17d996d4e8a64a004f"
+      "content_sha": "19164faa21f822d5ab1f5ae4e4300ed4507ac86fbe75a8ca4723db57f5d56ff4"
     },
     "coverage_matrix.md": {
       "content_sha": "e577c48a967a117dde6114523719893b7fd4b0ab5f5cbd1802308c3df917184f"
     },
     "events.md": {
-      "content_sha": "5e813c46b0409769b15b9412fdf34203595ccc1406f15def76b6e3cd46b5f28f"
+      "content_sha": "58e2f112e0c991d435026cddd89c1bf282891a3f3a389cd84ffdc8ccb62bb6ca"
     },
     "functional_areas.md": {
       "content_sha": "f83319abd0865b55e7b1f487729df5f7f52d9a9c1d85b2706e32e6482ca3f95e"
@@ -43,7 +43,7 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "db0036ba7ca796f52dcbc17aa36553e50bfb0fb921f5451ec294bd78dfe6c215"
+      "content_sha": "6dddb078bf9eb265ee5a2f0acf61e11e0b6e7cdcb899085d40eddfee168cdade"
     },
     "ports.md": {
       "content_sha": "c5694cc02e165570a5196a4f9443170f984d254d68710cbe41856bdd4da64cc0"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "1a7c69ce7d85f4d4ae34607b2e69ae28394af96665374341a2c0f96dfed53764"
+  "content_sha": "36e47bfef3899c7d066e1ab72ac958305b0f459522b8c11003ca02912c84d610"
 }

@@ -6,10 +6,14 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `eb3b1d0` — fix(gateway): review pass 1 — the console could not fire its own 409, and empty feeds lied *(2026-08-22)*
-- `daeb841` — fix(gateway): drop the B008 suppression on the matrix requirement selector *(2026-08-22)*
-- `f3937c7` — docs(adr): ADR-0140 — revision-safe policy workspace and the operator write boundary *(2026-08-22)*
-- `1bc8a56` — feat(gateway): revision-safe policy workspace core and the ADR-0138 D5 write gate *(2026-08-22)*
+- `c1aead8` — fix(gateway): review pass 2 — an unresolved slug wrote the host repo, and a dead feed still looked current *(2026-08-22)*
+- `adf70b2` — fix(gateway): review pass 1 — the console could not fire its own 409, and empty feeds lied *(2026-08-22)*
+- `c9310e5` — fix(gateway): drop the B008 suppression on the matrix requirement selector *(2026-08-22)*
+- `3a07510` — docs(adr): ADR-0140 — revision-safe policy workspace and the operator write boundary *(2026-08-22)*
+- `5549397` — feat(gateway): revision-safe policy workspace core and the ADR-0138 D5 write gate *(2026-08-22)*
+- `8eb762f` — fix(instruments): the calibration accept arm scored fresh merges as clean — #11643's last commit never landed (#11647) (#11647) *(2026-08-22)*
+- `2f440e8` — refactor(orchestrator,plan-phase): decompose two god classes below the mass threshold (#11645) (#11645) *(2026-08-22)*
+- `6523893` — feat(instruments): calibrate the test-adequacy gate — the reject arm is outcome-censored (#11593 seam 2) (#11643) (#11643) *(2026-08-22)*
 - `dfd0e25` — fix(director): the shadow observer spun the allocator and fsync'd per tick (#11641) (#11641) *(2026-08-22)*
 - `d227fab` — feat(director): Fable P2 — isolated director and broker in shadow mode (#11537) (#11638) (#11638) *(2026-08-22)*
 - `36468f8` — feat(gateway): P1 — policy resolver, explanation, and shadow decisions (ADR-0139) (#11639) (#11639) *(2026-08-22)*
