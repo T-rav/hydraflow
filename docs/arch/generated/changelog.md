@@ -7,6 +7,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W34
 
 - `b1ae4e6` — feat(triage): honor 'Blocked by: #N' so phase-ordered children flow in order (#11614) (#11614) *(2026-08-21)*
+- `3b191e0` — chore(loops): remove the retired activity-based ADR-drift loops (#11600) (#11600) *(2026-08-21)*
 - `41b468b` — feat(config): light lane on by default — issues at complexity ≤3 take one spawn to PR (refs #11568) (#11590) (#11590) *(2026-08-21)*
 - `c104554` — chore(config): remove retired feature flags and their machinery (flag-rot audit) (#11599) (#11599) *(2026-08-21)*
 - `7af74dd` — feat(implement): test-adequacy gate repairs in-run before rejecting (#11593) (#11603) (#11603) *(2026-08-21)*

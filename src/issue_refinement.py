@@ -505,7 +505,8 @@ _ACTIVE_PIPELINE_PHASE_LABELS: frozenset[str] = frozenset(
 )
 
 # Caretaker-loop escalation families — a stuck-loop finding actively being
-# worked by another loop, not the refinement loop's to touch.
+# worked by another loop, not the refinement loop's to touch. (The
+# hydraflow-adr-drift family left with its loops in ADR-0136.)
 _ESCALATION_LABELS: frozenset[str] = frozenset(
     {
         # bare literal (prep.py HYDRAFLOW_LITERAL_LABELS) — stuck-loop HITL
