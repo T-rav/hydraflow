@@ -24,6 +24,7 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -103,8 +104,22 @@ def _served_model(turn: Any) -> str:
     return str(json.loads(turn.exchanges[-1][1])["model"])
 
 
-def _served_origin(turn: Any) -> str:
-    """The upstream host the request actually reached."""
+def _served_host(turn: Any) -> str:
+    """The exact upstream host the request actually reached.
+
+    Parsed and compared whole rather than prefix-matched on the URL string.
+    "Which account served this turn?" is the single most load-bearing claim in
+    this file, and a prefix check answers a weaker question than it looks like
+    it does: ``https://zai.test.example.invalid/v1/messages`` starts with
+    ``https://zai.test`` too. CodeQL's ``py/incomplete-url-substring-sanitization``
+    is right to call that out even in a test.
+    """
+    assert turn.exchanges, "the origin was never reached"
+    return urlsplit(str(turn.exchanges[-1][0])).netloc
+
+
+def _served_url(turn: Any) -> str:
+    """The whole upstream URL, for comparing one run against another."""
     assert turn.exchanges, "the origin was never reached"
     return str(turn.exchanges[-1][0])
 
@@ -126,7 +141,7 @@ async def test_a_governed_turn_reaches_the_upstream_the_policy_chose(
         policies=(_project_x_uses_zai(),),
     )
 
-    assert _served_origin(turn).startswith("https://zai.test")
+    assert _served_host(turn) == "zai.test"
 
 
 async def test_a_governed_turn_serves_the_model_the_policy_chose(
@@ -207,7 +222,7 @@ async def test_another_repository_reaches_the_same_upstream_as_with_no_canary(
         policies=(_project_x_uses_zai(),),
     )
 
-    assert _served_origin(armed) == _served_origin(disarmed)
+    assert _served_url(armed) == _served_url(disarmed)
 
 
 async def test_another_repository_sends_the_same_bytes_as_with_no_canary(
@@ -235,6 +250,20 @@ async def test_the_comparison_is_not_between_two_empty_wires(
     disarmed = await _turn(tmp_path, monkeypatch, repo=_OTHER_REPO, canary="")
 
     assert _served_model(disarmed) == TURN_MODEL
+
+
+async def test_an_ungoverned_turn_reaches_the_legacy_upstream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The contrast that gives "reached z.ai" its meaning.
+
+    Both upstreams are configured on the same gateway in every case here, so
+    without this the governed assertion could be satisfied by a deployment that
+    only ever had one place to go.
+    """
+    turn = await _turn(tmp_path, monkeypatch, repo=_OTHER_REPO, canary="")
+
+    assert _served_host(turn) == "anthropic.test"
 
 
 async def test_the_canary_repository_with_no_policy_is_also_untouched(

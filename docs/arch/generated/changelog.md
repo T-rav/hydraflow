@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `c6bb1dd` — fix(gateway): review pass 2 — the rollback had two places to look, and the boundary had one *(2026-08-22)*
 - `57fd879` — fix(gateway): restore the attempt-table bound test a scripted edit silently dropped *(2026-08-22)*
 - `bcb2c2a` — fix(gateway): pin AC5 at the subprocess seam; correct two renamed codes in the ADR *(2026-08-22)*
 - `1bd7eca` — fix(gateway): the governed set and the body-capture set share a shape, not semantics *(2026-08-22)*
