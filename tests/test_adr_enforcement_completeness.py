@@ -165,10 +165,12 @@ _UNATTRIBUTED_BASELINE: frozenset[str] = frozenset(
         "0028", "0029", "0032", "0034", "0037", "0041", "0043", "0045",
         "0047", "0050", "0052", "0057", "0058", "0060", "0061", "0064",
         "0071", "0083", "0090", "0093", "0096", "0097", "0102", "0104",
-        "0106", "0109", "0111", "0117", "0119",
+        "0109", "0111", "0117", "0119",
     }
 )  # fmt: skip
-_UNATTRIBUTED_MAX = 44
+# Ratchet: shrinks only. 0106 left the baseline when #11604 bound its
+# escalation gates to tests/regressions/test_issue_11604.py, which names it.
+_UNATTRIBUTED_MAX = 43
 
 
 @pytest.fixture(scope="module")
