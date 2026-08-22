@@ -557,23 +557,21 @@ class AdvisorMixin:
             # handling layers can react. Soft failures block the merge
             # instead of silently approving — the merge gate must be
             # fail-closed, not fail-open (issue #6357).
-            from subprocess_util import (  # noqa: PLC0415
-                AuthenticationError,
-                CreditExhaustedError,
+            #
+            # #11618/#11626: this used to restate the fatal set as a literal
+            # ``AuthenticationError | CreditExhaustedError`` re-raise followed
+            # by the six likely-bug types. That restatement is exactly the
+            # drift the centralized set exists to prevent, so it now defers to
+            # ``FATAL_EXCEPTIONS`` — same two infra errors, the identical six
+            # likely-bug types, plus ``MemoryError``, which the canonical set
+            # has always classed as fatal and which this handler was silently
+            # absorbing into a merge block. Matches the two sibling advisor
+            # handlers in this module.
+            from exception_classify import (  # noqa: PLC0415
+                reraise_on_credit_or_bug,
             )
 
-            if isinstance(exc, AuthenticationError | CreditExhaustedError):
-                raise
-            if isinstance(
-                exc,
-                TypeError
-                | KeyError
-                | AttributeError
-                | ValueError
-                | IndexError
-                | NotImplementedError,
-            ):
-                raise
+            reraise_on_credit_or_bug(exc)
             # Credit/auth-looking string matches coming through non-SDK paths
             # (e.g. wrapped by review runner). Keep these as raising too —
             # the message is the only signal.
