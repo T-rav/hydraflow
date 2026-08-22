@@ -770,6 +770,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_FAIL_CLOSED",
         True,
     ),
+    ("test_adequacy_pin_demand", "HYDRAFLOW_TEST_ADEQUACY_PIN_DEMAND", True),
     ("triage_blocker_gate_enabled", "HYDRAFLOW_TRIAGE_BLOCKER_GATE_ENABLED", True),
     ("triage_honeypot_enabled", "HYDRAFLOW_TRIAGE_HONEYPOT_ENABLED", True),
     ("triage_honeypot_enforce", "HYDRAFLOW_TRIAGE_HONEYPOT_ENFORCE", False),
@@ -1793,6 +1794,24 @@ class HydraFlowConfig(BaseModel):
             "0 = today's straight-to-rejection behavior. "
             "max_test_adequacy_attempts=0 still disables the whole gate, "
             "repair included."
+        ),
+    )
+    test_adequacy_pin_demand: bool = Field(
+        default=True,
+        description=(
+            "Judge a test-adequacy retry against the demand the PREVIOUS "
+            "attempt actually stated (#11644). #11643's calibration measured "
+            "9 of 15 consecutive re-rejections demanding something entirely "
+            "new (mean substantive overlap 0.04), so an implementer could "
+            "satisfy every stated finding and still be rejected on a fresh "
+            "set. With the pin in force a retry is rejected by a finding that "
+            "restates the pinned demand, by a genuinely NEW finding that names "
+            "a locatable referent, or by a deterministic coverage gap — but "
+            "not by a new finding that names nothing locatable, which is "
+            "recorded as advisory instead. Strictness is otherwise unchanged: "
+            "a first attempt still blocks on every finding, and the "
+            "coverage-delta source never routes through the contract at all. "
+            "False = pre-#11644 behavior."
         ),
     )
     test_adequacy_coverage_timeout_secs: int = Field(

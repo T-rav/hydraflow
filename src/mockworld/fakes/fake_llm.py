@@ -180,6 +180,9 @@ class _FakeAgentRunner(_ScriptedRunner):
         super().__init__()
         self._streams: dict[int, list[Any]] = {}
         self._prior_failures: dict[int, list[str]] = {}
+        # #11644: the pinned test-adequacy demand each retry received, so a
+        # scenario can assert the pin reached the runner seam.
+        self._pinned_demands: dict[int, list[list[str]]] = {}
         # #11568: every ``run`` spawn's kwargs, keyed by issue — scenarios
         # count attempts and assert the tiered ``timeout_s`` reached the seam.
         self._run_calls: dict[int, list[dict[str, Any]]] = {}
@@ -199,16 +202,20 @@ class _FakeAgentRunner(_ScriptedRunner):
         attempt_number: int = 0,
         known_traps: str = "",
         timeout_s: int | None = None,
+        pinned_adequacy_findings: Sequence[str] | None = None,
     ) -> Any:
         issue_number = getattr(task, "id", getattr(task, "number", 0))
         if prior_failure:
             self._prior_failures.setdefault(issue_number, []).append(prior_failure)
+        pinned = list(pinned_adequacy_findings or ())
+        self._pinned_demands.setdefault(issue_number, []).append(pinned)
         self._run_calls.setdefault(issue_number, []).append(
             {
                 "branch": branch,
                 "attempt_number": attempt_number,
                 "timeout_s": timeout_s,
                 "prior_failure": prior_failure,
+                "pinned_adequacy_findings": pinned,
             }
         )
         result = self._pop(
@@ -244,6 +251,10 @@ class _FakeAgentRunner(_ScriptedRunner):
 
     def prior_failures_seen_for(self, issue_number: int) -> list[str]:
         return list(self._prior_failures.get(issue_number, []))
+
+    def pinned_demands_seen_for(self, issue_number: int) -> list[list[str]]:
+        """The pinned adequacy demand each ``run`` spawn received (#11644)."""
+        return [list(p) for p in self._pinned_demands.get(issue_number, [])]
 
     def fail_next_commit_pending(self) -> None:
         """Make the next factory-owned JSONL persistence boundary fail."""

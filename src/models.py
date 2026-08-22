@@ -564,6 +564,29 @@ class TestAdequacyOutcome(BaseModel):
             "wrote nothing and was burned)"
         ),
     )
+    pinned_findings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The demand the PREVIOUS attempt stated, in force for this one "
+            "(#11644). Empty on a first attempt or when "
+            "test_adequacy_pin_demand is off — that is what 'no pin enforced' "
+            "looks like to the calibration instrument."
+        ),
+    )
+    new_findings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Findings this attempt raised that the pinned demand never "
+            "mentioned (#11644) — the moving bar, kept measurable"
+        ),
+    )
+    advisory_findings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Findings recorded but NOT blocking: new AND naming no locatable "
+            "referent, on an attempt judged against a pinned demand (#11644)"
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -3534,6 +3557,12 @@ class WorkerResultMeta(TypedDict, total=False):
     # the prior error string. Empty/absent means no review ran or no gaps
     # were found.
     spec_review_gaps: str
+    # #11644: the blocking findings of the test-adequacy verdict that killed
+    # the previous attempt. Carried onto the retry as the PINNED demand, so
+    # attempt N+1 is judged against the bar attempt N actually stated rather
+    # than a freshly-sampled one. Absent when the last attempt did not die at
+    # the adequacy gate.
+    test_adequacy_findings: list[str]
 
 
 class TimelineStageMetadata(TypedDict, total=False):
