@@ -75,7 +75,34 @@ def seed() -> MockWorldSeed:
             "decomposition": {1: [_DIRECTION, _VALIDATION]},
             "auto_agent": {3: [_LIGHT_RESOLVED], 4: [_LIGHT_RESOLVED]},
         },
-        cycles_to_run=2,
+        # #11298: lane-on makes this flow SERIALIZED, not merely slower.
+        # AutoAgentPreflightLoop is single-issue-per-tick (see its module
+        # docstring + ``_do_work``: ``_select_dispatchable_issue`` returns ONE
+        # issue and ``_process_one`` handles just that one). Under lane-on,
+        # PlanPhase._route_light_lane claims each decomposed child with
+        # ``hydraflow-auto-light`` and stops the plan flow, so BOTH children
+        # come back to this same loop for their spawn — one child per tick.
+        # The flow therefore needs THREE preflight ticks, not one:
+        #   tick 1  decompose #1 -> epic #2 + children #3, #4
+        #   tick 2  light-lane spawn for child #3
+        #   tick 3  light-lane spawn for child #4
+        # Pre-lane-on, the children fanned out across the concurrent phase
+        # orchestrators after a single decompose tick, so one tick was enough.
+        # At the default 60s cadence those three ticks put the SECOND child at
+        # t>=180s — exactly the predicate budget, i.e. a guaranteed race. It
+        # duly lost on CI (run 32536667685): child #3 landed in history at
+        # tick 2 + 2s, child #4's spawn finished ~1s AFTER the 180s predicate
+        # gave up ("1 failed in 181.18s").
+        # Fix the SERIALIZATION, not the clock: tick every 6s (the cadence s55
+        # already proves in CI for the identical hop-1 decompose) so the three
+        # serialized ticks cost ~20s instead of ~180s. The assertion budget
+        # below is unchanged and now carries ~8x margin rather than none.
+        sandbox_loop_interval=6,
+        # In-process parity tier (test_sandbox_parity) only — the docker
+        # sandbox ticks continuously and ignores this. Raised 2 -> 6 to match
+        # the three serialized ticks above (at 2 the in-process tier could
+        # never reach the second child's dispatch either).
+        cycles_to_run=6,
     )
 
 
@@ -86,12 +113,14 @@ async def assert_outcome(api, page) -> None:
     # observable end-to-end signal (the epic + the superseded #1 are not pipeline
     # work-items). >=2 children under the scripted epic title == the terminal
     # decomposed rather than paging a human.
-    # timeout=180.0 (not the original 90.0): the flow needs a full 60s
-    # sandbox_loop_interval tick just to reach cycle 2, plus council LLM
-    # round-trips on top — observed CI durations of 86-90s left almost no
-    # margin and the scenario flaked past 90s under ordinary runner
-    # variance. 180s matches the tier used by other multi-cycle,
-    # council-driven scenarios (s02/s03/s04/s08).
+    # timeout=180.0 (not the original 90.0), matching the tier other
+    # multi-cycle, council-driven scenarios use (s02/s03/s04/s08). The budget
+    # is NOT what makes this deterministic — the seed's 6s
+    # sandbox_loop_interval is. Under #11298 lane-on this flow needs three
+    # SERIALIZED AutoAgentPreflightLoop ticks (decompose, then one light-lane
+    # spawn per child, because the loop is single-issue-per-tick); see the
+    # seed for the full derivation. At 6s those cost ~20s, so 180s is headroom
+    # rather than the thing being raced against.
     epic_title = "Epic: split issue #1"
     payload = await api.wait_until(
         "/api/issues/history?limit=500",
