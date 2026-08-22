@@ -32,7 +32,8 @@ def seed() -> MockWorldSeed:
 async def assert_outcome(api, page) -> None:
     gateway = os.environ.get("SANDBOX_GATEWAY_BASE", "http://gateway:8080")
     control_token = os.environ.get(
-        "SANDBOX_GATEWAY_CONTROL_TOKEN", "sandbox-control-token-0123456789abcdef"
+        "SANDBOX_GATEWAY_CONTROL_TOKEN",
+        "hfgwctl_sandbox-control-token-0123456789abcdef",
     )
     initial_coverage = await api.get("/api/diagnostics/gateway-coverage?range=24h")
     repo_slug = initial_coverage.get("repo_slug")

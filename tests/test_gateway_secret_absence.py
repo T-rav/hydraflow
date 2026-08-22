@@ -43,12 +43,13 @@ from hydraflow_gateway.settings import (
 )
 from secret_scrub import scan_for_secrets
 
-# The two provider keys are deliberately shaped like real ones, so the
-# ``scan_for_secrets`` assertion is a live detector rather than a formality. The
-# control token and the virtual token are NOT recognised by that pattern set —
-# ``secret_scrub`` has no ``hfgw_`` or gateway-control-token pattern — so those
-# two are carried by their own explicit ``not in payload`` assertions below.
-_CONTROL_TOKEN = "gw-control-token-" + "c" * 40
+# Every credential here is deliberately shaped like a real one, so the
+# ``scan_for_secrets`` assertion is a live detector rather than a formality.
+# Since #11635 that covers all four: ``secret_scrub`` carries ``hfgw_``
+# virtual-key and ``hfgwctl_`` control-token patterns alongside the provider-key
+# ones, so a leak of any of them now trips the canonical detector as well as its
+# own explicit ``not in payload`` assertion below.
+_CONTROL_TOKEN = "hfgwctl_" + "c" * 43
 _ANTHROPIC_KEY = "sk-ant-" + "a" * 44
 _ZAI_KEY = "sk-" + "z" * 48
 _NOW = datetime(2026, 8, 22, 12, 0, 0, tzinfo=UTC)
