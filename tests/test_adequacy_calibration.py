@@ -221,6 +221,45 @@ def test_parse_run_manifest_prefers_the_structured_verdict_source() -> None:
     assert record.verdict_source == VERDICT_SOURCE_COVERAGE_DELTA
 
 
+@pytest.mark.parametrize(
+    ("block_findings", "expected"),
+    [
+        pytest.param(
+            {"findings": []},
+            (),
+            id="explicit-empty-beats-the-legacy-error-string",
+        ),
+        pytest.param(
+            {},
+            (
+                "verifier produced no output (fail-closed policy treats this as an override)",
+            ),
+            id="absent-key-still-falls-back-to-the-legacy-split",
+        ),
+    ],
+)
+def test_a_structured_findings_key_is_authoritative_when_present(
+    block_findings: dict[str, object], expected: tuple[str, ...]
+) -> None:
+    """A verifier override enumerating nothing records ``findings: []``; its
+    summary can be pure policy boilerplate, and splitting THAT into a finding
+    would inflate the unanchored share with text that was never a demand.
+    """
+    manifest = _structured_manifest(
+        error=(
+            "test-adequacy failed: verifier produced no output "
+            "(fail-closed policy treats this as an override)"
+        ),
+        test_adequacy={
+            "passed": False,
+            "verdict_source": VERDICT_SOURCE_VERIFIER_OVERRIDE,
+            **block_findings,
+        },
+    )
+    record = parse_run_manifest(manifest)
+    assert record is not None and record.findings == expected
+
+
 def test_parse_run_manifest_reads_repair_passes_from_the_structured_block() -> None:
     record = parse_run_manifest(_structured_manifest())
     assert record is not None

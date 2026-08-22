@@ -615,9 +615,19 @@ def parse_run_manifest(raw: object) -> AdequacyRunRecord | None:
         source = block.get("verdict_source")
         if isinstance(source, str) and source in VERDICT_SOURCES:
             verdict_source = source
-        structured_findings = _coerce_findings(block.get("findings"))
-        if structured_findings:
-            findings = structured_findings
+        # A structured block's findings are AUTHORITATIVE when the key is
+        # present, empty list included (#11644). Falling back to the legacy
+        # error-string split on an explicit ``[]`` would re-derive a demand the
+        # runtime deliberately declined to treat as one: a verifier override
+        # that enumerated no gaps records ``findings: []``, and its summary can
+        # be pure policy boilerplate ("verifier produced no output (fail-closed
+        # policy treats this as an override)"). Splitting that sentence into a
+        # finding would inflate the unanchored share this instrument exists to
+        # measure — with text that was never a demand. A manifest carrying no
+        # ``findings`` key at all still falls back, which is the pre-#11603
+        # legacy shape.
+        if "findings" in block:
+            findings = _coerce_findings(block.get("findings"))
         passes = block.get("repair_passes_used")
         if isinstance(passes, int) and not isinstance(passes, bool):
             repair_passes = max(0, passes)
