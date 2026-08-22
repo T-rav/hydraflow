@@ -13,6 +13,11 @@
 pytest:tests/test_driver_contracts.py
 pytest:tests/test_director_capability_probe.py
 pytest:tests/regressions/test_issue_11533_stale_driver_states.py
+pytest:tests/test_issue_driver.py
+pytest:tests/test_issue_driver_policy.py
+pytest:tests/test_driver_manager.py
+pytest:tests/test_scheduling_default_off.py
+pytest:tests/regressions/test_issue_11535_kill_mid_transition.py
 
 **Precedent:** Fenced leases over a durable log — the epoch/fencing-token discipline for a single-writer owner whose liveness cannot be trusted (Chubby, Burrows 2006; Kafka's producer epoch; Lamport's "the lease holder may already be dead").
 **Divergence:** classical fencing assumes the shared store enforces the token, but HydraFlow's durable store is the GitHub label set, which has no compare-and-swap and whose swap primitive is add-first-then-best-effort-remove (`src/pr_manager.py:PRManager.swap_pipeline_labels`), so the fence is enforced at the *admission* boundary instead and multi-label crash states are reconciled against a transition intent recorded before the swap rather than prevented — priority-based reconciliation alone silently reverts backward transitions (receipt: #11533, and the adversarial panel on #10038).
@@ -233,11 +238,52 @@ The controller's unique deliverables are therefore exactly two: a single traceab
 
 Supersede when the brokered canary produces evidence that falsifies a constraint — in particular if the S4 assertion proves unmaintainable against CLI churn, if the B3 wait bound is measured worse than one implement timeout, or if the B5 bar is met and the design graduates from canary to default.
 
+## Implementation status
+
+The **driver half** landed with #11535: `scheduling_model` / `execution_runtime`
+config dials (Classic default), the `SchedulingPolicy` control law, `DriverManager`,
+the fenced `IssueDriver` with C8's boundary ordering, single-item phase adapters over
+the existing stage workers, and the single-owner interlock that keeps AutoAgent from
+becoming a second owner. C1–C9 are implemented, including C5(a)'s
+reconcile-against-recorded-intent and the two separate intent slots; the
+kill-mid-transition test B6 demands is
+`tests/regressions/test_issue_11535_kill_mid_transition.py`, and it covers both
+C8 gaps **and** both backward edges.
+
+C9's slot is written on the one sub-state transition this phase actually makes:
+entering `HITL_APPLY` to take up an operator's correction, which moves no label
+and would otherwise leave no durable trace. `DIAGNOSE` and `PARKED` are reached
+through the reviewer's own routing rather than through a driver-declared
+sub-state, so they carry no record yet; the slot and its accessors are in place
+for the phases that add them.
+
+One boundary is worth naming precisely, because it is where the driver's
+guarantee stops. The intent record covers every transition the driver *drives*:
+it is written before the phase runs, so it covers both the driver's own swap and
+the swap the stage worker makes inside it. A transition a stage worker decides on
+**mid-run** and commits without the driver having declared it — a reviewer
+choosing to route back — carries no intent record, so a crash inside that
+particular swap still falls to C5(a) rule 4. That window is pre-existing Classic
+behaviour, unchanged and not widened by this phase; closing it means the stage
+workers recording their own intent, which is P2b/P2c work.
+
+The **director half** is untouched and unarmed: S1–S6, the capsule/command/receipt
+contracts and `admit_dispatch` have no runtime consumer until #11537. Selecting
+`execution_runtime=fable_director` is refused at config load.
+
 ## Source-file citations
 
 - `src/driver_contracts.py`: `WorkerRole`, `ModelRequirement`, `DriverLease`, `WriterLease`, `DirectorCapsule`, `DirectorCommand`, `WorkerDispatchRequest`, `WorkerReceipt`, `DriverCheckpoint`, `WorkerLineage`, `WorkerCatalogEntry`, `WORKER_CATALOG`, `RejectionReason`, `admit_dispatch`, `DriverPhase`.
-- `src/models.py`: `DriverState`, `SuspendRecord`, `ConvergenceLedger`.
-- `src/state/_driver.py`: `DriverStateMixin`.
+- `src/scheduling_model.py`: `SchedulingModel`, `ExecutionRuntime`, `SchedulingPreset`, `resolve_preset`, `uses_issue_driver` — the two dials and the fail-loud combination guard (#11535).
+- `src/issue_driver_policy.py`: `SchedulingView`, `SlotOccupancy`, `select_admissions`, `rank_candidates`, `admit_phase_result`, `reconcile_stage_label`, `StageIntent`, `StageReconciliation`, `ReconcileOutcome`, `counts_against_wip`, `is_preemptible`, `boundary_idempotency_key` — the pure control law behind B3, C3, C4, C5(a) and C6.
+- `src/issue_driver.py`: `IssueDriver`, `PhaseOutcome`, `AdvanceOutcome` — C1/C5/C7 fencing and C8's boundary transaction.
+- `src/driver_manager.py`: `DriverManager`, `PipelineLabelAdapter`, `DriverTransitions` — the capacity allocator and the C5(a) reconcile-against-recorded-intent read.
+- `src/driver_journal.py`: `DriverJournal` — the durable boundary record C8 step 4 appends to.
+- `src/driver_ownership.py`: `DriverOwnershipRegistry` — the single-owner interlock.
+- `src/driver_phase_adapters.py`: `PlanPhaseAdapter`, `ImplementPhaseAdapter`, `ReviewPhaseAdapter`, `HITLPhaseAdapter` — single-item adapters preserving the existing stage-worker contracts.
+- `src/models.py`: `DriverState`, `SuspendRecord`, `ConvergenceLedger`, `PendingStageTransition`, `PendingSubStateTransition` — the two intent slots C5(a)/C9 require, deliberately separate.
+- `src/state/_driver.py`: `DriverStateMixin` — including `record_stage_transition` / `clear_stage_transition` and `record_sub_state_transition` / `clear_sub_state_transition`.
+- `src/config.py`: `HydraFlowConfig.effective_driver_max_in_flight`, `HydraFlowConfig.driver_stage_cap_total` — the binding `max_in_flight` ≥ stage-cap-total floor from the ADR-0094 narrowing (i).
 - `src/issue_store.py`: `_STAGE_PRIORITY`, `IssueStore._compute_stage_map`.
 - `src/pr_manager.py`: `PRManager.swap_pipeline_labels`.
 - `src/hydraflow_gateway/keys.py`: `VirtualKeyStore`.

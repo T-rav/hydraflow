@@ -6,8 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `a1f7bc1` — fix(gateway): close the in-flight leak and stop the read plane overclaiming *(2026-08-22)*
-- `090492d` — feat(gateway): read-only account and active-route visibility (ADR-0138) *(2026-08-22)*
+- `5808f0c` — fix(driver): tick released drivers, and commit the sub-state transition (C9) (#11535) (#11535) *(2026-08-22)*
+- `c5e51d1` — fix(driver): reconcile against recorded intent, not label priority (#11535) (#11535) *(2026-08-22)*
+- `db94776` — feat(scheduling): deterministic IssueDriver behind an explicit scheduling_model dial (#11535) (#11535) *(2026-08-22)*
+- `f16dcc5` — feat(gateway): read-only account and active-route visibility (ADR-0138) (#11633) (#11633) *(2026-08-22)*
 - `798cdd2` — fix(driver): correct the B1 reconciliation rule and harden the P0 contracts (#11533) (#11632) (#11632) *(2026-08-21)*
 - `ab3e5d1` — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold (#11628) (#11628) *(2026-08-21)*
 - `e24b730` — fix(mixins): TYPE_CHECKING-only seam declarations + guard against MRO shadowing (#11631) (#11631) *(2026-08-21)*

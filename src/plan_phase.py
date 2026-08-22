@@ -171,6 +171,10 @@ class PlanPhase(PlanWikiIngestMixin):
         self._state = state
         self._store = store
         self._planners = planners
+        # Shared across every ``plan_single_issue`` call so repeated single-item
+        # planning still honours ``max_planners`` (#11535). Built lazily: a
+        # semaphore per call would cap nothing.
+        self._solo_semaphore: asyncio.Semaphore | None = None
         self._prs = prs
         self._transitioner: TaskTransitioner = prs
         self._bus = event_bus
@@ -1539,6 +1543,13 @@ class PlanPhase(PlanWikiIngestMixin):
         falls BACK to this pipeline (never to a human). Returns True when
         routed (the flow stops); mutates *state* accordingly.
         """
+        if self._config.uses_issue_driver():
+            # #11535: under ``issue_controller`` a fenced IssueDriver already
+            # owns this issue. Routing it to the single-session auto-agent would
+            # hand the same issue to a second owner the driver does not control
+            # — the exact hazard the controller exists to remove. Inert under
+            # Classic, where this returns False and the lane behaves as before.
+            return False
         if not self._config.auto_agent_light_intake_enabled:
             return False
         if not self._config.auto_agent_preflight_enabled:
@@ -2304,6 +2315,39 @@ class PlanPhase(PlanWikiIngestMixin):
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
+
+    async def plan_single_issue(
+        self, issue: Task, *, semaphore: asyncio.Semaphore | None = None
+    ) -> PlanResult:
+        """Plan exactly *issue*, with no queue drain and no refilling pool (#11535).
+
+        The explicit single-item entry point ``issue_controller`` scheduling
+        needs. ``plan_issues`` is a *scheduler* — it drains the plan queue and
+        decides how many issues to work — so a driver calling it would hand back
+        the very decision it exists to own. This runs the same per-issue
+        pipeline (``_plan_one``: prepass → surface → draft → council → route →
+        records → gate → ready) under the same semaphore, sentry span and store
+        lifecycle, so the planner's contract, prompts and output markers are
+        untouched and shared by both schedulers.
+
+        The planner-concurrency cap is preserved: callers that make repeated
+        single-item calls pass the *same* semaphore, and the default is a
+        process-lifetime one sized from ``max_planners`` so an omitted argument
+        still throttles rather than silently uncapping the stage.
+        """
+        return await self._plan_one(
+            0, issue, semaphore or self._single_item_semaphore()
+        )
+
+    def _single_item_semaphore(self) -> asyncio.Semaphore:
+        """Shared ``max_planners`` semaphore for single-item planning.
+
+        Built once and reused, because a fresh semaphore per call would cap
+        nothing at all.
+        """
+        if self._solo_semaphore is None:
+            self._solo_semaphore = asyncio.Semaphore(self._config.max_planners)
+        return self._solo_semaphore
 
     async def plan_issues(self) -> list[PlanResult]:
         """Run planning agents on issues from the plan queue.

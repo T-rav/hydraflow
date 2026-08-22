@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import tempfile
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -24,6 +25,11 @@ from pydantic import (
 import file_util
 from package_resources import ResourceNotFoundError, checkout_path
 from queue_strategy import BandWeights, QueueStrategy
+from scheduling_model import (
+    ExecutionRuntime,
+    SchedulingModel,
+    resolve_preset,
+)
 
 logger = logging.getLogger("hydraflow.config")
 
@@ -1142,8 +1148,10 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
 
 # StrEnum-typed fields, kept separate from _ENV_LITERAL_OVERRIDES because
 # get_args() is empty for an Enum subclass — the choices are the enum members.
-_ENV_ENUM_OVERRIDES: list[tuple[str, str, type[QueueStrategy]]] = [
+_ENV_ENUM_OVERRIDES: list[tuple[str, str, type[StrEnum]]] = [
     ("queue_strategy", "HYDRAFLOW_QUEUE_STRATEGY", QueueStrategy),
+    ("scheduling_model", "HYDRAFLOW_SCHEDULING_MODEL", SchedulingModel),
+    ("execution_runtime", "HYDRAFLOW_EXECUTION_RUNTIME", ExecutionRuntime),
 ]
 
 # Deprecated env var aliases (HYDRA_ → HYDRAFLOW_).
@@ -1320,6 +1328,114 @@ class HydraFlowConfig(BaseModel):
             p2=self.queue_weight_p2,
             unprioritised=self.queue_weight_unprioritised,
         )
+
+    # --- Scheduling model (#11535) ---------------------------------------
+    # Two orthogonal dials, deliberately separate: scheduling decides HOW a
+    # picked issue is driven across phases, execution runtime decides WHO
+    # decides inside a phase. The UI presents them as one preset; the backend
+    # keeps them apart so #11537 can change one without touching the other
+    # (docs/proposals/fable-subagent-scheduling.md, "Separate scheduling from
+    # execution"). Both are restart-required: the orchestrator chooses which
+    # pipeline loops to start once, at boot.
+    #
+    # Default is Classic (phase_requeue + stage_subprocess) — today's exact
+    # behaviour, zero change on merge. Flipping it is a separate, factory-wide
+    # decision gated on the ADR-0137 B5 evidence bar, and the ADR forbids that
+    # flip landing on the same day as this build regardless of the numbers.
+    scheduling_model: SchedulingModel = Field(
+        default=SchedulingModel.PHASE_REQUEUE,
+        description=(
+            "How a picked issue is executed: 'phase_requeue' (Classic default "
+            "- each phase re-acquires the issue from its own queue) or "
+            "'issue_controller' (one fenced IssueDriver owns the issue across "
+            "phases, ADR-0137). Restart required."
+        ),
+    )
+    execution_runtime: ExecutionRuntime = Field(
+        default=ExecutionRuntime.STAGE_SUBPROCESS,
+        description=(
+            "Who decides inside a phase: 'stage_subprocess' (the deterministic "
+            "stage runners) or 'fable_director' (a Fable director dispatching "
+            "brokered workers - not armed until #11537). Restart required."
+        ),
+    )
+    # ADR-0137 C4: the controller's global WIP cap, on top of - never instead
+    # of - the existing per-stage max_planners / max_workers / max_reviewers
+    # caps, which the allocator respects. Inert under Classic, which has no
+    # global cap at all (concurrency there is workers-per-phase).
+    driver_max_in_flight: int = Field(
+        default=4,
+        ge=1,
+        le=40,
+        description=(
+            "Maximum issues held by a live IssueDriver at once under "
+            "scheduling_model='issue_controller'. Parked and HITL-waiting "
+            "drivers release their slot (ADR-0137 C6). Raised to the sum of "
+            "the per-stage caps if set below it — see "
+            "effective_driver_max_in_flight. Ignored under Classic."
+        ),
+    )
+
+    def driver_stage_cap_total(self) -> int:
+        """Total concurrent work today's per-stage caps allow a driver to occupy.
+
+        Plan + implement + review + HITL. Triage stays Classic under
+        ``issue_controller``, so its cap is not part of the driver's budget.
+        """
+        return (
+            self.max_planners
+            + self.max_workers
+            + self.max_reviewers
+            + self.max_hitl_workers
+        )
+
+    def effective_driver_max_in_flight(self) -> int:
+        """The global WIP cap actually used, never below the stage-cap total.
+
+        ADR-0137's narrowing of ADR-0094 rests on the driver being a *WIP
+        limit* rather than a serialization, and that only holds if total
+        concurrent work is no lower than today's per-stage caps already allow.
+        The ADR makes it a binding constraint on this phase rather than an
+        assumption, so a configured value below the floor is raised to it —
+        the alternative is a throughput regression wearing a WIP limit's
+        clothes, which is exactly what the constraint exists to prevent.
+        """
+        floor = self.driver_stage_cap_total()
+        if self.driver_max_in_flight < floor:
+            logger.warning(
+                "driver_max_in_flight=%d is below the per-stage cap total (%d); "
+                "raising it to the floor — a lower value would be a throughput "
+                "regression, not a WIP limit (ADR-0137, ADR-0094 narrowing (i))",
+                self.driver_max_in_flight,
+                floor,
+            )
+            return floor
+        return self.driver_max_in_flight
+
+    @model_validator(mode="after")
+    def _scheduling_combination_is_supported(self) -> HydraFlowConfig:
+        """Reject an invalid or unarmed scheduling pair at load, loudly.
+
+        ``queue_strategy`` shipped without this guard and needed a follow-up
+        (#10053) to stop an unrecognised member silently dispatching as the
+        default. A scheduler that quietly picks a discipline the operator did
+        not choose is the dangerous shape, so the check is a load-time
+        validator: a bad combination is a startup error, never a running
+        factory that believes it is doing something else.
+        """
+        resolve_preset(self.scheduling_model, self.execution_runtime)
+        return self
+
+    def uses_issue_driver(self) -> bool:
+        """True when this config runs per-issue drivers rather than Classic requeue.
+
+        The single predicate every default-off guard reads, so "is the driver
+        armed?" has exactly one answer across the orchestrator, the service
+        registry and the ownership registry.
+        """
+        return resolve_preset(
+            self.scheduling_model, self.execution_runtime
+        ).uses_issue_driver
 
     # Plugin skill registry — see docs/superpowers/specs/2026-04-18-dynamic-plugin-skill-registry-design.md
     required_plugins: list[str] = Field(

@@ -6,8 +6,8 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 - **Population:** Accepted (84 ADRs)
 - **Mean density** (per-ADR, unweighted): 96%
-- **Executable fraction** (check-weighted): 98% (163 of 166 cited checks)
-- **Check kinds:** pytest 162, make 1, script 0, prose 3
+- **Executable fraction** (check-weighted): 98% (168 of 171 cited checks)
+- **Check kinds:** pytest 167, make 1, script 0, prose 3
 - **Prose-count control limit** (Shewhart c-chart UCL): 0.60
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 
@@ -99,7 +99,7 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0134 | Per-repo model/harness selection — run Claude and GLM projects side by side | 100% | 5 | 0 |
 | ADR-0135 | Factory runs as a launchd service; operator Stop is a latch honoured by autostart and the liveness kernel | 100% | 8 | 0 |
 | ADR-0136 | ADR drift enforcement is a deterministic cited-symbol CI gate, not a caretaker loop | 100% | 2 | 0 |
-| ADR-0137 | Fenced IssueDriver and director runtime boundary | 100% | 3 | 0 |
+| ADR-0137 | Fenced IssueDriver and director runtime boundary | 100% | 8 | 0 |
 | ADR-0138 | Gateway account identity and sanitized route visibility | 100% | 8 | 0 |
 
 

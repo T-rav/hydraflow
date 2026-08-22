@@ -58,6 +58,15 @@ SETTINGS: dict[str, SettingSpec] = {
     "queue_weight_p2": SettingSpec("Work Queue", live=True, order=2),
     "queue_weight_unprioritised": SettingSpec("Work Queue", live=True, order=3),
     "queue_starvation_threshold_hours": SettingSpec("Work Queue", live=True, order=4),
+    # --- Scheduling model (#11535) ---------------------------------------
+    # Not live: the orchestrator decides which pipeline loops to start once, at
+    # boot, so a change here is a restart-required edit. Marking it live would
+    # show the operator a green "applied" badge over a factory still running
+    # the old discipline — the exact dishonesty this registry's docstring
+    # warns against.
+    "scheduling_model": SettingSpec("Scheduling", live=False, order=20),
+    "execution_runtime": SettingSpec("Scheduling", live=False, order=21),
+    "driver_max_in_flight": SettingSpec("Scheduling", live=False, order=22),
     # --- Models ----------------------------------------------------------
     "model": SettingSpec("Models", live=True, order=0),
     "planner_model": SettingSpec("Models", live=True, order=1),
