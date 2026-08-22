@@ -28,10 +28,11 @@ shadow-mode and canary phases.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 DRIVER_CONTRACTS_SCHEMA_VERSION = 1
 """Bumped only on a breaking change; additive optional fields do not bump it."""
@@ -85,8 +86,22 @@ LITERAL_FAMILIES = frozenset({"claude-opus", "claude-sonnet"})
 CAPABILITY_CLASSES = frozenset({"high-reasoning", "balanced"})
 """Provider-neutral classes a policy may satisfy with any approved backend."""
 
+LITERAL_FAMILY_TOKENS = {"claude-opus": "opus", "claude-sonnet": "sonnet"}
+"""Family value -> the token a served model id must carry to satisfy it."""
+
+_ANTHROPIC_MODEL_ID = re.compile(r"^(?:[a-z]{2,8}\.)?(?:anthropic\.)?claude-")
+"""Allow-list for a served model's provenance.
+
+Matches the first-party form (``claude-sonnet-4-6``) and the Bedrock forms,
+including cross-region inference profiles (``anthropic.claude-...``,
+``us.anthropic.claude-...``, ``global.anthropic.claude-...``, ``jp.anthropic...``). This is deliberately an
+allow-list: a deny-list of known third-party vendors is fail-open the moment a
+new backend ships, which is precisely the failure mode ADR-0137's own tool-surface
+finding (F2) condemns. Do not reintroduce one as the primary check.
+"""
+
 NON_ANTHROPIC_MODEL_MARKERS = frozenset({"glm", "qwen", "deepseek", "kimi"})
-"""Substrings that disqualify a served model from satisfying a literal family.
+"""Redundant belt over the allow-list, not the primary defence.
 
 The named hazard from the proposal: *"a GLM model is never reported as
 Sonnet."* :class:`WorkerReceipt` enforces this at the receipt boundary so a
@@ -131,12 +146,14 @@ class RejectionReason(StrEnum):
 
     STOP_FENCE = "stop_fence"
     DRAINING = "draining"
+    DRIVER_IDENTITY_MISMATCH = "driver_identity_mismatch"
     STALE_EPOCH = "stale_epoch"
     STALE_PHASE_ATTEMPT = "stale_phase_attempt"
     LEASE_EXPIRED = "lease_expired"
     LIVE_LABEL_CHANGED = "live_label_changed"
     ROLE_NOT_IN_CATALOG = "role_not_in_catalog"
     ROLE_PHASE_FORBIDDEN = "role_phase_forbidden"
+    ROLE_NOT_IN_CAPSULE = "role_not_in_capsule"
     MODEL_REQUIREMENT_UNSATISFIABLE = "model_requirement_unsatisfiable"
     ROUTE_POLICY_REVISION_STALE = "route_policy_revision_stale"
     DUPLICATE_IDEMPOTENCY_KEY = "duplicate_idempotency_key"
@@ -180,16 +197,23 @@ class ModelRequirement(BaseModel):
     def satisfied_by(self, served_model: str) -> bool:
         """True when *served_model* legitimately satisfies this requirement.
 
-        A literal family is satisfied only by a model whose id carries that
-        family name and no non-Anthropic marker. This is the single predicate
-        behind the "GLM is never reported as Sonnet" invariant.
+        A literal family is satisfied only by an id with Anthropic provenance
+        (:data:`_ANTHROPIC_MODEL_ID`) that carries the family token and no
+        third-party marker. This is the single predicate behind the "GLM is
+        never reported as Sonnet" invariant, and it is an allow-list so a new
+        third-party backend cannot satisfy a literal family by default.
+
+        A concrete-model requirement is satisfied only by that exact id.
         """
         served = served_model.lower()
         if self.kind is ModelRequirementKind.LITERAL_FAMILY:
-            family = self.value.split("-", 1)[1]
+            if not _ANTHROPIC_MODEL_ID.match(served):
+                return False
             if any(marker in served for marker in NON_ANTHROPIC_MODEL_MARKERS):
                 return False
-            return family in served
+            return LITERAL_FAMILY_TOKENS[self.value] in served
+        if self.kind is ModelRequirementKind.CONCRETE_MODEL:
+            return served == self.value.lower()
         return True
 
 
@@ -300,7 +324,7 @@ class DriverLease(BaseModel):
     phase: DriverPhase
     expected_stage_label: str = Field(min_length=1, max_length=64)
     phase_attempt: int = Field(ge=0)
-    expires_at: datetime
+    expires_at: AwareDatetime
 
     def is_expired(self, now: datetime) -> bool:
         """Expiry is evaluated at admission, never at construction.
@@ -360,6 +384,22 @@ class WorkerDispatchRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
     expected_route_policy_revision: str = Field(min_length=1, max_length=64)
     idempotency_key: str = Field(min_length=1, max_length=128)
+    requesting_spawn_id: str | None = Field(default=None, max_length=128)
+    """The spawn whose lineage this request originates from, when there is one.
+
+    Load-bearing for the self-review fence: admission compares this against the
+    known implementer spawns, because ``request_id`` is minted fresh by the
+    director and lives in a different namespace from a spawn id.
+    """
+
+    @model_validator(mode="after")
+    def _director_never_names_a_concrete_model(self) -> WorkerDispatchRequest:
+        if self.model_requirement.kind is ModelRequirementKind.CONCRETE_MODEL:
+            raise ValueError(
+                "a dispatch request may name a literal family or a capability "
+                "class only; resolving to a concrete model id is the broker's job"
+            )
+        return self
 
 
 class DirectorCommand(BaseModel):
@@ -389,6 +429,11 @@ class DirectorCommand(BaseModel):
             keys = [d.idempotency_key for d in self.dispatches]
             if len(set(keys)) != len(keys):
                 raise ValueError("duplicate idempotency_key within one dispatch batch")
+            request_ids = [d.request_id for d in self.dispatches]
+            if len(set(request_ids)) != len(request_ids):
+                # request_id keys the writer-lease holder check, so a duplicate
+                # would let two dispatches both read as the lease holder.
+                raise ValueError("duplicate request_id within one dispatch batch")
         elif self.dispatches:
             raise ValueError(f"{self.kind} command must not carry dispatches")
         return self
@@ -453,8 +498,8 @@ class WorkerReceipt(BaseModel):
     route_policy_revision: str = Field(min_length=1, max_length=64)
     artifact_digest: str | None = Field(default=None, max_length=128)
     output_contract_ok: bool | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
+    started_at: AwareDatetime | None = None
+    finished_at: AwareDatetime | None = None
     usd_cost: float = Field(default=0.0, ge=0.0)
 
     @model_validator(mode="after")
@@ -468,15 +513,22 @@ class WorkerReceipt(BaseModel):
                 raise ValueError("accepted receipt must carry lineage")
             if self.served_model is None:
                 raise ValueError("accepted receipt must record the served model")
-            if not self.requested_model.satisfied_by(self.served_model):
-                raise ValueError(
-                    f"served model {self.served_model!r} does not satisfy requested "
-                    f"{self.requested_model.kind}={self.requested_model.value!r}; "
-                    "a literal family must never be served by another provider's model"
-                )
         elif self.reason_code is None:
             raise ValueError(
                 f"{self.status} receipt must carry a deterministic reason_code"
+            )
+
+        # Model honesty is checked on EVERY receipt that names a served model,
+        # not only accepted ones: an expired or superseded worker still ran, and
+        # its receipt is still evidence. Guarding only the accepted branch left
+        # a smuggling path for a mis-resolved model.
+        if self.served_model is not None and not self.requested_model.satisfied_by(
+            self.served_model
+        ):
+            raise ValueError(
+                f"served model {self.served_model!r} does not satisfy requested "
+                f"{self.requested_model.kind}={self.requested_model.value!r}; "
+                "a literal family must never be served by another provider's model"
             )
         return self
 
@@ -513,30 +565,45 @@ def admit_dispatch(
     live_stage_label: str,
     route_policy_revision: str,
     writer_lease: WriterLease,
+    sandbox_verified: bool,
+    allowed_roles: frozenset[WorkerRole],
     seen_idempotency_keys: frozenset[str] = frozenset(),
     in_flight_for_role: int = 0,
     remaining_usd_budget: float = 0.0,
     stop_requested: bool = False,
     draining: bool = False,
-    sandbox_verified: bool = True,
     implementer_spawn_ids: frozenset[str] = frozenset(),
 ) -> RejectionReason | None:
     """Pure admission decision for one dispatch. ``None`` means admit.
 
-    Ordering is deliberate and fail-closed: global stop fences first, then
-    ownership fencing, then live-label coherence, then catalog legality, then
-    capacity. The first matching reason wins so the code is deterministic and
+    Ordering is deliberate and fail-closed: global stop/drain fences first, then
+    the sandbox assertion, then ownership fencing, then live-label coherence,
+    then catalog legality and integrity fences, then capacity. The first matching reason wins so the code is deterministic and
     replayable — the same inputs always yield the same reason.
+
+    ``sandbox_verified`` and ``allowed_roles`` are required arguments with no
+    defaults on purpose. The first carries ADR-0137's S4 observed-boundary
+    assertion and the second the capsule's role allow-list; a caller that
+    forgets either must fail loudly rather than dispatch fail-open.
+
+    When admitting a *batch*, the caller folds each admitted request into
+    ``seen_idempotency_keys`` and ``in_flight_for_role`` before evaluating the
+    next one — this function judges one request against a fixed snapshot and
+    does no accumulation of its own.
     """
     entry = WORKER_CATALOG.get(request.worker_role)
 
     # Rule order is the contract, so it is expressed as data rather than as
-    # control flow: global stop fences, then ownership fencing, then live-label
-    # coherence, then catalog membership.
+    # control flow: global stop/drain fences, then the sandbox assertion, then
+    # ownership fencing, then live-label coherence, then catalog membership.
     fencing: tuple[tuple[bool, RejectionReason], ...] = (
         (stop_requested, RejectionReason.STOP_FENCE),
         (draining, RejectionReason.DRAINING),
         (not sandbox_verified, RejectionReason.SANDBOX_UNVERIFIED),
+        (
+            request.driver_id != lease.driver_id,
+            RejectionReason.DRIVER_IDENTITY_MISMATCH,
+        ),
         (request.epoch != lease.epoch, RejectionReason.STALE_EPOCH),
         (
             request.phase_attempt != lease.phase_attempt,
@@ -556,19 +623,37 @@ def admit_dispatch(
     if entry is None:  # pragma: no cover — narrowed by ROLE_NOT_IN_CATALOG above
         return RejectionReason.ROLE_NOT_IN_CATALOG
 
-    # An independent reviewer may not be spawned inside the implementer's
-    # lineage; review must be a fresh external process. A write-capable role
-    # may proceed only if it already holds the single-writer lease.
+    # An independent reviewer may not originate from the implementer's lineage;
+    # review must be a fresh external process. The comparison is on the
+    # requesting SPAWN id, not on request_id — a request_id is minted fresh by
+    # the director and could never collide with a spawn id, which would leave
+    # this fence permanently unreachable. A write-capable role may proceed only
+    # if it already holds the single-writer lease.
     self_review = (
-        entry.independent_of_implementer and request.request_id in implementer_spawn_ids
+        entry.independent_of_implementer
+        and request.requesting_spawn_id is not None
+        and request.requesting_spawn_id in implementer_spawn_ids
     )
+    # Writer-lease checks apply only to roles that can actually take the lease.
+    # A read-only explorer must not be blocked because the lease has not been
+    # re-minted at the current epoch, and a lease lagging its driver's epoch is
+    # a stale fence rather than ownership theft — so it reports LEASE_EXPIRED,
+    # not DRIVER_IDENTITY_MISMATCH, which B5's bar counts as a theft event.
+    needs_writer_lease = entry.write_scope is WriteScope.ISSUE_WORKTREE
+    writer_foreign = needs_writer_lease and writer_lease.driver_id != lease.driver_id
+    writer_stale = needs_writer_lease and writer_lease.epoch != lease.epoch
     writer_conflict = (
-        entry.write_scope is WriteScope.ISSUE_WORKTREE
+        needs_writer_lease
         and writer_lease.is_held
         and writer_lease.holder_request_id != request.request_id
     )
     legality: tuple[tuple[bool, RejectionReason], ...] = (
         (lease.phase not in entry.allowed_phases, RejectionReason.ROLE_PHASE_FORBIDDEN),
+        (
+            request.worker_role not in allowed_roles,
+            RejectionReason.ROLE_NOT_IN_CAPSULE,
+        ),
+        (self_review, RejectionReason.SELF_REVIEW_FORBIDDEN),
         (
             request.expected_route_policy_revision != route_policy_revision,
             RejectionReason.ROUTE_POLICY_REVISION_STALE,
@@ -577,7 +662,8 @@ def admit_dispatch(
             request.idempotency_key in seen_idempotency_keys,
             RejectionReason.DUPLICATE_IDEMPOTENCY_KEY,
         ),
-        (self_review, RejectionReason.SELF_REVIEW_FORBIDDEN),
+        (writer_foreign, RejectionReason.DRIVER_IDENTITY_MISMATCH),
+        (writer_stale, RejectionReason.LEASE_EXPIRED),
         (writer_conflict, RejectionReason.WRITER_LEASE_HELD),
         (in_flight_for_role >= entry.max_concurrency, RejectionReason.FANOUT_OVERFLOW),
         (remaining_usd_budget <= 0.0, RejectionReason.BUDGET_EXHAUSTED),

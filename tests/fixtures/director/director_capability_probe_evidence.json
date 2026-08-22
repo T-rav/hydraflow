@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "evidence_kind": "director_capability_probe",
-  "recorded_at": "2026-08-22T06:49:58Z",
+  "recorded_at": "2026-08-22T08:22:44Z",
   "platform": "darwin",
   "live_lane_ran": true,
   "agent_cli_version": "2.1.239 (Claude Code)",
@@ -58,14 +58,15 @@
       "proof": "isolated_settings_home",
       "lane": "live",
       "verdict": "pass",
-      "summary": "With env -i, a disposable HOME and CLAUDE_CONFIG_DIR and an empty cwd, the turn loads no MCP server and no plugin, and its memory path is confined to the disposable config dir. A hostile .claude/settings.json and CLAUDE.md planted in the cwd are not loaded.",
+      "summary": "With an allow-list environment, a disposable HOME and CLAUDE_CONFIG_DIR and an empty working directory, the turn loads no MCP server and no plugin, and its only memory path is inside the disposable config dir. A hostile .claude/settings.json and CLAUDE.md planted in the working directory produce no project memory path.",
       "constraint": null,
       "observations": {
         "mcp_servers_loaded": 0,
         "plugins_loaded": 0,
         "memory_path_confined_to_sandbox": true,
         "operator_home_path_leaked": false,
-        "hostile_project_settings_planted": true,
+        "hostile_project_files_planted": true,
+        "hostile_project_memory_loaded": false,
         "cli_exit_code": 1
       }
     },
@@ -77,6 +78,7 @@
       "constraint": null,
       "observations": {
         "hostile_vars_offered": 8,
+        "secret_shaped_vars_offered": 4,
         "vars_surviving": 6,
         "secret_shaped_leaks": 0,
         "vars_outside_allowlist": 0,
@@ -103,6 +105,7 @@
       "summary": "A 60s virtual key resolves before its TTL and is refused after it; the store retains only a SHA-256 digest, never the token.",
       "constraint": null,
       "observations": {
+        "record_sampled_before_expiry": true,
         "resolved_before_ttl": true,
         "refused_after_ttl": true,
         "plaintext_token_retained": false,
@@ -114,19 +117,33 @@
       "proof": "no_ambient_tools_or_credentials",
       "lane": "live",
       "verdict": "pass_with_constraint",
-      "summary": "No ambient credential reaches the isolated child — the turn reports no api key source and fails authentication outright, proving the keychain/OAuth path does not cross the sandbox. The tool surface reaches empty only under an explicit exhaustive deny-list.",
-      "constraint": "Isolation alone does NOT empty the tool surface: the baseline turn still exposed Bash, Write, Edit, WebFetch and Task. An allow-list does not narrow it at all, and the advertised tool array is incomplete (denying every advertised name still left Glob and Grep). A name deny-list is therefore fail-open across CLI upgrades. The runtime MUST assert the observed init tool array is EMPTY and refuse to dispatch otherwise. apiKeySource is not a trustworthy provenance signal and must not gate anything.",
+      "summary": "No ambient credential reaches the isolated child: with no credential the turn fails authentication, and with only the virtual gateway key present it is never observed to authenticate against the host keychain. The tool surface reaches empty only under an explicit exhaustive deny-list, and only the deny-list turn's own init frame can attest to it.",
+      "constraint": "Isolation alone does NOT empty the tool surface, an allow-list does not narrow it, and the advertised tool array is incomplete — so a name deny-list is fail-open across CLI upgrades. The runtime MUST assert the init tools key is PRESENT and empty (absent/renamed reads as unverified), and must also account for the agents, skills and slash-command channels, which stay populated at zero tools. apiKeySource is not a trustworthy provenance signal and must not gate anything. The assertion is post-hoc: it inspects a turn that already ran, so the residual exposure is one turn.",
       "observations": {
         "tools_with_isolation_only": 22,
-        "tools_with_exhaustive_denylist": 0,
+        "baseline_init_frame_seen": true,
+        "allowlist_init_frame_seen": true,
+        "tools_with_allowlist_of_one": 22,
         "allowlist_narrows_surface": false,
+        "advertised_denial_init_frame_seen": true,
+        "tools_after_denying_every_advertised_name": 2,
         "advertised_tool_array_is_complete": false,
+        "tools_with_exhaustive_denylist": 0,
+        "tools_key_present_on_init": true,
+        "credential_turn_completed": false,
+        "credential_turn_killed_at_probe_budget": true,
+        "credential_turn_authenticated": false,
+        "credential_turn_used_injected_endpoint": false,
         "ambient_credential_reached_child": false,
+        "credential_turn_init_frames": 1,
+        "credential_turn_api_key_source": "none",
         "api_key_source_reported": "none",
         "residual_agents_advertised": 5,
         "residual_skills_advertised": 15,
         "residual_slash_commands_advertised": 42,
-        "cli_exit_code": 1
+        "residual_capability_entries_outside_tools": 62,
+        "cli_exit_code": 1,
+        "credential_turn_exit_code": -1
       }
     }
   ],
