@@ -18,6 +18,14 @@ pytest:tests/test_issue_driver_policy.py
 pytest:tests/test_driver_manager.py
 pytest:tests/test_scheduling_default_off.py
 pytest:tests/regressions/test_issue_11535_kill_mid_transition.py
+pytest:tests/test_director_sandbox.py
+pytest:tests/test_director_broker.py
+pytest:tests/test_fable_director.py
+pytest:tests/test_director_shadow_default_off.py
+pytest:tests/test_director_turn_runner_env.py
+pytest:tests/test_dashboard_routes_scheduling.py
+pytest:tests/architecture/test_director_no_authority.py
+pytest:tests/regressions/test_issue_11537_shadow_safety.py
 
 **Precedent:** Fenced leases over a durable log — the epoch/fencing-token discipline for a single-writer owner whose liveness cannot be trusted (Chubby, Burrows 2006; Kafka's producer epoch; Lamport's "the lease holder may already be dead").
 **Divergence:** classical fencing assumes the shared store enforces the token, but HydraFlow's durable store is the GitHub label set, which has no compare-and-swap and whose swap primitive is add-first-then-best-effort-remove (`src/pr_manager.py:PRManager.swap_pipeline_labels`), so the fence is enforced at the *admission* boundary instead and multi-label crash states are reconciled against a transition intent recorded before the swap rather than prevented — priority-based reconciliation alone silently reverts backward transitions (receipt: #11533, and the adversarial panel on #10038).
@@ -267,9 +275,99 @@ particular swap still falls to C5(a) rule 4. That window is pre-existing Classic
 behaviour, unchanged and not widened by this phase; closing it means the stage
 workers recording their own intent, which is P2b/P2c work.
 
-The **director half** is untouched and unarmed: S1–S6, the capsule/command/receipt
-contracts and `admit_dispatch` have no runtime consumer until #11537. Selecting
-`execution_runtime=fable_director` is refused at config load.
+The **director half** landed with #11537, in **shadow mode**: S1–S6, the
+capsule/command/receipt contracts and `admit_dispatch` now have a runtime
+consumer, and `execution_runtime=fable_director` is selectable rather than
+refused at config load. What it selects is an *observer*, not an actuator.
+
+Under `issue_controller + fable_director` the deterministic `IssueDriver` still
+executes every phase and remains authoritative. At each boundary it completes,
+`FableDirector` reconstructs the issue's capsule from live state, runs one
+isolated turn, applies S4's assertion to that turn's own `system/init` frame,
+validates the reply against `DirectorCommand`, passes it to
+`ShadowDispatchBroker`, and records the comparison. Nothing in the pipeline
+reads any of it.
+
+Three properties make "shadow" a demonstrated safety property rather than an
+intention:
+
+- **The seam returns nothing.** `DriverManager.DriverBoundaryObserver` is handed
+  a boundary that already happened and yields no value the allocator can act on.
+  `tests/regressions/test_issue_11537_shadow_safety.py` proves differentially
+  that the same tick with and without an observer produces byte-identical live
+  effects — labels, journal bytes, store claims, tick report — **including when
+  the observer raises**. A shadow component must not be able to fail what it
+  observes; the one exception is `CreditExhaustedError`, which is factory-wide.
+- **The broker has no dispatch method.** "No production worker is dispatched by
+  Fable" is the absence of the code rather than a flag, pinned by
+  `tests/architecture/test_director_no_authority.py`. Arming dispatch is
+  #11541's decision and `SchedulingPreset.director_dispatch_armed` is its
+  separate flip — separate so that selecting the observer can never be mistaken
+  for trusting the actuator.
+- **No convergence state is written.** The same architecture guard asserts the
+  decision path never calls a ledger mutator. `ConvergenceLedger` remains the
+  sole owner of convergence state, per the ADR-0094 narrowing (ii); the shadow
+  log is telemetry beside it, never a second copy of it.
+
+**S4 is implemented as an assertion over the observed frame, not as trust in the
+flags passed.** `director_sandbox.assert_observed_surface` requires the `tools`
+key to be *present* and empty (absent or renamed reads as unverified), requires
+`mcp_servers` and `plugins` to be present and empty for the same reason, requires
+the `agents`/`skills`/`slash_commands` channels to be empty or unchanged from the
+committed evidence, and re-arms the gate on a CLI version mismatch. Its result
+is applied **before** the turn's command is parsed: a turn whose surface cannot
+be proven empty has its output discarded rather than parsed and then refused.
+The residual one-turn exposure window named in D2 is unchanged.
+
+**One clause is implemented stricter than S4 as written, deliberately.** S4(3)
+says the residual channels must be "empty or unchanged", which permits a renamed
+channel key to read as *empty* and therefore verify — the same fail-open shape
+S4(1) exists to close, surviving on a different leg of the same assertion. The
+runtime treats an absent or non-collection channel key as **moved**, never as
+empty. A future revision of this ADR should adopt that wording; until it does,
+the code is the tighter of the two and the divergence is recorded here rather
+than left as an undocumented surprise.
+
+**The observation is taken at real boundaries only, and its cost is bounded.**
+A driver parked on a barrier reaches `IDLE` on every poll, so observing every
+advance would spawn a director turn every `poll_interval` indefinitely — and
+because `IDLE` maps to "yield", where yielding is trivially right, those no-op
+ticks would then dominate the agreement rate, which is the headline number B5's
+bar reads. Contaminating that rate would corrupt the evidence the next phase's
+go/no-go rests on. So only outcomes representing a boundary the driver actually
+attempted are observed; `IDLE` is recorded as `not_a_boundary` and never scores.
+Two further bounds exist because nothing else in the design bounds turn *count*:
+`director_shadow_usd_ceiling` is an aggregate spend ceiling that stops turns
+being started, and `director_shadow_enabled` is a **live** kill switch, because
+the dials that select the director are restart-required and a director turn
+costs money.
+
+**Evidence is minted honestly.** A refusal produces a real `WorkerReceipt`
+(`REJECTED`, deterministic reason code, no served model). An *admitted* request
+produces no receipt at all — it produces a `ShadowDispatch`, which records what
+would have been dispatched and claims nothing else. An `ACCEPTED` receipt would
+require inventing a lineage and a served model for a worker that never ran, in a
+contract whose purpose is to make a mis-reported model a validation error.
+
+Two honest gaps this phase does **not** close:
+
+- **S2 is implemented; its *proof* against a live gateway is not.** The turn
+  runner mints one short-lived parent-scoped virtual key per turn through the
+  same `runner_utils.resolve_harness_env("gateway", …)` path every other spawn
+  uses, and revokes it in a `finally` — so the director inherits the existing
+  fail-closed mint (a `GatewayMintError` rather than a fall-through to an ambient
+  provider key) rather than a bespoke one. Minting is proven at **preflight**:
+  a director that cannot obtain its one permitted credential refuses to run,
+  because the alternative is a shadow log full of authentication failures that
+  read like a flaky model rather than an unconfigured gateway. What remains for
+  #11541 is D2's actual request — re-running the probe against a gateway that
+  *answers*, converting "never observed to authenticate" from a negative
+  observation into a positive one. That needs a live gateway, not more code.
+- **`WriterLease` digests are not measured.** A shadow turn inspects no worktree,
+  so the lease carries the literal value `"unobserved"` rather than a fabricated
+  sha, and is never held on entry. The broker *does* fold it forward within a
+  batch, so the single-writer property holds over what would have been
+  dispatched. Real digests and real lease enforcement remain #11542's.
 
 ## Source-file citations
 
@@ -283,9 +381,15 @@ contracts and `admit_dispatch` have no runtime consumer until #11537. Selecting
 - `src/driver_phase_adapters.py`: `PlanPhaseAdapter`, `ImplementPhaseAdapter`, `ReviewPhaseAdapter`, `HITLPhaseAdapter` — single-item adapters preserving the existing stage-worker contracts.
 - `src/models.py`: `DriverState`, `SuspendRecord`, `ConvergenceLedger`, `PendingStageTransition`, `PendingSubStateTransition` — the two intent slots C5(a)/C9 require, deliberately separate.
 - `src/state/_driver.py`: `DriverStateMixin` — including `record_stage_transition` / `clear_stage_transition` and `record_sub_state_transition` / `clear_sub_state_transition`.
-- `src/config.py`: `HydraFlowConfig.effective_driver_max_in_flight`, `HydraFlowConfig.driver_stage_cap_total` — the binding `max_in_flight` ≥ stage-cap-total floor from the ADR-0094 narrowing (i).
+- `src/config.py`: `HydraFlowConfig.uses_fable_director`, `HydraFlowConfig.director_shadow_enabled` (the live kill switch), `HydraFlowConfig.director_shadow_usd_ceiling` (the aggregate spend bound), `HydraFlowConfig.effective_driver_max_in_flight`, `HydraFlowConfig.driver_stage_cap_total` — the binding `max_in_flight` ≥ stage-cap-total floor from the ADR-0094 narrowing (i).
 - `src/issue_store.py`: `_STAGE_PRIORITY`, `IssueStore._compute_stage_map`.
 - `src/pr_manager.py`: `PRManager.swap_pipeline_labels`.
 - `src/hydraflow_gateway/keys.py`: `VirtualKeyStore`.
 - `src/process_group.py`: `kill_process_group`.
+- `src/director_sandbox.py`: `DIRECTOR_ENV_ALLOWLIST`, `DIRECTOR_DENIED_TOOLS`, `build_scrubbed_env`, `director_sandbox`, `turn_failed`, `last_init_frame`, `assert_observed_surface`, `SurfaceVerdict`, `ProbeEvidence` — S1/S3/S4/S5 (#11537).
+- `src/director_turn_runner.py`: `DirectorTurnRunner`, `DirectorTurnResult`, `render_capsule_prompt`, `extract_command_json` — the director's spawn, delegated to `SubprocessRunner.run_simple` for S6's reap; S1's allow-list over the parent environment and S2's per-turn minted key live here.
+- `src/director_broker.py`: `ShadowDispatchBroker`, `ShadowDispatch`, `BrokerVerdict` — C7 applied to director-requested dispatches, with no dispatch path.
+- `src/fable_director.py`: `FableDirector`, `OBSERVABLE_OUTCOMES` — the shadow observer, its capsule reconstruction, its fail-closed boundary, and the real-boundaries-only rule that keeps the agreement rate uncontaminated.
+- `src/director_shadow_log.py`: `ShadowObservationLog`, `ShadowObservation`, `ShadowAgreement`, `TurnFailure`, `classify_agreement` — the comparison record B5's bar is measured from.
+- `src/dashboard_routes/_scheduling_routes.py`: `GET /api/scheduling/status` — desired vs effective scheduling mode and the hypothetical worker tree.
 - `scripts/director_capability_probe.py` — the probe; `tests/fixtures/director/director_capability_probe_evidence.json` — its sanitized evidence.

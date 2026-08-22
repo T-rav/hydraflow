@@ -4,10 +4,10 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 ## Population
 
-- **Population:** Accepted (84 ADRs)
+- **Population:** Accepted (85 ADRs)
 - **Mean density** (per-ADR, unweighted): 96%
-- **Executable fraction** (check-weighted): 98% (168 of 171 cited checks)
-- **Check kinds:** pytest 167, make 1, script 0, prose 3
+- **Executable fraction** (check-weighted): 98% (184 of 187 cited checks)
+- **Check kinds:** pytest 183, make 1, script 0, prose 3
 - **Prose-count control limit** (Shewhart c-chart UCL): 0.60
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 
@@ -66,7 +66,7 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0065 | Remove CodeGroomingLoop | 100% | 1 | 0 |
 | ADR-0071 | RouteBackCounterPort: Testable Counter for Precondition Route-Backs | 100% | 1 | 0 |
 | ADR-0083 | No ignored automated test gates | 100% | 2 | 0 |
-| ADR-0085 | Secrets never persist in the canonical audit stream | 100% | 2 | 0 |
+| ADR-0085 | Secrets never persist in the canonical audit stream | 100% | 3 | 0 |
 | ADR-0087 | Prompt structure standard (XML tags, 8-criterion rubric, mechanical scoring) | 100% | 2 | 0 |
 | ADR-0088 | LabelDriftWatcherLoop — Cross-Entity State-Machine Drift Caretaker | 100% | 2 | 0 |
 | ADR-0089 | MemoryBacklogLoop — promote session-memory feedback to the find queue | 100% | 3 | 0 |
@@ -99,8 +99,9 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0134 | Per-repo model/harness selection — run Claude and GLM projects side by side | 100% | 5 | 0 |
 | ADR-0135 | Factory runs as a launchd service; operator Stop is a latch honoured by autostart and the liveness kernel | 100% | 8 | 0 |
 | ADR-0136 | ADR drift enforcement is a deterministic cited-symbol CI gate, not a caretaker loop | 100% | 2 | 0 |
-| ADR-0137 | Fenced IssueDriver and director runtime boundary | 100% | 8 | 0 |
+| ADR-0137 | Fenced IssueDriver and director runtime boundary | 100% | 16 | 0 |
 | ADR-0138 | Gateway account identity and sanitized route visibility | 100% | 8 | 0 |
+| ADR-0139 | Shadow routing policy resolver and hash-linked decision record | 100% | 7 | 0 |
 
 
 <!-- arch:generated -->

@@ -64,11 +64,17 @@ class TestBuildServices:
         # is not constructed at all unless an operator opts in, not that it is
         # constructed and dormant. tests/test_scheduling_default_off.py pins
         # both halves of that.
+        # fable_director is None under Classic AND under the deterministic
+        # controller (#11537): a shadow Fable process is a strictly narrower
+        # opt-in than running per-issue drivers, and someone choosing drivers
+        # must not acquire one silently. tests/test_director_shadow_default_off.py
+        # pins both halves.
         optional_fields = {
             "hindsight",
             "hindsight_wal",
             "live_corpus_replay_loop",
             "driver_manager",
+            "fable_director",
         }
         for field_name in ServiceRegistry.__dataclass_fields__:
             if field_name in optional_fields:

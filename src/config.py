@@ -849,6 +849,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_GATEWAY_FLEET_RATCHET_ENABLED",
         False,
     ),
+    (
+        "gateway_route_shadow_enabled",
+        "HYDRAFLOW_GATEWAY_ROUTE_SHADOW_ENABLED",
+        True,
+    ),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
     ("auto_agent_redrive_enabled", "HYDRAFLOW_AUTO_AGENT_REDRIVE_ENABLED", True),
     (
@@ -1375,6 +1380,91 @@ class HydraFlowConfig(BaseModel):
             "effective_driver_max_in_flight. Ignored under Classic."
         ),
     )
+
+    # --- Fable director, shadow mode (#11537) -----------------------------
+    # Only read under execution_runtime='fable_director'. Under Classic and
+    # under the deterministic controller nothing constructs a director, so
+    # these are inert rather than merely defaulted.
+    director_turn_timeout_seconds: int = Field(
+        default=180,
+        ge=30,
+        le=1800,
+        description=(
+            "Wall-clock budget for one shadow Fable director turn. A turn that "
+            "exceeds it is killed with its whole process group (ADR-0137 S6) "
+            "and recorded as a failed turn, never retried in place. Ignored "
+            "unless execution_runtime='fable_director'."
+        ),
+    )
+    director_shadow_enabled: bool = Field(
+        default=True,
+        description=(
+            "Kill switch for the shadow Fable director. Live: an operator can "
+            "stop every director turn without restarting the factory, which "
+            "matters because a director turn costs money and the dials that "
+            "select it are restart-required. Off, the deterministic controller "
+            "is entirely unaffected. Ignored unless "
+            "execution_runtime='fable_director'."
+        ),
+    )
+    director_shadow_usd_ceiling: float = Field(
+        default=25.0,
+        ge=0.0,
+        le=10000.0,
+        description=(
+            "Total USD the shadow director may spend on turns in one run, "
+            "across all issues. Once reached no further turn is started and "
+            "the boundary is recorded as spend-ceiling. This is the AGGREGATE "
+            "bound; director_shadow_usd_budget is the per-boundary figure the "
+            "capsule advertises and bounds only what a director may request. "
+            "Ignored unless execution_runtime='fable_director'."
+        ),
+    )
+    director_shadow_usd_budget: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=100.0,
+        description=(
+            "USD budget a shadow director capsule advertises per boundary. At "
+            "0.0 every dispatch the director requests is refused with "
+            "BUDGET_EXHAUSTED - which is a legitimate way to observe a "
+            "director's intent while admitting nothing at all. Ignored unless "
+            "execution_runtime='fable_director'."
+        ),
+    )
+
+    def uses_fable_director(self) -> bool:
+        """True when a shadow Fable director is attached to the driver.
+
+        The counterpart of :meth:`uses_issue_driver`, and the single predicate
+        every #11537 default-off guard reads. It is deliberately *not* the same
+        question: ``issue_controller + stage_subprocess`` runs drivers with no
+        director at all.
+        """
+        return self.execution_runtime is ExecutionRuntime.FABLE_DIRECTOR
+
+    def director_probe_evidence_path(self) -> Path:
+        """Where the committed probe evidence S4 asserts against lives.
+
+        A checkout artifact, not a setting and not package data: it is
+        *committed evidence* about a specific CLI build, produced by
+        ``scripts/director_capability_probe.py`` (also checkout-only). A
+        configurable path would let a stale or hand-edited file satisfy the one
+        gate ADR-0137's conditional go depends on.
+
+        Resolved through :func:`package_resources.checkout_path`, which raises
+        rather than returning a path that does not exist — so an installed
+        wheel with no checkout cannot arm S4, and the director refuses to run
+        instead of asserting against nothing (#11589).
+        """
+        from package_resources import checkout_path
+
+        return checkout_path(
+            "tests",
+            "fixtures",
+            "director",
+            "director_capability_probe_evidence.json",
+        )
 
     def driver_stage_cap_total(self) -> int:
         """Total concurrent work today's per-stage caps allow a driver to occupy.
@@ -2953,6 +3043,19 @@ class HydraFlowConfig(BaseModel):
             "Minimum lifetime requested for each per-spawn gateway virtual key. "
             "The runner raises the effective TTL when needed to cover the full "
             "subprocess timeout plus a cleanup grace period."
+        ),
+    )
+    # Routing-policy shadow (#11536, ADR-0139). Observation only: the resolver
+    # computes and records the route it *would* choose beside the route legacy
+    # routing actually took, and changes neither. Nothing here enforces a
+    # policy — enforcement is a later, separately gated phase.
+    gateway_route_shadow_enabled: bool = Field(
+        default=True,
+        description=(
+            "Record a shadow routing decision beside every spawn: what the "
+            "policy resolver would have chosen versus what legacy routing did. "
+            "Observation only — it never changes a provider, model, or command. "
+            "Set false to stop writing the per-repo shadow decision chain."
         ),
     )
     gateway_fleet_ratchet_enabled: bool = Field(

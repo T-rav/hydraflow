@@ -6,8 +6,17 @@ restart intentionally expires every key.
 
 Required runtime configuration:
 
-- `GATEWAY_CONTROL_TOKEN` (at least 32 ASCII bytes; generate with a secure
-  random source such as `secrets.token_urlsafe(32)`)
+- `GATEWAY_CONTROL_TOKEN` (at least 32 ASCII bytes). Mint it in the canonical
+  `hfgwctl_` grammar —
+  `python -c "import secrets; print('hfgwctl_' + secrets.token_urlsafe(32))"` —
+  so the repo's canonical scrubber (`src/secret_scrub.py`, ADR-0085) recognises
+  it and redacts it from the durable audit/transcript/event stream. The server
+  still accepts any ≥32-byte ASCII token for backward compatibility, but a token
+  without that prefix is only redactable when it is printed next to its
+  `GATEWAY_CONTROL_TOKEN` (or `HYDRAFLOW_GATEWAY_CONTROL_TOKEN`) variable name,
+  as an echoed child env prints it; a bare value is invisible to the scrubber.
+  Virtual keys need no such convention:
+  `hfgw_{key_id}.{secret}` is minted by the gateway itself and is always matched.
 - one complete provider pair:
   `GATEWAY_ANTHROPIC_BASE_URL` + `GATEWAY_ANTHROPIC_API_KEY`, or
   `GATEWAY_ZAI_HARNESS_BASE_URL` + `GATEWAY_ZAI_HARNESS_API_KEY`

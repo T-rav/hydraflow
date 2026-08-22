@@ -103,6 +103,26 @@ class DriverTransitions(Protocol):
     def clear_sub_state_transition(self, issue_number: int) -> None: ...
 
 
+class DriverBoundaryObserver(Protocol):
+    """A read-only witness to each boundary the allocator completes (#11537).
+
+    This is the observation seam ADR-0137's shadow phase hangs off, and its
+    shape is the safety property: it is handed the boundary that *already
+    happened* and returns nothing. There is no return value the allocator could
+    act on and no argument it can mutate into an effect, so a shadow director
+    cannot become an actuator by accident — only by someone changing this
+    signature, which is a visible change rather than a silent one.
+
+    ``tests/regressions/test_issue_11537_shadow_safety.py`` proves the property
+    differentially: the same tick with and without an observer produces
+    byte-identical live effects, including when the observer raises.
+    """
+
+    async def observe_boundary(
+        self, *, task: Task, advance: DriverAdvance, driver: IssueDriver
+    ) -> None: ...
+
+
 logger = logging.getLogger("driver_manager")
 
 #: Stage the queue getter for each phase corresponds to. Used only to release
@@ -284,6 +304,7 @@ class DriverManager:
         max_in_flight: int,
         stage_caps: Mapping[DriverPhase, int],
         sub_states: DriverTransitions | None = None,
+        observer: DriverBoundaryObserver | None = None,
     ) -> None:
         self._store = store
         self._labels = labels
@@ -295,6 +316,7 @@ class DriverManager:
         self._max_in_flight = max_in_flight
         self._stage_caps = stage_caps
         self._sub_states = sub_states
+        self._observer = observer
         self._drivers: dict[int, IssueDriver] = {}
         self._tasks: dict[int, Task] = {}
         self._waiting_since: dict[int, datetime] = {}
@@ -479,7 +501,40 @@ class DriverManager:
                     advance.phase.value if advance.phase else "?",
                     driver.driver_state,
                 )
+            await self._observe(task, advance, driver)
         return advances
+
+    async def _observe(
+        self, task: Task, advance: DriverAdvance, driver: IssueDriver
+    ) -> None:
+        """Offer the completed boundary to the shadow observer, if there is one.
+
+        Called **after** the boundary, with its result, and its own outcome is
+        discarded — the whole point of shadow mode. The broad ``except`` is the
+        containment: a shadow component may not fail the pipeline it observes,
+        so anything it raises is logged and dropped rather than reaching the
+        allocator's driver-level handler, where it would have skipped the rest
+        of the tick and turned an observation into an effect.
+
+        ``reraise_on_credit_or_bug`` is called first and is the one deliberate
+        hole: a burnt credit balance is a factory-wide signal, not a shadow
+        failure, and eating it here would spend attempt budget against an
+        exhausted account (dark-factory §2.2).
+        """
+        if self._observer is None:
+            return
+        try:
+            await self._observer.observe_boundary(
+                task=task, advance=advance, driver=driver
+            )
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
+            logger.warning(
+                "driver_manager: shadow observer failed for #%d (live behaviour "
+                "unaffected): %s",
+                task.id,
+                exc,
+            )
 
     def _retire_finished(self) -> list[int]:
         released: list[int] = []
@@ -495,6 +550,21 @@ class DriverManager:
             self._waiting_since.pop(issue_number, None)
             released.append(issue_number)
         return released
+
+    def detach_observer(self) -> None:
+        """Drop the shadow observer for the rest of this run (#11537).
+
+        Called when a director fails its startup boundary proof. Detaching is
+        the fail-closed answer rather than leaving it attached and hoping each
+        turn refuses: an observer that cannot prove its sandbox must not be
+        *asked*, because ADR-0137's S4 exposure window is one turn and the way
+        to keep that window at zero is not to spend one.
+        """
+        self._observer = None
+
+    @property
+    def has_observer(self) -> bool:
+        return self._observer is not None
 
     def release_all(self) -> None:
         """Drop every driver and claim. Called on factory stop."""

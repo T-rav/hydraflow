@@ -73,6 +73,7 @@ _DISPOSITION: dict[str, str] = {
     "src/config.py::_ENV_INT_OVERRIDES": "harmless:import-time-only += (config.py) appending give-up-window overrides; never mutated during a run",
     "src/config.py::_DOTENV_INERT_ROOTS": "harmless:session-scoped registration of the default repo root; extra register_dotenv_inert_root calls must be unregister-paired by the caller (test_dotenv_inert_under_pytest_10902.py), not reset per-test",
     "src/events.py::_event_counter": "harmless:monotonic event-id counter; tests never assert absolute IDs (docs/wiki/testing.md), so leak is benign by convention",
+    "src/hydraflow_gateway/routing_audit.py::_append_locks": "harmless:per-path mutex registry (ADR-0139 D6), holding locks rather than behaviour — a leaked entry is the same lock for the same path, and each test's tmp_path is a distinct key. Mirrors file_util._thread_gate_registry, which is keyed and left unreset for the same reason.",
     # --- tracked debt: no per-test reset fixture yet ---
     "src/knowledge_metrics.py::metrics": "debt:mutable metrics accumulator (increment/reset); has .reset() but no autouse fixture calls it",
     "src/agent_rate_backoff.py::_BACKOFF": "debt:rate-backoff singleton; no autouse reset, touching tests pair try/finally manually",

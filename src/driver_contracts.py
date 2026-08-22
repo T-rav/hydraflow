@@ -166,6 +166,26 @@ class RejectionReason(StrEnum):
     SANDBOX_UNVERIFIED = "sandbox_unverified"
 
 
+def has_anthropic_provenance(served_model: str) -> bool:
+    """True when *served_model*'s id is an Anthropic one by the allow-list.
+
+    The provenance half of :meth:`ModelRequirement.satisfied_by`, exposed on its
+    own so the routing resolver (ADR-0139 D4) can ask the same question of a
+    *concrete-model* request without re-deriving the allow-list. Two copies of
+    "is this an Anthropic model" is exactly how a third-party backend ends up
+    satisfying one of them and not the other.
+
+    This deliberately does NOT accept the Claude CLI's bare aliases
+    (``opus``/``sonnet``/``haiku``): those are request shorthand, never a
+    *served* model id, and widening this predicate would let a served model
+    literally named ``opus`` pass as Anthropic.
+    """
+    served = served_model.strip().lower()
+    if not _ANTHROPIC_MODEL_ID.match(served):
+        return False
+    return not any(marker in served for marker in NON_ANTHROPIC_MODEL_MARKERS)
+
+
 class ModelRequirement(BaseModel):
     """A ``{kind, value}`` pair. Colon-joined forms are display shorthand only.
 
@@ -209,9 +229,7 @@ class ModelRequirement(BaseModel):
         """
         served = served_model.lower()
         if self.kind is ModelRequirementKind.LITERAL_FAMILY:
-            if not _ANTHROPIC_MODEL_ID.match(served):
-                return False
-            if any(marker in served for marker in NON_ANTHROPIC_MODEL_MARKERS):
+            if not has_anthropic_provenance(served):
                 return False
             return LITERAL_FAMILY_TOKENS[self.value] in served
         if self.kind is ModelRequirementKind.CONCRETE_MODEL:

@@ -44,6 +44,7 @@ from preflight.agent import PreflightSpawn, hash_prompt
 from prompt_telemetry import refresh_prompt_telemetry_health_after_retention
 from repo_wiki import RepoWikiStore, WikiEntry
 from runtime_config import load_runtime_config
+from scheduling_model import ExecutionRuntime
 from service_registry import (
     ServiceRegistry,
     WorkerRegistryCallbacks,
@@ -332,6 +333,17 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # ``rc_auto_recut_enabled`` above. Scenario cover is the catalog builder's
     # injected fake runner (tests/scenarios/test_goal_supervisor_scenario.py).
     object.__setattr__(config, "goal_supervisor_loop_enabled", False)
+    # FableDirector (#11537): its turn runner spawns a real ``claude`` with a
+    # fully REPLACED environment (ADR-0137 S1 wants an allow-list, not a merge).
+    # Two seams cover it and neither is left aspirational: the runner takes an
+    # injected ``SubprocessRunner``, which main() below supplies as
+    # ``FakeSubprocessRunner``; and the director is not constructed at all
+    # unless ``execution_runtime=fable_director``, pinned off here. No
+    # SANDBOX_SEAMS row: the module has no lexical spawn of its own, and the
+    # scan rejects a declaration for a module it never sees spawning. Scenario
+    # cover for the shadow path injects a scripted turn runner
+    # (tests/scenarios/test_fable_director_shadow_scenario.py).
+    object.__setattr__(config, "execution_runtime", ExecutionRuntime.STAGE_SUBPROCESS)
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:

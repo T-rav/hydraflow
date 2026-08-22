@@ -47,7 +47,7 @@ services:
     environment:
       GATEWAY_HOST: "0.0.0.0"
       GATEWAY_PORT: "8080"
-      GATEWAY_CONTROL_TOKEN: "sandbox-control-token-0123456789abcdef"
+      GATEWAY_CONTROL_TOKEN: "hfgwctl_sandbox-control-token-0123456789abcdef"
       GATEWAY_ANTHROPIC_BASE_URL: "http://fake-llm-http:8090"
       GATEWAY_ANTHROPIC_API_KEY: "sandbox-provider-key"
       GATEWAY_LEDGER_PATH: "/var/lib/hydraflow-gateway/metadata/requests.jsonl"
@@ -97,7 +97,7 @@ services:
       HYDRAFLOW_DATA_ROOT: "/tmp/hydraflow"
       HYDRAFLOW_GATEWAY_BASE_URL: "http://gateway:8080"
       HYDRAFLOW_GATEWAY_LEDGER_PATH: "/gateway-metadata/requests.jsonl"
-      HYDRAFLOW_GATEWAY_CONTROL_TOKEN: "sandbox-control-token-0123456789abcdef"
+      HYDRAFLOW_GATEWAY_CONTROL_TOKEN: "hfgwctl_sandbox-control-token-0123456789abcdef"
       HYDRAFLOW_GATEWAY_REPO_CLASS: "hydraflow"
       HYDRAFLOW_GATEWAY_KEY_TTL_SECONDS: "3660"
       # Canary P4: the bounded ADR reviewer is the first real agentic role
@@ -183,7 +183,7 @@ services:
       SANDBOX_BASE_URL: "http://ui"
       SANDBOX_API_BASE: "http://hydraflow:5555"
       SANDBOX_GATEWAY_BASE: "http://gateway:8080"
-      SANDBOX_GATEWAY_CONTROL_TOKEN: "sandbox-control-token-0123456789abcdef"
+      SANDBOX_GATEWAY_CONTROL_TOKEN: "hfgwctl_sandbox-control-token-0123456789abcdef"
       # ``tests`` is a package at the repo root; the runner conftest +
       # test_scenarios.py both ``import tests.sandbox_scenarios...``.
       # ``src`` is on the path so ``mockworld.seed.MockWorldSeed``

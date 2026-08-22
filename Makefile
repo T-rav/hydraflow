@@ -78,7 +78,14 @@ PYTEST_QUALITY_BACKGROUND_SERIAL_PATHS := $(filter-out $(PYTEST_HOST_EXCLUSIVE_P
 # so its package keeps a stricter branch-coverage contract than the aggregate
 # repository floor. Keep one canonical command for the explicit target, local
 # quality, and the path-triggered CI gate.
-GATEWAY_PACKAGE_TEST_PATHS := tests/test_gateway_*.py
+# The gateway package's own test files. Two globs, because the two naming
+# rules that bind here disagree: the audit's P10.2 unit-ring check credits a
+# module only to a test whose stem MATCHES it (routing_policy.py ->
+# test_routing_policy.py), while this coverage gate needs those same files in
+# its population or hydraflow_gateway/routing_*.py would be measured at ~40% by
+# tests that never run. Naming them test_gateway_routing_*.py satisfied the gate
+# and silently orphaned three modules in P10.2 (#11536).
+GATEWAY_PACKAGE_TEST_PATHS := tests/test_gateway_*.py tests/test_routing_*.py
 GATEWAY_PACKAGE_TEST_IGNORES := $(addprefix --ignore=,$(wildcard $(GATEWAY_PACKAGE_TEST_PATHS)))
 GATEWAY_PACKAGE_COVERAGE_MIN := 85
 GATEWAY_PACKAGE_COVERAGE_CMD := PYTHONPATH=src $(UV) pytest $(GATEWAY_PACKAGE_TEST_PATHS) --cov=hydraflow_gateway --cov-branch --cov-fail-under=$(GATEWAY_PACKAGE_COVERAGE_MIN) --cov-report=term-missing

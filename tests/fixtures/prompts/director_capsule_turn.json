@@ -1,0 +1,7 @@
+{
+  "builder": "director_turn_runner.render_capsule_prompt",
+  "args": {
+    "capsule_json": "{\"schema_version\": 1, \"lease\": {\"schema_version\": 1, \"driver_id\": \"drv-8801-1f2e3d4c\", \"epoch\": 2, \"repo_slug\": \"acme/widgets\", \"issue_number\": 8801, \"phase\": \"IMPLEMENT\", \"expected_stage_label\": \"hydraflow-ready\", \"phase_attempt\": 0, \"expires_at\": \"2026-08-22T13:15:00Z\"}, \"issue_goal\": \"Retries on the upload path are unbounded\\n\\n`upload_chunk` retries forever on a 503, so a bucket outage turns into a hot loop that burns the whole worker pool. Bound the retry count and surface the failure to the caller.\", \"live_stage_label\": \"hydraflow-ready\", \"pr_number\": null, \"ci_state\": null, \"worktree_base_digest\": null, \"worktree_head_digest\": null, \"allowed_roles\": [\"debugger\", \"explorer\", \"implementer\"], \"route_policy_revision\": \"claude-sonnet-4-6:fable_director\", \"remaining_usd_budget\": 1.0, \"remaining_wall_clock_seconds\": 900, \"prior_receipts\": [], \"stop_requested\": false, \"draining\": false}"
+  },
+  "faked_deps": {}
+}

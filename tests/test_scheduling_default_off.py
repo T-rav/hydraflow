@@ -53,15 +53,25 @@ def test_opting_in_to_the_controller_uses_the_issue_driver(
     assert controller_config.uses_issue_driver() is True
 
 
-def test_the_fable_runtime_is_not_selectable_yet() -> None:
-    # #11537 lands the director and the broker. Until then the combination is
-    # declared but unarmed, and choosing it fails at load rather than silently
-    # scheduling as something else.
-    with pytest.raises((SchedulingCombinationError, ValueError), match="unarmed"):
-        HydraFlowConfig(
-            scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
-            execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
-        )
+def test_the_fable_runtime_is_selectable_but_not_the_default() -> None:
+    # #11537 landed the shadow director, so the pair now loads. What "default
+    # off" means for it is pinned in tests/test_director_shadow_default_off.py:
+    # the director object is not constructed unless it is selected.
+    config = HydraFlowConfig(
+        scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
+        execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
+    )
+
+    assert (config.uses_fable_director(), HydraFlowConfig().uses_fable_director()) == (
+        True,
+        False,
+    )
+
+
+def test_a_fable_director_without_a_controller_is_still_invalid() -> None:
+    # Arming the shadow director changed nothing about the two-owners pair.
+    with pytest.raises((SchedulingCombinationError, ValueError), match="invalid"):
+        HydraFlowConfig(execution_runtime=ExecutionRuntime.FABLE_DIRECTOR)
 
 
 def test_a_classic_ownership_registry_never_reports_an_owned_issue() -> None:

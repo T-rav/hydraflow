@@ -67,6 +67,15 @@ SETTINGS: dict[str, SettingSpec] = {
     "scheduling_model": SettingSpec("Scheduling", live=False, order=20),
     "execution_runtime": SettingSpec("Scheduling", live=False, order=21),
     "driver_max_in_flight": SettingSpec("Scheduling", live=False, order=22),
+    # --- Fable director, shadow mode (#11537) ----------------------------
+    # Same group and the same live=False reason: the director is attached to
+    # the allocator once, at boot, so a live badge would be a lie.
+    "director_turn_timeout_seconds": SettingSpec("Scheduling", live=False, order=23),
+    "director_shadow_usd_budget": SettingSpec("Scheduling", live=False, order=24),
+    # live=True, unlike its neighbours: this one is a kill switch, and a kill
+    # switch that needs a restart is not a kill switch (docs/wiki/patterns.md).
+    "director_shadow_enabled": SettingSpec("Scheduling", live=True, order=25),
+    "director_shadow_usd_ceiling": SettingSpec("Scheduling", live=True, order=26),
     # --- Models ----------------------------------------------------------
     "model": SettingSpec("Models", live=True, order=0),
     "planner_model": SettingSpec("Models", live=True, order=1),
@@ -231,6 +240,11 @@ SETTINGS: dict[str, SettingSpec] = {
     # Live: repo_backend.apply_repo_provider re-reads both at every spawn.
     "repo_provider": SettingSpec("Model Routing", live=True, order=70),
     "repo_model": SettingSpec("Model Routing", live=True, order=71),
+    # --- Routing shadow (policy resolver observation, #11536 / ADR-0139) ---
+    # Live: route_shadow re-reads the switch at every spawn seam, so turning it
+    # off stops the next spawn's recording without a restart. Observation only —
+    # it can never change which provider or model a spawn uses.
+    "gateway_route_shadow_enabled": SettingSpec("Model Routing", live=True, order=80),
     # --- Issue Refinement (backlog dedup + priority scoring, #9957) ----------
     "issue_refinement_enabled": SettingSpec("Issue Refinement", live=True, order=0),
     "issue_refinement_pair_budget": SettingSpec("Issue Refinement", live=True, order=1),

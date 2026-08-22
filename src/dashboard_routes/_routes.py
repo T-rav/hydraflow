@@ -1758,6 +1758,11 @@ def create_router(
 
     _register_metrics(router, ctx)
 
+    # --- Scheduling routes (desired vs effective mode + shadow director) ---
+    from dashboard_routes._scheduling_routes import register as _register_scheduling
+
+    _register_scheduling(router, ctx)
+
     # --- Fitness routes (loop fitness scorecard read endpoint) ---
     from dashboard_routes._fitness_routes import register as _register_fitness
 

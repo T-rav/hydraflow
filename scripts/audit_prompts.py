@@ -571,6 +571,17 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Adjacent",
         "src/spec_match.py",
     ),
+    # #11537: the shadow Fable director's turn. Its prompt is the whole of what
+    # a director may know and may ask for, so it is scored like any other
+    # builder — a capsule that under-specifies the command shape is exactly the
+    # defect the malformed-output fail-closed path would then absorb silently.
+    AuditTarget(
+        "director_capsule_turn",
+        "director_turn_runner.render_capsule_prompt",
+        "tests/fixtures/prompts/director_capsule_turn.json",
+        "Adjacent",
+        "src/director_turn_runner.py",
+    ),
     AuditTarget(
         "prompt_refiner_refine",
         "prompt_refiner.build_refine_prompt",

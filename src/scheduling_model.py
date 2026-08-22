@@ -11,7 +11,7 @@ rather than prose:
 ===================  ====================  =======================================
 ``phase_requeue``    ``stage_subprocess``  Classic. The default. Today's behaviour.
 ``issue_controller`` ``stage_subprocess``  The deterministic foundation (#11535).
-``issue_controller`` ``fable_director``    Fable mode. Unarmed until #11537.
+``issue_controller`` ``fable_director``    Fable SHADOW mode (#11537). Selectable.
 ``phase_requeue``    ``fable_director``    Structurally invalid — two owners.
 ===================  ====================  =======================================
 
@@ -50,7 +50,12 @@ class ExecutionRuntime(StrEnum):
     """Today's deterministic stage runners, one fresh subprocess per phase."""
 
     FABLE_DIRECTOR = "fable_director"
-    """A Fable director dispatching brokered workers. Unarmed until #11537."""
+    """A shadow Fable director beside the deterministic runtime (#11537).
+
+    The stage subprocesses still run and still decide; the director observes
+    each boundary and records the choice it would have made. Graduating it from
+    observer to decider is #11541's, behind ``director_dispatch_armed``.
+    """
 
 
 class SchedulingSupport(StrEnum):
@@ -58,7 +63,12 @@ class SchedulingSupport(StrEnum):
 
     SUPPORTED = "supported"
     UNARMED = "unarmed"
-    """A designed combination whose runtime has not landed yet."""
+    """A designed combination whose runtime has not landed yet.
+
+    No preset carries it today — #11537 armed the last one that did. It is kept
+    because the *next* designed-but-unlanded combination needs it, and because
+    ``resolve_preset``'s fail-loud contract is stated in terms of it.
+    """
 
     INVALID = "invalid"
     """A combination that can never be made to work."""
@@ -82,11 +92,28 @@ class SchedulingPreset:
     execution_runtime: ExecutionRuntime
     support: SchedulingSupport
     reason: str = ""
+    director_dispatch_armed: bool = False
+    """Whether a director may dispatch a **real** worker under this preset.
+
+    False everywhere today, and the flip is #11541's, gated on ADR-0137 B5's
+    evidence bar. It is a field of its own rather than a reading of
+    ``execution_runtime`` because selecting the director and *trusting* the
+    director are two different operator decisions, and collapsing them into one
+    dial is how "we turned on the observer" becomes "we turned on the actuator".
+    In shadow mode there is no code path that would read it as permission —
+    :mod:`director_broker` has no dispatch method at all — so it is a declared
+    seam for the next phase, not a live switch.
+    """
 
     @property
     def uses_issue_driver(self) -> bool:
         """True when this preset runs a per-issue :class:`IssueDriver`."""
         return self.scheduling_model is SchedulingModel.ISSUE_CONTROLLER
+
+    @property
+    def uses_fable_director(self) -> bool:
+        """True when a shadow Fable director observes each driver boundary."""
+        return self.execution_runtime is ExecutionRuntime.FABLE_DIRECTOR
 
 
 CLASSIC = SchedulingPreset(
@@ -106,15 +133,25 @@ DETERMINISTIC_CONTROLLER = SchedulingPreset(
 """#11535: one fenced driver per issue over the existing stage runners."""
 
 FABLE_DIRECTOR = SchedulingPreset(
-    name="Fable director",
+    name="Fable director (shadow)",
     scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
     execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
-    support=SchedulingSupport.UNARMED,
+    support=SchedulingSupport.SUPPORTED,
     reason=(
-        "the Fable director and dispatch broker land in #11537; "
-        "no director process exists yet"
+        "#11537 shadow mode: the deterministic controller executes every phase "
+        "and stays authoritative; the director records what it would have "
+        "dispatched. No production worker is dispatched by Fable"
     ),
 )
+"""#11537. Selectable, and **shadow-only** — which is not the same as armed.
+
+The dial being selectable is what lets an operator gather ADR-0137 B5's
+evidence at all; it is not permission for a director to act. Letting a director
+actually dispatch is #11541's decision, gated on that evidence, and it is
+:data:`SchedulingPreset.director_dispatch_armed` — deliberately a *separate*
+flip from this one, so "I turned on the observer" can never be mistaken for
+"I turned on the actuator".
+"""
 
 _TWO_OWNERS = SchedulingPreset(
     name="(invalid)",
@@ -132,8 +169,12 @@ _PRESETS: dict[tuple[SchedulingModel, ExecutionRuntime], SchedulingPreset] = {
     for p in (CLASSIC, DETERMINISTIC_CONTROLLER, FABLE_DIRECTOR, _TWO_OWNERS)
 }
 
-SELECTABLE_PRESETS: tuple[SchedulingPreset, ...] = (CLASSIC, DETERMINISTIC_CONTROLLER)
-"""Presets an operator may select today, in display order."""
+SELECTABLE_PRESETS: tuple[SchedulingPreset, ...] = (
+    CLASSIC,
+    DETERMINISTIC_CONTROLLER,
+    FABLE_DIRECTOR,
+)
+"""Presets an operator may select today, in display order (riskiest last)."""
 
 
 def resolve_preset(
