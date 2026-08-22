@@ -6,6 +6,13 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `6a06e09` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-1422 *(2026-08-22)*
+- `94b544e` — fix(implement): anchor the test-adequacy demand and pin it across retries (#11644) (#11649) (#11649) *(2026-08-22)*
+- `8c392d0` — feat(gateway): P2 — revision-safe project policy workspace (ADR-0140) (#11648) (#11648) *(2026-08-22)*
+- `8eb762f` — fix(instruments): the calibration accept arm scored fresh merges as clean — #11643's last commit never landed (#11647) (#11647) *(2026-08-22)*
+- `2f440e8` — refactor(orchestrator,plan-phase): decompose two god classes below the mass threshold (#11645) (#11645) *(2026-08-22)*
+- `6523893` — feat(instruments): calibrate the test-adequacy gate — the reject arm is outcome-censored (#11593 seam 2) (#11643) (#11643) *(2026-08-22)*
+- `7df4f1a` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
 - `99a839e` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0838 *(2026-08-22)*
 - `dfd0e25` — fix(director): the shadow observer spun the allocator and fsync'd per tick (#11641) (#11641) *(2026-08-22)*
 - `8531cd5` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*

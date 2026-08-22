@@ -1193,7 +1193,8 @@ def build_services(
     # ADR-0107: Discover/Shape are no longer standalone pipeline phases.
     # Build the discover/shape ENGINES (DiscoverRunner / ShapeRunner) directly
     # and hand them to the planner, which invokes them on demand behind its
-    # decision gate (plan_phase.py:_should_discover_helper / _should_shape_helper).
+    # decision gate (plan_phase_prepass.py:_should_discover_helper /
+    # _should_shape_helper).
     # The escalation deps (issue-filing + dedup for evaluator escalation) that
     # the standalone DiscoverPhase / ShapePhase used to bind at construction are
     # bound here instead, on a single shared hitl_escalations dedup store, so
@@ -1228,8 +1229,8 @@ def build_services(
         plan_reviewer=plan_reviewer,
         # ADR-0107: hand the discover/shape engines (escalation deps already
         # bound above) to the planner, whose decision gates
-        # (plan_phase.py:_should_discover_helper / _should_shape_helper) invoke
-        # them on demand as in-process research/shaping sub-steps.
+        # (plan_phase_prepass.py:_should_discover_helper / _should_shape_helper)
+        # invoke them on demand as in-process research/shaping sub-steps.
         discover_runner=discover_runner,
         shape_runner=shape_runner,
     )

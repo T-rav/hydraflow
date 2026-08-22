@@ -1,4 +1,8 @@
-"""Tests for epic group planning — grouping, gap review, and iteration capping."""
+"""Tests for epic group planning — grouping, gap review, and iteration capping.
+
+Renamed from ``test_epic_group_planning.py`` when the cluster moved to
+``src/plan_phase_epic.py`` (#11547).
+"""
 
 from __future__ import annotations
 

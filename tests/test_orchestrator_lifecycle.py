@@ -1,4 +1,8 @@
-"""Tests for stop-and-resume behavior (issue #776).
+"""Tests for orchestrator stop-and-resume behavior (issue #776).
+
+Renamed from ``test_stop_resume.py`` when ``stop`` / ``reset`` /
+``_build_interrupted_issues`` moved to ``src/orchestrator_lifecycle.py``
+(#11547).
 
 Covers:
 - State persistence for interrupted issues

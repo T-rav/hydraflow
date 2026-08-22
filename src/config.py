@@ -770,6 +770,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_FAIL_CLOSED",
         True,
     ),
+    ("test_adequacy_pin_demand", "HYDRAFLOW_TEST_ADEQUACY_PIN_DEMAND", True),
     ("triage_blocker_gate_enabled", "HYDRAFLOW_TRIAGE_BLOCKER_GATE_ENABLED", True),
     ("triage_honeypot_enabled", "HYDRAFLOW_TRIAGE_HONEYPOT_ENABLED", True),
     ("triage_honeypot_enforce", "HYDRAFLOW_TRIAGE_HONEYPOT_ENFORCE", False),
@@ -852,6 +853,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "gateway_route_shadow_enabled",
         "HYDRAFLOW_GATEWAY_ROUTE_SHADOW_ENABLED",
+        True,
+    ),
+    (
+        "gateway_policy_workspace_enabled",
+        "HYDRAFLOW_GATEWAY_POLICY_WORKSPACE_ENABLED",
         True,
     ),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
@@ -1788,6 +1794,24 @@ class HydraFlowConfig(BaseModel):
             "0 = today's straight-to-rejection behavior. "
             "max_test_adequacy_attempts=0 still disables the whole gate, "
             "repair included."
+        ),
+    )
+    test_adequacy_pin_demand: bool = Field(
+        default=True,
+        description=(
+            "Judge a test-adequacy retry against the demand the PREVIOUS "
+            "attempt actually stated (#11644). #11643's calibration measured "
+            "9 of 15 consecutive re-rejections demanding something entirely "
+            "new (mean substantive overlap 0.04), so an implementer could "
+            "satisfy every stated finding and still be rejected on a fresh "
+            "set. With the pin in force a retry is rejected by a finding that "
+            "restates the pinned demand, by a genuinely NEW finding that names "
+            "a locatable referent, or by a deterministic coverage gap — but "
+            "not by a new finding that names nothing locatable, which is "
+            "recorded as advisory instead. Strictness is otherwise unchanged: "
+            "a first attempt still blocks on every finding, and the "
+            "coverage-delta source never routes through the contract at all. "
+            "False = pre-#11644 behavior."
         ),
     )
     test_adequacy_coverage_timeout_secs: int = Field(
@@ -2903,8 +2927,8 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Clarity score threshold (ADR-0107). Issues scoring below this are "
             "flagged to the planner's on-demand discover/shape decision gate "
-            "(plan_phase.py:_should_discover_helper) as a discovery hint, rather "
-            "than routed to a standalone Discover phase at triage time."
+            "(plan_phase_prepass.py:_should_discover_helper) as a discovery hint, "
+            "rather than routed to a standalone Discover phase at triage time."
         ),
     )
     plan_review_min_complexity: int = Field(
@@ -3056,6 +3080,18 @@ class HydraFlowConfig(BaseModel):
             "policy resolver would have chosen versus what legacy routing did. "
             "Observation only — it never changes a provider, model, or command. "
             "Set false to stop writing the per-repo shadow decision chain."
+        ),
+    )
+    gateway_policy_workspace_enabled: bool = Field(
+        default=True,
+        description=(
+            "Serve the operator Routing policy workspace: read the per-repo "
+            "policy snapshot, effective-route matrix, and mutation audit, and "
+            "expose the revision-safe write plane. Routing behaviour is "
+            "unaffected either way — enforcement is a later phase. Writes need "
+            "an authenticated operator identity (env-only "
+            "HYDRAFLOW_OPERATOR_TOKEN) AND a loopback dashboard bind, so this "
+            "dial off is the third, blunt way to close them (ADR-0140)."
         ),
     )
     gateway_fleet_ratchet_enabled: bool = Field(

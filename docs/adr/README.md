@@ -199,6 +199,7 @@ cadence and files remediation issues on drift.
 | [0137](0137-fenced-issue-driver-and-director-runtime-boundary.md) | Fenced IssueDriver and director runtime boundary | Accepted |
 | [0138](0138-gateway-account-identity-and-sanitized-route-visibility.md) | Gateway account identity and sanitized route visibility | Accepted |
 | [0139](0139-shadow-routing-policy-resolver.md) | Shadow routing policy resolver and hash-linked decision record | Accepted |
+| [0140](0140-revision-safe-policy-workspace-and-operator-write-boundary.md) | Revision-safe policy workspace and the operator write boundary | Accepted |
 
 ## Adding a new ADR
 

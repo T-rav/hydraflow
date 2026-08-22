@@ -1,0 +1,22 @@
+{
+ "issue_number": 9009,
+ "timestamp": "20260804T000000Z",
+ "outcome": "failed",
+ "error": "test-adequacy failed: uncovered lines in src/sample_widget.py",
+ "duration_seconds": 2100.0,
+ "files": [
+  "manifest.json"
+ ],
+ "failure_class": "test_adequacy",
+ "test_adequacy": {
+  "passed": false,
+  "verdict_source": "coverage-delta",
+  "findings": [
+   "uncovered lines in src/sample_widget.py"
+  ],
+  "repair_passes_used": 1,
+  "repair_outcomes": [
+   "still-failing"
+  ]
+ }
+}

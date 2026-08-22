@@ -42,7 +42,7 @@ async def test_transient_auth_blip_restarts_loop_not_stopped(config) -> None:
     factories: list = [("ci_monitor", _noop_loop)]
     exc = AuthenticationError("Command ('gh', ...) failed: authentication required")
 
-    with patch("orchestrator.probe_auth_availability", AsyncMock(return_value=True)):
+    with patch("orchestrator_restart.probe_auth_availability", AsyncMock(return_value=True)):
         await orch._handle_loop_exception("ci_monitor", exc, tasks, factories)
 
     assert orch._auth_failed is False  # factory NOT marked auth-failed
@@ -60,7 +60,7 @@ async def test_persistent_auth_failure_still_stops(config) -> None:
     factories: list = [("ci_monitor", _noop_loop)]
     exc = AuthenticationError("Command ('gh', ...) failed: not logged in")
 
-    with patch("orchestrator.probe_auth_availability", AsyncMock(return_value=False)):
+    with patch("orchestrator_restart.probe_auth_availability", AsyncMock(return_value=False)):
         await orch._handle_loop_exception("ci_monitor", exc, tasks, factories)
 
     assert orch._auth_failed is True  # factory marked auth-failed
@@ -78,7 +78,7 @@ async def test_kill_switch_reverts_to_halt_on_signal(config) -> None:
 
     # Probe would say auth is fine, but the kill-switch disables corroboration.
     with patch(
-        "orchestrator.probe_auth_availability", AsyncMock(return_value=True)
+        "orchestrator_restart.probe_auth_availability", AsyncMock(return_value=True)
     ) as probe:
         await orch._handle_loop_exception("ci_monitor", exc, tasks, factories)
 

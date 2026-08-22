@@ -163,6 +163,15 @@ class RoutingAuditLog:
         """Every record in order. A malformed line raises rather than being skipped."""
         return tuple(self._iter_records())
 
+    def head(self) -> AuditRecord | None:
+        """The last record via the same bounded tail read appends use, or ``None``.
+
+        Public because a write-ahead recovery has to answer "did my append
+        already land?" in O(1) after a crash (ADR-0140), and re-reading the
+        whole chain to learn that would make recovery cost grow with history.
+        """
+        return self._head()
+
     def verify(self) -> ChainVerification:
         """Walk the chain and report the first record whose links do not hold."""
         expected_prev = GENESIS_HASH

@@ -1,0 +1,10 @@
+{
+ "issue_number": 9003,
+ "timestamp": "20260801T020000Z",
+ "files": [
+  "manifest.json"
+ ],
+ "outcome": "failed",
+ "error": "test-adequacy failed: Independent verifier overrode OK: edge-case-coverage",
+ "duration_seconds": 1260.0
+}

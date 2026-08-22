@@ -1,5 +1,8 @@
 """Tests for Orchestrator.restart_loop_task — the stalled-loop restart verb.
 
+Renamed from ``test_orchestrator_loop_restart.py`` when the restart cluster
+moved to ``src/orchestrator_restart.py`` (#11547).
+
 A silently-stalled loop task never completes, so ``_supervise_loops`` never
 sees it (its ``asyncio.wait`` only wakes on task completion). The restart
 verb cancels the stalled task and replaces it from the retained factory;

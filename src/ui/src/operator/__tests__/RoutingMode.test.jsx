@@ -279,7 +279,7 @@ describe('RoutingMode live view', () => {
 
 describe('RoutingMode view selection', () => {
   it('defaults to the accounts view for an unknown sub-view', () => {
-    render(<RoutingMode accounts={ACCOUNTS} live={LIVE} routingView="policies" />)
+    render(<RoutingMode accounts={ACCOUNTS} live={LIVE} routingView="bogus" />)
     expect(screen.getByTestId('routing-accounts')).toBeInTheDocument()
   })
 
@@ -290,5 +290,25 @@ describe('RoutingMode view selection', () => {
     fireEvent.click(screen.getByTestId('routing-view-live'))
 
     expect(select).toHaveBeenCalledWith('routingView', 'live')
+  })
+
+  it.each([
+    ['effective', 'effective-routes'],
+    ['policies', 'policy-workspace'],
+    ['audit', 'policy-audit'],
+  ])('renders the %s workspace view (#11538)', (view, testid) => {
+    render(<RoutingMode accounts={ACCOUNTS} live={LIVE} routingView={view} />)
+    expect(screen.getByTestId(testid)).toBeInTheDocument()
+  })
+
+  it('offers all five sub-views the routing design reserves', () => {
+    render(<RoutingMode accounts={ACCOUNTS} live={LIVE} routingView="accounts" />)
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual([
+      'Accounts',
+      'Effective routes',
+      'Policies',
+      'Live',
+      'Audit',
+    ])
   })
 })

@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from adequacy_demand import pin_findings
 from adr_utils import is_adr_issue_title, next_adr_number
 from agent import AgentRunner
 from beads_manager import BeadsManager
@@ -119,6 +120,21 @@ def _route_is_failure_screen(state: FlowState) -> bool:
     here only via ``zero-commit-abort`` (its first-match edge wins).
     """
     return state.get("route") in {"fail_zero_commit", "fail_null_delivery"}
+
+
+def _pinned_adequacy_demand(result: WorkerResult) -> list[str]:
+    """The test-adequacy demand to carry onto the next attempt (#11644).
+
+    Empty unless this attempt actually died at the adequacy gate. Only the
+    findings that BLOCKED ride forward: advisory findings (new *and* naming
+    nothing locatable) did not reject this run, so promoting them to the next
+    run's bar would reintroduce exactly the moving target the pin removes.
+    """
+    outcome = result.test_adequacy
+    if outcome is None or outcome.passed:
+        return []
+    advisory = set(outcome.advisory_findings)
+    return list(pin_findings([f for f in outcome.findings if f not in advisory]))
 
 
 def _open_pr_terminal(state: FlowState) -> bool:
@@ -1546,6 +1562,13 @@ class ImplementPhase:
             "error": result.error,
             "commits": result.commits,
         }
+        # #11644: pin the demand the adequacy gate actually made, so the next
+        # attempt is judged against THIS bar rather than a freshly-sampled one.
+        # Only the blocking findings ride forward — advisory ones did not
+        # reject this run and must not become the next run's bar.
+        pinned = _pinned_adequacy_demand(result)
+        if pinned:
+            meta["test_adequacy_findings"] = pinned
         self._state.set_worker_result_meta(issue.id, meta)
 
     async def _run_implementation(
@@ -1559,11 +1582,20 @@ class ImplementPhase:
         # Retrieve prior failure context for retry feedback
         last_meta = self._state.get_worker_result_meta(issue.id)
         prior_failure = ""
+        # #11644: the demand the previous attempt's adequacy gate stated. Rides
+        # the same seam as prior_failure and under the same condition — during a
+        # review-feedback retry the prior gate verdict is stale, so no pin.
+        pinned_adequacy: list[str] = []
         reset_for_retry = bool(review_feedback)  # review-feedback retries always reset
         # Only inject prior failure context for cycling retries (no active review feedback).
         # During review-feedback retries the prior error is stale — the agent should
         # focus on reviewer comments, not a potentially-resolved quality gate error.
         if last_meta and not review_feedback:
+            pinned_adequacy = [
+                f
+                for f in last_meta.get("test_adequacy_findings") or []
+                if isinstance(f, str) and f.strip()
+            ]
             prior_error = last_meta.get("error") or ""
             # ADR-0063 W5: spec-compliance gaps from the prior attempt's
             # post-failure review take priority — they describe *what* was
@@ -1639,6 +1671,9 @@ class ImplementPhase:
             # #11568: complexity-tiered wall-clock budget for the build spawn;
             # ``agent_timeout`` remains the ceiling inside the runner.
             "timeout_s": self._implement_timeout(issue),
+            # #11644: judge this retry's adequacy verdict against the demand
+            # the previous attempt stated, not a freshly-sampled one.
+            "pinned_adequacy_findings": pinned_adequacy,
         }
         if bead_mapping:
             run_kwargs["bead_mapping"] = bead_mapping

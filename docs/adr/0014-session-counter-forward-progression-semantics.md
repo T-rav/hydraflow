@@ -108,8 +108,8 @@ Adopt **forward-progression-only** as the canonical semantics for all
 - `src/models.py:SessionCounters` — counter model definition
 - `src/state/_session.py:SessionStateMixin.increment_session_counter` — increment logic
 - `src/triage_phase.py:TriagePhase._triage_single` — triaged counter (forward-progression)
-- `src/plan_phase.py:PlanPhase._handle_already_satisfied`, `src/plan_phase.py:PlanPhase._swap_plan_to_ready` — planned counter (forward-progression)
+- `src/plan_phase_disposition.py:PlanDispositionMixin._handle_already_satisfied`, `src/plan_phase_disposition.py:PlanDispositionMixin._swap_plan_to_ready` — planned counter (forward-progression)
 - `src/implement_phase.py:ImplementPhase._handle_implementation_result` — implemented counter (forward-progression)
 - `src/review_phase/_phase.py:ReviewPhase._record_review_outcome` — reviewed counter (guarded on APPROVE)
 - `src/post_merge_handler.py:PostMergeHandler.handle_approved` — merged counter (forward-progression)
-- `src/orchestrator.py:HydraFlowOrchestrator.build_pipeline_stats` — session_counter_map (stage-to-field mapping)
+- `src/orchestrator_stats.py:OrchestratorStatsMixin.build_pipeline_stats` — session_counter_map (stage-to-field mapping)

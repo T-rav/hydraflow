@@ -215,7 +215,7 @@ _Source: #6359 (plan)_
 
 ## Fatal error hierarchy: AuthenticationError and CreditExhaustedError propagate
 
-Catch fatal errors first in except clauses: AuthenticationError, CreditExhaustedError propagate; all others suppressed. Pattern in base_background_loop.py:141, orchestrator.py:948, phase_utils.py:392.
+Catch fatal errors first in except clauses: AuthenticationError, CreditExhaustedError propagate; all others suppressed. Pattern in base_background_loop.py:141, orchestrator_loops.py (`_polling_loop`), phase_utils.py:392.
 
 **Why:** Preserves fatal errors while suppressing handled exceptions; canonical across codebase.
 

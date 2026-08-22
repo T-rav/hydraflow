@@ -244,7 +244,7 @@ def build_route_context(
     )
     return RouteContext(
         repo=RepoIdentity.from_canonical(str(getattr(config, "repo", "") or "")),
-        repo_class=_repo_class(config),
+        repo_class=repo_class_for(config),
         principal_id=principal_id.strip()[:256] or "unknown",
         worker_role=canonical_worker_role(principal_id),
         model_requirement=requirement_for_model(final_model),
@@ -439,7 +439,13 @@ def record_dialled_route_shadow(
     )
 
 
-def _repo_class(config: HydraFlowConfig) -> RepoClass:
+def repo_class_for(config: HydraFlowConfig) -> RepoClass:
+    """Return the governance class this repo's spawns are stamped with.
+
+    Public because the policy workspace (ADR-0140) builds effective-route
+    contexts from the same config and must read the class the same way; two
+    readings of ``gateway_repo_class`` would be two answers to one question.
+    """
     raw = str(getattr(config, "gateway_repo_class", "") or "").strip().lower()
     try:
         return RepoClass(raw)

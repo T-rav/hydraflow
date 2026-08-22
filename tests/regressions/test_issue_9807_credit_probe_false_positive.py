@@ -32,7 +32,7 @@ async def test_false_credit_signal_not_paused_when_probe_says_available(config) 
     factories: list = [("plan", AsyncMock())]
     exc = CreditExhaustedError("Your credit balance is too low")
 
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=True)):
+    with patch("orchestrator_credits.probe_credit_availability", AsyncMock(return_value=True)):
         await orch._pause_for_credits(exc, "diagnostic", tasks, factories)
 
     assert orch._credits_paused_until is None  # no global pause committed
@@ -50,7 +50,7 @@ async def test_real_credit_out_still_pauses_when_probe_confirms(config) -> None:
     factories: list = [("plan", AsyncMock())]
     exc = CreditExhaustedError("usage limit reached")
 
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=False)):
+    with patch("orchestrator_credits.probe_credit_availability", AsyncMock(return_value=False)):
         await orch._pause_for_credits(exc, "plan", tasks, factories)
 
     assert orch._credits_paused_until is not None  # pause committed

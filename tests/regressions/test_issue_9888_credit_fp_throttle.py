@@ -40,7 +40,7 @@ async def test_repeat_false_positives_within_cooldown_are_log_only(config) -> No
     exc = CreditExhaustedError("Your credit balance is too low")
     probe = AsyncMock(return_value=True)
 
-    with patch("orchestrator.probe_credit_availability", probe):
+    with patch("orchestrator_credits.probe_credit_availability", probe):
         for _ in range(6):  # the observed 6-in-3ms storm
             paused = await orch._pause_for_credits(exc, "diagnostic", {}, [])
             assert paused is False
@@ -57,7 +57,7 @@ async def test_cooldown_expiry_resumes_suppression_banner(config) -> None:
     exc = CreditExhaustedError("usage limit reached")
     probe = AsyncMock(return_value=True)
 
-    with patch("orchestrator.probe_credit_availability", probe):
+    with patch("orchestrator_credits.probe_credit_availability", probe):
         await orch._pause_for_credits(exc, "diagnostic", {}, [])
         # Backdate the suppression past the cooldown (clock-free test).
         orch._credit_fp_last["diagnostic"] = datetime.now(UTC) - timedelta(
@@ -76,7 +76,7 @@ async def test_sources_are_throttled_independently(config) -> None:
     exc = CreditExhaustedError("credit balance too low")
     probe = AsyncMock(return_value=True)
 
-    with patch("orchestrator.probe_credit_availability", probe):
+    with patch("orchestrator_credits.probe_credit_availability", probe):
         await orch._pause_for_credits(exc, "diagnostic", {}, [])
         await orch._pause_for_credits(exc, "reviewer", {}, [])
 

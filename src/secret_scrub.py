@@ -99,6 +99,23 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         "HydraFlow gateway control token",
         re.compile(r"hfgwctl_[A-Za-z0-9_-]{32,}"),
     ),
+    # The dashboard operator credential ADR-0140 gates policy writes on. Same
+    # shape of rule as the two gateway tokens above and here for the same reason:
+    # a credential that only the "not in payload" assertion in one test file can
+    # catch is a credential the canonical detector is blind to everywhere else —
+    # the audit chain and the transcript stream included. The "hfop_" prefix
+    # collides with neither "hfgw_" nor "hfgwctl_".
+    (
+        "HydraFlow operator token (assignment)",
+        re.compile(
+            r"(?:HYDRAFLOW_)?OPERATOR_TOKEN\s*[:=]\s*[^\s'\",}\[\]]{16,}",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "HydraFlow operator token",
+        re.compile(r"hfop_[A-Za-z0-9_-]{32,}"),
+    ),
     (
         "Generic private key",
         re.compile(r"-----BEGIN\s+(RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),

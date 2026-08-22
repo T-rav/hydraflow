@@ -362,7 +362,11 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "spec_review": frozenset({1, 3, 4, 8}),
     "spec_match_self_review": frozenset({1, 3, 5, 7, 8}),
     "term_proposer": frozenset({1, 3}),
-    "test_adequacy": frozenset({2, 3, 5}),
+    # #11644 tightened criterion 2: the finder now states what a gap MUST name
+    # (a path/symbol/constant/flag/route) and gives the two verbatim corpus
+    # counter-examples, so the anti-example criterion passes. Baseline lowered
+    # in the same commit that earned it.
+    "test_adequacy": frozenset({3, 5}),
     # Repair-in-run prompt (#11593): pinned at its introduction score, in line
     # with its finder/verifier siblings.
     "test_adequacy_repair": frozenset({1, 3, 5, 7, 8}),

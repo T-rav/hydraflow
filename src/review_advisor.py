@@ -253,6 +253,9 @@ CRITICAL_PATH_GLOBS: tuple[str, ...] = (
     "src/persistence/*",
     "src/state/*",
     "src/*_loop.py",
+    # The orchestrator's surfaces moved into a mixin family (#11547); a change
+    # there is the same blast radius it was when it lived in orchestrator.py.
+    "src/orchestrator_*.py",
 )
 
 

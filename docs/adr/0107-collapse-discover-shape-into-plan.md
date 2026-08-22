@@ -41,8 +41,9 @@ standalone phases carry disproportionate cost for that minority:
   proceeded and surfaced a specific question instead.
 
 The planner already contains the seams this decision needs:
-`plan_phase.py:_should_research` gates a research pre-pass (escalated or cycled
-issues) via an injected research runner, and `plan_phase.py:_is_product_track_issue`
+`plan_phase_prepass.py:_should_research` gates a research pre-pass (escalated or
+cycled issues) via an injected research runner, and
+`plan_phase_prepass.py:_is_product_track_issue`
 detects product-track provenance. The discover/shape logic is likewise already
 factored into callable engines (`discover_runner.py:DiscoverRunner`,
 `shape_runner.py:ShapeRunner`) rather than being welded to their loops — the
@@ -194,11 +195,11 @@ removed now that the collapsed topology is the only path.
   topology change behind a boolean rollout flag.
 - `src/triage_phase.py:TriagePhase._triage_single` — routing; the Discover branch is removed, so a ready
   issue always transitions to `hydraflow-plan`.
-- `src/plan_phase.py:PlanPhase._should_research` — existing gate the planner discovery
+- `src/plan_phase_prepass.py:PlanPrepassMixin._should_research` — existing gate the planner discovery
   decision extends.
-- `src/plan_phase.py:PlanPhase._should_discover_helper` / `_should_shape_helper` — the
+- `src/plan_phase_prepass.py:PlanPrepassMixin._should_discover_helper` / `_should_shape_helper` — the
   planner decision gate that invokes the discover/shape engines on demand.
-- `src/plan_phase.py:PlanPhase._is_product_track_issue` — product-track detection that
+- `src/plan_phase_prepass.py:PlanPrepassMixin._is_product_track_issue` — product-track detection that
   collapses into planner decomposition.
 - `src/discover_runner.py:DiscoverRunner` — retained as the planner-invoked
   research engine (the standalone `DiscoverPhase` wrapper was removed).

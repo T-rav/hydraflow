@@ -1811,6 +1811,12 @@ def create_router(
 
     router.include_router(build_gateway_router(config))
 
+    # --- Routing policy workspace (ADR-0140): four reads and ONE write, the
+    # write gated on a loopback bind plus an authenticated operator identity.
+    from dashboard_routes._gateway_policy_routes import build_gateway_policy_router
+
+    router.include_router(build_gateway_policy_router(config, ctx))
+
     # --- Issue history cache ---
     # Cache the aggregated issue_rows + pr_to_issue for the unfiltered case.
     # Persisted to disk so the first request after restart is fast.

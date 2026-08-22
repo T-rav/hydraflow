@@ -102,6 +102,9 @@ SETTINGS: dict[str, SettingSpec] = {
     # Repair-in-run (#11593). Live: AgentRunner._run_skill reads it via
     # getattr(config, skill.repair_config_key) on every gate evaluation.
     "test_adequacy_repair_passes": SettingSpec("CI & Quality", live=True, order=22),
+    # Demand contract (#11644). Live: skill_gate reads it via
+    # getattr(config, skill.pin_config_key) on every gate evaluation.
+    "test_adequacy_pin_demand": SettingSpec("CI & Quality", live=True, order=23),
     "test_adequacy_verifier_model": SettingSpec("Models", live=True, order=4),
     # Live: auto_pr re-reads both via trace_collector.get_active_config()
     # on every gate run (#10013), so a toggle applies to the next bot PR.
@@ -245,6 +248,13 @@ SETTINGS: dict[str, SettingSpec] = {
     # off stops the next spawn's recording without a restart. Observation only —
     # it can never change which provider or model a spawn uses.
     "gateway_route_shadow_enabled": SettingSpec("Model Routing", live=True, order=80),
+    # --- Routing policy workspace (#11538 / ADR-0140) ------------------------
+    # Live: every policy route reads the dial per request, so closing it takes
+    # effect on the next call without a restart. It gates the workspace only;
+    # no routing decision reads it.
+    "gateway_policy_workspace_enabled": SettingSpec(
+        "Model Routing", live=True, order=81
+    ),
     # --- Issue Refinement (backlog dedup + priority scoring, #9957) ----------
     "issue_refinement_enabled": SettingSpec("Issue Refinement", live=True, order=0),
     "issue_refinement_pair_budget": SettingSpec("Issue Refinement", live=True, order=1),

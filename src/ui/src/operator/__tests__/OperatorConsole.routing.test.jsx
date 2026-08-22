@@ -8,10 +8,15 @@
  */
 
 import React from 'react'
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { OperatorConsoleView } from '../OperatorConsole'
 import { toGatewayAccounts, toGatewayLiveRoutes } from '../model/gatewayRouting'
+import {
+  EMPTY_POLICY_AUDIT_VM,
+  toEffectiveMatrix,
+  toPolicyWorkspace,
+} from '../model/policyWorkspace'
 
 const EMPTY_STAGES = {
   triage: [],
@@ -150,5 +155,173 @@ describe('OperatorConsole — Routing mode', () => {
     render(<OperatorConsoleView socket={idleSocket()} />)
 
     expect(screen.getByTestId('routing-accounts-unavailable')).toBeInTheDocument()
+  })
+})
+
+// The three views P2 added (#11538, ADR-0140). Same seams: URL-addressable,
+// idle-exempt, and fed from the container's props rather than a private fetch.
+const POLICY_FEED = {
+  workspace: toPolicyWorkspace({
+    scope: 'repo',
+    repo: 'acme/hydraflow',
+    state: 'ok',
+    revision: 4,
+    policies: [],
+    editable_policy_ids: [],
+    issues: [],
+    write_gate: 'no-operator-identity',
+    editable: false,
+  }),
+  matrix: toEffectiveMatrix({
+    repo: 'acme/hydraflow',
+    policy_revision: 4,
+    snapshot_state: 'ok',
+    cells: [
+      {
+        key: 'implementer|agentic|capability:balanced',
+        role: 'implementer',
+        request_face: 'agentic',
+        requirement: { kind: 'capability', value: 'balanced' },
+        state: 'unmanaged',
+        outcome: 'held',
+        reason: 'no-legacy-route',
+        policy_source: 'none',
+        policy_revision: 4,
+        explanation: { context: {}, considered: [] },
+      },
+    ],
+  }),
+  audit: EMPTY_POLICY_AUDIT_VM,
+  preview: null,
+  rejection: null,
+  requestPreview: () => {},
+  save: () => {},
+  clearPreview: () => {},
+}
+
+describe('OperatorConsole routing policy views (#11538)', () => {
+  let originalHref
+
+  beforeEach(() => {
+    originalHref = window.location.href
+    window.history.replaceState({}, '', '/')
+  })
+
+  afterEach(() => {
+    window.history.replaceState({}, '', originalHref)
+  })
+
+  it('restores the effective-routes sub-view straight from the URL', () => {
+    window.history.replaceState({}, '', '/?mode=routing&routingView=effective')
+    render(<OperatorConsoleView socket={idleSocket()} policy={POLICY_FEED} />)
+
+    expect(screen.getByTestId('effective-revision')).toHaveTextContent('policy revision 4')
+  })
+
+  it('flows the workspace view model through to the policies view', () => {
+    window.history.replaceState({}, '', '/?mode=routing&routingView=policies')
+    render(<OperatorConsoleView socket={idleSocket()} policy={POLICY_FEED} />)
+
+    expect(screen.getByTestId('policy-revision')).toHaveTextContent('revision 4')
+  })
+
+  it('renders the policies view read-only when the write gate is closed', () => {
+    window.history.replaceState({}, '', '/?mode=routing&routingView=policies')
+    render(<OperatorConsoleView socket={idleSocket()} policy={POLICY_FEED} />)
+
+    expect(screen.getByTestId('policy-write-gate')).toBeInTheDocument()
+  })
+
+  it('mirrors a within-view selection into the URL', () => {
+    window.history.replaceState({}, '', '/?mode=routing&routingView=effective')
+    render(<OperatorConsoleView socket={idleSocket()} policy={POLICY_FEED} />)
+
+    fireEvent.click(
+      screen.getByTestId('effective-cell-implementer|agentic|capability:balanced'),
+    )
+
+    expect(new URLSearchParams(window.location.search).get('routingSelection')).toBe(
+      'implementer|agentic|capability:balanced',
+    )
+  })
+
+  it('renders a read-only workspace when the console is given no policy feed', () => {
+    window.history.replaceState({}, '', '/?mode=routing&routingView=policies')
+    render(<OperatorConsoleView socket={idleSocket()} />)
+
+    expect(screen.queryByTestId('policy-editor')).toBeNull()
+  })
+
+  it('keeps the audit view reachable on an idle factory', () => {
+    window.history.replaceState({}, '', '/?mode=routing&routingView=audit')
+    render(<OperatorConsoleView socket={idleSocket()} policy={POLICY_FEED} />)
+
+    expect(screen.getByTestId('policy-audit')).toBeInTheDocument()
+  })
+})
+
+// The container seam that let a HIGH defect ship through a review pass: every
+// other test injects a `policy` fixture, so the wiring between the console's
+// live selection and the policy feed was never exercised.
+describe('OperatorConsole policy feed wiring (#11538)', () => {
+  let originalHref
+
+  beforeEach(() => {
+    originalHref = window.location.href
+    window.history.replaceState({}, '', '/')
+  })
+
+  afterEach(() => {
+    window.history.replaceState({}, '', originalHref)
+  })
+
+  function recordingFetcher() {
+    return vi.fn(() =>
+      Promise.resolve({ ok: true, status: 200, data: { scope: 'repo', policies: [] } }),
+    )
+  }
+
+  it('does not poll the policy plane while Routing is closed', async () => {
+    const fetcher = recordingFetcher()
+    render(<OperatorConsoleView socket={idleSocket()} policyFetcher={fetcher} />)
+    await waitFor(() => expect(screen.getByTestId('mode-toggle-routing')).toBeInTheDocument())
+
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('starts polling when the operator opens Routing', async () => {
+    // `useOperatorSelection` is per-caller state seeded from the URL at mount,
+    // so a second instance would freeze here and the feed would never enable.
+    const fetcher = recordingFetcher()
+    render(<OperatorConsoleView socket={idleSocket()} policyFetcher={fetcher} />)
+
+    fireEvent.click(screen.getByTestId('mode-toggle-routing'))
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalled())
+  })
+
+  it('scopes the feed to the repository the operator selected', async () => {
+    const fetcher = recordingFetcher()
+    window.history.replaceState({}, '', '/?mode=routing&repo=acme%2Fchosen')
+    render(<OperatorConsoleView socket={idleSocket()} policyFetcher={fetcher} />)
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalled())
+
+    expect(fetcher.mock.calls.every(([url]) => url.includes('repo=acme%2Fchosen'))).toBe(true)
+  })
+
+  it('does not poll at all when a fixture feed is supplied', async () => {
+    const fetcher = recordingFetcher()
+    window.history.replaceState({}, '', '/?mode=routing')
+    render(
+      <OperatorConsoleView
+        socket={idleSocket()}
+        policy={POLICY_FEED}
+        policyFetcher={fetcher}
+      />,
+    )
+    await waitFor(() => expect(screen.getByTestId('routing-mode')).toBeInTheDocument())
+
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })

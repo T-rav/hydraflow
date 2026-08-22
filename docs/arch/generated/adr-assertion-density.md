@@ -4,10 +4,10 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 ## Population
 
-- **Population:** Accepted (85 ADRs)
-- **Mean density** (per-ADR, unweighted): 96%
-- **Executable fraction** (check-weighted): 98% (185 of 188 cited checks)
-- **Check kinds:** pytest 184, make 1, script 0, prose 3
+- **Population:** Accepted (86 ADRs)
+- **Mean density** (per-ADR, unweighted): 97%
+- **Executable fraction** (check-weighted): 98% (191 of 194 cited checks)
+- **Check kinds:** pytest 190, make 1, script 0, prose 3
 - **Prose-count control limit** (Shewhart c-chart UCL): 0.60
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 
@@ -102,6 +102,7 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0137 | Fenced IssueDriver and director runtime boundary | 100% | 17 | 0 |
 | ADR-0138 | Gateway account identity and sanitized route visibility | 100% | 8 | 0 |
 | ADR-0139 | Shadow routing policy resolver and hash-linked decision record | 100% | 7 | 0 |
+| ADR-0140 | Revision-safe policy workspace and the operator write boundary | 100% | 6 | 0 |
 
 
 <!-- arch:generated -->

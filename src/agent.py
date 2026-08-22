@@ -180,6 +180,7 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
         attempt_number: int = 0,
         known_traps: str = "",
         timeout_s: int | None = None,
+        pinned_adequacy_findings: Sequence[str] | None = None,
     ) -> WorkerResult:
         """Run the implementation agent for *task*.
 
@@ -196,6 +197,10 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
         for the main build spawn, resolved by the implement phase from
         triage's complexity score. ``None`` means ``agent_timeout`` — which
         stays the ceiling either way (``BaseRunner._execute`` clamps).
+
+        ``pinned_adequacy_findings`` (#11644) is the test-adequacy demand the
+        previous attempt stated. On a retry the gate is judged against it, so
+        satisfying the stated bar is not defeated by a freshly-sampled one.
 
         Returns a :class:`WorkerResult` with success/failure info.
         """
@@ -262,6 +267,7 @@ These six patterns pass locally but go red in CI. Check each trigger and apply t
                     branch,
                     worker_id,
                     plan_text=skill_plan_text,
+                    pinned_findings=pinned_adequacy_findings or (),
                 )
                 if skill_result.test_adequacy is not None:
                     # Rejection/repair telemetry (#11593 seam 3) — rides the
@@ -1160,6 +1166,7 @@ SUMMARY: <one-line summary>
         branch: str,
         worker_id: int,
         plan_text: str = "",
+        pinned_findings: Sequence[str] = (),
     ) -> LoopResult:
         """Run a registered post-implementation skill via the skill registry.
 
@@ -1169,6 +1176,10 @@ SUMMARY: <one-line summary>
         repair passes hand the concrete findings back to the implementer
         worktree and re-run the FULL check; the run is rejected only when
         the verdict still fails afterwards. Returns a :class:`LoopResult`.
+
+        ``pinned_findings`` (#11644) is the demand the previous attempt
+        stated. It applies only to a skill declaring ``pin_config_key``
+        (test-adequacy today) and only while that config field is true.
         """
         max_attempts = getattr(self._config, skill.config_key, 0)
         if max_attempts <= 0:
@@ -1180,7 +1191,13 @@ SUMMARY: <one-line summary>
 
         skill_started = time.monotonic()
         check = await self._run_skill_check(
-            skill, issue, worktree_path, branch, max_attempts, plan_text
+            skill,
+            issue,
+            worktree_path,
+            branch,
+            max_attempts,
+            plan_text,
+            pinned_findings=pinned_findings,
         )
         if check.short_circuit:
             return check.result
@@ -1208,7 +1225,7 @@ SUMMARY: <one-line summary>
         # and every repair-pass outcome so the verifier can be calibrated
         # later. A clean first-pass OK carries no record.
         if skill.repair_config_key is not None and (
-            not result.passed or repair_outcomes
+            not result.passed or repair_outcomes or check.demand.advisory
         ):
             result = replace(
                 result,
@@ -1218,6 +1235,12 @@ SUMMARY: <one-line summary>
                     findings=check.findings[:10],
                     repair_passes_used=len(repair_outcomes),
                     repair_outcomes=repair_outcomes,
+                    # #11644: what the retry was judged against, what it
+                    # raised that the pin never mentioned, and what the pin
+                    # absorbed. The moving bar stays measurable.
+                    pinned_findings=list(check.pinned[:10]),
+                    new_findings=list(check.demand.new[:10]),
+                    advisory_findings=list(check.demand.advisory[:10]),
                 ),
             )
         return result
@@ -1230,10 +1253,18 @@ SUMMARY: <one-line summary>
         branch: str,
         max_attempts: int,
         plan_text: str,
+        pinned_findings: Sequence[str] = (),
     ) -> SkillCheckOutcome:
         """Delegate to :func:`skill_gate.run_skill_check` (patch seam)."""
         return await skill_gate.run_skill_check(
-            self, skill, issue, worktree_path, branch, max_attempts, plan_text
+            self,
+            skill,
+            issue,
+            worktree_path,
+            branch,
+            max_attempts,
+            plan_text,
+            pinned_findings=pinned_findings,
         )
 
     async def _run_skill_repair_loop(

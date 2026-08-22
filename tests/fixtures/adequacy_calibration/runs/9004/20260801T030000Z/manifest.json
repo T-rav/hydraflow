@@ -1,0 +1,10 @@
+{
+ "issue_number": 9004,
+ "timestamp": "20260801T030000Z",
+ "files": [
+  "manifest.json"
+ ],
+ "outcome": "failed",
+ "error": "test-adequacy failed: dead new keyword parameter, untested `_load` branch",
+ "duration_seconds": 1620.0
+}

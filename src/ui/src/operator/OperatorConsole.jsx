@@ -57,6 +57,7 @@ import { toSupervisorGauges } from './model/supervisorGauges'
 import { EMPTY_TRUST_FLEET_VM } from './model/trustFleet'
 import RoutingMode from './RoutingMode'
 import { useGatewayAccounts, useGatewayLiveRoutes } from './useGatewayRouting'
+import { defaultPolicyFetcher, usePolicyWorkspace } from './usePolicyWorkspace'
 import {
   EMPTY_GATEWAY_ACCOUNTS_VM,
   EMPTY_GATEWAY_LIVE_VM,
@@ -196,11 +197,28 @@ function ModeToggle({ mode, select, styles }) {
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM, policy = null, policyFetcher = null }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
-  const { repo, stage, item, mode, routingView, select, breadcrumb } = useOperatorSelection()
+  const { repo, stage, item, mode, routingView, routingSelection, select, breadcrumb } = useOperatorSelection()
+  // Routing policy (#11538, ADR-0140) is owned HERE, not in the container.
+  // `useOperatorSelection` is per-caller `useState` seeded from the URL at
+  // mount, so a second instance in the container would freeze at whatever the
+  // URL said then: clicking the Routing tab would render the workspace while
+  // the feed stayed disabled, and a repo picked later would never reach it.
+  // One instance, one selection.
+  // `policyFetcher` is REQUIRED to reach the network: this shell is rendered
+  // with fixtures in tests "without a live HydraFlowProvider", and a default
+  // fetcher would have it opening real requests and a 30-second interval from
+  // a test. The container passes the real one.
+  const livePolicy = usePolicyWorkspace({
+    repo,
+    enabled:
+      mode === 'routing' && policy == null && typeof policyFetcher === 'function',
+    fetcher: policyFetcher || undefined,
+  })
+  const policyFeed = policy ?? livePolicy
   const events = socket.events ?? []
 
   const pipeline = useMemo(
@@ -368,8 +386,18 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                 <RoutingMode
                   accounts={gatewayAccounts}
                   live={gatewayLive}
+                  workspace={policyFeed.workspace}
+                  matrix={policyFeed.matrix}
+                  audit={policyFeed.audit}
+                  policySourceState={policyFeed.sourceState}
+                  preview={policyFeed.preview}
+                  rejection={policyFeed.rejection}
                   routingView={routingView}
+                  routingSelection={routingSelection}
                   select={select}
+                  onPreviewPolicy={policyFeed.requestPreview}
+                  onSavePolicy={policyFeed.save}
+                  onClearPreview={policyFeed.clearPreview}
                 />
               ) : mode === 'supervisor' ? (
                 <SupervisorMode
@@ -463,7 +491,7 @@ export function OperatorConsole() {
   // of the WS slice the shell otherwise renders from.
   const gatewayAccounts = useGatewayAccounts()
   const gatewayLive = useGatewayLiveRoutes()
-  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} />
+  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} policyFetcher={defaultPolicyFetcher} />
 }
 
 export default OperatorConsole
