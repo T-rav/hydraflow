@@ -627,3 +627,58 @@ Demand stationarity is the load-bearing one precisely because it needs no outcom
 ```json:entry
 {"id":"GATE-DEMAND-ANCHORED-AND-PINNED-001","source_type":"manual","topic":"patterns","tags":["test-adequacy","gate","demand","anchoring","stationarity","yield","implement","calibration","adr-0127","measure-the-machinery"],"rule":"When a gate's rejections are unlocatable and non-stationary, fix the DEMAND, not the threshold. (1) A finding counts as an actionable demand only when it names a locatable referent (path/symbol/constant/flag/route/backticked span) or cites a survivability demonstration; unanchored findings still block but are routed to the repair pass with a locate-it-first instruction rather than verbatim. (2) A retry is judged against the demand the previous attempt STATED, carried on the prior-failure seam: a finding restating the pin blocks, a genuinely new finding blocks only if anchored, and a new unanchored finding is recorded as advisory. The anchoring predicate has ONE definition shared by the live gate and the calibration instrument, the contract runs BEFORE the deterministic and second-opinion stages so a flipped verdict still faces both, deterministic gaps never route through it, and every non-comparable case (no findings, empty summary, a pin with no topical tokens) fails closed. The pin, the new findings and the absorbed findings all ride the telemetry so the non-stationarity stays measurable after the fix.","anti_pattern":"Loosening the gate's threshold or its override rule when the calibration says the gate is leaky rather than over-tight; handing a referent-less finding back to an implementer as 'write exactly these missing tests'; letting a retry face a freshly-derived demand disjoint from the one it was told to close; applying the demand contract AFTER the coverage-delta/verifier stages so a flipped verdict skips them; waiving a failing verdict that enumerated nothing; promoting advisory findings into the next run's pin; and defining 'anchored' separately in the runtime and the instrument so the measurement can drift from the enforcement","code_refs":["src/adequacy_demand.py","src/skill_gate.py:run_skill_check","src/adequacy_calibration.py:demand_anchoring","src/adequacy_calibration.py:pinned_demand_overlap","src/test_adequacy.py:build_test_adequacy_repair_prompt","src/implement_phase.py:_pinned_adequacy_demand","tests/regressions/test_adequacy_demand_contract_11644.py","tests/scenarios/test_test_adequacy_pinned_demand_scenario.py"],"source_issue":11644,"added":"2026-08-22"}
 ```
+
+
+## Erosion baselines: what a recorded number is for, and how to move one
+
+`disturbance/baselines/*.yaml` hold the set-points for the erosion sensors, and
+they are not all the same shape. Two kinds exist, and confusing them is how a
+number rots.
+
+**Membership baselines** (`mass.yaml`) grandfather a *set*: the mass ratchet
+fails when a file or class crosses the size threshold and is **absent** from the
+recorded set. The `loc:`/`methods:` beside each entry are not the gate — they are
+the high-water mark that `erosion.mass_baseline.grown()` compares the live
+reading against, and the `ErosionMetricsLoop` renders as the "Grown since
+baseline" section of the burn-down roster issue. Read, but read by the roster,
+not the gate.
+
+**Scalar ratchets** (`suite_hygiene.yaml`, `suppressions.yaml`) record counts the
+gate compares directly: the build fails when a count rises above its mark. These
+cannot rot upward, because rising is the failure.
+
+**Growth is sensed, not gated — deliberately.** Making `mass.yaml`'s numbers a
+per-PR gate was measured against 60 days of `staging`: at the 10 % tolerance it
+would have blocked 70 of 948 merged commits (7.4 %), and even a lax 50 % bound
+blocks 2.0 %. Worse than the rate is the remedy: decomposing a god class is a
+structural PR of its own, never in scope for the PR that happened to tip it over,
+so the only action available to that author is re-recording the number — the
+bypass printed in the failure message. A gate whose realistic response is "move
+the goalpost" trains the reflex it exists to prevent. The burn-down roster, which
+the decomposition batches already work from, is where growth belongs.
+
+**Both god-making axes count.** A class is a god class when EITHER its LOC or its
+method count crosses a threshold, so `grown()` watches both. `AgentRunner` is the
+worked case: it shrank 1408 → 1388 LOC while gaining six methods (36 → 42), and a
+LOC-only reading scored that as unchanged.
+
+**Move one entry, not all of them.** `scripts/regen_mass_baseline.py --only <key>`
+(repeatable; `src/foo.py` or `src/foo.py:Bar`) rewrites exactly the named entries
+— updating one still over threshold, dropping one a decomposition took below it —
+and leaves every other line byte-identical. Use it. A blanket regen inside a
+structural-refactor PR sweeps every *other* class's unrelated growth into that
+diff and records it as reviewed when nobody reviewed it. Reserve the blanket mode
+for a PR whose entire diff *is* the baseline advance. Two burn-down PRs (#11628,
+#11645) hand-edited the YAML rather than face that choice, which is what #11646
+was filed about.
+
+**A field no consumer compares is worse than no field.** `suite_hygiene.yaml`
+carried `total_tests` "for the trend reader" — written, loaded, and read by
+nobody. It drifted +1010 (20627 → 21637, +4.9 %) before anyone noticed, and the
+trend reader was reading the live number the whole time. It was removed rather
+than refreshed: absent data cannot be mistaken for fact.
+
+
+```json:entry
+{"id":"01KX8MASSBASELINE11646001","title":"Erosion baselines: what a recorded number is for, and how to move one","topic":null,"source_type":"compiled","source_issue":11646,"source_repo":null,"created_at":"2026-08-22T00:00:00.000000+00:00","updated_at":"2026-08-22T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

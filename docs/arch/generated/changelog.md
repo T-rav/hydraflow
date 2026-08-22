@@ -6,12 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `6ce4175` — chore(arch): regenerate architecture artifacts after the rebase onto staging *(2026-08-22)*
-- `c1aead8` — fix(gateway): review pass 2 — an unresolved slug wrote the host repo, and a dead feed still looked current *(2026-08-22)*
-- `adf70b2` — fix(gateway): review pass 1 — the console could not fire its own 409, and empty feeds lied *(2026-08-22)*
-- `c9310e5` — fix(gateway): drop the B008 suppression on the matrix requirement selector *(2026-08-22)*
-- `3a07510` — docs(adr): ADR-0140 — revision-safe policy workspace and the operator write boundary *(2026-08-22)*
-- `5549397` — feat(gateway): revision-safe policy workspace core and the ADR-0138 D5 write gate *(2026-08-22)*
+- `94b544e` — fix(implement): anchor the test-adequacy demand and pin it across retries (#11644) (#11649) (#11649) *(2026-08-22)*
+- `8c392d0` — feat(gateway): P2 — revision-safe project policy workspace (ADR-0140) (#11648) (#11648) *(2026-08-22)*
 - `8eb762f` — fix(instruments): the calibration accept arm scored fresh merges as clean — #11643's last commit never landed (#11647) (#11647) *(2026-08-22)*
 - `2f440e8` — refactor(orchestrator,plan-phase): decompose two god classes below the mass threshold (#11645) (#11645) *(2026-08-22)*
 - `6523893` — feat(instruments): calibrate the test-adequacy gate — the reject arm is outcome-censored (#11593 seam 2) (#11643) (#11643) *(2026-08-22)*

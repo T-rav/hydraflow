@@ -12,8 +12,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from erosion.mass_baseline import Growth
+from erosion.models import GodClass, GodFile, MassFinding
 from erosion_metrics_loop import (
     _current_head_sha,
+    _render_mass,
     class_issue_fingerprint,
     find_class_issue_entry,
 )
@@ -26,6 +29,23 @@ from tests.test_erosion_metrics_loop import (
     _make_loop,
     _make_state,
 )
+
+
+def _mass_candidate(*, growth: tuple[Growth, ...]) -> dict[str, object]:
+    finding = MassFinding(
+        god_files=(GodFile("src/implement_phase.py", 1949),),
+        god_classes=(GodClass("src/implement_phase.py", "ImplementPhase", 1845, 61),),
+        total_files=400,
+        file_loc_threshold=1500,
+        class_loc_threshold=600,
+        class_method_threshold=40,
+    )
+    return {
+        "kind": "mass",
+        "finding": finding,
+        "growth": growth,
+        "roster": ["src/implement_phase.py:ImplementPhase — 1845 LOC, 61 methods"],
+    }
 
 
 def _god_class_source(methods: int = 40) -> str:
@@ -363,3 +383,99 @@ class TestRendering:
         assert "test_case_0, test_case_1, test_case_2" in body
         assert "pytest.mark.parametrize" in body
         assert "| tests | 3 |" in body
+
+
+class TestMassGrowthSection:
+    """The recorded `loc:`/`methods:` in `mass.yaml` are read, not decoration.
+
+    `mass_grown(mass, baseline)` compares the recorded numbers against the live
+    reading and the roster body renders the result. These tests pin that
+    consumption so a future "unused field" sweep cannot quietly delete the
+    numbers — the failure mode #11646 was filed about.
+    """
+
+    @pytest.mark.parametrize(
+        ("growth", "expected_line"),
+        [
+            pytest.param(
+                Growth(
+                    key="src/implement_phase.py:ImplementPhase",
+                    kind="class",
+                    baseline_loc=1672,
+                    loc=1845,
+                    baseline_methods=56,
+                    methods=61,
+                    grew_loc=True,
+                    grew_methods=False,
+                ),
+                "- `src/implement_phase.py:ImplementPhase` (class): 1672 → 1845 LOC",
+                id="loc-axis-only",
+            ),
+            pytest.param(
+                Growth(
+                    key="src/agent.py:AgentRunner",
+                    kind="class",
+                    baseline_loc=1408,
+                    loc=1388,
+                    baseline_methods=36,
+                    methods=42,
+                    grew_loc=False,
+                    grew_methods=True,
+                ),
+                "- `src/agent.py:AgentRunner` (class): 36 → 42 methods",
+                id="method-axis-only",
+            ),
+            pytest.param(
+                Growth(
+                    key="src/config.py:HydraFlowConfig",
+                    kind="class",
+                    baseline_loc=4898,
+                    loc=5059,
+                    baseline_methods=39,
+                    methods=45,
+                    grew_loc=True,
+                    grew_methods=True,
+                ),
+                "- `src/config.py:HydraFlowConfig` (class): 4898 → 5059 LOC, "
+                "39 → 45 methods",
+                id="both-axes",
+            ),
+            pytest.param(
+                Growth(
+                    key="src/implement_phase.py",
+                    kind="file",
+                    baseline_loc=1750,
+                    loc=1949,
+                    grew_loc=True,
+                ),
+                "- `src/implement_phase.py` (file): 1750 → 1949 LOC",
+                id="file-entry",
+            ),
+        ],
+    )
+    def test_growth_line_names_the_axis_that_grew(
+        self, growth: Growth, expected_line: str
+    ) -> None:
+        _title, body = _render_mass(_mass_candidate(growth=(growth,)))
+
+        assert expected_line in body
+
+    def test_body_points_at_the_targeted_refresh_for_a_grown_entry(self) -> None:
+        growth = Growth(
+            key="src/ports.py:PRPort",
+            kind="class",
+            baseline_loc=488,
+            loc=560,
+            baseline_methods=76,
+            methods=78,
+            grew_loc=True,
+        )
+
+        _title, body = _render_mass(_mass_candidate(growth=(growth,)))
+
+        assert "--only src/ports.py:PRPort" in body
+
+    def test_no_growth_section_when_nothing_grew(self) -> None:
+        _title, body = _render_mass(_mass_candidate(growth=()))
+
+        assert "## Grown since baseline" not in body

@@ -120,6 +120,7 @@ from erosion.baseline import is_flagged as spread_is_flagged
 from erosion.baseline import load_spread_baseline
 from erosion.mass import collect_sources
 from erosion.mass import compute as mass_compute
+from erosion.mass_baseline import Growth as MassGrowth
 from erosion.mass_baseline import grown as mass_grown
 from erosion.mass_baseline import load_mass_baseline
 from erosion.scatter import DEFAULT_SCATTER_THRESHOLD, added_symbols_for_range
@@ -720,6 +721,21 @@ def _roster_section(roster: list[str]) -> str:
     return section
 
 
+def _growth_line(growth: MassGrowth) -> str:
+    """One roster line naming the axis (or axes) that actually grew.
+
+    A class is a god class on either axis, so both are reported: `AgentRunner`
+    shrank 1408 → 1388 LOC while gaining six methods, and a LOC-only line would
+    have shown nothing.
+    """
+    axes = []
+    if growth.grew_loc:
+        axes.append(f"{growth.baseline_loc} → {growth.loc} LOC")
+    if growth.grew_methods:
+        axes.append(f"{growth.baseline_methods} → {growth.methods} methods")
+    return f"- `{growth.key}` ({growth.kind}): {', '.join(axes)}"
+
+
 def _render_mass(candidate: dict[str, Any]) -> tuple[str, str]:
     finding = candidate["finding"]
     growth = candidate["growth"]
@@ -737,8 +753,18 @@ def _render_mass(candidate: dict[str, Any]) -> tuple[str, str]:
         f"(largest: {largest_text})"
     )
     marker = render_marker(compute_class_key(_CLASS_SOURCE, _CLASS_NEEDLES["mass"]))
-    grown_lines = "\n".join(
-        f"- `{g.key}` ({g.kind}): {g.baseline_loc} → {g.loc} LOC" for g in growth
+    grown_lines = "\n".join(_growth_line(g) for g in growth)
+    only_flags = " ".join(f"--only {g.key}" for g in growth)
+    grown_section = (
+        f"## Grown since baseline\n{grown_lines}\n\n"
+        "Decompose the class, or — when the new size is a reviewed decision — "
+        "record it for these entries alone:\n\n"
+        f'```\npython scripts/regen_mass_baseline.py {only_flags} --reason "<why>"\n```\n\n'
+        "That rewrites exactly those entries and leaves every other line "
+        "byte-identical, so no unrelated growth is laundered through the PR "
+        "(a blanket regen would).\n\n"
+        if growth
+        else ""
     )
     body = (
         "## Evidence (ErosionMetricsLoop, automated)\n\n"
@@ -747,11 +773,11 @@ def _render_mass(candidate: dict[str, Any]) -> tuple[str, str]:
         f"≥{finding.class_method_threshold} methods) | {classes} |\n"
         f"| god files (≥{finding.file_loc_threshold} LOC) | {files} |\n"
         f"| source files measured | {finding.total_files} |\n"
-        f"| grown >10% since baseline | {len(growth)} |\n"
+        f"| grown >10% since baseline (LOC or methods) | {len(growth)} |\n"
         f"| largest | {largest_text} |\n\n"
         f"{marker}\n\n"
         f"{_roster_section(candidate['roster'])}\n"
-        + (f"## Grown since baseline\n{grown_lines}\n\n" if growth else "")
+        + grown_section
         + "## How to decompose safely (one class per PR, largest first)\n\n"
         "Extract one cohesive cluster of methods into a new module and "
         "**re-export** the moved symbols from the original file so every "
@@ -760,9 +786,12 @@ def _render_mass(candidate: dict[str, Any]) -> tuple[str, str]:
         "`plan_phase_wiki_ingest.py` from #10840; ADR-0030 for route "
         "packages). Move any `# noqa` with the code it annotates (the "
         "suppressions ratchet counts per file). When the class shrinks, run "
-        '`python scripts/regen_mass_baseline.py --reason "decomposed <Class>"` '
-        "so `tests/architecture/test_mass_ratchet.py` records the smaller "
-        "size and the next growth is caught.\n\n"
+        "`python scripts/regen_mass_baseline.py --only <key> "
+        '--reason "decomposed <Class>"` so the baseline records the smaller '
+        "size (or drops the entry when it falls below threshold) and the next "
+        "growth is measured from there. `--only` touches exactly that entry — a "
+        "blanket regen would sweep every other class's unrelated growth into a "
+        "structural-refactor PR's diff.\n\n"
         "This is a standing class issue (mass sensor, `erosion.mass`): the "
         "roster refreshes in place while it is open and the issue is re-filed "
         "if closed while the reading is still non-empty. Pattern B outer-loop "

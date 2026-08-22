@@ -40,7 +40,7 @@ graph LR
     src -- "30" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
-    src -- "23" --> src_erosion
+    src -- "24" --> src_erosion
     src -- "9" --> src_escape
     src -- "6" --> src_flows
     src -- "14" --> src_hydraflow_gateway
