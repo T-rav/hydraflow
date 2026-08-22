@@ -466,7 +466,12 @@ export default function PolicyWorkspacePanel({
             {CORRUPT_MESSAGE}
           </Notice>
         )}
-        {workspace.loaded && !editable && (
+        {workspace.loaded && current && !editable && (
+          // `current`, because `editable` now also folds in the feed's health:
+          // without it a repository whose gate is `enabled` and whose poll just
+          // died would claim "Policy writes are unavailable on this dashboard"
+          // — a permanent-sounding statement about configuration, for what is a
+          // transport problem the danger notice above already names.
           <Notice tone="warning" styles={styles} testid="policy-write-gate">
             {writeGateMessage(workspace.writeGate) ||
               'Policy writes are unavailable on this dashboard.'}

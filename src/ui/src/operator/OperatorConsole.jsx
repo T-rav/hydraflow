@@ -57,7 +57,7 @@ import { toSupervisorGauges } from './model/supervisorGauges'
 import { EMPTY_TRUST_FLEET_VM } from './model/trustFleet'
 import RoutingMode from './RoutingMode'
 import { useGatewayAccounts, useGatewayLiveRoutes } from './useGatewayRouting'
-import { usePolicyWorkspace } from './usePolicyWorkspace'
+import { defaultPolicyFetcher, usePolicyWorkspace } from './usePolicyWorkspace'
 import {
   EMPTY_GATEWAY_ACCOUNTS_VM,
   EMPTY_GATEWAY_LIVE_VM,
@@ -197,7 +197,7 @@ function ModeToggle({ mode, select, styles }) {
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM, policy = null, policyFetcher = undefined }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM, policy = null, policyFetcher = null }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
@@ -208,10 +208,15 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
   // URL said then: clicking the Routing tab would render the workspace while
   // the feed stayed disabled, and a repo picked later would never reach it.
   // One instance, one selection.
+  // `policyFetcher` is REQUIRED to reach the network: this shell is rendered
+  // with fixtures in tests "without a live HydraFlowProvider", and a default
+  // fetcher would have it opening real requests and a 30-second interval from
+  // a test. The container passes the real one.
   const livePolicy = usePolicyWorkspace({
     repo,
-    enabled: mode === 'routing' && policy == null,
-    fetcher: policyFetcher,
+    enabled:
+      mode === 'routing' && policy == null && typeof policyFetcher === 'function',
+    fetcher: policyFetcher || undefined,
   })
   const policyFeed = policy ?? livePolicy
   const events = socket.events ?? []
@@ -486,7 +491,7 @@ export function OperatorConsole() {
   // of the WS slice the shell otherwise renders from.
   const gatewayAccounts = useGatewayAccounts()
   const gatewayLive = useGatewayLiveRoutes()
-  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} />
+  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} policyFetcher={defaultPolicyFetcher} />
 }
 
 export default OperatorConsole

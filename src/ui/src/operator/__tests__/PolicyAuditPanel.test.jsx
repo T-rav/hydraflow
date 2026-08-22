@@ -131,3 +131,27 @@ describe('PolicyAuditPanel — verification is only claimable while current', ()
     )
   })
 })
+
+describe('PolicyAuditPanel — a broken chain is never softened', () => {
+  it('keeps the broken headline even after the source stops answering', () => {
+    // Degrading the AFFIRMATIVE claim is right; degrading the negative one
+    // drops a red headline exactly when the operator loses their read.
+    render(
+      <PolicyAuditPanel
+        audit={toPolicyAudit({ records: [record()], verified: false, broken_at_seq: 0 })}
+        sourceState="unavailable"
+      />,
+    )
+    expect(screen.getByTestId('policy-audit-verified')).toHaveTextContent('chain broken')
+  })
+
+  it('still explains where a broken chain broke when the source is dark', () => {
+    render(
+      <PolicyAuditPanel
+        audit={toPolicyAudit({ records: [record()], verified: false, broken_at_seq: 2 })}
+        sourceState="unavailable"
+      />,
+    )
+    expect(screen.getByTestId('policy-audit-broken')).toHaveTextContent('seq 2')
+  })
+})

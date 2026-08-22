@@ -555,3 +555,51 @@ describe('PolicyWorkspacePanel — aggregate', () => {
     expect(screen.getByTestId('policy-aggregate-empty')).toBeInTheDocument()
   })
 })
+
+describe('PolicyWorkspacePanel — a dead feed is not a configuration verdict', () => {
+  it('does not blame the write gate for a transport failure', () => {
+    // `writeGateMessage('enabled')` is empty, so the fallback would claim
+    // "Policy writes are unavailable on this dashboard" — permanent-sounding,
+    // and contradicting the danger notice directly above it.
+    render(
+      <PolicyWorkspacePanel workspace={workspace()} sourceState="unavailable" />,
+    )
+    expect(screen.queryByTestId('policy-write-gate')).toBeNull()
+  })
+
+  it('still names a genuinely closed gate while the feed is healthy', () => {
+    render(
+      <PolicyWorkspacePanel
+        workspace={workspace({ editable: false, write_gate: 'no-operator-identity' })}
+        sourceState="available"
+      />,
+    )
+    expect(screen.getByTestId('policy-write-gate')).toHaveTextContent(
+      'HYDRAFLOW_OPERATOR_TOKEN',
+    )
+  })
+
+  it('keeps the pin when a save returns no body at all', () => {
+    // A 200 whose body is not JSON leaves `data` null, so `revision` is
+    // undefined. Dropping the pin there restores the unpinned behaviour.
+    const onSave = vi.fn(() => Promise.resolve({ ok: true, status: 200 }))
+    const { rerender } = render(
+      <PolicyWorkspacePanel
+        workspace={workspace()}
+        preview={WRITABLE_PREVIEW}
+        onSave={onSave}
+      />,
+    )
+    fillEditor()
+    fireEvent.click(screen.getByTestId('policy-save-button'))
+    rerender(
+      <PolicyWorkspacePanel
+        workspace={workspace({ revision: 9 })}
+        preview={WRITABLE_PREVIEW}
+        onSave={onSave}
+      />,
+    )
+
+    expect(screen.getByTestId('policy-rebased')).toBeInTheDocument()
+  })
+})

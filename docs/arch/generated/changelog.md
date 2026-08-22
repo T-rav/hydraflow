@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `6ce4175` — chore(arch): regenerate architecture artifacts after the rebase onto staging *(2026-08-22)*
 - `c1aead8` — fix(gateway): review pass 2 — an unresolved slug wrote the host repo, and a dead feed still looked current *(2026-08-22)*
 - `adf70b2` — fix(gateway): review pass 1 — the console could not fire its own 409, and empty feeds lied *(2026-08-22)*
 - `c9310e5` — fix(gateway): drop the B008 suppression on the matrix requirement selector *(2026-08-22)*

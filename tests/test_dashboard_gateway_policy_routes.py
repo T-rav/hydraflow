@@ -741,22 +741,70 @@ def test_a_per_repo_bind_cannot_close_a_loopback_socket(tmp_path: Path) -> None:
     assert response.status_code == 200
 
 
+_MUTATION_BODY = {
+    "kind": "create",
+    "expected_revision": 0,
+    "policy": _policy_body(),
+}
+
+
 @pytest.mark.parametrize(
-    "path",
+    ("method", "path", "body", "offloaded_name"),
     [
-        pytest.param("/api/gateway/policies", id="the-snapshot-read"),
-        pytest.param("/api/gateway/policies/effective", id="the-effective-matrix"),
-        pytest.param("/api/gateway/policies/audit", id="the-mutation-history"),
-        pytest.param("/api/gateway/policies?repo=__all__", id="the-aggregate-summary"),
+        pytest.param(
+            "GET", "/api/gateway/policies", None, "read", id="the-snapshot-read"
+        ),
+        pytest.param(
+            "GET",
+            "/api/gateway/policies/effective",
+            None,
+            "read",
+            id="the-effective-matrix",
+        ),
+        pytest.param(
+            "GET",
+            "/api/gateway/policies/audit",
+            None,
+            "history",
+            id="the-mutation-history",
+        ),
+        pytest.param(
+            "GET",
+            "/api/gateway/policies?repo=__all__",
+            None,
+            "_aggregate_summary",
+            id="the-aggregate-summary",
+        ),
+        pytest.param(
+            "POST",
+            "/api/gateway/policies/preview",
+            _MUTATION_BODY,
+            "preview",
+            id="the-builder-preview",
+        ),
+        pytest.param(
+            "POST",
+            "/api/gateway/policies/mutations",
+            _MUTATION_BODY,
+            "apply",
+            id="the-write",
+        ),
     ],
 )
-def test_every_read_hands_its_disk_io_to_a_worker_thread(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
+def test_every_route_hands_its_disk_io_to_a_worker_thread(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    path: str,
+    body: dict[str, Any] | None,
+    offloaded_name: str,
 ) -> None:
     """One dashboard shares one event loop with five async loops (ADR-0001).
 
-    The audit read in particular walks and hash-verifies a chain this phase
-    deliberately never prunes.
+    The write is the worst one to leave on the loop — an advisory file lock plus
+    two fsync'd writes — and the audit read walks and hash-verifies a chain this
+    phase deliberately never prunes. The offloaded function is asserted BY NAME:
+    "something was offloaded" would pass while the expensive call stayed inline.
     """
     offloaded: list[str] = []
     real = asyncio.to_thread
@@ -766,10 +814,49 @@ def test_every_read_hands_its_disk_io_to_a_worker_thread(
         return await real(func, *args, **kwargs)
 
     monkeypatch.setattr(gateway_policy_routes.asyncio, "to_thread", recording)
+    client = _client(_config(tmp_path))
 
-    _client(_config(tmp_path)).get(path)
+    if method == "GET":
+        client.get(path)
+    else:
+        client.post(path, json=body, headers=_AUTH)
 
-    assert offloaded != []
+    assert offloaded_name in offloaded
+
+
+@pytest.mark.parametrize(
+    ("path", "target"),
+    [
+        pytest.param(
+            "/api/gateway/policies/audit", "history", id="an-unreadable-chain"
+        ),
+        pytest.param(
+            "/api/gateway/policies/mutations", "apply", id="an-unwritable-store"
+        ),
+    ],
+)
+def test_a_store_this_process_cannot_reach_is_unavailable_not_a_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str, target: str
+) -> None:
+    """An EACCES on the routing directory is a degraded source, never a 500 —
+    and emphatically never an empty history."""
+
+    def unreachable(*_args: object, **_kwargs: object) -> None:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(PolicyWorkspace, target, unreachable)
+    client = _client(_config(tmp_path))
+
+    response = (
+        client.get(path)
+        if target == "history"
+        else client.post(path, json=_MUTATION_BODY, headers=_AUTH)
+    )
+
+    assert (response.status_code, response.json()["code"]) == (
+        503,
+        "storage-unavailable",
+    )
 
 
 def test_every_refusal_code_maps_to_a_status(tmp_path: Path) -> None:

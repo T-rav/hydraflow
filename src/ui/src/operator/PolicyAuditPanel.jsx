@@ -121,10 +121,13 @@ export default function PolicyAuditPanel({
   const t = useTokens()
   const styles = makeStyles(t)
   const notice = feedNotice(sourceState, audit.loaded)
-  // `verified` is a THREE-state fact: verified, broken, or never read. Only the
-  // first two are claims this panel is entitled to make — and only while the
-  // source is still answering. A frozen last-known chain is not a verified one.
-  const unread = audit.verified == null || !feedIsCurrent(sourceState)
+  // `verified` is a THREE-state fact: verified, broken, or never read. A stale
+  // source degrades only the AFFIRMATIVE claim — a frozen last-known chain is
+  // not a verified one. It must NOT soften a chain already known to be broken:
+  // dropping that red headline to a neutral badge at the moment the operator
+  // loses their read is the one thing this panel may never do.
+  const unread =
+    audit.verified == null || (audit.verified === true && !feedIsCurrent(sourceState))
 
   return (
     <div style={styles.card} data-testid="policy-audit">

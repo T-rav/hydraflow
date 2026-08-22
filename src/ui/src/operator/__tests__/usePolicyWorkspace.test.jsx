@@ -343,3 +343,34 @@ describe('usePolicyWorkspace — honesty of the source state', () => {
     expect(result.current.preview).toBeNull()
   })
 })
+
+describe('usePolicyWorkspace — a committed save retires its preview too', () => {
+  it('does not let an in-flight preview re-enable Save after a commit', async () => {
+    // The same defect `clearPreview` fixes, on the sibling path: the preview
+    // describes the PRE-save revision, and Save keys off `preview.writable`.
+    const gates = []
+    const fetcher = vi.fn(url => {
+      if (url.startsWith(POLICY_PREVIEW_ENDPOINT)) {
+        return new Promise(resolve => {
+          gates.push(resolve)
+        })
+      }
+      if (url.startsWith(POLICY_MUTATIONS_ENDPOINT)) {
+        return Promise.resolve({ ok: true, status: 200, data: { revision: 2 } })
+      }
+      return Promise.resolve({ ok: true, status: 200, data: workspacePayload(2) })
+    })
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
+    await waitFor(() => expect(result.current.workspace.loaded).toBe(true))
+
+    await act(async () => {
+      const pending = result.current.requestPreview({ kind: 'create', expected_revision: 1 })
+      await waitFor(() => expect(gates.length).toBe(1))
+      await result.current.save({ kind: 'create', expected_revision: 1 }, 'tok')
+      gates[0]({ ok: true, status: 200, data: { writable: true, cells: [], diff: {} } })
+      await pending
+    })
+
+    expect(result.current.preview).toBeNull()
+  })
+})

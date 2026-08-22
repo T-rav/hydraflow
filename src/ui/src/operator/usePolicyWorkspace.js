@@ -242,6 +242,11 @@ export function usePolicyWorkspace({
         }
       }
       setRejection(null)
+      // Retire the ticket as well as the state, for the same reason
+      // `clearPreview` does: an in-flight preview landing after the save would
+      // repopulate `preview` with a view of the PRE-save revision and re-enable
+      // the Save button for an edit that has already been written.
+      previewApplied.current = previewIssued.current
       setPreview(null)
       await load()
       return { ok: true, status: response.status, revision: response.data?.revision }
