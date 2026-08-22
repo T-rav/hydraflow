@@ -556,3 +556,68 @@ class TestServedAndConfiguredModelsPriced:
         assert rate.input_includes_cache is True
         assert pricing.get_rate("zai/glm-5.3") == rate
         assert pricing.get_rate("glm-5.2") == rate
+
+
+class TestUsageShapeHelpers:
+    """One place decides cache-inclusiveness for a telemetry row (transport,
+    not model id). Writers stamp ``usage_shape`` from the CLI / client that
+    produced the counts; readers derive the override from stamp-then-tool."""
+
+    @pytest.mark.parametrize(
+        "tool, expected",
+        [
+            ("claude", "anthropic"),
+            ("gateway", "anthropic"),
+            ("Claude", "anthropic"),
+            ("codex", "openai_compat"),
+            ("zai", "openai_compat"),
+            ("kimi", "openai_compat"),
+            ("openrouter", "openai_compat"),
+            ("", None),
+            (None, None),
+        ],
+    )
+    def test_usage_shape_for_tool(self, tool, expected) -> None:
+        from model_pricing import usage_shape_for_tool
+
+        assert usage_shape_for_tool(tool) == expected
+
+    @pytest.mark.parametrize(
+        "usage_shape, tool, expected",
+        [
+            ("anthropic", "zai", False),  # stamp wins over the transport marker
+            ("anthropic", None, False),
+            ("openai_compat", "claude", None),  # table default (GLM True, Kimi False)
+            ("openai_compat", None, None),
+            (None, "claude", False),  # legacy: Claude CLI rows are exclusive
+            (None, "gateway", False),
+            (None, "GATEWAY", False),
+            (None, "zai", None),  # legacy ambiguous marker: table default + guard
+            (None, "kimi", None),
+            (None, "codex", None),
+            (None, None, None),
+            ("", "", None),
+            ("unexpected-shape", "claude", False),  # unknown stamp falls to tool rule
+        ],
+    )
+    def test_input_includes_cache_for(self, usage_shape, tool, expected) -> None:
+        from model_pricing import input_includes_cache_for
+
+        assert input_includes_cache_for(usage_shape, tool) is expected
+
+    def test_row_helper_reads_stamp_then_tool(self) -> None:
+        from model_pricing import row_input_includes_cache
+
+        assert (
+            row_input_includes_cache({"usage_shape": "anthropic", "tool": "zai"})
+            is False
+        )
+        assert row_input_includes_cache({"tool": "claude"}) is False
+        assert row_input_includes_cache({"tool": "zai"}) is None
+        assert row_input_includes_cache({}) is None
+
+    def test_shape_constants_are_the_wire_values(self) -> None:
+        from model_pricing import USAGE_SHAPE_ANTHROPIC, USAGE_SHAPE_OPENAI_COMPAT
+
+        assert USAGE_SHAPE_ANTHROPIC == "anthropic"
+        assert USAGE_SHAPE_OPENAI_COMPAT == "openai_compat"

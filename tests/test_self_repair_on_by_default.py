@@ -12,11 +12,11 @@ cold cache, so ON reroutes every READY issue back to plan forever and wedges
 the full-machine pipeline (RC promotion + post-merge smoke). They stay runtime
 toggles so an operator can opt in after confirming coverage.
 
-``adr_touchpoint_auditor_loop_enabled`` was deliberately dropped from the flip
-(kept default-OFF): it re-enables the activity-based ADR-drift auditor #10540
-retired for a ~70% false-positive rate, and its triage sibling
-``adr_drift_resolver_loop_enabled`` stays off — so its rollups would pile up
-unhandled. It is pinned OFF here alongside the other landmines.
+The two ADR-drift kill-switches that used to be pinned OFF here as landmines
+(``adr_touchpoint_auditor_loop_enabled`` / ``adr_drift_resolver_loop_enabled``)
+are gone: ADR-0136 deleted the loops they guarded, so there is no flag left to
+flip back on. ``tests/architecture/test_adr0136_adr_drift_loops_removed.py``
+now holds that ground.
 
 These tests fail-closed on:
   1. An accidental flip-back of any default-ON self-repair flag to False.
@@ -66,14 +66,9 @@ OPT_IN_AFTER_CACHE_FLAGS: tuple[str, ...] = (
 )
 
 # Deliberately held OFF (disturbance dampener) / landmines that must stay off.
-# adr_touchpoint_auditor_loop_enabled is dropped from the flip for the same
-# reason adr_drift_resolver stays off: it is the retired (#10540) activity-based
-# ADR-drift auditor (~70% false positives) whose triage sibling stays off.
 EXCLUDED_OFF_FLAGS: tuple[str, ...] = (
     "disturbance_dampener_enabled",
     "rc_auto_recut_enabled",
-    "adr_drift_resolver_loop_enabled",
-    "adr_touchpoint_auditor_loop_enabled",
     "agent_unrestricted_tools",
 )
 
@@ -81,7 +76,6 @@ EXCLUDED_OFF_FLAGS: tuple[str, ...] = (
 @pytest.mark.parametrize("flag", SELF_REPAIR_FLAGS)
 def test_self_repair_flag_defaults_true(flag: str) -> None:
     """Each flipped flag's *pure* Pydantic default (env-independent) is True."""
-    # Arrange / Act
     default = HydraFlowConfig.model_fields[flag].default
 
     # Assert — use the field default, not an instance, so ambient env vars
@@ -106,11 +100,9 @@ def test_self_repair_flag_is_runtime_toggle(flag: str) -> None:
 @pytest.mark.parametrize("flag", SELF_REPAIR_FLAGS)
 def test_self_repair_flag_renders_as_bool_row(flag: str) -> None:
     """Each flipped flag renders in the settings schema as a bool toggle."""
-    # Arrange
     schema = build_settings_schema(HydraFlowConfig())
     rows = {row["name"]: row for row in schema}
 
-    # Assert
     assert flag in rows, f"{flag} produced no settings-schema row"
     assert rows[flag]["type"] == "bool", (
         f"{flag} should render as a bool toggle, got {rows[flag]['type']!r}"

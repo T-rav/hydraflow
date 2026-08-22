@@ -1,25 +1,25 @@
 """Regression pins for issue #10458 — nudge bare shared-infra citations to :Symbol.
 
 A bare citation of a high-churn shared-infra module (``src/config.py`` et al.)
-is *silently suppressed* from ADR drift detection: it is read as a dependency
-pointer, not a decision anchor (#9397/#9176, churn-derived in #10456). #10458
-adds a non-blocking authoring nudge that surfaces those suppressed citations and
-suggests re-citing at ``:Symbol`` granularity so an ADR that genuinely owns a
-symbol there keeps drifting on real changes.
+is a *dependency pointer*, not a decision anchor (#9397/#9176). #10458 added a
+non-blocking authoring nudge that surfaces those citations and suggests
+re-citing at ``:Symbol`` granularity.
 
-The load-bearing contract these tests pin:
+**Re-anchored for ADR-0136.** The nudge originally mirrored ADR-drift
+*suppression*: it fired on exactly the bare citations ``compute_drift``
+declined to flag. That drift engine was deleted with
+``AdrTouchpointAuditorLoop``, and the nudge's meaning moved one step over
+without changing its output: a bare citation is the form the deterministic
+citation gate (`tests/test_adr_citation_conformance.py`) **cannot enforce**, so
+the nudge is now the on-ramp from an unenforceable citation to an enforceable
+one. The load-bearing contract these tests pin:
 
-1. **The nudge surfaces exactly what suppression hides.** Nudge
-   (``bare_infra_citation_nudges``) and drift suppression (``compute_drift`` via
-   ``_citation_drifts``) both route through the one ``_is_shared_infra``
-   predicate. On the SAME ADR corpus, every bare citation that produces no drift
-   finding produces a nudge, and every bare citation that DOES drift produces no
-   nudge. If a future change reintroduces a second, divergent suppression check,
-   the two halves fall out of sync and this fails.
+1. **The nudge surfaces exactly the unenforceable bare shared-infra citations.**
+   One predicate (``_is_shared_infra``) decides; a symbol-qualified owner — the
+   citation the gate DOES enforce — is left un-nudged.
 
 2. **The nudge is a pure authoring aid, never a gate.** It reads ADR citation
-   data and returns records; it must not alter ``compute_drift`` output. A
-   symbol-qualified owner both keeps drifting AND is left un-nudged.
+   data and returns records; nothing it emits changes what CI enforces.
 
 3. **The cross-reference report always carries the section.** Its presence must
    not depend on whether any ADR currently qualifies (renders ``None.`` empty).
@@ -29,7 +29,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from adr_drift import bare_infra_citation_nudges, compute_drift
+from adr_citation_resolve import unresolved_citations
+from adr_drift import bare_infra_citation_nudges
 from adr_index import ADRIndex
 from arch._models import ADRRefIndex
 from arch.generators.adr_cross_reference import render_adr_cross_reference
@@ -53,43 +54,42 @@ def _corpus(tmp_path: Path) -> ADRIndex:
     adr_dir = tmp_path / "adr"
     adr_dir.mkdir()
     _write_adr(adr_dir, number=1, related_files=[_SHARED_INFRA])  # bare -> nudged
-    _write_adr(adr_dir, number=2, related_files=[_ORDINARY])  # bare -> drifts
+    _write_adr(adr_dir, number=2, related_files=[_ORDINARY])  # bare, not infra
     _write_adr(
         adr_dir, number=3, related_files=[f"{_SHARED_INFRA}:HydraFlowConfig"]
-    )  # symbol owner -> drifts on its symbol, not nudged
+    )  # symbol owner -> enforced by the gate, not nudged
     return ADRIndex(adr_dir)
 
 
-def test_nudge_surfaces_exactly_what_shared_infra_suppression_hides(
+def test_nudge_surfaces_exactly_the_unenforceable_shared_infra_citations(
     tmp_path: Path,
 ) -> None:
     idx = _corpus(tmp_path)
-    adrs = idx.adrs()
 
-    nudged = {(n.adr_number, n.path) for n in bare_infra_citation_nudges(adrs)}
+    nudged = {(n.adr_number, n.path) for n in bare_infra_citation_nudges(idx.adrs())}
 
-    # The bare shared-infra citation drifts nowhere (suppressed) ...
-    assert compute_drift(idx, pr_number=1, changed_files=[_SHARED_INFRA]) == []
-    # ... and that is exactly the (ADR, path) pair the nudge surfaces.
+    # The bare shared-infra citation is the one that gets the nudge ...
     assert (1, _SHARED_INFRA) in nudged
-
-    # The ordinary bare citation DOES drift, so it is NOT nudged.
-    ordinary = compute_drift(idx, pr_number=2, changed_files=[_ORDINARY])
-    assert [f.adr.number for f in ordinary] == [2]
-    assert (2, _ORDINARY) not in nudged
+    # ... and it is the ONLY one: an ordinary bare citation is not a
+    # dependency-pointer module, and the symbol owner is already enforceable.
+    assert nudged == {(1, _SHARED_INFRA)}
 
 
-def test_symbol_owner_still_drifts_and_is_not_nudged(tmp_path: Path) -> None:
+def test_symbol_owner_is_enforced_by_the_gate_and_not_nudged(tmp_path: Path) -> None:
+    """ADR-3 owns ``HydraFlowConfig``: the citation the gate holds it to.
+
+    Proves the ``:Symbol`` re-cite the nudge recommends actually buys
+    enforcement — the resolver reports no violation while the symbol exists,
+    and the ADR is not nudged because there is nothing left to upgrade.
+    """
     idx = _corpus(tmp_path)
-    # ADR-3 owns HydraFlowConfig in the shared-infra module: a symbol-level
-    # change drifts it, proving the :Symbol re-cite the nudge recommends works.
-    findings = compute_drift(
-        idx, pr_number=3, changed_files=[f"{_SHARED_INFRA}:HydraFlowConfig"]
-    )
-    assert [f.adr.number for f in findings] == [3]
-    # It already cites at symbol granularity, so nothing to nudge.
-    nudged = {n.adr_number for n in bare_infra_citation_nudges(idx.adrs())}
-    assert 3 not in nudged
+    repo_root = Path(__file__).resolve().parents[2]
+
+    # The cited symbol resolves against the real tree -> no violation.
+    violations = unresolved_citations(idx, repo_root=repo_root)
+    assert (3, _SHARED_INFRA, "HydraFlowConfig") not in violations
+
+    assert 3 not in {n.adr_number for n in bare_infra_citation_nudges(idx.adrs())}
 
 
 def test_cross_reference_report_always_carries_nudge_section() -> None:

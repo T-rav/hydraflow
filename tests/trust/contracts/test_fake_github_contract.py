@@ -23,6 +23,8 @@ from tests.trust.contracts._replay import FakeOutput, list_cassettes, replay_cas
 from tests.trust.contracts._schema import Cassette
 
 _CASSETTE_DIR = Path(__file__).parent / "cassettes" / "github"
+# #11517: the promoted-main commit OID the release-tagging cassettes pin.
+_PROMOTED_MAIN_SHA = "9f2c0d4e8b7a6c5d4e3f2a1b0c9d8e7f6a5b4c3d"
 
 
 async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR0911
@@ -738,6 +740,25 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
         messages = await fake.get_pr_commit_messages(pr_number)
         return FakeOutput(exit_code=0, stdout=f"{messages}\n", stderr="")
 
+    if method == "get_pr_title_and_body":
+        import json as _json
+
+        pr_number = int(args[0])
+        # Seed HydraFlow's canonical PR title shape (``Fixes #N: <title>``) —
+        # the exact input the decompose terminal reads to tell a landing fix
+        # from a stalled one (#11480).
+        fake.add_pr(
+            number=pr_number,
+            issue_number=1,
+            branch="b",
+            title="Fixes #1: real bug",
+            body="Fixes #1\n\nThe whole fix.",
+        )
+        title, body = await fake.get_pr_title_and_body(pr_number)
+        return FakeOutput(
+            exit_code=0, stdout=_json.dumps([title, body]) + "\n", stderr=""
+        )
+
     # --- Workflow-run / CI-log / git-op / alerts cluster (#9768 slice 5) ---
 
     if method == "list_workflow_runs":
@@ -969,6 +990,42 @@ async def _invoke_fake_github(cassette: Cassette) -> FakeOutput:  # noqa: PLR091
 
         prs = await fake.list_all_prs()
         return FakeOutput(exit_code=0, stdout=_json.dumps(prs) + "\n", stderr="")
+
+    # --- Release tagging (ADR-0011, #11517) ---
+
+    if method == "resolve_remote_branch_sha":
+        branch = str(args[0])
+        fake.set_branch_head(branch, _PROMOTED_MAIN_SHA)
+        sha = await fake.resolve_remote_branch_sha(branch)
+        assert sha == _PROMOTED_MAIN_SHA, (
+            f"resolve_remote_branch_sha({branch!r}) ignored the seeded head"
+        )
+        return FakeOutput(exit_code=0, stdout=f"{sha}\n", stderr="")
+
+    if method == "create_tag":
+        tag, ref = str(args[0]), str(args[1])
+        created = await fake.create_tag(tag, ref=ref)
+        assert created, "FakeGitHub.create_tag unexpectedly returned False"
+        # The side-effect pins fidelity: a fake that tagged HEAD (or ignored
+        # ``ref``) would still return True.
+        assert fake.tags.get(tag) == ref, (
+            f"create_tag recorded {fake.tags.get(tag)!r} for {tag}; expected {ref!r}"
+        )
+        return FakeOutput(exit_code=0, stdout="", stderr="")
+
+    if method == "create_release":
+        tag, title = str(args[0]), str(args[1])
+        body = str(args[2]) if len(args) > 2 else ""
+        created = await fake.create_release(tag, title, body)
+        assert created, "FakeGitHub.create_release unexpectedly returned False"
+        assert fake.releases.get(tag) == (title, body), (
+            f"create_release recorded {fake.releases.get(tag)!r} for {tag}"
+        )
+        return FakeOutput(
+            exit_code=0,
+            stdout=f"https://github.com/test-org/test-repo/releases/tag/{tag}\n",
+            stderr="",
+        )
 
     msg = f"FakeGitHub has no contract-tested method {method!r}"
     raise NotImplementedError(msg)

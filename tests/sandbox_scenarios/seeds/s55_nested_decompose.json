@@ -46,87 +46,27 @@
         }
       ]
     },
-    "plan": {
-      "3": [
-        {
-          "success": true
-        }
-      ],
+    "auto_agent": {
       "4": [
         {
-          "success": true
+          "status": "resolved",
+          "diagnosis": "Leaf shipped in one session."
         }
       ],
       "6": [
         {
-          "success": true
+          "status": "resolved",
+          "diagnosis": "Leaf shipped in one session."
         }
       ],
       "7": [
         {
-          "success": true
-        }
-      ]
-    },
-    "implement": {
-      "3": [
-        {
-          "success": true,
-          "branch": "hf/issue-3"
-        },
-        {
-          "success": true,
-          "branch": "hf/issue-3"
-        },
-        {
-          "success": true,
-          "branch": "hf/issue-3"
-        },
-        {
-          "success": true,
-          "branch": "hf/issue-3"
-        }
-      ],
-      "4": [
-        {
-          "success": true,
-          "branch": "hf/issue-4"
-        }
-      ],
-      "6": [
-        {
-          "success": true,
-          "branch": "hf/issue-6"
-        }
-      ],
-      "7": [
-        {
-          "success": true,
-          "branch": "hf/issue-7"
+          "status": "resolved",
+          "diagnosis": "Leaf shipped in one session."
         }
       ]
     },
     "review": {
-      "3": [
-        {
-          "verdict": "request-changes",
-          "comments": [
-            "bad 1"
-          ]
-        },
-        {
-          "verdict": "request-changes",
-          "comments": [
-            "bad 2"
-          ]
-        },
-        {
-          "verdict": "request-changes",
-          "comments": [
-            "bad 3"
-          ]
-        }
-      ],
       "4": [
         {
           "verdict": "approve",

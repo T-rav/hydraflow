@@ -22,6 +22,7 @@ from pydantic import (
 )
 
 import file_util
+from package_resources import ResourceNotFoundError, checkout_path
 from queue_strategy import BandWeights, QueueStrategy
 
 logger = logging.getLogger("hydraflow.config")
@@ -127,6 +128,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_diff_sanity_attempts", "HYDRAFLOW_MAX_DIFF_SANITY_ATTEMPTS", 1),
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
+    ("test_adequacy_repair_passes", "HYDRAFLOW_TEST_ADEQUACY_REPAIR_PASSES", 1),
     (
         "test_adequacy_coverage_timeout_secs",
         "HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS",
@@ -151,7 +153,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     (
         "implement_no_progress_abort_attempts",
         "HYDRAFLOW_IMPLEMENT_NO_PROGRESS_ABORT_ATTEMPTS",
-        3,
+        1,
     ),
     ("max_decomposition_depth", "HYDRAFLOW_MAX_DECOMPOSITION_DEPTH", 2),
     (
@@ -347,12 +349,6 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_SECOND_ORDER_VITALS_MIN_MERGE_THROUGHPUT",
         1,
     ),
-    ("adr_drift_resolver_interval", "HYDRAFLOW_ADR_DRIFT_RESOLVER_INTERVAL", 3600),
-    (
-        "adr_drift_resolver_max_triage_per_tick",
-        "HYDRAFLOW_ADR_DRIFT_RESOLVER_MAX_TRIAGE_PER_TICK",
-        5,
-    ),
     ("adr_review_interval", "HYDRAFLOW_ADR_REVIEW_INTERVAL", 86400),
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
@@ -519,21 +515,6 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "wiki_rot_detector_max_issues_per_tick",
         "HYDRAFLOW_WIKI_ROT_DETECTOR_MAX_ISSUES_PER_TICK",
         10,
-    ),
-    (
-        "adr_touchpoint_auditor_interval",
-        "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_INTERVAL",
-        14400,
-    ),
-    (
-        "adr_drift_fleet_batch_threshold",
-        "HYDRAFLOW_ADR_DRIFT_FLEET_BATCH_THRESHOLD",
-        4,
-    ),
-    (
-        "adr_drift_shared_infra_fanout_threshold",
-        "HYDRAFLOW_ADR_DRIFT_SHARED_INFRA_FANOUT_THRESHOLD",
-        4,
     ),
     (
         "adr_conformance_interval",
@@ -783,6 +764,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_FAIL_CLOSED",
         True,
     ),
+    ("triage_blocker_gate_enabled", "HYDRAFLOW_TRIAGE_BLOCKER_GATE_ENABLED", True),
     ("triage_honeypot_enabled", "HYDRAFLOW_TRIAGE_HONEYPOT_ENABLED", True),
     ("triage_honeypot_enforce", "HYDRAFLOW_TRIAGE_HONEYPOT_ENFORCE", False),
     ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
@@ -871,12 +853,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "auto_agent_light_intake_enabled",
         "HYDRAFLOW_AUTO_AGENT_LIGHT_INTAKE_ENABLED",
-        False,
-    ),
-    (
-        "epic_decompose_on_intake_enabled",
-        "HYDRAFLOW_EPIC_DECOMPOSE_ON_INTAKE_ENABLED",
-        False,
+        True,
     ),
     (
         "auto_pr_preflight_gate_enabled",
@@ -924,17 +901,17 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
+        "implement_full_quality_gate",
+        "HYDRAFLOW_IMPLEMENT_FULL_QUALITY_GATE",
+        False,
+    ),
+    (
         "human_steering_enabled",
         "HYDRAFLOW_HUMAN_STEERING_ENABLED",
         True,
     ),
     # Static config gates — 34 loops (dark-factory §2.1 #3 defense-in-depth)
     ("adr_reviewer_loop_enabled", "HYDRAFLOW_ADR_REVIEWER_LOOP_ENABLED", True),
-    (
-        "adr_touchpoint_auditor_loop_enabled",
-        "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_LOOP_ENABLED",
-        False,  # #10540: activity-based ADR-drift retired; default OFF.
-    ),
     (
         "adr_conformance_loop_enabled",
         "HYDRAFLOW_ADR_CONFORMANCE_LOOP_ENABLED",
@@ -1000,6 +977,10 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_MERGE_STATE_WATCHER_LOOP_ENABLED",
         True,
     ),
+    # #11595: auto-rebase actuator for the factory's own dirty PRs. Default
+    # OFF — a branch-rewriting actuator is armed by the operator, not shipped
+    # hot.
+    ("pr_autorebase_enabled", "HYDRAFLOW_PR_AUTOREBASE_ENABLED", False),
     ("pr_unsticker_loop_enabled", "HYDRAFLOW_PR_UNSTICKER_LOOP_ENABLED", True),
     ("pricing_refresh_loop_enabled", "HYDRAFLOW_PRICING_REFRESH_LOOP_ENABLED", True),
     ("rc_budget_loop_enabled", "HYDRAFLOW_RC_BUDGET_LOOP_ENABLED", True),
@@ -1100,11 +1081,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
-        "adr_drift_resolver_loop_enabled",
-        "HYDRAFLOW_ADR_DRIFT_RESOLVER_LOOP_ENABLED",
-        False,  # #10540: activity-based ADR-drift retired; default OFF.
-    ),
-    (
         "human_branch_shepherd_enabled",
         "HYDRAFLOW_HUMAN_BRANCH_SHEPHERD_ENABLED",
         True,
@@ -1161,7 +1137,6 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("triage_honeypot_provider", "HYDRAFLOW_TRIAGE_HONEYPOT_PROVIDER"),
     ("pr_unstick_provider", "HYDRAFLOW_PR_UNSTICK_PROVIDER"),
     ("term_proposer_provider", "HYDRAFLOW_TERM_PROPOSER_PROVIDER"),
-    ("adr_drift_resolver_provider", "HYDRAFLOW_ADR_DRIFT_RESOLVER_PROVIDER"),
     ("maintenance_provider", "HYDRAFLOW_MAINTENANCE_PROVIDER"),
 ]
 
@@ -1246,11 +1221,6 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
     ("HYDRAFLOW_TERM_PROPOSER", "term_proposer_tool", "term_proposer_model"),
-    (
-        "HYDRAFLOW_ADR_DRIFT_RESOLVER",
-        "adr_drift_resolver_tool",
-        "adr_drift_resolver_model",
-    ),
 ]
 
 
@@ -1596,6 +1566,24 @@ class HydraFlowConfig(BaseModel):
         le=3,
         description="Max test adequacy check passes (0 = disabled)",
     )
+    test_adequacy_repair_passes: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description=(
+            "Bounded in-run repair passes when the test-adequacy gate fails "
+            "(#11593): the concrete findings (finder/verifier gaps + "
+            "coverage-delta uncovered lines) go back to the same implementer "
+            "worktree with a focused write-the-missing-tests prompt, then the "
+            "full check (coverage delta + independent verifier) re-runs. "
+            "Default 1: 61 of 105 failed August runs died at this gate and a "
+            "rejected run costs a median 29 min plus a whole restarted "
+            "attempt, so one bounded rescue pass is cheaper than rejection. "
+            "0 = today's straight-to-rejection behavior. "
+            "max_test_adequacy_attempts=0 still disables the whole gate, "
+            "repair included."
+        ),
+    )
     test_adequacy_coverage_timeout_secs: int = Field(
         default=300,
         ge=60,
@@ -1654,6 +1642,21 @@ class HydraFlowConfig(BaseModel):
             "without a wired Makefile quality target."
         ),
     )
+    implement_full_quality_gate: bool = Field(
+        default=False,
+        description=(
+            "Implementer post-build gate (#11568). Off (default): after each "
+            "build and each quality-fix round the implementer runs "
+            "`make quality-lite` (lint + typecheck + security) then "
+            "`make test-impacted IMPACTED_ARGS=--bounded` (the tests its diff "
+            "touches, never the whole suite; repos without that target run "
+            "test_command) — both host-lock-free — and CI is the one "
+            "full-suite gate per PR. On: restore the pre-#11568 full "
+            "`make quality`, which queues every implementer on the host-wide "
+            "quality lock (#11400) so max_workers no longer reflects real "
+            "parallelism. HITL and diagnostic runners always run the full gate."
+        ),
+    )
     max_merge_conflict_fix_attempts: int = Field(
         default=3,
         ge=0,
@@ -1673,20 +1676,24 @@ class HydraFlowConfig(BaseModel):
         description="Max total implementation attempts per issue before HITL escalation",
     )
     implement_no_progress_abort_attempts: int = Field(
-        default=3,
+        default=1,
         ge=0,
         le=10,
         description=(
-            "No-progress early-abort threshold for ImplementPhase's flow "
-            "(#10659/#10616, P2 of #10682). When an issue reaches this attempt "
-            "number AND its immediately prior attempt produced no output (zero "
-            "commits with an error), the ``no-progress-abort`` flow node "
-            "escalates it to HITL BEFORE spending another full (up to "
-            "``agent_timeout``) build, instead of retry-thrashing to the "
-            "``max_issue_attempts`` cap. Default 3 == the default "
-            "``max_issue_attempts``, so the final futile build is skipped while "
-            "the ADR-0063 W5 corrective retry still runs; lower it to abort "
-            "sooner (fewer corrective retries) or set 0 to disable the abort."
+            "Zero-commit abort threshold for ImplementPhase's flow "
+            "(#10659/#10616, P2 of #10682; tightened by #11568): the attempt "
+            "number at/after which a zero-commit (no output) attempt stops "
+            "the retry loop and routes the issue to diagnose with the "
+            "transcript tail. Default 1: the FIRST zero-commit result routes "
+            "to diagnose (post-build ``zero-commit-abort`` node) instead of "
+            "burning attempts 2 and 3 on the same shape — measured 2026-08-21 "
+            "as the doubling of attempts per merged issue (1.2 → 2.2). The "
+            "pre-build ``no-progress-abort`` node applies the same threshold "
+            "to the immediately prior attempt of the current cycle (a "
+            "backstop for state written before #11568). Raise to 2–3 to "
+            "restore the ADR-0063 W5 corrective retry after a zero-commit "
+            "attempt; set 0 to disable both aborts (retry to the "
+            "``max_issue_attempts`` cap)."
         ),
     )
     max_decomposition_depth: int = Field(
@@ -1904,10 +1911,11 @@ class HydraFlowConfig(BaseModel):
         default=["auto-decomposed-child"],
         description=(
             "Label stamped on every child issue created by decompose-to-converge "
-            "(ADR-0105), on top of epic_child_label/find_label. Triage's intake "
-            "complexity path (_maybe_decompose) skips re-decomposing an issue "
-            "carrying this label so the depth counter can't be bypassed by "
-            "re-entering through the intake vector uncounted."
+            "(ADR-0105), on top of epic_child_label/find_label. Further splits "
+            "of a stamped child only happen through the stall-path call to "
+            "IssueDecomposer.create_epic_from_result(depth=...), which the "
+            "depth cap bounds (the #11298 intake auto-decomposition vector "
+            "was removed)."
         ),
     )
     epic_group_planning: bool = Field(
@@ -1924,19 +1932,12 @@ class HydraFlowConfig(BaseModel):
         default=8,
         ge=1,
         le=10,
-        description="Minimum triage complexity score to trigger decomposition",
-    )
-    epic_decompose_on_intake_enabled: bool = Field(
-        default=False,
         description=(
-            "#11298 board-churn root cause: intake auto-decomposition minted "
-            "epics + parked children at classification time (push), re-"
-            "expanding consolidated work before anyone could build it — one "
-            "class canonical became 6 open issues in a day. Default OFF: "
-            "complex issues plan WHOLE, and the demand-driven ADR-0105 "
-            "stall path (non-convergence -> decompose) remains the "
-            "decomposition mechanism. Flip on only if whole-planning of "
-            "epics measurably thrashes."
+            "Complexity score at which the triage cache ranks an issue "
+            "'high' (TriagePhase._complexity_rank). No longer gates any "
+            "decomposition action — the #11298 intake auto-decomposition "
+            "path was removed; splits happen only via the ADR-0105 "
+            "stall-path terminal."
         ),
     )
     backlog_budget: int = Field(
@@ -2554,29 +2555,6 @@ class HydraFlowConfig(BaseModel):
             "gates ordinary merges, or files fix PRs."
         ),
     )
-    adr_drift_resolver_interval: int = Field(
-        default=3600,
-        ge=900,
-        le=86400,
-        description=(
-            "AdrDriftResolverLoop cycle interval in seconds (#9976: "
-            "triage-before-escalate for adr_touchpoint_auditor's ADR-drift "
-            "rollups; default 1h)"
-        ),
-    )
-    adr_drift_resolver_max_triage_per_tick: int = Field(
-        default=5,
-        ge=1,
-        le=20,
-        description=(
-            "Max LLM triage calls AdrDriftResolverLoop attempts in one tick "
-            "(#9976) — every call ATTEMPTED counts against this budget, "
-            "including one that errors, not just successful triages "
-            "(#11181). Overflow candidates are simply retried next tick — "
-            "no carryover bookkeeping needed since the candidate set is "
-            "re-derived from state each tick."
-        ),
-    )
 
     # Hash-chained audit stream retention (CH-1, #9729). None = keep forever.
     # A set value is a retention FLOOR: RunsGCLoop may prune records strictly
@@ -3028,6 +3006,19 @@ class HydraFlowConfig(BaseModel):
             "parked (#10291)."
         ),
     )
+    triage_blocker_gate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Honour ``Blocked by: #N[, #M]`` lines in issue bodies during "
+            "triage (#11614). A child whose declared prerequisite is still "
+            "OPEN is held on its current pipeline label and re-evaluated on "
+            "the next tick instead of being triaged into the plan queue, so "
+            "phase-ordered epic children flow in declared order rather than "
+            "all becoming eligible at once. Self-healing: no park, no extra "
+            "label, no second actor. Every unreadable blocker fails OPEN. "
+            "Kill switch for the gate; see src/blocker_gate.py."
+        ),
+    )
     triage_honeypot_enabled: bool = Field(
         default=True,
         description=(
@@ -3239,7 +3230,11 @@ class HydraFlowConfig(BaseModel):
         default=3600,
         ge=60,
         le=7200,
-        description="Timeout in seconds for 'make quality' verification",
+        description=(
+            "Timeout in seconds per post-build verification command: the full "
+            "'make quality' (HITL / diagnostic runners) or each implement-path "
+            "step — 'make quality-lite', then the impacted-test run (#11568)"
+        ),
     )
     git_command_timeout: int = Field(
         default=30,
@@ -3652,11 +3647,6 @@ class HydraFlowConfig(BaseModel):
 
     # Hindsight + memory_auto_approve knobs removed in Phase 3 cutover.
 
-    memory_prune_stale_items: bool = Field(
-        default=True,
-        description="Remove local memory item files whose source issue is no longer active",
-    )
-
     # Observability context injection
     max_runtime_log_chars: int = Field(
         default=8_000,
@@ -3887,31 +3877,6 @@ class HydraFlowConfig(BaseModel):
     report_issue_model: str = Field(
         default="opus",
         description="Model for report-issue worker (codebase research + structured issue creation)",
-    )
-    adr_drift_resolver_tool: Literal["claude", "codex"] = Field(
-        default="claude",
-        description="CLI backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
-    )
-    adr_drift_resolver_model: str = Field(
-        default="sonnet",
-        description=(
-            "Model for AdrDriftResolverLoop's TRIAGE call (#9976) — "
-            "classifying one ADR-drift rollup's cited diff against the "
-            "ADR's Decision/Context text. Sonnet is sufficient; the task is "
-            "structured classification, not deep reasoning."
-        ),
-    )
-    adr_drift_resolver_timeout: int = Field(
-        default=180,
-        ge=30,
-        le=1800,
-        description="Per-call timeout (seconds) for AdrDriftResolverLoop's TRIAGE call (#9976).",
-    )
-    adr_drift_resolver_provider: Literal[
-        "claude", "gateway", "openrouter", "zai", "kimi"
-    ] = Field(
-        default="claude",
-        description="Backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
     )
     report_issue_interval: int = Field(
         default=30,
@@ -4169,6 +4134,38 @@ class HydraFlowConfig(BaseModel):
             "the external liveness watchdog (#10009). Enable only where a "
             "supervisor with Restart=always is in place; without one this "
             "turns a frozen process into a dead one. Re-read at trip time."
+        ),
+    )
+    event_loop_watchdog_restart_after_episodes: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "How many accumulated freeze episodes a hard restart requires "
+            "(#11604). Default 2: the first episode notifies (stack dump, "
+            "stall marker, loop-stalled issue) and only a REPEAT exits the "
+            "process. The counter is the stall marker's episode_count, which "
+            "resets when the health monitor gets a healthy cycle and consumes "
+            "the marker — so 'recovered well enough to file the issue' resets "
+            "it, while 'froze, recovered, froze again' climbs it. Set to 1 to "
+            "restore restart-on-first-episode. Re-read at trip time."
+        ),
+    )
+    event_loop_watchdog_starvation_service_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Observer service ratio below which a freeze is blamed on HOST "
+            "CPU starvation rather than a wedged loop, vetoing the hard "
+            "restart (#11604). The ratio is the watchdog thread's own polls "
+            "taken over the freeze window divided by the polls its cadence "
+            "called for: a wedged event loop does not stop a separate OS "
+            "thread waking on time (ratio ~1.0), but an oversubscribed host "
+            "starves the observer too. Default 0.5 — the observer must have "
+            "lost HALF its own schedule before a restart is vetoed. Set to "
+            "0.0 to disable the veto. Never vetoes the notify path. Re-read "
+            "at trip time."
         ),
     )
     staging_bisect_flake_reruns: int = Field(
@@ -4768,45 +4765,6 @@ class HydraFlowConfig(BaseModel):
         description="Seconds between FakeCoverageAuditorLoop ticks (default 7d)",
     )
 
-    # Trust fleet — AdrTouchpointAuditorLoop (ADR-0056)
-    adr_touchpoint_auditor_interval: int = Field(
-        default=14400,
-        ge=900,
-        le=86400,
-        description="Seconds between AdrTouchpointAuditorLoop ticks (default 4h)",
-    )
-    adr_drift_label: list[str] = Field(
-        default=["hydraflow-adr-drift"],
-        description="Labels for ADR drift findings filed by adr_touchpoint_auditor",
-    )
-    adr_drift_stuck_label: list[str] = Field(
-        default=["hydraflow-adr-drift-stuck"],
-        description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
-    )
-    adr_drift_fleet_batch_threshold: int = Field(
-        default=4,
-        ge=2,
-        le=100,
-        description=(
-            "Distinct-ADR count at which a single PR's drift findings collapse "
-            "into ONE batched fleet rollup issue instead of N per-ADR rollups "
-            "(#9662 cross-cutting caretaker-fleet sweeps)"
-        ),
-    )
-    adr_drift_shared_infra_fanout_threshold: int = Field(
-        default=4,
-        ge=2,
-        le=100,
-        description=(
-            "Live (Accepted/Proposed) ADR count at which a bare-cited src/ "
-            "module is automatically treated as shared infra (suppressed from "
-            "drift the same as `_SHARED_INFRA_MODULES`) — churn-derived, so "
-            "the next high-churn shared module doesn't need a manual allowlist "
-            "edit (#10456). Floor of 2: fan-out counts the citing ADR itself, "
-            "so 1 would suppress every bare citation"
-        ),
-    )
-
     # Trust fleet — AdrConformanceLoop (ADR-0100)
     adr_conformance_interval: int = Field(
         default=86400,
@@ -4831,13 +4789,6 @@ class HydraFlowConfig(BaseModel):
             "(#10777). A batch of newly-pending mirror entries would otherwise "
             "file one issue each; over-cap entries are folded into a single "
             "summary issue instead."
-        ),
-    )
-    memory_backlog_enabled: bool = Field(
-        default=True,
-        description=(
-            "Static gate for MemoryBacklogLoop. Defense-in-depth alongside "
-            "the in-body ADR-0049 kill-switch."
         ),
     )
     memory_backlog_label: list[str] = Field(
@@ -4897,14 +4848,6 @@ class HydraFlowConfig(BaseModel):
             "capped, so ``reconcile_open`` cannot wrongly auto-close a live "
             "escalation for a merely rate-limited cite (patterns/0576)."
         ),
-    )
-
-    # Caretaker — AdrTouchpointAuditorLoop (ADR-0056)
-    adr_touchpoint_auditor_interval: int = Field(
-        default=14400,
-        ge=900,
-        le=86400,
-        description="Seconds between AdrTouchpointAuditorLoop ticks (default 4h)",
     )
 
     # Caretaker — AutoTightenLoop (auto-tightening ratchet)
@@ -5410,13 +5353,16 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     auto_agent_light_intake_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "#11298 light lane: PlanPhase routes issues triaged at or below "
             "auto_agent_light_max_complexity to the single-session auto-agent "
             "(one spawn: read issue -> implement -> test -> PR) instead of the "
             "staged plan/review pipeline. Exhaustion falls back to the staged "
-            "pipeline, never to a human. Default OFF - the operator flips it."
+            "pipeline, never to a human. Default ON since 2026-08-21 (operator "
+            "ruling after the throughput analysis: attempts per merged issue "
+            "had doubled on the staged path, #11568); set False to route every "
+            "issue through the staged pipeline."
         ),
     )
     auto_agent_light_max_complexity: int = Field(
@@ -5737,20 +5683,6 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for ADRReviewerLoop.",
     )
-    adr_touchpoint_auditor_loop_enabled: bool = Field(
-        default=False,
-        description=(
-            "Deploy-time kill-switch for AdrTouchpointAuditorLoop. Defaults "
-            "OFF (#10540): activity-based ADR-drift ('a cited module changed "
-            "in a PR', ~70% false positives) is retired in favour of the "
-            "deterministic violation-based citation gate "
-            "(tests/test_adr_citation_conformance.py). The loop code is kept "
-            "for now; set HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_LOOP_ENABLED=true "
-            "to re-enable. Deliberately EXCLUDED from the self-repair-on-by-"
-            "default set: its triage sibling adr_drift_resolver stays off, so "
-            "its false-positive rollups would pile up unhandled."
-        ),
-    )
     adr_conformance_loop_enabled: bool = Field(
         default=True,
         description=(
@@ -5895,6 +5827,18 @@ class HydraFlowConfig(BaseModel):
     merge_state_watcher_loop_enabled: bool = Field(
         default=True,
         description="Deploy-time kill-switch for MergeStateWatcherLoop.",
+    )
+    pr_autorebase_enabled: bool = Field(
+        default=False,
+        description=(
+            "Arm the MergeStateWatcher auto-rebase actuator (#11595): when a "
+            "factory-owned (agent/*) PR goes CONFLICTING because the base "
+            "branch advanced, merge the base + regenerate docs/arch/generated "
+            "in an ephemeral worktree and push, so CI re-dispatches without "
+            "an operator. One attempt per PR per base head; source-file "
+            "conflicts abort untouched and escalate to HITL. Default OFF — "
+            "the operator arms a branch-rewriting actuator deliberately."
+        ),
     )
     pr_unsticker_loop_enabled: bool = Field(
         default=True,
@@ -6051,19 +5995,6 @@ class HydraFlowConfig(BaseModel):
             "default; disable via the System tab). Also gated by "
             "sampled_audit_reaudit_enabled, so the air-gapped sandbox "
             "(which pins re-audit OFF) reaches no adjudicator spawn either."
-        ),
-    )
-    adr_drift_resolver_loop_enabled: bool = Field(
-        default=False,
-        description=(
-            "Deploy-time kill-switch for AdrDriftResolverLoop (#9976: "
-            "triage-before-escalate so ADR-drift rollups self-resolve). "
-            "Defaults OFF (#10540): it triaged the activity-based ADR-drift "
-            "rollups that are now retired in favour of the deterministic "
-            "violation-based citation gate "
-            "(tests/test_adr_citation_conformance.py), so there is nothing for "
-            "it to resolve. Loop code is kept; set "
-            "HYDRAFLOW_ADR_DRIFT_RESOLVER_LOOP_ENABLED=true to re-enable."
         ),
     )
     stale_issue_loop_enabled: bool = Field(
@@ -6443,23 +6374,23 @@ class HydraFlowConfig(BaseModel):
         """Resolve the factory-autonomy merge policy file (CH-3, #9731).
 
         A managed repo's own ``docs/standards/factory_autonomy/policy.yaml``
-        when present; otherwise the packaged policy shipped with this
-        HydraFlow checkout (the standard applies to every HydraFlow-format
-        project). ``merge_policy.enforce_merge_policy`` fails CLOSED when
-        the resolved file is missing or invalid.
+        when present; otherwise the copy in the HydraFlow *checkout* (the
+        standard applies to every HydraFlow-format project). ``docs/`` is
+        documentation, not package data, so a wheel install has no second
+        copy — the property then names the managed repo's own expected
+        location, which is the one path an operator can act on.
+        ``merge_policy.enforce_merge_policy`` fails CLOSED on a missing or
+        invalid file either way (#11589).
         """
         repo_local = (
             self.repo_root / "docs" / "standards" / "factory_autonomy" / "policy.yaml"
         )
         if repo_local.exists():
             return repo_local
-        return (
-            Path(__file__).resolve().parent.parent
-            / "docs"
-            / "standards"
-            / "factory_autonomy"
-            / "policy.yaml"
-        )
+        try:
+            return checkout_path("docs", "standards", "factory_autonomy", "policy.yaml")
+        except ResourceNotFoundError:
+            return repo_local
 
     def base_branch(self) -> str:
         """Return the branch agent PRs should target.
@@ -6702,7 +6633,6 @@ _MAINTENANCE_DIALED_ROLES: tuple[str, ...] = (
     "wiki_compilation",
     "adr_review",
     "transcript_summary",
-    "adr_drift_resolver",
     "term_proposer",
     "triage_honeypot",
     "pr_unstick",
@@ -6919,11 +6849,6 @@ def _tool_model_stage_pairs(config: HydraFlowConfig) -> tuple[_StageToolModel, .
         ("report_issue", config.report_issue_tool, config.report_issue_model),
         ("adr_review", config.adr_review_tool, config.adr_review_model),
         ("term_proposer", config.term_proposer_tool, config.term_proposer_model),
-        (
-            "adr_drift_resolver",
-            config.adr_drift_resolver_tool,
-            config.adr_drift_resolver_model,
-        ),
         (
             "sampled_audit",
             resolve_maintenance_tool(config),

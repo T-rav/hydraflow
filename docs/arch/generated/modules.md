@@ -40,7 +40,7 @@ graph LR
     src -- "30" --> src_contracts
     src -- "4" --> src_dashboard_routes
     src -- "5" --> src_disturbance
-    src -- "22" --> src_erosion
+    src -- "23" --> src_erosion
     src -- "9" --> src_escape
     src -- "4" --> src_flows
     src -- "1" --> src_hydraflow_gateway
@@ -50,7 +50,7 @@ graph LR
     src -- "1" --> src_review_phase
     src -- "1" --> src_runners
     src -- "1" --> src_signal_control
-    src -- "62" --> src_state
+    src -- "61" --> src_state
     src -- "6" --> src_vitals
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
@@ -67,14 +67,13 @@ graph LR
     src_disturbance_detectors -- "5" --> src_disturbance
     src_erosion -- "4" --> src_arch
     src_intervention -- "3" --> src_escape
+    src_mockworld -- "1" --> src_preflight
     src_mockworld_fakes -- "30" --> src_mockworld
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
-    src_review_phase -- "1" --> src
     src_review_phase -- "1" --> src_flows
     src_review_phase -- "1" --> src_state
     src_runners -- "1" --> src_preflight
-    src_state -- "1" --> src
     src_vitals -- "2" --> src_audit
     src_vitals -- "1" --> src_erosion
     src_vitals -- "2" --> src_escape

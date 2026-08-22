@@ -85,56 +85,6 @@ def test_fake_coverage_auditor_interval_bounds() -> None:
         HydraFlowConfig(fake_coverage_auditor_interval=10_000_000)  # above 30d max
 
 
-def test_adr_drift_fleet_batch_threshold_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("HYDRAFLOW_ADR_DRIFT_FLEET_BATCH_THRESHOLD", raising=False)
-    cfg = HydraFlowConfig()
-    assert cfg.adr_drift_fleet_batch_threshold == 4
-
-
-def test_adr_drift_fleet_batch_threshold_env_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("HYDRAFLOW_ADR_DRIFT_FLEET_BATCH_THRESHOLD", "7")
-    cfg = HydraFlowConfig()
-    assert cfg.adr_drift_fleet_batch_threshold == 7
-
-
-def test_adr_drift_fleet_batch_threshold_bounds() -> None:
-    with pytest.raises(ValueError):
-        HydraFlowConfig(adr_drift_fleet_batch_threshold=1)  # below 2 minimum
-    with pytest.raises(ValueError):
-        HydraFlowConfig(adr_drift_fleet_batch_threshold=101)  # above 100 max
-
-
-def test_adr_drift_shared_infra_fanout_threshold_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv(
-        "HYDRAFLOW_ADR_DRIFT_SHARED_INFRA_FANOUT_THRESHOLD", raising=False
-    )
-    cfg = HydraFlowConfig()
-    assert cfg.adr_drift_shared_infra_fanout_threshold == 4
-
-
-def test_adr_drift_shared_infra_fanout_threshold_env_override(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("HYDRAFLOW_ADR_DRIFT_SHARED_INFRA_FANOUT_THRESHOLD", "6")
-    cfg = HydraFlowConfig()
-    assert cfg.adr_drift_shared_infra_fanout_threshold == 6
-
-
-def test_adr_drift_shared_infra_fanout_threshold_bounds() -> None:
-    # Floor of 2: fan-out counts the citing ADR itself, so a threshold of 1
-    # would suppress every bare citation and mask genuine single-ADR drift.
-    with pytest.raises(ValueError):
-        HydraFlowConfig(adr_drift_shared_infra_fanout_threshold=1)  # below 2 minimum
-    with pytest.raises(ValueError):
-        HydraFlowConfig(adr_drift_shared_infra_fanout_threshold=101)  # above 100 max
-
-
 def test_term_proposer_config_defaults() -> None:
     config = HydraFlowConfig()
     assert config.term_proposer_enabled is True

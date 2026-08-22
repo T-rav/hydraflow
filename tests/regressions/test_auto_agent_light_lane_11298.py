@@ -26,9 +26,12 @@ from config import HydraFlowConfig
 from plan_phase import PlanPhase
 
 
-def test_light_lane_defaults_off() -> None:
+def test_light_lane_defaults_on() -> None:
+    """Default ON since 2026-08-21 (operator ruling; the staged path's attempts
+    per merged issue had doubled — #11568). ``False`` still routes everything
+    through the staged pipeline."""
     config = HydraFlowConfig()
-    assert config.auto_agent_light_intake_enabled is False
+    assert config.auto_agent_light_intake_enabled is True
     assert config.auto_agent_light_max_complexity == 3
     assert config.light_autofix_label == ["hydraflow-auto-light"]
 

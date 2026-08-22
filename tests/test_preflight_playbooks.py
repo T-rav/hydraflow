@@ -113,14 +113,14 @@ def test_iter_playbooks_returns_all_specialists_in_registry() -> None:
 
 
 def test_playbook_prompt_template_resolves_when_file_exists() -> None:
-    """A playbook's `prompt_template` is the filename stem under prompts/auto_agent/.
+    """A playbook's `prompt_template` is the filename stem in the prompts resource tree.
 
     For every specialist that ships a custom prompt file, the file must exist
     so the runner doesn't silently fall back to _default at render time.
     """
-    from pathlib import Path
+    from package_resources import resource_dir
 
-    prompt_dir = Path(__file__).parent.parent / "prompts" / "auto_agent"
+    prompt_dir = resource_dir("prompts") / "auto_agent"
     for pb in iter_playbooks():
         if pb.prompt_template in (None, "_default"):
             continue

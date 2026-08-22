@@ -4,10 +4,10 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 ## Population
 
-- **Population:** Accepted (81 ADRs)
+- **Population:** Accepted (82 ADRs)
 - **Mean density** (per-ADR, unweighted): 96%
-- **Executable fraction** (check-weighted): 98% (142 of 145 cited checks)
-- **Check kinds:** pytest 141, make 1, script 0, prose 3
+- **Executable fraction** (check-weighted): 98% (152 of 155 cited checks)
+- **Check kinds:** pytest 151, make 1, script 0, prose 3
 - **Prose-count control limit** (Shewhart c-chart UCL): 0.61
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 
@@ -57,7 +57,6 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0052 | Sandbox-tier scenario testing | 100% | 2 | 0 |
 | ADR-0053 | Ubiquitous Language as a Living Artifact | 100% | 2 | 0 |
 | ADR-0054 | Term Auto-Proposer Loop (Dark-Factory Glossary Growth) | 100% | 2 | 0 |
-| ADR-0056 | ADR touchpoint enforcement — synchronous gate → asynchronous caretaker loop | 100% | 1 | 0 |
 | ADR-0057 | Term-Pruner Loop (Dark-Factory Glossary Hygiene) | 100% | 2 | 0 |
 | ADR-0058 | Edge-Proposer Loop (Dark-Factory Graph Densification) | 100% | 2 | 0 |
 | ADR-0060 | Atlas — Graph View, ADR Nodes, and Term Provenance | 100% | 1 | 0 |
@@ -84,7 +83,7 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0102 | Convergence gate general availability (flag removed) | 100% | 1 | 0 |
 | ADR-0103 | Continuous Human-on-the-Loop Steering Channel | 100% | 6 | 0 |
 | ADR-0104 | Auto-tightening ratchet | 100% | 1 | 0 |
-| ADR-0106 | Thread-level event-loop freeze detector | 100% | 1 | 0 |
+| ADR-0106 | Thread-level event-loop freeze detector | 100% | 2 | 0 |
 | ADR-0107 | Collapse Discover + Shape into Plan — Triage → Plan Directly | 100% | 1 | 0 |
 | ADR-0109 | Opt-in "ultra" deep-review tier for the review phase | 100% | 1 | 0 |
 | ADR-0110 | Provider/Harness Backend Split — z.ai as a Claude-harness backend | 100% | 1 | 0 |
@@ -98,6 +97,8 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0118 | Observability belongs to the SRE agent, not the loops | 100% | 1 | 0 |
 | ADR-0119 | Credit failover — reroute work to GLM instead of pausing when Claude credits are exhausted | 100% | 1 | 0 |
 | ADR-0134 | Per-repo model/harness selection — run Claude and GLM projects side by side | 100% | 5 | 0 |
+| ADR-0135 | Factory runs as a launchd service; operator Stop is a latch honoured by autostart and the liveness kernel | 100% | 8 | 0 |
+| ADR-0136 | ADR drift enforcement is a deterministic cited-symbol CI gate, not a caretaker loop | 100% | 2 | 0 |
 
 
 <!-- arch:generated -->

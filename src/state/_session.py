@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from file_util import atomic_write
+from implement_failure_class import FAILURE_CLASSES
 from models import SessionCounters, SessionLog
 
 if TYPE_CHECKING:
@@ -49,6 +50,22 @@ class SessionStateMixin:
             return
         sc = self._data.session_counters
         setattr(sc, stage, getattr(sc, stage) + 1)
+        self.save()
+
+    def increment_implement_failure(self, failure_class: str) -> None:
+        """Count a failed implement run under its failure class and persist.
+
+        #11593 seam 3: the System tab counts attempts but not why they die.
+        *failure_class* comes from
+        :func:`implement_failure_class.classify_implement_failure`; anything
+        outside :data:`implement_failure_class.FAILURE_CLASSES` is coerced to
+        ``"other"`` so a classifier drift can never grow unbounded keys in
+        persisted state.
+        """
+        if failure_class not in FAILURE_CLASSES:
+            failure_class = "other"
+        failures = self._data.session_counters.implement_failures
+        failures[failure_class] = failures.get(failure_class, 0) + 1
         self.save()
 
     def get_session_counters(self) -> SessionCounters:

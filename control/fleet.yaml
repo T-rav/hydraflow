@@ -110,11 +110,6 @@ report_issue:
   class: exploratory
 adr_reviewer:
   class: exploratory
-adr_drift_resolver:
-  class: exploratory
-  finder_id: adr_drift
-adr_touchpoint_auditor:
-  class: exploratory
 adr_conformance:
   class: exploratory
 term_proposer:

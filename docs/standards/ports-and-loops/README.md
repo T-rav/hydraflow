@@ -62,7 +62,6 @@ Rows below capture the canonical standard status. Full coverage detail
 | Loop | ADR | Wiki | Notes |
 |---|---|---|---|
 | `ADRReviewerLoop` | (none) | [adr-reviewer-loop.md](../../wiki/terms/adr-reviewer-loop.md) | Caretaker loop |
-| `AdrTouchpointAuditorLoop` | [0056, 0057] | [adr-touchpoint-auditor-loop.md](../../wiki/terms/adr-touchpoint-auditor-loop.md) | Trust fleet |
 | `AutoAgentPreflightLoop` | [0050, 0063] | dark-factory.md | Phase gap mitigation |
 | `CIMonitorLoop` | [0029, 0065] | [ci-monitor-loop.md](../../wiki/terms/ci-monitor-loop.md) | Caretaker loop |
 | `ContractRefreshLoop` | [0045, 0047] | [contract-refresh-loop.md](../../wiki/terms/contract-refresh-loop.md) | Trust fleet |

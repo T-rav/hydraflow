@@ -7,11 +7,27 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-exclude = ["ui*", "templates*", "tests*"]
+# hydraflow_resources.* is excluded so the resource tree is ONE package whose
+# package-data glob below covers every file beneath it. Discovered as separate
+# sub-packages, each nested directory would need its own package-data entry
+# and a new prompts sub-directory would ship empty (#11589).
+exclude = ["ui*", "templates*", "tests*", "hydraflow_resources.*"]
+
+# The ~340 flat top-level modules under src/ (server.py, config.py, ...) are
+# enumerated by setup.py at build time — packages.find sees directories only
+# and py-modules cannot be a glob (#11580). Runtime data read relative to
+# __file__ must be declared here or the wheel boots and fails on first use.
+[tool.setuptools.package-data]
+assets = ["*.json"]
+# prompts/, templates/ and static/ — the runtime resources resolved through
+# src/package_resources.py. They live under src/ precisely so that one
+# expression (`package_root() / "hydraflow_resources"`) finds them in a
+# checkout and in site-packages alike (#11589).
+hydraflow_resources = ["**/*"]
 
 [project]
 name = "hydraflow"
-version = "0.9.7"
+version = "1.0.0"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "pydantic>=2.0.0",
@@ -54,6 +70,11 @@ test = [
     # advisory lane before real time detonates them on an RC. Two RC-blocking
     # detonations in 48h motivated this (PRs #11045, #11053).
     "freezegun>=1.5.0",
+    # The packaging regression (tests/regressions/test_issue_11580.py) builds
+    # the real wheel with the venv's own build backend — no network, no
+    # `uv build` isolation — so the backend must be present in every lane
+    # that runs tests/regressions/, including the `--extra test`-only ones.
+    "setuptools>=83.0.0",
 ]
 dev = [
     "ruff==0.15.0",
@@ -129,7 +150,7 @@ exclude = [
     "tests",
     "**/__pycache__",
     "**/node_modules",
-    "templates",
+    "src/hydraflow_resources",
     ".cache",
     ".cache/**",
     ".uv-cache",
@@ -206,7 +227,7 @@ filterwarnings = [
 
 [tool.coverage.run]
 source = ["src"]
-omit = ["tests/*", "*/__init__.py", "venv/*", ".venv/*", "templates/*"]
+omit = ["tests/*", "*/__init__.py", "venv/*", ".venv/*", "src/hydraflow_resources/*"]
 
 [tool.coverage.report]
 fail_under = 91.3

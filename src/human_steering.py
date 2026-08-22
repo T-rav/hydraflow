@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from issue_store import STAGE_NAME_MAP, IssueStoreStage
+from issue_store import IssueStoreStage, resolve_issue_store_stage
 from models import SteeringState
 from untrusted_text import fence_untrusted
 
@@ -22,34 +22,20 @@ _FLOW_RUNNING = "running"
 _FLOW_PAUSED = "paused"
 _FLOW_ABORT = "abort"
 
-# Inverse of STAGE_NAME_MAP (dashboard display name -> internal stage value),
-# plus an identity map (internal stage value -> itself) so `/redo` accepts
-# either surface. MERGED is excluded: it isn't a redoable phase. Stage keys
-# in STAGE_NAME_MAP are IssueStoreStage members, which is a StrEnum — so the
-# key string itself IS the internal stage value.
-_REDO_TOKEN_MAP: dict[str, str] = {
-    **{
-        display: str(stage)
-        for stage, display in STAGE_NAME_MAP.items()
-        if stage != IssueStoreStage.MERGED
-    },
-    **{
-        str(stage): str(stage)
-        for stage in IssueStoreStage
-        if stage != IssueStoreStage.MERGED
-    },
-}
-
 
 def resolve_redo_phase(token: str) -> str | None:
     """Resolve a `/redo` token to an internal stage value.
 
     Accepts either a dashboard-facing display name (e.g. "implement") or an
-    already-internal stage name (e.g. "ready", "plan") and returns the
+    already-internal stage name (e.g. "ready", "plan") — the one mapping in
+    ``issue_store.resolve_issue_store_stage`` (#11551) — and returns the
     internal ``IssueStoreStage`` value. Returns ``None`` for anything
     unrecognized, including "merged" (not a redoable phase).
     """
-    return _REDO_TOKEN_MAP.get(token)
+    stage = resolve_issue_store_stage(token)
+    if stage is None or stage == IssueStoreStage.MERGED:
+        return None
+    return str(stage)
 
 
 def fenced_steering_guidance(guidance: str | None) -> str:

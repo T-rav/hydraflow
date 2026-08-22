@@ -115,6 +115,54 @@ class TestRunContext:
         assert manifest.outcome == "failed"
         assert manifest.error == "Agent crashed"
 
+    def test_finalize_records_failure_class(self, tmp_path: Path) -> None:
+        """#11593 seam 3: failed runs carry their failure class in the manifest."""
+        run_dir = tmp_path / "run1"
+        run_dir.mkdir()
+        ctx = RunContext(run_dir, issue_number=42, timestamp="20260101T000000Z")
+        manifest = ctx.finalize(
+            "failed",
+            error="test-adequacy failed: missing tests",
+            failure_class="test_adequacy",
+        )
+        assert manifest.failure_class == "test_adequacy"
+
+    def test_finalize_records_test_adequacy_telemetry(self, tmp_path: Path) -> None:
+        """#11593 seam 3: rejection telemetry lands in the manifest JSON."""
+        import json
+
+        run_dir = tmp_path / "run1"
+        run_dir.mkdir()
+        ctx = RunContext(run_dir, issue_number=42, timestamp="20260101T000000Z")
+        telemetry = {
+            "passed": False,
+            "verdict_source": "verifier-override",
+            "findings": ["src/foo.py:bar — no test"],
+            "repair_passes_used": 1,
+            "repair_outcomes": ["still-failing"],
+        }
+        ctx.finalize(
+            "failed",
+            error="test-adequacy failed: gaps",
+            failure_class="test_adequacy",
+            test_adequacy=telemetry,
+        )
+        on_disk = json.loads((run_dir / "manifest.json").read_text())
+        assert on_disk["test_adequacy"] == telemetry
+
+    def test_manifest_without_new_fields_still_validates(self, tmp_path: Path) -> None:
+        """Pre-#11593 manifests (no failure_class/test_adequacy) must load."""
+        from run_recorder import RunManifest
+
+        legacy = (
+            '{"issue_number": 42, "timestamp": "20260101T000000Z", '
+            '"outcome": "failed", "error": "boom", '
+            '"duration_seconds": 1.0, "files": []}'
+        )
+        manifest = RunManifest.model_validate_json(legacy)
+        assert manifest.failure_class is None
+        assert manifest.test_adequacy is None
+
     def test_finalize_tracks_duration(self, tmp_path: Path) -> None:
         run_dir = tmp_path / "run1"
         run_dir.mkdir()

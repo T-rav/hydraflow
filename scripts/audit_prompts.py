@@ -47,13 +47,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Triage",
         "src/triage.py:194",
     ),
-    AuditTarget(
-        "triage_decomposition",
-        "triage.TriageRunner._build_decomposition_prompt",
-        "tests/fixtures/prompts/triage_decomposition.json",
-        "Triage",
-        "src/triage.py:511",
-    ),
     # Plan
     AuditTarget(
         "planner_build_prompt_first_attempt",
@@ -213,7 +206,14 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "test_adequacy.build_test_adequacy_verifier_prompt",
         "tests/fixtures/prompts/test_adequacy_verifier.json",
         "Adjacent",
-        "src/test_adequacy.py:98",
+        "src/test_adequacy.py:166",
+    ),
+    AuditTarget(
+        "test_adequacy_repair",
+        "test_adequacy.build_test_adequacy_repair_prompt",
+        "tests/fixtures/prompts/test_adequacy_repair.json",
+        "Adjacent",
+        "src/test_adequacy.py:99",
     ),
     AuditTarget(
         "spec_match_requirements_gap",
@@ -437,13 +437,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "src/decomposition_council.py:290",
     ),
     # --- Caretaker / adjudication loops (backfill 2026-07-30) ---
-    AuditTarget(
-        "adr_drift_triage",
-        "adr_drift_triage_llm.AdrDriftTriageLLM._build_prompt",
-        "tests/fixtures/prompts/adr_drift_triage.json",
-        "Adjacent",
-        "src/adr_drift_triage_llm.py:137",
-    ),
     # NOTE: this builder's output is used twice — as the agent prompt AND as the
     # burn-down PR body (`pr_body=self._build_prompt(unit)`,
     # src/disturbance_dampener_loop.py:173). Rubric remediation here also

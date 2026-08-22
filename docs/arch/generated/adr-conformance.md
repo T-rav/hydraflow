@@ -48,7 +48,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0052 | enforced | `pytest:tests/test_mockworld_fakes_conformance.py`, `pytest:tests/test_sandbox_scenario_contract.py` |
 | ADR-0053 | enforced | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
 | ADR-0054 | enforced | `pytest:tests/test_term_proposer_loop.py`, `pytest:tests/architecture/test_term_proposer_wiring.py` |
-| ADR-0056 | enforced | `pytest:tests/test_adr_touchpoint_auditor_loop.py` |
 | ADR-0057 | enforced | `pytest:tests/test_term_pruner_loop.py`, `pytest:tests/architecture/test_term_pruner_wiring.py` |
 | ADR-0058 | enforced | `pytest:tests/test_edge_proposer_loop.py`, `pytest:tests/architecture/test_edge_proposer_wiring.py` |
 | ADR-0060 | enforced | `pytest:tests/test_atlas_routes.py` |
@@ -75,7 +74,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0102 | enforced | `pytest:tests/test_review_phase_core.py` |
 | ADR-0103 | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
-| ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py` |
+| ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py`, `pytest:tests/regressions/test_issue_11604.py` |
 | ADR-0107 | enforced | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0109 | enforced | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | enforced | `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` |
@@ -89,6 +88,8 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0118 | enforced | `pytest:tests/architecture/test_no_otel_imports.py` |
 | ADR-0119 | enforced | `pytest:tests/test_credit_failover.py` |
 | ADR-0134 | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
+| ADR-0135 | enforced | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
+| ADR-0136 | enforced | `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations`, `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` |
 
 ## Check → ADRs it protects
 
@@ -106,6 +107,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` | ADR-0065 |
 | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` | ADR-0107 |
 | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` | ADR-0112 |
+| `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` | ADR-0136 |
 | `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
 | `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0089 |
 | `pytest:tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
@@ -116,8 +118,10 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human` | ADR-0115 |
 | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface` | ADR-0115 |
 | `pytest:tests/regressions/test_issue_11176.py::test_aging_resolvable_escape_self_answers_despite_a_busy_ask_budget` | ADR-0115 |
+| `pytest:tests/regressions/test_issue_11604.py` | ADR-0106 |
 | `pytest:tests/regressions/test_issue_9143_codeql_suppression.py` | ADR-0085 |
 | `pytest:tests/regressions/test_issue_9552.py` | ADR-0106 |
+| `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py` | ADR-0135 |
 | `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_inconclusive_leaves_it_for_a_human` | ADR-0115 |
 | `pytest:tests/regressions/test_sampled_audit_auto_adjudicate_before_human.py::TestSampledAuditAutoAdjudicateBeforeHuman::test_upheld_self_applies_label_and_crosslinks` | ADR-0115 |
 | `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` | ADR-0094, ADR-0095 |
@@ -128,10 +132,11 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/scenarios/test_convergence_pipeline_mockworld.py` | ADR-0096 |
 | `pytest:tests/scenarios/test_convergence_review_mockworld.py` | ADR-0094, ADR-0095 |
 | `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` | ADR-0062 |
+| `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` | ADR-0135 |
+| `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations` | ADR-0136 |
 | `pytest:tests/test_adr_conformance_coverage.py` | ADR-0100 |
 | `pytest:tests/test_adr_enforcement_completeness.py` | ADR-0116 |
 | `pytest:tests/test_adr_pre_validator.py` | ADR-0037 |
-| `pytest:tests/test_adr_touchpoint_auditor_loop.py` | ADR-0056 |
 | `pytest:tests/test_adversarial_retry_loop.py` | ADR-0064 |
 | `pytest:tests/test_agent_advanced.py` | ADR-0092 |
 | `pytest:tests/test_agent_cli.py` | ADR-0004, ADR-0092 |
@@ -163,23 +168,29 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_escape_auto_diagnose.py::TestClassifyDiagnosis::test_bug_label_stays_inconclusive_not_dismissed` | ADR-0115 |
 | `pytest:tests/test_event_persistence.py` | ADR-0021 |
 | `pytest:tests/test_events.py::TestEventBusTypedSubscription::test_typed_subscriber_receives_only_subscribed_types` | ADR-0114 |
+| `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning` | ADR-0135 |
+| `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow` | ADR-0135 |
 | `pytest:tests/test_flows.py` | ADR-0111 |
 | `pytest:tests/test_human_steering.py` | ADR-0103 |
 | `pytest:tests/test_human_steering_actuator.py` | ADR-0103 |
 | `pytest:tests/test_human_steering_loop.py` | ADR-0103 |
 | `pytest:tests/test_human_steering_state.py` | ADR-0103 |
 | `pytest:tests/test_implement_phase.py` | ADR-0005, ADR-0024 |
+| `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label` | ADR-0135 |
+| `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path` | ADR-0135 |
 | `pytest:tests/test_integration_pipeline.py` | ADR-0022 |
 | `pytest:tests/test_integration_worktree.py` | ADR-0010 |
 | `pytest:tests/test_issue_cache.py` | ADR-0041 |
 | `pytest:tests/test_label_drift_watcher_integration.py` | ADR-0088 |
 | `pytest:tests/test_label_drift_watcher_loop.py` | ADR-0088 |
+| `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start` | ADR-0135 |
 | `pytest:tests/test_loop_fitness_completeness.py` | ADR-0093 |
 | `pytest:tests/test_loop_kill_switch_completeness.py` | ADR-0049 |
 | `pytest:tests/test_loop_wiring_completeness.py` | ADR-0045, ADR-0050, ADR-0089 |
 | `pytest:tests/test_memory_backlog_loop.py` | ADR-0089 |
 | `pytest:tests/test_mockworld_fakes_conformance.py` | ADR-0052 |
 | `pytest:tests/test_no_screenshot_regression_tests.py` | ADR-0083 |
+| `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start` | ADR-0135 |
 | `pytest:tests/test_orchestrator_human_steering.py` | ADR-0103 |
 | `pytest:tests/test_orchestrator_loops.py` | ADR-0001 |
 | `pytest:tests/test_phase_skill_filter.py` | ADR-0043 |

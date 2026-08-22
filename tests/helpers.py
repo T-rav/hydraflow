@@ -367,7 +367,6 @@ class ConfigFactory:
         ui_dirs: list[str] | None = None,
         docker_network: str = "",
         docker_extra_mounts: list[str] | None = None,
-        memory_prune_stale_items: bool = True,
         harness_insight_window: int = 20,
         harness_pattern_threshold: int = 3,
         max_runtime_log_chars: int = 8_000,
@@ -391,7 +390,6 @@ class ConfigFactory:
         max_troubleshooting_prompt_chars: int = 3000,
         epic_group_planning: bool = False,
         epic_decompose_complexity_threshold: int = 8,
-        epic_decompose_on_intake_enabled: bool = False,
         epic_monitor_interval: int = 1800,
         epic_sweep_interval: int = 3600,
         workspace_gc_interval: int = 1800,
@@ -657,7 +655,6 @@ class ConfigFactory:
                 docker_extra_mounts=docker_extra_mounts
                 if docker_extra_mounts is not None
                 else [],
-                memory_prune_stale_items=memory_prune_stale_items,
                 harness_insight_window=harness_insight_window,
                 harness_pattern_threshold=harness_pattern_threshold,
                 max_runtime_log_chars=max_runtime_log_chars,
@@ -678,7 +675,6 @@ class ConfigFactory:
                 max_troubleshooting_prompt_chars=max_troubleshooting_prompt_chars,
                 epic_group_planning=epic_group_planning,
                 epic_decompose_complexity_threshold=epic_decompose_complexity_threshold,
-                epic_decompose_on_intake_enabled=epic_decompose_on_intake_enabled,
                 epic_monitor_interval=epic_monitor_interval,
                 epic_sweep_interval=epic_sweep_interval,
                 workspace_gc_interval=workspace_gc_interval,
@@ -909,6 +905,12 @@ class PipelineHarness:
         self.fetcher = AsyncMock()
         self.store = IssueStore(self.config, self.fetcher, self.bus)
         self.stop_event = asyncio.Event()
+        # The same single cache production wires into ImplementPhase (#11568):
+        # scenarios record a triage classification here and the real phase
+        # reads the complexity tier back through it.
+        from issue_cache import IssueCache
+
+        self.issue_cache = IssueCache(self.config.data_path("cache"), enabled=True)
 
         self.prs = AsyncMock()
         self._setup_pr_manager_mocks()
@@ -984,6 +986,7 @@ class PipelineHarness:
             "store": self.store,
             "stop_event": self.stop_event,
             "beads_manager": beads_manager,
+            "issue_cache": self.issue_cache,
         }
         self.implement_phase = ImplementPhase(
             agents=self.agents,
@@ -1353,6 +1356,7 @@ def make_implement_phase(
     push_return=True,
     create_pr_return=None,
     spec_reviewer=None,
+    issue_cache=None,
 ):
     """Build an ImplementPhase with standard mocks.
 
@@ -1460,6 +1464,7 @@ def make_implement_phase(
         store=mock_store,
         stop_event=stop_event,
         spec_reviewer=spec_reviewer,
+        issue_cache=issue_cache,
     )
 
     return phase, mock_wt, mock_prs

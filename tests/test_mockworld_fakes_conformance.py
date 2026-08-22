@@ -251,7 +251,6 @@ _REAL_RUNNER_FAKE_ATTRS: list[tuple[type, str]] = [
 _REQUIRED_METHOD_FLOOR: frozenset[str] = frozenset(
     {
         "evaluate",
-        "run_decomposition",
         "plan",
         "run_gap_review",
         "run",

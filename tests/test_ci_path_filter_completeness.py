@@ -53,10 +53,11 @@ EXEMPT_PATHS: dict[str, str] = {
     "deploy": "deployment manifests; exercised by the sandbox e2e lane, not unit tests",
     "disturbance": "ratchet baselines, read by tests rather than imported by src",
     "repo_wiki": "per-repo knowledge written BY the factory; no code imports it",
-    "static": "front-end assets; covered by the src/ui quality lane",
-    "templates": "server-rendered HTML; covered by the src/ui quality lane",
 }
-EXEMPT_PATHS_MAX = 6
+# Ratchet: 6 -> 4 when `static/` and `templates/` moved under
+# src/hydraflow_resources/ so the wheel ships them (#11589). They are covered
+# by the `src/hydraflow_resources/**` glob now, not exempt from it.
+EXEMPT_PATHS_MAX = 4
 
 # Directories that hold no committed source of any kind.
 _IGNORED = {".git", ".github", ".venv", "node_modules", "__pycache__"}

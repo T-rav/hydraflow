@@ -33,12 +33,16 @@ Four cases (per ``.superpowers/sdd/task-8-brief.md``):
     in ``EpicState``) is why nesting is capped off by default; a follow-up
     tracked in ADR-0105 adds the lineage link so the default can safely
     rise back to 2.
-(d) The Task-5 intake-vector skip guard: an issue already labelled
-    ``auto-decomposed-child`` does NOT get re-split via the *intake* triage
-    path, even when triage's complexity gate and the decomposition seam are
-    both scripted to approve a split — proven by asserting no new epic is
-    created despite the green light, so the assertion is non-vacuous
-    (removing the guard would make this test start failing).
+(e) #11480: an exhausted stuck issue whose fix is already in flight on the
+    auto-agent's own branch is NOT re-sliced — no epic is registered with
+    ``EpicManager``, no children are filed, the in-flight PR is not closed as
+    superseded, and the issue is not paged out to a human either. The council
+    is scripted to APPROVE a split here too, so the assertion is non-vacuous.
+
+The former (d) — the Task-5 intake-vector skip guard — is gone with the
+#11298 intake auto-decomposition path itself: there is no intake triage
+split vector left to guard, so the case is structurally impossible rather
+than merely skipped.
 """
 
 from __future__ import annotations
@@ -552,88 +556,74 @@ class TestNestedDecompositionCascadesToRoot:
 
 
 # ---------------------------------------------------------------------------
-# (d) Intake triage does not re-split an already auto-decomposed child
-#     (Task 5's skip guard).
+# (e) A stuck issue whose fix is already in flight is not re-sliced (#11480).
 # ---------------------------------------------------------------------------
 
 
-class TestIntakeSkipsReSplittingAutoDecomposedChild:
-    async def test_auto_child_label_skips_intake_decomposition(self, tmp_path) -> None:
-        from epic import EpicManager  # noqa: PLC0415
-        from events import EventBus  # noqa: PLC0415
-        from mockworld.fakes._factories import TriageResultFactory  # noqa: PLC0415
-        from models import EpicDecompResult, NewIssueSpec  # noqa: PLC0415
-
+class TestLandedFixIsNeverReSliced:
+    async def test_in_flight_fix_on_auto_agent_branch_creates_no_epic(
+        self, tmp_path, monkeypatch
+    ) -> None:
         world = MockWorld(tmp_path)
         cfg = world.harness.config
-        issue_number = 900
-
-        # PipelineHarness's TriagePhase is built with epic_manager=None
-        # (MockWorld._wire_targets doesn't wire an epic_manager -- there is
-        # no intake decomposition to test by default). Wire a real one here
-        # (mirrors tests/scenarios/test_agent_realistic.py's
-        # test_A13_epic_decomposition_creates_child_issues injection
-        # pattern) so the Task-5 guard actually has something to bypass.
-        world.harness.triage_phase._epic_manager = EpicManager(
-            config=cfg,
-            state=world.harness.state,
-            prs=world.github,
-            fetcher=MagicMock(),
-            event_bus=EventBus(),
-        )
-        # world.harness.prs is a bare AsyncMock; MockWorld._wire_targets
-        # doesn't wire create_issue onto it (only pre-existing PR/label
-        # methods). Wire it to FakeGitHub so a (guard-failure) decompose
-        # would actually create observable issues rather than erroring on
-        # a MagicMock return value.
-        world.harness.prs.create_issue = world.github.create_issue
-
-        auto_child_label = cfg.auto_decomposed_child_label[0]
-        labels = [cfg.find_label[0], cfg.epic_child_label[0], auto_child_label]
+        issue_number = 11427
         world.add_issue(
             issue_number,
-            "Auto-decomposed child: narrower slice A",
-            "Created by a prior decomposition.",
-            labels=labels,
+            "Root issue: the frobnicator never converges",
+            "The frobnicator keeps failing CI no matter what the auto-agent tries.",
+            labels=["hitl-escalation", "flaky-test-stuck"],
+        )
+        _exhaust_attempts(world, issue_number)
+
+        # The auto-agent's final attempt DID produce a fix — on its own
+        # branch, with CI still running. The attempt cap trips on count, not
+        # outcome, so this issue still arrives at the decompose terminal.
+        pr_number = 11461
+        world.github.add_pr(
+            number=pr_number,
+            issue_number=issue_number,
+            branch=cfg.auto_agent_branch_for_issue(issue_number),
+            title=f"Fixes #{issue_number}: stop the frobnicator from stalling",
+            body=f"Fixes #{issue_number}",
+            checks=[("quality", "IN_PROGRESS")],
         )
 
-        # Triage would decompose this (ready, clear, complexity above the
-        # gate) IF the guard didn't intercept it first.
-        world.set_phase_result(
-            "triage",
-            issue_number,
-            TriageResultFactory.create(
-                issue_number=issue_number,
-                ready=True,
-                complexity_score=cfg.epic_decompose_complexity_threshold + 1,
-                clarity_score=10,
-                needs_discovery=False,
-            ),
-        )
-        # And the decomposition seam is scripted to APPROVE a split -- if
-        # the guard is ever removed, this exact test starts creating a
-        # nested epic, proving the assertion below is non-vacuous.
-        world._llm.triage_runner.script_decomposition(
-            issue_number,
-            EpicDecompResult(
-                should_decompose=True,
-                epic_title="Epic: re-split the auto-child",
-                epic_body="## Sub-issues\n\n- [ ] X\n- [ ] Y",
-                children=[
-                    NewIssueSpec(title="X", body="..."),
-                    NewIssueSpec(title="Y", body="..."),
-                ],
-                reasoning="Still complex.",
-            ),
+        epic_manager = _make_epic_manager(world)
+        _wire_decompose(world, epic_manager)
+        # Scripted to APPROVE: if the #11480 gate is removed, this exact test
+        # starts creating an epic + children, proving the assertions below
+        # are non-vacuous.
+        _script_council(
+            monkeypatch,
+            [
+                _direction_reply(),
+                _validation_reply(decision="approve", confidence="high"),
+            ],
         )
 
-        pre_issue_count = len(world.github._issues)
+        results = await world.run_with_loops(["auto_agent_preflight"], cycles=1)
 
-        await world.run_pipeline()
+        assert results["auto_agent_preflight"] == {
+            "status": "ok",
+            "issues_processed": 1,
+            "result_status": "skipped_already_satisfied",
+            "suppressed": 0,
+        }
 
-        # No new epic (or any new issue at all) was created by decompose --
-        # the guard skipped intake decomposition outright, never reaching
-        # run_decomposition's approval.
+        # No epic anywhere: not on GitHub, and not registered with EpicManager.
         assert _find_epic_numbers(world, cfg.epic_label[0]) == []
-        assert len(world.github._issues) == pre_issue_count
+        assert world.harness.state.get_all_epic_states() == {}
+        assert list(world.github._issues) == [issue_number]
+
+        # The in-flight fix survives, the issue keeps its place in the
+        # pipeline, and no human was paged.
+        assert world.github._prs[pr_number].closed is False
+        assert world.github.issue(issue_number).state == "open"
+        assert "human-required" not in world.github.issue(issue_number).labels
         assert world.harness.state.get_issue_status(issue_number) != "decomposed"
+
+        # The skip is announced once, naming the evidence.
+        comments = [str(c) for c in world.github.issue(issue_number).comments]
+        skips = [c for c in comments if "already landed" in c]
+        assert len(skips) == 1
+        assert f"#{pr_number}" in skips[0]

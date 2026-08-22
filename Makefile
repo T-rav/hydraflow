@@ -106,7 +106,7 @@ RESET := \033[0m
 DOCKER_IMAGE ?= ghcr.io/t-rav/hydraflow-agent:latest
 DOCKER_BASE_IMAGE ?= ghcr.io/t-rav/hydraflow-agent-base:latest
 
-.PHONY: help run dev factory env dry-run clean clean-assets compact coverage cover gateway-coverage smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
+.PHONY: help run dev factory factory-service-install factory-service-uninstall env dry-run clean clean-assets compact coverage cover gateway-coverage smoke test test-fast test-cov test-impacted test-ui lint lint-check lint-fix lint-ul typecheck security quality quality-unlocked quality-lite install install-plugins setup status ui ui-dev ui-clean ensure-labels ensure-hooks prep scaffold hot docker-build docker-ensure docker-test deps integration soak check-node-ui trust trust-adversarial auto-agent-adversarial post-merge-smoke stamp
 
 check-node-ui:
 	@cd $(HYDRAFLOW_DIR)src/ui && $(HYDRAFLOW_DIR)scripts/ui-npm.sh --version >/dev/null
@@ -196,6 +196,19 @@ dev: run
 factory:
 	@echo "$(BLUE)Starting HydraFlow factory in an isolated workspace (dev checkout stays clean)$(RESET)"
 	@$(HYDRAFLOW_DIR)scripts/run-factory-isolated.sh
+
+## factory-service-install — run the factory as a macOS launchd service (ADR-0135).
+## Renders ~/Library/LaunchAgents/com.hydraflow.factory.plist (KeepAlive,
+## in-place from ~/.hydraflow/factory-workspace/hydraflow) and gives the
+## liveness knob a RESTART_LABEL. Pair with `scripts/install_liveness_watchdog.py`.
+##   make factory-service-install ARGS="--dry-run"
+factory-service-install:
+	@echo "$(BLUE)Installing com.hydraflow.factory launchd agent (factory-as-service)$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(UV) python scripts/install_factory_service.py $(ARGS)
+
+factory-service-uninstall:
+	@echo "$(YELLOW)Uninstalling com.hydraflow.factory launchd agent$(RESET)"
+	@cd $(HYDRAFLOW_DIR) && $(UV) python scripts/install_factory_service.py --uninstall $(ARGS)
 
 dry-run:
 	@echo "$(BLUE)HydraFlow dry run (server mode)$(RESET)"
@@ -384,10 +397,18 @@ test-cov: deps
 # Override the compared ref with e.g. `make test-impacted BASE_REF=origin/main`.
 # BASE_REF corresponds to config.base_branch() (origin/staging by default).
 BASE_REF ?= origin/staging
+# #11568: the implementer's post-build gate (AgentRunner._verify_quality) runs
+# this target with IMPACTED_ARGS=--bounded instead of the host-locked `make
+# quality`. In bounded mode the selector never emits __ALL__ — a high-fanout
+# diff keeps its name-mapped tests + the floor and defers the full suite to
+# CI — so N concurrent implementers cannot each expand into an UNLOCKED full
+# suite (the #11219 thrash the lock exists to prevent). Humans get the
+# conservative default (no flag → __ALL__ runs everything, unlocked, as before).
+IMPACTED_ARGS ?=
 test-impacted: deps
 	@cd $(HYDRAFLOW_DIR) && set -e; \
 	base="$(BASE_REF)"; \
-	sel="$$(PYTHONPATH=src $(UV) python scripts/impacted_tests.py --base "$$base")"; \
+	sel="$$(PYTHONPATH=src $(UV) python scripts/impacted_tests.py --base "$$base" $(IMPACTED_ARGS))"; \
 	if [ "$$sel" = "__ALL__" ]; then \
 		echo "$(YELLOW)test-impacted: FULL SUITE required (high-fanout/infra change vs $$base) — running everything$(RESET)"; \
 		PYTHONPATH=src $(UV) pytest tests/ -n auto --dist loadscope; \

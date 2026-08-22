@@ -157,14 +157,8 @@ class TestInitialization:
             # sandbox_failure_fixer_attempts migrated to convergence_ledgers (Task 2)
             # DisturbanceDampenerLoop (ADR-0101, Pattern A)
             "disturbance_dampener_attempts",
-            # AdrTouchpointAuditorLoop (ADR-0056)
-            "adr_audit_cursor",
-            "adr_audit_attempts",
-            # Per-ADR rollup tracking (#8987) — see ADR-0056 amendment.
-            "adr_rollup_issues",
             "rollup_issues",
-            # AdrConformanceLoop (ADR-0100) — mirrors adr_audit_attempts/
-            # adr_rollup_issues above under a distinct namespace.
+            # AdrConformanceLoop (ADR-0100)
             "adr_conformance_attempts",
             "adr_conformance_rollup_issues",
             # MemoryBacklogLoop (ADR-0089)
@@ -249,83 +243,6 @@ class TestInitialization:
 # ---------------------------------------------------------------------------
 # Persistence (load / save round-trip)
 # ---------------------------------------------------------------------------
-
-
-class TestAdrRollupTracking:
-    """Per-ADR rollup accessors (#8987) incl. all_adr_rollups (#9622)."""
-
-    def test_all_adr_rollups_empty_by_default(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        assert tracker.all_adr_rollups() == {}
-
-    def test_all_adr_rollups_returns_every_tracked_entry(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        tracker.set_adr_rollup("ADR-0038", issue_number=9418, pr_numbers=[9100, 9101])
-        tracker.set_adr_rollup("ADR-0042", issue_number=8800, pr_numbers=[7000])
-
-        rollups = tracker.all_adr_rollups()
-        assert set(rollups) == {"ADR-0038", "ADR-0042"}
-        assert rollups["ADR-0038"] == {
-            "issue_number": 9418,
-            "pr_numbers": [9100, 9101],
-            "adr_numbers": [],
-        }
-        assert rollups["ADR-0042"] == {
-            "issue_number": 8800,
-            "pr_numbers": [7000],
-            "adr_numbers": [],
-        }
-
-    def test_all_adr_rollups_reflects_clear(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        tracker.set_adr_rollup("ADR-0038", issue_number=9418, pr_numbers=[9100])
-        tracker.clear_adr_rollup("ADR-0038")
-        assert tracker.all_adr_rollups() == {}
-
-    def test_all_adr_rollups_is_a_copy(self, tmp_path: Path) -> None:
-        """Mutating the returned mapping must not corrupt persisted state."""
-        tracker = make_tracker(tmp_path)
-        tracker.set_adr_rollup("ADR-0038", issue_number=9418, pr_numbers=[9100])
-        rollups = tracker.all_adr_rollups()
-        rollups.pop("ADR-0038")
-        rollups_again = tracker.all_adr_rollups()
-        assert "ADR-0038" in rollups_again
-
-    def test_set_adr_rollup_persists_adr_numbers(self, tmp_path: Path) -> None:
-        """#10457 — a fleet rollup's member ADR numbers survive a round-trip
-        through get/all so the resolver loop can triage each member."""
-        tracker = make_tracker(tmp_path)
-        tracker.set_adr_rollup(
-            "FLEET-8500",
-            issue_number=200,
-            pr_numbers=[8500],
-            adr_numbers=[103, 101, 102],
-        )
-        assert tracker.get_adr_rollup("FLEET-8500") == {
-            "issue_number": 200,
-            "pr_numbers": [8500],
-            "adr_numbers": [101, 102, 103],
-        }
-
-    def test_all_adr_rollups_includes_adr_numbers(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        tracker.set_adr_rollup(
-            "FLEET-8500", issue_number=200, pr_numbers=[8500], adr_numbers=[101, 102]
-        )
-        rollups = tracker.all_adr_rollups()
-        assert rollups["FLEET-8500"]["adr_numbers"] == [101, 102]
-
-    def test_adr_numbers_defaults_to_empty_list(self, tmp_path: Path) -> None:
-        """Per-ADR rollups (and rollups written before #10457) never pass
-        ``adr_numbers`` — get/all must default it to an empty list, not KeyError."""
-        tracker = make_tracker(tmp_path)
-        tracker.set_adr_rollup("ADR-0038", issue_number=9418, pr_numbers=[9100])
-        assert tracker.get_adr_rollup("ADR-0038") == {
-            "issue_number": 9418,
-            "pr_numbers": [9100],
-            "adr_numbers": [],
-        }
-        assert tracker.all_adr_rollups()["ADR-0038"]["adr_numbers"] == []
 
 
 class TestLoadSave:

@@ -41,6 +41,7 @@ from onboarding.kernel_lock import (
     build_lock,
     dump_lock,
 )
+from package_resources import checkout_path
 
 METHODOLOGY_REF = "docs/methodology/onboarding-hydraflow-format-repos.md"
 
@@ -171,8 +172,13 @@ class StampResult:
 
 
 def _hydraflow_root() -> Path:
-    """The running HydraFlow checkout root (source of the standards + AGENTS.md)."""
-    return Path(__file__).resolve().parents[2]
+    """The running HydraFlow checkout root (source of the standards + AGENTS.md).
+
+    ``AGENTS.md`` and ``docs/standards/`` are checkout content, not package
+    data, so stamping a kernel needs a real clone; from an installed wheel
+    this raises rather than reading an empty ``site-packages`` (#11589).
+    """
+    return checkout_path()
 
 
 def _makefile(spec: KernelSpec) -> str:

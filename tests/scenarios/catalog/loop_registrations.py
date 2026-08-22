@@ -539,6 +539,11 @@ def _build_merge_state_watcher(ports: dict[str, Any], config: Any, deps: Any) ->
         prs=ports["github"],
         deps=deps,
         approval_reconciler=reconciler,
+        # #11595: scenarios may seed a PRAutoRebase (e.g. one whose refresh_fn
+        # targets a real tiny git repo); None lets the loop build its default,
+        # which stays inert while ``pr_autorebase_enabled`` is OFF (the test
+        # config default).
+        autorebase=ports.get("autorebase"),
     )
 
 
@@ -1179,135 +1184,10 @@ def _build_fake_coverage_auditor(ports: dict[str, Any], config: Any, deps: Any) 
     return loop
 
 
-def _build_adr_touchpoint_auditor(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    """Build AdrTouchpointAuditorLoop for scenarios (ADR-0056).
-
-    Tests pre-seed:
-    * ``adr_touchpoint_list_merged_prs`` → replaces ``_list_recent_merged_prs``
-      so we don't shell out to ``gh``.
-    * ``adr_touchpoint_reconcile_closed`` → replaces ``_reconcile_closed_escalations``.
-    * ``adr_touchpoint_index`` → an ``ADRIndex`` (or duck-typed substitute).
-
-    ``state`` defaults to a MagicMock behaving like a clean slate (empty
-    cursor → seed-and-return on first tick); ``dedup`` defaults to a real
-    ``DedupStore`` (#11446). Tests override via
-    ``adr_touchpoint_state`` / ``adr_touchpoint_dedup``.
-    """
-    from adr_touchpoint_auditor_loop import (  # noqa: PLC0415
-        AdrTouchpointAuditorLoop,
-    )
-
-    state = ports.get("adr_touchpoint_state")
-    if state is None:
-        state = MagicMock()
-        state.get_adr_audit_cursor.return_value = ""
-        state.get_adr_audit_attempts.return_value = 0
-        state.inc_adr_audit_attempts.return_value = 1
-        ports["adr_touchpoint_state"] = state
-
-    dedup = _scenario_dedup(
-        ports,
-        config,
-        "adr_touchpoint_dedup",
-        "adr_touchpoint_auditor",
-        "adr_touchpoint_auditor.json",
-    )
-
-    pr_manager = ports.get("pr_manager") or ports["github"]
-    adr_index = ports.get("adr_touchpoint_index") or MagicMock(
-        adrs_touching=lambda paths: {}
-    )
-
-    loop = AdrTouchpointAuditorLoop(
-        config=config,
-        state=state,
-        pr_manager=pr_manager,
-        dedup=dedup,
-        adr_index=adr_index,
-        deps=deps,
-    )
-
-    list_prs = ports.get("adr_touchpoint_list_merged_prs")
-    if list_prs is not None:
-        loop._list_recent_merged_prs = list_prs  # type: ignore[method-assign]
-    reconcile = ports.get("adr_touchpoint_reconcile_closed")
-    if reconcile is not None:
-        loop._reconcile_closed_escalations = reconcile  # type: ignore[method-assign]
-
-    return loop
-
-
-def _build_adr_drift_resolver(ports: dict[str, Any], config: Any, deps: Any) -> Any:
-    """Build AdrDriftResolverLoop for scenarios (#9976).
-
-    Sibling of ``_build_adr_touchpoint_auditor`` — reads the auditor's
-    rollup state (seeded directly here, not produced by actually running
-    the auditor) and triages it via a FAKED LLM boundary (no real model
-    calls in scenarios/tests, per #9976). Tests pre-seed:
-
-    * ``adr_drift_resolver_state`` — MagicMock whose ``all_adr_rollups()``
-      returns the open ``{rollup_key: {issue_number, pr_numbers}}`` map to
-      triage; defaults to a clean slate (empty dict — nothing to triage).
-    * ``adr_drift_resolver_dedup`` — a real ``DedupStore`` (#11446) by
-      default.
-    * ``adr_drift_resolver_index`` — an ``ADRIndex`` (or duck-typed
-      substitute); defaults to one reporting no ADRs (unmatched candidates
-      are skipped, never crash the tick).
-    * ``adr_drift_resolver_triage`` — an ``AdrDriftTriageLLM`` (or
-      duck-typed substitute with an async ``classify`` method) — the FAKED
-      TRIAGE boundary; defaults to a MagicMock always returning a
-      CONSISTENT verdict.
-    """
-    from adr_drift_resolver_loop import AdrDriftResolverLoop  # noqa: PLC0415
-
-    state = ports.get("adr_drift_resolver_state")
-    if state is None:
-        state = MagicMock()
-        state.all_adr_rollups.return_value = {}
-        ports["adr_drift_resolver_state"] = state
-
-    dedup = _scenario_dedup(
-        ports,
-        config,
-        "adr_drift_resolver_dedup",
-        "adr_drift_resolver",
-        "adr_drift_resolver.json",
-    )
-
-    pr_manager = ports.get("pr_manager") or ports["github"]
-    adr_index = ports.get("adr_drift_resolver_index") or MagicMock(adrs=lambda: [])
-
-    triage = ports.get("adr_drift_resolver_triage")
-    if triage is None:
-        from adr_drift_triage import (  # noqa: PLC0415
-            DriftClassification,
-            TriageVerdict,
-        )
-
-        triage = MagicMock()
-        triage.classify = AsyncMock(
-            return_value=TriageVerdict(
-                classification=DriftClassification.CONSISTENT,
-                rationale="No contradicting evidence in the scoped diff.",
-            )
-        )
-        ports["adr_drift_resolver_triage"] = triage
-
-    return AdrDriftResolverLoop(
-        config=config,
-        state=state,
-        pr_manager=pr_manager,
-        dedup=dedup,
-        adr_index=adr_index,
-        triage=triage,
-        deps=deps,
-    )
-
-
 def _build_adr_conformance(ports: dict[str, Any], config: Any, deps: Any) -> Any:
     """Build AdrConformanceLoop for scenarios (ADR-0100).
 
-    Mirrors ``_build_adr_touchpoint_auditor``. Tests pre-seed:
+    Tests pre-seed:
     * ``adr_conformance_runner`` → a ``ConformanceRunnerPort`` (defaults to
       ``FakeConformanceRunner``, which maps ``check.raw`` -> preset outcome
       without shelling out).
@@ -1769,10 +1649,14 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
     """Build AutoAgentPreflightLoop for scenarios (spec §1–§11).
 
     Tests typically seed a FakeGitHub via the ``github`` port and may pre-seed
-    ``auto_agent_audit_store`` to inspect appended entries. The loop's
-    spawn_fn is a placeholder that returns a needs_human PreflightSpawn — the
-    full subprocess wiring lives in production deps; tests can monkeypatch
-    ``loop._build_spawn_fn`` to inject a cassette spawn for end-to-end coverage.
+    ``auto_agent_audit_store`` to inspect appended entries. When the
+    ``auto_agent_spawn_builder`` port is present (``MockWorld.run_with_loops``
+    always seeds it — #11298) the loop's ``_build_spawn_fn`` is rebound to
+    that builder, so the spawn pops the world's scripted
+    ``seed.scripts["auto_agent"]`` outcomes (``set_phase_results("auto_agent",
+    …)``) and never constructs a real ``AutoAgentRunner``; an unscripted
+    issue gets a deterministic crashed spawn. Tests that build the loop
+    directly can still monkeypatch ``loop._build_spawn_fn`` with a cassette.
 
     State defaults to a MagicMock with the auto_agent_* accessors stubbed; tests
     can override via the ``auto_agent_state`` port to use a real StateTracker.
@@ -1813,7 +1697,7 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
         state.get_escalation_context.return_value = None
         ports["auto_agent_state"] = state
 
-    return AutoAgentPreflightLoop(
+    loop = AutoAgentPreflightLoop(
         config=config,
         state=state,
         pr_manager=pr_manager,
@@ -1824,6 +1708,12 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
         epic_manager=ports.get("auto_agent_epic_manager"),
         runner=ports.get("auto_agent_decompose_runner"),
     )
+    spawn_builder = ports.get("auto_agent_spawn_builder")
+    if spawn_builder is not None:
+        # Instance-level seam — the same vars() idiom sandbox_main's
+        # ``air_gap_runner_sentinels`` uses, so both tiers rebind identically.
+        vars(loop)["_build_spawn_fn"] = spawn_builder
+    return loop
 
 
 def _build_corpus_learning(ports: dict[str, Any], config: Any, deps: Any) -> Any:
@@ -2445,8 +2335,6 @@ _BUILDERS: dict[str, Any] = {
     "flake_tracker": _build_flake_tracker,
     "skill_prompt_eval": _build_skill_prompt_eval,
     "fake_coverage_auditor": _build_fake_coverage_auditor,
-    "adr_touchpoint_auditor": _build_adr_touchpoint_auditor,
-    "adr_drift_resolver": _build_adr_drift_resolver,
     "adr_conformance": _build_adr_conformance,
     "auto_tighten": _build_auto_tighten,
     "memory_backlog": _build_memory_backlog,

@@ -80,6 +80,74 @@ def parse_test_adequacy_result(transcript: str) -> tuple[bool, str, list[str]]:
     return passed, summary, gaps
 
 
+#: Human-readable labels for the repair prompt's verdict-source line.
+_VERDICT_SOURCE_LABELS: dict[str, str] = {
+    "llm-fail": "test-adequacy finder (LLM review of the diff)",
+    "verifier-override": "independent test-adequacy verifier (second opinion)",
+    "coverage-delta": (
+        "deterministic coverage delta — changed production lines the test "
+        "suite does not execute"
+    ),
+}
+
+#: Cap findings injected into the repair prompt; the coverage delta can name
+#: hundreds of lines and the repair pass only needs the concrete list, not
+#: an unbounded prompt.
+_MAX_REPAIR_FINDINGS = 30
+
+
+def build_test_adequacy_repair_prompt(
+    *,
+    issue_number: int,
+    issue_title: str,
+    verdict_source: str,
+    summary: str,
+    findings: list[str],
+    pass_number: int,
+    max_passes: int,
+    **_kwargs: object,
+) -> str:
+    """Build the bounded in-run repair prompt (#11593 seam 1).
+
+    Handed to the SAME implementer worktree when the adequacy gate fails,
+    instead of discarding the whole run: the concrete findings (finder gaps,
+    verifier gaps, or coverage-delta uncovered lines) come back as a focused
+    "write exactly these missing tests" instruction. The full check —
+    including the independent verifier and the deterministic coverage delta —
+    re-runs afterwards, so this pass can rescue the run but never weaken the
+    gate.
+    """
+    source_label = _VERDICT_SOURCE_LABELS.get(verdict_source, verdict_source)
+    shown = findings[:_MAX_REPAIR_FINDINGS]
+    findings_block = "\n".join(f"- {f}" for f in shown) or "- (see summary above)"
+    if len(findings) > _MAX_REPAIR_FINDINGS:
+        findings_block += f"\n- (+ {len(findings) - _MAX_REPAIR_FINDINGS} more)"
+    return f"""You are running a bounded Test Adequacy REPAIR pass ({pass_number} of {max_passes}) for issue #{issue_number}: {issue_title}.
+
+The post-implementation test-adequacy gate REJECTED the current branch. This pass is your one chance to fix it in-run — write exactly the missing tests below instead of losing the whole attempt.
+
+## Rejection
+
+Source: {source_label}
+Summary: {summary}
+
+## Findings to fix
+
+{findings_block}
+
+## Instructions
+
+- Write EXACTLY the tests these findings name — nothing more. No production-code rewrites, no refactoring, no scope creep.
+- For coverage findings of the form `path:line`, add tests that execute those changed lines.
+- Each new test must fail if the production change it covers were reverted or broken — tautological tests do not count.
+- Do NOT delete or weaken production code or existing tests to make findings disappear.
+- Run the tests you add and make them pass.
+- Commit your work when done.
+
+The full adequacy check (including the independent verifier and the deterministic coverage delta) re-runs after this pass; the final verdict is the re-checked one, not this pass's claim.
+"""
+
+
 def finder_asserted_adequate(transcript: str) -> bool:
     """Return ``True`` only when the finder emitted an explicit ``OK`` marker.
 

@@ -25,6 +25,42 @@ def telemetry(tmp_path):
     return PromptTelemetry(config)
 
 
+class TestIterInferences:
+    """The streaming reader window loaders build on (#11581): file order,
+    tolerant of blank/corrupt lines, and LOUD about a read it could not
+    finish — rows already yielded cannot be retracted, so an OSError must
+    reach the caller rather than dress a truncated prefix as a full read.
+    """
+
+    def test_streams_rows_in_file_order_skipping_blank_and_corrupt_lines(
+        self, telemetry
+    ):
+        path = telemetry._config.cost_inferences_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            '{"issue_number": 1}\n\nnot json\n[1, 2]\n{"issue_number": 2}\n',
+            encoding="utf-8",
+        )
+        assert [r["issue_number"] for r in telemetry.iter_inferences()] == [1, 2]
+
+    def test_missing_file_yields_nothing(self, telemetry):
+        assert list(telemetry.iter_inferences()) == []
+
+    def test_os_error_propagates_instead_of_truncating_silently(
+        self, telemetry, monkeypatch: pytest.MonkeyPatch
+    ):
+        path = telemetry._config.cost_inferences_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"issue_number": 1}\n', encoding="utf-8")
+
+        def _deny(*_args: object, **_kwargs: object) -> None:
+            raise OSError("disk denied")
+
+        monkeypatch.setattr("prompt_telemetry.open", _deny, raising=False)
+        with pytest.raises(OSError, match="disk denied"):
+            list(telemetry.iter_inferences())
+
+
 class TestParseCommandToolModel:
     def test_parses_claude_model(self):
         tool, model = parse_command_tool_model(
@@ -525,6 +561,33 @@ class TestGetSourceRegimes:
         rows = telemetry.load_inferences(limit=1)
         assert len(rows) == 1
         assert rows[0]["issue_number"] == 11
+
+    def test_load_inferences_keeps_the_newest_limit_rows_oldest_first(self, telemetry):
+        path = telemetry._config.cost_inferences_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "".join(json.dumps({"issue_number": n}) + "\n" for n in range(1, 8)),
+            encoding="utf-8",
+        )
+        assert [r["issue_number"] for r in telemetry.load_inferences(limit=3)] == [
+            5,
+            6,
+            7,
+        ]
+        assert telemetry.load_inferences(limit=0) == []
+
+    def test_load_inferences_degrades_to_empty_when_unreadable(
+        self, telemetry, monkeypatch: pytest.MonkeyPatch
+    ):
+        path = telemetry._config.cost_inferences_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"issue_number": 1}\n', encoding="utf-8")
+
+        def _deny(*_args: object, **_kwargs: object) -> None:
+            raise OSError("disk denied")
+
+        monkeypatch.setattr("prompt_telemetry.open", _deny, raising=False)
+        assert telemetry.load_inferences() == []
 
     def test_failed_empty_run_does_not_estimate_tokens(self, telemetry):
         telemetry.record(
@@ -1127,3 +1190,89 @@ class TestRecordNeverRaises:
             self._record_with_stats(telemetry, {})
 
         assert any("prompt telemetry" in r.getMessage().lower() for r in caplog.records)
+
+
+class TestUsageShapeStamp:
+    """Writers stamp the usage SHAPE; the record's own cost honors it."""
+
+    def _glm_table(self, tmp_path) -> ModelPricingTable:
+        pricing_path = tmp_path / "pricing.json"
+        pricing_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "models": {
+                        "glm-5.2": {
+                            "input_cost_per_million": 1.4,
+                            "output_cost_per_million": 4.4,
+                            "cache_read_cost_per_million": 0.26,
+                            "input_includes_cache": True,
+                        }
+                    },
+                }
+            )
+        )
+        return ModelPricingTable(pricing_path)
+
+    def _record(self, telemetry: PromptTelemetry, **overrides) -> None:
+        kwargs = {
+            "source": "implementer",
+            "tool": "zai",
+            "model": "glm-5.2",
+            "issue_number": 1,
+            "pr_number": None,
+            "session_id": "s",
+            "prompt_chars": 10,
+            "transcript_chars": 10,
+            "duration_seconds": 1.0,
+            "success": True,
+            # input >= cache_read: the impossible-counts guard cannot decide.
+            # Non-zero output so the char-estimate fallback does not kick in.
+            "stats": {
+                "input_tokens": 5_000_000,
+                "output_tokens": 1_000,
+                "cache_read_input_tokens": 4_000_000,
+            },
+        }
+        kwargs.update(overrides)
+        telemetry.record(**kwargs)
+
+    def test_record_stamps_usage_shape_and_prices_anthropic_shape_exclusive(
+        self, tmp_path
+    ):
+        config = ConfigFactory.create(repo_root=tmp_path)
+        telemetry = PromptTelemetry(config, pricing=self._glm_table(tmp_path))
+
+        self._record(telemetry, usage_shape="anthropic")
+
+        row = json.loads(config.cost_inferences_path.read_text().strip())
+        assert row["usage_shape"] == "anthropic"
+        assert row["estimated_cost_usd"] == pytest.approx(
+            (1.4 * 5_000_000 + 4.4 * 1_000 + 0.26 * 4_000_000) / 1e6, abs=1e-6
+        )
+
+    def test_record_without_stamp_keeps_table_default_for_ambiguous_tool(
+        self, tmp_path
+    ):
+        config = ConfigFactory.create(repo_root=tmp_path)
+        telemetry = PromptTelemetry(config, pricing=self._glm_table(tmp_path))
+
+        self._record(telemetry)
+
+        row = json.loads(config.cost_inferences_path.read_text().strip())
+        assert row["usage_shape"] is None
+        assert row["estimated_cost_usd"] == pytest.approx(
+            (1.4 * 1_000_000 + 4.4 * 1_000 + 0.26 * 4_000_000) / 1e6, abs=1e-6
+        )
+
+    def test_openai_compat_stamp_keeps_table_default(self, tmp_path):
+        config = ConfigFactory.create(repo_root=tmp_path)
+        telemetry = PromptTelemetry(config, pricing=self._glm_table(tmp_path))
+
+        self._record(telemetry, usage_shape="openai_compat")
+
+        row = json.loads(config.cost_inferences_path.read_text().strip())
+        assert row["usage_shape"] == "openai_compat"
+        assert row["estimated_cost_usd"] == pytest.approx(
+            (1.4 * 1_000_000 + 4.4 * 1_000 + 0.26 * 4_000_000) / 1e6, abs=1e-6
+        )

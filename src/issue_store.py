@@ -65,6 +65,29 @@ STAGE_NAME_MAP: dict[str, str] = {
     IssueStoreStage.MERGED: "merged",
 }
 
+# Dashboard-facing display names → IssueStoreStage (the inverse of
+# STAGE_NAME_MAP). Phases record lifecycle with the name the operator sees
+# (ImplementPhase says "implement"; its queue is READY), so mark_active()
+# normalizes through resolve_issue_store_stage() and active_count /
+# total_processed key on ONE vocabulary (#11551).
+_DISPLAY_NAME_TO_STAGE: dict[str, IssueStoreStage] = {
+    display: IssueStoreStage(stage) for stage, display in STAGE_NAME_MAP.items()
+}
+
+
+def resolve_issue_store_stage(name: str) -> IssueStoreStage | None:
+    """Resolve *name* in either stage vocabulary to its ``IssueStoreStage``.
+
+    Accepts the internal values (``"ready"``) and the dashboard-facing display
+    names from ``STAGE_NAME_MAP`` (``"implement"``, ``"triage"``). Returns
+    ``None`` for anything else — callers decide whether that is an error.
+    """
+    try:
+        return IssueStoreStage(name)
+    except ValueError:
+        return _DISPLAY_NAME_TO_STAGE.get(name)
+
+
 # Priority order — higher index = further along in the pipeline.
 # When an issue has multiple HydraFlow labels, it is routed to the
 # most advanced stage (highest priority).
@@ -640,9 +663,17 @@ class IssueStore:
     # ------------------------------------------------------------------
 
     def mark_active(self, issue_number: int, stage: str) -> None:
-        """Mark a task as actively being processed in *stage*."""
+        """Mark a task as actively being processed in *stage*.
+
+        *stage* may be an internal ``IssueStoreStage`` value or the
+        dashboard-facing display name a phase reports (``"implement"`` for the
+        READY queue). It is normalized here so ``get_queue_stats().active_count``
+        and the throughput counter :meth:`mark_complete` bumps key on the same
+        vocabulary (#11551). An unknown name is kept verbatim: the issue still
+        shows as active, it just contributes to no stage counter.
+        """
         self._in_flight.pop(issue_number, None)
-        self._active[issue_number] = stage
+        self._active[issue_number] = resolve_issue_store_stage(stage) or stage
         self._publish_queue_update_nowait()
 
     def mark_complete(self, issue_number: int) -> None:

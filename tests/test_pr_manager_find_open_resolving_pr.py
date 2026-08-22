@@ -62,7 +62,23 @@ async def test_returns_none_when_no_open_prs(config, event_bus) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("keyword", ["Fixes", "fixes", "Closes", "Resolves", "FIXES"])
+@pytest.mark.parametrize(
+    "keyword",
+    [
+        "Fixes",
+        "fixes",
+        "Closes",
+        "Resolves",
+        "FIXES",
+        # #11481: bare and past-tense forms GitHub also auto-closes on.
+        "Fix",
+        "Fixed",
+        "Close",
+        "Closed",
+        "Resolve",
+        "Resolved",
+    ],
+)
 async def test_recognizes_every_auto_close_keyword(
     keyword: str, config, event_bus
 ) -> None:

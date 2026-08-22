@@ -5,7 +5,7 @@ kind: "service"
 bounded_context: "caretaker"
 code_anchor: "src/escalation_reconcile.py:EscalationReconciler"
 aliases: ["escalation lifecycle reconciler", "hitl escalation reconciler"]
-related: [{"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B6"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B5"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B2"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A4"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A1"}, {"kind": "depends_on", "target": "01KT3WKPR5MN8QJ14CF77W6K6"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "depends_on", "target": "01KY4QF8BE4Y5782543MPQNDQ0"}]
+related: [{"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B5"}, {"kind": "depends_on", "target": "01KRBL0F20M01PGF32CF88W9B2"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A4"}, {"kind": "depends_on", "target": "01KR9A3F20M01PGF32CF88W9A1"}, {"kind": "depends_on", "target": "01KT3WKPR5MN8QJ14CF77W6K6"}, {"kind": "depends_on", "target": "01KQV37D10M06PGF32CF77W6K7"}, {"kind": "depends_on", "target": "01KY4QF8BE4Y5782543MPQNDQ0"}]
 evidence: ["01KQNZNK5DWPQ75W9HBCJX2DJB", "01KQP0V9KK99G77287P414NFRG"]
 superseded_by: null
 superseded_reason: null

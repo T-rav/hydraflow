@@ -14,7 +14,6 @@ graph LR
     adrcouncilreviewer["ADRCouncilReviewer<br/><i>service</i>"]
     adrprevalidator["ADRPreValidator<br/><i>service</i>"]
     adrreviewerloop["ADRReviewerLoop<br/><i>loop</i>"]
-    adrtouchpointauditorloop["AdrTouchpointAuditorLoop<br/><i>loop</i>"]
     cimonitorloop["CIMonitorLoop<br/><i>loop</i>"]
     contractrefreshloop["ContractRefreshLoop<br/><i>loop</i>"]
     corpuslearningloop["CorpusLearningLoop<br/><i>loop</i>"]
@@ -116,15 +115,6 @@ graph LR
   adrreviewerloop -->|implements| basebackgroundloop
   adrreviewerloop -->|depends_on| adrcouncilreviewer
   adrreviewerloop -->|depends_on| governor
-  adrtouchpointauditorloop -->|depends_on| basebackgroundloop
-  adrtouchpointauditorloop -->|depends_on| hydraflowconfig
-  adrtouchpointauditorloop -->|depends_on| statetracker
-  adrtouchpointauditorloop -->|implements| basebackgroundloop
-  adrtouchpointauditorloop -->|depends_on| adrindex
-  adrtouchpointauditorloop -->|depends_on| governor
-  adrtouchpointauditorloop -->|depends_on| escalationreconciler
-  adrtouchpointauditorloop -->|depends_on| prmanager
-  adrtouchpointauditorloop -->|depends_on| dedupstore
   agentport -->|depends_on| task
   agentport -->|depends_on| hitlitem
   agentport -->|depends_on| reviewverdict
@@ -188,7 +178,6 @@ graph LR
   creditexhaustederror -->|depends_on| subprocessrunner
   creditexhaustederror -->|depends_on| circuitbreaker
   dedupstore -->|depends_on| adrcouncilreviewer
-  dedupstore -->|depends_on| adrtouchpointauditorloop
   dedupstore -->|depends_on| contractrefreshloop
   dedupstore -->|depends_on| corpuslearningloop
   dedupstore -->|depends_on| dependabotmergeloop
@@ -267,7 +256,6 @@ graph LR
   error -->|depends_on| hydraflowconfig
   error -->|depends_on| observabilityport
   error -->|depends_on| dedupstore
-  escalationreconciler -->|depends_on| adrtouchpointauditorloop
   escalationreconciler -->|depends_on| fakecoverageauditorloop
   escalationreconciler -->|depends_on| flaketrackerloop
   escalationreconciler -->|depends_on| rcbudgetloop

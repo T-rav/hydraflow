@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from config import HydraFlowConfig
+from package_resources import RESOURCE_PACKAGE, checkout_root, package_root
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +107,17 @@ CONFIG_SNAPSHOT_ALLOWLIST: tuple[str, ...] = (
 
 
 def _default_factory_root() -> Path:
-    """The factory checkout that is executing this code (src/ → repo root)."""
-    return Path(__file__).resolve().parents[1]
+    """The root the factory's own prompts and git metadata hang off.
+
+    The checkout executing this code when there is one. From an installed
+    wheel there is no checkout, so fall back to the packaged resource root:
+    :func:`_prompts_dir` still finds ``prompts/`` beneath it (the trees ship
+    as package data, #11589) and the hash keys are unchanged, while
+    ``git rev-parse`` finds no repository and the SHA degrades to
+    ``"unknown"`` — the honest answer for a build that came from no checkout.
+    """
+    root = checkout_root()
+    return root if root is not None else package_root() / RESOURCE_PACKAGE
 
 
 def _factory_sha(factory_root: Path) -> str:
@@ -131,19 +141,49 @@ def _hash_file(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _prompts_dir(factory_root: Path) -> Path | None:
+    """Where *factory_root*'s auto-agent prompts live, or ``None``.
+
+    Since #11589 the prompt tree is package data under
+    ``src/hydraflow_resources/prompts`` — the one location that resolves both
+    in a checkout and beside the installed modules. ``<root>/prompts`` stays
+    a recognised layout so a root that predates the move (or a fixture that
+    models one) is still hashed rather than silently reported empty.
+    """
+    for candidate in (
+        factory_root / "src" / RESOURCE_PACKAGE / "prompts",
+        factory_root / "prompts",
+    ):
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
 def _prompt_hashes(factory_root: Path) -> dict[str, str]:
-    """sha256 per template file in the :data:`PROMPT_HASH_SPEC` set."""
-    files: list[Path] = []
-    prompts_dir = factory_root / "prompts"
-    if prompts_dir.is_dir():
-        files.extend(prompts_dir.rglob("*.md"))
+    """sha256 per template file in the :data:`PROMPT_HASH_SPEC` set.
+
+    Keys stay ``prompts/...`` / ``.codex/skills/...`` regardless of where the
+    prompt tree physically sits, so manifests remain comparable across the
+    #11589 move.
+    """
+    keyed: dict[str, Path] = {}
+    prompts_dir = _prompts_dir(factory_root)
+    if prompts_dir is not None:
+        keyed.update(
+            {
+                f"prompts/{p.relative_to(prompts_dir).as_posix()}": p
+                for p in prompts_dir.rglob("*.md")
+            }
+        )
     skills_dir = factory_root / ".codex" / "skills"
     if skills_dir.is_dir():
-        files.extend(skills_dir.glob("*/SKILL.md"))
-    return {
-        p.relative_to(factory_root).as_posix(): _hash_file(p)
-        for p in sorted(files, key=lambda p: p.relative_to(factory_root).as_posix())
-    }
+        keyed.update(
+            {
+                p.relative_to(factory_root).as_posix(): p
+                for p in skills_dir.glob("*/SKILL.md")
+            }
+        )
+    return {key: _hash_file(keyed[key]) for key in sorted(keyed)}
 
 
 def _resolved_models(config: HydraFlowConfig) -> dict[str, dict[str, str | None]]:

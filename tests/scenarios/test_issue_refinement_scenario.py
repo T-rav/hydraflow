@@ -37,6 +37,16 @@ Three scenarios (spec #9957 §3):
   auto-close settles the backlog, a second tick over the now-unchanged
   backlog makes zero LLM calls and leaves the digest body untouched (cache
   proof).
+* `test_human_close_retires_digest_until_there_is_something_to_report` —
+  (#11519) a human closes the digest; two refining-but-empty ticks leave the
+  board unchanged; a tick with a proposal reopens exactly one digest; the
+  human retires it again and a following empty tick does not reopen it.
+
+The auto-close scenarios seed a LIVE digest (`_seed_live_digest`) because a
+tick with only completed work never mints one (#11519): the digest is a
+rolling report that is minted/reopened only for something a human needs to
+see (an open operator question or an apply failure); a live one still
+records every tick's closes and relabels.
 """
 
 from __future__ import annotations
@@ -54,6 +64,7 @@ from dedup_store import DedupStore
 from events import EventBus
 from issue_refinement_loop import (
     _DIGEST_LABEL,
+    _DIGEST_TITLE,
     _REFINEMENT_AUTO_LABEL,
     IssueRefinementLoop,
 )
@@ -136,6 +147,65 @@ def _seed_near_dup_pair(world: MockWorld) -> None:
     world.github.set_issue_updated_at(102, _SETTLED_UPDATED_AT)
 
 
+def _seed_second_near_dup_pair(world: MockWorld) -> None:
+    """A second pair (104/105) on an unrelated subject — a fresh operator
+    question on a later tick (#11519 scenario)."""
+    world.github.add_issue(
+        104,
+        "WikiCompileLoop double-writes the index on a cold restart",
+        "After a cold restart the WikiCompileLoop writes the wiki index twice "
+        "in the same tick, so the second write clobbers the first entry.",
+        labels=[],
+    )
+    world.github.add_issue(
+        105,
+        "WikiCompileLoop double-writes the index after cold restart",
+        "The WikiCompileLoop writes the wiki index twice in the same tick after "
+        "a cold restart; the second write clobbers the first entry.",
+        labels=[],
+    )
+    world.github.set_issue_updated_at(104, _SETTLED_UPDATED_AT)
+    world.github.set_issue_updated_at(105, _SETTLED_UPDATED_AT)
+
+
+# Mutually dissimilar title AND body: none clears the dup prefilter floor
+# against any other seeded issue (identical bodies alone would — body overlap
+# is 40% of the score; and a judged pair, even one judged distinct, renders as
+# an operator question, which would give an "empty" tick something to say).
+_UNRELATED = {
+    200: ("Telemetry export gap on the metrics endpoint", "counters stop at noon"),
+    201: ("OAuth login flow returns a blank page", "redirect lands on nothing"),
+    202: ("Webhook retries hammer the staging deploy hook", "backoff never grows"),
+}
+
+
+def _seed_unrelated_issue(world: MockWorld, number: int) -> None:
+    """A dissimilar settled issue: makes a tick non-quiet without any question."""
+    title, body = _UNRELATED[number]
+    world.github.add_issue(number, title, body)
+    world.github.set_issue_updated_at(number, _SETTLED_UPDATED_AT)
+
+
+_LIVE_DIGEST = 9000
+
+
+def _seed_live_digest(world: MockWorld, state: StateTracker) -> int:
+    """An OPEN rolling digest already on the board, pointed at by state — the
+    steady state of a factory whose refinement loop had something to say on an
+    earlier tick."""
+    world.github.add_issue(
+        _LIVE_DIGEST, _DIGEST_TITLE, "earlier digest body", labels=[_DIGEST_LABEL]
+    )
+    state.set_refinement_digest_issue(_LIVE_DIGEST)
+    return _LIVE_DIGEST
+
+
+def _digest_numbers(world: MockWorld) -> list[int]:
+    return [
+        n for n, issue in world.github._issues.items() if _DIGEST_LABEL in issue.labels
+    ]
+
+
 def _build_loop(
     world: MockWorld, tmp_path: Path, *, refinement_llm: _ScriptedRefinementLLM
 ) -> tuple[IssueRefinementLoop, StateTracker]:
@@ -171,9 +241,10 @@ async def test_auto_close_path_closes_exactly_one_and_records_digest(
 ) -> None:
     """Seeded near-dup pair + scripted exact_dup/high verdict -> EXACTLY the
     duplicate closes, with the evidence comment + `refinement-auto` label; the
-    canonical stays open; the digest records the close; the pair is cached.
-    The same tick also proves the priority-relabel path: an unrelated,
-    unlabeled, settled issue scripted P1 gets the P-label applied."""
+    canonical stays open; the LIVE digest records the close; the pair is
+    cached. The same tick also proves the priority-relabel path: an unrelated,
+    unlabeled, settled issue scripted P1 gets the P-label applied. The digest
+    is seeded live because completed work alone never mints one (#11519)."""
     world = MockWorld(tmp_path)
     _seed_near_dup_pair(world)
     world.github.add_issue(
@@ -194,6 +265,7 @@ async def test_auto_close_path_closes_exactly_one_and_records_digest(
         priority={103: _priority_json("P1", "silently eats the credit signal")},
     )
     loop, state = _build_loop(world, tmp_path, refinement_llm=llm)
+    live_digest = _seed_live_digest(world, state)
 
     stats = await loop._do_work()
 
@@ -219,12 +291,12 @@ async def test_auto_close_path_closes_exactly_one_and_records_digest(
     assert canonical.state == "open"
     assert _REFINEMENT_AUTO_LABEL not in canonical.labels
 
-    # Digest issue exists and records the close.
-    digest_num = state.get_refinement_digest_issue()
-    assert digest_num > 0
-    digest = world.github.issue(digest_num)
+    # The live digest records the close (and no second digest was minted).
+    assert state.get_refinement_digest_issue() == live_digest
+    digest = world.github.issue(live_digest)
     assert _DIGEST_LABEL in digest.labels
     assert "#102: duplicate of #101" in digest.body
+    assert _digest_numbers(world) == [live_digest]
 
     # Pair is cached — keyed on the two issue numbers.
     judged = state.get_judged_pairs()
@@ -309,12 +381,14 @@ async def test_cache_path_second_tick_unchanged_backlog_is_zero_llm(
     )
     loop, state = _build_loop(world, tmp_path, refinement_llm=llm)
     state.set_refinement_last_full_sweep(datetime.now(UTC))  # incremental mode
+    digest_num = _seed_live_digest(world, state)  # completed work never mints one
 
     stats1 = await loop._do_work()
     assert stats1["closed"] == 1  # #102 auto-closed, drops out of the backlog
 
-    digest_num = state.get_refinement_digest_issue()
+    assert state.get_refinement_digest_issue() == digest_num
     digest_body_after_first_tick = world.github.issue(digest_num).body
+    assert "#102: duplicate of #101" in digest_body_after_first_tick
     calls_after_first_tick = len(llm.prompts)
     assert calls_after_first_tick > 0
 
@@ -323,3 +397,71 @@ async def test_cache_path_second_tick_unchanged_backlog_is_zero_llm(
     assert stats2["changed"] == 0
     assert len(llm.prompts) == calls_after_first_tick  # zero new LLM calls
     assert world.github.issue(digest_num).body == digest_body_after_first_tick
+
+
+async def test_human_close_retires_digest_until_there_is_something_to_report(
+    tmp_path: Path,
+) -> None:
+    """#11519 — the #10224 timeline, over MockWorld's FakeGitHub + real state:
+    a proposal mints the digest; a human closes it (and answers the question);
+    two refining-but-empty ticks leave the board unchanged (no reopen, no
+    fresh digest, body untouched); a tick with a new proposal reopens exactly
+    one digest (the same rolling issue); the human retires it again and a
+    following empty tick does not reopen it."""
+    world = MockWorld(tmp_path)
+    _seed_near_dup_pair(world)
+    llm = _ScriptedRefinementLLM(
+        dup={
+            frozenset({101, 102}): _dup_json("likely_dup", 101, "medium"),
+            frozenset({104, 105}): _dup_json("likely_dup", 104, "medium"),
+        }
+    )
+    loop, state = _build_loop(world, tmp_path, refinement_llm=llm)
+    state.set_refinement_last_full_sweep(datetime.now(UTC))  # incremental mode
+
+    # Tick 1: the 101/102 question mints the digest.
+    await loop._do_work()
+    digest = state.get_refinement_digest_issue()
+    assert digest > 0
+    assert _digest_numbers(world) == [digest]
+
+    # A human retires the rolling report and answers the open question.
+    await world.github.close_issue(digest)
+    await world.github.close_issue(102, reason="not planned")
+    retired_body = world.github.issue(digest).body
+
+    # Ticks 2-3: refining, but nothing to report -> board unchanged.
+    for number in (200, 201):
+        _seed_unrelated_issue(world, number)
+        before = len(world.github._issues)
+        stats = await loop._do_work()
+        assert stats["changed"] >= 1
+        assert stats["proposals"] == 0
+        assert stats["open_questions"] == 0
+        assert world.github.issue(digest).state == "closed"
+        assert world.github.issue(digest).body == retired_body
+        assert len(world.github._issues) == before
+    assert _digest_numbers(world) == [digest]
+
+    # Tick 4: a new proposal reopens the SAME digest, exactly once.
+    _seed_second_near_dup_pair(world)
+    before = len(world.github._issues)
+    stats = await loop._do_work()
+    assert stats["proposals"] == 1
+    assert world.github.issue(digest).state == "open"
+    assert "#104 vs #105" in world.github.issue(digest).body
+    assert len(world.github._issues) == before
+    assert _digest_numbers(world) == [digest]
+
+    # Retired again + answered; tick 5 has nothing to say -> stays closed.
+    await world.github.close_issue(digest)
+    await world.github.close_issue(105, reason="not planned")
+    retired_body = world.github.issue(digest).body
+    _seed_unrelated_issue(world, 202)
+    before = len(world.github._issues)
+    stats = await loop._do_work()
+    assert stats["open_questions"] == 0
+    assert world.github.issue(digest).state == "closed"
+    assert world.github.issue(digest).body == retired_body
+    assert len(world.github._issues) == before
+    assert _digest_numbers(world) == [digest]

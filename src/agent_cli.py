@@ -201,6 +201,14 @@ def build_lightweight_command(
     settings and skips the pre-cloned ``--plugin-dir`` flags, shielding the
     contract worker from a host/user ``SessionStart`` hook — see
     :data:`_CONTRACT_SETTING_SOURCES`.
+
+    The claude command requests ``--output-format json`` so the reply arrives
+    as ONE result envelope carrying the CLI's token ``usage``;
+    ``runner_utils._claude_cli_complete`` unwraps it back to the bare reply
+    text for callers and forwards the usage to telemetry. Bare-text output has
+    no usage, and a zero-usage success on a non-trivial prompt is reclassified
+    as a failed $0 inference — which blinded every one-shot claude source
+    (#11514 / #11515 / #11516).
     """
     _require_supported_tool(tool)
     if tool == "codex":
@@ -220,6 +228,7 @@ def build_lightweight_command(
         input_bytes = None
 
     if tool == "claude":
+        cmd.extend(["--output-format", "json"])
         if isolate_user_settings:
             cmd.extend(claude_isolation_flags())
         else:

@@ -1,8 +1,9 @@
 """Config defaults + state accessors for AdrConformanceLoop (ADR-0100).
 
-Mirrors the sibling ADR-0056 touchpoint-auditor config flags and
-adr_audit_*/adr_rollup_* state methods, renamed to the adr_conformance_*
-namespace so counters never collide between the two auditors.
+The ``adr_conformance_*`` namespace was chosen to keep these counters disjoint
+from the sibling ADR-0056 touchpoint auditor's ``adr_audit_*``/``adr_rollup_*``
+state; that loop and its state slice were removed by ADR-0136, so this is the
+only occupant of ``src/state/_adr_audit.py`` now.
 """
 
 from __future__ import annotations
@@ -32,15 +33,6 @@ def test_state_attempt_counter_increments(state_tracker: StateTracker):
     assert state_tracker.inc_adr_conformance_attempts("ADR-0049") == 1
     assert state_tracker.inc_adr_conformance_attempts("ADR-0049") == 2
     state_tracker.clear_adr_conformance_attempts("ADR-0049")
-    assert state_tracker.inc_adr_conformance_attempts("ADR-0049") == 1
-
-
-def test_state_attempt_counter_is_namespaced_from_adr_audit(
-    state_tracker: StateTracker,
-):
-    """Conformance counters must not collide with the sibling audit counters."""
-    state_tracker.inc_adr_audit_attempts("ADR-0049")
-    state_tracker.inc_adr_audit_attempts("ADR-0049")
     assert state_tracker.inc_adr_conformance_attempts("ADR-0049") == 1
 
 

@@ -22,6 +22,7 @@ from dashboard_routes._routes import (
     _pick_folder_with_dialog,
 )
 from models import RepoRuntimeInfo
+from operator_start import apply_operator_start
 from prompt_gate import is_valid_data_class
 
 logger = logging.getLogger("hydraflow.dashboard")
@@ -146,6 +147,14 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
 
         ``rt.start()`` resets and relaunches the orchestrator (all loops,
         incl. background workers), so a stopped line restarts cleanly.
+
+        A per-line Start carries the same intent as the factory-level Start
+        (``POST /api/control/start``), so it applies the same transition to
+        THIS line's state and orchestrator: re-enable the default pipeline
+        workers, leave every other kill-switch alone (#11611). The one
+        difference is ``clear_latch=False`` — ``operator_stopped`` is a
+        factory-level latch consulted by boot autostart, and starting a single
+        repo must not silently re-arm the whole factory.
         """
         if registry is None:
             return JSONResponse(
@@ -156,6 +165,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
             return JSONResponse({"error": f"Unknown repo: {slug}"}, status_code=404)
         if rt.running:
             return JSONResponse({"error": "Already running"}, status_code=409)
+        apply_operator_start(rt.state, rt.orchestrator, clear_latch=False)
         await rt.start()
         return JSONResponse({"status": "started", "slug": slug})
 

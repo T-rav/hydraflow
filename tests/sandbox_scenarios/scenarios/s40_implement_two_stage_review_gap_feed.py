@@ -1,12 +1,16 @@
 """s40 — ImplementPhase two-stage spec-compliance gap-feed recovery (ADR-0063 W5).
 
 Drives the W5 recovery branch end-to-end: the first implement attempt fails
-with zero commits (zero-diff branch); ``ImplementPhase._run_spec_compliance_review``
-dispatches the scripted spec-compliance reviewer which returns ``compliant=False``
-with explicit gaps; the gaps are persisted to ``WorkerResultMeta.spec_review_gaps``
-and surface as the next attempt's ``prior_failure`` anchor; the second implement
-attempt succeeds, the issue advances through review and merges — no human
-escalation.
+with commits but a red gate (a committed-but-failed build);
+``ImplementPhase._run_spec_compliance_review`` dispatches the scripted
+spec-compliance reviewer which returns ``compliant=False`` with explicit gaps;
+the gaps are persisted to ``WorkerResultMeta.spec_review_gaps`` and surface as
+the next attempt's ``prior_failure`` anchor; the second implement attempt
+succeeds, the issue advances through review and merges — no human escalation.
+
+Since #11568 a ZERO-commit first attempt no longer takes this path: it routes
+to diagnose on the first result (``zero-commit-abort``), so the W5 gap-feed is
+driven here with a committed failure — the retry shape W5 still owns.
 
 The scripted scenario uses the ``script_implement_spec_review`` FakeLLM hook
 added in PR #9038. Without that hook the only achievable s40 was
@@ -19,8 +23,8 @@ from mockworld.seed import MockWorldSeed
 
 NAME = "s40_implement_two_stage_review_gap_feed"
 DESCRIPTION = (
-    "ImplementPhase: first attempt fails zero-diff, spec-compliance reviewer "
-    "surfaces gaps, second attempt succeeds → issue reaches merged."
+    "ImplementPhase: first attempt commits but fails its gate, spec-compliance "
+    "reviewer surfaces gaps, second attempt succeeds → issue reaches merged."
 )
 
 
@@ -38,15 +42,17 @@ def seed() -> MockWorldSeed:
         scripts={
             "plan": {4: [{"success": True, "task_count": 1}]},
             # ADR-0063 W5: drive ImplementPhase's failure-then-success path.
-            # Attempt 1 produces zero commits (triggers _run_spec_compliance_review);
+            # Attempt 1 commits but fails its quality gate (triggers
+            # _run_spec_compliance_review on the committed-failure route —
+            # a zero-commit attempt would route to diagnose instead, #11568);
             # attempt 2 succeeds with one commit on the implementation branch.
             "implement": {
                 4: [
                     {
                         "success": False,
                         "branch": "hf/issue-4",
-                        "commits": 0,
-                        "error": "No commits found on branch",
+                        "commits": 1,
+                        "error": "make quality failed: tests/test_feature_w.py",
                     },
                     {"success": True, "branch": "hf/issue-4", "commits": 1},
                 ],
@@ -66,12 +72,12 @@ def seed() -> MockWorldSeed:
                     {
                         "compliant": False,
                         "gaps": [
-                            "src/feature_w.py is missing — branch produced no diff",
+                            "src/feature_w.py does not implement the W entry point",
                             "no acceptance test covers feature W",
                         ],
                         "reasoning": (
-                            "The implementation branch carries zero commits "
-                            "against the base; the spec required the new module."
+                            "The implementation branch commits a stub that fails "
+                            "its own tests; the spec required the working module."
                         ),
                     },
                 ],
@@ -86,9 +92,9 @@ async def assert_outcome(api, page) -> None:
 
     Only a successful spec-compliance recovery + a passing second attempt +
     subsequent phases can produce a merged outcome here. Without W5 the
-    failed first attempt would either re-dispatch with an uninformative
-    ``"No commits found on branch"`` prior_failure (potentially looping
-    until the attempt cap) or escalate.
+    failed first attempt would either re-dispatch with only the raw gate
+    error as prior_failure (potentially looping until the attempt cap) or
+    escalate.
     """
     _ = page
 

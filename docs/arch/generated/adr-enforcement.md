@@ -6,14 +6,14 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 81
-- **REAL** (real asserting enforcement): 78 (96.3%)
+- **Accepted ADRs:** 82
+- **REAL** (real asserting enforcement): 79 (96.3%)
 - **WEAK** (prose-only or tautological): 3
 - **MISSING** (no `**Enforced by:**`): 0
 - **Justified exemptions** (process-only, allow-listed): 3
-- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 81 = 0.0%**
+- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 82 = 0.0%**
 
-By declared `**Enforcement:**` kind: `enforced` 78 · `manual` 3 · `decision-of-record` 0.
+By declared `**Enforcement:**` kind: `enforced` 79 · `manual` 3 · `decision-of-record` 0.
 
 ## Classification
 
@@ -59,7 +59,6 @@ By declared `**Enforcement:**` kind: `enforced` 78 · `manual` 3 · `decision-of
 | ADR-0052 | REAL | — | enforced | `pytest:tests/test_mockworld_fakes_conformance.py`, `pytest:tests/test_sandbox_scenario_contract.py` |
 | ADR-0053 | REAL | — | enforced | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
 | ADR-0054 | REAL | — | enforced | `pytest:tests/test_term_proposer_loop.py`, `pytest:tests/architecture/test_term_proposer_wiring.py` |
-| ADR-0056 | REAL | — | enforced | `pytest:tests/test_adr_touchpoint_auditor_loop.py` |
 | ADR-0057 | REAL | — | enforced | `pytest:tests/test_term_pruner_loop.py`, `pytest:tests/architecture/test_term_pruner_wiring.py` |
 | ADR-0058 | REAL | — | enforced | `pytest:tests/test_edge_proposer_loop.py`, `pytest:tests/architecture/test_edge_proposer_wiring.py` |
 | ADR-0060 | REAL | — | enforced | `pytest:tests/test_atlas_routes.py` |
@@ -86,7 +85,7 @@ By declared `**Enforcement:**` kind: `enforced` 78 · `manual` 3 · `decision-of
 | ADR-0102 | REAL | — | enforced | `pytest:tests/test_review_phase_core.py` |
 | ADR-0103 | REAL | — | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | REAL | — | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
-| ADR-0106 | REAL | — | enforced | `pytest:tests/regressions/test_issue_9552.py` |
+| ADR-0106 | REAL | — | enforced | `pytest:tests/regressions/test_issue_9552.py`, `pytest:tests/regressions/test_issue_11604.py` |
 | ADR-0107 | REAL | — | enforced | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0109 | REAL | — | enforced | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | REAL | — | enforced | `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` |
@@ -100,6 +99,8 @@ By declared `**Enforcement:**` kind: `enforced` 78 · `manual` 3 · `decision-of
 | ADR-0118 | REAL | — | enforced | `pytest:tests/architecture/test_no_otel_imports.py` |
 | ADR-0119 | REAL | — | enforced | `pytest:tests/test_credit_failover.py` |
 | ADR-0134 | REAL | — | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
+| ADR-0135 | REAL | — | enforced | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
+| ADR-0136 | REAL | — | enforced | `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations`, `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` |
 
 ## Unenforced-decision debt
 
@@ -133,7 +134,6 @@ REAL ADRs whose cited test resolves and asserts, but whose text never names the 
 | ADR-0007 | `pytest:tests/test_dashboard_routes_repo.py` |
 | ADR-0008 | `pytest:tests/test_dashboard_routes_repo.py` |
 | ADR-0010 | `pytest:tests/test_integration_worktree.py` |
-| ADR-0011 | `pytest:tests/test_epic.py`, `pytest:tests/test_release.py` |
 | ADR-0012 | `pytest:tests/test_epic_merge_coordination.py` |
 | ADR-0014 | `pytest:tests/test_state_machine.py` |
 | ADR-0015 | `pytest:tests/test_review_phase_hooks.py` |
@@ -167,7 +167,6 @@ REAL ADRs whose cited test resolves and asserts, but whose text never names the 
 | ADR-0097 | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
 | ADR-0102 | `pytest:tests/test_review_phase_core.py` |
 | ADR-0104 | `pytest:tests/test_auto_tighten_invariant.py` |
-| ADR-0106 | `pytest:tests/regressions/test_issue_9552.py` |
 | ADR-0109 | `pytest:tests/test_ultra_review.py` |
 | ADR-0111 | `pytest:tests/test_flows.py` |
 | ADR-0117 | `pytest:tests/test_prompt_observatory.py` |

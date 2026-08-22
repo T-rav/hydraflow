@@ -56,24 +56,74 @@ jobs:
     name: Staging RC dry-run shard
     runs-on: ubuntu-latest
     needs: [resolve]
+    # packages:read pulls the buildx layer cache for Dockerfile.agent. Never
+    # `write` here — see the build step's comment below.
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false # run every shard so all failures surface in one pass
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     steps:
+      # TRUST: this ref is the literal protected branch `staging` — never a job
+      # output. It used to be `ref: ${{ needs.resolve.outputs.sha }}`, which
+      # CodeQL reported as actions/cache-poisoning/poisonable-step (alert #108,
+      # issue #11518): the analysis cannot see that `resolve` produces that SHA
+      # by running `git rev-parse HEAD` on protected `staging`, so a privileged,
+      # cache-writing job appeared to check out attacker-influenced code.
+      #
+      # Checking out the branch tip re-opens a different hole — staging can
+      # advance between `resolve` and this job, which would break the sensor's
+      # "one SHA per report" property. The `pin` step below closes it by
+      # asserting in-job that HEAD *is* the resolved SHA, and every step after
+      # it is gated on that assertion, so nothing builds, caches, or executes
+      # repo code on an unverified commit.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: staging
+      # Verified for real (not just shape-checked) in
+      # tests/test_staging_rc_dryrun_pin.py; the wiring below is pinned by
+      # tests/architecture/test_staging_rc_dryrun_workflow_shape.py. Runs on the
+      # image's system python3 — `setup-python` is itself behind the gate.
+      - name: Pin shard to the resolved staging HEAD
+        id: pin
+        env:
+          # Passed through the environment, not interpolated into the shell
+          # body: a `${{ }}` job output inside `run:` is a script-injection sink.
+          EXPECTED_SHA: ${{ needs.resolve.outputs.sha }}
+          SHARD: ${{ matrix.shard }}/6
+        run: |
+          python3 scripts/staging_rc_dryrun_pin.py \
+            --expected-sha "$EXPECTED_SHA" \
+            --shard "$SHARD" \
+            --skip-summary-json /tmp/summary.json
       - uses: actions/setup-python@v5
+        if: steps.pin.outputs.matched == 'true'
         with:
           python-version: "3.11"
-      - run: pip install uv && uv pip install --system -e ".[dev]"
-      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
+      - if: steps.pin.outputs.matched == 'true'
+        run: pip install uv && uv pip install --system -e ".[dev]"
+      # Read-only cache access. This job runs with default-branch privilege on
+      # a schedule; it reads the layer cache the post-merge push lane
+      # publishes, and deliberately does not write it — one writer, in the one
+      # context that only ever sees merged code.
+      - name: Build agent image (GHCR layer cache)
+        if: steps.pin.outputs.matched == 'true'
+        uses: ./.github/actions/build-agent-image
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.pin.outputs.matched == 'true'
+        run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway ui playwright
       - name: Run shard ${{ matrix.shard }}/6 against staging HEAD
+        if: steps.pin.outputs.matched == 'true'
         run: |
           python scripts/sandbox_scenario.py run-all \
             --shard ${{ matrix.shard }}/6 \
             --summary-json /tmp/summary.json
+      # Unconditional on purpose: when the shard skipped, this uploads the pin
+      # step's skip marker instead, so the reporter reads a well-formed
+      # zero-failure summary rather than scanning an absent artifact.
       - name: Upload shard run summary
         if: always()
         uses: actions/upload-artifact@v4
@@ -104,11 +154,21 @@ jobs:
       contents: read
       issues: write
     steps:
+      # TRUST: literal protected branch, same as the shard. This job used to
+      # keep `ref: ${{ needs.resolve.outputs.sha }}` on the theory that a
+      # reporter with no pip/docker/cache step has nothing to poison — true,
+      # but it left the fleet with one checkout of a job-output ref, and
+      # tests/architecture/test_workflow_checkout_refs.py now forbids the
+      # shape outright (#11565). Nothing here depends on the checked-out
+      # commit: the tree only supplies scripts/staging_rc_dryrun_report.py,
+      # and the SHA the report names travels through the job output into
+      # `--sha` below (via env, never interpolated into the shell body). So a
+      # staging tip that advanced since `resolve` cannot make the report name
+      # the wrong commit — no pin step is needed and a mismatch is not an
+      # error. Pinned by tests/architecture/test_staging_rc_dryrun_workflow_shape.py.
       - uses: actions/checkout@v4
         with:
-          # Pin the reporter to the exact commit the shards tested, not a
-          # possibly-advanced staging tip.
-          ref: ${{ needs.resolve.outputs.sha }}
+          ref: staging
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -120,10 +180,14 @@ jobs:
           merge-multiple: false
       - name: Aggregate failures into an issue body
         id: aggregate
+        env:
+          # The commit the shards tested. Through the environment, not `${{ }}`
+          # inside `run:` — same script-injection hygiene as the shard's pin.
+          RESOLVED_SHA: ${{ needs.resolve.outputs.sha }}
         run: |
           python scripts/staging_rc_dryrun_report.py \
             --results-dir /tmp/dryrun-summaries \
-            --sha "${{ needs.resolve.outputs.sha }}" \
+            --sha "$RESOLVED_SHA" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       - name: File or update rolling hydraflow-find issue on break
         if: steps.aggregate.outputs.has_failures == 'true'

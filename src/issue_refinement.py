@@ -505,10 +505,10 @@ _ACTIVE_PIPELINE_PHASE_LABELS: frozenset[str] = frozenset(
 )
 
 # Caretaker-loop escalation families — a stuck-loop finding actively being
-# worked by another loop, not the refinement loop's to touch.
+# worked by another loop, not the refinement loop's to touch. (The
+# hydraflow-adr-drift family left with its loops in ADR-0136.)
 _ESCALATION_LABELS: frozenset[str] = frozenset(
     {
-        "hydraflow-adr-drift",  # adr_drift_label (config.py) — ADR-drift finding
         # bare literal (prep.py HYDRAFLOW_LITERAL_LABELS) — stuck-loop HITL
         # escalation root, distinct from the hydraflow-hitl-escalation
         # config field
@@ -828,6 +828,26 @@ def render_digest(actions: RefinementActions, stats: Mapping[str, object]) -> st
         lines.append(_NO_ENTRIES)
 
     return "\n".join(lines) + "\n"
+
+
+def digest_has_content(
+    actions: RefinementActions, failures: Sequence[str] = ()
+) -> bool:
+    """True when the digest has something a human needs to see.
+
+    Gates minting or reopening the rolling digest issue (#11519): a human close
+    retires it (operator ruling on #10224, 2026-08-17 — the digest is a rolling
+    report, not a work item), and the loop re-files only with something to
+    report. "Something to report" is an open operator question — a dup
+    proposal or a priority question, including ones accumulated from earlier
+    ticks — or an apply failure that needs a human. Stats alone never count,
+    and neither does completed machine work (auto-closes, relabels): that is
+    already recorded on the affected issues themselves (evidence comment +
+    ``refinement-auto`` label, the new P-label). A LIVE digest still renders
+    everything; this predicate only decides whether a missing one is worth a
+    standing board issue.
+    """
+    return bool(actions.dup_proposals or actions.priority_questions or failures)
 
 
 # ---------------------------------------------------------------------------

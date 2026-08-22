@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from events import EventBus
-from issue_store import IssueStore
+from issue_store import STAGE_READY, IssueStore
 from mockworld.fakes import FakeGitHub
 from mockworld.fakes.fake_issue_store import FakeIssueStore
 from models import EpicGapReview
@@ -382,7 +382,9 @@ class TestPlanEpicGroup:
 
         assert planners.plan.await_count == 2
         planners.run_gap_review.assert_awaited_once()
-        assert store.get_active_issues() == {10: "implement"}
+        # The store canonicalizes the phase name to its stage (#11551): the
+        # implement owner is preserved and shows under READY.
+        assert store.get_active_issues() == {10: STAGE_READY}
 
     @pytest.mark.asyncio
     async def test_post_read_local_claim_prevents_stale_replan(
@@ -427,7 +429,9 @@ class TestPlanEpicGroup:
         await phase._plan_epic_group(100, children, asyncio.Semaphore(2))
 
         assert planners.plan.await_count == 2
-        assert store.get_active_issues() == {10: "implement"}
+        # The store canonicalizes the phase name to its stage (#11551): the
+        # implement owner is preserved and shows under READY.
+        assert store.get_active_issues() == {10: STAGE_READY}
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

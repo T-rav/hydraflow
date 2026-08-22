@@ -41,6 +41,7 @@ from json import dumps
 from pathlib import Path
 
 from file_util import append_jsonl
+from package_resources import checkout_path
 
 logger = logging.getLogger("hydraflow.prompt_observatory")
 
@@ -308,7 +309,10 @@ class UnrecognizedShape:
 
 def registry_token_sets() -> dict[str, frozenset[str]]:
     """Registered prompt name -> token digests of its rendered fixture."""
-    audit_path = Path(__file__).resolve().parent.parent / "scripts" / "audit_prompts.py"
+    # scripts/ is a development artefact the wheel does not ship; ask the
+    # checkout, which names what is missing instead of pointing into
+    # site-packages (#11589).
+    audit_path = checkout_path("scripts", "audit_prompts.py")
     spec = importlib.util.spec_from_file_location("_audit_prompts_obs", audit_path)
     if spec is None or spec.loader is None:  # pragma: no cover - defensive
         return {}

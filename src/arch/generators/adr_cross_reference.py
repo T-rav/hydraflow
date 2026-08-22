@@ -30,9 +30,8 @@ def _render_symbol_granularity_nudges(adrs: list[ADR] | None) -> str:
     """Render the soft ``## Symbol-Granularity Nudges`` section (#10458).
 
     Always emitted (renders ``None.`` when empty) so its presence never
-    depends on the ADR corpus. Uses the manual shared-infra allowlist only
-    (``shared_infra_fanout_threshold`` left at its default) to keep the
-    generated artifact deterministic and independent of runtime config.
+    depends on the ADR corpus. Reads the manual shared-infra allowlist only,
+    with no runtime config input, so the generated artifact is deterministic.
     """
     section = "\n\n## Symbol-Granularity Nudges\n\n" + _NUDGE_PREAMBLE
     nudges = bare_infra_citation_nudges(adrs or [])

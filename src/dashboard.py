@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from app_version import get_app_version
 from config import Credentials, HydraFlowConfig
 from events import EventBus
+from package_resources import package_root, resource_dir
 from pr_manager import PRManager
 from state import StateTracker
 
@@ -28,11 +29,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.dashboard")
 
-# React build output or fallback HTML template
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-_UI_DIST_DIR = _REPO_ROOT / "src" / "ui" / "dist"
-_TEMPLATE_DIR = _REPO_ROOT / "templates"
-_STATIC_DIR = _REPO_ROOT / "static"
+# React build output, or the server-rendered fallback HTML + its JS.
+#
+# ``ui/dist`` is a *build* artefact (``make ui-build``), not package data: it
+# is absent from a fresh checkout and from the wheel alike, and ``create_app``
+# degrades to the fallback template when it is missing. ``package_root()``
+# names ``src/`` in a checkout and ``site-packages`` from a wheel, so the
+# lookup is correct (and correctly empty) in both.
+_UI_DIST_DIR = package_root() / "ui" / "dist"
+_TEMPLATE_DIR = resource_dir("templates")
+_STATIC_DIR = resource_dir("static")
 
 
 class HydraFlowDashboard:

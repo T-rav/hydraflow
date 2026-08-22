@@ -226,3 +226,16 @@ def test_every_class_has_config_fields(cls: GiveUpClass, field_stem: str) -> Non
     w = resolve_window(cfg, cls)
     assert w.max_restarts >= 1
     assert w.window_seconds >= 1
+
+
+def test_self_solve_outcome_wire_values_are_pinned() -> None:
+    """``GiveUpTracker.record_action`` persists ``SelfSolveOutcome.value`` for
+    the ``/api`` give-up surface, so the member set is a wire contract: adding
+    or renaming one (#11480 added ``already-satisfied``) is a deliberate edit
+    here, never a silent one."""
+    assert {m.value for m in SelfSolveOutcome} == {
+        "decompose",
+        "diagnose",
+        "already-satisfied",
+        "human-required",
+    }

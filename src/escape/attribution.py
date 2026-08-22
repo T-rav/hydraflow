@@ -12,18 +12,15 @@ from __future__ import annotations
 
 import re
 
+# GitHub's closing keywords (`fixes #123` / `Resolved #123` / …). #11481 folded
+# this module's own hand-rolled alternation onto the canonical object so the
+# closing-keyword grammar has exactly one definition repo-wide.
+from false_close import CLOSE_KEYWORD_RE
+
 # "This reverts commit <sha>." — the body line `git revert` writes. Also the
 # `Revert "<subject>"` subject form (captured separately, no sha there).
 _REVERTS_COMMIT_RE = re.compile(r"This reverts commit ([0-9a-f]{7,40})")
 _REVERT_SUBJECT_RE = re.compile(r'^Revert\s+"')
-
-# `fixes #123` / `closes #123` / `resolves #123` (GitHub's closing keywords),
-# case-insensitive, hash-prefixed issue/PR number.
-_FIXES_RE = re.compile(
-    r"\b(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\b"
-    r"\s+#(\d+)",
-    re.IGNORECASE,
-)
 
 # A bare `#123` cross-reference (weaker than a closing keyword).
 _HASH_REF_RE = re.compile(r"(?<![\w/])#(\d+)\b")
@@ -72,7 +69,7 @@ def is_hotfix(subject: str, body: str) -> bool:
 def extract_fixes_refs(text: str) -> list[int]:
     """Return issue/PR numbers named by a GitHub closing keyword, in order."""
     seen: list[int] = []
-    for match in _FIXES_RE.finditer(text):
+    for match in CLOSE_KEYWORD_RE.finditer(text):
         num = int(match.group(1))
         if num not in seen:
             seen.append(num)

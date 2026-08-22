@@ -6,13 +6,41 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `e692acf` — Merge remote-tracking branch 'origin/staging' into codex/fix-workspace-gc-landed-safety *(2026-08-21)*
-- `6923db5` — Fixes #11502: harden WorkspaceGC landed proof *(2026-08-21)*
+- `11d86a3` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0004 *(2026-08-22)*
+- `8fcd6a0` — fix(control): Start clears the pipeline-worker disable set on both branches (#11611) (#11623) (#11623) *(2026-08-21)*
+- `5c33050` — fix(packaging): resolve repo-root resources through a package-aware helper (#11589) (#11617) (#11617) *(2026-08-21)*
+- `72faffb` — feat(ci): cache the agent image and add a dispatchable sandbox-scenario run (#11601) (#11621) (#11621) *(2026-08-21)*
+- `faaaa9e` — fix(liveness): event-loop stall — attribute starvation vs block before hard restart (#11604) (#11622) (#11622) *(2026-08-21)*
+- `ca6f42c` — chore(loops): remove the retired activity-based ADR-drift loops (#11600) (#11620) (#11620) *(2026-08-21)*
+- `2a2fb8c` — feat(triage): honor 'Blocked by: #N' so phase-ordered children flow in order (#11614) (#11616) (#11616) *(2026-08-21)*
+- `c298996` — fix(sandbox): air-gap the composition-root AutoAgentRunner constructions (#11602) (#11615) (#11615) *(2026-08-21)*
+- `41b468b` — feat(config): light lane on by default — issues at complexity ≤3 take one spawn to PR (refs #11568) (#11590) (#11590) *(2026-08-21)*
+- `c104554` — chore(config): remove retired feature flags and their machinery (flag-rot audit) (#11599) (#11599) *(2026-08-21)*
+- `7af74dd` — feat(implement): test-adequacy gate repairs in-run before rejecting (#11593) (#11603) (#11603) *(2026-08-21)*
+- `9cf6452` — feat(factory): auto-rebase own dirty PRs when staging moves (#11595) (#11598) (#11598) *(2026-08-21)*
+- `98d9393` — feat(factory): run as a launchd service; liveness kernel honours operator Stop (#11594) (#11594) *(2026-08-21)*
+- `e3e5665` — fix(packaging): wheel ships the flat src/ modules + assets so the hydraflow console script imports (Fixes #11580) (#11591) (#11591) *(2026-08-21)*
+- `35f8b29` — docs(adr): ADR-0011 — release primitive is decoupled from epic close since #2689; document the manual cut (Fixes #11569) (#11583) (#11583) *(2026-08-21)*
+- `83b0f29` — fix(implement): take make quality off the host lock on the implement path (#11568 seam 3) (#11592) (#11592) *(2026-08-21)*
+- `b3ff35a` — fix(implement): tier build timeout by complexity, route zero-commit attempts to diagnose (#11568) (#11585) (#11585) *(2026-08-21)*
+- `e25d020` — fix(workspace-gc): prune tracked entries whose dir is gone; phase-3 branch deletes require the landed proof (Fixes #11570, Fixes #11571) (#11582) (#11582) *(2026-08-21)*
+- `1b9e118` — fix(token-drift): load telemetry by window, not by row count (Fixes #11581) (#11586) (#11586) *(2026-08-21)*
+- `2e6e13d` — chore(release): bump to 1.0.0, CHANGELOG, pinned-install docs (refs #11520) (#11584) (#11584) *(2026-08-21)*
+- `28338b9` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop — one issue per source per ISO week (Fixes #11442) (#11578) (#11578) *(2026-08-21)*
+- `112ec85` — fix(release): tag the promoted main SHA, never the factory checkout HEAD (Fixes #11517) (#11576) (#11576) *(2026-08-21)*
+- `91c83ee` — fix(telemetry): one-shot claude spawns report usage — issue_refinement / sampled_audit / sampled_audit_adjudicate (Fixes #11514, Fixes #11515, Fixes #11516) (#11579) (#11579) *(2026-08-21)*
+- `eac96f2` — Fixes #11480: never re-slice an issue whose fix already landed (#11566) (#11566) *(2026-08-21)*
+- `e1aa0d8` — test(workspace-gc): real-git pins for the closed-issue landed guard on phases 1-2 and 5 (refs #11503, #11507; fix shipped in #11530) (#11572) (#11572) *(2026-08-21)*
+- `0cce8a7` — Fixes #11481: fold sixth site, and widen the class-closure guard to find it *(2026-08-21)*
+- `1bffda8` — Merge remote-tracking branch 'origin/main' into rc/2026-08-21-1043 *(2026-08-21)*
+- `53b4905` — fix(workspace-gc): prove exact HEAD landed before cleanup (#11530) (#11530) *(2026-08-21)*
 - `b91594d` — Fix factory task graphs to per-worktree JSONL (#11527) (#11527) *(2026-08-21)*
 - `54795e2` — fix: inherit maintenance routing for shared caretakers (#11525) (#11525) *(2026-08-21)*
 - `4474b1a` — fix: fail closed on wrong-branch worktree reuse (#11523) (#11523) *(2026-08-21)*
 - `3c6d708` — fix(pipeline): gate /api/pipeline snapshot on IssueStore's first refresh (#11349) (#11349) *(2026-08-21)*
+- `2f73247` — feat(ul): entry-evidence — 1 new entry links across 1 terms (#11545) (#11545) *(2026-08-20)*
 - `cd84a92` — feat(erosion): mass + suite-hygiene sensors — repeatable god-class breakup and test-suite pruning (#11522) (#11522) *(2026-08-20)*
+- `418f2cb` — chore(arch): refresh generated artifacts after the main merge *(2026-08-20)*
 - `7838527` — chore(rc): merge main into rc/2026-08-21-0200 to clear the DIRTY promotion *(2026-08-20)*
 - `9e85063` — Fixes #11441: token-drift engine + API drift block (read-only salvage) (#11495) (#11495) *(2026-08-20)*
 - `1ae1c2e` — Fixes #11425: land the true remainder of the fake-fidelity hardening pass (#11488) (#11488) *(2026-08-20)*
@@ -509,24 +537,6 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `3c87f71` — feat(gates): branch-protection drift caretaker loop (Slice 4) *(2026-05-29)*
 - `79a1ada` — docs(adr): ADR-0082 declarative gate contract (extends ADR-0042 enforcement) *(2026-05-29)*
 - `0afd876` — feat(gates): gen-gates CLI + make targets; generate README table; scrub stale prose *(2026-05-29)*
-
-## 2026-W21
-
-- `1d9c95f` — Fixes #8931: stream onboarding activity in dashboard *(2026-05-23)*
-- `9dc0a8d` — Refs #8933: validate third-domain onboarding dashboard flow *(2026-05-23)*
-- `01b5854` — docs: refresh architecture artifacts *(2026-05-23)*
-- `66a1b1f` — Refs #8932: stream onboarding design chat *(2026-05-23)*
-- `8728fc2` — Refs #8932: persist wizard spec edits *(2026-05-23)*
-- `9362727` — Refs #8932: harden design chat extraction *(2026-05-23)*
-- `72eae73` — Refs #8933: add repo metrics dashboard payload *(2026-05-23)*
-- `43b1e0a` — Refs #8933: wire onboarding format upgrade *(2026-05-23)*
-- `bab9837` — Fixes #8933: wire onboarding continue plan *(2026-05-23)*
-- `553bd1d` — Refs #8932: add Claude design provider fallback *(2026-05-23)*
-- `adbcc6a` — Refs #8931: add onboarding push endpoint *(2026-05-23)*
-- `f4915b8` — Refs #8933: add onboarding dashboard repo slice *(2026-05-22)*
-- `6b74497` — Refs #8932: add onboarding design chat slice *(2026-05-22)*
-- `091f166` — Refs #8931: add onboarding wizard UI slice *(2026-05-22)*
-- `e439049` — Refs #8930: add onboarding materialize API slice *(2026-05-22)*
 
 
 <!-- arch:generated -->

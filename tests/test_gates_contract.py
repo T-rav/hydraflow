@@ -8,8 +8,10 @@ CONTRACT = Path("docs/standards/branch_protection/gates.toml")
 
 
 def test_contract_has_no_adr_gate() -> None:
-    # ADR gate's producing workflow was deleted (commit 29f26763); enforcement
-    # moved to the adr_touchpoint_auditor caretaker loop (ADR-0056).
+    # ADR gate's producing workflow was deleted (commit 29f26763). Enforcement
+    # went to the adr_touchpoint_auditor caretaker loop (ADR-0056), and from
+    # there — that loop being retired — into the existing Tests lane as
+    # test_no_unresolved_adr_citations (ADR-0136). Still not a gate of its own.
     contract = load_gates(CONTRACT)
     names = {g.name for g in contract.gates}
     assert "ADR gate" not in names
@@ -44,3 +46,23 @@ def test_branch_envelopes_present() -> None:
     assert contract.branches["staging"].allowed_merge_methods == ["squash", "merge"]
     assert contract.branches["main"].code_quality_severity == "errors"
     assert contract.branches["staging"].code_quality_severity is None
+
+
+def test_unattributed_changes_approval_defaults_true_and_parses_explicit(
+    tmp_path,
+) -> None:
+    toml = tmp_path / "gates.toml"
+    toml.write_text(
+        '[branch.main]\nallowed_merge_methods = ["merge"]\n'
+        '[branch.staging]\nallowed_merge_methods = ["squash"]\n'
+        "require_extra_approval_for_unattributed_changes = false\n"
+    )
+    contract = load_gates(toml)
+    assert (
+        contract.branches["main"].require_extra_approval_for_unattributed_changes
+        is True
+    )
+    assert (
+        contract.branches["staging"].require_extra_approval_for_unattributed_changes
+        is False
+    )

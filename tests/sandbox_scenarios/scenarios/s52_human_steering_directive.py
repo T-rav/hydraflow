@@ -169,8 +169,13 @@ def seed() -> MockWorldSeed:
             # gate) routes the issue straight from hydraflow-find to
             # hydraflow-plan in one triage pass (no discover/shape detour —
             # keeps the Tier-1 single-shot run_pipeline() parity check
-            # satisfied; see module docstring).
-            "triage": {_ISSUE_NUMBER: [{"ready": True}]},
+            # satisfied; see module docstring). complexity_score=5: this
+            # scenario IS the plan phase (the fail-forever plan loop is what
+            # keeps the issue active), so the issue must stay on the staged
+            # path — the fake triage's default score of 0 would route it to
+            # the #11298 auto-agent light lane (ON by default) and PlanPhase
+            # would never hold it.
+            "triage": {_ISSUE_NUMBER: [{"ready": True, "complexity_score": 5}]},
             # Plan fails forever: PlanPhase sets ts_status="failed", skips
             # the label swap (issue stays on hydraflow-plan), and the plan
             # polling loop immediately re-polls (did_work is truthy) with no

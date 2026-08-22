@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import importlib.metadata
 import logging
 import os
 import signal
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,6 +18,7 @@ from config import HydraFlowConfig, build_credentials
 from events import EventType, HydraFlowEvent
 from factory_autostart import maybe_autostart_host
 from log import setup_logging
+from package_resources import ResourceNotFoundError, checkout_path, checkout_root
 from prompt_gate import most_restrictive_data_class
 from runtime_config import (
     DEFAULT_LOG_FILE,
@@ -24,6 +28,8 @@ from runtime_config import (
 from unpushed_branch_alert import check_and_alert_unpushed_branches
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from dashboard import HydraFlowDashboard
     from events import EventBus
     from repo_runtime import RepoRuntimeRegistry
@@ -201,9 +207,13 @@ async def _boot_factory(
     # overrides, #10658) into the runtime registry.
     await _restore_registered_repos(repo_store, registry)
 
-    # Auto-register parent repo when running as a git submodule
-    hydraflow_root = Path(__file__).resolve().parent.parent
-    submodule_parent = _detect_submodule_parent(hydraflow_root)
+    # Auto-register parent repo when running as a git submodule. Only a
+    # source checkout can BE a submodule; an installed wheel has no enclosing
+    # repository, so there is nothing to detect (#11589).
+    hydraflow_root = checkout_root()
+    submodule_parent = (
+        _detect_submodule_parent(hydraflow_root) if hydraflow_root is not None else None
+    )
     if submodule_parent is not None:
         try:
             parent_slug = await _detect_remote_slug(submodule_parent)
@@ -308,9 +318,10 @@ async def _boot_factory(
     await dashboard.start()
 
     # Autostart the host orchestrator once the server is healthy — the
-    # server-up != factory-running gap (#11208). Fires the exact same path
-    # POST /api/control/start does; suppressed by config, an active
-    # operator-stopped latch, or an already-running host (see
+    # server-up != factory-running gap (#11208). Applies the same
+    # operator-Start transition POST /api/control/start does (pipeline workers
+    # re-enabled, #11611) minus the latch clear; suppressed by config, an
+    # active operator-stopped latch, or an already-running host (see
     # factory_autostart.decide_autostart).
     await maybe_autostart_host(
         config=config, host_runtime=host_runtime, state=state, event_bus=bus
@@ -409,7 +420,50 @@ async def _run(config: HydraFlowConfig) -> None:
         await _run_headless(config)
 
 
-def main() -> None:
+def package_version() -> str:
+    """Version of the running HydraFlow: installed metadata, else the checkout.
+
+    A wheel / editable install answers through ``importlib.metadata``. A bare
+    checkout run with ``PYTHONPATH=src`` (``make run``, the agent image's
+    ``--no-install-project`` venv) has no metadata, so fall back to the
+    ``[project] version`` in the checkout's ``pyproject.toml``.
+    """
+    try:
+        return importlib.metadata.version("hydraflow")
+    except importlib.metadata.PackageNotFoundError:
+        pass
+    try:
+        pyproject = checkout_path("pyproject.toml")
+        return str(tomllib.loads(pyproject.read_text("utf-8"))["project"]["version"])
+    except (ResourceNotFoundError, OSError, KeyError, tomllib.TOMLDecodeError):
+        return "unknown"
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """CLI surface of the ``hydraflow`` console script (#11580).
+
+    Configuration is environment-driven (``.env`` / ``HYDRAFLOW_*``), so the
+    only options are ``--help`` and ``--version`` — both answer without
+    touching config, logging or the event loop, which is what lets an
+    installed wheel be smoke-tested in a clean venv.
+    """
+    parser = argparse.ArgumentParser(
+        prog="hydraflow",
+        description=(
+            "Start the HydraFlow server. Configuration is read from the "
+            "environment and .env (HYDRAFLOW_* keys; see README.md)."
+        ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {package_version()}",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    parse_args(argv)
     from dotenv import load_dotenv  # noqa: PLC0415
 
     load_dotenv()

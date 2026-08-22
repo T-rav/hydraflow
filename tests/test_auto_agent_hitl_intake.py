@@ -189,6 +189,9 @@ async def test_flag_off_skips_widened_poll(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HYDRAFLOW_AUTO_AGENT_HITL_INTAKE_ENABLED", "false")
+    # Light lane (#11298) is ON by default since #11590 and adds its own
+    # claim-label poll; switch it off so this isolates the HITL flag.
+    monkeypatch.setenv("HYDRAFLOW_AUTO_AGENT_LIGHT_INTAKE_ENABLED", "false")
     loop, _state, pr, _audit = _make_loop(
         tmp_path,
         label_map={"hydraflow-hitl": [_issue(5, ["hydraflow-hitl"])]},

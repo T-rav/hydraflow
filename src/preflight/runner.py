@@ -7,12 +7,12 @@ This module owns prompt rendering; spawning happens in PreflightAgent (agent.py)
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
+from package_resources import resource_dir
 from untrusted_text import UNTRUSTED_DATA_PREAMBLE, fence_untrusted
 
-_PROMPT_DIR = Path(__file__).parent.parent.parent / "prompts" / "auto_agent"
+_PROMPT_DIR = resource_dir("prompts") / "auto_agent"
 
 
 def render_prompt(
@@ -43,7 +43,7 @@ def render_prompt(
     """
     # Strip the `hydraflow-` label prefix from the file-fallback stem. The
     # config-default escalation labels (fake_coverage_stuck_label =
-    # `hydraflow-fake-coverage-stuck`, adr_drift_stuck_label,
+    # `hydraflow-fake-coverage-stuck`,
     # memory_backlog_stuck_label) are prefixed, but their prompt files
     # (fake-coverage-stuck.md, ...) are unprefixed — so without this strip a
     # prefixed label falls through to _default.md instead of its specialist

@@ -733,3 +733,34 @@ def test_gateway_row_with_incomplete_usage_is_never_repriced() -> None:
     assert snapshot.gateway_requests == 1
     assert snapshot.unpriced_gateway_requests == 1
     assert snapshot.gateway_spend_usd == 0.0
+
+
+def test_bypass_rows_are_priced_by_usage_shape_then_tool() -> None:
+    """Direct CLI-harness rows (tool=claude, or stamped anthropic) are
+    Anthropic-shaped; the model's one-shot flag must not subtract their cache."""
+    exclusive = (1.4 * 5_000_000 + 0.26 * 4_000_000) / 1e6
+    inclusive = (1.4 * 1_000_000 + 0.26 * 4_000_000) / 1e6
+    common = {
+        "model": "glm-5.2",
+        "input_tokens": 5_000_000,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 4_000_000,
+        "cost_usd": None,
+        "cost_unknown": True,
+    }
+
+    def spend(**fields: object) -> float:
+        snapshot = build_coverage(
+            [],
+            [_row(source="implementer", **common, **fields)],
+            since=_SINCE,
+            until=_NOW,
+            window_label="24h",
+        )
+        return snapshot.bypass_spend_usd
+
+    assert spend(tool="zai", usage_shape="anthropic") == pytest.approx(
+        exclusive, abs=1e-6
+    )
+    assert spend(tool="claude") == pytest.approx(exclusive, abs=1e-6)
+    assert spend(tool="zai") == pytest.approx(inclusive, abs=1e-6)

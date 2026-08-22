@@ -2,7 +2,7 @@
 
 # Ubiquitous Language
 
-_84 terms across 3 bounded contexts._
+_83 terms across 3 bounded contexts._
 
 See [ADR-0053](../../adr/0053-ubiquitous-language-as-living-artifact.md) for the governing pattern.
 
@@ -32,7 +32,7 @@ ADRCouncilReviewer is the domain service that runs multi-agent council review se
 **Kind:** `service` · **Context:** `shared-kernel` · **Anchor:** `src/adr_index.py:ADRIndex` · **Confidence:** `accepted`
 **Aliases:** `adr cache`, `adr catalog`, `architecture decision index`
 
-Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on first access and re-scans only when the directory mtime changes. Exposes parsed ADR records — including normalized status, context summary, cited source files, and symbol-level citations — to caretaker loops and agent prompts. Acts as the authoritative in-process view of architecture decisions, enabling loops such as AdrTouchpointAuditorLoop to check which Accepted ADRs cite a given source file without re-reading the filesystem on every tick. The module docstring frames it explicitly as load-bearing: agents must know what has already been decided before they plan.
+Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on first access and re-scans only when the directory mtime changes. Exposes parsed ADR records — including normalized status, context summary, cited source files, and symbol-level citations — to caretaker loops and agent prompts. Acts as the authoritative in-process view of architecture decisions, enabling callers such as `adr_citation_resolve.unresolved_citations` (the ADR-0136 citation gate) and AdrConformanceLoop to check what live ADRs cite without re-reading the filesystem on every access. The module docstring frames it explicitly as load-bearing: agents must know what has already been decided before they plan.
 
 **Invariants:**
 - Re-scans the ADR directory only when its mtime changes; returns the cached ADR list on a stable directory
@@ -60,20 +60,6 @@ Caretaker loop that polls for ADRs in `Proposed` status and runs council reviews
 **Invariants:**
 - The loop delegates entirely to `ADRCouncilReviewer.review_proposed_adrs()`; no review logic lives in the loop itself.
 - Kill-switch is via `enabled_cb("adr_reviewer")` and `config.adr_reviewer_loop_enabled` (ADR-0049).
-
-## AdrTouchpointAuditorLoop
-
-**Kind:** `loop` · **Context:** `caretaker` · **Anchor:** `src/adr_touchpoint_auditor_loop.py:AdrTouchpointAuditorLoop` · **Confidence:** `accepted`
-**Aliases:** `ADR touchpoint auditor loop`, `adr drift auditor loop`, `adr touchpoint gate caretaker`
-
-Trust-fleet loop that replaces the deleted ADR touchpoint pre-merge gate with an async caretaker (ADR-0056). Periodically scans recently-merged PRs and files `hydraflow-find` issues when an Accepted or Proposed ADR's cited `src/` modules changed without the ADR file appearing in the same diff. Issues are aggregated into one rollup per ADR (`ADR-NNNN` dedup key) listing all drifted PRs; subsequent ticks update the body in-place. When the ADR file itself appears in a PR diff the rollup is auto-closed. The cursor (`state.adr_audit_cursor`) is seeded to "now" on first deploy — pre-existing history is not retroactively scanned.
-
-**Invariants:**
-- One rollup issue per ADR, never one issue per drifted PR.
-- First-deploy cursor seed is "now" — historical PRs before deploy are not scanned.
-- ADR self-appearance in a PR diff closes the rollup; partial fixes (some-but-not-all modules updated) do not close it.
-- Maximum 3 repair attempts before HITL escalation.
-- Kill-switch is via `enabled_cb("adr_touchpoint_auditor")` (ADR-0049).
 
 ## AgentPort
 

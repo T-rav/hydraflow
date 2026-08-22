@@ -20,7 +20,9 @@ from textwrap import dedent
 
 from tests.architecture.sandbox_seam_scan import (
     ratchet_diff,
+    scan_runner_constructions,
     scan_spawn_signatures,
+    subprocess_runner_subclasses,
     undeclared_signatures,
 )
 
@@ -155,3 +157,74 @@ def test_second_spawn_call_in_grandfathered_function_reddens(
     assert current[signature] == 2
     new, _resolved = ratchet_diff({signature: current[signature]}, {signature: 1})
     assert new == {signature: 1}
+
+
+# ---------------------------------------------------------------------------
+# BaseSubprocessRunner construction sites (#11602) — the spawn-primitive scan
+# above structurally cannot see these: the only lexical spawn is inside
+# ``runners/base_subprocess_runner.py``, so the CONSTRUCTING module produces no
+# spawn signature at all. Three composition-root runners rode that blind spot.
+# ---------------------------------------------------------------------------
+
+_RUNNER_DEFS = """
+    class FixerRunner(BaseSubprocessRunner[Spawn]):
+        def _telemetry_source(self) -> str:
+            return "fixer"
+
+
+    class SpecialFixerRunner(FixerRunner):
+        def _telemetry_source(self) -> str:
+            return "special_fixer"
+    """
+
+_COMPOSITION_ROOT = """
+    from runners.fixer_runner import FixerRunner
+    from runners.fixer_runner import SpecialFixerRunner as SFR
+
+
+    def build_services(config, bus):
+        return (
+            FixerRunner(config=config, event_bus=bus),
+            FixerRunner(config=config, event_bus=bus),
+            SFR(config=config, event_bus=bus),
+        )
+    """
+
+
+def _write_runner_tree(root: Path) -> None:
+    spec = {
+        "src/runners/base_subprocess_runner.py": (
+            "\n    class BaseSubprocessRunner:\n        pass\n"
+        ),
+        "src/runners/fixer_runner.py": _RUNNER_DEFS,
+        "src/service_registry.py": _COMPOSITION_ROOT,
+    }
+    for rel, body in spec.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(dedent(body).lstrip("\n"))
+
+
+def test_construction_scan_counts_composition_root_sites(tmp_path: Path) -> None:
+    """Two runners built in one function are one signature with count 2."""
+    _write_runner_tree(tmp_path)
+
+    current = scan_runner_constructions(tmp_path)
+
+    assert current["src/service_registry.py::build_services::FixerRunner"] == 2
+
+
+def test_construction_scan_follows_subclass_of_subclass(tmp_path: Path) -> None:
+    """A second-generation subclass spawns through the same base ``run``."""
+    _write_runner_tree(tmp_path)
+
+    assert "SpecialFixerRunner" in subprocess_runner_subclasses(tmp_path)
+
+
+def test_construction_scan_resolves_import_aliases(tmp_path: Path) -> None:
+    """Renaming at the import site must not dodge the ratchet."""
+    _write_runner_tree(tmp_path)
+
+    current = scan_runner_constructions(tmp_path)
+
+    assert "src/service_registry.py::build_services::SpecialFixerRunner" in current

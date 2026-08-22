@@ -188,6 +188,42 @@ class TestBuildLightweightCommand:
         assert cmd[cmd.index("--model") + 1] == "sonnet"
         assert cmd_input is None
 
+    def test_claude_lightweight_requests_json_envelope(self) -> None:
+        """The one-shot claude spawn must ask for the JSON result envelope.
+
+        Without ``--output-format json`` the CLI prints bare text, the seam
+        has no usage to record, and every successful call with a non-trivial
+        prompt is reclassified ``status=failed`` / $0 by the zero-usage guard
+        (#11514 / #11515 / #11516 — 100% of issue_refinement, sampled_audit,
+        sampled_audit_adjudicate rows in the live ledger).
+        """
+        cmd, _ = build_lightweight_command(
+            tool="claude", model="sonnet", prompt="explain this"
+        )
+
+        assert "--output-format" in cmd
+        assert cmd[cmd.index("--output-format") + 1] == "json"
+        # The prompt stays in its positional slot right after ``-p`` so the
+        # MockWorld fake's argv extraction is untouched.
+        assert cmd[cmd.index("-p") + 1] == "explain this"
+
+    def test_claude_lightweight_stdin_path_requests_json_envelope(self) -> None:
+        large_prompt = "x" * 100_001
+        cmd, cmd_input = build_lightweight_command(
+            tool="claude", model="sonnet", prompt=large_prompt
+        )
+
+        assert cmd[cmd.index("--output-format") + 1] == "json"
+        assert cmd[cmd.index("-p") + 1] == "-"
+        assert cmd_input == large_prompt.encode()
+
+    def test_codex_lightweight_has_no_claude_output_format_flag(self) -> None:
+        cmd, _ = build_lightweight_command(
+            tool="codex", model="o4-mini", prompt="summarize this"
+        )
+
+        assert "--output-format" not in cmd
+
     def test_input_none_for_short_prompts(self) -> None:
         """cmd_input should be None for short prompts (passed as CLI arg)."""
         _, codex_input = build_lightweight_command(

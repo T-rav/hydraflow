@@ -1154,6 +1154,7 @@ class TestL23cBranchGC:
         has_open_pr: bool = False,
         issue_state: str = "OPEN",
         branch: str = _BRANCH_GC_BRANCH,
+        commit_message: str = "auto-agent commit",
     ):
         from mockworld.fakes.fake_github import FakeGitHub  # noqa: PLC0415
 
@@ -1164,9 +1165,7 @@ class TestL23cBranchGC:
         )
 
         fake = FakeGitHub()
-        fake.add_gc_branch(
-            branch, [{"date": commit_iso, "message": "auto-agent commit"}]
-        )
+        fake.add_gc_branch(branch, [{"date": commit_iso, "message": commit_message}])
         # updated_at pinned to "now" (not a fixed past date) so the
         # unrelated general stale-issue scan never trips on this issue and
         # contaminates the branch-GC-only assertions below (#11045-class
@@ -1272,6 +1271,47 @@ class TestL23cBranchGC:
     async def test_resolved_issue_skips(self, tmp_path):
         """A branch referencing an already-resolved issue is not a false claim."""
         fake = self._make_fake(issue_state="COMPLETED")
+        loop = self._make_loop(tmp_path, fake)
+
+        result = await loop._do_work()
+
+        assert result["branch_gc_commented"] == 0
+        assert fake._comments == []
+
+    @pytest.mark.parametrize("verb", ["Fixed", "Closed", "Resolved", "Fix", "Close"])
+    async def test_fix_branch_resolves_issue_from_any_closing_verb(
+        self, tmp_path, verb: str
+    ):
+        """#11481: ``fix/*`` is a live GC prefix, and for it the commit message
+        is the ONLY way to resolve the issue — the branch name carries no
+        number. The narrowed ``(?:fixes|closes|resolves)`` regex returned 0 for
+        a ``Fixed #N`` commit, so ``if issue_number <= 0: continue`` skipped the
+        whole truth-comment pass for exactly the false "fix applied" branches
+        this reconciler exists to catch — silently, with no stat to notice.
+        """
+        fake = self._make_fake(
+            branch="fix/late-claim",
+            commit_message=f"{verb} #{_BRANCH_GC_ISSUE}: claim it is done",
+        )
+        loop = self._make_loop(tmp_path, fake)
+
+        result = await loop._do_work()
+
+        assert result["branch_gc_commented"] == 1
+        issue_number, body = fake._comments[0]
+        assert issue_number == _BRANCH_GC_ISSUE
+        assert "fix/late-claim" in body
+
+    async def test_fix_branch_without_closing_reference_is_still_skipped(
+        self, tmp_path
+    ):
+        """Liveness counter-pin: widening the verb set must not turn every
+        ``fix/*`` branch into a truth-comment target. No closing reference (and
+        a mere verb substring like ``prefixes``) still resolves to 0."""
+        fake = self._make_fake(
+            branch="fix/no-reference",
+            commit_message="chore: tidy imports, prefixes #9553 are unrelated",
+        )
         loop = self._make_loop(tmp_path, fake)
 
         result = await loop._do_work()

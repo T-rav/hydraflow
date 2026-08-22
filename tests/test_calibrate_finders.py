@@ -3,7 +3,7 @@
 Covers the ``WorktreeFinderRunner`` materialize→detect→count path with an
 injected worktree factory + fake detector (no real git), the unsupported /
 detection-failure skip contracts (never a fabricated 0), the read-only ledger
-population, and a REAL deterministic-detection integration case for adr_drift
+population, and a REAL deterministic-detection integration case for wiki_rot
 and wiki_rot against tiny fixture trees.
 
 The shell shares no basename with a src module, but is still loaded via
@@ -112,14 +112,14 @@ def test_runner_raises_for_unsupported_finder(tmp_path: Path) -> None:
 
 def test_calibrate_finders_populates_both_ledgers(tmp_path: Path) -> None:
     data_root = tmp_path / "data"
-    detectors = {"wiki_rot": lambda _wt: 2, "adr_drift": lambda _wt: 0}
+    detectors = {"wiki_rot": lambda _wt: 2, "edge_proposer": lambda _wt: 0}
     runner = shell.WorktreeFinderRunner(
         tmp_path, detectors, worktree_factory=_fake_factory(tmp_path)
     )
     with runner:
         calibrated, skipped = shell.calibrate_finders(
             runner=runner,
-            finder_ids=["wiki_rot", "adr_drift", "erosion_metrics"],
+            finder_ids=["wiki_rot", "edge_proposer", "erosion_metrics"],
             baseline_sha="cafe1234",
             samples=3,
             data_root=data_root,
@@ -129,12 +129,12 @@ def test_calibrate_finders_populates_both_ledgers(tmp_path: Path) -> None:
             now=_NOW,
         )
 
-    assert set(calibrated) == {"wiki_rot", "adr_drift"}
+    assert set(calibrated) == {"wiki_rot", "edge_proposer"}
     # The LLM finder is skipped with a reason, NOT recorded as a fabricated 0.
     assert [fid for fid, _reason in skipped] == ["erosion_metrics"]
 
     floors = CalibrationLedger(calibration_ledger_path(data_root)).latest_by_finder()
-    assert set(floors) == {"wiki_rot", "adr_drift"}
+    assert set(floors) == {"wiki_rot", "edge_proposer"}
     assert floors["wiki_rot"].floor_mean == 2.0
     assert floors["wiki_rot"].sample_count == 3
     assert floors["wiki_rot"].floor_sigma == 0.0  # deterministic ⇒ zero spread
@@ -200,43 +200,6 @@ def test_detection_failure_skips_without_faking_zero(tmp_path: Path) -> None:
 
 
 # -- real deterministic detection against tiny fixtures ------------------------
-
-
-def test_real_adr_drift_detection_counts_unresolved_citation(tmp_path: Path) -> None:
-    (tmp_path / "docs" / "adr").mkdir(parents=True)
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "foo.py").write_text(
-        "class Real:\n    pass\n", encoding="utf-8"
-    )
-    (tmp_path / "docs" / "adr" / "0001-test.md").write_text(
-        "# ADR-0001: Test\n\n**Status:** Accepted\n\n## Context\n\n"
-        "This decision anchors on `src/foo.py:Missing`, a symbol that is gone.\n",
-        encoding="utf-8",
-    )
-
-    runner = shell.WorktreeFinderRunner(
-        tmp_path,
-        {"adr_drift": shell._detect_adr_drift},
-        worktree_factory=_fake_factory(tmp_path),
-    )
-    with runner:
-        shell.calibrate_finders(
-            runner=runner,
-            finder_ids=["adr_drift"],
-            baseline_sha="cafe",
-            samples=2,
-            data_root=tmp_path / "data",
-            vetted_by="operator-supplied",
-            vetted_at=_NOW,
-            note="",
-            now=_NOW,
-        )
-
-    floors = CalibrationLedger(
-        calibration_ledger_path(tmp_path / "data")
-    ).latest_by_finder()
-    # Exactly one unresolved citation (`src/foo.py:Missing`).
-    assert floors["adr_drift"].floor_mean == 1.0
 
 
 def test_real_wiki_rot_detection_counts_broken_cite(tmp_path: Path) -> None:

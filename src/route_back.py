@@ -33,6 +33,7 @@ import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from exception_classify import reraise_on_credit_or_bug
 from giveup_window import SelfSolveOutcome
 
 if TYPE_CHECKING:
@@ -61,10 +62,11 @@ class RouteBackOutcome(StrEnum):
     ESCALATED = "escalated"
     # The give-up window (N-in-T) was exhausted and the issue was routed
     # to a machine self-solve (ADR-0105 decompose, or the auto-agent
-    # diagnose path) — NOT to a human. This is the give-up→self-solve
-    # terminal (#10735); ``human-required`` is applied only when the
-    # self-solve path itself exhausts (which returns ESCALATED, logged
-    # as a break).
+    # diagnose path) — NOT to a human. Also covers the terminal finding
+    # the fix already landed (#11480): nothing to route, the issue closes
+    # with its fix. This is the give-up→self-solve terminal (#10735);
+    # ``human-required`` is applied only when the self-solve path itself
+    # exhausts (which returns ESCALATED, logged as a break).
     SELF_SOLVED = "self_solved"
     # An unexpected failure during the route-back itself (label swap
     # raised, cache write raised). Logged at warning, returned for
@@ -374,6 +376,9 @@ class RouteBackCoordinator:
              applied (``SELF_SOLVED``).
           2. If decompose declines, the self-solver falls back to the
              auto-agent diagnose path (``SELF_SOLVED``) — still a machine move.
+             If instead the terminal finds the fix already landed
+             (``ALREADY_SATISFIED``, #11480) there is nothing to route: no
+             relabel at all, the issue closes with its fix (``SELF_SOLVED``).
           3. Only if the self-solve path itself exhausts (``EXHAUSTED``) is
              ``human-required`` applied — a rare event, logged as a break at
              WARNING. Routing a convergence-solvable issue straight to a human
@@ -389,6 +394,18 @@ class RouteBackCoordinator:
                     issue_body=issue_body,
                 )
             except Exception as exc:  # noqa: BLE001
+                # The self-solver spawns subprocess work (the decompose
+                # terminal's `gh` reads and the council/decomposer runs), so
+                # this is a subprocess-runner handler and owes the standing
+                # reraise. ``PlanRetrySelfSolver.solve`` documents that it
+                # re-raises credit-exhaustion / real-bug exceptions rather
+                # than eating them; without the same call here that contract
+                # died one frame up — the billing signal was logged as a
+                # warning and converted into EXHAUSTED → human-required,
+                # burning attempt budget against an exhausted account and
+                # hiding genuine TypeError/KeyError bugs in the give-up path
+                # behind a "self-solve exhausted" line (#11609).
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "route_back: self-solve raised for issue #%d — treating as "
                     "exhausted (human-required): %s",
@@ -403,7 +420,11 @@ class RouteBackCoordinator:
                 issue_id, self._plan_retry_window, outcome
             )
 
-        if outcome in (SelfSolveOutcome.DECOMPOSED, SelfSolveOutcome.DIAGNOSED):
+        if outcome in (
+            SelfSolveOutcome.DECOMPOSED,
+            SelfSolveOutcome.DIAGNOSED,
+            SelfSolveOutcome.ALREADY_SATISFIED,
+        ):
             logger.info(
                 "Issue #%d give-up window exhausted after %d plan-retries — "
                 "self-solved via %s (no human)",

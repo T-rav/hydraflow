@@ -20,7 +20,7 @@ const payload = () => ({
     },
     // Deterministic zero-noise floor, live rate exactly 0 → within floor.
     {
-      finder_id: 'adr_drift', signal_class: 'adr-drift', calibrated: true, live_rate: 0,
+      finder_id: 'entry_evidence', signal_class: 'wiki-evidence', calibrated: true, live_rate: 0,
       status: 'within_floor', floor_mean: 0.0, floor_sigma: 0.0, threshold: 0, sample_count: 4,
       low_confidence: false, last_calibrated: '2026-08-01T00:00:00+00:00', drift_days: 0,
       baseline_stale: false, baseline_sha: 'def5678', baseline_vetted: true,
@@ -38,7 +38,7 @@ const payload = () => ({
 describe('toFinderFaceplates — calibrated/pending split + header counts', () => {
   it('splits calibrated finders from pending (uncalibrated) ones, preserving order', () => {
     const vm = toFinderFaceplates(payload())
-    expect(vm.calibrated.map(r => r.finderId)).toEqual(['edge_proposer', 'adr_drift', 'wiki_rot'])
+    expect(vm.calibrated.map(r => r.finderId)).toEqual(['edge_proposer', 'entry_evidence', 'wiki_rot'])
     expect(vm.pending.map(r => r.finderId)).toEqual(['erosion_metrics'])
   })
 
@@ -62,7 +62,7 @@ describe('toFinderFaceplates — per-row normalization', () => {
 
   it('preserves a genuine live_rate of 0 as 0, and a null live_rate as null (never 0-for-null)', () => {
     const vm = toFinderFaceplates(payload())
-    expect(vm.calibrated.find(r => r.finderId === 'adr_drift').liveRate).toBe(0)
+    expect(vm.calibrated.find(r => r.finderId === 'entry_evidence').liveRate).toBe(0)
     expect(vm.pending.find(r => r.finderId === 'erosion_metrics').liveRate).toBeNull()
   })
 

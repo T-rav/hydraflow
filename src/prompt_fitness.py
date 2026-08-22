@@ -36,9 +36,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 
-_REPO = Path(__file__).resolve().parent.parent
-_SRC = _REPO / "src"
-_AUDIT = _REPO / "scripts" / "audit_prompts.py"
+from package_resources import checkout_path
+
+# Both inputs are development artefacts the wheel deliberately does not ship:
+# this module reads HydraFlow's own source tree to discover prompt builders,
+# and executes scripts/audit_prompts.py for the registry. They resolve through
+# the checkout — and are resolved lazily, so importing this module from an
+# installed wheel is fine and only *using* it raises a named error instead of
+# walking site-packages as if it were src/ (#11589).
+
+
+def _src_root() -> Path:
+    """HydraFlow's own ``src/`` tree — the corpus this module walks."""
+    return checkout_path("src")
+
+
+def _audit_script() -> Path:
+    """``scripts/audit_prompts.py`` — holder of ``PROMPT_REGISTRY``."""
+    return checkout_path("scripts", "audit_prompts.py")
+
 
 # A prompt builder assembles model-bound text. Convention: build/compose/render
 # + "prompt", or the bare ``_build_prompt`` / ``_build_prompt_with_stats`` used
@@ -127,13 +143,13 @@ def _module_name(path: Path) -> str:
     The dotted name is also the importable name, so a registry entry can be
     constructed from it directly.
     """
-    return ".".join(path.relative_to(_SRC).with_suffix("").parts)
+    return ".".join(path.relative_to(_src_root()).with_suffix("").parts)
 
 
 def discovered_builders() -> dict[str, list[str]]:
     """Dotted module name -> prompt-builder function names, found by AST walk."""
     out: dict[str, list[str]] = {}
-    for path in sorted(_SRC.rglob("*.py")):
+    for path in sorted(_src_root().rglob("*.py")):
         module = _module_name(path)
         if module in EXCLUDED_MODULES or path.stem in EXCLUDED_MODULES:
             continue
@@ -275,7 +291,6 @@ class PromptFitness:
 PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "acceptance_criteria_build": frozenset({3, 4, 5}),
     "acceptance_criteria_precheck": frozenset({2, 3, 5, 8}),
-    "adr_drift_triage": frozenset({1, 3, 7, 8}),
     "adr_reviewer": frozenset({3, 7}),
     "adversarial_agent_compose": frozenset({1, 3, 4}),
     "agent_build_prompt_first_attempt": frozenset({1}),
@@ -344,9 +359,14 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "spec_match_self_review": frozenset({1, 3, 5, 7, 8}),
     "term_proposer": frozenset({1, 3}),
     "test_adequacy": frozenset({2, 3, 5}),
+    # Repair-in-run prompt (#11593): pinned at its introduction score, in line
+    # with its finder/verifier siblings.
+    "test_adequacy_repair": frozenset({1, 3, 5, 7, 8}),
     "test_adequacy_verifier": frozenset({1, 3, 5, 7}),
     "triage_build_prompt": frozenset({1, 3}),
-    "triage_decomposition": frozenset({1, 3, 4, 8}),
+    # triage_decomposition removed: its builder went away with the #11298
+    # intake auto-decomposition path (flag-rot cleanup), so there is no
+    # prompt left to pin.
     "triage_honeypot": frozenset({1, 4, 8}),
     "ultra_review": frozenset({3, 4, 8}),
     "verification_judge_code_validation": frozenset({3, 4, 7}),
@@ -600,9 +620,10 @@ def load_audit_module() -> ModuleType:
     calls never return the same object, so callers must not rely on
     identity across calls.
     """
-    spec = importlib.util.spec_from_file_location("_audit_prompts", _AUDIT)
+    audit = _audit_script()
+    spec = importlib.util.spec_from_file_location("_audit_prompts", audit)
     if spec is None or spec.loader is None:  # pragma: no cover - defensive
-        raise ImportError(f"cannot load {_AUDIT}")
+        raise ImportError(f"cannot load {audit}")
     module = importlib.util.module_from_spec(spec)
     sys.modules.setdefault("_audit_prompts", module)
     spec.loader.exec_module(module)

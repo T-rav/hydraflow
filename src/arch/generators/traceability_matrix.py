@@ -28,6 +28,7 @@ import subprocess
 from pathlib import Path
 
 from arch._models import TraceCommitInfo
+from false_close import CLOSE_KEYWORD_RE
 from git_timeouts import GIT_READONLY_TIMEOUT_S
 from traceability import normalize_req_id
 
@@ -62,9 +63,6 @@ _REQ_ID_TRAILER_RE = re.compile(
     r"^\s*\*?\s*Req-ID:[ \t]*(?P<req_id>[A-Za-z0-9][A-Za-z0-9._/-]{0,63})",
     re.MULTILINE,
 )
-_ISSUE_REF_RE = re.compile(
-    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(?P<issue>\d+)", re.IGNORECASE
-)
 _APPROVAL_RE = re.compile(
     r"^\s*\*?\s*(?:Reviewed|Approved)-by:[ \t]*(?P<who>.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
@@ -97,8 +95,8 @@ def parse_trace_commits(
             if req_id is not None and req_id not in req_ids:
                 req_ids.append(req_id)
         issue_refs: list[int] = []
-        for m in _ISSUE_REF_RE.finditer(body):
-            issue = int(m.group("issue"))
+        for m in CLOSE_KEYWORD_RE.finditer(body):
+            issue = int(m.group(1))
             if issue not in issue_refs:
                 issue_refs.append(issue)
         approvals = [m.group("who") for m in _APPROVAL_RE.finditer(body)]

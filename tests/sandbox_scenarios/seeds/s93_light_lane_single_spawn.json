@@ -1,0 +1,76 @@
+{
+  "repos": [
+    [
+      "owner/repo",
+      "/workspace/repo"
+    ]
+  ],
+  "issues": [
+    {
+      "number": 1,
+      "title": "Fix typo in operator panel label",
+      "body": "One-line copy fix in the operator panel header.",
+      "labels": [
+        "hydraflow-find"
+      ]
+    }
+  ],
+  "comments": {},
+  "prs": [],
+  "scripts": {
+    "triage": {
+      "1": [
+        {
+          "ready": true,
+          "complexity_score": 2
+        }
+      ]
+    },
+    "auto_agent": {
+      "1": [
+        {
+          "status": "resolved",
+          "diagnosis": "Copy fixed; tests green."
+        }
+      ]
+    },
+    "review": {
+      "1": [
+        {
+          "verdict": "approve",
+          "comments": []
+        }
+      ]
+    }
+  },
+  "advisor_scripts": {},
+  "phase_scripts": {},
+  "auto_agent_attempts": {},
+  "sandbox_loop_interval": 15,
+  "cycles_to_run": 2,
+  "loops_enabled": [
+    "auto_agent_preflight"
+  ],
+  "staging_enabled": false,
+  "main_branch_ci_status": [
+    "success",
+    ""
+  ],
+  "plan_hold_seconds": 0.0,
+  "skill_prompt_corpus_cases": [],
+  "skill_prompt_refine_patch": "",
+  "rulesets": {},
+  "stale_workspaces": [],
+  "gate_activations": [],
+  "expired_run_dirs": [],
+  "epic_states": [],
+  "health_metrics": {},
+  "prompt_telemetry_source_initialized": false,
+  "worker_heartbeats": {},
+  "issue_refinement_backlog": [],
+  "issue_refinement_verdicts": [],
+  "registered_workers": {},
+  "worker_status_history": {},
+  "repo_wiki_fixtures": [],
+  "credit_exhaustion": null
+}

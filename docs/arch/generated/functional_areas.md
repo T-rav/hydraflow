@@ -43,8 +43,6 @@ flowchart LR
     end
     subgraph governance["Governance & Audit"]
         governance_AdrConformanceLoop([AdrConformanceLoop])
-        governance_AdrDriftResolverLoop([AdrDriftResolverLoop])
-        governance_AdrTouchpointAuditorLoop([AdrTouchpointAuditorLoop])
         governance_BranchProtectionAuditorLoop([BranchProtectionAuditorLoop])
         governance_ContractRefreshLoop([ContractRefreshLoop])
         governance_DiagramLoop([DiagramLoop])
@@ -173,8 +171,6 @@ Audit, compliance, and drift workers that hold the factory to its own declared r
 **Loops**
 
 - `AdrConformanceLoop` — `src.adr_conformance_loop`
-- `AdrDriftResolverLoop` — `src.adr_drift_resolver_loop`
-- `AdrTouchpointAuditorLoop` — `src.adr_touchpoint_auditor_loop`
 - `BranchProtectionAuditorLoop` — `src.branch_protection_auditor_loop`
 - `ContractRefreshLoop` — `src.contract_refresh_loop`
 - `DiagramLoop` — `src.diagram_loop`

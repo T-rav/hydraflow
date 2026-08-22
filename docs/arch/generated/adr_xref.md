@@ -62,7 +62,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0053 | `src.repo_wiki`, `src.repo_wiki_loop` | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
 | ADR-0054 | `src.term_proposer_loop`, `src.ubiquitous_language` | `pytest:tests/test_term_proposer_loop.py`, `pytest:tests/architecture/test_term_proposer_wiring.py` |
 | ADR-0055 | `src.base_background_loop`, `src.base_runner`, `src.config`, `src.events`, `src.exception_classify`, `src.mockworld.fakes.fake_honeycomb`, `src.pr_manager`, `src.server`, `src.telemetry.__init__`, `src.telemetry.otel`, `src.telemetry.slugs`, `src.telemetry.spans`, `src.telemetry.subprocess_bridge`, `src.trace_collector`, `src.workspace` | — |
-| ADR-0056 | `src.adr_drift`, `src.adr_touchpoint_auditor_loop`, `src.state._adr_audit` | `pytest:tests/test_adr_touchpoint_auditor_loop.py` |
+| ADR-0056 | `src.adr_drift`, `src.state._adr_audit` | `(superseded — the loop and its tests were deleted by #11600; ADR-0136 carries the live enforcement)` |
 | ADR-0057 | `src.term_pruner_loop`, `src.ubiquitous_language` | `pytest:tests/test_term_pruner_loop.py`, `pytest:tests/architecture/test_term_pruner_wiring.py` |
 | ADR-0058 | `src.edge_proposer_loop`, `src.ubiquitous_language` | `pytest:tests/test_edge_proposer_loop.py`, `pytest:tests/architecture/test_edge_proposer_wiring.py` |
 | ADR-0059 | `src.mockworld.fakes.fake_llm`, `src.review_advisor`, `src.review_phase._phase`, `src.reviewer` | `'tests/test_review_advisor.py' (~100+ unit tests covering all 5 surfaces); 'tests/scenarios/test_pr_review_advisor_*.py' (11 Tier-1 MockWorld scenarios); 'tests/test_review_phase_core.py::TestSelfModificationGuard' (T29 self-modification guard); 'make quality' CI gate.` |
@@ -75,7 +75,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0066 | `src.agent`, `src.base_runner`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0067 | `src.issue_fetcher`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0068 | `src.ports`, `src.term_proposer_loop`, `src.term_pruner_loop` | `(none) — structural subtype check planned in follow-up` |
-| ADR-0069 | `src.ports`, `src.workspace_gc_landed_safety`, `src.workspace_gc_loop` | `tests/test_workspace_gc_loop.py` |
+| ADR-0069 | `src.ports`, `src.workspace_gc_landed_safety`, `src.workspace_gc_loop` | `tests/test_workspace_gc_loop.py, tests/regressions/test_workspace_gc_landed_safety.py, tests/regressions/test_issue_11503.py, tests/regressions/test_issue_11507.py, tests/regressions/test_issue_11570.py, tests/regressions/test_issue_11571.py, tests/architecture/test_workspace_gc_landed_guard.py, tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
 | ADR-0070 | `src.ports`, `src.review_insights` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0071 | `src.route_back`, `src.state.__init__` | `pytest:tests/test_route_back.py` |
 | ADR-0072 | `src.stale_issue_gc_loop`, `src.stale_issue_loop` | `tests/test_stale_issue_loop.py` |
@@ -112,7 +112,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0103 | `src.agent`, `src.config`, `src.discover_completeness`, `src.discover_runner`, `src.hitl_runner`, `src.human_steering`, `src.human_steering_loop`, `src.models`, `src.orchestrator`, `src.planner`, `src.review_advisor`, `src.reviewer`, `src.service_registry`, `src.shape_coherence`, `src.shape_runner` | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | — | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0105 | — | `'tests/test_issue_decomposer.py'; 'tests/test_decomposition_council.py'; 'tests/test_auto_agent_decompose_terminal.py'; 'tests/test_decomposition_depth_cap.py'; 'tests/scenarios/test_decompose_to_converge_scenario.py'; 'tests/sandbox_scenarios/scenarios/s54_decompose_to_converge.py'. Nested-lineage follow-up (#9757): 'tests/regressions/test_epic_lineage_nested_convergence.py'; 'tests/regressions/test_epic_sweeper_lineage_gate.py'; 'tests/regressions/test_epic_manager_lineage_propagation.py'; 'tests/sandbox_scenarios/scenarios/s55_nested_decompose.py'.` |
-| ADR-0106 | `src.base_background_loop`, `src.config`, `src.event_loop_watchdog`, `src.health_monitor_loop`, `src.orchestrator`, `src.settings_registry` | `pytest:tests/regressions/test_issue_9552.py` |
+| ADR-0106 | `src.base_background_loop`, `src.config`, `src.event_loop_watchdog`, `src.health_monitor_loop`, `src.orchestrator`, `src.settings_registry` | `pytest:tests/regressions/test_issue_9552.py`, `pytest:tests/regressions/test_issue_11604.py` |
 | ADR-0107 | `src.discover_runner`, `src.models`, `src.plan_phase`, `src.shape_runner`, `src.triage_phase` | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0108 | `src.event_loop_watchdog`, `src.health_monitor_loop`, `src.issue_fetcher`, `src.issue_store`, `src.mockworld.fakes.fake_clock`, `src.mockworld.sandbox_main`, `src.models`, `src.phase_utils`, `src.retrospective_queue`, `src.subprocess_util` | — |
 | ADR-0109 | `src.agent_cli`, `src.exception_classify`, `src.ports`, `src.review_advisor`, `src.review_phase._phase`, `src.reviewer`, `src.ultra_review` | `pytest:tests/test_ultra_review.py` |
@@ -141,6 +141,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0132 | — | — |
 | ADR-0133 | `src.audit.governance`, `src.finder_calibration`, `src.judge_independence`, `src.vitals.control`, `src.vitals_methodology` | `'pytest:tests/test_vitals_methodology.py'` |
 | ADR-0134 | — | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
+| ADR-0135 | `src.dashboard_routes._control_routes`, `src.factory_autostart`, `src.models` | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
+| ADR-0136 | `src.adr_citation_resolve`, `src.adr_drift`, `src.adr_index`, `src.arch.generators.adr_cross_reference`, `src.finder_faceplate`, `src.prep`, `src.state._adr_audit` | `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations`, `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` |
 
 ## Module → ADRs
 
@@ -148,20 +150,21 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 |---|---|
 | `src._mock_spec_detector` | ADR-0101 |
 | `src.adr_assertion_density` | ADR-0129 |
+| `src.adr_citation_resolve` | ADR-0136 |
 | `src.adr_conformance` | ADR-0100 |
 | `src.adr_conformance_loop` | ADR-0100 |
-| `src.adr_drift` | ADR-0056 |
-| `src.adr_index` | ADR-0100 |
+| `src.adr_drift` | ADR-0056, ADR-0136 |
+| `src.adr_index` | ADR-0100, ADR-0136 |
 | `src.adr_pre_validator` | ADR-0037 |
 | `src.adr_reviewer` | ADR-0033, ADR-0034, ADR-0037, ADR-0039, ADR-0040, ADR-0079 |
 | `src.adr_reviewer_loop` | ADR-0079 |
-| `src.adr_touchpoint_auditor_loop` | ADR-0056 |
 | `src.adversarial_labels` | ADR-0064 |
 | `src.adversarial_retry_loop` | ADR-0064 |
 | `src.agent` | ADR-0024, ADR-0027, ADR-0066, ADR-0092, ADR-0103 |
 | `src.agent_cli` | ADR-0004, ADR-0109 |
 | `src.arch._models` | ADR-0114 |
 | `src.arch.extractors.events` | ADR-0114 |
+| `src.arch.generators.adr_cross_reference` | ADR-0136 |
 | `src.arch.generators.event_bus` | ADR-0114 |
 | `src.assumption_surfacer` | ADR-0064, ADR-0131 |
 | `src.audit.adjudicate` | ADR-0115 |
@@ -189,6 +192,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.credit_failover` | ADR-0119 |
 | `src.dashboard` | ADR-0007, ADR-0008, ADR-0038 |
 | `src.dashboard_routes._atlas_routes` | ADR-0060, ADR-0090 |
+| `src.dashboard_routes._control_routes` | ADR-0135 |
 | `src.dashboard_routes._cost_rollups` | ADR-0045 |
 | `src.dashboard_routes._diagnostics_routes` | ADR-0050 |
 | `src.dashboard_routes._epic_routes` | ADR-0019 |
@@ -221,9 +225,11 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.event_loop_watchdog` | ADR-0106, ADR-0108 |
 | `src.events` | ADR-0006, ADR-0055, ADR-0064, ADR-0114 |
 | `src.exception_classify` | ADR-0055, ADR-0109 |
+| `src.factory_autostart` | ADR-0135 |
 | `src.fake_coverage_auditor_loop` | ADR-0045 |
 | `src.file_util` | ADR-0021 |
 | `src.finder_calibration` | ADR-0126, ADR-0133 |
+| `src.finder_faceplate` | ADR-0136 |
 | `src.fitness_scorecard_loop` | ADR-0093 |
 | `src.flake_tracker_loop` | ADR-0045 |
 | `src.flows.adapters` | ADR-0111 |
@@ -259,7 +265,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mockworld.fakes.fake_honeycomb` | ADR-0055 |
 | `src.mockworld.fakes.fake_llm` | ADR-0059 |
 | `src.mockworld.sandbox_main` | ADR-0052, ADR-0108 |
-| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098, ADR-0099, ADR-0103, ADR-0107, ADR-0108 |
+| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098, ADR-0099, ADR-0103, ADR-0107, ADR-0108, ADR-0135 |
 | `src.mutation_gauntlet` | ADR-0125 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0014, ADR-0044, ADR-0045, ADR-0103, ADR-0106 |
 | `src.pending_concerns` | ADR-0064 |
@@ -282,6 +288,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.preflight.context` | ADR-0050, ADR-0084 |
 | `src.preflight.decision` | ADR-0050, ADR-0084 |
 | `src.preflight.runner` | ADR-0050, ADR-0084, ADR-0092 |
+| `src.prep` | ADR-0136 |
 | `src.pricing_refresh_diff` | ADR-0078 |
 | `src.pricing_refresh_loop` | ADR-0078 |
 | `src.principles_audit_loop` | ADR-0045 |
@@ -328,7 +335,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.stale_issue_gc_loop` | ADR-0072 |
 | `src.stale_issue_loop` | ADR-0072 |
 | `src.state.__init__` | ADR-0006, ADR-0017, ADR-0024, ADR-0071 |
-| `src.state._adr_audit` | ADR-0056 |
+| `src.state._adr_audit` | ADR-0056, ADR-0136 |
 | `src.state._auto_agent` | ADR-0050, ADR-0097 |
 | `src.state._convergence` | ADR-0094, ADR-0097, ADR-0098 |
 | `src.state._driver` | ADR-0099 |
@@ -421,5 +428,6 @@ Non-blocking authoring aid (#10458): each ADR below bare-cites a high-churn shar
 | ADR-0106 | `src/config.py` | `src/config.py:<Symbol>` |
 | ADR-0108 | `src/models.py` | `src/models.py:<Symbol>` |
 | ADR-0109 | `src/review_phase/_phase.py` | `src/review_phase/_phase.py:<Symbol>` |
+| ADR-0135 | `src/models.py` | `src/models.py:<Symbol>` |
 
 <!-- arch:generated -->

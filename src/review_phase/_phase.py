@@ -141,6 +141,7 @@ from ultra_review import (
     should_ultra_review,
     summarize_ultra_findings,
 )
+from wiki_corroboration_rank import rank_corroboration_candidates
 from wiki_maint_queue import enqueue_wiki_ingest
 
 from ._common import (
@@ -855,7 +856,9 @@ class ReviewPhase(VisualGateMixin):
         """Run ``dedup_or_corroborate`` per entry against existing active
         entries in the same topic. Returns one decision per entry in the
         same order. Bounded per-entry by a candidate cap so a large
-        topic doesn't fire one LLM call per existing entry.
+        topic doesn't fire one LLM call per existing entry — the cap picks
+        the entries most similar to the one being ingested, never whichever
+        entries happen to sort first by filename (#11606).
         """
         from wiki_compiler import CorroborationDecision  # noqa: PLC0415
 
@@ -868,9 +871,11 @@ class ReviewPhase(VisualGateMixin):
             topic_dir = tracked_store._tracked_topic_dir(repo, topic)
             existing_pairs: list[tuple[WikiEntry, Path]] = []
             if topic_dir is not None:
-                existing_pairs = (
-                    tracked_store._load_tracked_topic_entries_with_paths(topic_dir)
-                )[:max_candidates]
+                existing_pairs = rank_corroboration_candidates(
+                    entry,
+                    tracked_store._load_tracked_topic_entries_with_paths(topic_dir),
+                    limit=max_candidates,
+                )
             try:
                 decision = await self._wiki_compiler.dedup_or_corroborate(
                     repo_slug=repo,
@@ -1021,11 +1026,11 @@ class ReviewPhase(VisualGateMixin):
         # (Task 10 of earlier-adversarial-pipeline). These labels are
         # intra-stage issue markers, not review work — if one ever leaks
         # onto a PR, the agent reviewer should not process it.
-        from edge_proposer_loop import EDGE_PROPOSER_PR_LABEL  # noqa: PLC0415
-        from entry_evidence_loop import ENTRY_EVIDENCE_PR_LABEL  # noqa: PLC0415
-        from src.adversarial_labels import (  # noqa: PLC0415
+        from adversarial_labels import (  # noqa: PLC0415
             LABELS_ADVERSARIAL_TRANSIENT,
         )
+        from edge_proposer_loop import EDGE_PROPOSER_PR_LABEL  # noqa: PLC0415
+        from entry_evidence_loop import ENTRY_EVIDENCE_PR_LABEL  # noqa: PLC0415
         from term_proposer_loop import TERM_PROPOSER_PR_LABEL  # noqa: PLC0415
         from term_pruner_loop import TERM_PRUNER_PR_LABEL  # noqa: PLC0415
 

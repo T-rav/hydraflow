@@ -79,6 +79,30 @@ _LABEL_TO_STAGE: dict[str, str] = {
 
 _CLAIMABLE_STAGES = frozenset({STAGE_FIND, STAGE_PLAN, STAGE_READY, STAGE_REVIEW})
 
+# Dashboard-facing display names → stage, mirroring the inverse of
+# ``issue_store.STAGE_NAME_MAP`` (parity pinned by
+# tests/test_fake_issue_store.py). ``mark_active`` normalizes through it so a
+# phase reporting "implement" lands on the READY counters exactly as the real
+# store does (#11551).
+_DISPLAY_NAME_TO_STAGE: dict[str, str] = {
+    "triage": STAGE_FIND,
+    "plan": STAGE_PLAN,
+    "implement": STAGE_READY,
+    "review": STAGE_REVIEW,
+    "hitl": STAGE_HITL,
+    "merged": STAGE_MERGED,
+}
+_ALL_STAGES = frozenset(
+    {STAGE_FIND, STAGE_PLAN, STAGE_READY, STAGE_REVIEW, STAGE_HITL, STAGE_MERGED}
+)
+
+
+def _resolve_stage(name: str) -> str | None:
+    """Mirror of ``issue_store.resolve_issue_store_stage`` for the Fake."""
+    if name in _ALL_STAGES:
+        return name
+    return _DISPLAY_NAME_TO_STAGE.get(name)
+
 
 @dataclass
 class FakeIssueRecord:
@@ -283,8 +307,11 @@ class FakeIssueStore:
     # ------------------------------------------------------------------
 
     def mark_active(self, issue_number: int, stage: str) -> None:
+        # Mirrors IssueStore.mark_active (#11551): a dashboard-facing name such
+        # as "implement" is normalized to its stage so the counters key on one
+        # vocabulary.
         self._in_flight.pop(issue_number, None)
-        self._active[issue_number] = stage
+        self._active[issue_number] = _resolve_stage(stage) or stage
 
     def try_claim_stage(self, task: Task, expected_stage: str) -> bool:
         """Reserve a task only when FakeGitHub still exposes that stage."""

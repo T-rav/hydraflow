@@ -184,7 +184,7 @@ _REGISTRY: dict[str, PreflightPlaybook] = {
 # Escalation sub-labels are a MIX: most producer loops file *unprefixed*
 # sub-labels (e.g. ``principles-stuck``, ``discover-stuck`` — strip is a no-op),
 # but the config-default escalation labels (``fake_coverage_stuck_label`` =
-# ``hydraflow-fake-coverage-stuck``, ``adr_drift_stuck_label``,
+# ``hydraflow-fake-coverage-stuck``,
 # ``memory_backlog_stuck_label``) carry the prefix.
 _LABEL_PREFIX = "hydraflow-"
 

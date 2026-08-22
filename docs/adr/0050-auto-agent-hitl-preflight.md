@@ -126,7 +126,7 @@ The following files carry this ADR's decisions and must be kept in sync with any
 - `src/preflight/auto_agent_runner.py:AutoAgentRunner` — `AutoAgentRunner` real Claude Code subprocess spawn (production `_build_spawn_fn`) + per-attempt telemetry to `inferences.jsonl` + cost estimate via `model_pricing`.
 - `src/sentry/reverse_lookup.py:query_sentry_by_title` — `query_sentry_by_title()` (never-raises).
 - `src/auto_agent_preflight_loop.py:AutoAgentPreflightLoop` — `AutoAgentPreflightLoop._do_work` pipeline + reconcile-on-close.
-- `prompts/auto_agent/` — shared envelope (`_envelope.md`) + `_default.md` + 9 sub-label prompt files.
+- `src/hydraflow_resources/prompts/auto_agent/` — shared envelope (`_envelope.md`) + `_default.md` + 9 sub-label prompt files.
 - `src/dashboard_routes/_diagnostics_routes.py:build_diagnostics_router` — `/api/diagnostics/auto-agent` endpoint.
 - `src/ui/src/components/diagnostics/AutoAgentStats.jsx` — System tab tile.
 - `tests/test_auto_agent_preflight_loop.py` + `tests/test_auto_agent_close_reconciliation.py` + `tests/test_auto_agent_loop_wiring.py` + `tests/test_preflight_auto_agent_runner.py` — unit + wiring + runner tests.

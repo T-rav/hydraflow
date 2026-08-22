@@ -1,18 +1,26 @@
 name: RC Promotion Scenario
 
-# ADR-0042: scenario suite runs on every rc/* → main promotion PR, both
-# on push (PR open / PR update) and on a fixed cron cycle so a stalled
-# promotion PR keeps its CI signal fresh. StagingPromotionLoop only
-# auto-merges when ``wait_for_ci`` reports green — this is the check it
-# waits on.
+# ADR-0042: the MockWorld + browser + trust scenario suites run on every
+# rc/* → main promotion PR. StagingPromotionLoop only auto-merges when
+# ``wait_for_ci`` reports green — these are the checks it waits on, bound to
+# the PR head SHA by the pull_request event.
+#
+# pull_request ONLY — no schedule, no workflow_dispatch (#11565). The cron that
+# used to live here resolved "the open rc/* PR" through `gh api` and checked
+# out `refs/pull/N/merge` from a job output while running with default-branch
+# privilege: the exact actions/cache-poisoning/poisonable-step shape CodeQL
+# flagged as alert #108 on staging-rc-dryrun.yml — and in a public repo the
+# lookup would have matched a fork PR whose head branch was merely *named*
+# rc/*. It also never did what its comment claimed ("keeps a stalled PR's CI
+# signal fresh"): a scheduled run binds its check runs to the default branch's
+# SHA, not the PR head, so wait_for_ci never saw it. The loop's own re-trigger
+# is the synthetic-commit push (#8705) that fires pull_request:synchronize; a
+# human re-runs the PR's run from the Actions tab.
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
-  schedule:
-    - cron: "*/30 * * * *"
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,7 +28,7 @@ permissions:
   checks: write
 
 concurrency:
-  group: rc-scenario-${{ github.event.pull_request.number || 'scheduled' }}
+  group: rc-scenario-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -28,46 +36,35 @@ jobs:
     name: Resolve RC PR
     runs-on: ubuntu-latest
     outputs:
-      pr_number: ${{ steps.resolve.outputs.pr_number }}
-      pr_ref: ${{ steps.resolve.outputs.pr_ref }}
       should_run: ${{ steps.resolve.outputs.should_run }}
     steps:
       - name: Resolve target PR
         id: resolve
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER_EVENT: ${{ github.event.pull_request.number }}
+          # Event fields through the environment: a fork's branch name is
+          # attacker-chosen text and must never be interpolated into `run:`.
           PR_HEAD_REF_EVENT: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_REPO_EVENT: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            case "$PR_HEAD_REF_EVENT" in
-              rc/*)
-                echo "pr_number=$PR_NUMBER_EVENT" >> "$GITHUB_OUTPUT"
-                echo "pr_ref=refs/pull/$PR_NUMBER_EVENT/merge" >> "$GITHUB_OUTPUT"
-                echo "should_run=true" >> "$GITHUB_OUTPUT"
-                ;;
-              *)
-                echo "Non-RC PR (head=$PR_HEAD_REF_EVENT); skipping."
-                echo "should_run=false" >> "$GITHUB_OUTPUT"
-                ;;
-            esac
-            exit 0
-          fi
-
-          # schedule / workflow_dispatch — look up the open rc/* PR
-          json=$(gh api \
-            "repos/${{ github.repository }}/pulls?state=open&base=main&per_page=100" \
-            --jq '[.[] | select(.head.ref | startswith("rc/"))] | .[0] // empty')
-          if [ -z "$json" ]; then
-            echo "No open rc/* promotion PR — skipping scheduled scenario run."
+          # An RC promotion PR is an rc/* branch cut by StagingPromotionLoop IN
+          # THIS REPO. A fork PR named rc/* is not one: the suite is skipped
+          # and the required checks stay "expected", so nothing can merge it.
+          if [ "$PR_HEAD_REPO_EVENT" != "$THIS_REPO" ]; then
+            echo "Fork PR (head repo=$PR_HEAD_REPO_EVENT); skipping."
             echo "should_run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          num=$(echo "$json" | jq -r '.number')
-          echo "pr_number=$num" >> "$GITHUB_OUTPUT"
-          echo "pr_ref=refs/pull/$num/merge" >> "$GITHUB_OUTPUT"
-          echo "should_run=true" >> "$GITHUB_OUTPUT"
+          case "$PR_HEAD_REF_EVENT" in
+            rc/*)
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Non-RC PR (head=$PR_HEAD_REF_EVENT); skipping."
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
 
   scenario:
     name: Scenario Tests
@@ -76,9 +73,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # TRUST: no `ref:` on purpose. In a pull_request job the default checkout
+      # is the event's own merge ref (refs/pull/N/merge — github.ref), not a
+      # job output, and the uv cache it writes is scoped to this PR. `gate`
+      # admits only same-repo rc/* heads. A push to the PR fires `synchronize`,
+      # which cancels this run (concurrency) and starts one on the new merge
+      # ref, so there is no stale-SHA race to pin against. Forbidden shape and
+      # guard: tests/architecture/test_workflow_checkout_refs.py.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.gate.outputs.pr_ref }}
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v4
         with:
@@ -109,9 +112,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      # TRUST: no `ref:` — the event's own merge ref; see `scenario` above.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.gate.outputs.pr_ref }}
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v4
         with:
@@ -155,9 +158,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # TRUST: no `ref:` — the event's own merge ref; see `scenario` above.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.gate.outputs.pr_ref }}
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v4
         with:

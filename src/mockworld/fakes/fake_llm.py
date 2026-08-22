@@ -20,7 +20,7 @@ from mockworld.fakes._factories import (
     TriageResultFactory,
     WorkerResultFactory,
 )
-from models import EpicDecompResult, ReviewVerdict
+from models import ReviewVerdict
 from subprocess_util import CreditExhaustedError
 
 if TYPE_CHECKING:
@@ -34,6 +34,24 @@ class _BudgetState:
     max: int
     per_call: int
     used: int = 0
+
+
+# #11298 light lane: the normalized shape of one scripted auto-agent spawn
+# outcome (see ``FakeLLM.script_auto_agent``). ``output_text`` overrides the
+# rendered ``<status>``/``<pr_url>``/... tags wholesale; every other key feeds
+# the render. Keys are the closed set — a seed typo raises at script time
+# rather than silently defaulting the outcome to ``resolved``.
+_AUTO_AGENT_SCRIPT_DEFAULTS: dict[str, Any] = {
+    "status": "resolved",
+    "pr_url": None,
+    "diagnosis": "",
+    "confidence": "high",
+    "blocked_reason": "none",
+    "cost_usd": 0.0,
+    "tokens": 0,
+    "crashed": False,
+    "output_text": None,
+}
 
 
 class _ScriptedRunner:
@@ -91,25 +109,11 @@ class _ScriptedRunner:
 
 
 class _FakeTriageRunner(_ScriptedRunner):
-    def __init__(self) -> None:
-        super().__init__()
-        self._decomposition_scripts: dict[int, EpicDecompResult] = {}
-
-    def script_decomposition(self, issue_number: int, result: EpicDecompResult) -> None:
-        """Script the EpicDecompResult returned for the given issue."""
-        self._decomposition_scripts[issue_number] = result
-
     async def evaluate(self, issue: Any, worker_id: int = 0) -> Any:
         issue_number = getattr(issue, "id", getattr(issue, "number", 0))
         return self._pop(
             issue_number,
             lambda: TriageResultFactory.create(issue_number=issue_number, ready=True),
-        )
-
-    async def run_decomposition(self, task: Any) -> EpicDecompResult:
-        issue_number = getattr(task, "id", getattr(task, "number", 0))
-        return self._decomposition_scripts.get(
-            issue_number, EpicDecompResult(should_decompose=False)
         )
 
 
@@ -176,6 +180,9 @@ class _FakeAgentRunner(_ScriptedRunner):
         super().__init__()
         self._streams: dict[int, list[Any]] = {}
         self._prior_failures: dict[int, list[str]] = {}
+        # #11568: every ``run`` spawn's kwargs, keyed by issue — scenarios
+        # count attempts and assert the tiered ``timeout_s`` reached the seam.
+        self._run_calls: dict[int, list[dict[str, Any]]] = {}
         self.commit_pending_snapshots: list[tuple[int, bytes]] = []
         self._fail_next_commit_pending = False
 
@@ -191,11 +198,20 @@ class _FakeAgentRunner(_ScriptedRunner):
         human_guidance: str = "",
         attempt_number: int = 0,
         known_traps: str = "",
+        timeout_s: int | None = None,
     ) -> Any:
         issue_number = getattr(task, "id", getattr(task, "number", 0))
         if prior_failure:
             self._prior_failures.setdefault(issue_number, []).append(prior_failure)
-        return self._pop(
+        self._run_calls.setdefault(issue_number, []).append(
+            {
+                "branch": branch,
+                "attempt_number": attempt_number,
+                "timeout_s": timeout_s,
+                "prior_failure": prior_failure,
+            }
+        )
+        result = self._pop(
             issue_number,
             lambda: WorkerResultFactory.create(
                 issue_number=issue_number,
@@ -205,6 +221,20 @@ class _FakeAgentRunner(_ScriptedRunner):
                 commits=1,
             ),
         )
+        # A scripted exception instance is raised rather than returned, so a
+        # scenario can script the credit-cap / auth-failure spawn outcomes
+        # (``CreditExhaustedError`` etc.) the real runner re-raises (#11568).
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    def run_calls_for(self, issue_number: int) -> list[dict[str, Any]]:
+        """Every ``run`` spawn recorded for *issue_number*, in order (#11568)."""
+        return list(self._run_calls.get(issue_number, []))
+
+    def timeouts_seen_for(self, issue_number: int) -> list[int | None]:
+        """The ``timeout_s`` each ``run`` spawn for *issue_number* received."""
+        return [call["timeout_s"] for call in self._run_calls.get(issue_number, [])]
 
     def script_stream(self, issue_number: int, events: list[Any]) -> None:
         self._streams[issue_number] = list(events)
@@ -449,6 +479,16 @@ class FakeLLM:
         # validation), so a scenario scripts them in that order (and doubles the
         # list for a retry). Popped in call order by ``next_decomposition_reply``.
         self.decomposition: dict[int, deque[str]] = {}
+        # #11298 light lane: AutoAgentPreflightLoop's single-session spawn,
+        # keyed by issue → FIFO of scripted spawn outcomes (normalized by
+        # ``_coerce_auto_agent``). The sandbox / MockWorld composition roots
+        # rebind ``AutoAgentPreflightLoop._build_spawn_fn`` to a builder that
+        # pops these via ``next_auto_agent_spawn`` instead of spawning a real
+        # ``claude`` (the #9796 wedge class). ``auto_agent_calls`` records
+        # every pop (scripted or not) in spawn order so a scenario can assert
+        # "the fake spawn ran exactly once".
+        self.auto_agent: dict[int, deque[dict[str, Any]]] = {}
+        self.auto_agent_calls: list[int] = []
 
     def script_decomposition(self, issue_number: int, replies: list[str]) -> None:
         """Script the raw transcript strings the DecompositionCouncil's seam
@@ -469,6 +509,39 @@ class FakeLLM:
         if not queue:
             return None
         return queue.popleft()
+
+    def script_auto_agent(self, issue_number: int, results: list[Any]) -> None:
+        """Script the single-session auto-agent spawn outcomes for
+        *issue_number* (#11298 light lane), in call order.
+
+        Each entry is a dict over the ``_AUTO_AGENT_SCRIPT_DEFAULTS`` keys
+        (``status`` / ``pr_url`` / ``diagnosis`` / ``confidence`` /
+        ``blocked_reason`` / ``cost_usd`` / ``tokens`` / ``crashed`` /
+        ``output_text``) or a raw transcript string. Accumulates like every
+        other ``script_*`` method so the two loaders agree: ``sandbox_main``
+        passes the whole list in one call, ``MockWorld.apply_seed`` replays
+        ``seed.scripts`` one entry at a time — both build the same FIFO.
+        """
+        self.auto_agent.setdefault(issue_number, deque()).extend(
+            self._coerce_auto_agent(r) for r in results
+        )
+
+    def next_auto_agent_spawn(self, issue_number: int) -> dict[str, Any] | None:
+        """Pop the next scripted auto-agent spawn for *issue_number*, or
+        ``None`` when nothing is scripted (the composition-root seam turns
+        ``None`` into a deterministic crashed spawn — never a real
+        subprocess). Every call is recorded in ``auto_agent_calls``."""
+        self.auto_agent_calls.append(issue_number)
+        queue = self.auto_agent.get(issue_number)
+        if not queue:
+            return None
+        return queue.popleft()
+
+    def auto_agent_spawn_count(self, issue_number: int | None = None) -> int:
+        """Number of auto-agent spawn pops observed (for *issue_number*, or all)."""
+        if issue_number is None:
+            return len(self.auto_agent_calls)
+        return sum(1 for n in self.auto_agent_calls if n == issue_number)
 
     def script_triage(self, issue_number: int, results: list[Any]) -> None:
         self.triage_runner.add_script(
@@ -730,6 +803,33 @@ class FakeLLM:
             kw = cls._filter_kwargs(WorkerResultFactory.create, raw)
             return WorkerResultFactory.create(issue_number=issue_number, **kw)
         return raw
+
+    @classmethod
+    def _coerce_auto_agent(cls, raw: Any) -> dict[str, Any]:
+        """Normalize one scripted auto-agent spawn outcome (#11298).
+
+        A string is the raw transcript the spawn "printed" (``output_text``,
+        parsed verbatim by ``preflight.runner.parse_agent_response``); a dict
+        supplies the fields the seam renders into ``<status>``/``<pr_url>``/
+        ... tags. Unknown keys raise so a seed typo (``statsu``) fails the
+        scenario at load time instead of silently scripting a resolve.
+        """
+        if isinstance(raw, str):
+            return {**_AUTO_AGENT_SCRIPT_DEFAULTS, "output_text": raw}
+        if not isinstance(raw, dict):
+            msg = (
+                "auto_agent script entry must be a dict or a transcript string, "
+                f"got {type(raw).__name__}"
+            )
+            raise TypeError(msg)
+        unknown = sorted(set(raw) - set(_AUTO_AGENT_SCRIPT_DEFAULTS))
+        if unknown:
+            msg = (
+                f"auto_agent script entry has unknown key(s) {unknown}; "
+                f"valid: {sorted(_AUTO_AGENT_SCRIPT_DEFAULTS)}"
+            )
+            raise ValueError(msg)
+        return {**_AUTO_AGENT_SCRIPT_DEFAULTS, **raw}
 
     @classmethod
     def _coerce_review(cls, issue_number: int, raw: Any) -> Any:

@@ -85,7 +85,6 @@ _PROVABLY_BOUNDED: dict[str, str] = {
 _GRANDFATHERED_UNCAPPED: frozenset[str] = frozenset(
     {
         "adr_conformance_loop.py",
-        "adr_touchpoint_auditor_loop.py",
         "corpus_learning_loop.py",
         "flake_tracker_loop.py",
     }

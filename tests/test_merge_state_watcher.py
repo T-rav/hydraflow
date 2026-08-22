@@ -39,10 +39,16 @@ def fake_pr_port():
     return pr
 
 
+def _empty_stats(**overrides: int) -> dict[str, int]:
+    stats = {"checked": 0, "rebased": 0, "autorebased": 0, "escalated": 0, "skipped": 0}
+    stats.update(overrides)
+    return stats
+
+
 async def test_no_conflicting_prs_returns_empty_stats(fake_pr_port) -> None:
     watcher = MergeStateWatcher(prs=fake_pr_port, hitl_label="hydraflow-hitl")
     stats = await watcher.unstick_conflicts()
-    assert stats == {"checked": 0, "rebased": 0, "escalated": 0, "skipped": 0}
+    assert stats == _empty_stats()
     fake_pr_port.update_pr_branch.assert_not_awaited()
     fake_pr_port.add_pr_labels.assert_not_awaited()
 
@@ -57,7 +63,7 @@ async def test_rebases_pr_with_no_relevant_labels(fake_pr_port) -> None:
 
     fake_pr_port.update_pr_branch.assert_awaited_once_with(8491)
     fake_pr_port.add_pr_labels.assert_not_awaited()
-    assert stats == {"checked": 1, "rebased": 1, "escalated": 0, "skipped": 0}
+    assert stats == _empty_stats(checked=1, rebased=1)
 
 
 async def test_skips_pr_already_labeled_hitl(fake_pr_port) -> None:
@@ -71,7 +77,7 @@ async def test_skips_pr_already_labeled_hitl(fake_pr_port) -> None:
 
     fake_pr_port.update_pr_branch.assert_not_awaited()
     fake_pr_port.add_pr_labels.assert_not_awaited()
-    assert stats == {"checked": 1, "rebased": 0, "escalated": 0, "skipped": 1}
+    assert stats == _empty_stats(checked=1, skipped=1)
 
 
 async def test_skips_pr_in_active_review(fake_pr_port) -> None:
@@ -84,7 +90,7 @@ async def test_skips_pr_in_active_review(fake_pr_port) -> None:
     stats = await watcher.unstick_conflicts()
 
     fake_pr_port.update_pr_branch.assert_not_awaited()
-    assert stats == {"checked": 1, "rebased": 0, "escalated": 0, "skipped": 1}
+    assert stats == _empty_stats(checked=1, skipped=1)
 
 
 async def test_escalates_pr_when_rebase_does_not_resolve(fake_pr_port) -> None:
@@ -98,7 +104,7 @@ async def test_escalates_pr_when_rebase_does_not_resolve(fake_pr_port) -> None:
 
     fake_pr_port.update_pr_branch.assert_awaited_once_with(8654)
     fake_pr_port.add_pr_labels.assert_awaited_once_with(8654, ["hydraflow-hitl"])
-    assert stats == {"checked": 1, "rebased": 0, "escalated": 1, "skipped": 0}
+    assert stats == _empty_stats(checked=1, escalated=1)
 
 
 async def test_escalates_when_rebase_succeeds_but_pr_still_conflicting(
@@ -136,7 +142,7 @@ async def test_handles_three_prs_with_mixed_outcomes(fake_pr_port) -> None:
     watcher = MergeStateWatcher(prs=fake_pr_port, hitl_label="hydraflow-hitl")
     stats = await watcher.unstick_conflicts()
 
-    assert stats == {"checked": 3, "rebased": 1, "escalated": 1, "skipped": 1}
+    assert stats == _empty_stats(checked=3, rebased=1, escalated=1, skipped=1)
     # PR 1 rebased, PR 2 skipped, PR 3 escalated
     fake_pr_port.add_pr_labels.assert_awaited_once_with(3, ["hydraflow-hitl"])
 
@@ -158,6 +164,100 @@ async def test_continues_after_one_pr_raises(fake_pr_port) -> None:
 
     assert stats["checked"] == 2
     assert stats["rebased"] == 1
+
+
+# --- Auto-rebase actuator wiring (#11595) ------------------------------------
+
+
+async def test_autorebased_pr_is_counted_and_not_escalated(fake_pr_port) -> None:
+    """update-branch fails, the actuator pushes a fresh head → no HITL."""
+    fake_pr_port.list_conflicting_prs.return_value = [
+        _pr(11583, branch="agent/issue-11500")
+    ]
+    fake_pr_port.update_pr_branch.return_value = False
+    autorebase = AsyncMock()
+    autorebase.try_autorebase = AsyncMock(return_value="autorebased")
+
+    watcher = MergeStateWatcher(
+        prs=fake_pr_port, hitl_label="hydraflow-hitl", autorebase=autorebase
+    )
+    stats = await watcher.unstick_conflicts()
+
+    assert stats == _empty_stats(checked=1, autorebased=1)
+    fake_pr_port.add_pr_labels.assert_not_awaited()
+
+
+async def test_real_conflict_outcome_still_escalates(fake_pr_port) -> None:
+    """The actuator aborted on a source conflict — HITL takes over."""
+    fake_pr_port.list_conflicting_prs.return_value = [
+        _pr(11584, branch="agent/issue-11501")
+    ]
+    fake_pr_port.update_pr_branch.return_value = False
+    autorebase = AsyncMock()
+    autorebase.try_autorebase = AsyncMock(return_value="real_conflict")
+
+    watcher = MergeStateWatcher(
+        prs=fake_pr_port, hitl_label="hydraflow-hitl", autorebase=autorebase
+    )
+    stats = await watcher.unstick_conflicts()
+
+    fake_pr_port.add_pr_labels.assert_awaited_once_with(11584, ["hydraflow-hitl"])
+    assert stats == _empty_stats(checked=1, escalated=1)
+
+
+async def test_skipped_outcome_keeps_legacy_escalation(fake_pr_port) -> None:
+    """Actuator disarmed (default OFF) — behavior is exactly the legacy path."""
+    fake_pr_port.list_conflicting_prs.return_value = [_pr(11585)]
+    fake_pr_port.update_pr_branch.return_value = False
+    autorebase = AsyncMock()
+    autorebase.try_autorebase = AsyncMock(return_value="skipped_disabled")
+
+    watcher = MergeStateWatcher(
+        prs=fake_pr_port, hitl_label="hydraflow-hitl", autorebase=autorebase
+    )
+    stats = await watcher.unstick_conflicts()
+
+    fake_pr_port.add_pr_labels.assert_awaited_once_with(11585, ["hydraflow-hitl"])
+    assert stats == _empty_stats(checked=1, escalated=1)
+
+
+async def test_actuator_not_consulted_when_update_branch_resolves(
+    fake_pr_port,
+) -> None:
+    fake_pr_port.list_conflicting_prs.return_value = [
+        _pr(11586, branch="agent/issue-11502")
+    ]
+    fake_pr_port.update_pr_branch.return_value = True
+    fake_pr_port.get_pr_mergeable.return_value = True
+    autorebase = AsyncMock()
+    autorebase.try_autorebase = AsyncMock(return_value="autorebased")
+
+    watcher = MergeStateWatcher(
+        prs=fake_pr_port, hitl_label="hydraflow-hitl", autorebase=autorebase
+    )
+    stats = await watcher.unstick_conflicts()
+
+    autorebase.try_autorebase.assert_not_awaited()
+    assert stats == _empty_stats(checked=1, rebased=1)
+
+
+async def test_actuator_transient_error_falls_through_to_escalation(
+    fake_pr_port,
+) -> None:
+    fake_pr_port.list_conflicting_prs.return_value = [
+        _pr(11587, branch="agent/issue-11503")
+    ]
+    fake_pr_port.update_pr_branch.return_value = False
+    autorebase = AsyncMock()
+    autorebase.try_autorebase = AsyncMock(side_effect=RuntimeError("git outage"))
+
+    watcher = MergeStateWatcher(
+        prs=fake_pr_port, hitl_label="hydraflow-hitl", autorebase=autorebase
+    )
+    stats = await watcher.unstick_conflicts()
+
+    fake_pr_port.add_pr_labels.assert_awaited_once_with(11587, ["hydraflow-hitl"])
+    assert stats == _empty_stats(checked=1, escalated=1)
 
 
 # --- Loop wiring -------------------------------------------------------------
@@ -241,3 +341,23 @@ async def test_loop_delegates_to_watcher() -> None:
     assert stats["rebased"] == 1
     assert stats["approvals"] == {"merged_seen": 0, "recorded": 0}
     reconciler.reconcile.assert_awaited_once()
+
+
+async def test_loop_wires_the_autorebase_actuator_by_default() -> None:
+    """The actuator rides the existing loop (no new loop wiring, #11595);
+    arming is the live ``pr_autorebase_enabled`` flag, not construction."""
+    from base_background_loop import LoopDeps  # noqa: PLC0415
+    from config import HydraFlowConfig  # noqa: PLC0415
+    from events import EventBus  # noqa: PLC0415
+    from merge_state_watcher_loop import MergeStateWatcherLoop  # noqa: PLC0415
+    from pr_autorebase import PRAutoRebase  # noqa: PLC0415
+
+    cfg = HydraFlowConfig(repo="acme/widgets")
+    deps = LoopDeps(
+        event_bus=EventBus(),
+        stop_event=asyncio.Event(),
+        status_cb=lambda *a, **k: None,
+        enabled_cb=lambda _name: True,
+    )
+    loop = MergeStateWatcherLoop(config=cfg, prs=AsyncMock(), deps=deps)
+    assert isinstance(loop._watcher._autorebase, PRAutoRebase)

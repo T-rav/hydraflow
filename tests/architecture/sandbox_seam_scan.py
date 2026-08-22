@@ -9,6 +9,14 @@ A "spawn primitive" is one of the call names through which loop/runner code
 reaches a real ``claude`` or a raw subprocess. The scan is lexical (call
 sites by name, per module), deliberately line-number-free so signatures are
 drift-immune, mirroring ``disturbance.models.Finding``.
+
+``scan_runner_constructions`` covers the blind spot that scan cannot see
+(#11590/#11602): a ``BaseSubprocessRunner`` subclass spawns through the base's
+``run``, so the CONSTRUCTING module has no lexical spawn call and never appears
+in a spawn signature. Its air-gap depends on where the instance is built —
+injected at the composition root (attachable sentinel) vs. built inside a
+method (not attachable) — so the construction sites are enumerated in their own
+right.
 """
 
 from __future__ import annotations
@@ -105,6 +113,132 @@ def scan_spawn_signatures(repo_root: Path) -> dict[str, int]:
         visitor.visit(ast.parse(path.read_text(), filename=rel))
         for qualname, primitive in visitor.hits:
             signature = f"{rel}::{qualname}::{primitive}"
+            counts[signature] = counts.get(signature, 0) + 1
+    return counts
+
+
+#: Base class whose subclasses spawn through ``BaseSubprocessRunner.run``.
+#: Their construction sites are invisible to ``scan_spawn_signatures`` — the
+#: only lexical spawn is inside ``src/runners/base_subprocess_runner.py`` — so
+#: they get their own scan (#11590/#11602).
+SUBPROCESS_RUNNER_BASE = "BaseSubprocessRunner"
+
+
+def runner_construction_target_files(repo_root: Path) -> list[Path]:
+    """Enumerate the modules the construction-site scan reads.
+
+    All of ``src/`` recursively, minus ``src/mockworld/`` (the Fakes — the
+    sandbox-side seam machinery itself) and vendored ``node_modules`` trees.
+    Composition roots that build runners live anywhere (``service_registry``,
+    a loop module, a phase), so this scan cannot use the narrow
+    loop/runner glob ``spawn_target_files`` uses.
+    """
+    src = repo_root / "src"
+    return sorted(
+        path
+        for path in src.glob("**/*.py")
+        if "node_modules" not in path.parts and (src / "mockworld") not in path.parents
+    )
+
+
+def _base_names(node: ast.ClassDef) -> set[str]:
+    """Names of *node*'s bases, unwrapping ``Generic[...]`` subscripts."""
+    names: set[str] = set()
+    for base in node.bases:
+        target = base.value if isinstance(base, ast.Subscript) else base
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, ast.Attribute):
+            names.add(target.attr)
+    return names
+
+
+def subprocess_runner_subclasses(repo_root: Path) -> set[str]:
+    """Class names in ``src/`` that subclass ``BaseSubprocessRunner``.
+
+    Transitive: a subclass of a subclass spawns through the same base ``run``
+    and needs a seam just as much, so the class set is closed to a fixed point
+    rather than matched against the literal base name once.
+    """
+    by_class: dict[str, set[str]] = {}
+    for path in runner_construction_target_files(repo_root):
+        tree = ast.parse(path.read_text(), filename=path.name)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                by_class.setdefault(node.name, set()).update(_base_names(node))
+    found = {SUBPROCESS_RUNNER_BASE}
+    while True:
+        grown = {name for name, bases in by_class.items() if bases & found} | found
+        if grown == found:
+            return found - {SUBPROCESS_RUNNER_BASE}
+        found = grown
+
+
+class _RunnerConstructionVisitor(ast.NodeVisitor):
+    """Collects (enclosing qualname, class name) for every runner construction.
+
+    Import aliases are resolved back to the real class name
+    (``from x import AutoAgentRunner as AAR`` → ``AAR(...)`` is recorded as
+    ``AutoAgentRunner``) so renaming at the import site cannot dodge the
+    ratchet — and so the recorded signature stays stable across such a rename.
+    """
+
+    def __init__(self, class_names: Collection[str]) -> None:
+        self._class_names = set(class_names)
+        self._aliases: dict[str, str] = {}
+        self._stack: list[str] = []
+        self.hits: list[tuple[str, str]] = []
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.asname and alias.name in self._class_names:
+                self._aliases[alias.asname] = alias.name
+        self.generic_visit(node)
+
+    def _visit_scoped(self, node: ast.AST, name: str) -> None:
+        self._stack.append(name)
+        self.generic_visit(node)
+        self._stack.pop()
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._visit_scoped(node, node.name)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_scoped(node, node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_scoped(node, node.name)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        callee = node.func
+        name: str | None = None
+        if isinstance(callee, ast.Name):
+            name = callee.id
+        elif isinstance(callee, ast.Attribute):
+            name = callee.attr
+        resolved = self._aliases.get(name or "", name)
+        if resolved in self._class_names:
+            qualname = ".".join(self._stack) or "<module>"
+            self.hits.append((qualname, resolved))
+        self.generic_visit(node)
+
+
+def scan_runner_constructions(repo_root: Path) -> dict[str, int]:
+    """Return ``{signature: count}`` for every ``BaseSubprocessRunner`` build.
+
+    ``signature`` is ``"{posix relpath}::{enclosing qualname}::{ClassName}"``,
+    line-number-free like ``scan_spawn_signatures``. Counts matter: the three
+    ``AutoAgentRunner``s of ``service_registry.build_services`` share one
+    signature, so a fourth added there must be declared too.
+    """
+    class_names = subprocess_runner_subclasses(repo_root)
+    counts: dict[str, int] = {}
+    for path in runner_construction_target_files(repo_root):
+        rel = path.relative_to(repo_root).as_posix()
+        visitor = _RunnerConstructionVisitor(class_names)
+        visitor.visit(ast.parse(path.read_text(), filename=rel))
+        for qualname, class_name in visitor.hits:
+            signature = f"{rel}::{qualname}::{class_name}"
             counts[signature] = counts.get(signature, 0) + 1
     return counts
 

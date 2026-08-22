@@ -28,9 +28,9 @@ import logging
 import time
 from dataclasses import dataclass, field
 
+from adversarial_agents import AgentLike
 from exception_classify import reraise_on_credit_or_bug
 from models import PlanFindingSeverity, PlanReview
-from src.adversarial_agents import AgentLike
 
 logger = logging.getLogger(__name__)
 

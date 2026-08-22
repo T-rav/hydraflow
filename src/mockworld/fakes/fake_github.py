@@ -167,6 +167,12 @@ class FakePR:
     # created_at, mirroring FakeIssue.closed_at's convention (#9727).
     closed_at: str = ""
     merged_at: str = ""
+    # The PR's own declaration of what it closes (#11480). Production PR
+    # titles are ``Fixes #N: <title>``; the decompose terminal reads these
+    # to tell a landing fix from a stalled one. Empty by default so an
+    # unseeded PR declares nothing — a scenario must opt in explicitly.
+    title: str = ""
+    body: str = ""
 
 
 class FakeGitHubUnmodelledCommand(RuntimeError):
@@ -226,6 +232,15 @@ class FakeGitHub:
         # newest first. Distinct from _rc_branches (rc/* has its own
         # lifecycle via create_rc_branch/delete_branch).
         self._branch_commits: dict[str, list[dict[str, str]]] = {}
+        # #11517: release tagging (ADR-0011). ``_branch_heads`` seeds what
+        # ``resolve_remote_branch_sha`` answers per branch (``None`` = the
+        # branch cannot be resolved, driving the fail-closed skip); unseeded
+        # branches resolve to the synthetic ``sha-<branch>`` that
+        # ``list_branch_refs`` also reports. ``_tags`` / ``_releases`` record
+        # create_tag / create_release so scenarios can assert the tag ref.
+        self._branch_heads: dict[str, str | None] = {}
+        self._tags: dict[str, str] = {}
+        self._releases: dict[str, tuple[str, str]] = {}
         self._ci_scripts: dict[int, deque[tuple[bool, str]]] = {}
         self._comments: list[tuple[int, str]] = []
         self._ci_main_status: tuple[str, str] = ("success", "")
@@ -391,6 +406,9 @@ class FakeGitHub:
         created_at: str | None = None,
         closed_at: str | None = None,
         merged_at: str | None = None,
+        title: str = "",
+        body: str = "",
+        checks: list[tuple[str, str]] | None = None,
     ) -> None:
         """Directly insert a PR record (sync helper for test seeding).
 
@@ -401,6 +419,9 @@ class FakeGitHub:
         ``created_at``/``closed_at``/``merged_at`` let a scenario give
         distinct PRs distinct ages for fitness-window boundary testing
         (#11418) — unset, they fall back to FakePR's fixed defaults.
+        ``title``/``body``/``checks`` seed what ``get_pr_title_and_body`` and
+        ``get_pr_checks`` serve, so a scenario can stage a PR that declares
+        ``Fixes #N`` with live CI (#11480).
         """
         pr = FakePR(
             number=number,
@@ -413,6 +434,9 @@ class FakeGitHub:
             author=author,
             is_bot=is_bot,
             mergeable=mergeable,
+            title=title,
+            body=body,
+            checks=list(checks or []),
         )
         if created_at:
             pr.created_at = created_at
@@ -444,6 +468,15 @@ class FakeGitHub:
         self._branch_commits[branch] = commits or [
             {"date": "2026-01-01T00:00:00Z", "message": f"chore: seed {branch}"}
         ]
+
+    def set_branch_head(self, branch: str, sha: str | None) -> None:
+        """Seed-API helper: pin what ``resolve_remote_branch_sha`` returns (#11517).
+
+        ``None`` marks *branch* unresolvable (a fetch / rev-parse failure),
+        so a scenario can prove the release path skips fail-closed instead
+        of falling back to the checkout ``HEAD``.
+        """
+        self._branch_heads[branch] = sha
 
     def add_alerts(self, *, branch: str, alerts: list[Any]) -> None:
         """Script code-scanning alerts returned by fetch_code_scanning_alerts."""
@@ -738,18 +771,25 @@ class FakeGitHub:
         number = self._pr_counter
         self._pr_counter += 1
         issue_number = getattr(issue, "id", getattr(issue, "number", 0))
+        # Slug matches the recorded pr_create cassette (test-org/test-repo) —
+        # the contract replay normalizes the number but NOT the repo slug.
+        url = f"https://github.com/test-org/test-repo/pull/{number}"
         self._prs[number] = FakePR(
             number=number,
             issue_number=issue_number,
             branch=branch,
             draft=draft,
-            url=f"https://github.com/test/repo/pull/{number}",
+            url=url,
         )
+        # Return the URL the fake actually stores — production ``PRInfo.url``
+        # is the created PR's URL, and the light-lane spawn seam renders it
+        # into the ``<pr_url>`` tag the auto-agent decision parses (#11298).
         return PRInfoFactory.create(
             number=number,
             issue_number=issue_number,
             branch=branch,
             draft=draft,
+            url=url,
         )
 
     async def find_open_pr_for_branch(
@@ -909,6 +949,19 @@ class FakeGitHub:
     async def get_pr_approvers(self, pr_number: int) -> list[str]:
         self._maybe_rate_limit()
         return ["octocat"]
+
+    async def get_pr_title_and_body(self, pr_number: int) -> tuple[str, str]:
+        """Serve seeded ``FakePR.title``/``FakePR.body`` (#11480).
+
+        Defaults to ``("", "")`` — the same "unreadable" shape the real
+        adapter returns on failure — so an unseeded PR never accidentally
+        declares a closing keyword for its issue.
+        """
+        self._maybe_rate_limit()
+        pr = self._prs.get(pr_number)
+        if pr is None:
+            return ("", "")
+        return (pr.title, pr.body)
 
     async def get_pr_checks(self, pr_number: int) -> list[dict[str, str]]:
         """Serve seeded ``FakePR.checks`` (#10260). Defaults to empty — same
@@ -1535,7 +1588,12 @@ class FakeGitHub:
             results.append(
                 ConflictingPR(
                     number=pr.number,
-                    branch=getattr(pr, "head_ref", "") or "",
+                    # FakePR's field is ``branch`` (mirrors headRefName). The
+                    # old ``getattr(pr, "head_ref", "")`` read a field that
+                    # never existed, so every conflicting PR came back with an
+                    # empty branch — masked until the auto-rebase actuator
+                    # (#11595) made the head-branch namespace load-bearing.
+                    branch=pr.branch or "",
                     labels=list(getattr(pr, "labels", []) or []),
                 )
             )
@@ -1556,6 +1614,44 @@ class FakeGitHub:
     async def upload_screenshot(self, **_kw: Any) -> str:
         self._maybe_rate_limit()
         return ""
+
+    # --- Release tagging (ADR-0011, #11517) ---
+    #
+    # Mirrors PRManager.resolve_remote_branch_sha / create_tag /
+    # create_release: the epic release path resolves the promoted main SHA
+    # (ADR-0042) and tags THAT, never the factory checkout HEAD. The fake
+    # records the ``tag -> ref`` pairing so scenarios can assert the target.
+
+    async def resolve_remote_branch_sha(self, branch: str) -> str | None:
+        """Seeded head for *branch* (``None`` = unresolvable), else ``sha-<branch>``."""
+        self._maybe_rate_limit()
+        if branch in self._branch_heads:
+            return self._branch_heads[branch]
+        return f"sha-{branch}"
+
+    async def create_tag(self, tag: str, *, ref: str) -> bool:
+        """Record *tag* -> *ref*; a duplicate tag fails like ``git tag`` does."""
+        self._maybe_rate_limit()
+        if tag in self._tags:
+            return False
+        self._tags[tag] = ref
+        return True
+
+    async def create_release(self, tag: str, title: str, body: str) -> bool:
+        """Record the GitHub Release for *tag*."""
+        self._maybe_rate_limit()
+        self._releases[tag] = (title, body)
+        return True
+
+    @property
+    def tags(self) -> dict[str, str]:
+        """``{tag: ref}`` recorded by :meth:`create_tag` (a copy)."""
+        return dict(self._tags)
+
+    @property
+    def releases(self) -> dict[str, tuple[str, str]]:
+        """``{tag: (title, body)}`` recorded by :meth:`create_release` (a copy)."""
+        return dict(self._releases)
 
     # --- Staging / RC promotion PRPort methods ---
     #

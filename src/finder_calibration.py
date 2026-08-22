@@ -109,11 +109,6 @@ GENERATIVE_FINDERS: tuple[GenerativeFinder, ...] = (
         "EdgeProposerLoop — proposes depends_on / implements term-map edges.",
     ),
     GenerativeFinder(
-        "adr_drift",
-        "adr-drift",
-        "AdrTouchpointAuditorLoop — flags ADR ↔ code citation drift.",
-    ),
-    GenerativeFinder(
         "entry_evidence",
         "wiki-evidence",
         "EntryEvidenceLoop — proposes wiki-entry matches as Term.evidence.",

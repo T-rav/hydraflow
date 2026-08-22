@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from src.pending_concerns import AdversarialState, Concern
+from pending_concerns import AdversarialState, Concern
 
 
 def detect_shipped_with_known_gaps(state: AdversarialState) -> list[Concern]:

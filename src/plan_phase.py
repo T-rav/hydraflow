@@ -9,13 +9,17 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import plan_phase_wiki_ingest
+from adversarial_agents import AgentLike
+from adversarial_retry_loop import AdversarialRetryLoop
 from analysis import PlanAnalyzer
+from assumption_surfacer import AssumptionSurfacer, SurfacerOutput
 from config import HydraFlowConfig
 from convergence_recording import record_stage_verdict, signatures_from_concerns
 from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
 from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
 from harness_insights import FailureCategory, HarnessInsightStore
+from issue_cache import classification_complexity
 from models import (
     ConversationTurn,
     DiscoverResult,
@@ -29,6 +33,12 @@ from models import (
     ShapeTurnResult,
     Task,
 )
+from pending_concerns import (
+    AdversarialState,
+    Concern,
+    StageRun,
+    is_design_decision_concern,
+)
 from phase_utils import (
     MemorySuggester,
     PipelineEscalator,
@@ -39,22 +49,13 @@ from phase_utils import (
     store_lifecycle,
 )
 from plan_constants import PlanScale
+from plan_council import CouncilTally, PlanCouncil
 from plan_phase_wiki_ingest import PlanWikiIngestMixin
 from planner import PlannerRunner
 from repo_wiki import RepoWikiStore
 from research_runner import ResearchRunner
-from src.adversarial_agents import AgentLike
-from src.adversarial_retry_loop import AdversarialRetryLoop
-from src.assumption_surfacer import AssumptionSurfacer, SurfacerOutput
-from src.pending_concerns import (
-    AdversarialState,
-    Concern,
-    StageRun,
-    is_design_decision_concern,
-)
-from src.plan_council import CouncilTally, PlanCouncil
-from src.spec_ac_generator import SpecACGenerator
-from src.spec_judge import JudgeResult, SpecJudge
+from spec_ac_generator import SpecACGenerator
+from spec_judge import JudgeResult, SpecJudge
 from state import StateTracker
 from task_source import TaskTransitioner
 from traceability import extract_req_id, missing_required_req_id
@@ -529,19 +530,7 @@ class PlanPhase(PlanWikiIngestMixin):
         review for never-classified issues — found by the sampled re-audit
         on #11304 (#11314, audit-upheld).
         """
-        if self._issue_cache is None:
-            return None
-        try:
-            record = self._issue_cache.latest_classification(issue.id)
-        except (AttributeError, TypeError, ValueError):
-            return None
-        payload = getattr(record, "payload", None)
-        if not isinstance(payload, dict):
-            return None
-        try:
-            return int(payload["complexity_score"])
-        except (KeyError, TypeError, ValueError):
-            return None
+        return classification_complexity(self._issue_cache, issue.id)
 
     def _skip_plan_review(self, issue: Task) -> tuple[bool, int]:
         """#11298 size tiering: does this issue skip the adversarial review?

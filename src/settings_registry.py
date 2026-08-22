@@ -73,12 +73,17 @@ SETTINGS: dict[str, SettingSpec] = {
     "test_adequacy_coverage_timeout_secs": SettingSpec(
         "CI & Quality", live=True, order=7
     ),
+    # Live: AgentRunner._verify_quality reads it on every post-build gate.
+    "implement_full_quality_gate": SettingSpec("CI & Quality", live=True, order=12),
     # Independent test-adequacy verifier (#9546). Live: AgentRunner._run_skill
     # re-reads all three via getattr(config, ...) on every skill dispatch.
     "test_adequacy_verifier_enabled": SettingSpec("CI & Quality", live=True, order=20),
     "test_adequacy_verifier_fail_closed": SettingSpec(
         "CI & Quality", live=True, order=21
     ),
+    # Repair-in-run (#11593). Live: AgentRunner._run_skill reads it via
+    # getattr(config, skill.repair_config_key) on every gate evaluation.
+    "test_adequacy_repair_passes": SettingSpec("CI & Quality", live=True, order=22),
     "test_adequacy_verifier_model": SettingSpec("Models", live=True, order=4),
     # Live: auto_pr re-reads both via trace_collector.get_active_config()
     # on every gate run (#10013), so a toggle applies to the next bot PR.
@@ -101,6 +106,9 @@ SETTINGS: dict[str, SettingSpec] = {
     # --- PR Unsticker ----------------------------------------------------
     "unstick_auto_merge": SettingSpec("PR Unsticker", live=True, order=0),
     "unstick_all_causes": SettingSpec("PR Unsticker", live=True, order=1),
+    # Live: PRAutoRebase reads config.pr_autorebase_enabled on every
+    # MergeStateWatcher attempt, so flipping it applies on the next tick.
+    "pr_autorebase_enabled": SettingSpec("PR Unsticker", live=True, order=2),
     # --- Branching & Release --------------------------------------------
     # Structural — captured into loop wiring at startup; change then restart.
     "staging_enabled": SettingSpec("Branching & Release", live=False, order=0),
@@ -163,6 +171,14 @@ SETTINGS: dict[str, SettingSpec] = {
     ),
     "event_loop_watchdog_hard_restart": SettingSpec(
         "Event-Loop Watchdog", live=True, order=2
+    ),
+    # #11604 escalation gates on the DESTRUCTIVE path only — both re-read at
+    # trip time, so tuning them never needs a restart.
+    "event_loop_watchdog_restart_after_episodes": SettingSpec(
+        "Event-Loop Watchdog", live=True, order=3
+    ),
+    "event_loop_watchdog_starvation_service_ratio": SettingSpec(
+        "Event-Loop Watchdog", live=True, order=4
     ),
     # --- Goal Supervisor (Tier-2 liveness, ADR-0124) ----------------------
     # enabled: deploy-time kill-switch (captured at startup → restart badge).

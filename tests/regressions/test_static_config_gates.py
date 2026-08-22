@@ -79,20 +79,6 @@ def _adr_reviewer_loop(tmp_path: Path):
     return ADRReviewerLoop(config=d.config, adr_reviewer=MagicMock(), deps=d.loop_deps)
 
 
-def _adr_touchpoint_auditor_loop(tmp_path: Path):
-    from adr_touchpoint_auditor_loop import AdrTouchpointAuditorLoop
-
-    d = _deps(tmp_path, "adr_touchpoint_auditor_loop_enabled")
-    return AdrTouchpointAuditorLoop(
-        config=d.config,
-        state=MagicMock(),
-        pr_manager=MagicMock(),
-        dedup=MagicMock(),
-        adr_index=MagicMock(),
-        deps=d.loop_deps,
-    )
-
-
 def _ci_monitor_loop(tmp_path: Path):
     from ci_monitor_loop import CIMonitorLoop
 
@@ -456,7 +442,6 @@ def _workspace_gc_loop(tmp_path: Path):
 
 _LOOP_FACTORIES = [
     ("ADRReviewerLoop", _adr_reviewer_loop),
-    ("AdrTouchpointAuditorLoop", _adr_touchpoint_auditor_loop),
     ("CIMonitorLoop", _ci_monitor_loop),
     ("ContractRefreshLoop", _contract_refresh_loop),
     ("CorpusLearningLoop", _corpus_learning_loop),

@@ -298,9 +298,6 @@ class MockWorld:
         """
         # Runners
         target.triage_runner.evaluate = self._llm.triage_runner.evaluate
-        target.triage_runner.run_decomposition = (
-            self._llm.triage_runner.run_decomposition
-        )
         target.planners.plan = self._llm.planners.plan
         target.planners.run_gap_review = self._llm.planners.run_gap_review
         target.agents.run = self._llm.agents.run
@@ -351,6 +348,17 @@ class MockWorld:
             # board instead of the unwired PRManager method (a real ``gh``
             # subprocess).
             "get_issue_state",
+            # Issue-body read. Wired so triage's #11614 blocker gate can walk
+            # ``Blocked by:`` edges for its cycle guard against the fake board;
+            # an unwired AsyncMock body would make the walk raise and the gate
+            # fail open, hiding the ordering behaviour a scenario asserts.
+            "get_issue_body",
+            # #11517: the ADR-0011 release path — resolve the promoted main
+            # SHA, tag it, publish the release — so a scenario's FakeGitHub
+            # records the tag ref instead of an unwired AsyncMock.
+            "resolve_remote_branch_sha",
+            "create_tag",
+            "create_release",
         ):
             setattr(prs, method, getattr(gh, method))
 
@@ -493,6 +501,12 @@ class MockWorld:
             # loads in-process too — matching how sandbox_main dispatches
             # seed.scripts generically via getattr(fake_llm, f"script_{phase}").
             "decomposition": self._llm.script_decomposition,
+            # "auto_agent" (#11298 light lane): the single-session auto-agent
+            # spawn outcomes AutoAgentPreflightLoop's seeded spawn seam pops
+            # (``build_seeded_auto_agent_spawn_builder``). Same dual-loader
+            # contract as "decomposition" above — sandbox_main dispatches
+            # ``seed.scripts`` generically via getattr(fake_llm, f"script_{phase}").
+            "auto_agent": self._llm.script_auto_agent,
         }
         # fix_ci uses a single-result scripting API (the latest call wins);
         # convert per-call here so scenarios can describe it uniformly.
@@ -817,6 +831,24 @@ class MockWorld:
             self._loop_ports["github"] = self._github
             self._loop_ports["workspace"] = self._workspace
             self._loop_ports["state"] = self._harness.state
+        # #11298 light lane air-gap (unconditional, mirrors sandbox_main's
+        # ``air_gap_runner_sentinels``): the catalog-built AutoAgentPreflightLoop
+        # constructs its AutoAgentRunner INSIDE ``_build_spawn_fn``, so without
+        # this port a scenario that lets the loop reach a claimed issue spawns a
+        # REAL ``claude`` on the host. ``_build_auto_agent_preflight`` rebinds
+        # the builder when the port is present; the spawn pops
+        # ``seed.scripts["auto_agent"]`` (or ``set_phase_results("auto_agent",
+        # …)``) from this world's FakeLLM and mints PRs through its FakeGitHub.
+        from mockworld.sandbox_main import (  # noqa: PLC0415
+            build_seeded_auto_agent_spawn_builder,
+        )
+
+        self._loop_ports.setdefault(
+            "auto_agent_spawn_builder",
+            build_seeded_auto_agent_spawn_builder(
+                self._llm, prs=self._github, config=config
+            ),
+        )
 
         # Mirror sandbox_main's seed-seam composition wiring (#9543) so the
         # in-process tier exercises the same active-trigger paths the docker

@@ -69,8 +69,6 @@ _INTERVAL_BOUNDS: dict[str, tuple[int, int]] = {
     "flake_tracker": (3600, 2_592_000),  # 1h min, 30d max
     "skill_prompt_eval": (86400, 2_592_000),  # 1d min, 30d max
     "fake_coverage_auditor": (86400, 2_592_000),  # 1d min, 30d max
-    "adr_touchpoint_auditor": (900, 86400),  # 15m min, 1d max (default 4h, ADR-0056)
-    "adr_drift_resolver": (900, 86400),  # 15m min, 1d max (default 1h, #9976)
     "adr_conformance": (3600, 604800),  # 1h min, 7d max (default 24h, ADR-0100)
     "auto_tighten": (3600, 604800),  # 1h min, 7d max (default 24h)
     "memory_backlog": (3_600, 604_800),  # 1h min, 7d max

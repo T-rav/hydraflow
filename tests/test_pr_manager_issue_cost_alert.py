@@ -284,7 +284,14 @@ async def test_title_variants_are_all_parsed(
     merge_cfg: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Issue numbers are pulled from the first ``#N`` in the title regardless of shape."""
+    """Issue numbers are pulled from the title regardless of shape.
+
+    A closing-keyword reference anchors the match; the first bare ``#N`` is
+    only the fallback for keyword-less titles. #11481 widened the anchored set
+    to every form GitHub auto-closes on — the discriminating cases (a bare
+    ``#N`` *preceding* the closing reference) are pinned in
+    ``tests/regressions/test_issue_11481_closing_verb_class.py``.
+    """
     captured: list[int] = []
 
     async def fake_check_issue_cost(_cfg, *, issue_number, **_kw):

@@ -17,6 +17,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -610,6 +611,118 @@ class TestRebootFactory:
         assert spawned is False
 
 
+class TestRebootFactoryViaLaunchdLabel:
+    """ADR-0135: when the factory is a KeepAlive launchd service, a reboot is a
+    ``launchctl kickstart -k`` of that label — launchd re-runs the service-mode
+    launcher (which re-syncs). Killing the port group and spawning the
+    dev-checkout launcher as well would race launchd's own restart: two
+    factories contending for the dashboard port."""
+
+    def test_label_kickstarts_instead_of_kill_and_spawn(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        terminated: list[int] = []
+        monkeypatch.setattr(
+            watchdog, "find_port_listener_pids", lambda port, **k: [4242]
+        )
+        monkeypatch.setattr(watchdog, "_terminate_pid_group", terminated.append)
+        spawned = False
+
+        def _popen(*a: object, **k: object) -> None:
+            nonlocal spawned
+            spawned = True
+
+        monkeypatch.setattr(watchdog.subprocess, "Popen", _popen)
+        runs: list[list[str]] = []
+
+        def _run(argv: list[str], **k: object) -> object:
+            runs.append(list(argv))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(watchdog.subprocess, "run", _run)
+        monkeypatch.setattr(watchdog.os, "getuid", lambda: 501)
+
+        ok = watchdog.reboot_factory(
+            workspace=tmp_path / "ws",
+            factory_branch="staging",
+            dashboard_port=5555,
+            launcher=tmp_path / "does-not-exist.sh",  # irrelevant under a label
+            restart_label="com.hydraflow.factory",
+            dry_run=False,
+        )
+        assert ok is True
+        # One kickstart; launchd owns both the kill and the relaunch.
+        assert (runs, terminated, spawned) == (
+            [["launchctl", "kickstart", "-k", "gui/501/com.hydraflow.factory"]],
+            [],
+            False,
+        )
+
+    def test_label_kickstart_failure_returns_false(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            watchdog.subprocess,
+            "run",
+            lambda *a, **k: SimpleNamespace(returncode=113, stdout="", stderr="x"),
+        )
+        ok = watchdog.reboot_factory(
+            workspace=tmp_path / "ws",
+            factory_branch="staging",
+            dashboard_port=5555,
+            restart_label="com.hydraflow.factory",
+            dry_run=False,
+        )
+        assert ok is False
+
+    def test_dry_run_with_label_calls_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        called = False
+
+        def _run(*a: object, **k: object) -> None:
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(watchdog.subprocess, "run", _run)
+        ok = watchdog.reboot_factory(
+            workspace=tmp_path / "ws",
+            factory_branch="staging",
+            dashboard_port=5555,
+            restart_label="com.hydraflow.factory",
+            dry_run=True,
+        )
+        assert ok is True
+        assert called is False
+
+    def test_blank_label_falls_back_to_kill_and_spawn(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # An empty/whitespace RESTART_LABEL is "not configured" — exactly the
+        # knob state install_liveness_watchdog.py seeds — so the legacy path
+        # (kill port group + detached launcher spawn) stays in force.
+        monkeypatch.setattr(watchdog, "find_port_listener_pids", lambda port, **k: [])
+        popen_calls: list[object] = []
+
+        class _FakePopen:
+            def __init__(self, argv: object, **kwargs: object) -> None:
+                popen_calls.append(argv)
+
+        monkeypatch.setattr(watchdog.subprocess, "Popen", _FakePopen)
+        launcher = tmp_path / "run-factory-isolated.sh"
+        launcher.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        ok = watchdog.reboot_factory(
+            workspace=tmp_path / "ws",
+            factory_branch="staging",
+            dashboard_port=5555,
+            launcher=launcher,
+            restart_label="   ",
+            dry_run=False,
+        )
+        assert ok is True
+        assert len(popen_calls) == 1
+
+
 def _wire_kernel(
     monkeypatch: pytest.MonkeyPatch, *, decision: object, status: str = "idle"
 ) -> None:
@@ -669,6 +782,41 @@ class TestBootGuardMainWiring:
         # Incident recorded so the next tick does not re-spawn.
         marker = json.loads((tmp_path / "state.json").read_text())
         assert "stale_reboot_at" in marker
+
+    def test_stale_boot_reboot_carries_the_knob_restart_label(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The knob the two installers leave behind (ADR-0135): enabled + label.
+        (tmp_path / "restart.knob").write_text(
+            "RESTART_ENABLED=true\nRESTART_LABEL=com.hydraflow.factory\n",
+            encoding="utf-8",
+        )
+        _wire_kernel(monkeypatch, decision=_reboot_decision())
+        calls: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            watchdog, "reboot_factory", lambda **k: calls.append(k) or True
+        )
+        monkeypatch.setattr(watchdog, "send_notification", lambda *a, **k: None)
+        monkeypatch.setattr(watchdog, "attempt_restart", lambda *a, **k: None)
+
+        watchdog.main(self._args(tmp_path))
+
+        assert len(calls) == 1
+        assert calls[0]["restart_label"] == "com.hydraflow.factory"
+
+    def test_stale_boot_without_label_passes_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _wire_kernel(monkeypatch, decision=_reboot_decision())
+        calls: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            watchdog, "reboot_factory", lambda **k: calls.append(k) or True
+        )
+        monkeypatch.setattr(watchdog, "send_notification", lambda *a, **k: None)
+
+        watchdog.main(self._args(tmp_path))
+
+        assert calls[0]["restart_label"] is None
 
     def test_stale_boot_reboots_at_most_once_per_incident(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

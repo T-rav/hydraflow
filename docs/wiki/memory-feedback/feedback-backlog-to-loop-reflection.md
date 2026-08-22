@@ -21,4 +21,4 @@ When you catch yourself (or a session) **manually clearing a recurring backlog t
 
 Fires at **N=1 when repetition is within the batch** (lighter than the N=2 [[learning-cycle-manual-to-factory]] outer cycle). The anti-pattern: **detector-without-resolver** — escalates to HITL on retry-exhaustion, never asking "is this even real?", so HITL becomes the default sink.
 
-Worked example: the 2026-07-18/19 ADR-drift sweep (~33 issues cleared by hand) → #9976 (`AdrDriftResolverLoop`) + #9662 (amplification). Related: [[project_repo_wiki_feature]], ADR-0056 auditor.
+Worked example: the 2026-07-18/19 ADR-drift sweep (~33 issues cleared by hand) → #9976 (`AdrDriftResolverLoop`) + #9662 (amplification). **Counter-example too:** both loops and the auditor they served were retired (#10540) and deleted (ADR-0136) for a ~70% false-positive rate — reflecting a backlog into a loop only pays when the backlog is a real signal; here the right answer was a deterministic gate, not a second loop to triage the first one's noise. Related: [[project_repo_wiki_feature]], ADR-0056 (superseded by ADR-0136).

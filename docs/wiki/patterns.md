@@ -301,6 +301,43 @@ Every `BaseBackgroundLoop` subclass MUST gate `_do_work` on `self._enabled_cb(se
 ```
 
 
+## Operator Start semantics — and never hand-edit a live `state.json` (#11611)
+
+`POST /api/control/start` is the operator saying **"run the pipeline"**, and it does exactly two things through one shared helper, `operator_start.apply_operator_start` (both branches of the route call it, so they cannot drift apart again):
+
+1. **Clears the `operator_stopped` latch** (#11208, ADR-0135) so a relaunch's boot-time autostart and the liveness kernel stop honouring a Stop that is no longer in effect.
+2. **Removes `DEFAULT_PIPELINE_WORKERS` (`triage`, `plan`, `implement`, `review`, `hitl`) from the disabled set** — in the persisted state *and* in the live orchestrator's in-memory enabled map. Every **other** entry in `disabled_workers` is a deliberate per-worker kill-switch and survives Start untouched: Start is not an "enable everything" button.
+
+Both writes are needed because each is authoritative for a different reader: state is what a cold boot restores from, the in-memory map is what running loops consult through `enabled_cb`. `StateRestorer._restore_disabled_workers` only ever **adds** disabled flags, and `RepoRuntime.start()` reuses the same orchestrator object across a stop/start — so a state-only clear leaves a restarted line still holding `plan: False` in memory.
+
+**Boot-time autostart applies the same transition.** `factory_autostart.maybe_autostart_host` (the `server.py` boot path, #11208) calls the same helper with `clear_latch=False` before `host_runtime.start()`. It has to: `decide_autostart` fires whenever the latch is clear and never looks at `disabled_workers`, so a kill-switch set through `/api/control/bg-worker` (which leaves `operator_stopped` false) would otherwise survive a relaunch as a running-but-dark factory — the #11611 symptom through a different door. Autostart never *clears* the latch; only an operator Start does.
+
+What Start does **not** do: start every registered repo. The factory-level Start brings up the **host** line only (`registry.start_all` was removed — a factory must run fine with zero repos). Each repo line is started individually with `POST /api/runtimes/{slug}/start`, which applies the same pipeline-worker transition to **that line's** state and orchestrator but leaves `operator_stopped` alone — the latch is factory-level, and starting one repo must not re-arm boot autostart for the whole factory.
+
+**The durable, supported per-worker control is the bg-worker API**, not the state file:
+
+```bash
+# port = dashboard_port (HYDRAFLOW_DASHBOARD_PORT, default 5555)
+curl -sX POST localhost:5555/api/control/bg-worker \
+  -H 'Content-Type: application/json' -d '{"name":"plan","enabled":false}'   # kill-switch ON
+curl -sX POST localhost:5555/api/control/bg-worker \
+  -H 'Content-Type: application/json' -d '{"name":"plan","enabled":true}'    # back on
+curl -sX POST localhost:5555/api/control/start                               # latch + pipeline
+curl -s localhost:5555/api/control/status  | jq '.operator_stopped'          # the latch
+curl -s localhost:5555/api/system/workers  | jq '.workers[] | {name, enabled}'
+```
+
+Add `?repo=<slug>` to scope any of them to a registered line instead of the host.
+
+**Never edit the state file (`<data_root>/<repo-slug>/state.json`, i.e. `.hydraflow/<owner>-<repo>/state.json`) on disk while a factory process is alive.** `StateTracker` holds the whole document in memory and rewrites the file on the next `save()` — every accessor (`set_disabled_workers`, `set_operator_stopped`, any worker heartbeat) persists the *in-memory* copy, so the hand edit is silently clobbered, usually within seconds. Observed 2026-08-21: a pre-boot edit setting `disabled_workers: []` came back as `["plan","triage"]` after boot. Stop the process first, or — better — use the API above, which writes both halves.
+
+**Why:** an operator pressing Start reasonably expects the board→READY path to run. The registry branch used to clear only the latch, so the 2026-08-21 launchd boot returned `{"status":"started"}` with `disabled_workers` still `["plan","triage"]` — a factory that looked started and moved nothing, until each worker was re-enabled by hand.
+
+```json:entry
+{"id":"OPERATOR-START-SEMANTICS-PIPELINE-REENABLE-001","source_type":"manual","topic":"patterns","tags":["control-routes","operator-start","kill-switch","disabled-workers","operator-stopped","state-json","dashboard","launchd","adr-0135","adr-0049"],"rule":"POST /api/control/start applies one shared transition (operator_start.apply_operator_start) on both branches: clear the operator_stopped latch AND re-enable DEFAULT_PIPELINE_WORKERS (triage/plan/implement/review/hitl) in BOTH the persisted disabled set and the live orchestrator's in-memory enabled map; every other disabled worker is a durable kill-switch and survives. Start brings up the host line only; POST /api/runtimes/{slug}/start and boot-time factory_autostart.maybe_autostart_host apply the same worker transition with clear_latch=False (only an operator Start clears the latch). Per-worker control is POST /api/control/bg-worker {name, enabled} (+ ?repo=<slug>). Never hand-edit a live state.json: StateTracker rewrites the whole document from memory on the next save.","anti_pattern":"Clearing only the latch on one Start branch (the registry/production path) so Start reports 'started' with disabled_workers still [plan, triage] and no board->READY path; writing only state and not the live orchestrator's enabled map (StateRestorer only ADDS disabled flags, and RepoRuntime.start() reuses the same orchestrator object); letting boot-time autostart skip the transition (decide_autostart never inspects disabled_workers, so a bg-worker kill-switch survives a relaunch as a running-but-dark factory); or editing .hydraflow/<repo>/state.json on disk while the factory runs and expecting it to stick","code_refs":["src/operator_start.py:apply_operator_start","src/dashboard_routes/_control_routes.py","src/dashboard_routes/_state_routes.py","src/factory_autostart.py:maybe_autostart_host","src/state/_worker.py","src/state/_control.py","src/state_restorer.py","src/bg_worker_manager.py","tests/test_operator_stopped_latch_routes.py","tests/regressions/test_start_reenables_pipeline_workers_11611.py","tests/scenarios/test_operator_stop_latch_kernel_scenario.py"],"source_issue":11611,"added":"2026-08-22"}
+```
+
+
 ## HITL Escalation Channel — hitl-escalation label
 
 Trust loops never page humans except by filing a GitHub issue with the `hitl-escalation` label (ADR-0045). File exactly one escalation issue and stop re-filing until the operator resolves it. Body must promise: 'closing this issue clears the attempt counter'. Threshold-based escalation checks the counter BEFORE incrementing—past-threshold ticks are no-ops until reconciliation. Anomalies file with sub-labels (rc-red-attribution-unsafe, principles-stuck) for operator targeting.
@@ -402,7 +439,7 @@ HydraFlow uses **OpenTelemetry → Honeycomb** for distributed tracing (per-phas
 | Ruleset | ID | Target | Allowed merge methods | Required status checks |
 |---|---|---|---|---|
 | `main protect` | `15468404` | `refs/heads/main` (explicit ref, not `~DEFAULT_BRANCH` — `staging` is the GitHub default branch, `main` is the release branch) | `["merge"]` only — squash is rejected (ADR-0042 §Decision: squash from a long-lived integration branch produces a growing-diff regression). RC promotion uses `gh pr merge --merge`. | Full standard CI set + RC promotion gate: `Tests`, `Lint & Format`, `Type Check`, `Security Scan`, `Smoke Tests`, `Scenario Tests`, `Regression Tests`, `Principles Audit`, `quality (.)`, `quality (src/ui)`, **`Resolve RC PR`**, **`Browser Scenarios`**, **`Trust Gate (adversarial corpus, fixture mode)`**, **`Sandbox (rc/* promotion PR full suite)`**. The bold four are the MockWorld + e2e gate that only applies to `rc/* → main` PRs. (Source of truth: [`gates.toml`](../standards/branch_protection/gates.toml); this list is generated.) |
-| `staging protect` | `16066429` | `refs/heads/staging` | `["squash", "merge"]` — agent PRs squash by default; merges accepted for cross-branch fixups. | **2 always-on checks**: `Detect Changes`, `discover-projects`. (ADR enforcement is no longer a required check; it moved to the `adr_touchpoint_auditor` caretaker loop, ADR-0056.) Heavy CI (`Tests`, `Lint`, `Type Check`, etc.) is path-filtered to SKIPPED for docs-only PRs and would block forever if required. Failures still appear in the PR rollup for visible-but-not-enforced gating. The `CI Gate` umbrella job (`ci.yml`, `if: always()`, `needs:` all conditional jobs) now aggregates these path-filter-safe; it runs visibly and can be promoted to the single required context (see `docs/standards/branch_protection/ADDING-A-GATE.md`). |
+| `staging protect` | `16066429` | `refs/heads/staging` | `["squash", "merge"]` — agent PRs squash by default; merges accepted for cross-branch fixups. | **2 always-on checks**: `Detect Changes`, `discover-projects`. (ADR enforcement is no longer a required check of its own: ADR-0136 puts it inside the existing `Tests` lane as `test_no_unresolved_adr_citations`. It was briefly the `adr_touchpoint_auditor` caretaker loop, ADR-0056 — now superseded.) Heavy CI (`Tests`, `Lint`, `Type Check`, etc.) is path-filtered to SKIPPED for docs-only PRs and would block forever if required. Failures still appear in the PR rollup for visible-but-not-enforced gating. The `CI Gate` umbrella job (`ci.yml`, `if: always()`, `needs:` all conditional jobs) now aggregates these path-filter-safe; it runs visibly and can be promoted to the single required context (see `docs/standards/branch_protection/ADDING-A-GATE.md`). |
 
 Both rulesets also enforce: no deletion, no force-push, PR required (no direct pushes). `main protect` additionally enforces code-quality severity=`errors` and code-scanning CodeQL high-or-higher; `staging protect` does NOT (staging is fast integration, and the CodeQL/code-quality gate is enforced on the `rc/* → main` promotion PR instead).
 
@@ -489,4 +526,60 @@ Expose a deep multi-reviewer "ultra" pass as an opt-in review-phase option (#105
 
 ```json:entry
 {"id":"01KYEF98BHWVZEC1S5YEBDJPK3","title":"Opt-in ultra deep-review tier (ADR-0109)","topic":null,"source_type":"compiled","source_issue":10555,"source_repo":null,"created_at":"2026-07-25T00:00:00.000000+00:00","updated_at":"2026-07-25T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
+
+
+## Release policy — stable tags vs the rolling main tip
+
+HydraFlow ships two things that are easy to confuse. **`main` is the rolling integration tip**: `StagingPromotionLoop` cuts an `rc/YYYY-MM-DD-HHMM` PR every `rc_cadence_hours` (default 4h) and merges it once the RC gate (`RC Promotion Scenario` + sandbox shards) is green (ADR-0042). Every `main` SHA has passed that gate, but `main` carries no compatibility promise between promotions and is not a release. **A stable tag (`vX.Y.Z`) is a promise**: the milestone that names it has zero open issues (no open data-loss or wrong-branch paths, no false-close blind spots), `main` CI and the last `RC Promotion Scenario` run are green on the tagged SHA, zero open high-severity code-scanning alerts, no open P0, and the version in `pyproject.toml` / `src/__init__.py` / `src/ui/package.json` matches the tag. Downstream HydraFlow-format repos (amplifier, harvestd, Signal Room, every `make stamp` bootstrap) pin a tag — `git checkout vX.Y.Z` — never `main` (README → "Install a pinned release"; per-release notes in `CHANGELOG.md`). The tag always points at a **promoted `main` SHA**: never at `staging`, never at whatever `HEAD` the operator's checkout happens to be on.
+
+**The cut recipe** (first used for v1.0.0, #11520):
+
+```bash
+# (a) preconditions — every line must come back clean
+gh issue list --milestone "<milestone>" --state open --json number --jq length                     # 0
+gh run list --branch main --workflow CI --limit 1 --json conclusion --jq '.[0].conclusion'          # success
+gh run list --workflow "RC Promotion Scenario" --limit 1 --json conclusion --jq '.[0].conclusion'   # success
+gh api 'repos/{owner}/{repo}/code-scanning/alerts?state=open&severity=high' --jq length             # 0
+gh issue list --label P0 --state open --json number --jq length                                     # 0
+
+# (b) version-bump + CHANGELOG PR → staging; merge it; let the next RC promote it to main
+#     touches pyproject.toml, src/__init__.py, src/ui/package.json (+ package-lock.json), uv.lock, CHANGELOG.md
+gh pr create --base staging --title "chore(release): vX.Y.Z — <name>: version bump, CHANGELOG, pinned-install docs (refs #<release issue>)"
+
+# (c) tag the PROMOTED main SHA and publish the release — by hand
+git fetch origin main
+git log -1 --format='%H %s' origin/main          # confirm this SHA carries the bump (RC promotion of the bump PR)
+git tag -a vX.Y.Z <promoted main sha> -m "vX.Y.Z — <name>"
+git push origin vX.Y.Z
+gh release create vX.Y.Z --title "vX.Y.Z — <name>" --notes-file <the CHANGELOG section for vX.Y.Z>
+```
+
+**Nothing cuts the tag for you.** ADR-0011 describes a release-on-epic-close trigger, but `EpicCompletionChecker._do_close_epic` stopped calling `_create_release_for_epic` in #2689 (pinned by `tests/test_release.py::test_no_release_on_epic_close`), and `EpicManager.release_epic` only merges the bundle and flips `released` — the primitive has no production caller (#11569), and before #11517 it would have tagged the factory checkout `HEAD` rather than `main`. Until #11569 re-attaches the primitive to a chosen trigger, step (c) is manual: run it in a checkout whose `origin/main` was just fetched and pass the SHA explicitly — a bare `git tag vX.Y.Z` tags the current `HEAD`, which on a factory host is `staging` or an agent branch.
+
+**Why:** Downstream repos need a SHA they can name and trust; "latest main" moves every 4h, and the only automatic tagging path was found to be caller-less and pointed at the wrong ref class (#11517, #11569). Making the promise explicit (milestone clear + gates green + tag on promoted `main`) and the mechanism manual-until-wired keeps the tag honest.
+
+
+```json:entry
+{"id":"RELEASE-POLICY-STABLE-TAG-001","source_type":"manual","topic":"patterns","tags":["release","tag","semver","main","staging","rc-promotion","downstream","adr-0042","adr-0011","changelog"],"rule":"main is the rolling integration tip (RC-promoted every rc_cadence_hours, ADR-0042), not a release. A stable vX.Y.Z tag promises: milestone at 0 open, main CI + last RC Promotion Scenario green, zero open high code-scanning alerts, no open P0, version files match the tag. Cut it by hand on the promoted main SHA after the bump PR lands via RC: fetch origin main, tag -a <main sha>, push the tag, gh release create with the CHANGELOG section. The ADR-0011 epic-close trigger has not fired since #2689 (#11569) — nothing tags automatically.","anti_pattern":"Telling downstream repos to build on main, or running a bare `git tag vX.Y.Z` without an explicit ref so the tag lands on staging / a checkout HEAD instead of the promoted main SHA","code_refs":["CHANGELOG.md","README.md","pyproject.toml","src/__init__.py","src/epic.py:EpicCompletionChecker._create_release_for_epic","docs/adr/0042-two-tier-branch-release-promotion.md","docs/adr/0011-epic-release-creation-architecture.md"],"source_issue":11520,"added":"2026-08-21"}
+```
+
+## Quality gate tiers — the implementer runs lock-free, CI is the full gate (#11568)
+
+`make quality` runs under a host-wide advisory lock (`scripts/quality_host_lock.py`, #11400): two concurrent full suites on one box oversubscribe it, xdist workers get killed mid-run and the survivor reports failures that pass in isolation (#11219), so the second run waits. That lock guards the **host**, not the code. Routing the implementer's post-build verification through it serialized every worker after every build and every quality-fix round — 10–15 min queued per round with three workers on one lock, while the dashboard reported `max_workers` parallelism the lock removed (measured in #11568: implement attempts per issue 1.2 → 2.2). Operator ruling 2026-08-21: take `make quality` off the host lock on the implement path; CI (9–11 min) is the full gate.
+
+**Three tiers, each honest about what it checks:**
+
+| Who | Command | Lock | Suite |
+|---|---|---|---|
+| Implementer post-build gate (`AgentRunner._verify_quality`, every build + every quality-fix round) | `make quality-lite`, then `make test-impacted BASE_REF=origin/<base> IMPACTED_ARGS=--bounded` (repos without the target: `test_command`) | none | lint + pyright + bandit, then the tests the diff plausibly touches — **bounded**: `--bounded` never emits `__ALL__`, a high-fanout diff keeps its name-mapped tests + the floor and defers the full suite to CI |
+| CI on the PR | the workflow lanes | one suite per runner | full — the merge gate |
+| Humans / operators, HITL + diagnostic runners (`BaseRunner._verify_quality`), the RC gate | `make quality` | host lock | full, one at a time by design |
+
+The implementer prompt already says "`make quality-lite` as a sense check; CI runs the full test suite" and `.githooks/pre-push` already runs `make quality-lite` — the runner's gate now matches both. `implement_full_quality_gate=True` (`HYDRAFLOW_IMPLEMENT_FULL_QUALITY_GATE`, System tab › CI & Quality) restores the locked full run for a repo that needs it.
+
+**Why not "N concurrent unlocked full suites":** that is the #11219 thrash the lock exists to prevent; "off the lock" means "do not run the full suite locally", not "run it without the guard". **Why not `max_workers` = lock width:** it would make the dashboard truthful but keep the 10–15 min round — the waste is the round, not the lie.
+
+```json:entry
+{"id":"QUALITY-GATE-TIERS-IMPLEMENT-LOCK-FREE-001","source_type":"manual","topic":"patterns","tags":["quality-gate","host-lock","implementer","quality-lite","test-impacted","ci","throughput","max_workers","adr-0044"],"rule":"The implementer's post-build gate (AgentRunner._verify_quality, after every build and every quality-fix round) runs lock-free: make quality-lite, then make test-impacted IMPACTED_ARGS=--bounded (never __ALL__; repos without the target run test_command). CI is the one full-suite gate per PR. Humans, HITL/diagnostic runners and the RC gate keep the host-locked make quality — the lock guards the host and those paths are one-at-a-time. implement_full_quality_gate=True restores the locked full run.","anti_pattern":"Routing every implementer's post-build verification through the host-locked full make quality so max_workers workers serialize on one lock (10-15 min per quality-fix round) — or 'fixing' it by running N unlocked full suites concurrently, which is the #11219 host thrash the lock exists to prevent","code_refs":["src/agent.py:AgentRunner._verify_quality","src/base_runner.py:BaseRunner._verify_quality","scripts/impacted_tests.py","scripts/quality_host_lock.py","Makefile","src/config.py","tests/regressions/test_issue_11568_implement_quality_off_host_lock.py","tests/scenarios/test_implement_quality_gate_scenario.py"],"source_issue":11568,"added":"2026-08-21"}
 ```

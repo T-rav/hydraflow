@@ -1,12 +1,21 @@
 # ADR-0056: ADR touchpoint enforcement — synchronous gate → asynchronous caretaker loop
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-05-06
 - **Enforcement:** enforced
 - **Supersedes:** none (the gate it replaces was a piece of CI tooling, not an ADR-blessed decision)
-- **Superseded by:** none
-- **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0045](0045-trust-architecture-hardening.md) (trust-architecture hardening, which originally floated `Skip-ADR:` as a convention). Code: `src/adr_touchpoint_auditor_loop.py:AdrTouchpointAuditorLoop`, `src/adr_drift.py:compute_drift`, `src/adr_drift.py:partition_fleet_drift`, `src/adr_drift.py:FleetDriftBatch`, `src/state/_adr_audit.py:AdrAuditStateMixin`. Additional coverage: `tests/test_adr_drift.py`, `tests/test_loop_wiring_completeness.py` (auto-discovery confirms the loop is wired in all 5 checkpoints).
-- **Enforced by:** pytest:tests/test_adr_touchpoint_auditor_loop.py
+- **Superseded by:** [ADR-0136](0136-adr-drift-enforcement-deterministic-citation-gate.md) — activity-based ADR drift is retired (~70% false positives, #10540/PR #10547); enforcement is now the deterministic cited-symbol CI gate. Both loops and all machinery below were deleted by #11600.
+- **Related:** [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker-loop pattern), [ADR-0045](0045-trust-architecture-hardening.md) (trust-architecture hardening, which originally floated `Skip-ADR:` as a convention). Additional coverage: `tests/test_loop_wiring_completeness.py` (auto-discovery confirmed the loop was wired in all 5 checkpoints).
+- **Enforced by:** (superseded — the loop and its tests were deleted by #11600; ADR-0136 carries the live enforcement)
+
+> **Retired 2026-08-22 (#11600).** This ADR is frozen history. `AdrTouchpointAuditorLoop`,
+> `AdrDriftResolverLoop`, their kill-switches, their `hydraflow-adr-drift` labels, and the
+> pure drift engine (`adr_drift.compute_drift` / `compute_drift_by_adr` /
+> `partition_fleet_drift` / `FleetDriftBatch` / `AdrRollupEntry` / `DriftFinding`) no longer
+> exist. The code citations that named them were removed from the header above rather than
+> left dangling. Everything below documents the decision as it stood; read
+> [ADR-0136](0136-adr-drift-enforcement-deterministic-citation-gate.md) for what enforces
+> ADR-to-code drift today. Rule 4 below (`Skip-ADR:` is gone) survives the supersession.
 
 ## Context
 

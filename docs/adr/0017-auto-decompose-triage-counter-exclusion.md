@@ -5,6 +5,16 @@
 **Enforcement:** enforced
 **Enforced by:** pytest:tests/test_state_machine.py
 
+> **Note (2026-08-21, flag-rot cleanup):** the intake auto-decomposition path
+> this ADR describes (`_maybe_decompose()` and its
+> `epic_decompose_on_intake_enabled` gate) was removed outright after #11298
+> turned it default-OFF (it re-expanded consolidated work at classification
+> time; the demand-driven ADR-0105 stall terminal is the decomposition
+> mechanism). The decision below is therefore vacuously satisfied today —
+> no triage-time decomposition exists to exclude from the counter — and is
+> kept as the recorded precedent should an intake-time split vector ever be
+> reintroduced. The prose below describes the pre-removal code.
+
 ## Context
 
 In the triage phase (`src/triage_phase.py:TriagePhase.triage_issues`), when an issue scores above the
@@ -98,7 +108,7 @@ is **intentional and should remain as-is**. The rationale:
 
 - Source memory: #1729
 - Original implementation: PR #1689 (issue #1542)
-- `src/triage_phase.py:TriagePhase._maybe_decompose`, `src/triage_phase.py:TriagePhase.triage_issues`
+- `src/triage_phase.py` (`_maybe_decompose` removed in the flag-rot cleanup — see the Note above), `src/triage_phase.py:TriagePhase.triage_issues`
 - `src/state/__init__.py:StateTracker` — `StateTracker.increment_session_counter()`,
   `StateTracker.mark_issue()`
 - ADR-0001 (Five concurrent async loops — triage is loop 1)

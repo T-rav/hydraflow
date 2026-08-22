@@ -78,7 +78,6 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from base_background_loop import BaseBackgroundLoop, LoopDeps
@@ -86,6 +85,7 @@ from config import HydraFlowConfig
 from dedup_store import DedupStore
 from exception_classify import reraise_on_credit_or_bug
 from loop_fitness import FitnessContext, FitnessKind, LoopFitness
+from package_resources import resource_path
 from rollup_issue_manager import RollupIssueManager
 
 if TYPE_CHECKING:
@@ -798,12 +798,7 @@ class PrRedRepairLoop(BaseBackgroundLoop):
 
     async def _build_dispatch_prompt(self, pr: Any, *, log_text: str) -> str:
         """Render the ``pr_red_fix.md`` envelope with this PR's context."""
-        envelope_path = (
-            Path(__file__).resolve().parent.parent
-            / "prompts"
-            / "auto_agent"
-            / _PROMPT_TEMPLATE
-        )
+        envelope_path = resource_path("prompts", "auto_agent", _PROMPT_TEMPLATE)
         envelope = envelope_path.read_text()
 
         diffs = await self._fetch_recent_diffs(pr.pr)

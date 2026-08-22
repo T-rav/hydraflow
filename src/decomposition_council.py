@@ -526,7 +526,9 @@ def _extract_json_object(
 ) -> dict[str, object] | None:
     """Extract a JSON object from *transcript*: direct parse, then code fence.
 
-    Mirrors ``triage.py._parse_decomposition``'s two-strategy approach.
+    Mirrors the two-strategy approach of the retired intake parser
+    (``triage.py``'s ``_parse_decomposition``, removed with the #11298
+    intake auto-decomposition path).
     *required_key* disambiguates which pass's shape is being parsed (e.g.
     direction's ``children`` vs. validation's ``decision``).
     """

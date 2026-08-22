@@ -15,6 +15,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 import credit_failover
 from goal_supervisor_loop import GoalSupervisorLoop, NudgeResult
 from supervisor_observation import (
@@ -461,3 +463,42 @@ async def test_giveup_window_escalates_on_repeat(
     assert second["nudges"] == 0
     assert second["escalations"] >= 1
     assert len(nudger.executed) == 1  # only nudged once, then escalated
+
+
+def test_goal_supervisor_cost_estimate_is_anthropic_shaped(tmp_path) -> None:
+    """Fable runs on the Claude CLI: its usage EXCLUDES cache even if the
+    configured supervisor model's one-shot table flag says inclusive."""
+    import json
+    from unittest.mock import MagicMock, patch
+
+    from goal_supervisor_runner import GoalSupervisorRunner
+    from model_pricing import ModelPricingTable
+    from tests.helpers import ConfigFactory
+
+    config = ConfigFactory.create()
+    pricing_path = tmp_path / "pricing.json"
+    pricing_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "models": {
+                    config.goal_supervisor_model: {
+                        "input_cost_per_million": 1.4,
+                        "output_cost_per_million": 4.4,
+                        "cache_read_cost_per_million": 0.26,
+                        "input_includes_cache": True,
+                    }
+                },
+            }
+        )
+    )
+    runner = GoalSupervisorRunner(config=config, event_bus=MagicMock())
+    stats = {"input_tokens": 5_000_000, "cache_read_input_tokens": 4_000_000}
+
+    with patch(
+        "goal_supervisor_runner.load_pricing",
+        return_value=ModelPricingTable(pricing_path),
+    ):
+        estimate = runner._estimate_cost(stats, usage_shape="anthropic")
+
+    assert estimate == pytest.approx((1.4 * 5_000_000 + 0.26 * 4_000_000) / 1e6)

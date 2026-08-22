@@ -32,7 +32,7 @@ from pydantic.alias_generators import (
 )
 from typing_extensions import TypedDict
 
-from src.pending_concerns import AdversarialState
+from pending_concerns import AdversarialState
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -526,6 +526,46 @@ class PlannerStatus(StrEnum):
     FAILED = "failed"
 
 
+class TestAdequacyOutcome(BaseModel):
+    """Telemetry for one test-adequacy gate evaluation (#11593 seam 3).
+
+    Recorded whenever the gate rejects a run or a repair pass runs, so the
+    independent verifier can be calibrated later (join against the escape
+    ledger, ADR-0127) and the System tab can show why implement attempts die.
+    Rides ``LoopResult.test_adequacy`` out of ``AgentRunner._run_skill``,
+    then ``WorkerResult.test_adequacy`` into the run manifest.
+    """
+
+    passed: bool = Field(
+        description="Final gate verdict after any repair passes",
+    )
+    verdict_source: (
+        Literal["llm-fail", "verifier-override", "coverage-delta"] | None
+    ) = Field(
+        default=None,
+        description=(
+            "What produced the final failing verdict: the finder LLM, the "
+            "independent verifier override, or the deterministic coverage "
+            "delta. None when the final verdict passed."
+        ),
+    )
+    findings: list[str] = Field(
+        default_factory=list,
+        description="Concrete gaps from the final failing verdict (bounded)",
+    )
+    repair_passes_used: int = Field(
+        default=0, ge=0, description="In-run repair passes spent (#11593 seam 1)"
+    )
+    repair_outcomes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Per-pass outcome: 'verdict-flipped' (repair fixed the gaps), "
+            "'still-failing' (re-check failed again), 'no-change' (the pass "
+            "wrote nothing and was burned)"
+        ),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class LoopResult:
     """Named result from internal agent verification/fix loops.
@@ -538,6 +578,9 @@ class LoopResult:
     passed: bool
     summary: str
     attempts: int = 0
+    #: Test-adequacy gate telemetry (#11593); None for every other loop and
+    #: for clean first-pass adequacy verdicts.
+    test_adequacy: TestAdequacyOutcome | None = None
 
 
 class NewIssueSpec(BaseModel):
@@ -891,6 +934,14 @@ class WorkerResult(BaseModel):
     )
     pr_info: PRInfo | None = Field(
         default=None, description="Pull request info if a PR was created"
+    )
+    test_adequacy: TestAdequacyOutcome | None = Field(
+        default=None,
+        description=(
+            "Test-adequacy gate telemetry (#11593): set whenever the gate "
+            "rejected the run or an in-run repair pass ran; recorded into "
+            "the run manifest by the implement phase"
+        ),
     )
 
 
@@ -1450,6 +1501,10 @@ class PipelineStats(BaseModel):
     queue: QueueStats = Field(default_factory=QueueStats)
     throughput: ThroughputStats = Field(default_factory=ThroughputStats)
     uptime_seconds: float = 0.0
+    #: Session counts of failed implement runs by failure class (#11593):
+    #: {test_adequacy, timeout, zero_commit, diff_sanity, quality, scope,
+    #: other}. Empty until the first classified failure.
+    implement_failures: dict[str, int] = Field(default_factory=dict)
 
 
 class RepoRuntimeInfo(BaseModel):
@@ -1542,6 +1597,12 @@ class SessionCounters(BaseModel):
     reviewed: int = 0
     merged: int = 0
     session_start: str = ""
+    #: Failed implement runs by failure class (#11593 seam 3): keys are
+    #: ``implement_failure_class.FAILURE_CLASSES`` (test_adequacy, timeout,
+    #: zero_commit, diff_sanity, quality, scope, other). Surfaced through
+    #: ``PipelineStats.implement_failures`` so the System tab can show why
+    #: attempts die, not just how many ran.
+    implement_failures: dict[str, int] = Field(default_factory=dict)
 
 
 class LifetimeStats(BaseModel):
@@ -2277,16 +2338,10 @@ class StateData(BaseModel):
     # issues per uncovered method. See `_handle_rollup` in
     # `fake_coverage_auditor_loop.py`.
     fake_coverage_rollup_issues: dict[str, int] = Field(default_factory=dict)
-    # AdrTouchpointAuditorLoop (ADR-0056) — cursor is ISO-8601 of last-scanned merged PR.
-    adr_audit_cursor: str = Field(default="")
-    adr_audit_attempts: dict[str, int] = Field(default_factory=dict)
-    # Per-ADR rollup tracking (#8987). Keyed by "ADR-NNNN"; value carries the
-    # rollup issue number + the set of PR numbers currently listed in the body.
-    # Used so subsequent ticks update the body in-place rather than re-filing.
-    adr_rollup_issues: dict[str, dict] = Field(default_factory=dict)
     # AdrConformanceLoop (ADR-0100) — remediation attempt counters + rollup
-    # tracking. Mirrors adr_audit_attempts/adr_rollup_issues above under a
-    # distinct namespace so the two auditors' counters never collide.
+    # tracking. (ADR-0136 removed the sibling adr_audit_*/adr_rollup_issues
+    # slice with AdrTouchpointAuditorLoop; StateData is extra="ignore", so any
+    # of those keys still on disk is dropped silently — no migration needed.)
     adr_conformance_attempts: dict[str, int] = Field(default_factory=dict)
     adr_conformance_rollup_issues: dict[str, dict] = Field(default_factory=dict)
     # Generic rollup tracking for RollupIssueManager (#9359 hygiene). Keyed by
@@ -2841,6 +2896,16 @@ class ControlStatusResponse(BaseModel):
     # The React UI renders MockWorldBanner when this is True so operators
     # can never confuse a sandbox tab with a production tab.
     mockworld_active: bool = False
+    # ADR-0135: the persisted operator-stopped latch (``StateData.
+    # operator_stopped``) — True after ``POST /api/control/stop`` until the
+    # next ``POST /api/control/start``. After a Stop ``status`` reads ``idle``
+    # exactly like a never-started boot, so this is the ONLY signal that lets
+    # the external liveness kernel (``scripts/liveness/boot_guard.py``, which
+    # cannot read StateTracker) tell a deliberate Stop from a dead line and
+    # refrain from re-starting it. Factory-level, not per-repo: Stop halts
+    # every line and latches the HOST state, so the ``repo=__all__`` rollup
+    # and every per-repo response report that one host latch.
+    operator_stopped: bool = False
     # Per-repo breakdown for ``repo=__all__`` aggregate mode (empty for a single
     # repo). Each entry: ``{slug, status, credits_paused_until, mockworld_active,
     # config}``. The top-level fields above are a rollup; ``config`` is the

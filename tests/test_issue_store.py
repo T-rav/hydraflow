@@ -486,6 +486,41 @@ class TestActiveTracking:
         store.mark_complete(999)  # Should not raise
         assert not store.is_active(999)
 
+    def test_mark_active_with_dashboard_name_counts_against_its_stage(self) -> None:
+        """#11551: ImplementPhase reports ``"implement"``; the counter is READY."""
+        store = _make_store()
+        store.mark_active(42, "implement")
+
+        assert store.is_active(42)
+        assert store.get_active_issues()[42] == STAGE_READY
+        assert store.get_queue_stats().active_count[STAGE_READY] == 1
+
+    def test_mark_complete_after_dashboard_name_bumps_its_stage_counter(self) -> None:
+        store = _make_store()
+        store.mark_active(42, "implement")
+        store.mark_complete(42)
+
+        stats = store.get_queue_stats()
+        assert stats.total_processed[STAGE_READY] == 1
+        assert stats.active_count[STAGE_READY] == 0
+
+    def test_mark_active_with_triage_name_counts_as_find(self) -> None:
+        store = _make_store()
+        store.mark_active(7, "triage")
+        store.mark_complete(7)
+
+        assert store.get_queue_stats().total_processed[STAGE_FIND] == 1
+
+    def test_mark_active_with_unknown_name_is_active_but_uncounted(self) -> None:
+        store = _make_store()
+        store.mark_active(9, "bogus")
+
+        assert store.is_active(9)
+        assert store.get_active_issues()[9] == "bogus"
+        assert sum(store.get_queue_stats().active_count.values()) == 0
+        store.mark_complete(9)
+        assert sum(store.get_queue_stats().total_processed.values()) == 0
+
     def test_is_active_returns_false_for_unknown_issue(self) -> None:
         store = _make_store()
         assert not store.is_active(999)

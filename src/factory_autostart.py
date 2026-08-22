@@ -12,8 +12,9 @@ Two halves, mirroring ``scripts/liveness/boot_guard.py``:
   whether the host line is already running. No I/O; fully unit-testable.
 * a thin async I/O edge (:func:`maybe_autostart_host`) that calls
   :func:`decide_autostart` and, when it authorises a start, drives the host
-  runtime through the exact same call ``POST /api/control/start`` makes
-  (``host_runtime.start()`` + an ``ORCHESTRATOR_STATUS`` event).
+  runtime through the same transition ``POST /api/control/start`` applies
+  (``apply_operator_start`` — which re-enables the default pipeline workers,
+  #11611 — then ``host_runtime.start()`` + an ``ORCHESTRATOR_STATUS`` event).
 
 Called from exactly one production call site: ``server.py``'s
 ``_run_with_dashboard``, right after the dashboard is healthy. Never called
@@ -31,6 +32,7 @@ from typing import TYPE_CHECKING
 
 from events import EventType, HydraFlowEvent
 from models import OrchestratorStatusPayload
+from operator_start import apply_operator_start
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -88,10 +90,11 @@ async def maybe_autostart_host(
     """Fire the host orchestrator start at boot, unless suppressed.
 
     Mirrors the registry branch of ``POST /api/control/start``
-    (``dashboard_routes/_control_routes.py``) exactly: ``host_runtime.start()``
-    then a reset ``ORCHESTRATOR_STATUS`` event, so the dashboard/UI observe
-    boot-time autostart identically to an operator click. Returns whether it
-    started the host line.
+    (``dashboard_routes/_control_routes.py``): the same operator-Start
+    transition (``apply_operator_start``), then ``host_runtime.start()`` and a
+    reset ``ORCHESTRATOR_STATUS`` event, so the dashboard/UI observe boot-time
+    autostart identically to an operator click. Returns whether it started the
+    host line.
     """
     decision = decide_autostart(
         factory_autostart=config.factory_autostart,
@@ -102,6 +105,15 @@ async def maybe_autostart_host(
         logger.info("Factory autostart skipped: %s", decision.reason)
         return False
     logger.info("Factory autostart: %s", decision.reason)
+    # Bring the line up the way an operator Start does (#11611): a host that
+    # boots with its pipeline workers disabled has no path from the board to
+    # READY, and the latch does NOT gate that case — a kill-switch set through
+    # POST /api/control/bg-worker leaves operator_stopped False, so autostart
+    # fires and would otherwise come up running-but-dark.
+    # ``clear_latch=False``: decide_autostart only fires when the latch is
+    # already clear, and autostart must never be the thing that clears an
+    # operator's Stop.
+    apply_operator_start(state, host_runtime.orchestrator, clear_latch=False)
     await host_runtime.start()
     await event_bus.publish(
         HydraFlowEvent(

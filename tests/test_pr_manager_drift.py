@@ -207,12 +207,31 @@ class TestFindLabelDriftAutoCloseKeywords:
     (``Fixes``, ``Closes``, ``Resolves`` — case insensitive). Regex previously
     matched only ``[Ff]ixes`` so PRs using ``Closes``/``Resolves`` were
     silently skipped. See #8725.
+
+    #11481: the narrowed regex was later widened to the canonical
+    ``false_close.CLOSE_KEYWORD_RE`` set, which additionally covers the bare
+    (``Fix``/``Close``/``Resolve``) and past-tense (``Fixed``/``Closed``/
+    ``Resolved``) forms GitHub itself recognizes.
     """
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "keyword",
-        ["Fixes", "fixes", "Closes", "closes", "Resolves", "resolves", "FIXES"],
+        [
+            "Fixes",
+            "fixes",
+            "Closes",
+            "closes",
+            "Resolves",
+            "resolves",
+            "FIXES",
+            "Fix",
+            "Fixed",
+            "Close",
+            "Closed",
+            "Resolve",
+            "Resolved",
+        ],
     )
     async def test_detects_each_auto_close_keyword(
         self, keyword: str, config, event_bus

@@ -24,11 +24,12 @@ from agent_rate_backoff import classify_agent_outcome, get_agent_rate_backoff
 from docker_runner import get_docker_runner
 from events import EventBus, EventType, HydraFlowEvent
 from execution import HostRunner, SimpleResult, SubprocessRunner, get_default_runner
+from model_pricing import USAGE_SHAPE_OPENAI_COMPAT, usage_shape_for_tool
 from models import TranscriptEventData, TranscriptLinePayload
 from process_group import kill_process_group
 from prompt_gate import PromptGateBlockedError, gate_prompt
 from prompt_telemetry import parse_command_tool_model
-from stream_parser import StreamParser
+from stream_parser import StreamParser, parse_result_envelope
 from subprocess_util import (
     PROVIDER_ANTHROPIC,
     CreditExhaustedError,
@@ -583,11 +584,17 @@ def record_inference_telemetry(
     pr_number: int | None = None,
     session_id: str | None = None,
     stats: dict[str, object] | None = None,
+    usage_shape: str | None = None,
 ) -> None:
     """Best-effort :class:`PromptTelemetry` record for non-central spawn paths.
 
     Never raises — a telemetry write failure must not crash the spawn that
     produced it (matches the central runners' best-effort recording).
+
+    ``usage_shape`` stamps how the counts were produced (see
+    :func:`model_pricing.usage_shape_for_tool`); when omitted it is derived
+    from the ``cmd`` head, which for these wrappers is the real producer
+    (CLI name, ``gateway``, or the one-shot provider name).
     """
     from prompt_telemetry import PromptTelemetry  # noqa: PLC0415
 
@@ -605,6 +612,9 @@ def record_inference_telemetry(
             duration_seconds=duration_s,
             success=success,
             stats=stats,
+            usage_shape=(
+                usage_shape if usage_shape is not None else usage_shape_for_tool(tool)
+            ),
         )
     except Exception:
         logger.warning(
@@ -757,6 +767,9 @@ async def stream_claude_with_telemetry(
                 pr_number=attributed_pr,
                 session_id=getattr(event_bus, "current_session_id", None),
                 stats=stats,
+                # The CLI produced the counts: Anthropic-shaped for the Claude
+                # CLI even when the transport marker is ``gateway``/``zai``.
+                usage_shape=usage_shape_for_tool(gate_tool),
             )
         finally:
             try:
@@ -1485,6 +1498,7 @@ async def _claude_cli_complete(
     source: str = "unknown",
     session_id: str | None = None,
     gateway_client: GatewayControlClient | None = None,
+    usage_out: dict[str, object] | None = None,
 ) -> SimpleResult:
     """The Claude CLI backend (today's behaviour). Credit-out surfaces as
     ``rc != 0`` output text, so it is detected and raised here.
@@ -1493,7 +1507,12 @@ async def _claude_cli_complete(
     Anthropic endpoint; ``"zai"`` points the CLI at GLM's Anthropic-compatible
     endpoint via a per-spawn env override (needs *config* for the URL). The
     credit-out is tagged with the resolved provider so a backend cap is scoped
-    to loops on that backend."""
+    to loops on that backend.
+
+    The spawn requests the CLI's JSON result envelope; it is unwrapped here so
+    ``SimpleResult.stdout`` is the bare reply text callers always parsed, and
+    the envelope's token usage is copied into *usage_out* (the
+    ``StreamParser.usage_snapshot`` shape) for the telemetry row."""
 
     from agent_cli import AgentTool, build_lightweight_command  # noqa: PLC0415
 
@@ -1520,6 +1539,7 @@ async def _claude_cli_complete(
                 env = scrub_gateway_spawn_env(env)
             env.update(harness_env)
         result = await runner.run_simple(cmd, env=env, input=cmd_input, timeout=timeout)
+        result = _unwrap_result_envelope(result, usage_out)
         raise_if_credit_exhausted(
             result.stdout,
             result.stderr,
@@ -1529,6 +1549,31 @@ async def _claude_cli_complete(
         return result
     finally:
         await revoke_gateway_key(harness_env)
+
+
+def _unwrap_result_envelope(
+    result: SimpleResult, usage_out: dict[str, object] | None
+) -> SimpleResult:
+    """Collapse a ``--output-format json`` envelope to reply text + usage.
+
+    Non-envelope stdout (bare text, the caller's own JSON reply, MockWorld's
+    stream-json event lines) is returned untouched. An ``is_error`` envelope
+    on a zero exit is surfaced as a failed result — the CLI can exit 0 after a
+    mid-run API error or a max-turns stop, and callers branch on
+    ``returncode`` — while keeping the usage it reports, so the spend is
+    still recorded.
+    """
+    envelope = parse_result_envelope(result.stdout)
+    if envelope is None:
+        return result
+    if usage_out is not None:
+        usage_out.update(envelope.usage)
+    returncode = result.returncode
+    stderr = result.stderr
+    if envelope.is_error and returncode == 0:
+        returncode = 1
+        stderr = stderr or envelope.result
+    return SimpleResult(stdout=envelope.result, stderr=stderr, returncode=returncode)
 
 
 async def _openai_compatible_complete(
@@ -1669,8 +1714,11 @@ async def run_lightweight_agent(
       (TypeError/KeyError/...); transient failures collapse to a
       ``SimpleResult(returncode=-1)`` the caller treats as a soft failure.
     * Records :class:`PromptTelemetry` (``source=``) so the spend is visible
-      to the cost cap / ROI dashboard. ``run_simple`` carries no usage stats,
-      so cost is char-estimated (``token_source="estimated"``).
+      to the cost cap / ROI dashboard. Both backends report real token usage
+      (the CLI via its JSON result envelope, the HTTP providers via the
+      response ``usage``), so the row is token-accurate
+      (``token_source="actual"``); a reply with no usage falls back to a char
+      estimate.
 
     Returns the ``SimpleResult``; callers inspect ``returncode``/``stdout`` as
     before. Lightweight LLM spawns MUST route through this helper rather than
@@ -1741,14 +1789,14 @@ async def run_lightweight_agent(
     success = False
     record_row = False
     result = SimpleResult(returncode=-1)
-    # Real token usage from the OpenRouter API (None on the CLI path, which has
-    # no usage stats and falls back to a char estimate).
-    usage_stats: dict[str, object] | None = None
+    # Real token usage, filled by whichever backend runs: the HTTP providers
+    # copy the response ``usage`` in; the CLI path unwraps its JSON result
+    # envelope. Stays empty (-> char estimate) when the spawn never answered.
+    usage_stats: dict[str, object] = {}
     backend = _OPENAI_COMPAT_BACKENDS.get(transport_provider)
     try:
         try:
             if backend is not None:
-                usage_stats = {}
                 result = await _openai_compatible_complete(
                     provider=transport_provider,
                     base_url=backend.base_url(config),
@@ -1773,6 +1821,7 @@ async def run_lightweight_agent(
                     source=source,
                     session_id=session_id,
                     gateway_client=gateway_client,
+                    usage_out=usage_stats,
                 )
         except TimeoutError:
             # ``asyncio.wait_for`` raises a *bare* TimeoutError whose ``str()``
@@ -1815,6 +1864,11 @@ async def run_lightweight_agent(
                     issue_number=issue_number,
                     pr_number=pr_number,
                     session_id=session_id,
+                    usage_shape=(
+                        USAGE_SHAPE_OPENAI_COMPAT
+                        if backend is not None
+                        else usage_shape_for_tool(tool)
+                    ),
                     stats=usage_stats,
                 )
         finally:

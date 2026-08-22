@@ -37,6 +37,7 @@ from models import (
     ControlStatus,
     OrchestratorStatusPayload,
 )
+from operator_start import apply_operator_start
 from prompt_telemetry import PromptTelemetry
 from route_types import (
     REPO_ALL,
@@ -193,11 +194,6 @@ _bg_worker_defs = [
     # enforced by tests/test_loop_wiring_completeness.py). Labels/descriptions mirror
     # ui/src/constants.js BACKGROUND_WORKERS. ---
     (
-        "adr_touchpoint_auditor",
-        "ADR Touchpoint Auditor",
-        "Scans recently-merged PRs for ADR drift — cited src/ modules changed without the ADR being updated. Replaces the synchronous touchpoint gate. See ADR-0056.",
-    ),
-    (
         "adr_conformance",
         "ADR Conformance",
         "Evaluates every Accepted ADR's `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100.",
@@ -353,11 +349,6 @@ _bg_worker_defs = [
         "The capstone residual monitor (read-only, Pattern B): reads the four instrument ledgers, gives each of five families its own Shewhart control limit, and computes the green-while-dying verdict (green/watch/diverging) — adverse drift across ≥3 families sustained over 2 windows while primary health is green. `diverging` files ONE never-batched find + HITL per episode; `watch` is a dashboard state change only. Never gates or fixes. See #10373.",
     ),
     (
-        "adr_drift_resolver",
-        "ADR Drift Resolver",
-        "Triage-before-escalate for adr_touchpoint_auditor's ADR-drift rollups: one LLM call classifies each as consistent (auto-close), real/over/dead-citation drift (relabel hydraflow-find with an ADR-edit brief), or low-confidence (HITL, rare). Fail-closed — only a confident consistent verdict auto-closes. See #9976.",
-    ),
-    (
         "issue_refinement",
         "Issue Refinement",
         "Backlog-wide duplicate detection, priority scoring, and a rolling operator digest issue.",
@@ -461,8 +452,6 @@ _WORKER_SOURCE_ALIASES: dict[str, tuple[str, ...]] = {
     "review": ("reviewer", "merge_conflict", "fresh_rebuild"),
 }
 
-_DEFAULT_PIPELINE_WORKERS = ("triage", "plan", "implement", "review", "hitl")
-
 
 def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
     """Register control-related routes on *router*."""
@@ -535,6 +524,16 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         once the factory is running — the factory runs fine with zero repos and
         must never force them all on. (Previously this called
         ``registry.start_all`` and booted every registered repo.)
+
+        Both branches apply the identical operator-Start transition
+        (``apply_operator_start``): clear the operator-stopped latch (#11208)
+        AND re-enable the default pipeline workers (#11611). ``ctx.state`` /
+        ``ctx.get_orchestrator()`` ARE the host line's state and orchestrator
+        in production — the host runtime is built with
+        ``RepoRuntime.from_shared(config, bus, state)`` and
+        ``Dashboard._get_orchestrator`` returns the host runtime's orchestrator
+        — so the host line is what both branches transition, which is exactly
+        the line Start brings up.
         """
         registry = ctx.registry
         if registry is not None:
@@ -544,10 +543,11 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                     {"error": "No host runtime registered"}, status_code=501
                 )
             # An explicit Start is the operator's intent regardless of whether
-            # the host was already running — clear the operator-stopped latch
-            # (#11208) so a future relaunch's boot-time autostart isn't
-            # suppressed by a stop that's no longer in effect.
-            ctx.state.set_operator_stopped(False)
+            # the host was already running — apply the transition either way so
+            # a future relaunch's boot-time autostart isn't suppressed by a stop
+            # that's no longer in effect, and so a host that came up with its
+            # pipeline workers disabled gets a path from the board to READY.
+            apply_operator_start(ctx.state, ctx.get_orchestrator())
             if not host_rt.running:
                 await host_rt.start()
             await ctx.event_bus.publish(
@@ -563,16 +563,9 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
         if orch and orch.running:
             return JSONResponse({"error": "already running"}, status_code=409)
 
-        # Explicit Start clears the operator-stopped latch (#11208) — see the
-        # registry branch above for why.
-        ctx.state.set_operator_stopped(False)
-
-        # Remove pipeline workers from the disabled set
-        existing_disabled = ctx.state.get_disabled_workers()
-        pipeline_names = set(_DEFAULT_PIPELINE_WORKERS)
-        cleaned = existing_disabled - pipeline_names
-        if cleaned != existing_disabled:
-            ctx.state.set_disabled_workers(cleaned)
+        # Same transition as the registry branch above — one helper, so the
+        # two branches cannot drift apart again (#11611).
+        apply_operator_start(ctx.state, orch)
 
         # REUSE an already-wired orchestrator when one is set (e.g. MockWorld's
         # air-gapped fake-wired orch, or an orch a prior Start left stopped)
@@ -784,6 +777,10 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                     commits_behind=commits_behind,
                 ),
                 mockworld_active=mockworld_any,
+                # Factory-level latch (ADR-0135): Stop latches the host state
+                # only, so the rollup reports that — not an OR over per-repo
+                # states that never carry it.
+                operator_stopped=ctx.state.get_operator_stopped(),
                 repos=per_repo,
             )
             data = response.model_dump()
@@ -805,6 +802,7 @@ def register(router: APIRouter, ctx: RouteContext) -> None:  # noqa: PLR0915
                 commits_behind=commits_behind,
             ),
             mockworld_active=mockworld_active,
+            operator_stopped=ctx.state.get_operator_stopped(),
         )
         data = response.model_dump()
         data["current_session_id"] = current_session

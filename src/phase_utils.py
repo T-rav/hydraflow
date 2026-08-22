@@ -440,7 +440,11 @@ async def store_lifecycle(
     Args:
         store: The issue store that tracks active/complete status.
         issue_number: GitHub issue number to mark.
-        stage: Pipeline stage name (e.g. ``"plan"``, ``"review"``).
+        stage: Pipeline stage name (e.g. ``"plan"``, ``"review"``). Either
+            the internal ``IssueStoreStage`` value or its dashboard-facing
+            display name (``"implement"`` for READY) is accepted — the store
+            normalizes via ``issue_store.resolve_issue_store_stage`` so the
+            active/throughput counters key on one vocabulary (#11551).
 
     Usage::
 

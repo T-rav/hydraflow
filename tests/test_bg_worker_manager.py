@@ -181,18 +181,18 @@ class TestInterval:
                 f"{mgr.get_interval(name)} vs {poll}"
             )
 
-    def test_adr_touchpoint_auditor_uses_config_interval(
+    def test_caretaker_loop_uses_config_interval(
         self, config: HydraFlowConfig, state: Any
     ) -> None:
         # Regression for #8671/#8652: interval must come from the loop's
         # _get_default_interval(), not fall through to poll_interval (30s).
+        # Originally pinned on adr_touchpoint_auditor (loop removed by
+        # ADR-0136); re-pointed at its surviving ADR-governance sibling —
+        # the guard is about the fall-through, not any one loop.
         fake = MagicMock()
-        fake._get_default_interval.return_value = config.adr_touchpoint_auditor_interval
-        mgr = BGWorkerManager(config, state, {"adr_touchpoint_auditor": fake})
-        assert (
-            mgr.get_interval("adr_touchpoint_auditor")
-            == config.adr_touchpoint_auditor_interval
-        )
+        fake._get_default_interval.return_value = config.adr_conformance_interval
+        mgr = BGWorkerManager(config, state, {"adr_conformance": fake})
+        assert mgr.get_interval("adr_conformance") == config.adr_conformance_interval
 
     def test_persists_to_state(self, manager: BGWorkerManager) -> None:
         manager.set_interval("x", 99)

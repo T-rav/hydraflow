@@ -1,34 +1,34 @@
 {
   "artifacts": {
     "adr-assertion-density.md": {
-      "content_sha": "03bf70aaf5d4945dab934da2dcad497becc7cf7a45895a2c7b606cb74e7cf4c5"
+      "content_sha": "c7eb07ef62ad6758019d2a94334ec0339ebd21884f24e17b26456c2bdf98ad66"
     },
     "adr-conformance.md": {
-      "content_sha": "fd0deec8a876e39973acb39ef32525dba6808fff6ee8716eace20cee1a6ae55c"
+      "content_sha": "19ea3894b6ea98ae4aeecfab12ab5fe68d5a86f389979dffd6a0216b58e9c039"
     },
     "adr-enforcement.md": {
-      "content_sha": "b0f446e129197ab91f7cff79d49e7efbb7fe457b03b551bee136493dae9f1bba"
+      "content_sha": "2cb3bdf525459a9a27dd99ca7372c5c8ba0ea715eccd7c314e45e2de766d4097"
     },
     "adr-falsifiability.md": {
-      "content_sha": "a3a535e33b734f2b970ec63cdab139ad09e866a7e79e257664bb9ac518144681"
+      "content_sha": "c9e7e0bc74ddd90204f3f12570502682e908a385cebb4f56efbea457f7289f39"
     },
     "adr_xref.md": {
-      "content_sha": "51325a7afd79bc5b1a7d1090a694aa1958a0cae4387556a65264fb17e7a4da94"
+      "content_sha": "fcc0b125d719ae01c316bb41b17aa3a318903ce4160cf364d9517788ecdc5b0d"
     },
     "ai_system_inventory.md": {
-      "content_sha": "98182cc57073c3dc1808acccbb33276255e4c65d63b03415e114186019ae63e5"
+      "content_sha": "2381f3afd37771426b714ba2c452b287d8947a371cc36bed4cd6c49059a93255"
     },
     "changelog.md": {
-      "content_sha": "335bf8e18e580f6fa67cff575d286516d9fff78402c0b3c3dc06cbf707b7b06b"
+      "content_sha": "d4cdb517f37434172a45180e3ab0da1660342b94d39c83f22e6bb26783f454b6"
     },
     "coverage_matrix.md": {
-      "content_sha": "43d824a30a8579b12e24a69507a350bf6dea0d3a439ed7d51ef88f47476c3928"
+      "content_sha": "e577c48a967a117dde6114523719893b7fd4b0ab5f5cbd1802308c3df917184f"
     },
     "events.md": {
-      "content_sha": "4102b85691d1dc25c404bfb332aab10a8aa42c2f95ff43d6dac94513ff41aebe"
+      "content_sha": "9727dde17137d399cdfa37aac2f7cf50349945dd73f5c6408cf5e315c2f882ae"
     },
     "functional_areas.md": {
-      "content_sha": "bd045a39e58ec311f5b7ab2e1d2069e884a882cc764345a886eac9c240809023"
+      "content_sha": "f83319abd0865b55e7b1f487729df5f7f52d9a9c1d85b2706e32e6482ca3f95e"
     },
     "gauntlet-calibration.md": {
       "content_sha": "a04ac9289e3456ea2de979818193f105d5d69d3d08c0f19d77e8008ec226502d"
@@ -37,29 +37,29 @@
       "content_sha": "3a9f46c2a2264d70cfa9fc9ad00212cfb2c0fe358af60acc3c7a7f09aa0126de"
     },
     "loops.md": {
-      "content_sha": "bf9ca55049491b54114c61afa02a2b263f31f801f0e898d9e9a8bcb72566bf53"
+      "content_sha": "6a7c9b65ad80e93896ecd8343b52e4d1b75e7c67443f36857449ded15a42eecc"
     },
     "mockworld.md": {
-      "content_sha": "ddff9ec2f53a774c9060dcd601333de49ef089cda348aa4c2b56d957c2f4030a"
+      "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "357929f200a4367b2b213a169e39367bde1f8b8e23e186f1ee5e3342b06f2ca9"
+      "content_sha": "f8c477bea40bee30817ab14b7cf6dd332fa0643d575c23beeb2a5530ece3cbd8"
     },
     "ports.md": {
-      "content_sha": "0c430115ec7533dfdcf277d04f457c39308b644ce0368e88e325bdad580600d8"
+      "content_sha": "c5694cc02e165570a5196a4f9443170f984d254d68710cbe41856bdd4da64cc0"
     },
     "traceability_matrix.md": {
       "content_sha": "df86c0747ce17ddad086a080af88c83afde30844363f3dcacab19e9c345fda5b"
     },
     "ubiquitous-language-context-map.md": {
-      "content_sha": "461790aedeeb92e64745ecc069d3f718b787f6c7099023026f07e8eafa566de0"
+      "content_sha": "bec384b2a00e8dd2ff7216babcfd67d509285117ccd1b800fd7ff7f8a11edcba"
     },
     "ubiquitous-language.md": {
-      "content_sha": "4a1b4891b4c5f45bdc2160c40cb8371ce2e322d8b1a4c3495a11c98dee4c4b99"
+      "content_sha": "99396eec211b21e32b3db34f56aaaf9b30b83db32cdd921c7b9f9704b96636eb"
     },
     "vitals-methodology.md": {
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "59e455dafafed7c5b0711aa81d5a8658dce72a91958b397f6e2837646322bb08"
+  "content_sha": "efa960304658c6e4fb5a0b7e0b855ec373f731780e5a2269c42bb27d55628859"
 }

@@ -2,9 +2,6 @@ classes:
   src/adr_reviewer.py:ADRCouncilReviewer:
     loc: 833
     methods: 29
-  src/adr_touchpoint_auditor_loop.py:AdrTouchpointAuditorLoop:
-    loc: 642
-    methods: 22
   src/agent.py:AgentRunner:
     loc: 1408
     methods: 36

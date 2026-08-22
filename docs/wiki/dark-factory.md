@@ -127,7 +127,7 @@ document clearly in the prompt envelope AND rely on principles-audit + CI
 to catch violations. Don't lie about enforcement boundaries — operators
 reading docs during incident triage need to know what's runtime-enforced
 vs what's post-hoc-audited. The Auto-Agent `_envelope.md` revision
-(`prompts/auto_agent/_envelope.md`) is the reference: clearly separates
+(`src/hydraflow_resources/prompts/auto_agent/_envelope.md`) is the reference: clearly separates
 "Enforced by the Claude Code CLI" from "Enforced post-hoc by CI /
 principles audit".
 
@@ -309,10 +309,22 @@ baseline and compares each new trailing ISO week against it. `GET
 /api/diagnostics/token-report`'s `drift` block degrades to `no_baseline` (never
 pinned or the ledger is unreadable/corrupt), `insufficient_data` (fewer than
 `MIN_BASELINE_WINDOWS` — 8, mirroring `VitalsThresholds.min_baseline_windows`
-— pinned windows, or no issues in the trailing week), or `stale` (pinned more
-than `MAX_BASELINE_AGE` — 90 days — ago) instead of ever fabricating a
-verdict. **All three mean the instrument is not watching** — drift is not
-being checked, not that drift was checked and found clean.
+— pinned windows, no issues in the trailing week, or a trailing week the
+loader could not cover completely — the telemetry read died mid-stream, or
+`audit_retention_days_inference_telemetry` falls inside the window so its head
+may already be pruned; #11581), or `stale` (pinned more than
+`MAX_BASELINE_AGE` — 90 days — ago) instead of ever fabricating a verdict.
+**All three mean the instrument is not watching** — drift is not being
+checked, not that drift was checked and found clean.
+
+Telemetry is loaded **by window, never by row count** (`token_drift.
+load_window_rows` streams `inferences.jsonl` via `PromptTelemetry.
+iter_inferences` and keeps every row of `trailing_complete_weeks(now, n)`).
+The original `DRIFT_LOAD_LIMIT = 5000` tail cap went blind in exactly the
+weeks the sensor exists for: 2026-W25 alone carried 24,434 rows, so the open
+week pushed the trailing week out of the cap within ~1.5 days
+(`insufficient_data`, nothing filed) and a cap landing mid-week mis-sampled
+the shares into a confident wrong verdict (#11581).
 
 Re-pin whenever:
 
@@ -343,9 +355,11 @@ concentration baseline. The ledger lands at
 `finder_calibration.CALIBRATION_SUBDIR`; last row wins), needs at least 8
 complete ISO weeks of `inferences.jsonl` telemetry to pin from (`--windows`
 overrides the trailing-week count), and is read back by
-`token_drift.load_and_check_drift` on every `/token-report` request — no
-caretaker loop, no filing; this slice is read-only by design (the filing
-actuator is the deferred sibling issue). Verify a pin landed via
+`token_drift.load_and_check_drift` on every `/token-report` request and by
+`ErosionMetricsLoop` on each tick that saw new commits, which files one
+`hydraflow-find` issue per drifting source per ISO week (#11442,
+`erosion.token_drift_filing`); the engine itself stays read-only — no
+prompt pruning, no config change. Verify a pin landed via
 `curl localhost:<port>/api/diagnostics/token-report | jq .drift`.
 
 ## §5 — Verifying the contract is honored

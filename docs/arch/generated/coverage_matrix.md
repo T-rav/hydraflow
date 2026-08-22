@@ -11,10 +11,8 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | Loop | ADR | Wiki | Generated | Standard | Unit | Scenario | Sandbox |
 |---|---|---|---|---|---|---|---|
 | `ADRReviewerLoop` | ✅ [0079] | ✅ [adr-council-reviewer.md, adr-reviewer-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ✅ `s25_adr_reviewer_no_proposed_adrs.py` |
-| `AdrConformanceLoop` | ✅ [0100, 0104] | ❌ | ✅ loops.md | ❌ | ✅ `test_adr_conformance_loop.py` | ✅ in catalog | ❌ |
-| `AdrDriftResolverLoop` | ✅ [0056] | ✅ [feedback-backlog-to-loop-reflection.md] | ✅ loops.md | ❌ | ✅ `test_adr_drift_resolver_loop.py` | ✅ in catalog | ❌ |
-| `AdrTouchpointAuditorLoop` | ✅ [0056, 0089, 0099, 0100, 0126] | ✅ [adr-index.md, adr-touchpoint-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ✅ `s33_adr_touchpoint_auditor_no_drift.py` |
-| `AutoAgentPreflightLoop` | ✅ [0050, 0063, 0084] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
+| `AdrConformanceLoop` | ✅ [0100, 0104, 0136] | ✅ [adr-index.md] | ✅ loops.md | ❌ | ✅ `test_adr_conformance_loop.py` | ✅ in catalog | ❌ |
+| `AutoAgentPreflightLoop` | ✅ [0050, 0063, 0084] | ✅ [dark-factory.md, gotchas.md, testing.md] | ✅ loops.md | ✅ README.md | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ✅ `s31_auto_agent_preflight_no_escalations.py` |
 | `AutoTightenLoop` | ✅ [0104] | ❌ | ✅ loops.md | ❌ | ✅ `test_auto_tighten_loop.py` | ✅ in catalog | ❌ |
 | `BranchProtectionAuditorLoop` | ✅ [0082] | ❌ | ✅ loops.md | ❌ | ✅ `test_branch_protection_auditor_loop.py` | ✅ in catalog | ✅ `s41_branch_protection_auditor_no_drift.py` |
 | `CIMonitorLoop` | ✅ [0029, 0065] | ✅ [ci-monitor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_ci_monitor_loop.py` | ✅ in catalog | ✅ `s15_ci_monitor_main_branch_red.py` |
@@ -31,7 +29,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `EntryEvidenceLoop` | ✅ [0062, 0078, 0126] | ✅ [edge-proposer-loop.md, entry-evidence-loop.md, term-store.md, term.md] | ✅ loops.md | ✅ README.md | ✅ `test_entry_evidence_loop.py` | ✅ in catalog | ✅ `s24_entry_evidence_no_terms.py` |
 | `EpicMonitorLoop` | ✅ [0080, 0081, 0091] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_monitor_loop.py` | ✅ in catalog | ✅ `s27_epic_monitor_no_epics.py` |
 | `EpicSweeperLoop` | ✅ [0080, 0081, 0091, 0105] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_epic_sweeper_loop.py` | ✅ in catalog | ✅ `s23_epic_sweeper_no_epics.py` |
-| `ErosionMetricsLoop` | ✅ [0120, 0122, 0126] | ✅ [erosion.md] | ✅ loops.md | ❌ | ✅ `test_erosion_metrics_loop.py` | ✅ in catalog | ✅ `s80_erosion_metrics_idle_poll.py` |
+| `ErosionMetricsLoop` | ✅ [0120, 0122, 0126] | ✅ [dark-factory.md, erosion.md] | ✅ loops.md | ❌ | ✅ `test_erosion_metrics_loop.py` | ✅ in catalog | ✅ `s80_erosion_metrics_idle_poll.py` |
 | `EscapeLedgerLoop` | ✅ [0115] | ❌ | ✅ loops.md | ❌ | ✅ `test_escape_ledger_loop.py` | ✅ in catalog | ✅ `s83_escape_ledger_idle_poll.py` |
 | `FailOpenMonitorLoop` | ✅ [0120] | ❌ | ✅ loops.md | ❌ | ✅ `test_fail_open_monitor_loop.py` | ✅ in catalog | ✅ `s84_fail_open_monitor_idle_poll.py` |
 | `FakeCoverageAuditorLoop` | ✅ [0045, 0047, 0056, 0089] | ✅ [fake-coverage-auditor-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_fake_coverage_auditor_loop.py` | ✅ in catalog | ✅ `s29_fake_coverage_auditor_clean.py` |
@@ -60,7 +58,7 @@ Regenerated from the live source tree. Cell vocabulary: ✅ covered, ⚠️ part
 | `RepoWikiLoop` | ✅ [0032, 0053, 0061, 0062, 0064] | ✅ [dark-factory.md] | ✅ loops.md | ✅ README.md | ✅ `test_repo_wiki_loop.py` | ✅ in catalog | ❌ |
 | `ReportIssueLoop` | ✅ [0013, 0018, 0028, 0045, 0120] | ✅ [report-issue-loop.md] | ✅ loops.md | ✅ README.md | ✅ `test_report_issue_loop.py` | ✅ in catalog | ✅ `s19_report_issue_empty_queue.py` |
 | `RetrospectiveLoop` | ✅ [0074, 0093, 0120] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_retrospective_loop.py` | ✅ in catalog | ✅ `s18_retrospective_empty_queue.py` |
-| `RunsGCLoop` | ✅ [0073] | ✅ [architecture-async-control.md] | ✅ loops.md | ✅ README.md | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ✅ `s47_runs_gc_idle_poll.py` |
+| `RunsGCLoop` | ✅ [0073] | ✅ [architecture-async-control.md, gotchas.md] | ✅ loops.md | ✅ README.md | ✅ `test_runs_gc_loop.py` | ✅ in catalog | ✅ `s47_runs_gc_idle_poll.py` |
 | `SampledAuditLoop` | ✅ [0115, 0120] | ❌ | ✅ loops.md | ❌ | ✅ `test_sampled_audit_loop.py` | ✅ in catalog | ✅ `s86_sampled_audit_idle_poll.py` |
 | `SandboxFailureFixerLoop` | ✅ [0052, 0063, 0097, 0101] | ✅ [dark-factory.md, disturbance-dampener-loop.md, feedback-backlog-to-loop-reflection.md] | ✅ loops.md | ✅ README.md | ✅ `test_sandbox_failure_fixer_loop.py` | ✅ in catalog | ✅ `s38_sandbox_fixer_richer_context.py` |
 | `SecondOrderVitalsLoop` | ✅ [0120] | ❌ | ✅ loops.md | ❌ | ✅ `test_second_order_vitals_loop.py` | ✅ in catalog | ✅ `s87_second_order_vitals_idle_poll.py` |

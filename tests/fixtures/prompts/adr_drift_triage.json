@@ -1,7 +1,0 @@
-{
-  "builder": "adr_drift_triage_llm.AdrDriftTriageLLM._build_prompt",
-  "args": {},
-  "faked_deps": {
-    "ctx": "adr_drift_pr_9820"
-  }
-}

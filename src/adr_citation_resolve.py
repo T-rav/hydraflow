@@ -1,10 +1,9 @@
 """Deterministic ADR citation resolver (#10540, #10533).
 
-Violation-based replacement for the activity-based ADR-drift heuristic
-(``adr_drift.compute_drift`` → ``AdrTouchpointAuditorLoop`` →
-``AdrDriftResolverLoop``). Instead of the probabilistic "a cited module
-changed in a PR" signal (~70% false positives), this answers a concrete,
-deterministic question: does every symbol-qualified ``src/...py:Symbol``
+Violation-based replacement for the activity-based ADR-drift heuristic that
+ran as a pair of caretaker loops until ADR-0136 deleted them. Instead of the
+probabilistic "a cited module changed in a PR" signal (~70% false positives),
+this answers a concrete, deterministic question: does every symbol-qualified ``src/...py:Symbol``
 citation in an ADR still resolve against the current source tree?
 
 A citation is *unresolved* (a violation) when:
@@ -45,7 +44,8 @@ if TYPE_CHECKING:
 # is an *illustrative pattern* (``src/*_loop.py``, ``src/**/*.py``,
 # ``src/<domain>/*.py``) an ADR uses in prose to mean "a family of files", not
 # a concrete file to resolve. Such paths never named a single file the old
-# ``compute_drift`` gate could match either, so they are exempt here too.
+# retired activity-based drift gate could match either, so they are exempt
+# here too.
 _GLOB_CHARS = frozenset("*?<>[]")
 
 

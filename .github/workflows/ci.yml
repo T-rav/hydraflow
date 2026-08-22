@@ -89,13 +89,17 @@ jobs:
               # console_ledger filter below, OR'd into the `audit` job's
               # `if:` (#11164; see tests/regressions/test_issue_11164.py).
               - 'agents/**'
-              # prompts/**: the auto-agent Markdown templates are model-bound
-              # prompts. tests/test_audit_prompts.py renders one of them
-              # (preflight_auto_agent) and prompt_observatory reconciles all of
-              # them, so editing a template must run those tests. Found by
+              # src/hydraflow_resources/**: the shipped runtime resources —
+              # the auto-agent Markdown prompts plus the dashboard's fallback
+              # template and JS. They live under src/ so the wheel carries
+              # them (#11589), but `src/**/*.py` does not match a .md/.html,
+              # so they need their own entry. tests/test_audit_prompts.py
+              # renders one prompt (preflight_auto_agent) and
+              # prompt_observatory reconciles all of them, so editing a
+              # template must run those tests. Found by
               # tests/test_ci_path_filter_completeness.py, which exists because
               # this same omission caused two incidents in two days.
-              - 'prompts/**'
+              - 'src/hydraflow_resources/**'
             # console_ledger: a narrower agents/** signal used only to make
             # the `audit` job (which runs `make console-conformance`) fire
             # for ledger-only PRs, without widening core_python's heavier
@@ -118,6 +122,7 @@ jobs:
               - 'src/ui/**'
             ci:
               - '.github/workflows/**'
+              - '.github/actions/**'
             service_registry:
               - 'src/service_registry.py'
             orchestrator:
@@ -127,6 +132,12 @@ jobs:
             dockerfiles:
               - 'Dockerfile*'
               - 'gateway/**/Dockerfile*'
+              # The composite action is HOW Dockerfile.agent is built in every
+              # sandbox lane (buildx + GHCR layer cache). A change to it
+              # changes what those lanes actually run, so it must trip the
+              # same lanes a Dockerfile edit does — otherwise a broken build
+              # path merges with every sandbox job skipped.
+              - '.github/actions/build-agent-image/**'
             compose:
               - 'docker-compose*.yml'
             sandbox_scenarios:
@@ -219,7 +230,7 @@ jobs:
           predicate-quantifier: 'every'
           filters: |
             core_python:
-              - '{src/**/*.py,tests/**,gateway/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,prompts/**,control/**}'
+              - '{src/**/*.py,src/hydraflow_resources/**,tests/**,gateway/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,control/**}'
               - '!src/arch/**'
               - '!tests/architecture/**'
               - '!tests/regressions/**'
@@ -810,13 +821,26 @@ jobs:
         needs.changes.outputs.sandbox_scenarios == 'true' ||
         needs.changes.outputs.config == 'true'
       )
+    # packages:read lets the buildx layer cache be PULLED from GHCR. Read-only
+    # on purpose: this is a pull_request lane, and a PR that can write the
+    # shared cache ref is a cache-poisoning sink. The cache is refreshed by the
+    # post-merge push lane instead.
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
-      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
+      - name: Build agent image (GHCR layer cache)
+        uses: ./.github/actions/build-agent-image
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      # `hydraflow` is deliberately absent — the step above already built and
+      # loaded it. Rebuilding it here would discard the cached layers.
+      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway ui playwright
       - name: Run fast subset (s01, s06, s53, s54, s55, s58, s59, s91)
         run: |
           # Run every scenario and aggregate failures — do NOT early-exit on the
@@ -915,13 +939,21 @@ jobs:
       fail-fast: false # run every shard so all failures surface in one pass
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
+    # Read-only cache access: rc/* → main is still a pull_request context.
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
-      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
+      - name: Build agent image (GHCR layer cache)
+        uses: ./.github/actions/build-agent-image
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway ui playwright
       - name: Run shard ${{ matrix.shard }}/6
         run: python scripts/sandbox_scenario.py run-all --shard ${{ matrix.shard }}/6
       - if: failure()
@@ -962,9 +994,14 @@ jobs:
     # Workflow-level default is contents:read; the failure step files a
     # hydraflow-find issue, which needs issues:write (#10309 follow-up — the
     # nightly's issue-create had silently lacked the scope).
+    #
+    # packages:write — a trusted cache WRITER. Scheduled runs execute the
+    # default-branch workflow against `main`, never PR-authored code, so
+    # refreshing the shared layer cache here cannot be poisoned by a PR.
     permissions:
       contents: read
       issues: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -973,7 +1010,12 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install uv && uv pip install --system -e ".[dev]"
-      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
+      - name: Build agent image (GHCR layer cache)
+        uses: ./.github/actions/build-agent-image
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          push-cache: "true"
+      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway ui playwright
       - name: Run full suite + record metrics
         run: python scripts/sandbox_scenario.py run-all
       - name: Open hydraflow-find issue on failure
@@ -1008,9 +1050,15 @@ jobs:
     # The failure step provisions a label + files/updates a rolling
     # hydraflow-find issue; the workflow-level contents:read default can do
     # neither, so grant issues:write here (#10309 follow-up).
+    #
+    # packages:write — this is THE cache writer for the sandbox lanes. It runs
+    # on every push to staging/main, i.e. on already-merged, already-reviewed
+    # code, so the layer cache it publishes is refreshed on every merge while
+    # never being writable from a pull_request context.
     permissions:
       contents: read
       issues: write
+      packages: write
     concurrency:
       # Merge trains (e.g. the staging batch-merge cascade) push in quick
       # succession; only the newest SHA's verdict matters.
@@ -1028,7 +1076,12 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: uv sync --all-extras
-      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
+      - name: Build agent image (GHCR layer cache — refresh it)
+        uses: ./.github/actions/build-agent-image
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          push-cache: "true"
+      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway ui playwright
       - name: Run s82 (standard PR path + RC promotion path, one boot)
         run: make post-merge-smoke
       - name: File or update rolling post-merge-smoke issue on failure

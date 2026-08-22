@@ -10,7 +10,10 @@ The ladder, reusing existing machinery rather than inventing an escalation:
   1. **Decompose (ADR-0105).** Run ``preflight.decompose_terminal.
      decompose_or_escalate`` — the same terminal the auto-agent uses at its
      attempt cap. On success the non-convergent issue is superseded by an epic
-     of convergent children and ``human-required`` is never applied.
+     of convergent children and ``human-required`` is never applied. The
+     terminal's third verdict, ``already-satisfied`` (#11480: a fix already
+     landed or is in flight), ends the ladder right here — nothing to solve,
+     no relabel, no human; the issue closes with its fix.
   2. **Diagnose.** If the decompose council declines (or decompose isn't
      wired / depth-capped), fall back to the auto-agent diagnose label so the
      diagnose path can resolve-or-dismiss with evidence — still a machine move.
@@ -30,7 +33,11 @@ from typing import TYPE_CHECKING, Any, cast
 from exception_classify import reraise_on_credit_or_bug
 from giveup_window import SelfSolveOutcome
 from preflight.context import PreflightContext
-from preflight.decompose_terminal import DECOMPOSED, decompose_or_escalate
+from preflight.decompose_terminal import (
+    ALREADY_SATISFIED,
+    DECOMPOSED,
+    decompose_or_escalate,
+)
 
 if TYPE_CHECKING:
     from config import HydraFlowConfig
@@ -86,8 +93,9 @@ class PlanRetrySelfSolver:
         )
 
         # Step 1: decompose (ADR-0105). decompose_or_escalate returns
-        # "decomposed" on success or "human-required" when the council declines,
-        # decompose isn't wired, or the depth cap is spent.
+        # "decomposed" on success, "already-satisfied" when a fix for the issue
+        # has already landed (#11480), or "human-required" when the council
+        # declines, decompose isn't wired, or the depth cap is spent.
         try:
             outcome = await decompose_or_escalate(
                 issue_number=issue_id,
@@ -114,6 +122,18 @@ class PlanRetrySelfSolver:
 
         if outcome == DECOMPOSED:
             return SelfSolveOutcome.DECOMPOSED
+
+        if outcome == ALREADY_SATISFIED:
+            # #11480: the terminal found the fix already landed (or in flight)
+            # and has commented the evidence on the issue. Nothing left to
+            # self-solve — no diagnose relabel, no human; the issue stays in
+            # the pipeline and closes with its fix.
+            logger.info(
+                "Issue #%d give-up window: a fix already landed — skipping "
+                "diagnose and human-required (#11480)",
+                issue_id,
+            )
+            return SelfSolveOutcome.ALREADY_SATISFIED
 
         # Step 2: diagnose fallback. Route to the auto-agent diagnose stage for
         # one more autonomous resolve-or-dismiss pass before any human.
