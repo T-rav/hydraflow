@@ -6,10 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `2f4c802` — refactor(review-phase): centralize the extracted spec-check fatal set; guard the promotion seams *(2026-08-22)*
-- `e696db2` — refactor(pr-manager): point the P6.5 audit probe at the extracted label module *(2026-08-22)*
-- `726c2e4` — refactor(pr-manager,review-phase): follow the moved code in the location-keyed gates *(2026-08-22)*
-- `c773ad8` — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold *(2026-08-22)*
+- `6e48915` — fix(driver): close the last doc residues and the provenance sliver (#11533) (#11533) *(2026-08-22)*
+- `341aa80` — fix(driver): correct the B1 reconciliation rule and harden the P0 contracts (#11533) (#11533) *(2026-08-22)*
+- `ab3e5d1` — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold (#11628) (#11628) *(2026-08-21)*
 - `e24b730` — fix(mixins): TYPE_CHECKING-only seam declarations + guard against MRO shadowing (#11631) (#11631) *(2026-08-21)*
 - `5128551` — feat(driver): ADR-0137 narrows ADR-0094, fixes driver contracts, proves the runtime boundary (#11533) (#11627) (#11627) *(2026-08-21)*
 - `980253f` — fix(pools): derive the worker-pool fatal set from one source of truth (#11626) (#11626) *(2026-08-21)*

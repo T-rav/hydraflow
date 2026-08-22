@@ -10,7 +10,7 @@
       "content_sha": "a31a91cb80d7bcd43b2192efac43e9f539ed210fc360d358b76c8e8ff6a7d2d5"
     },
     "adr-falsifiability.md": {
-      "content_sha": "b9abf382ea0f44b10f18b8791ed2ea759f19a0689692fc2bbec00980a220a623"
+      "content_sha": "276d9347fa96e138831934d778c59bf037cf571fe1073f9e3114aa7ddf902e4a"
     },
     "adr_xref.md": {
       "content_sha": "a65b7e1200e8c4ac501fc2793f3ce065c244304eb57aa38bb852d09e324fe0b9"
@@ -19,7 +19,7 @@
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
     "changelog.md": {
-      "content_sha": "02c7211917171059d6fa097d90c2b4bbcb56458246f3a9365ef71d8ea2e5b053"
+      "content_sha": "a629fa0d57a4cb6883ad2545e9023a42d7598c652238d0d54cece12988a9c202"
     },
     "coverage_matrix.md": {
       "content_sha": "e577c48a967a117dde6114523719893b7fd4b0ab5f5cbd1802308c3df917184f"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "eea623dd480350de8a8f8d5917486221817bbc6c1d14dfb38f552ec02a410757"
+  "content_sha": "274384e64bb8da51870ad9b611a181643875a7bee93b428f4291cd48d5085847"
 }

@@ -136,10 +136,11 @@ def test_spec_no_longer_claims_a_thirteen_state_literal() -> None:
 @pytest.mark.parametrize(
     "heading",
     [
-        "### 5.5 Reconcile-from-label (Constraint C5)",
+        "### 5.5 Reconcile-from-recorded-intent (Constraint C5)",
         "### 5.6 Capacity release for non-working drivers (Constraint C6)",
         "### 5.7 SchedulingPolicy / SchedulingView, and the P0 wait bound",
-        "### 5.8 Boundary transaction ordering (Constraint C8)",
+        "### 5.7b Fenced admission (Constraint C7)",
+        "### 5.8 Boundary transaction ordering (Constraints C8 and C9)",
         '## 8a. The quantitative "proven" bar',
         "## 8b. Alternatives considered",
     ],
@@ -205,3 +206,70 @@ def test_adr_0137_answers_each_adversarial_finding(finding: str) -> None:
 def test_adr_0137_records_the_sandbox_verification_constraint() -> None:
     # The condition the conditional GO rests on.
     assert "SANDBOX_UNVERIFIED" in ADR.read_text()
+
+
+# --------------------------------------------------------------------------
+# The corrected B1 reconciliation rule (#11627 adversarial review)
+# --------------------------------------------------------------------------
+
+
+def test_reconciliation_is_recorded_intent_not_bare_priority() -> None:
+    # Priority-only reconciliation silently reverts backward transitions; the
+    # spec must mandate an intent record written before the swap.
+    assert "pending_stage_transition" in SPEC.read_text()
+
+
+def test_spec_names_the_backward_transition_hazard() -> None:
+    text = SPEC.read_text()
+
+    assert "silently undoes the route-back" in text
+
+
+def test_adr_documents_the_backward_swap_reversal() -> None:
+    assert "the route-back is silently undone" in ADR.read_text()
+
+
+def test_adr_records_the_sub_state_commit_constraint() -> None:
+    # DIAGNOSE/HITL_APPLY/PARKED write no label, so C8's commit cannot cover them.
+    assert "C9 (sub-state transitions commit in the ledger)" in ADR.read_text()
+
+
+def test_adr_states_that_the_ledger_still_owns_convergence_state() -> None:
+    # The ADR-0094 axis the first draft failed to engage.
+    text = ADR.read_text()
+
+    assert "remains the sole owner of convergence state" in text
+
+
+def test_adr_quantifies_the_p0_wait_ceiling() -> None:
+    assert "70 minutes" in ADR.read_text()
+
+
+def test_proven_bar_compares_against_the_classic_baseline_not_itself() -> None:
+    text = ADR.read_text()
+
+    assert "`phase_requeue` (classic) baseline" in text
+
+
+def test_adr_names_the_post_hoc_sandbox_exposure_window() -> None:
+    assert "one director turn" in ADR.read_text()
+
+
+def test_spec_splits_the_bundled_p2_row_by_risk() -> None:
+    text = SPEC.read_text()
+
+    assert "| **P2a** |" in text and "| **P2b** |" in text and "| **P2c** |" in text
+
+
+def test_reconciliation_carves_out_external_operator_drift() -> None:
+    # A third label dragged in mid-swap must preempt, not be removed by the driver.
+    assert "external drift, not an interrupted swap" in SPEC.read_text()
+
+
+def test_sub_state_records_are_not_cleared_by_single_label_reconciliation() -> None:
+    # Otherwise C5 rule 1 deletes the very commit record C9 introduces.
+    assert "separate slots" in ADR.read_text()
+
+
+def test_intent_record_staleness_is_defined() -> None:
+    assert "usable" in ADR.read_text() and "phase_attempt` matches" in ADR.read_text()

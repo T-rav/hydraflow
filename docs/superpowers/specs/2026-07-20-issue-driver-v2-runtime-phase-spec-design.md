@@ -1,6 +1,6 @@
 # IssueDriver v2 Runtime — Phase Spec (Scheduling Model as a Selectable Strategy)
 
-**Date:** 2026-07-20 (topology realigned and constraints C5–C8 added 2026-08-22 by #11533)
+**Date:** 2026-07-20 (topology realigned and constraints C5–C9 added 2026-08-22 by #11533)
 **Status:** Design (accepted anchors: ADR-0099, ADR-0137)
 **Issue:** #10038 (companion to #10037 / #10045 — work-queue discipline as a selectable strategy); realigned by #11533
 
@@ -10,7 +10,7 @@
 > carried an 11-state literal without them ever since, so the spec was describing
 > stages that no longer exist. Section 4 below now matches the live topology.
 > Separately, the adversarial panel on #10038 falsified this document's headline
-> crash-safety claim; constraints **C5–C8** and Sections 5.5–5.8 are the response,
+> crash-safety claim; constraints **C5–C9** and Sections 5.5–5.8 are the response,
 > and [ADR-0137](../../adr/0137-fenced-issue-driver-and-director-runtime-boundary.md)
 > is the ADR that narrows ADR-0094's prior rejection so this design may be built at all.
 **Scope:** The runtime phase spec that [ADR-0099](../../adr/0099-orchestration-as-a-control-system.md) assumes but never got. ADR-0099 references v2 phases P2–P5 (`DriverManager`, `SchedulingPolicy`, `Governor`, `PolicyScorecard`, the P5 anchor cutover) as though specified elsewhere; they were not. This document is that specification. It defines the **scheduling model** as a selectable strategy — `phase_requeue` (today's implicit start-stop) vs `issue_controller` (the v2 servo) — and, crucially, states as a **design constraint** (not a late discovery) how `issue_controller` is built without weakening ADR-0002's crash-safety guarantee.
@@ -109,15 +109,24 @@ Bounded by C1: labels remain the sole source of truth; `driver_state` / `Converg
 ### 5.4 Backpressure
 **Constraint C4 (stage-aware WIP caps).** `DriverManager` enforces two limits: a global `max_in_flight` (total live drivers) and a per-expensive-stage cap that reuses today's semantics — no more than `max_workers` drivers in the implement stage, `max_reviewers` in review, etc. A WIP-limited model must not let N drivers pile into implement simultaneously; C4 makes the existing per-phase caps a property the allocator respects, not a throttle the model removes.
 
-### 5.5 Reconcile-from-label (Constraint C5) — the falsified premise, repaired
+### 5.5 Reconcile-from-recorded-intent (Constraint C5) — the falsified premise, repaired
 
 **C1 alone does not deliver "a single unambiguous current label."** `src/pr_manager.py:PRManager.swap_pipeline_labels` adds the new label first and then removes stale ones best-effort, so a crash mid-swap leaves an issue carrying **two** pipeline labels. The spec as first written asserted the guarantee the primitive does not provide.
 
-**Constraint C5 (reconcile-from-label).** Three rules, all mandatory:
+**Constraint C5 (reconcile-from-recorded-intent).** Three rules, all mandatory:
 
-1. **Boot reconciliation reuses the existing tie-break.** `src/issue_store.py:IssueStore._compute_stage_map` already resolves a multi-label issue via `_STAGE_PRIORITY` **most-advanced-label-wins**. The driver does not invent a second reconciliation; it cites and reuses this one. Because the swap always adds the *forward* label first, the tie-break biases correctly forward, so a mid-swap crash resolves to the newer stage.
+1. **Reconciliation is direction-aware.** Priority-based most-advanced-label-wins (`src/issue_store.py:IssueStore._compute_stage_map`, `_STAGE_PRIORITY`) is correct **only for forward transitions**. `swap_pipeline_labels` is direction-agnostic, and this pipeline's crash-interesting edges are backward: a `DIAGNOSE → READY` route-back crashing mid-swap leaves `hydraflow-review` (5) beside `hydraflow-ready` (4) and most-advanced-wins **silently undoes the route-back**; a `HITL_APPLY → READY` resume leaves `hydraflow-hitl` (6) beside `hydraflow-ready` (4) and **silently reverts the resume**. So the driver persists a `pending_stage_transition` record (`from_label`, `to_label`, `epoch`, `phase_attempt`) to the `ConvergenceLedger` **before** every swap, and reconciles like this:
+   A record is **usable** only when its `epoch` is the one being recovered and its `phase_attempt` matches the ledger's; anything older is stale and ignored. Then:
+   - **one pipeline label** → that label is the truth; clear any pending *stage* record. A pending **sub-state** record (C9) is not cleared here — those transitions run with one pipeline label and the record is their commit. Stage and sub-state records occupy separate slots;
+   - **two or more labels, a usable record whose `to_label` is present, and every other present label is its `from_label`** → the recorded `to_label` wins **regardless of direction**; remove the `from_label` and clear the record;
+   - **two or more labels including one outside `{from_label, to_label}`** → external drift, not an interrupted swap. The driver **must not** remove it: it abandons the transition, adopts the externally-set label, and escalates (same preemption rule as rule 2 below);
+   - **two or more labels and no usable record** → fall back to `_STAGE_PRIORITY` most-advanced-wins. This path is unreachable via a driver crash (the record precedes the label add) and exists only for drift the driver did not cause.
+
+   Because the record is written before the label add, every crash inside the non-atomic window falls into case 2. A crash *between* the record and the add — or an add that fails rather than crashes — leaves one label, so case 1 discards the intent and the driver retries under C6; no stale intent survives. The record is consumed and cleared by the first reconciliation that observes it, so it can never be more than one incarnation stale, which is what makes it safe to honour a record written under the epoch recovery has just fenced. `IssueStore`'s behaviour for non-driver issues is unchanged.
 2. **The label is re-read at every phase boundary,** and an externally changed label **preempts** the driver's own state. ADR-0002 documents "drag a label" as the HITL escape hatch; without this rule the next C1 write silently clobbers the operator's edit. `src/driver_contracts.py:admit_dispatch` returns `LIVE_LABEL_CHANGED` for this case.
-3. **DIAGNOSE ambiguity is resolved by rule.** DIAGNOSE shares `hydraflow-review` and is not a suspend transition, so no `SuspendRecord` is written and a crash mid-DIAGNOSE is indistinguishable from a fresh REVIEW by label alone. The rule: **resume at the nominal state and re-detect the route-back fresh.** This is safe because route-back detection is a pure function of the PR's CI state and diff, so re-running it is idempotent — no marker file is needed.
+3. **DIAGNOSE ambiguity is resolved by rule.** DIAGNOSE shares `hydraflow-review` and is not a suspend transition, so no `SuspendRecord` is written and a crash mid-DIAGNOSE is indistinguishable from a fresh REVIEW by label alone. The rule: **resume at the nominal state and re-detect the route-back fresh.** Two things make that safe, and neither is "the detector is pure":
+   - An interrupted DIAGNOSE may already have pushed a commit and retriggered CI, **mutating the detector's own inputs**. Re-running a pure function over mutated inputs is not idempotent in effect. What makes re-detection safe is that it **converges on current reality** — it reads the PR's present CI state and diff and re-decides, so a fix that landed before the crash is seen as green and one that did not is seen as red.
+   - `increment_route_backs` feeds ADR-0094's lap budget, so a crash around it double-counts or loses a lap. The increment is ordered **inside C8's ledger write under the same `pending_stage_transition` record** and applied exactly once per recorded transition; the record's `phase_attempt` makes a replayed increment detectable and refused.
 
 ### 5.6 Capacity release for non-working drivers (Constraint C6)
 
@@ -125,7 +134,7 @@ Bounded by C1: labels remain the sole source of truth; `driver_state` / `Converg
 
 - A driver blocked on a congested phase semaphore **does** count against admission — it is working, merely queued.
 - Label-write failure gets a bounded retry: 5 attempts with exponential backoff and a **10-minute maximum slot hold**, then escalate to HITL and release. Without this bound a retrying driver holds its slot indefinitely — a livelock class unique to `issue_controller`.
-- Re-admission keys on the driver's original enqueue time, so a released driver is never starved by newer arrivals.
+- Re-admission keys on the driver's original enqueue time, so a released driver is never starved by newer arrivals — **within its priority band only**, per the precedence in Section 5.7; otherwise this rule would outrank an arriving P0 and contradict the wait bound.
 
 ### 5.7 SchedulingPolicy / SchedulingView, and the P0 wait bound (Constraint C3, completed)
 
@@ -143,21 +152,32 @@ Bounded by C1: labels remain the sole source of truth; `driver_state` / `Converg
 
 `SchedulingPolicy.select(view) -> ranked candidates` is the control law over that view. Candidate ordering is drawn from the existing `queue_strategy` engine rather than reimplemented.
 
-**Worst-case P0 wait is bounded, not left open.** Because C3 makes every phase boundary a yield point and C6 releases non-working slots, a P0 arriving with all slots full waits at most **one phase-boundary interval of the longest-running in-flight phase** — in practice one implement-phase subprocess timeout. That is a hard number the canary must measure and report, not a "per policy" hand-wave. Mid-sub-process preemption stays a non-goal (Section 5.3); the bound is what makes that non-goal acceptable.
+**Worst-case P0 wait is bounded, with a precedence and a number.** Three ordering rules exist and must be ranked or the bound is not derivable: C6's anti-starvation rule keys re-admission on original enqueue time, Section 7 draws candidate order from the `queue_strategy` engine, and a P0 is by construction the *newest* arrival. **Precedence, highest first: (1) priority band, (2) original enqueue time within a band, (3) `queue_strategy` ordering within that** — so anti-starvation operates *within* a band and never lets a released P3 outrank an arriving P0.
 
-### 5.8 Boundary transaction ordering (Constraint C8)
+With that ranking, a P0 arriving with all slots full waits at most `one phase-boundary interval of the longest-running in-flight phase + C6's maximum slot hold`. Both terms are concrete: `agent_timeout` defaults to **3600 s** and C6's label-write hold is **600 s**, so the stated worst case is **70 minutes**. That number is deliberately bad and naming it is the point — if it is unacceptable the fix is a lower `agent_timeout` for driver-held phases or genuine boundary preemption, decided on evidence rather than discovered in production. The canary must report the measured distribution against this ceiling. Mid-sub-process preemption stays a non-goal (Section 5.3); the bound is what makes that non-goal acceptable.
+
+### 5.7b Fenced admission (Constraint C7)
+
+**Constraint C7.** Every worker dispatch passes `src/driver_contracts.py:admit_dispatch` before anything is launched. It is a pure function over a fixed snapshot returning a deterministic `RejectionReason` or `None`, evaluated in a fixed order — global stop fences, then driver identity and epoch fencing, then lease expiry and live-label coherence, then catalog legality, then capacity and budget. The first matching reason wins, so the same inputs always produce the same reason and shadow-mode comparisons are meaningful across runs.
+
+Two properties matter for recovery. Driver identity is fenced: a request or writer lease belonging to **another driver** is refused with `DRIVER_IDENTITY_MISMATCH`, while a *stale epoch* is reported distinctly — `STALE_EPOCH` for the request, `LEASE_EXPIRED` for a writer lease that has not been re-minted — because a lagging fence is not ownership theft and must not inflate the theft count in Section 8a's bar. Writer-lease checks apply only to roles holding `issue_worktree` write scope, so a read-only explorer is never blocked by a lease it would never take. And `sandbox_verified` and `allowed_roles` are **required** arguments with no defaults, so a caller that forgets to thread ADR-0137's S4 result or the capsule allow-list fails loudly rather than dispatching fail-open.
+
+### 5.8 Boundary transaction ordering (Constraints C8 and C9)
 
 **Constraint C8.** For every phase, in exactly this order:
 
 1. validate the worker's output and canonical side effects;
 2. persist the bounded artifact/result under an **idempotency key**;
-3. compare the expected live stage and **swap the label — this is the durable commit**;
-4. append the driver checkpoint/audit record;
-5. only then admit the next dispatch.
+3. record the `pending_stage_transition` intent (C5);
+4. compare the expected live stage and **swap the label — this is the durable commit**;
+5. append the driver checkpoint/audit record and clear the intent;
+6. only then admit the next dispatch.
 
-A crash before step 3 safely replays the idempotent step 2. A crash after step 3 recovers from label truth even if the audit cache lags. This ordering is what prevents a `ConvergenceLedger` `driver_state`/`policy_log` write that raced ahead of the label write from corrupting P4's replay with a phantom transition. **The behavioural test P2b must ship** is a kill-mid-transition test that kills the process between steps 2 and 3, and again between steps 3 and 4, asserting correct recovery in both cases. A test that string-matches spec phrases cannot test this.
+**Constraint C9 (sub-state transitions commit in the ledger).** `DIAGNOSE`, `HITL_APPLY`, and `PARKED` are sub-states of an already-labelled stage (Section 4), so they write **no label** and step 4 does not exist for them. Their durable commit is a `pending_sub_state_transition` record — a **separate slot** from the stage record, written with the sub-state as `to_label` and cleared on completion. The separation is load-bearing: C5 rule 1 clears the *stage* record whenever exactly one pipeline label is present, which is the normal condition for a sub-state transition, so a shared slot would delete the very commit this constraint creates. Without C9 a crash between `take_pending_correction` and the applied correction loses the correction with no commit record — a blind spot C8 alone cannot cover.
 
-**Net:** with C1–C8, `issue_controller` preserves every virtue of `phase_requeue` (crash-safety, throttling, preemptability at boundaries) while collapsing inter-phase latency and expressing WIP. That outcome — ADR-0002 intact — is the **design target and acceptance bar**, not a hoped-for side effect.
+A crash before step 4 safely replays the idempotent step 2 — the transition never committed, and C5 rule 1 discards the intent. A crash *inside* step 4 is resolved by C5 rule 2 from the recorded intent. A crash after step 4 recovers from label truth even if the audit cache lags. This ordering is what prevents a `ConvergenceLedger` `driver_state`/`policy_log` write that raced ahead of the label write from corrupting P4's replay with a phantom transition. **The behavioural test P2b must ship** is a kill-mid-transition test that kills the process between steps 3 and 4 (intent recorded, label not yet swapped) and again between steps 4 and 5 (label swapped, checkpoint not yet appended), asserting correct recovery in both cases. It MUST cover the two **backward** edges C5 exists for — a route-back `REVIEW → READY` and a HITL resume `HITL → READY` — since a test exercising only forward transitions would pass against the wrong reconciliation rule. A test that string-matches spec phrases cannot test this.
+
+**Net:** with C1–C9, `issue_controller` preserves every virtue of `phase_requeue` (crash-safety, throttling, preemptability at boundaries) while collapsing inter-phase latency and expressing WIP. That outcome — ADR-0002 intact — is the **design target and acceptance bar**, not a hoped-for side effect.
 
 ## 6. The `scheduling_model` knob (config surface — specified here, built in P2)
 
@@ -177,7 +197,9 @@ Any queuing discipline composes with any scheduling model. `queue_strategy` deci
 | Phase | Deliverable | ADR-0099 role | Status |
 |---|---|---|---|
 | **P1** | Per-issue driver state layer (`DriverState`, `ConvergenceLedger` driver fields, `SuspendRecord`, `PolicyEvent`, `DriverStateMixin`) | Plant / error register | **Landed** (this spec documents it; no new code) |
-| **P2** | `IssueDriver` servo + `DriverManager` + `SchedulingPolicy.select(SchedulingView)`; the `scheduling_model` knob (Section 6) with `phase_requeue` default; C1–C4 enforced | Servo + supervisory controller | Follows this spec |
+| **P2a** | `DriverManager` + the `scheduling_model` knob (Section 6), delegating to the existing `phase_requeue` path — behaviour-neutral, replay-testable | Capacity allocator | Follows this spec |
+| **P2b** | `IssueDriver` subprocess swap behind the flag; C1–C2, C5, C7–C9 enforced; ships with the kill-mid-transition test (Section 5.8) | Servo | After P2a |
+| **P2c** | Real `SchedulingPolicy.select(SchedulingView)` + C3/C4/C6 backpressure and preemption | Supervisory controller | After P2b |
 | **P3** | `Governor` — saturation limits + interlocks (kill switches per ADR-0049, credit holds) formalized beneath the allocator | Governor | P2+ |
 | **P4** | `PolicyScorecard` + `ReplayDriverManager` — offline scoring of control laws over recorded `policy_log`s (system identification); auto-tuner deliberately deferred | System identification | P3+ |
 | **P5** | Anchor cutover — re-point ADR-0099's representative glossary anchors to the v2 symbols (Plant→`IssueDriver`, Sensor→`SchedulingView`, Controller→`SchedulingPolicy`/`HybridGate`, Governor→`Governor`); the ADR-0001 supersession ADR set | (all) | Last |
@@ -194,7 +216,7 @@ To advance beyond shadow mode, all of the following must hold over a measured wi
 - 100% of accepted workers carry lineage, cost, and effective-route receipts;
 - zero label-desync incidents (label and committed checkpoint disagreeing after a settled window);
 - no increase in orphan process groups versus the classic baseline;
-- terminal success rate and escaped-defect rate no worse than the `issue_controller` baseline — not merely no worse than nothing;
+- terminal success rate and escaped-defect rate no worse than the **`phase_requeue` (classic) baseline** over a comparable window — the thing being gated is `issue_controller`, so comparing it to itself would be vacuous;
 - p95 worker-decision latency and parent cost bounded and reported;
 - successful fresh reconstruction on every resume failure;
 - the measured worst-case P0 wait (Section 5.7) reported against its stated bound.
@@ -223,7 +245,7 @@ Neither cheaper design was evaluated in the original spec, which left "is a cont
 
 1. This phase spec exists and specifies both scheduling models, the state machine over the landed driver layer, the phase plan P1–P5, the `scheduling_model` knob surface, and orthogonal composition with `queue_strategy`.
 2. ADR-0099 is **Accepted** (was Proposed), with a resolvable, non-mutating `**Enforcement:** enforced` declaration — the ratchet (`tests/test_adr_conformance_coverage.py`) stays green.
-3. The ADR-0002 crash-safety resolution is **explicit** (Section 5, constraints C1–C8): `issue_controller` is an execution-model change only and ADR-0002 survives intact. C5–C8 are load-bearing, not optional hardening — C1–C4 alone rest on a false atomicity premise (Section 5.5).
-5. The transition map (Section 4) matches the live 11-state `DriverState` and carries no `DISCOVER`/`SHAPE`, pinned by `tests/regressions/test_issue_11533_stale_driver_states.py`.
-6. ADR-0137 is Accepted, narrowing ADR-0094's blocking-shepherd rejection, before any P2 runtime code merges.
-4. No runtime behaviour changes on merge (design-only PR); regression pins in `tests/regressions/regression_issue_10038.py` guard the invariants above.
+3. The ADR-0002 crash-safety resolution is **explicit** (Section 5, constraints C1–C9): `issue_controller` is an execution-model change only and ADR-0002 survives intact. C5–C9 are load-bearing, not optional hardening — C1–C4 alone rest on a false atomicity premise, and priority-only reconciliation rests on a false monotonicity premise (Section 5.5).
+4. The transition map (Section 4) matches the live 11-state `DriverState` and carries no `DISCOVER`/`SHAPE`, pinned by `tests/regressions/test_issue_11533_stale_driver_states.py`.
+5. ADR-0137 is Accepted, narrowing ADR-0094's blocking-shepherd rejection, before any P2 runtime code merges.
+6. No runtime behaviour changes on merge (design-only PR). `tests/regressions/regression_issue_10038.py` pins the document-level invariants only — it string-matches spec prose and **cannot** test crash-safety behaviour; the behavioural guard is P2b's kill-mid-transition test (Section 5.8).

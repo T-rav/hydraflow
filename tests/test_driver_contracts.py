@@ -86,6 +86,8 @@ def _admit(**overrides: object) -> RejectionReason | None:
         "route_policy_revision": "rev-7",
         "writer_lease": _writer_lease(),
         "remaining_usd_budget": 5.0,
+        "sandbox_verified": True,
+        "allowed_roles": frozenset(WorkerRole),
     }
     request = overrides.pop("request", _request())
     kwargs.update(overrides)
@@ -473,15 +475,36 @@ def test_the_lease_holder_may_continue_writing_in_its_own_worktree() -> None:
     assert reason is None
 
 
-def test_a_reviewer_spawned_inside_the_implementer_lineage_is_refused() -> None:
+def test_a_reviewer_originating_from_the_implementer_lineage_is_refused() -> None:
     reason = _admit(
-        request=_request(worker_role=WorkerRole.REVIEWER, request_id="impl-1"),
+        request=_request(
+            worker_role=WorkerRole.REVIEWER,
+            request_id="req-review",
+            requesting_spawn_id="spawn-impl-1",
+        ),
         lease=_lease(phase=DriverPhase.REVIEW, expected_stage_label="hydraflow-review"),
         live_stage_label="hydraflow-review",
-        implementer_spawn_ids=frozenset({"impl-1"}),
+        implementer_spawn_ids=frozenset({"spawn-impl-1"}),
     )
 
     assert reason is RejectionReason.SELF_REVIEW_FORBIDDEN
+
+
+def test_a_reviewer_from_a_fresh_spawn_is_admitted_alongside_implementer_history() -> (
+    None
+):
+    reason = _admit(
+        request=_request(
+            worker_role=WorkerRole.REVIEWER,
+            request_id="req-review",
+            requesting_spawn_id="spawn-director",
+        ),
+        lease=_lease(phase=DriverPhase.REVIEW, expected_stage_label="hydraflow-review"),
+        live_stage_label="hydraflow-review",
+        implementer_spawn_ids=frozenset({"spawn-impl-1"}),
+    )
+
+    assert reason is None
 
 
 def test_exceeding_a_role_concurrency_cap_is_rejected() -> None:
@@ -498,3 +521,225 @@ def test_ownership_fencing_is_evaluated_before_catalog_legality() -> None:
     reason = _admit(request=_request(epoch=2, worker_role=WorkerRole.REVIEWER))
 
     assert reason is RejectionReason.STALE_EPOCH
+
+
+# --------------------------------------------------------------------------
+# Review-pass hardening (#11627 fresh-eyes findings)
+# --------------------------------------------------------------------------
+
+
+def test_a_request_from_another_driver_is_fenced() -> None:
+    assert _admit(request=_request(driver_id="OTHER")) is (
+        RejectionReason.DRIVER_IDENTITY_MISMATCH
+    )
+
+
+def test_a_read_only_role_is_not_blocked_by_a_lagging_writer_lease() -> None:
+    # A planner never takes the lease; a lease that has not been re-minted at
+    # the current epoch must not block it.
+    assert _admit(writer_lease=_writer_lease(epoch=99)) is None
+
+
+def test_a_writer_role_is_fenced_when_the_lease_belongs_to_another_driver() -> None:
+    reason = _admit(
+        request=_request(worker_role=WorkerRole.IMPLEMENTER),
+        lease=_lease(
+            phase=DriverPhase.IMPLEMENT, expected_stage_label="hydraflow-ready"
+        ),
+        live_stage_label="hydraflow-ready",
+        writer_lease=_writer_lease(driver_id="OTHER"),
+    )
+
+    assert reason is RejectionReason.DRIVER_IDENTITY_MISMATCH
+
+
+def test_a_writer_role_reports_a_lagging_lease_epoch_as_stale_not_as_theft() -> None:
+    # B5's bar counts ownership-theft events; a stale fence must not inflate it.
+    reason = _admit(
+        request=_request(worker_role=WorkerRole.IMPLEMENTER),
+        lease=_lease(
+            phase=DriverPhase.IMPLEMENT, expected_stage_label="hydraflow-ready"
+        ),
+        live_stage_label="hydraflow-ready",
+        writer_lease=_writer_lease(epoch=99),
+    )
+
+    assert reason is RejectionReason.LEASE_EXPIRED
+
+
+def test_a_role_outside_the_capsule_allowlist_is_refused() -> None:
+    reason = _admit(allowed_roles=frozenset({WorkerRole.EXPLORER}))
+
+    assert reason is RejectionReason.ROLE_NOT_IN_CAPSULE
+
+
+def test_the_capsule_role_allowlist_cannot_be_defaulted_away() -> None:
+    with pytest.raises(TypeError):
+        admit_dispatch(
+            _request(),
+            lease=_lease(),
+            now=NOW,
+            live_stage_label="hydraflow-plan",
+            route_policy_revision="rev-7",
+            writer_lease=_writer_lease(),
+            sandbox_verified=True,
+        )
+
+
+def test_a_role_inside_the_capsule_allowlist_is_admitted() -> None:
+    assert _admit(allowed_roles=frozenset({WorkerRole.PLANNER})) is None
+
+
+def test_an_unverified_sandbox_cannot_be_defaulted_away() -> None:
+    # sandbox_verified is required, so a caller that forgets S4 fails loudly.
+    with pytest.raises(TypeError):
+        admit_dispatch(
+            _request(),
+            lease=_lease(),
+            now=NOW,
+            live_stage_label="hydraflow-plan",
+            route_policy_revision="rev-7",
+            writer_lease=_writer_lease(),
+        )
+
+
+def test_a_stop_fence_is_reported_even_when_the_lease_is_naive_datetime() -> None:
+    # Aware datetimes are enforced at the model boundary, so the eager rule
+    # table can never trip over a naive/aware comparison.
+    with pytest.raises(ValidationError):
+        _lease(expires_at=datetime(2026, 8, 22, 12, 0))  # noqa: DTZ001 — the point
+
+
+def test_an_expired_receipt_cannot_smuggle_a_mismatched_served_model() -> None:
+    with pytest.raises(ValidationError):
+        WorkerReceipt(
+            request_id="r",
+            idempotency_key="i",
+            status=ReceiptStatus.EXPIRED,
+            reason_code=RejectionReason.LEASE_EXPIRED,
+            worker_role=WorkerRole.PLANNER,
+            requested_model=ModelRequirement(
+                kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+            ),
+            served_model="glm-5.3",
+            route_policy_revision="rev-7",
+        )
+
+
+def test_a_superseded_receipt_may_record_an_honest_served_model() -> None:
+    receipt = WorkerReceipt(
+        request_id="r",
+        idempotency_key="i",
+        status=ReceiptStatus.SUPERSEDED,
+        reason_code=RejectionReason.STALE_EPOCH,
+        worker_role=WorkerRole.PLANNER,
+        requested_model=ModelRequirement(
+            kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+        ),
+        served_model="claude-sonnet-4-6",
+        route_policy_revision="rev-7",
+    )
+
+    assert receipt.served_model == "claude-sonnet-4-6"
+
+
+@pytest.mark.parametrize(
+    "served", ["llama-sonnet-tune", "grok-4-sonnet", "minimax-sonnet", "glm-5.3-sonnet"]
+)
+def test_a_literal_family_is_not_satisfied_by_any_third_party_id(served: str) -> None:
+    # Allow-list, not deny-list: an unknown vendor must not satisfy by default.
+    requirement = ModelRequirement(
+        kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+    )
+
+    assert requirement.satisfied_by(served) is False
+
+
+@pytest.mark.parametrize(
+    "served",
+    [
+        "claude-sonnet-4-6",
+        "anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+    ],
+)
+def test_a_literal_family_accepts_first_party_and_bedrock_ids(served: str) -> None:
+    requirement = ModelRequirement(
+        kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+    )
+
+    assert requirement.satisfied_by(served) is True
+
+
+def test_a_concrete_model_requirement_demands_that_exact_id() -> None:
+    requirement = ModelRequirement(
+        kind=ModelRequirementKind.CONCRETE_MODEL, value="claude-opus-5"
+    )
+
+    assert requirement.satisfied_by("glm-5.3") is False
+
+
+def test_a_director_may_not_name_a_concrete_model_in_a_dispatch() -> None:
+    with pytest.raises(ValidationError):
+        _request(
+            model_requirement=ModelRequirement(
+                kind=ModelRequirementKind.CONCRETE_MODEL, value="claude-opus-5"
+            )
+        )
+
+
+def test_dispatch_command_rejects_a_duplicate_request_id_within_one_batch() -> None:
+    twins = (
+        _request(idempotency_key="idem-a"),
+        _request(idempotency_key="idem-b"),
+    )
+
+    with pytest.raises(ValidationError):
+        DirectorCommand(kind=DirectorCommandKind.DISPATCH_WORKERS, dispatches=twins)
+
+
+@pytest.mark.parametrize(
+    "served",
+    [
+        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "jp.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    ],
+)
+def test_a_bedrock_cross_region_inference_profile_satisfies_its_family(
+    served: str,
+) -> None:
+    # An honestly-served Sonnet must not be rejected for its region prefix.
+    requirement = ModelRequirement(
+        kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+    )
+
+    assert requirement.satisfied_by(served) is True
+
+
+def test_self_review_outranks_a_bookkeeping_rejection() -> None:
+    # An integrity fence must not be masked by a duplicate-key code in the receipt.
+    reason = _admit(
+        request=_request(
+            worker_role=WorkerRole.REVIEWER,
+            requesting_spawn_id="spawn-impl-1",
+        ),
+        lease=_lease(phase=DriverPhase.REVIEW, expected_stage_label="hydraflow-review"),
+        live_stage_label="hydraflow-review",
+        implementer_spawn_ids=frozenset({"spawn-impl-1"}),
+        seen_idempotency_keys=frozenset({"idem-1"}),
+    )
+
+    assert reason is RejectionReason.SELF_REVIEW_FORBIDDEN
+
+
+@pytest.mark.parametrize("served", ["zai.claude-sonnet-9", "vendor.claude-sonnet-4"])
+def test_a_region_prefix_without_anthropic_does_not_satisfy_a_family(
+    served: str,
+) -> None:
+    # Real Bedrock profiles always carry the `anthropic.` segment; a bare short
+    # prefix is a third-party id wearing Anthropic clothing.
+    requirement = ModelRequirement(
+        kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+    )
+
+    assert requirement.satisfied_by(served) is False
