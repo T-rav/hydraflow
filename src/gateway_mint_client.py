@@ -44,8 +44,6 @@ logger = logging.getLogger("hydraflow.runner_utils")
 # container startup, and the final response bytes cannot race token expiry.
 _GATEWAY_LEASE_GRACE_SECONDS = 60
 
-_ZAI = "zai"
-
 
 class GatewayMintError(RuntimeError):
     """The gateway was selected but a per-spawn credential could not be minted."""

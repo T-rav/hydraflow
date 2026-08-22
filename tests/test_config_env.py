@@ -133,7 +133,7 @@ class TestEnvVarOverrideTable:
         default: str,
     ) -> None:
         """Each str override should apply when the field is at its default."""
-        override = "client" if field == "gateway_repo_class" else "custom-value"
+        override = self._VALID_VALUES.get(field, "custom-value")
         monkeypatch.setenv(env_key, override)
         cfg = HydraFlowConfig(
             repo_root=tmp_path,
@@ -143,11 +143,21 @@ class TestEnvVarOverrideTable:
         result = getattr(cfg, field)
         assert str(result) == override
 
+    # Fields whose value is constrained (a Literal, or a validated grammar), so
+    # the generic tests cannot feed them an arbitrary string.
+    _VALID_VALUES: dict[str, str] = {
+        "gateway_repo_class": "client",
+        # ADR-0141 refuses anything that is not an exact canonical owner/repo,
+        # because a value that silently arms nothing is worse than an error.
+        "gateway_enforcement_canary_repo": "acme/project-x",
+    }
+
     # Valid non-default explicit values for Literal-typed string fields.
     # Generic tests can't use arbitrary strings for these fields.
     _EXPLICIT_VALUES: dict[str, str] = {
         "execution_mode": "docker",
         "gateway_repo_class": "hydraflow",
+        "gateway_enforcement_canary_repo": "acme/other-project",
         "security_patch_severity_threshold": "critical",
     }
 
@@ -166,7 +176,7 @@ class TestEnvVarOverrideTable:
     ) -> None:
         """Explicit values should take precedence over str env var overrides."""
         explicit = self._EXPLICIT_VALUES.get(field, "explicit-value")
-        env_value = "client" if field == "gateway_repo_class" else "env-value"
+        env_value = self._VALID_VALUES.get(field, "env-value")
         monkeypatch.setenv(env_key, env_value)
         cfg = HydraFlowConfig(
             **{field: explicit},  # type: ignore[arg-type]

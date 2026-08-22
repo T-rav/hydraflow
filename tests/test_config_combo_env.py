@@ -228,6 +228,39 @@ def test_gateway_repo_class_env_override_and_capture_policy() -> None:
         HydraFlowConfig(gateway_repo_class="client", gateway_capture_bodies=True)
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("acme-project-x", id="the-path-safe-runtime-slug"),
+        pytest.param("acme/project x", id="an-unsafe-path-segment"),
+        pytest.param("a/b/c", id="two-slashes"),
+        pytest.param("acme", id="a-bare-name-with-no-owner"),
+    ],
+)
+def test_a_canary_dial_that_could_arm_nothing_is_refused_at_load(value: str) -> None:
+    """ADR-0141: failing closed is right; failing closed *silently* is not.
+
+    The runtime predicate refuses anything that is not an exact canonical
+    ``owner/repo``, so a typo here enforces nothing — and an operator would have
+    no way to tell that from a repository with no policy. The load-time check
+    turns that silence into an error while the mistake is still cheap.
+    """
+    with pytest.raises((ValueError, ValidationError), match="canonical"):
+        HydraFlowConfig(gateway_enforcement_canary_repo=value)
+
+
+def test_an_empty_canary_dial_is_the_valid_disarmed_default() -> None:
+    """Empty is not a typo — it is the shipped state and the rollback target."""
+    assert HydraFlowConfig().gateway_enforcement_canary_repo == ""
+
+
+def test_a_canonical_repository_is_accepted_by_the_canary_dial() -> None:
+    """The affirmative case, so the refusals above are not refusing everything."""
+    cfg = HydraFlowConfig(gateway_enforcement_canary_repo="acme/project-x")
+
+    assert cfg.gateway_enforcement_canary_repo == "acme/project-x"
+
+
 def test_maintenance_knob_routes_only_maintenance_roles() -> None:
     """maintenance_* sets provider+model on maintenance roles, never work loops."""
     cfg = HydraFlowConfig(maintenance_provider="zai", maintenance_model="glm-5.2")

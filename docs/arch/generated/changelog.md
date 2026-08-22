@@ -7,6 +7,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W34
 
 - `94b544e` — fix(implement): anchor the test-adequacy demand and pin it across retries (#11644) (#11649) (#11649) *(2026-08-22)*
+- `1b110bf` — refactor(runner-utils): extract the gateway credential lifecycle; guard the canary hop *(2026-08-22)*
 - `4111fb8` — feat(gateway): P3 — bounded, reversible routing enforcement canary (ADR-0141) *(2026-08-22)*
 - `8c392d0` — feat(gateway): P2 — revision-safe project policy workspace (ADR-0140) (#11648) (#11648) *(2026-08-22)*
 - `8eb762f` — fix(instruments): the calibration accept arm scored fresh merges as clean — #11643's last commit never landed (#11647) (#11647) *(2026-08-22)*

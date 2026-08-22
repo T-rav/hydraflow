@@ -64,10 +64,6 @@ logger = logging.getLogger("hydraflow.runner_utils")
 # O(1) instead of re-scanning the whole (growing) transcript.
 _CREDIT_SCAN_TAIL_CHARS = 512
 
-# A key must remain valid beyond the subprocess deadline so scheduling jitter,
-# container startup, and the final response bytes cannot race token expiry.
-_GATEWAY_LEASE_GRACE_SECONDS = 60
-
 
 class AuthenticationRetryError(RuntimeError):
     """Raised when the agent CLI reports authentication_failed.
