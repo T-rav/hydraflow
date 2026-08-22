@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `f3937c7` — docs(adr): ADR-0140 — revision-safe policy workspace and the operator write boundary *(2026-08-22)*
 - `1bc8a56` — feat(gateway): revision-safe policy workspace core and the ADR-0138 D5 write gate *(2026-08-22)*
 - `dfd0e25` — fix(director): the shadow observer spun the allocator and fsync'd per tick (#11641) (#11641) *(2026-08-22)*
 - `d227fab` — feat(director): Fable P2 — isolated director and broker in shadow mode (#11537) (#11638) (#11638) *(2026-08-22)*

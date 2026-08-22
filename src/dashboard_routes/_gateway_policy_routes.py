@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any, TypeAlias
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.responses import JSONResponse
@@ -86,6 +86,18 @@ _REJECTION_STATUS: dict[MutationRejection, int] = {
     MutationRejection.CREDENTIAL_SHAPED_VALUE: 422,
     MutationRejection.VALIDATION_FAILED: 422,
 }
+
+RequirementSelectors: TypeAlias = Annotated[
+    list[str] | None,
+    Query(
+        description=(
+            "Extra `kind:value` model-requirement rows to resolve the matrix for; "
+            "the provider-neutral balanced capability is the default row."
+        )
+    ),
+]
+"""Repeatable ``?requirement=`` selector. Annotated rather than a ``Query`` default,
+which would be a mutable call in an argument default (ruff B008)."""
 
 _GATE_DETAIL: dict[WriteGate, str] = {
     WriteGate.WORKSPACE_DISABLED: (
@@ -166,7 +178,7 @@ def build_gateway_policy_router(
     @router.get("/effective")
     async def read_effective_routes(
         repo: RepoSlugParam = None,
-        requirement: list[str] = Query(default=[]),  # noqa: B008
+        requirement: RequirementSelectors = None,
     ) -> dict[str, Any]:
         """The repository × role × face matrix, pinned to one policy revision."""
         workspace = _workspace(repo)
@@ -177,7 +189,7 @@ def build_gateway_policy_router(
             accounts=local_account_availability(),
             snapshot=view.snapshot,
             snapshot_state=view.state,
-            requirements=_requirements(requirement),
+            requirements=_requirements(requirement or []),
         )
         return _matrix_json(matrix)
 
