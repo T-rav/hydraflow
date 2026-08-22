@@ -121,14 +121,24 @@ def _is_helper(name: str, class_name: str = "") -> bool:
 # Only fakes whose surface contains such scaffolding need an entry; FakeGit
 # and FakeDocker surfaces are already clean via the helper carve-outs above.
 _FAKE_REAL_SURFACE_SOURCES: dict[str, tuple[tuple[str, str], ...]] = {
-    # PRManagerPromotionMixin: the promotion/RC slice of PRManager extracted
-    # to pr_manager_promotion.py (god-file decomposition). The AST scan reads
-    # each class's own body and does not follow inheritance, so the mixin must
-    # be listed as its own source or its methods (e.g.
-    # apply_staging_branch_protection, list_recent_promotion_prs) silently
-    # drop out of the real surface.
+    # PRManager is decomposed into per-surface mixins (pr_manager_promotion
+    # from the #10840 god-file pass, the rest from the Refs #11547 god-class
+    # pass). The AST scan reads each class's own body and does NOT follow
+    # inheritance, so every mixin must be listed as its own source or its
+    # methods (e.g. apply_staging_branch_protection, get_pr_reviews,
+    # get_label_counts) silently drop out of the real surface and the auditor
+    # reclassifies them as fake-only scaffolding.
     "FakeGitHub": (
         ("pr_manager", "PRManager"),
+        ("pr_manager_artifacts", "PRManagerArtifactsMixin"),
+        ("pr_manager_branches", "PRManagerBranchesMixin"),
+        ("pr_manager_ci", "PRManagerCIMixin"),
+        ("pr_manager_comments", "PRManagerCommentsMixin"),
+        ("pr_manager_dashboard", "PRManagerDashboardMixin"),
+        ("pr_manager_drift", "PRManagerDriftMixin"),
+        ("pr_manager_issues", "PRManagerIssuesMixin"),
+        ("pr_manager_labels", "PRManagerLabelsMixin"),
+        ("pr_manager_pr_queries", "PRManagerPRQueriesMixin"),
         ("pr_manager_promotion", "PRManagerPromotionMixin"),
         ("ports", "PRPort"),
     ),
