@@ -111,6 +111,7 @@ class ScriptedAdapter:
     ) -> None:
         self.phase = phase
         self.target_label = target_label
+        self.sub_state_target = None
         self._outcome = outcome
         self._labels = labels
         self._commits_label = commits_label
@@ -569,9 +570,10 @@ async def test_a_retired_driver_reports_retired_and_runs_nothing() -> None:
     assert advance.outcome is AdvanceOutcome.RETIRED
 
 
-async def test_a_state_with_no_adapter_is_not_driven() -> None:
+async def test_a_state_with_no_adapter_is_idle_not_retired() -> None:
     # P1 leaves Triage to Classic; a driver holding a triage state has nothing
-    # to do rather than crashing on a missing adapter.
+    # to do rather than crashing on a missing adapter — and it is NOT finished,
+    # so reporting RETIRED would let the allocator drop a live issue.
     driver = IssueDriver(
         issue_number=501,
         driver_id="drv-501-test",
@@ -585,7 +587,7 @@ async def test_a_state_with_no_adapter_is_not_driven() -> None:
 
     advance = await driver.advance(_task())
 
-    assert advance.outcome is AdvanceOutcome.RETIRED
+    assert advance.outcome is AdvanceOutcome.IDLE
 
 
 # --------------------------------------------------------------------------

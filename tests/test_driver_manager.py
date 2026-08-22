@@ -90,6 +90,21 @@ class FakeTransitions:
 
     def __init__(self) -> None:
         self.stage: dict[int, PendingStageTransition] = {}
+        self.sub_state: dict[int, tuple[str, str, int, int]] = {}
+
+    def record_sub_state_transition(
+        self,
+        issue_number: int,
+        *,
+        from_state: str,
+        to_state: str,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None:
+        self.sub_state[issue_number] = (from_state, to_state, epoch, phase_attempt)
+
+    def clear_sub_state_transition(self, issue_number: int) -> None:
+        self.sub_state.pop(issue_number, None)
 
     def record_stage_transition(
         self,
@@ -119,6 +134,7 @@ class StuckAdapter:
 
     phase = DriverPhase.PLAN
     target_label = PLAN_LABEL
+    sub_state_target = None
 
     async def run(self, task: Task, *, lease: object) -> PhaseOutcome:
         return PhaseOutcome(ok=False, next_label=PLAN_LABEL, detail="still planning")
@@ -129,6 +145,7 @@ class MergingAdapter:
 
     phase = DriverPhase.PLAN
     target_label = None
+    sub_state_target = None
 
     async def run(self, task: Task, *, lease: object) -> PhaseOutcome:
         return PhaseOutcome(ok=True, next_label=None, next_state="MERGED", artifact={})
@@ -373,6 +390,7 @@ class NoopAdapter:
     def __init__(self, phase: DriverPhase) -> None:
         self.phase = phase
         self.target_label = None
+        self.sub_state_target = None
 
     async def run(self, task: Task, *, lease: object) -> PhaseOutcome:
         return PhaseOutcome(ok=False, next_label=lease.expected_stage_label, detail="x")
@@ -413,6 +431,73 @@ async def test_a_crashed_route_back_is_admitted_at_the_stage_its_intent_named(
     await manager.tick()
 
     assert manager._drivers[42].driver_state == "READY"  # noqa: SLF001
+
+
+async def test_a_route_back_recovers_even_when_the_issue_has_prior_checkpoints(
+    tmp_path: Path,
+) -> None:
+    # The realistic crash: the issue has already crossed a boundary, so the
+    # rebuilt driver takes journal.last_epoch + 1 while the dead incarnation's
+    # intent record carries the OLD epoch. An exact epoch match would make
+    # every such record unusable — i.e. intent-based recovery would silently
+    # never fire for any issue that had got past its first phase, which is
+    # every issue that reaches a route-back.
+    from driver_contracts import DriverCheckpoint
+
+    journal = DriverJournal(tmp_path / "driver_journal.jsonl")
+    journal.append_checkpoint(
+        43,
+        "43:0:PLAN:0",
+        DriverCheckpoint(
+            driver_id="drv-dead",
+            epoch=0,
+            last_committed_phase=DriverPhase.PLAN,
+            committed_stage_label=READY_LABEL,
+            capsule_digest="deadbeef",
+        ),
+    )
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        43, from_label=REVIEW_LABEL, to_label=READY_LABEL, epoch=0, phase_attempt=2
+    )
+    task = Task(id=43, title="routed back", tags=[REVIEW_LABEL, READY_LABEL])
+    manager = DriverManager(
+        store=FakeStore([task]),
+        labels=PipelineLabelAdapter(
+            FakeGitHubLabels({43: [REVIEW_LABEL, READY_LABEL]}),
+            ordered_labels=ORDERED_LABELS,
+            transitions=transitions,
+        ),
+        journal=journal,
+        ownership=DriverOwnershipRegistry(enabled=True),
+        adapters={
+            DriverPhase.IMPLEMENT: NoopAdapter(DriverPhase.IMPLEMENT),
+            DriverPhase.REVIEW: NoopAdapter(DriverPhase.REVIEW),
+        },
+        stage_labels=STAGE_LABELS,
+        repo_slug="acme/widgets",
+        max_in_flight=4,
+        stage_caps={},
+    )
+
+    await manager.tick()
+
+    assert manager._drivers[43].driver_state == "READY"  # noqa: SLF001
+
+
+async def test_an_intent_two_incarnations_old_is_not_honoured() -> None:
+    # "The record written by the incarnation it is replacing, and NO OLDER
+    # ONE" — a record from a long-dead generation must not resurrect a
+    # transition everything has since moved past.
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        3, from_label=REVIEW_LABEL, to_label=READY_LABEL, epoch=0, phase_attempt=0
+    )
+    adapter = _adapter({3: [REVIEW_LABEL, READY_LABEL]}, transitions)
+
+    resolved = await adapter.read_stage_label(3, epoch=2, phase_attempt=0)
+
+    assert resolved == REVIEW_LABEL
 
 
 async def test_a_consumed_intent_is_cleared_so_it_cannot_go_two_incarnations_stale(
@@ -594,3 +679,128 @@ async def test_committing_a_stage_label_goes_through_the_existing_swap_primitive
     await adapter.commit_stage_label(3, READY_LABEL)
 
     assert github.swaps == [(3, READY_LABEL)]
+
+
+# --------------------------------------------------------------------------
+# A released slot is not a dormant driver
+# --------------------------------------------------------------------------
+
+
+class CorrectionAdapter:
+    """A HITL adapter: idles while waiting, applies once a correction lands."""
+
+    phase = DriverPhase.HITL
+    target_label = None
+    sub_state_target = "HITL_APPLY"
+
+    def __init__(self) -> None:
+        self.correction: str | None = None
+        self.applied = 0
+
+    async def run(self, task: Task, *, lease: object) -> PhaseOutcome:
+        if self.correction is None:
+            return PhaseOutcome(
+                ok=False,
+                next_label=lease.expected_stage_label,
+                next_state="HITL_WAIT",
+                detail="awaiting operator correction",
+            )
+        self.applied += 1
+        return PhaseOutcome(
+            ok=True, next_label=lease.expected_stage_label, artifact={"applied": True}
+        )
+
+
+def _hitl_manager(tmp_path: Path, adapter: CorrectionAdapter, transitions=None):
+    task = Task(id=77, title="escalated", tags=[HITL_LABEL])
+    return DriverManager(
+        store=FakeStore([]),
+        labels=PipelineLabelAdapter(
+            FakeGitHubLabels({77: [HITL_LABEL]}),
+            ordered_labels=ORDERED_LABELS,
+            transitions=transitions,
+        ),
+        journal=DriverJournal(tmp_path / "driver_journal.jsonl"),
+        ownership=DriverOwnershipRegistry(enabled=True),
+        adapters={DriverPhase.HITL: adapter},
+        stage_labels=STAGE_LABELS,
+        repo_slug="acme/widgets",
+        max_in_flight=4,
+        stage_caps={},
+        sub_states=transitions,
+    ), task
+
+
+async def test_a_hitl_waiting_driver_is_still_ticked_so_a_correction_can_land(
+    tmp_path: Path,
+) -> None:
+    # C6 releases the WIP slot for a driver waiting on a human. It does NOT
+    # make the driver dormant: HITL_WAIT is the only state the hitl label
+    # resolves to, so a driver that stops being ticked there never notices the
+    # operator's answer and the issue is stranded forever.
+    adapter = CorrectionAdapter()
+    manager, task = _hitl_manager(tmp_path, adapter)
+    manager._drivers[77] = manager._build_driver(77, "HITL_WAIT")  # noqa: SLF001
+    manager._tasks[77] = task  # noqa: SLF001
+    await manager.tick()
+
+    adapter.correction = "please fix the flaky test"
+    await manager.tick()
+
+    assert adapter.applied == 1
+
+
+async def test_a_hitl_waiting_driver_holds_no_wip_slot_while_it_waits(
+    tmp_path: Path,
+) -> None:
+    adapter = CorrectionAdapter()
+    manager, task = _hitl_manager(tmp_path, adapter)
+    manager._drivers[77] = manager._build_driver(77, "HITL_WAIT")  # noqa: SLF001
+    manager._tasks[77] = task  # noqa: SLF001
+
+    await manager.tick()
+
+    assert manager.occupancy().in_flight == 0
+
+
+async def test_applying_a_correction_records_the_sub_state_commit(
+    tmp_path: Path,
+) -> None:
+    # C9: HITL_APPLY writes no pipeline label, so C8's durable commit does not
+    # exist for it and this second-slot record is the only durable trace that
+    # the correction was taken up.
+    transitions = FakeTransitions()
+    adapter = CorrectionAdapter()
+    manager, task = _hitl_manager(tmp_path, adapter, transitions)
+    driver = manager._build_driver(77, "HITL_WAIT")  # noqa: SLF001
+    manager._drivers[77] = driver
+    manager._tasks[77] = task  # noqa: SLF001
+    adapter.correction = "fix it"
+
+    await manager.tick()
+
+    assert transitions.sub_state == {}, "cleared once the boundary checkpointed"
+
+
+async def test_an_unapplied_correction_leaves_its_sub_state_commit_recorded(
+    tmp_path: Path,
+) -> None:
+    transitions = FakeTransitions()
+    adapter = CorrectionAdapter()
+    adapter.correction = "fix it"
+
+    async def _boom(task, *, lease):
+        transitions.record_sub_state_transition(
+            77, from_state="HITL_WAIT", to_state="HITL_APPLY", epoch=0, phase_attempt=0
+        )
+        raise RuntimeError("killed while applying")
+
+    manager, task = _hitl_manager(tmp_path, adapter, transitions)
+    adapter.run = _boom
+    driver = manager._build_driver(77, "HITL_WAIT")  # noqa: SLF001
+    manager._drivers[77] = driver
+    manager._tasks[77] = task  # noqa: SLF001
+
+    await manager.tick()
+
+    assert transitions.sub_state[77][1] == "HITL_APPLY"

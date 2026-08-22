@@ -104,6 +104,7 @@ class PlanAdapter:
 
     phase = DriverPhase.PLAN
     target_label = READY_LABEL
+    sub_state_target = None
 
     def __init__(self) -> None:
         self.runs = 0
@@ -280,6 +281,7 @@ class BackwardAdapter:
     def __init__(self, phase: DriverPhase, from_label: str) -> None:
         self.phase = phase
         self.target_label = READY_LABEL
+        self.sub_state_target = None
         self._from_label = from_label
         self.runs = 0
 

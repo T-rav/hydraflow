@@ -250,6 +250,13 @@ kill-mid-transition test B6 demands is
 `tests/regressions/test_issue_11535_kill_mid_transition.py`, and it covers both
 C8 gaps **and** both backward edges.
 
+C9's slot is written on the one sub-state transition this phase actually makes:
+entering `HITL_APPLY` to take up an operator's correction, which moves no label
+and would otherwise leave no durable trace. `DIAGNOSE` and `PARKED` are reached
+through the reviewer's own routing rather than through a driver-declared
+sub-state, so they carry no record yet; the slot and its accessors are in place
+for the phases that add them.
+
 One boundary is worth naming precisely, because it is where the driver's
 guarantee stops. The intent record covers every transition the driver *drives*:
 it is written before the phase runs, so it covers both the driver's own swap and
@@ -275,7 +282,7 @@ contracts and `admit_dispatch` have no runtime consumer until #11537. Selecting
 - `src/driver_ownership.py`: `DriverOwnershipRegistry` — the single-owner interlock.
 - `src/driver_phase_adapters.py`: `PlanPhaseAdapter`, `ImplementPhaseAdapter`, `ReviewPhaseAdapter`, `HITLPhaseAdapter` — single-item adapters preserving the existing stage-worker contracts.
 - `src/models.py`: `DriverState`, `SuspendRecord`, `ConvergenceLedger`, `PendingStageTransition`, `PendingSubStateTransition` — the two intent slots C5(a)/C9 require, deliberately separate.
-- `src/state/_driver.py`: `DriverStateMixin` — including `record_stage_transition` / `clear_stage_transition` and their sub-state counterparts.
+- `src/state/_driver.py`: `DriverStateMixin` — including `record_stage_transition` / `clear_stage_transition` and `record_sub_state_transition` / `clear_sub_state_transition`.
 - `src/config.py`: `HydraFlowConfig.effective_driver_max_in_flight`, `HydraFlowConfig.driver_stage_cap_total` — the binding `max_in_flight` ≥ stage-cap-total floor from the ADR-0094 narrowing (i).
 - `src/issue_store.py`: `_STAGE_PRIORITY`, `IssueStore._compute_stage_map`.
 - `src/pr_manager.py`: `PRManager.swap_pipeline_labels`.

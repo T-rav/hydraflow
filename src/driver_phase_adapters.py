@@ -101,6 +101,7 @@ class PlanPhaseAdapter:
         self._planner = planner
         self._ready_label = ready_label
         self.target_label: str | None = ready_label
+        self.sub_state_target: str | None = None
 
     async def run(self, task: Task, *, lease: DriverLease) -> PhaseOutcome:
         result = await self._planner.plan_single_issue(task)
@@ -140,6 +141,7 @@ class ImplementPhaseAdapter:
         self._implementer = implementer
         self._review_label = review_label
         self.target_label: str | None = review_label
+        self.sub_state_target: str | None = None
 
     async def run(self, task: Task, *, lease: DriverLease) -> PhaseOutcome:
         results, _issues = await self._implementer.run_batch(issues=[task])
@@ -188,6 +190,7 @@ class ReviewPhaseAdapter:
         # pipeline), approve, or route back. The reviewer commits whichever
         # transition it decides on, and the driver follows the label.
         self.target_label: str | None = None
+        self.sub_state_target: str | None = None
 
     async def run(self, task: Task, *, lease: DriverLease) -> PhaseOutcome:
         from models import GitHubIssue
@@ -248,12 +251,20 @@ class HITLPhaseAdapter:
     phase = DriverPhase.HITL
 
     def __init__(
-        self, hitl: SingleItemHITLApplier, *, waiting_state: str = "HITL_WAIT"
+        self,
+        hitl: SingleItemHITLApplier,
+        *,
+        waiting_state: str = "HITL_WAIT",
+        applying_state: str = "HITL_APPLY",
     ) -> None:
         self._hitl = hitl
         self._waiting_state = waiting_state
         # A correction is applied in place; the stage label does not move.
         self.target_label: str | None = None
+        # ...which is exactly why C9 exists: running this phase commits to
+        # HITL_APPLY with no label to show for it, so the sub-state record is
+        # the only durable trace that the correction was taken up.
+        self.sub_state_target: str | None = applying_state
 
     async def run(self, task: Task, *, lease: DriverLease) -> PhaseOutcome:
         correction = self._hitl.hitl_corrections.get(task.id)

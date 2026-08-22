@@ -672,6 +672,8 @@ def _build_driver_manager(
         repo_slug=config.repo,
         max_in_flight=config.effective_driver_max_in_flight(),
         stage_caps=stage_caps,
+        # ADR-0137 C9: the second intent slot, same ledger-backed accessor set.
+        sub_states=state,
     )
 
 

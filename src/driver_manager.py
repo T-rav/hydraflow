@@ -10,7 +10,9 @@ module does exactly those four and nothing else:
   the allocation decision is replayable from a log line.
 * **Release** (C6/B2) — a parked or HITL-waiting driver gives its slot back.
   It keeps its original admission time, so it is reconsidered ahead of work that
-  arrived while it waited and cannot be starved by newer arrivals.
+  arrived while it waited and cannot be starved by newer arrivals. Releasing a
+  slot is *not* the same as going dormant: such a driver is still ticked every
+  cycle, which is how it notices that the human it was waiting for has answered.
 * **Recover** (C2) — after a restart there are no drivers, only labels. A driver
   is rebuilt from the label the issue carries and takes the issue at
   ``journal.last_epoch + 1``, which fences anything still alive from the previous
@@ -42,7 +44,6 @@ from driver_contracts import DriverPhase
 from exception_classify import reraise_on_credit_or_bug
 from issue_driver import AdvanceOutcome, IssueDriver
 from issue_driver_policy import (
-    NON_WORKING_DRIVER_STATES,
     ReconcileOutcome,
     SchedulingView,
     SlotOccupancy,
@@ -60,7 +61,7 @@ if TYPE_CHECKING:
     from driver_journal import DriverJournal
     from driver_ownership import DriverOwnershipRegistry
     from issue_driver import DriverAdvance, PhaseAdapter
-    from models import PendingStageTransition, Task
+    from models import DriverState, PendingStageTransition, Task
     from ports import IssueStorePort, PRPort
 
 
@@ -88,6 +89,18 @@ class DriverTransitions(Protocol):
     ) -> PendingStageTransition | None: ...
 
     def clear_stage_transition(self, issue_number: int) -> None: ...
+
+    def record_sub_state_transition(
+        self,
+        issue_number: int,
+        *,
+        from_state: DriverState,
+        to_state: DriverState,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None: ...
+
+    def clear_sub_state_transition(self, issue_number: int) -> None: ...
 
 
 logger = logging.getLogger("driver_manager")
@@ -270,6 +283,7 @@ class DriverManager:
         repo_slug: str,
         max_in_flight: int,
         stage_caps: Mapping[DriverPhase, int],
+        sub_states: DriverTransitions | None = None,
     ) -> None:
         self._store = store
         self._labels = labels
@@ -280,6 +294,7 @@ class DriverManager:
         self._repo_slug = repo_slug
         self._max_in_flight = max_in_flight
         self._stage_caps = stage_caps
+        self._sub_states = sub_states
         self._drivers: dict[int, IssueDriver] = {}
         self._tasks: dict[int, Task] = {}
         self._waiting_since: dict[int, datetime] = {}
@@ -430,15 +445,21 @@ class DriverManager:
             stage_labels=self._stage_labels,
             driver_state=driver_state,
             epoch=epoch,
+            sub_states=self._sub_states,
         )
 
     async def _advance_all(self, *, stop_requested: bool) -> list[DriverAdvance]:
         advances: list[DriverAdvance] = []
         for issue_number, driver in list(self._drivers.items()):
-            if driver.driver_state in NON_WORKING_DRIVER_STATES:
-                # C6: parked / waiting on a human. The slot is already released
-                # by ``occupancy``; do not spin a phase against it.
-                continue
+            # NOTE: a driver in a non-working state is still ticked. C6 is
+            # about *capacity accounting* — ``occupancy`` already excludes it
+            # from the WIP cap — and conflating "does not hold a slot" with
+            # "is never asked again" strands the issue: HITL_WAIT is the only
+            # state the hydraflow-hitl label resolves to, so skipping the tick
+            # means an operator's correction is never picked up and every
+            # escalated issue dies there. Ticking is cheap for these states:
+            # PARKED has no phase at all and returns IDLE without touching a
+            # port, and the HITL adapter's no-correction path is a dict lookup.
             task = self._tasks.get(issue_number)
             if task is None:
                 continue

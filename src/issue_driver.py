@@ -42,7 +42,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from driver_contracts import DriverCheckpoint, DriverLease, DriverPhase, RejectionReason
 from exception_classify import reraise_on_credit_or_bug
@@ -56,7 +56,7 @@ from issue_driver_policy import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from models import Task
+    from models import DriverState, Task
 
 logger = logging.getLogger("issue_driver")
 
@@ -92,6 +92,14 @@ class AdvanceOutcome(StrEnum):
 
     RETIRED = "retired"
     """The issue reached a terminal state; the driver is done."""
+
+    IDLE = "idle"
+    """Nothing to run right now, and the driver is **not** finished.
+
+    A parked driver is waiting on a barrier and has no phase to run. Reporting
+    that as ``RETIRED`` would be a lie the allocator could act on, and skipping
+    the tick entirely would be worse — see ``DriverManager._advance_all``.
+    """
 
 
 @dataclass(frozen=True)
@@ -144,6 +152,17 @@ class PhaseAdapter(Protocol):
     def phase(self) -> DriverPhase: ...
 
     @property
+    def sub_state_target(self) -> str | None:
+        """The sub-state entering this phase commits to, if any (ADR-0137 C9).
+
+        ``DIAGNOSE``, ``HITL_APPLY`` and ``PARKED`` write no pipeline label, so
+        C8's durable commit does not exist for them and a record in the
+        second intent slot *is* their commit. ``None`` for phases that only
+        cross labelled stages.
+        """
+        ...
+
+    @property
     def target_label(self) -> str | None:
         """The pipeline label this phase nominally moves the issue to.
 
@@ -183,6 +202,22 @@ class DriverLabels(Protocol):
     def clear_intent(self, issue_number: int) -> None: ...
 
     async def commit_stage_label(self, issue_number: int, label: str) -> None: ...
+
+
+class DriverSubStates(Protocol):
+    """The second intent slot: sub-state transitions that write no label (C9)."""
+
+    def record_sub_state_transition(
+        self,
+        issue_number: int,
+        *,
+        from_state: DriverState,
+        to_state: DriverState,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None: ...
+
+    def clear_sub_state_transition(self, issue_number: int) -> None: ...
 
 
 class DriverJournalWriter(Protocol):
@@ -234,6 +269,7 @@ class IssueDriver:
         driver_state: str = "TRIAGE",
         epoch: int = 0,
         lease_ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
+        sub_states: DriverSubStates | None = None,
     ) -> None:
         self._issue_number = issue_number
         self._driver_id = driver_id
@@ -245,6 +281,7 @@ class IssueDriver:
         self._state = driver_state
         self._epoch = epoch
         self._lease_ttl_seconds = lease_ttl_seconds
+        self._sub_states = sub_states
         self._phase_attempts: dict[DriverPhase, int] = {}
 
     # -- identity -----------------------------------------------------------
@@ -405,12 +442,16 @@ class IssueDriver:
         called before anything is swallowed, so a burnt credit balance stops the
         factory rather than being spent as a failed phase attempt.
         """
-        phase = None if self.is_retired else phase_for_state(self._state)
+        phase = phase_for_state(self._state)
         adapter = self._adapters.get(phase) if phase is not None else None
-        if phase is None or adapter is None:
-            # Terminal, or a phase this preset does not drive (P1 leaves Triage
-            # to Classic). Neither is an error: the driver has nothing to do.
-            return self._advance(AdvanceOutcome.RETIRED, phase=phase)
+        if phase is None or adapter is None or self.is_retired:
+            # Terminal, or nothing to run: PARKED has no phase, and Triage has
+            # no adapter under this preset. Only the first is the end of the
+            # driver — the rest will be asked again next tick.
+            return self._advance(
+                AdvanceOutcome.RETIRED if self.is_retired else AdvanceOutcome.IDLE,
+                phase=phase,
+            )
 
         expected_label = self._stage_labels[self._state]
         key = boundary_idempotency_key(
@@ -458,6 +499,21 @@ class IssueDriver:
                 self._issue_number,
                 from_label=expected_label,
                 to_label=target_label,
+                epoch=lease.epoch,
+                phase_attempt=lease.phase_attempt,
+            )
+
+        # --- C9: a phase that commits to a sub-state writes no label, so
+        # C8's durable commit does not exist for it and this record is the
+        # commit. It lives in the *second* slot: C5(a) rule 1 clears the stage
+        # slot on the one-label condition a sub-state transition runs under,
+        # so a shared slot would delete this on the very path it protects.
+        sub_state = adapter.sub_state_target
+        if sub_state is not None and sub_state != self._state and self._sub_states:
+            self._sub_states.record_sub_state_transition(
+                self._issue_number,
+                from_state=cast("DriverState", self._state),
+                to_state=cast("DriverState", sub_state),
                 epoch=lease.epoch,
                 phase_attempt=lease.phase_attempt,
             )
@@ -543,10 +599,12 @@ class IssueDriver:
                 rotation_reason=None,
             ),
         )
-        # C8 step 5: the boundary is checkpointed, so the intent is spent.
-        # Cleared only here, after the checkpoint — clearing it before would
-        # reopen the window the record exists to close.
+        # C8 step 5: the boundary is checkpointed, so both intents are spent.
+        # Cleared only here, after the checkpoint — clearing either before
+        # would reopen the window the record exists to close.
         self._labels.clear_intent(self._issue_number)
+        if self._sub_states is not None:
+            self._sub_states.clear_sub_state_transition(self._issue_number)
         self._state = self._resolve_state(outcome, expected_label)
         self._phase_attempts.pop(phase, None)
         return self._advance(
