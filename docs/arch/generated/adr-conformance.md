@@ -74,7 +74,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0102 | enforced | `pytest:tests/test_review_phase_core.py` |
 | ADR-0103 | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
-| ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py` |
+| ADR-0106 | enforced | `pytest:tests/regressions/test_issue_9552.py`, `pytest:tests/regressions/test_issue_11604.py` |
 | ADR-0107 | enforced | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0109 | enforced | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | enforced | `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` |
@@ -118,6 +118,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human` | ADR-0115 |
 | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface` | ADR-0115 |
 | `pytest:tests/regressions/test_issue_11176.py::test_aging_resolvable_escape_self_answers_despite_a_busy_ask_budget` | ADR-0115 |
+| `pytest:tests/regressions/test_issue_11604.py` | ADR-0106 |
 | `pytest:tests/regressions/test_issue_9143_codeql_suppression.py` | ADR-0085 |
 | `pytest:tests/regressions/test_issue_9552.py` | ADR-0106 |
 | `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py` | ADR-0135 |

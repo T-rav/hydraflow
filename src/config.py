@@ -4135,6 +4135,38 @@ class HydraFlowConfig(BaseModel):
             "turns a frozen process into a dead one. Re-read at trip time."
         ),
     )
+    event_loop_watchdog_restart_after_episodes: int = Field(
+        default=2,
+        ge=1,
+        le=10,
+        description=(
+            "How many accumulated freeze episodes a hard restart requires "
+            "(#11604). Default 2: the first episode notifies (stack dump, "
+            "stall marker, loop-stalled issue) and only a REPEAT exits the "
+            "process. The counter is the stall marker's episode_count, which "
+            "resets when the health monitor gets a healthy cycle and consumes "
+            "the marker — so 'recovered well enough to file the issue' resets "
+            "it, while 'froze, recovered, froze again' climbs it. Set to 1 to "
+            "restore restart-on-first-episode. Re-read at trip time."
+        ),
+    )
+    event_loop_watchdog_starvation_service_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Observer service ratio below which a freeze is blamed on HOST "
+            "CPU starvation rather than a wedged loop, vetoing the hard "
+            "restart (#11604). The ratio is the watchdog thread's own polls "
+            "taken over the freeze window divided by the polls its cadence "
+            "called for: a wedged event loop does not stop a separate OS "
+            "thread waking on time (ratio ~1.0), but an oversubscribed host "
+            "starves the observer too. Default 0.5 — the observer must have "
+            "lost HALF its own schedule before a restart is vetoed. Set to "
+            "0.0 to disable the veto. Never vetoes the notify path. Re-read "
+            "at trip time."
+        ),
+    )
     staging_bisect_flake_reruns: int = Field(
         default=2,
         ge=1,
