@@ -12,7 +12,6 @@ one status event per registered ``BaseBackgroundLoop``.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 
 from events import EventType, HydraFlowEvent
@@ -21,10 +20,6 @@ from models import BackgroundWorkerState, BackgroundWorkerStatusPayload
 if TYPE_CHECKING:
     from bg_worker_manager import BGWorkerManager
     from events import EventBus
-
-# Same logger as the host — the moved code's records keep their
-# pre-extraction ``hydraflow.orchestrator`` origin.
-logger = logging.getLogger("hydraflow.orchestrator")
 
 
 class OrchestratorBGWorkersMixin:

@@ -13,7 +13,6 @@ to a plan — wiring the four optional agents, persisting the shared
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from adversarial_agents import AgentLike
@@ -28,10 +27,6 @@ from spec_judge import JudgeResult, SpecJudge
 if TYPE_CHECKING:
     from events import EventBus
     from state import StateTracker
-
-# Same logger as the host — the moved code's records keep their
-# pre-extraction ``hydraflow.plan_phase`` origin.
-logger = logging.getLogger("hydraflow.plan_phase")
 
 
 class PlanAdversarialMixin:

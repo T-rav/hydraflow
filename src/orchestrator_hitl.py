@@ -12,7 +12,6 @@ pause / abort / redo decision computed by ``human_steering.apply_steering``.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, cast
 
 from human_steering import apply_steering, resolve_redo_phase
@@ -26,10 +25,6 @@ if TYPE_CHECKING:
     from issue_store import IssueStore
     from service_registry import ServiceRegistry
     from state import StateTracker
-
-# Same logger as the host — the moved code's records keep their
-# pre-extraction ``hydraflow.orchestrator`` origin.
-logger = logging.getLogger("hydraflow.orchestrator")
 
 
 class OrchestratorHITLMixin:

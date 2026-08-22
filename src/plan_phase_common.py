@@ -10,15 +10,10 @@ seam keeps working.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from flows import FlowState
-
-# Same logger as the host — the moved code's records keep their
-# pre-extraction ``hydraflow.plan_phase`` origin.
-logger = logging.getLogger("hydraflow.plan_phase")
 
 # Verdict map for ConvergenceLedger boundary recording (ADR-0096 / convergence gate).
 # "ADVANCE" = issue moves forward in the pipeline.

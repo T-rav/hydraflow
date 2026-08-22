@@ -1229,8 +1229,8 @@ def build_services(
         plan_reviewer=plan_reviewer,
         # ADR-0107: hand the discover/shape engines (escalation deps already
         # bound above) to the planner, whose decision gates
-        # (plan_phase_prepass.py:_should_discover_helper / _should_shape_helper) invoke
-        # them on demand as in-process research/shaping sub-steps.
+        # (plan_phase_prepass.py:_should_discover_helper / _should_shape_helper)
+        # invoke them on demand as in-process research/shaping sub-steps.
         discover_runner=discover_runner,
         shape_runner=shape_runner,
     )
