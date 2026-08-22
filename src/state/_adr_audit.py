@@ -22,7 +22,12 @@ class AdrAuditStateMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by CoreMixin
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
+
+        def save(self) -> None: ...
 
     def inc_adr_conformance_attempts(self, adr_id: str) -> int:
         current = int(self._data.adr_conformance_attempts.get(adr_id, 0)) + 1

@@ -15,10 +15,15 @@ class ConvergenceStateMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by CoreMixin
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
 
-    @staticmethod
-    def _key(issue_id: int | str) -> str: ...  # provided by StateTracker
+        def save(self) -> None: ...
+
+        @staticmethod
+        def _key(issue_id: int | str) -> str: ...
 
     def get_convergence_ledger(self, issue_number: int) -> ConvergenceLedger | None:
         cl = self._data.convergence_ledgers.get(self._key(issue_number))

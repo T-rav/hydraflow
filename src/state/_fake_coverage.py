@@ -13,7 +13,12 @@ class FakeCoverageStateMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by CoreMixin
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
+
+        def save(self) -> None: ...
 
     def get_fake_coverage_last_known(self) -> dict[str, list[str]]:
         return {k: list(v) for k, v in self._data.fake_coverage_last_known.items()}

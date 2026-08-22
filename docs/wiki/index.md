@@ -170,7 +170,7 @@ New terms added 2026-05-19 (wiki-gap backfill):
 - Distinguish local from cross-group wiring at architecture boundary
 - AST-based regression tests are fragile to refactoring
 
-## Architecture-Refactoring (18)
+## Architecture-Refactoring (19)
 
 - Consolidate patterns with explicit scope to avoid partial migrations
 - Verify dead code removal via tests, lint, and layer checks
@@ -190,6 +190,7 @@ New terms added 2026-05-19 (wiki-gap backfill):
 - Backward-compat layers require individual liveness evaluation per item
 - Document trade-off when removing implicit documentation methods
 - Use underscore prefix for local implementation details in module-level functions
+- Mixin decomposition: declare host seams under TYPE_CHECKING, never as runtime stubs
 
 ## Architecture-State-Persistence (23)
 
@@ -235,7 +236,7 @@ New terms added 2026-05-19 (wiki-gap backfill):
 - Type signatures communicate breaking contract changes
 - Never import optional deps at module level in tests
 
-## Gotchas (53)
+## Gotchas (54)
 
 - Verify imports are present and not circular before type annotations
 - Import ordering follows isort: stdlib, third-party, local
@@ -290,6 +291,7 @@ New terms added 2026-05-19 (wiki-gap backfill):
 - Sentry captures real code bugs only, not transient failures
 - Never use git commit --no-verify or --no-hooks
 - StaleIssueLoop vs StaleIssueGCLoop — distinct scopes, zero business-logic overlap
+- Runtime `...` stubs in a mixin shadow sibling mixins via the MRO
 
 ## Patterns (33)
 
