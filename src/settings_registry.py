@@ -255,6 +255,14 @@ SETTINGS: dict[str, SettingSpec] = {
     "gateway_policy_workspace_enabled": SettingSpec(
         "Model Routing", live=True, order=81
     ),
+    # --- Enforcement canary (#11539 / ADR-0141) -----------------------------
+    # Live: route_enforcement re-reads it at every governed spawn seam, so
+    # clearing it disarms enforcement on the NEXT spawn without a restart. That
+    # liveness is the whole rollback story — an enforcement dial an operator has
+    # to restart the factory to unset is not a canary switch.
+    "gateway_enforcement_canary_repo": SettingSpec(
+        "Model Routing", live=True, order=82
+    ),
     # --- Issue Refinement (backlog dedup + priority scoring, #9957) ----------
     "issue_refinement_enabled": SettingSpec("Issue Refinement", live=True, order=0),
     "issue_refinement_pair_budget": SettingSpec("Issue Refinement", live=True, order=1),

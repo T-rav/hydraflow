@@ -15,7 +15,7 @@ import pytest
 
 from adversarial_agent_runner import SubprocessAgentRunner
 from config import HydraFlowConfig
-from runner_utils import GatewayMintCredential
+from gateway_mint_client import GatewayMintCredential
 from subprocess_util import CreditExhaustedError
 
 

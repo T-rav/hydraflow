@@ -60,6 +60,16 @@ class GatewaySettings(BaseModel):
     ledger_path: Path = Path(".hydraflow/gateway/requests.jsonl")
     body_dir: Path = Path(".hydraflow/gateway/bodies")
     body_capture_repo_slugs: frozenset[str] = frozenset()
+    governed_repo_slugs: frozenset[str] = frozenset()
+    """Repositories whose keys must be route-bound (ADR-0141 §D4).
+
+    Empty by default, and deliberately server-owned: a caller cannot declare
+    itself governed, and while this set names a repository, that repository's v1
+    mints are refused and its unbound keys are turned away by the data plane.
+    Arming it is a deployment act *after* the spawn side is already minting v2;
+    disarming runs the other way. ADR-0141 states the ordering and why the
+    operator-facing rollback is HydraFlow's own dial rather than this one.
+    """
     max_key_ttl_seconds: int = Field(default=86_400, gt=0)
     max_request_bytes: int = Field(default=33_554_432, gt=0)
     max_control_request_bytes: int = Field(default=16_384, gt=0)
@@ -70,6 +80,24 @@ class GatewaySettings(BaseModel):
     pool_timeout_seconds: float = Field(default=10.0, gt=0)
     max_connections: int = Field(default=100, gt=0)
     max_keepalive_connections: int = Field(default=20, ge=0)
+
+    def governs(self, repo_slug: str) -> bool:
+        """Whether this deployment requires a route-bound key for *repo_slug*.
+
+        Both sides are normalised at the moment of the decision rather than when
+        the set is built, and that placement is the point. A field validator is
+        skipped by ``model_copy`` and by any construction path that does not
+        validate, so an authorization boundary resting on one would be as strong
+        as however its settings object happened to be assembled. Normalising
+        here also means neither the operator's spelling (``owner/repo``, the
+        form ``.env.sample`` documents) nor the caller's (``MintKeyRequest``
+        carries a free string) can open it. ADR-0141 §D4.
+        """
+        target = normalise_repo_slug(repo_slug)
+        return any(
+            normalise_repo_slug(declared) == target
+            for declared in self.governed_repo_slugs
+        )
 
     @field_validator("control_token")
     @classmethod
@@ -123,6 +151,9 @@ class GatewaySettings(BaseModel):
             body_capture_repo_slugs=_repo_slug_allowlist(
                 env.get("GATEWAY_BODY_CAPTURE_REPOS", "")
             ),
+            governed_repo_slugs=_repo_slug_allowlist(
+                env.get("GATEWAY_GOVERNED_REPOS", "")
+            ),
             max_key_ttl_seconds=_positive_int(
                 env, "GATEWAY_MAX_KEY_TTL_SECONDS", default=86_400
             ),
@@ -159,8 +190,35 @@ def _positive_int(environ: Mapping[str, str], name: str, *, default: int) -> int
 
 
 def _repo_slug_allowlist(raw: str) -> frozenset[str]:
-    """Parse exact, case-insensitive repository slugs owned by the gateway."""
+    """Parse exact, case-insensitive repository slugs owned by the gateway.
+
+    Exact, deliberately: ``body_capture_repo_slugs`` is matched against whatever
+    ``MintKeyRequest.repo_slug`` carries, which is the caller's own runtime slug
+    and is not guaranteed to be in any canonical form. Normalising here would
+    silently stop authorising a repository whose slug does not round-trip.
+    """
     return frozenset(slug.strip().lower() for slug in raw.split(",") if slug.strip())
+
+
+def normalise_repo_slug(value: str) -> str:
+    """Reduce a repository name to the one form the governed set is keyed on.
+
+    ``owner/repo`` becomes ``owner-repo``; everything else is lower-cased and
+    returned as it stands. Both the allow-list and every match against it go
+    through here, because normalising only the operator's spelling would leave
+    the boundary decided by the *caller's*: ``MintKeyRequest.repo_slug`` is a
+    free string with no format constraint, so a caller sending the canonical
+    form would miss a governed set holding the slug — and ADR-0141 §D4's whole
+    claim is that the set is owned by the deployment and cannot be asserted by
+    the caller.
+    """
+    # Deferred: ``routing_policy`` reaches back into ``accounts``, which reads
+    # this module, so importing it at module scope closes a cycle.
+    from hydraflow_gateway.routing_policy import canonicalize_repo, runtime_slug_for
+
+    candidate = value.strip().lower()
+    canonical = canonicalize_repo(candidate)
+    return runtime_slug_for(canonical) if canonical is not None else candidate
 
 
 def _add_upstream(

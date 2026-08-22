@@ -248,13 +248,26 @@ class TestGatewayLedgerRowUsageHonesty:
     @pytest.mark.parametrize(
         "overrides",
         [
+            # Every case carries ``usage_complete: False`` deliberately. Without
+            # it the aborted and unfinished rows trip the *sibling* clause
+            # ("usage_complete must be false …") and this test passes on an
+            # error it never meant to assert — which is exactly what it did
+            # until ADR-0141 added two trailing fields and pushed
+            # ``cost_unknown`` out of the truncated ``input_value`` echo that
+            # ``match=`` had been matching on.
             {
                 "client_aborted": True,
                 "completed": False,
                 "status": "client-aborted",
                 "status_code": 499,
+                "usage_complete": False,
             },
-            {"completed": False, "status": "upstream-error", "status_code": 502},
+            {
+                "completed": False,
+                "status": "upstream-error",
+                "status_code": 502,
+                "usage_complete": False,
+            },
             {"usage_complete": False},
         ],
         ids=["client-aborted", "upstream-error", "explicit-incomplete"],
@@ -265,7 +278,7 @@ class TestGatewayLedgerRowUsageHonesty:
         payload = _row("request-1").model_dump(mode="json")
         payload.update(overrides)  # still cost_usd=0.001, cost_unknown=False
 
-        with pytest.raises(ValueError, match="cost_unknown"):
+        with pytest.raises(ValueError, match="cost_unknown must be true"):
             GatewayLedgerRow.model_validate(payload)
 
     @pytest.mark.parametrize(

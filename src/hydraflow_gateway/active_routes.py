@@ -61,6 +61,8 @@ class InFlightRoute:
     pr_number: int | None
     path: str | None
     started_at: datetime
+    mint_decision_id: str | None = None
+    route_decision_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +86,8 @@ class TerminalRoute:
     started_at: datetime
     cost_usd: float | None
     cost_unknown: bool
+    mint_decision_id: str | None = None
+    route_decision_id: str | None = None
 
 
 class LeaseView(BaseModel):
@@ -109,6 +113,11 @@ class LeaseView(BaseModel):
     issued_at: datetime
     expires_at: datetime
     age_seconds: float = Field(ge=0)
+    # ADR-0141: the decision that authorised this lease and the pure resolver's
+    # own decision id, so a lease joins to the gateway's mint record AND to the
+    # HydraFlow-side chain that recorded the route. Null on every v1 key.
+    mint_decision_id: str | None = None
+    route_decision_id: str | None = None
 
 
 class InFlightRouteView(BaseModel):
@@ -128,6 +137,8 @@ class InFlightRouteView(BaseModel):
     path: str | None = None
     started_at: datetime
     age_seconds: float = Field(ge=0)
+    mint_decision_id: str | None = None
+    route_decision_id: str | None = None
 
 
 class TerminalRouteView(BaseModel):
@@ -153,6 +164,8 @@ class TerminalRouteView(BaseModel):
     started_at: datetime
     cost_usd: float | None = None
     cost_unknown: bool
+    mint_decision_id: str | None = None
+    route_decision_id: str | None = None
 
 
 class ActiveRoutesView(BaseModel):
@@ -224,6 +237,7 @@ class ActiveRouteRegistry:
         started_at: datetime,
     ) -> None:
         """Record one accepted request as in-flight."""
+        binding = identity.route_binding
         route = InFlightRoute(
             request_id=request_id,
             provider_binding=identity.provider_binding,
@@ -235,6 +249,8 @@ class ActiveRouteRegistry:
             pr_number=identity.principal.pr_number,
             path=path,
             started_at=started_at,
+            mint_decision_id=(None if binding is None else binding.mint_decision_id),
+            route_decision_id=(None if binding is None else binding.route_decision_id),
         )
         with self._lock:
             self._in_flight[request_id] = route
@@ -309,6 +325,8 @@ def _terminal_route(row: GatewayLedgerRow) -> TerminalRoute:
         started_at=row.timestamp,
         cost_usd=row.cost_usd,
         cost_unknown=row.cost_unknown,
+        mint_decision_id=row.mint_decision_id,
+        route_decision_id=row.route_decision_id,
     )
 
 
@@ -331,6 +349,16 @@ def lease_view(identity: GatewayIdentity, *, now: datetime) -> LeaseView:
         issued_at=identity.issued_at,
         expires_at=identity.expires_at,
         age_seconds=_age_seconds(identity.issued_at, now),
+        mint_decision_id=(
+            None
+            if identity.route_binding is None
+            else identity.route_binding.mint_decision_id
+        ),
+        route_decision_id=(
+            None
+            if identity.route_binding is None
+            else identity.route_binding.route_decision_id
+        ),
     )
 
 
@@ -360,6 +388,8 @@ def build_active_routes_view(
                 path=route.path,
                 started_at=route.started_at,
                 age_seconds=_age_seconds(route.started_at, now),
+                mint_decision_id=route.mint_decision_id,
+                route_decision_id=route.route_decision_id,
             )
             for route in in_flight
         ),
@@ -402,6 +432,8 @@ def build_recent_routes_view(
                 started_at=route.started_at,
                 cost_usd=route.cost_usd,
                 cost_unknown=route.cost_unknown,
+                mint_decision_id=route.mint_decision_id,
+                route_decision_id=route.route_decision_id,
             )
             for route in routes
         ),

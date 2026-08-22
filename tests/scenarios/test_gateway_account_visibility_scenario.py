@@ -28,6 +28,7 @@ from dashboard_routes._gateway_routes import build_gateway_router
 from execution import SimpleResult
 from gateway_control_reader import GatewayControlReader
 from gateway_coverage import gateway_ledger_path
+from gateway_mint_client import GatewayMintCredential, GatewayMintRequest
 from hydraflow_gateway.app import create_app
 from hydraflow_gateway.keys import VirtualKeyStore
 from hydraflow_gateway.ledger import GatewayBodyStore, GatewayLedger
@@ -37,11 +38,7 @@ from hydraflow_gateway.settings import (
     UpstreamAuthStyle,
     UpstreamSettings,
 )
-from runner_utils import (
-    GatewayMintCredential,
-    GatewayMintRequest,
-    _claude_cli_complete,
-)
+from runner_utils import _claude_cli_complete
 from tests.helpers import ConfigFactory
 
 pytestmark = pytest.mark.scenario

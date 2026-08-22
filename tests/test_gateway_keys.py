@@ -23,6 +23,8 @@ from hydraflow_gateway.settings import (
     GatewaySettings,
     UpstreamAuthStyle,
     UpstreamSettings,
+    _repo_slug_allowlist,
+    normalise_repo_slug,
 )
 from mockworld.fakes.fake_clock import FakeClock
 
@@ -308,3 +310,116 @@ class TestAttribution:
     def test_attribution_rejects_non_positive_numbers(self, field: str) -> None:
         with pytest.raises(ValidationError):
             _request(**{field: 0})
+
+
+def _settings_for_governed() -> GatewaySettings:
+    """The smallest valid gateway settings object, governing nothing."""
+    return GatewaySettings(
+        control_token=SecretStr("c" * 40),
+        upstreams={
+            ProviderBinding.ANTHROPIC: UpstreamSettings(
+                base_url="https://upstream.test",
+                api_key=SecretStr("k"),
+                auth_style=UpstreamAuthStyle.X_API_KEY,
+            )
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(
+            "acme/project-x",
+            "acme-project-x",
+            id="a-canonical-name-becomes-the-runtime-slug",
+        ),
+        pytest.param(
+            "acme-project-x", "acme-project-x", id="a-runtime-slug-is-already-the-form"
+        ),
+        pytest.param("ACME/Project-X", "acme-project-x", id="case-does-not-matter"),
+        pytest.param(
+            " acme/project-x ", "acme-project-x", id="padding-does-not-matter"
+        ),
+        pytest.param("a/b/c", "a/b/c", id="an-unparseable-name-is-left-alone"),
+    ],
+)
+def test_both_identity_spaces_reduce_to_one_form(value: str, expected: str) -> None:
+    """ADR-0141 §D4: a security control must not fail open on a spelling.
+
+    HydraFlow's canary dial is the canonical ``owner/repo``; a mint request
+    carries the path-safe ``owner-repo`` and is a free string with no format
+    constraint. Both the allow-list and every match against it go through here,
+    so neither the operator's spelling nor the caller's can open the boundary.
+    """
+    assert normalise_repo_slug(value) == expected
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        pytest.param(
+            frozenset({"acme/project-x"}), id="the-operator-wrote-the-canonical-form"
+        ),
+        pytest.param(
+            frozenset({"acme-project-x"}), id="the-operator-wrote-the-runtime-slug"
+        ),
+        pytest.param(
+            frozenset({"ACME/Project-X"}), id="the-operator-wrote-it-in-mixed-case"
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "asked",
+    [
+        pytest.param("acme-project-x", id="asked-as-the-runtime-slug"),
+        pytest.param("acme/project-x", id="asked-in-the-canonical-form"),
+    ],
+)
+def test_the_governed_verdict_survives_every_spelling_on_either_side(
+    declared: frozenset[str], asked: str
+) -> None:
+    """Neither the operator's spelling nor the caller's can open the boundary.
+
+    Deliberately built with ``model_copy``, which skips field validators: an
+    authorization boundary must not be as strong as however its settings object
+    happened to be assembled. ADR-0141 §D4.
+    """
+    settings = _settings_for_governed().model_copy(
+        update={"governed_repo_slugs": declared}
+    )
+
+    assert settings.governs(asked) is True
+
+
+@pytest.mark.parametrize(
+    "asked",
+    [
+        pytest.param("other-repo", id="a-repository-that-is-not-governed"),
+        pytest.param("acme/other", id="a-near-miss-in-the-canonical-form"),
+        pytest.param("", id="an-empty-name-governs-nothing"),
+    ],
+)
+def test_an_ungoverned_repository_is_not_swept_in(asked: str) -> None:
+    """The affirmative cases above would be worthless if everything matched."""
+    settings = _settings_for_governed().model_copy(
+        update={"governed_repo_slugs": frozenset({"acme/project-x"})}
+    )
+
+    assert settings.governs(asked) is False
+
+
+def test_an_empty_governed_set_governs_nothing() -> None:
+    """The shipped default: an untouched gateway requires no route binding."""
+    assert _settings_for_governed().governs("acme-project-x") is False
+
+
+def test_the_body_capture_allowlist_is_still_matched_exactly() -> None:
+    """It shares a shape with the governed set but not its semantics.
+
+    ``body_capture_repo_slugs`` is compared against whatever
+    ``MintKeyRequest.repo_slug`` carries — a caller-supplied string with no
+    guaranteed form — so normalising it would silently de-authorise a repository
+    whose slug does not round-trip.
+    """
+    assert _repo_slug_allowlist("acme/hydraflow") == frozenset({"acme/hydraflow"})

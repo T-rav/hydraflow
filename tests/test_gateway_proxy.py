@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
@@ -24,8 +25,10 @@ from hydraflow_gateway.ledger import (
 from hydraflow_gateway.models import (
     GatewayIdentity,
     MintKeyRequest,
+    Principal,
     ProviderBinding,
     RepoClass,
+    RouteBinding,
 )
 from hydraflow_gateway.proxy import (
     GatewayProxy,
@@ -1231,3 +1234,303 @@ def test_sanitized_request_path_strips_query_and_bounds_length() -> None:
     assert "?" not in path
     assert len(path) == 2048
     assert path.startswith("/v1/aaaa")
+
+
+# --------------------------------------------------------------------------
+# ADR-0141: a route-bound key reaches its bound model, or no upstream at all
+# --------------------------------------------------------------------------
+
+_BOUND_MODEL = "glm-5.3"
+
+
+def _governed_client(
+    tmp_path: Path,
+    handler: Callable[[httpx.Request], Awaitable[httpx.Response]],
+    *,
+    governed_repo_slugs: frozenset[str] = frozenset(),
+    bind_route: bool = True,
+    capture_bodies: bool = False,
+    max_request_bytes: int = 33_554_432,
+) -> tuple[httpx.AsyncClient, str]:
+    """A gateway holding one key, route-bound or deliberately not."""
+    settings = _settings(tmp_path, max_request_bytes=max_request_bytes).model_copy(
+        update={"governed_repo_slugs": governed_repo_slugs}
+    )
+    store = VirtualKeyStore(
+        max_ttl_seconds=600,
+        id_factory=lambda: "key-1",
+        secret_factory=lambda: "virtual-secret",
+        body_capture_repo_slugs=frozenset({"acme-hydraflow"}),
+    )
+    if bind_route:
+        minted = store.mint_bound(
+            principal=Principal(kind="spawn", id="implementer", spawn_id="spawn-1"),
+            repo_slug="acme-hydraflow",
+            repo_class=RepoClass.HYDRAFLOW,
+            provider_binding=ProviderBinding.ZAI_HARNESS,
+            capture_bodies=capture_bodies,
+            ttl_seconds=300,
+            route_binding=RouteBinding(
+                mint_decision_id="gwd_1",
+                route_decision_id="dec_1",
+                dispatch_id="disp-1",
+                account_id="legacy-zai-harness",
+                effective_model=_BOUND_MODEL,
+                policy_id="project-x-zai",
+                policy_revision=3,
+            ),
+        )
+    else:
+        minted = store.mint(
+            MintKeyRequest(
+                principal_kind="spawn",
+                principal_id="implementer",
+                spawn_id="spawn-1",
+                repo_slug="acme-hydraflow",
+                repo_class=RepoClass.HYDRAFLOW,
+                provider_binding=ProviderBinding.ZAI_HARNESS,
+                capture_bodies=False,
+                ttl_seconds=300,
+            )
+        )
+    app = create_app(
+        settings,
+        key_store=store,
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        ledger=GatewayLedger(settings.ledger_path),
+        body_store=GatewayBodyStore(settings.body_dir),
+    )
+    return (
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://gateway.test"
+        ),
+        minted.token,
+    )
+
+
+class TestGovernedDataPlane:
+    """Every refusal here must leave the fake origin with nothing recorded."""
+
+    @staticmethod
+    def _origin() -> tuple[list[bytes], Callable[..., Any]]:
+        seen: list[bytes] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(await request.aread())
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                stream=_ChunkStream([_ZAI_SSE_BYTES]),
+            )
+
+        return seen, handler
+
+    async def _post(
+        self,
+        tmp_path: Path,
+        *,
+        path: str = "/v1/messages",
+        body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        governed_repo_slugs: frozenset[str] = frozenset(),
+        bind_route: bool = True,
+    ) -> tuple[int, list[bytes]]:
+        seen, handler = self._origin()
+        client, token = _governed_client(
+            tmp_path,
+            handler,
+            governed_repo_slugs=governed_repo_slugs,
+            bind_route=bind_route,
+        )
+        async with client:
+            response = await client.post(
+                path,
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                    **(headers or {}),
+                },
+                json=body if body is not None else {"model": _BOUND_MODEL},
+            )
+        return response.status_code, seen
+
+    async def test_a_body_naming_the_bound_model_is_forwarded(
+        self, tmp_path: Path
+    ) -> None:
+        """The affirmative case: a governed key still serves its own route."""
+        status, _ = await self._post(tmp_path)
+
+        assert status == 200
+
+    async def test_the_forwarded_body_reaches_the_upstream_intact(
+        self, tmp_path: Path
+    ) -> None:
+        """Buffering for the binding check must not drop or rewrite the bytes."""
+        _, seen = await self._post(tmp_path, body={"model": _BOUND_MODEL, "x": 1})
+
+        assert json.loads(seen[0]) == {"model": _BOUND_MODEL, "x": 1}
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected_status"),
+        [
+            pytest.param(
+                {"body": {"model": "claude-opus-4-8"}},
+                409,
+                id="a-body-naming-another-model-is-refused",
+            ),
+            pytest.param(
+                {"body": {"messages": []}},
+                409,
+                id="a-body-naming-no-model-is-refused",
+            ),
+            pytest.param(
+                {"path": "/v1/models"},
+                403,
+                id="an-unenumerated-face-is-refused",
+            ),
+            pytest.param(
+                {
+                    "governed_repo_slugs": frozenset({"acme-hydraflow"}),
+                    "bind_route": False,
+                },
+                403,
+                id="an-unbound-key-for-a-governed-repository-is-refused",
+            ),
+            pytest.param(
+                {
+                    # The operator wrote the canonical form; the caller sends
+                    # the slug. ADR-0141 §D4: the set is owned by the
+                    # deployment and cannot be asserted by the caller, so a
+                    # spelling difference must not open the boundary.
+                    "governed_repo_slugs": frozenset({"acme/hydraflow"}),
+                    "bind_route": False,
+                },
+                403,
+                id="the-callers-spelling-cannot-escape-the-governed-set",
+            ),
+        ],
+    )
+    async def test_a_request_that_defeats_the_binding_is_refused(
+        self, tmp_path: Path, kwargs: dict[str, Any], expected_status: int
+    ) -> None:
+        """Each refusal carries its own status, never a shared generic error."""
+        status, _ = await self._post(tmp_path, **kwargs)
+
+        assert status == expected_status
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param({"body": {"model": "claude-opus-4-8"}}, id="a-model-mismatch"),
+            pytest.param({"body": {"messages": []}}, id="a-missing-model"),
+            pytest.param({"path": "/v1/models"}, id="an-unenumerated-face"),
+            pytest.param(
+                {
+                    "governed_repo_slugs": frozenset({"acme-hydraflow"}),
+                    "bind_route": False,
+                },
+                id="an-unbound-key-for-a-governed-repository",
+            ),
+        ],
+    )
+    async def test_a_refused_request_sends_zero_upstream_bytes(
+        self, tmp_path: Path, kwargs: dict[str, Any]
+    ) -> None:
+        """The property the whole enforcement claim rests on."""
+        _, seen = await self._post(tmp_path, **kwargs)
+
+        assert seen == []
+
+    async def test_a_refused_request_names_its_reason_on_the_durable_row(
+        self, tmp_path: Path
+    ) -> None:
+        """A 409 an operator cannot classify afterwards is a 409 they cannot fix."""
+        seen, handler = self._origin()
+        settings = _settings(tmp_path)
+        client, token = _governed_client(tmp_path, handler)
+        async with client:
+            await client.post(
+                "/v1/messages",
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                },
+                json={"model": "claude-opus-4-8"},
+            )
+        rows = GatewayLedger(settings.ledger_path).read_all()
+
+        assert [row.refusal_reason for row in rows] == ["model-not-bound"]
+
+    async def test_a_served_request_names_no_refusal(self, tmp_path: Path) -> None:
+        """The column is null for everything that was not refused."""
+        seen, handler = self._origin()
+        settings = _settings(tmp_path)
+        client, token = _governed_client(tmp_path, handler)
+        async with client:
+            await client.post(
+                "/v1/messages",
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                },
+                json={"model": _BOUND_MODEL},
+            )
+        rows = GatewayLedger(settings.ledger_path).read_all()
+
+        assert [row.refusal_reason for row in rows] == [None]
+
+    async def test_a_refused_request_does_not_claim_a_complete_capture(
+        self, tmp_path: Path
+    ) -> None:
+        """The capture was opened before the body was read, and never written."""
+        seen, handler = self._origin()
+        settings = _settings(tmp_path)
+        client, token = _governed_client(tmp_path, handler, capture_bodies=True)
+        async with client:
+            await client.post(
+                "/v1/messages",
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                },
+                json={"model": "claude-opus-4-8"},
+            )
+        rows = GatewayLedger(settings.ledger_path).read_all()
+
+        assert [row.body_capture_complete for row in rows] == [False]
+
+    async def test_a_governed_body_over_the_ceiling_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The buffered path must honour the same bound the streamed one does."""
+        seen, handler = self._origin()
+        client, token = _governed_client(tmp_path, handler, max_request_bytes=256)
+        async with client:
+            response = await client.post(
+                "/v1/messages",
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                },
+                json={"model": _BOUND_MODEL, "padding": "x" * 4096},
+            )
+
+        assert response.status_code == 413
+
+    async def test_an_oversized_governed_body_sends_zero_upstream_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        """Refused for size is still refused before an upstream request exists."""
+        seen, handler = self._origin()
+        client, token = _governed_client(tmp_path, handler, max_request_bytes=256)
+        async with client:
+            await client.post(
+                "/v1/messages",
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                },
+                json={"model": _BOUND_MODEL, "padding": "x" * 4096},
+            )
+
+        assert seen == []

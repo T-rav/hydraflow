@@ -3094,6 +3094,28 @@ class HydraFlowConfig(BaseModel):
             "dial off is the third, blunt way to close them (ADR-0140)."
         ),
     )
+    # Enforcement canary (#11539, ADR-0141). The FIRST dial on which a routing
+    # decision changes what gets spawned — and deliberately the smallest one
+    # that can: it names exactly one canonical `owner/repo`, and only that
+    # repository's gateway-transported spawns are bound by policy. Empty is off
+    # for every repository, which is both the default and the rollback: clearing
+    # it disarms enforcement on the next spawn, with no restart and no policy
+    # edit. It never promotes a spawn onto the gateway; it only binds traffic
+    # already there.
+    gateway_enforcement_canary_repo: str = Field(
+        default="",
+        max_length=512,
+        description=(
+            "Canonical 'owner/repo' whose gateway-routed spawns are bound by "
+            "the routing policy resolver instead of by legacy dials. Empty "
+            "(the default) enforces nothing anywhere; clearing it is the "
+            "one-action rollback. Anything that is not exactly owner/repo — a "
+            "runtime slug included — arms nothing. Deliberately NOT an env "
+            "override: an env var that re-applies whenever the field is at its "
+            "default would mean clearing the field did not disarm, and a "
+            "rollback with two places to look is not one action (ADR-0141 D5)."
+        ),
+    )
     gateway_fleet_ratchet_enabled: bool = Field(
         default=False,
         description=(
@@ -6992,6 +7014,30 @@ def _required_provider_for_model(model: str) -> str | None:
     return None
 
 
+def _validate_gateway_enforcement_canary(config: HydraFlowConfig) -> None:
+    """A canary dial that arms nothing must say so at load, not at the spawn.
+
+    ADR-0141: only an exact canonical ``owner/repo`` arms the canary, and the
+    runtime predicate fails closed on anything else. Failing closed is the right
+    *behaviour* and the wrong *silence*: an operator who typed the path-safe
+    runtime slug would believe a repository was governed while every spawn ran
+    unenforced. The runtime check stays — this dial is live-editable, so a value
+    can still arrive without passing through here — but a value written to the
+    config file is refused where the mistake is still cheap.
+    """
+    from hydraflow_gateway.routing_policy import canonicalize_repo
+
+    raw = str(config.gateway_enforcement_canary_repo or "").strip()
+    if raw and canonicalize_repo(raw) is None:
+        msg = (
+            "gateway_enforcement_canary_repo must be an exact canonical "
+            f"'owner/repo' (got {raw!r}); the path-safe runtime slug cannot "
+            "identify a governed repository (ADR-0139 D2). Leave it empty to "
+            "enforce nothing."
+        )
+        raise ValueError(msg)
+
+
 def _validate_gateway_capture_policy(config: HydraFlowConfig) -> None:
     """Validate repo classification and the body-capture privacy boundary."""
     if config.gateway_repo_class not in {"hydraflow", "client", "personal"}:
@@ -7237,6 +7283,7 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
     object.__setattr__(config, "verification_judge_tool", config.review_tool)
 
     _validate_gateway_capture_policy(config)
+    _validate_gateway_enforcement_canary(config)
     _validate_gateway_fleet_profile(config)
     _validate_gateway_pr_unstick_tool(config)
     for stage, tool, model in _tool_model_stage_pairs(config):
