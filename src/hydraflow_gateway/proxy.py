@@ -17,6 +17,7 @@ from starlette.responses import StreamingResponse
 from starlette.types import Receive, Scope, Send
 from ulid import ULID
 
+from hydraflow_gateway.active_routes import ActiveRouteRegistry
 from hydraflow_gateway.ledger import (
     GatewayBodyCapture,
     GatewayBodyStore,
@@ -85,20 +86,30 @@ class _GatewayAttempt:
         if self.finalized:
             return
         self.finalized = True
-        proxy._finalize_attempt(
-            request_id=self.request_id,
-            identity=self.identity,
-            capture=self.capture,
-            request_observer=self.request_observer,
-            usage=usage or UsageSnapshot(),
-            started_epoch=self.started_epoch,
-            started_monotonic=self.started_monotonic,
-            path=self.path,
-            status_code=status_code,
-            completed=completed,
-            client_aborted=client_aborted,
-            capture_failed=self.capture_failed,
-        )
+        try:
+            proxy._finalize_attempt(
+                request_id=self.request_id,
+                identity=self.identity,
+                capture=self.capture,
+                request_observer=self.request_observer,
+                usage=usage or UsageSnapshot(),
+                started_epoch=self.started_epoch,
+                started_monotonic=self.started_monotonic,
+                path=self.path,
+                status_code=status_code,
+                completed=completed,
+                client_aborted=client_aborted,
+                capture_failed=self.capture_failed,
+            )
+        finally:
+            # The request is over on EVERY path that reaches here, and this
+            # attempt can never finalize again. Discarding by request id after
+            # the (already-idempotent) row-carrying release means a raise
+            # anywhere inside `_finalize_attempt` — a body-capture close, a
+            # pricing lookup, or a ledger-row validation error on a malformed
+            # upstream status — still clears the in-flight row instead of
+            # leaving a phantom "streaming" route for the process lifetime.
+            proxy.active_routes.discard(self.request_id)
 
 
 class _ObservedStreamingResponse(StreamingResponse):
@@ -134,6 +145,7 @@ class GatewayProxy:
         ledger: GatewayLedger,
         body_store: GatewayBodyStore,
         pricing: ModelPricingTable,
+        active_routes: ActiveRouteRegistry | None = None,
         wall_clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
         request_id_factory: Callable[[], str] | None = None,
@@ -143,6 +155,7 @@ class GatewayProxy:
         self._ledger = ledger
         self._body_store = body_store
         self._pricing = pricing
+        self._active_routes = active_routes or ActiveRouteRegistry()
         self._wall_clock = wall_clock
         self._monotonic = monotonic
         self._request_id_factory = request_id_factory or (lambda: str(ULID()))
@@ -152,6 +165,11 @@ class GatewayProxy:
     def telemetry_healthy(self) -> bool:
         """Whether observation persistence is still safe for new requests."""
         return self._telemetry_healthy
+
+    @property
+    def active_routes(self) -> ActiveRouteRegistry:
+        """Observation-only registry of leases-in-use and streaming requests."""
+        return self._active_routes
 
     def ensure_telemetry_healthy(self) -> None:
         """Fail future traffic closed after a persistence boundary fails."""
@@ -174,6 +192,15 @@ class GatewayProxy:
             started_epoch=self._wall_clock(),
             started_monotonic=self._monotonic(),
             path=sanitized_request_path(request),
+        )
+        # Observation only: registering never changes the attempt's binding, its
+        # bytes, or its outcome. Every terminal path funnels through
+        # ``_finalize_attempt``, which releases the row.
+        self._active_routes.register(
+            request_id=attempt.request_id,
+            identity=identity,
+            path=attempt.path,
+            started_at=datetime.fromtimestamp(attempt.started_epoch, tz=UTC),
         )
         try:
             self.ensure_telemetry_healthy()
@@ -425,6 +452,10 @@ class GatewayProxy:
             self._ledger.append(row)
         except OSError:
             self.mark_telemetry_unhealthy()
+        finally:
+            # The request is over on every path that reaches here, so the
+            # in-flight row is cleared even when persistence failed.
+            self._active_routes.release(row)
 
     def mark_telemetry_unhealthy(self) -> None:
         """Trip readiness after observation persistence becomes unreliable."""

@@ -32,6 +32,27 @@ the returned virtual `token` as either a bearer token or `x-api-key`; the
 gateway rejects missing, expired, or ambiguous credentials and never supports
 a direct-provider bypass.
 
+## Read-only account and route visibility (ADR-0138)
+
+Three authenticated GET endpoints sit behind the same control-token boundary
+and change no routing or mint behaviour:
+
+- `GET /control/v2/accounts?window_seconds=<60..86400>` — one sanitized account
+  per provider binding (`legacy-anthropic`, `legacy-zai-harness`), configured or
+  not, with `configured`, administrative state, lease/in-flight counts, observed
+  traffic, and passive health kept as **independent** fields;
+- `GET /control/v2/routes/active` — current leases and streaming requests;
+- `GET /control/v2/routes/recent?limit=<1..200>` — the bounded in-memory ring of
+  terminal routes (200 by default), with `truncated` and `evidence_since` so the
+  view never claims a complete history.
+
+No provider key, control token, virtual token, token digest, credential
+fingerprint, or captured-body handle appears in any of these payloads; accounts
+publish the upstream **origin** and the **name** of the variable that configures
+them, never its value. `tests/test_gateway_secret_absence.py` is the proof.
+HydraFlow's dashboard proxies all three under `/api/gateway/...`, holding the
+control token server-side so the browser never receives one.
+
 After a canary has soaked, HydraFlow's terminal fleet profile is enabled with
 `HYDRAFLOW_GATEWAY_FLEET_RATCHET_ENABLED=true` plus
 `HYDRAFLOW_GATEWAY_BASE_URL` and `HYDRAFLOW_GATEWAY_CONTROL_TOKEN`. The profile

@@ -55,6 +55,12 @@ import { EMPTY_SUPERVISOR_VM } from './model/supervisorThread'
 import { useTrustFleet } from './useTrustFleet'
 import { toSupervisorGauges } from './model/supervisorGauges'
 import { EMPTY_TRUST_FLEET_VM } from './model/trustFleet'
+import RoutingMode from './RoutingMode'
+import { useGatewayAccounts, useGatewayLiveRoutes } from './useGatewayRouting'
+import {
+  EMPTY_GATEWAY_ACCOUNTS_VM,
+  EMPTY_GATEWAY_LIVE_VM,
+} from './model/gatewayRouting'
 import { FinderFaceplatePanel } from './FinderFaceplatePanel'
 import { useFinderFaceplates } from './useFinderFaceplates'
 import { EMPTY_FINDER_FACEPLATES_VM } from './model/finderFaceplates'
@@ -101,6 +107,11 @@ const MODES = [
   // the rail keeps only a compact one-line summary (SupervisorSummary) that
   // deep-links here.
   { key: 'supervisor', label: 'Supervisor' },
+  // Routing: the read-only gateway Accounts + Live views (#11534, ADR-0138),
+  // a full-width workspace with its own `routingView` sub-selection. Global
+  // and idle-exempt for the same reason Instruments is: a quiet factory is
+  // exactly when an operator asks "is any account configured at all?".
+  { key: 'routing', label: 'Routing' },
 ]
 
 function makeStyles(t) {
@@ -185,11 +196,11 @@ function ModeToggle({ mode, select, styles }) {
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
-  const { repo, stage, item, mode, select, breadcrumb } = useOperatorSelection()
+  const { repo, stage, item, mode, routingView, select, breadcrumb } = useOperatorSelection()
   const events = socket.events ?? []
 
   const pipeline = useMemo(
@@ -275,8 +286,16 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
   // failed-over factory IS the idle case an operator most needs the gauges +
   // observation thread for — gating them behind idle would hide the tab
   // exactly when it matters most.
+  // Routing mode is exempt for the same reason (#11534): account configuration
+  // and "no route has ever been observed" are precisely what an operator needs
+  // to see on a quiet factory — IdleState would hide the answer.
   const idle =
-    activeCount === 0 && item == null && !showOverview && mode !== 'instruments' && mode !== 'supervisor'
+    activeCount === 0 &&
+    item == null &&
+    !showOverview &&
+    mode !== 'instruments' &&
+    mode !== 'supervisor' &&
+    mode !== 'routing'
   // Focus mode (a single ItemWorkspace) claims the full detail width (#8): the
   // detail area spans both grid columns. All-active / overview / idle keep the
   // vitals column beside the detail row.
@@ -345,6 +364,13 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                   <LoopFaceplatePanel faceplates={loopFaceplates} />
                   <JudgeCalibrationPanel calibration={calibration} />
                 </div>
+              ) : mode === 'routing' ? (
+                <RoutingMode
+                  accounts={gatewayAccounts}
+                  live={gatewayLive}
+                  routingView={routingView}
+                  select={select}
+                />
               ) : mode === 'supervisor' ? (
                 <SupervisorMode
                   gauges={gauges}
@@ -432,7 +458,12 @@ export function OperatorConsole() {
   // the Supervisor tab's gauges on its own pinned cadence (aborted in-flight
   // on unmount), independent of the WS slice the shell otherwise renders from.
   const fleet = useTrustFleet()
-  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} />
+  // Gateway routing (#11534, ADR-0138): two read-only polls for the Routing
+  // mode's Accounts and Live views (aborted in-flight on unmount), independent
+  // of the WS slice the shell otherwise renders from.
+  const gatewayAccounts = useGatewayAccounts()
+  const gatewayLive = useGatewayLiveRoutes()
+  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} />
 }
 
 export default OperatorConsole

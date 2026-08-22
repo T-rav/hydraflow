@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -31,6 +33,26 @@ class ProviderBinding(StrEnum):
 
     ANTHROPIC = "anthropic"
     ZAI_HARNESS = "zai-harness"
+
+
+LEGACY_ACCOUNT_IDS: Mapping[ProviderBinding, str] = MappingProxyType(
+    {
+        ProviderBinding.ANTHROPIC: "legacy-anthropic",
+        ProviderBinding.ZAI_HARNESS: "legacy-zai-harness",
+    }
+)
+"""Stable, non-secret account identities compiled from the v1 env-pair upstreams.
+
+ADR-0138. The id is derived from the *provider binding*, never from credential
+material, so it is safe in URLs, ledgers, and the operator dashboard. Multi-account
+pools (ADR-0138 "Later phases") add ids from a server-owned definition file; these
+two remain the deterministic identity of the legacy environment pairs.
+"""
+
+
+def legacy_account_id(binding: ProviderBinding) -> str:
+    """Return the stable account id compiled from one legacy upstream pair."""
+    return LEGACY_ACCOUNT_IDS[binding]
 
 
 class BodyCapturePolicy(StrEnum):

@@ -28,7 +28,13 @@ import { useCallback, useMemo, useState } from 'react'
 import { OPERATOR_STAGES } from './model/pipeline'
 
 const DEFAULT_MODE = 'focus'
-const VALID_MODES = new Set([DEFAULT_MODE, 'all-active', 'instruments', 'supervisor'])
+const VALID_MODES = new Set([DEFAULT_MODE, 'all-active', 'instruments', 'supervisor', 'routing'])
+
+// Routing sub-view (#11534, ADR-0138). The routing-control-plane design reserves
+// `accounts|effective|policies|live|audit`; P0 delivers the two read-only views
+// and later phases of epic #11531 add the rest without changing this contract.
+const DEFAULT_ROUTING_VIEW = 'accounts'
+const VALID_ROUTING_VIEWS = new Set([DEFAULT_ROUTING_VIEW, 'live'])
 
 /** Human label for a stage key, falling back to the raw key. */
 function stageLabel(key) {
@@ -59,11 +65,16 @@ export function readSelectionFromUrl(search) {
         : ''
   const params = new URLSearchParams(source)
   const rawMode = cleanParam(params.get('mode'))
+  const rawRoutingView = cleanParam(params.get('routingView'))
   return {
     repo: cleanParam(params.get('repo')),
     stage: cleanParam(params.get('stage')),
     item: cleanParam(params.get('item')),
     mode: rawMode && VALID_MODES.has(rawMode) ? rawMode : DEFAULT_MODE,
+    routingView:
+      rawRoutingView && VALID_ROUTING_VIEWS.has(rawRoutingView)
+        ? rawRoutingView
+        : DEFAULT_ROUTING_VIEW,
   }
 }
 
@@ -85,6 +96,11 @@ function writeSelectionToUrl(selection) {
   setOrDelete(params, 'stage', selection.stage)
   setOrDelete(params, 'item', selection.item)
   setOrDelete(params, 'mode', selection.mode === DEFAULT_MODE ? null : selection.mode)
+  setOrDelete(
+    params,
+    'routingView',
+    selection.routingView === DEFAULT_ROUTING_VIEW ? null : selection.routingView,
+  )
   const qs = params.toString()
   const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
   window.history.replaceState(window.history.state, '', next)
@@ -104,6 +120,13 @@ export function applySelect(prev, kind, value) {
       return { ...prev, item: v == null ? null : String(v) }
     case 'mode':
       return { ...prev, mode: v && VALID_MODES.has(v) ? v : DEFAULT_MODE }
+    case 'routingView':
+      // Orthogonal to the drill-down, like `mode`: it selects which read-only
+      // routing view is showing and never clears repo/stage/item.
+      return {
+        ...prev,
+        routingView: v && VALID_ROUTING_VIEWS.has(v) ? v : DEFAULT_ROUTING_VIEW,
+      }
     default:
       return prev
   }
@@ -140,6 +163,7 @@ export function useOperatorSelection() {
     stage: selection.stage,
     item: selection.item,
     mode: selection.mode,
+    routingView: selection.routingView,
     select,
     breadcrumb,
   }
