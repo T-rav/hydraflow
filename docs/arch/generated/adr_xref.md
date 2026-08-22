@@ -144,6 +144,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0135 | `src.dashboard_routes._control_routes`, `src.factory_autostart`, `src.models` | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
 | ADR-0136 | `src.adr_citation_resolve`, `src.adr_drift`, `src.adr_index`, `src.arch.generators.adr_cross_reference`, `src.finder_faceplate`, `src.prep`, `src.state._adr_audit` | `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations`, `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` |
 | ADR-0137 | `src.config`, `src.driver_contracts`, `src.driver_journal`, `src.driver_manager`, `src.driver_ownership`, `src.driver_phase_adapters`, `src.hydraflow_gateway.keys`, `src.issue_driver`, `src.issue_driver_policy`, `src.issue_store`, `src.models`, `src.pr_manager`, `src.process_group`, `src.queue_strategy`, `src.scheduling_model`, `src.state._driver` | `pytest:tests/test_driver_contracts.py`, `pytest:tests/test_director_capability_probe.py`, `pytest:tests/regressions/test_issue_11533_stale_driver_states.py`, `pytest:tests/test_issue_driver.py`, `pytest:tests/test_issue_driver_policy.py`, `pytest:tests/test_driver_manager.py`, `pytest:tests/test_scheduling_default_off.py`, `pytest:tests/regressions/test_issue_11535_kill_mid_transition.py` |
+| ADR-0138 | `src.driver_contracts`, `src.gateway_control_reader`, `src.hydraflow_gateway.accounts`, `src.hydraflow_gateway.active_routes`, `src.hydraflow_gateway.models` | `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/test_accounts.py`, `pytest:tests/test_active_routes.py`, `pytest:tests/test_gateway_control_v2_read_api.py`, `pytest:tests/test_gateway_control_reader.py`, `pytest:tests/test_dashboard_gateway_routes.py`, `pytest:tests/regressions/test_issue_11534_in_flight_route_leak.py`, `pytest:tests/scenarios/test_gateway_account_visibility_scenario.py` |
 
 ## Module → ADRs
 
@@ -214,7 +215,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.disturbance.registry` | ADR-0101 |
 | `src.disturbance_dampener_loop` | ADR-0101 |
 | `src.docker_runner` | ADR-0010, ADR-0043 |
-| `src.driver_contracts` | ADR-0137 |
+| `src.driver_contracts` | ADR-0137, ADR-0138 |
 | `src.driver_journal` | ADR-0137 |
 | `src.driver_manager` | ADR-0137 |
 | `src.driver_ownership` | ADR-0137 |
@@ -242,6 +243,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.flows.flow` | ADR-0111 |
 | `src.gate_activation_check` | ADR-0082 |
 | `src.gate_activator_loop` | ADR-0082 |
+| `src.gateway_control_reader` | ADR-0138 |
 | `src.gateway_coverage_loop` | ADR-0110 |
 | `src.github_cache_loop` | ADR-0076 |
 | `src.goal_supervisor_loop` | ADR-0124 |
@@ -250,8 +252,11 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.hitl_runner` | ADR-0103 |
 | `src.human_steering` | ADR-0103 |
 | `src.human_steering_loop` | ADR-0103 |
+| `src.hydraflow_gateway.accounts` | ADR-0138 |
+| `src.hydraflow_gateway.active_routes` | ADR-0138 |
 | `src.hydraflow_gateway.app` | ADR-0110 |
 | `src.hydraflow_gateway.keys` | ADR-0137 |
+| `src.hydraflow_gateway.models` | ADR-0138 |
 | `src.implement_phase` | ADR-0002, ADR-0005, ADR-0014, ADR-0024, ADR-0063, ADR-0097 |
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_driver` | ADR-0137 |
