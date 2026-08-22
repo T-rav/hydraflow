@@ -41,7 +41,11 @@ states plainly which of them can and cannot support a strictness change:
    :func:`judge_calibration.score_judge`. Measures how often accepted work
    escapes, i.e. whether the gate is too *loose*. Biased by the same selection
    (only passed work is observed), so it is reported with
-   :attr:`Identifiability.under_determined` alongside, never alone.
+   :attr:`Identifiability.under_determined` alongside, never alone — and an
+   escape-free reading only counts once it has aged past ADR-0127's
+   escape-detection grace window (:func:`resolved_escapes`), because a merge
+   from an hour ago has had no chance to accumulate an escape and scoring it
+   clean would credit the gate for work nothing has checked.
 2. **Recovery** — did the gated issue reach a *later successful run*? A demand
    nobody ever satisfies costs the full attempt budget whether or not it was
    correct, so this is the cost axis, not a correctness axis.
@@ -73,12 +77,13 @@ import statistics
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
 from implement_failure_class import classify_implement_failure
 from judge_calibration import (
+    DEFAULT_GRACE_WINDOW,
     JudgeScore,
     JudgeVerdictRecord,
     Outcome,
@@ -243,15 +248,25 @@ class AdequacyRunRecord:
 class IssueOutcome:
     """Injected ground truth for one issue — the escape-ledger join, data-in.
 
-    ``escaped`` is ``None`` when the outcome is **not resolvable** (no closing
-    PR known, or the escape ledger has no attribution for it). ``None`` is never
-    silently read as "clean": an unresolvable outcome is dropped from every rate
-    and counted in :class:`Identifiability` instead.
+    ``escaped`` is ``None`` when the escape ledger could not be consulted at all
+    (no closing PR known, or no ledger). ``None`` is never silently read as
+    "clean": an unresolvable outcome is dropped from every rate and counted in
+    :class:`Identifiability` instead.
+
+    ``escaped=False`` is a *reading*, not yet a resolution. ``closed_at`` — when
+    the closing work landed — is what turns it into one, because escapes surface
+    with a lag (ADR-0127 ``DEFAULT_GRACE_WINDOW``): a PR that merged an hour ago
+    has had no chance to accumulate one, so calling it clean would credit the
+    gate for work nothing has checked yet. :func:`resolved_escapes` therefore
+    holds a clean reading unresolved until ``closed_at`` clears the grace window,
+    and treats a missing ``closed_at`` as unresolvable rather than as aged.
+    An escape that *did* surface resolves bad immediately — no wait.
     """
 
     issue_number: int
     closing_prs: tuple[int, ...] = ()
     escaped: bool | None = None
+    closed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -865,16 +880,56 @@ def to_judge_verdicts(
     return verdicts
 
 
-def _escape_outcomes(outcomes: Sequence[IssueOutcome]) -> list[Outcome]:
-    """Resolvable issue outcomes → ``judge_calibration`` PR-keyed outcomes."""
-    resolved: list[Outcome] = []
+def resolved_escapes(
+    outcomes: Sequence[IssueOutcome],
+    *,
+    now: datetime,
+    grace_window: timedelta = DEFAULT_GRACE_WINDOW,
+) -> dict[int, bool]:
+    """Issue → escaped, for the outcomes that are actually resolved *yet*.
+
+    The single place the grace window is applied, so every rate in the report
+    obeys one rule (ADR-0127 Ruling 4, whose ``resolve_outcomes`` this mirrors
+    for a PR-keyed rather than verdict-keyed subject):
+
+    * an attributed escape resolves **bad immediately** — an escape is definitive
+      and waiting cannot un-observe it;
+    * a clean reading resolves **good only once ``closed_at`` has cleared
+      ``grace_window``** — escapes surface with a lag, so a fresh merge has had no
+      chance to accumulate one and calling it clean would credit the gate for
+      work nothing has checked;
+    * a clean reading with **no ``closed_at``** stays unresolved — "we cannot
+      date it" is the same epistemic state as "too recent", never "old enough";
+    * no ledger consulted (``escaped is None``) or no closing PR → unresolved.
+
+    Unresolved issues are simply absent from the mapping and counted in
+    :class:`Identifiability`, never defaulted either way.
+    """
+    resolved: dict[int, bool] = {}
     for outcome in outcomes:
         if outcome.escaped is None or not outcome.closing_prs:
             continue
-        resolved.append(
-            Outcome(subject_for_pr(outcome.closing_prs[0]), good=not outcome.escaped)
-        )
+        if outcome.escaped:
+            resolved[outcome.issue_number] = True
+            continue
+        if outcome.closed_at is None or now - outcome.closed_at <= grace_window:
+            continue
+        resolved[outcome.issue_number] = False
     return resolved
+
+
+def _escape_outcomes(
+    outcomes: Sequence[IssueOutcome], resolved: Mapping[int, bool]
+) -> list[Outcome]:
+    """Resolved issue outcomes → ``judge_calibration`` PR-keyed outcomes."""
+    return [
+        Outcome(
+            subject_for_pr(outcome.closing_prs[0]),
+            good=not resolved[outcome.issue_number],
+        )
+        for outcome in outcomes
+        if outcome.issue_number in resolved and outcome.closing_prs
+    ]
 
 
 # --- the report -----------------------------------------------------------------
@@ -884,14 +939,16 @@ def _summarise_source(
     verdict_source: str,
     rejections: Sequence[AdequacyRunRecord],
     last_acceptance: Mapping[int, datetime],
-    outcome_by_issue: Mapping[int, IssueOutcome],
+    resolved_escape: Mapping[int, bool],
     suspects_by_issue: Mapping[int, int],
 ) -> VerdictSourceSummary:
     """Build one verdict source's row of the report.
 
     ``recovery`` counts issues whose *last* acceptance in the corpus came after
     their *first* rejection by this source — the issue eventually satisfied the
-    gate rather than burning its attempts.
+    gate rather than burning its attempts. ``resolved_escape`` is already
+    grace-windowed by :func:`resolved_escapes`; issues absent from it contribute
+    to no denominator.
     """
     issues = sorted({r.issue_number for r in rejections})
     first_rejection = {
@@ -904,9 +961,7 @@ def _summarise_source(
         if issue in last_acceptance and last_acceptance[issue] > first_rejection[issue]
     )
     escaped_pairs = [
-        outcome_by_issue[issue].escaped
-        for issue in issues
-        if issue in outcome_by_issue and outcome_by_issue[issue].escaped is not None
+        resolved_escape[issue] for issue in issues if issue in resolved_escape
     ]
     grades = Counter(grade_finding(f) for r in rejections for f in r.findings)
     n_findings = sum(grades.values())
@@ -933,6 +988,7 @@ def _assess_identifiability(
     n_rejections_resolved: int,
     n_acceptances: int,
     n_acceptances_resolved: int,
+    n_grace_censored: int = 0,
 ) -> Identifiability:
     """State plainly what this corpus can and cannot establish."""
     reasons: list[str] = []
@@ -941,6 +997,12 @@ def _assess_identifiability(
             "reject arm is outcome-censored: rejected work never merges, and the "
             "escape ledger keys defects to an originating PR, so no rejection can "
             "ever resolve to a good/bad outcome"
+        )
+    if n_grace_censored:
+        reasons.append(
+            f"{n_grace_censored} issue(s) read escape-free but are held unresolved "
+            "— their closing work is inside the escape-detection grace window, or "
+            "carries no close date to age it against"
         )
     if n_acceptances_resolved == 0:
         reasons.append(
@@ -970,6 +1032,7 @@ def calibrate(
     outcomes: Sequence[IssueOutcome],
     *,
     now: datetime,
+    grace_window: timedelta = DEFAULT_GRACE_WINDOW,
 ) -> CalibrationReport:
     """Score the test-adequacy gate over a run corpus — the instrument entrypoint.
 
@@ -978,11 +1041,14 @@ def calibrate(
     Wilson interval and every degenerate case yields ``None`` rather than a
     fabricated number.
 
+    ``now`` + ``grace_window`` are load-bearing, not decoration: they are what
+    :func:`resolved_escapes` uses to hold a too-recent clean reading unresolved
+    instead of scoring it good (ADR-0127's escape-detection lag).
+
     Read :attr:`CalibrationReport.identifiability` first. While
     ``under_determined`` is set, the point estimates describe the corpus but do
     NOT license a change to the gate's strictness.
     """
-    del now  # accepted for signature parity with the sibling instruments
     rejections = [r for r in records if r.gate_outcome is GateOutcome.REJECTED]
     acceptances = [r for r in records if r.gate_outcome is GateOutcome.ACCEPTED]
     not_reached = [r for r in records if r.gate_outcome is GateOutcome.NOT_REACHED]
@@ -992,7 +1058,14 @@ def calibrate(
         prior = last_acceptance.get(record.issue_number)
         if prior is None or record.recorded_at > prior:
             last_acceptance[record.issue_number] = record.recorded_at
-    outcome_by_issue = {o.issue_number: o for o in outcomes}
+    resolved_escape = resolved_escapes(outcomes, now=now, grace_window=grace_window)
+    grace_censored = sum(
+        1
+        for o in outcomes
+        if o.escaped is False
+        and o.closing_prs
+        and o.issue_number not in resolved_escape
+    )
     suspects = suspect_rejections(records)
     suspects_by_issue = Counter(s.issue_number for s in suspects)
 
@@ -1004,7 +1077,7 @@ def calibrate(
             source,
             by_source[source],
             last_acceptance,
-            outcome_by_issue,
+            resolved_escape,
             suspects_by_issue,
         )
         for source in VERDICT_SOURCES
@@ -1013,7 +1086,7 @@ def calibrate(
 
     # The two arms are resolved separately so the reject arm's zero is a
     # measured result, not an artefact of a shared filter (see module docstring).
-    escape_outcomes = _escape_outcomes(outcomes)
+    escape_outcomes = _escape_outcomes(outcomes, resolved_escape)
     accept_arm = resolve(to_judge_verdicts(acceptances, outcomes), escape_outcomes)
     reject_arm = resolve(to_judge_verdicts(rejections, outcomes), escape_outcomes)
     score = score_judge(JUDGE_ID, JUDGE_FAMILY, accept_arm)
@@ -1038,6 +1111,7 @@ def calibrate(
             n_rejections_resolved=len(reject_arm),
             n_acceptances=len(acceptances),
             n_acceptances_resolved=len(accept_arm),
+            n_grace_censored=grace_censored,
         ),
         suspect_rejections=suspects,
     )
