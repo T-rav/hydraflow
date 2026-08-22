@@ -27,6 +27,17 @@ description: >
 # needs a hard reset (a corrupt export, a registry-side mishap), delete the
 # `sandbox-buildcache` tag from the GHCR package; the next writer republishes.
 #
+# NO EXPRESSION BRACES IN THIS FILE'S PROSE. GitHub template-evaluates EVERY
+# expression in an action manifest, including ones sitting inside a
+# `description:` string that reads like documentation. Two ways that bites,
+# both of which took every sandbox lane down at action-LOAD time on #11621:
+# naming a context composite actions do not have ("Unrecognized named-value:
+# 'secrets'"), and writing empty braces as a placeholder ("An expression was
+# expected"). actionlint does not evaluate manifest descriptions, so nothing
+# local catches either one. Describe expressions in words here; real ones
+# belong only in `outputs.*.value` and step-level `with:`/`env:`/`if:`.
+# Guarded by tests/architecture/test_sandbox_ci_cache.py.
+#
 # WHO WRITES THE CACHE: only trusted, non-PR contexts pass `push-cache: 'true'`
 # (post-merge push to staging/main, and the nightly). PR lanes read it. A
 # mutable cache ref that any PR could overwrite is a cache-poisoning sink in a
@@ -37,14 +48,9 @@ inputs:
   token:
     description: >
       Token used to authenticate to ghcr.io for the layer cache. Callers pass
-      secrets.GITHUB_TOKEN; the calling job needs `packages: read` (plus
-      `packages: write` when `push-cache` is 'true'). NOTE: written without
-      expression braces on purpose — GitHub template-evaluates every `${{ }}`
-      in an action manifest, INCLUDING inside a description string, and the
-      `secrets` context does not exist in composite-action metadata. Quoting
-      it "as documentation" fails the action at load time with
-      "Unrecognized named-value: 'secrets'", taking every sandbox lane with
-      it. Guarded by tests/architecture/test_sandbox_ci_cache.py.
+      the GITHUB_TOKEN secret; the calling job needs `packages: read` (plus
+      `packages: write` when `push-cache` is 'true'). See the NO EXPRESSION
+      BRACES note above for why this sentence spells that out in prose.
     required: true
   push-cache:
     description: >

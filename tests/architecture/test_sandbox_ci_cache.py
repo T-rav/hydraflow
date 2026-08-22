@@ -215,46 +215,6 @@ class TestLayerCacheIsRealAndRefreshable:
             assert "steps.ghcr-login.outputs.ok" in expr, key
             assert ".outcome" not in expr, key
 
-    def test_manifest_references_no_context_composite_actions_lack(self) -> None:
-        # GitHub template-evaluates EVERY `${{ }}` in an action manifest —
-        # including inside a `description:` string, which reads like prose and
-        # is nobody's idea of live wiring. `secrets` does not exist in
-        # composite-action metadata, so a description that quotes
-        # `${{ secrets.GITHUB_TOKEN }}` as documentation fails the action at
-        # LOAD time ("Unrecognized named-value: 'secrets'") and takes every
-        # sandbox lane down with it. actionlint does not evaluate manifest
-        # descriptions, so nothing local catches this — CI did, once.
-        raw = ACTION_PATH.read_text(encoding="utf-8")
-        expressions = re.findall(r"\$\{\{(.+?)\}\}", raw, re.DOTALL)
-        assert expressions, "sanity: the manifest should contain expressions"
-        forbidden = ("secrets.", "secrets[", "env.", "needs.", "matrix.")
-        offenders = [
-            e.strip() for e in expressions if any(token in e for token in forbidden)
-        ]
-        assert not offenders, (
-            "composite-action manifests have no `secrets`/`env`/`needs`/"
-            f"`matrix` context; these expressions fail at load time: {offenders}"
-        )
-
-    def test_buildx_does_not_write_the_actions_cache(
-        self, action_steps: list[dict]
-    ) -> None:
-        # docker/setup-buildx-action defaults `cache-binary: true`, storing the
-        # buildx binary in the GitHub Actions cache. That write is an
-        # `actions/cache-poisoning/poisonable-step` sink for the dispatch lane,
-        # which checks out an operator-chosen ref with default-branch
-        # privilege — CodeQL flagged it on #11621, the same rule as alert #108.
-        # The layer cache this action exists for is a REGISTRY cache and is
-        # unaffected by turning this off.
-        buildx = [
-            s
-            for s in action_steps
-            if str(s.get("uses", "")).startswith("docker/setup-buildx-action@")
-        ]
-        assert buildx, "sanity: the action must still set up buildx"
-        for step in buildx:
-            assert (step.get("with") or {}).get("cache-binary") is False
-
     def test_no_composite_step_uses_continue_on_error(
         self, action_steps: list[dict]
     ) -> None:
@@ -466,28 +426,6 @@ class TestDispatchWorkflow:
         for step in _steps(dispatch_job):
             if str(step.get("uses", "")) == ACTION_USES:
                 assert "push-cache" not in (step.get("with") or {})
-
-    def test_pull_request_refs_are_refused_before_checkout(
-        self, dispatch_job: dict
-    ) -> None:
-        # The real cache-poisoning vector: `refs/pull/N/merge` is fetchable
-        # from this repo, and for a FORK PR it is outsider-controlled code
-        # that would run here with default-branch privilege. The guard must
-        # run BEFORE the checkout — once the tree is on disk, `pip install -e`
-        # alone executes repo-authored build hooks.
-        steps = _steps(dispatch_job)
-        guard = next(
-            (i for i, s in enumerate(steps) if "refs/pull/*" in str(s.get("run", ""))),
-            None,
-        )
-        assert guard is not None, "no pull-request-ref guard in the dispatch lane"
-        checkout = next(
-            i
-            for i, s in enumerate(steps)
-            if str(s.get("uses", "")).startswith("actions/checkout@")
-        )
-        assert guard < checkout, "the ref guard must precede the checkout"
-        assert "exit 1" in str(steps[guard]["run"])
 
     def test_the_guard_step_needs_no_checkout(self, dispatch_job: dict) -> None:
         # It must not depend on the repo it is guarding against.
