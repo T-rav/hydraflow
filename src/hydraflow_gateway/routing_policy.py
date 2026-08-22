@@ -196,6 +196,12 @@ class AccountRejectionReason(StrEnum):
     PROVIDER_LOCK_MISMATCH = "provider-lock-mismatch"
     NOT_IN_POOL = "not-in-pool"
     ANTHROPIC_LANE_REQUIRED = "anthropic-lane-required"
+    # ADR-0142. The three live facts a *pool* adds, each a separate code so an
+    # operator reading a held decision can tell "I disabled this" from "it is
+    # rate-limited" from "it is full" — three different actions.
+    CIRCUIT_OPEN = "circuit-open"
+    LEASE_CAPACITY_EXHAUSTED = "lease-capacity-exhausted"
+    BEFORE_FALLBACK_POSITION = "before-fallback-position"
 
 
 class LegacyRouteMechanism(StrEnum):
