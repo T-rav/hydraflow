@@ -113,20 +113,40 @@ SANDBOX_SEAMS: dict[str, str] = {
     # FakeSubprocessRunner, so its centralized ``run_lightweight_agent`` call
     # never constructs or reaches a real CLI process.
     "adversarial_agent_runner": "fake_subprocess_runner",
-    # ADR-0063 runners (discover/plan-review/council/spec-review/diagnostic/
-    # decompose) consult the ``_mockworld_fake_llm`` sentinel before their
-    # BaseSubprocessRunner.run spawn; sentinels are attached in main().
+    # ``BaseSubprocessRunner.run`` consults the ``_mockworld_fake_llm``
+    # sentinel before its ``stream_claude_process`` spawn and returns a
+    # deterministic CRASHED outcome when one is attached (#11602). The consult
+    # is on the BASE, so it covers every subclass's construction site at once —
+    # but WHICH seam each site can use depends on where the instance is built:
     #
-    # EXCEPTION — ``preflight.auto_agent_runner.AutoAgentRunner`` (#11298 light
-    # lane + HITL auto-fix) is a BaseSubprocessRunner subclass that carries NO
-    # sentinel hook and is constructed INSIDE ``AutoAgentPreflightLoop.
-    # _build_spawn_fn`` per attempt — not injected, so neither this sentinel
-    # nor the ``subprocess_runner=`` seam can reach it. ``air_gap_runner_
-    # sentinels`` therefore rebinds ``_build_spawn_fn`` wholesale to the
-    # seed-scripted fake (``seed.scripts["auto_agent"]`` →
-    # ``FakeLLM.next_auto_agent_spawn``; unscripted = deterministic crashed
-    # spawn). The loop module itself has no lexical spawn call, so it has no
-    # row here — the seam is recorded on this runner's entry instead.
+    # - ``AutoAgentRunner`` × 3 at the ``build_services`` composition root
+    #   (pr_red_repair / sandbox_failure_fixer / disturbance_dampener). These
+    #   are INJECTED into their loops, so ``air_gap_runner_sentinels`` attaches
+    #   the sentinel to each (see ``_SENTINEL_RUNNER_LOOPS``).
+    # - ``AutoAgentRunner`` built per attempt INSIDE
+    #   ``AutoAgentPreflightLoop._build_spawn_fn`` (#11298 light lane): nothing
+    #   can attach a sentinel to a runner that does not exist until spawn time,
+    #   so ``air_gap_runner_sentinels`` rebinds that BUILDER wholesale to the
+    #   seed-scripted fake instead (``seed.scripts["auto_agent"]`` →
+    #   ``FakeLLM.next_auto_agent_spawn``; unscripted = deterministic crashed
+    #   spawn, #11590). The loop module has no lexical spawn call, so it has no
+    #   row of its own — the seam is recorded here.
+    # - ``GoalSupervisorRunner`` built lazily INSIDE
+    #   ``GoalSupervisorLoop._get_runner`` (ADR-0124): same unattachable shape,
+    #   closed by pinning ``goal_supervisor_loop_enabled`` OFF in
+    #   ``_apply_sandbox_config_overrides`` — the loop returns
+    #   ``config_disabled`` before it ever builds a runner.
+    #
+    # The ADR-0063 runners this entry named before #11602 (discover /
+    # plan-review / spec-review / diagnostic / decompose-council) are
+    # ``BaseRunner`` subclasses, not ``BaseSubprocessRunner`` ones — their
+    # sentinel consults live in their own dispatch methods and are declared by
+    # the ``base_runner`` entry above. This entry never covered them.
+    #
+    # Every construction site above is enumerated and ratcheted by
+    # ``tests/architecture/test_sandbox_seam_completeness.py``
+    # (``RUNNER_CONSTRUCTION_SEAMS``) — the spawn-primitive scan cannot see
+    # them, since the only lexical spawn is in ``base_subprocess_runner``.
     "base_subprocess_runner": "mockworld_sentinel",
     # ``get_docker_runner`` is the default only when no ``subprocess_runner``
     # is injected; main() always injects FakeSubprocessRunner.
@@ -185,6 +205,18 @@ SANDBOX_SEAMS: dict[str, str] = {
     # the Tier-1 MockWorld scenario with an injected fake auditor (#10370).
     "sampled_audit_loop": "config_disable",
 }
+
+
+# Registry loop attributes whose INJECTED ``BaseSubprocessRunner`` needs the
+# ``_mockworld_fake_llm`` sentinel attached (#11602). All three are handed an
+# ``AutoAgentRunner`` built at the ``build_services`` composition root; without
+# the attach, ``BaseSubprocessRunner.run`` spawns a real ``claude`` the first
+# time a scenario seeds actionable work for one of these loops.
+_SENTINEL_RUNNER_LOOPS: tuple[str, ...] = (
+    "pr_red_repair_loop",
+    "sandbox_failure_fixer_loop",
+    "disturbance_dampener_loop",
+)
 
 
 def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
@@ -291,6 +323,15 @@ def _apply_sandbox_config_overrides(config: HydraFlowConfig) -> None:
     # state/orphan-dir phases only, and the all-root reaper has its own unit +
     # MockWorld scenario cover.
     object.__setattr__(config, "worktree_gc_all_roots_enabled", False)
+    # GoalSupervisorLoop (#11602): its Fable consult is a real
+    # ``BaseSubprocessRunner`` spawn, and the runner is built lazily INSIDE
+    # ``_get_runner`` — nothing can attach the ``_mockworld_fake_llm`` sentinel
+    # to it, so the base-class consult cannot cover this site. The loop already
+    # ships default-OFF (ADR-0124); pin it here so the ``base_subprocess_runner``
+    # seam is TRUE rather than merely aspirational — the same reasoning as
+    # ``rc_auto_recut_enabled`` above. Scenario cover is the catalog builder's
+    # injected fake runner (tests/scenarios/test_goal_supervisor_scenario.py).
+    object.__setattr__(config, "goal_supervisor_loop_enabled", False)
 
 
 def apply_seed_config_overrides(config: HydraFlowConfig, seed: MockWorldSeed) -> None:
@@ -1085,11 +1126,19 @@ def air_gap_runner_sentinels(svc: ServiceRegistry, fake_llm: FakeLLM) -> None:
       "_mockworld_fake_llm", None)`` in their subprocess-dispatch method before
       the real ``claude`` spawn (#9796).
     - ``AutoAgentPreflightLoop._build_spawn_fn`` (#11298 light lane) builds
-      its ``AutoAgentRunner`` INSIDE the method — not injected, no sentinel
-      hook — so an un-rebound loop spawns a real ``claude`` in the container
-      (observed as ``Agent CLI authentication failed`` retries wedging s54
-      once decomposed children routed to the lane). Rebound wholesale to the
-      seed-scripted fake (``build_seeded_auto_agent_spawn_builder``).
+      its ``AutoAgentRunner`` INSIDE the method — not injected, so no sentinel
+      can be attached to it — and an un-rebound loop spawns a real ``claude``
+      in the container (observed as ``Agent CLI authentication failed`` retries
+      wedging s54 once decomposed children routed to the lane). Rebound
+      wholesale to the seed-scripted fake
+      (``build_seeded_auto_agent_spawn_builder``, #11590).
+    - the three composition-root ``AutoAgentRunner`` instances
+      (``pr_red_repair`` / ``sandbox_failure_fixer`` / ``disturbance_dampener``,
+      #11602). These ARE injected, so attaching the sentinel is enough:
+      ``BaseSubprocessRunner.run`` consults it before the spawn and fails
+      closed. Idle in every scenario today — which is exactly why they are
+      wired NOW: the first seed of actionable work for any of those loops
+      would otherwise spawn a real ``claude`` in the container.
 
     Shared by :func:`main` (the docker sandbox entrypoint) and
     ``tests.scenarios.fakes.mock_world.MockWorld._build_wired_orchestrator``
@@ -1123,6 +1172,13 @@ def air_gap_runner_sentinels(svc: ServiceRegistry, fake_llm: FakeLLM) -> None:
     vars(preflight_loop)["_build_spawn_fn"] = build_seeded_auto_agent_spawn_builder(
         fake_llm, prs=preflight_loop._prs, config=preflight_loop._config
     )
+    for loop_attr in _SENTINEL_RUNNER_LOOPS:
+        runner = getattr(getattr(svc, loop_attr, None), "_runner", None)
+        if runner is not None:
+            # Written through ``vars()`` rather than an attribute assignment so
+            # the seam needs no ``type: ignore[attr-defined]`` (the suppressions
+            # ratchet counts those per module).
+            vars(runner)["_mockworld_fake_llm"] = fake_llm
 
 
 async def main() -> None:

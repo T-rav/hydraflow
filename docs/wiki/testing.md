@@ -451,3 +451,20 @@ _Source: #11590 (build)_
 {"id":"01M0K5AREKCQMM12BWRNEC6KJW","title":"Light lane sandbox air-gap — AutoAgentPreflightLoop spawns through the seed-scripted fake","topic":null,"source_type":"manual","source_issue":11590,"source_repo":null,"created_at":"2026-08-21T22:30:00.000000+00:00","updated_at":"2026-08-21T22:30:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
 
+## A `BaseSubprocessRunner` construction is a spawn site the seam scan cannot see (#11602)
+
+The sandbox seam-completeness ratchet (`tests/architecture/test_sandbox_seam_completeness.py`) AST-scans loop/runner modules for **spawn primitives** (`stream_claude_process`, `run_subprocess*`, …). A `BaseSubprocessRunner` subclass has none: it spawns through the base's `run`, so the module that CONSTRUCTS one — `service_registry.build_services`, a loop's `_get_runner`, a phase — produces no spawn signature and the ratchet stays green while the instance can shell out to a real `claude` inside the air-gapped container. #11590 (`AutoAgentPreflightLoop._build_spawn_fn`) and #11602 (three composition-root `AutoAgentRunner`s) are the two recurrences.
+
+`scan_runner_constructions` closes it by enumerating the construction sites themselves; each must declare its seam in `RUNNER_CONSTRUCTION_SEAMS`. **Which seam is available depends on where the runner is built:**
+
+- **Injected at the composition root** (built once, handed to a loop) → `mockworld_sentinel`. The instance outlives construction, so `air_gap_runner_sentinels` attaches `_mockworld_fake_llm` (add the loop to `_SENTINEL_RUNNER_LOOPS`) and `BaseSubprocessRunner.run` consults it before the spawn, returning a deterministic CRASHED outcome.
+- **Built inside a method, per call** → no sentinel can ever be attached, because the object does not exist until spawn time. The site needs a `config_disable` on its loop or a `seed_seam` that replaces the enclosing builder wholesale.
+
+**Why:** the consult lives on `BaseSubprocessRunner.run` rather than on each subclass precisely because per-subclass consults are what let these sites slip — one seam on the base covers every subclass at once, and `SANDBOX_SEAMS["base_subprocess_runner"] = "mockworld_sentinel"` finally means what it says (before #11602 neither subclass consulted anything, so that declaration covered nothing).
+
+_Source: #11602 (implement)_
+
+
+```json:entry
+{"id":"01KRSUBPROCRUNNERCONSTRUCT11602","title":"A BaseSubprocessRunner construction is a spawn site the seam scan cannot see (#11602)","topic":null,"source_type":"implement","source_issue":11602,"source_repo":null,"created_at":"2026-08-22T00:00:00.000000+00:00","updated_at":"2026-08-22T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

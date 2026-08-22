@@ -23,12 +23,49 @@ from pathlib import Path
 from mockworld.sandbox_main import SANDBOX_SEAMS, SEAM_KINDS
 from tests.architecture.sandbox_seam_scan import (
     ratchet_diff,
+    scan_runner_constructions,
     scan_spawn_signatures,
     signature_module,
     undeclared_signatures,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# ``BaseSubprocessRunner`` construction sites and how the sandbox air-gaps each
+# instance (#11602). The spawn-primitive scan above CANNOT see these: the only
+# lexical spawn is inside ``src/runners/base_subprocess_runner.py``, so the
+# constructing module never produces a spawn signature. That is how three
+# unseamed composition-root runners (#11602) and the light-lane's in-method one
+# (#11590) sat under a green ratchet.
+#
+# Which seam a site can use is decided by WHERE it is built:
+# - injected at the composition root -> ``mockworld_sentinel``: the instance
+#   outlives construction, so ``air_gap_runner_sentinels`` can attach
+#   ``_mockworld_fake_llm`` and ``BaseSubprocessRunner.run`` consults it.
+# - built inside a method, per call -> no sentinel can ever be attached; the
+#   site needs a ``config_disable`` or a ``seed_seam`` that replaces the
+#   enclosing builder wholesale.
+RUNNER_CONSTRUCTION_SEAMS: dict[str, str] = {
+    # pr_red_repair / sandbox_failure_fixer / disturbance_dampener — injected
+    # into their loops; sentinel attached via ``_SENTINEL_RUNNER_LOOPS``.
+    "src/service_registry.py::build_services::AutoAgentRunner": "mockworld_sentinel",
+    # #11298 light lane: built per attempt inside the method, so
+    # ``air_gap_runner_sentinels`` rebinds the BUILDER to the seed-scripted
+    # fake (``build_seeded_auto_agent_spawn_builder``, #11590) instead.
+    "src/auto_agent_preflight_loop.py::AutoAgentPreflightLoop._build_spawn_fn::AutoAgentRunner": (
+        "seed_seam"
+    ),
+    # GoalSupervisorLoop builds its runner lazily in ``_get_runner``; the whole
+    # loop is pinned OFF in ``_apply_sandbox_config_overrides`` instead.
+    "src/goal_supervisor_loop.py::GoalSupervisorLoop._get_runner::GoalSupervisorRunner": (
+        "config_disable"
+    ),
+}
+
+# Construction sites with no seam yet, ``{signature: count}`` — shrink-only,
+# same rule as GRANDFATHERED_SPAWN_BASELINE. Empty: every site above is seamed
+# as of #11590 + #11602. DO NOT ADD ENTRIES — declare a seam instead.
+UNSEAMED_RUNNER_CONSTRUCTIONS: dict[str, int] = {}
 
 # Grandfathered spawn paths with no declared sandbox seam yet, keyed
 # ``{signature: count}`` (see sandbox_seam_scan.scan_spawn_signatures).
@@ -186,3 +223,118 @@ def test_baseline_entries_are_not_seam_declared() -> None:
         f"Modules present in both SANDBOX_SEAMS and the grandfathered "
         f"baseline: {conflicted}. Prune their baseline entries."
     )
+
+
+# ---------------------------------------------------------------------------
+# BaseSubprocessRunner construction sites (#11590/#11602) — the blind spot the
+# spawn-primitive scan above cannot see.
+# ---------------------------------------------------------------------------
+
+
+def test_scan_finds_known_runner_constructions() -> None:
+    """Anti-vacuity canary for the construction scan.
+
+    If subclass detection regresses (base renamed, scan scope narrowed) every
+    assertion below would pass vacuously on an empty scan.
+    """
+    current = scan_runner_constructions(REPO_ROOT)
+
+    assert (
+        current.get("src/service_registry.py::build_services::AutoAgentRunner") == 3
+    ), (
+        "The scan must still see the three composition-root AutoAgentRunners "
+        f"of #11602; got {current}."
+    )
+
+
+def test_new_runner_constructions_require_a_declared_seam() -> None:
+    """Every ``BaseSubprocessRunner`` build declares how the sandbox stops it."""
+    current = scan_runner_constructions(REPO_ROOT)
+    undeclared = {
+        signature: count
+        for signature, count in current.items()
+        if signature not in RUNNER_CONSTRUCTION_SEAMS
+    }
+    new, _resolved = ratchet_diff(undeclared, UNSEAMED_RUNNER_CONSTRUCTIONS)
+    assert not new, (
+        f"BaseSubprocessRunner built with no declared sandbox seam: {new}. "
+        "These never show up in the spawn-primitive scan (the spawn is inside "
+        "runners/base_subprocess_runner.py), which is how #11602's three "
+        "composition-root runners spawned a real claude in the air-gapped "
+        "container. Injected at the composition root? Attach the sentinel in "
+        "mockworld.sandbox_main._SENTINEL_RUNNER_LOOPS and declare "
+        "'mockworld_sentinel'. Built inside a method? No sentinel can reach "
+        "it — config-disable the loop or replace the builder with a seed seam. "
+        "Do NOT grow UNSEAMED_RUNNER_CONSTRUCTIONS — the ratchet only shrinks."
+    )
+
+
+def test_unseamed_runner_constructions_only_shrink() -> None:
+    """A site that gained a seam must be pruned from the baseline."""
+    current = scan_runner_constructions(REPO_ROOT)
+    undeclared = {
+        signature: count
+        for signature, count in current.items()
+        if signature not in RUNNER_CONSTRUCTION_SEAMS
+    }
+    _new, resolved = ratchet_diff(undeclared, UNSEAMED_RUNNER_CONSTRUCTIONS)
+    assert not resolved, (
+        f"UNSEAMED_RUNNER_CONSTRUCTIONS lists sites that are gone or now "
+        f"seam-declared: {resolved}. Prune them in the same change."
+    )
+
+
+def test_declared_runner_constructions_still_exist() -> None:
+    """A renamed or deleted construction site cannot leave a stale claim."""
+    current = scan_runner_constructions(REPO_ROOT)
+
+    stale = sorted(set(RUNNER_CONSTRUCTION_SEAMS) - set(current))
+
+    assert not stale, (
+        f"RUNNER_CONSTRUCTION_SEAMS declares seams for construction sites the "
+        f"scan no longer finds: {stale}. Rename or prune the declaration."
+    )
+
+
+def test_declared_runner_construction_seam_kinds_are_valid() -> None:
+    invalid = {
+        signature: kind
+        for signature, kind in RUNNER_CONSTRUCTION_SEAMS.items()
+        if kind not in SEAM_KINDS
+    }
+    assert not invalid, (
+        f"RUNNER_CONSTRUCTION_SEAMS entries with unknown seam kind: {invalid}. "
+        f"Valid kinds: {sorted(SEAM_KINDS)}."
+    )
+
+
+def test_sentinel_attach_list_names_real_registry_loops() -> None:
+    """A renamed loop must not silently no-op the sentinel attach.
+
+    ``air_gap_runner_sentinels`` reads each loop off the registry with a
+    ``getattr(svc, name, None)`` default so it stays usable against the partial
+    registries scenario tests build. A rename would therefore stop attaching
+    the sentinel with every test still green — this pins the names.
+    """
+    from mockworld.sandbox_main import _SENTINEL_RUNNER_LOOPS
+    from service_registry import ServiceRegistry
+
+    unknown = set(_SENTINEL_RUNNER_LOOPS) - set(ServiceRegistry.__dataclass_fields__)
+
+    assert not unknown, (
+        f"_SENTINEL_RUNNER_LOOPS names loops the ServiceRegistry does not "
+        f"have: {sorted(unknown)}. The sentinel attach silently no-ops for "
+        "those — re-open #11602."
+    )
+
+
+def test_base_subprocess_runner_consults_the_sentinel_it_declares() -> None:
+    """``SANDBOX_SEAMS`` calls this module ``mockworld_sentinel`` — prove it.
+
+    Before #11602 the declaration was pure fiction: no ``BaseSubprocessRunner``
+    subclass consulted ``_mockworld_fake_llm`` anywhere, so the seam covered
+    nothing. Pin the consult to the module that declares it.
+    """
+    source = (REPO_ROOT / "src/runners/base_subprocess_runner.py").read_text()
+
+    assert "_mockworld_fake_llm" in source
