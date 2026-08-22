@@ -372,6 +372,11 @@ class PolicyWorkspace:
         thread, like :meth:`apply`.
         """
         bounded = max(1, min(limit, MAX_HISTORY_LIMIT))
+        # No chain, nothing to tear — and `file_lock` would create the routing
+        # directory and a lock file as a side effect of a pure read on a
+        # repository that has never written a policy.
+        if not self._audit.path.exists():
+            return self._history_unlocked(bounded)
         try:
             with file_lock(self._lock_path, timeout=_HISTORY_LOCK_TIMEOUT_SECONDS):
                 return self._history_unlocked(bounded)
@@ -566,14 +571,27 @@ class PolicyWorkspace:
         # ONE idempotency check, above both branches: a crash between the append
         # and the unlink is possible on either path, and guarding only the
         # committed one would let recovery write a second `aborted` record for a
-        # single intent. `mutation_id` identifies the transaction, not its
-        # outcome, so it covers both payload kinds.
+        # single intent.
+        #
+        # It is keyed on the mutation id AND THE OUTCOME. `mutation_id` names the
+        # transaction, not what became of it — so an `aborted` record at the head
+        # must not suppress the `committed` record a later attempt at the same id
+        # earns. That pairing is reachable whenever the clock is injected (every
+        # test and scenario in this repo injects one), and it would leave a
+        # revision authoritative on disk with no committed record: unexplainable,
+        # and permanently un-rollback-to-able, because `_policies_at` only ever
+        # reads committed records.
         head = self._audit.head()
-        recorded = (
-            head is not None and head.payload.get("mutation_id") == intent.mutation_id
-        )
+
+        def recorded(outcome: MutationOutcome) -> bool:
+            return (
+                head is not None
+                and head.payload.get("mutation_id") == intent.mutation_id
+                and head.payload.get("outcome") == outcome.value
+            )
+
         if landed:
-            if not recorded:
+            if not recorded(MutationOutcome.COMMITTED):
                 self._audit.append(
                     _committed_payload(intent, load.snapshot, recovered=True),
                     recorded_at=intent.recorded_at,
@@ -583,7 +601,7 @@ class PolicyWorkspace:
         # The atomic replace never happened, so the prior revision is still
         # authoritative and always was — recovery records that, it does not
         # invent the revision the interrupted write was reaching for.
-        if not recorded:
+        if not recorded(MutationOutcome.ABORTED):
             self._audit.append(
                 _aborted_payload(intent, load), recorded_at=now.isoformat()
             )
@@ -745,15 +763,18 @@ def _committed_payload(
 def _aborted_payload(intent: MutationIntent, load: SnapshotLoad) -> dict[str, Any]:
     """An intent that never reached the snapshot, recorded rather than forgotten.
 
-    ``new_revision`` is the revision that REMAINS authoritative. A corrupt load
-    reports revision 0, which is not that — so the intent's own
-    ``prior_revision`` is used instead of publishing a zero the chain would then
-    carry as fact.
+    ``new_revision`` and ``new_content_hash`` both describe what REMAINS
+    authoritative, and they must describe the *same* revision. An unreadable load
+    reports revision 0 and the empty-set digest, neither of which is that — so
+    both fall back to the intent's own record of the revision it started from.
+    Taking one from each source would pair revision N with the empty-set hash: a
+    false pair, written durably, on the artefact whose whole value is that it can
+    be trusted.
     """
     snapshot = load.snapshot
-    remaining = (
-        snapshot.revision if load.state is SnapshotState.OK else intent.prior_revision
-    )
+    trustworthy = load.state is SnapshotState.OK
+    remaining = snapshot.revision if trustworthy else intent.prior_revision
+    remaining_hash = snapshot.content_hash if trustworthy else intent.prior_content_hash
     return {
         "record_kind": MUTATION_RECORD_KIND,
         "mutation_id": intent.mutation_id,
@@ -765,7 +786,7 @@ def _aborted_payload(intent: MutationIntent, load: SnapshotLoad) -> dict[str, An
         "prior_revision": intent.prior_revision,
         "new_revision": remaining,
         "prior_content_hash": intent.prior_content_hash,
-        "new_content_hash": snapshot.content_hash,
+        "new_content_hash": remaining_hash,
         "snapshot_state": load.state.value,
         "target_revision": intent.target_revision,
         "diff": PolicyDiff().to_json_dict(),

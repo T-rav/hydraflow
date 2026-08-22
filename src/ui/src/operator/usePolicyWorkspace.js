@@ -55,6 +55,8 @@ export const REPO_ALL = '__all__'
 export const POLICY_SOURCE_LOADING = 'loading'
 export const POLICY_SOURCE_AVAILABLE = 'available'
 export const POLICY_SOURCE_UNAVAILABLE = 'unavailable'
+/** Aggregate: the summary IS current, and the per-repo detail was never asked for. */
+export const POLICY_SOURCE_AGGREGATE = 'aggregate'
 
 /**
  * Default fetcher. Returns `{ok, status, data}` and throws only on a transport
@@ -105,9 +107,12 @@ export function usePolicyWorkspace({
   const [rejection, setRejection] = useState(null)
 
   // Two counters per channel, not one shared pair: `issued` hands out tickets,
-  // `applied` remembers the newest one that reached state, and a response only
-  // lands if it is newer. The poll and the preview keep their own pair so
-  // neither can invalidate the other's answer.
+  // `applied` remembers the newest ticket that has been SETTLED OR RETIRED, and
+  // a response lands only if it is strictly newer. Strictly, because
+  // `clearPreview` retires the in-flight ticket by setting applied = issued —
+  // a `>=` test would let that same request land anyway and re-enable Save for
+  // a draft the operator has already changed. The poll and the preview keep
+  // their own pair so neither can invalidate the other's answer.
   const pollIssued = useRef(0)
   const pollApplied = useRef(0)
   const previewIssued = useRef(0)
@@ -146,24 +151,27 @@ export function usePolicyWorkspace({
             : fetcher(withRepo(POLICY_AUDIT_ENDPOINT, scope), { signal }),
         ])
       } catch {
-        if (!signal?.aborted && ticket >= pollApplied.current) {
+        if (!signal?.aborted && ticket > pollApplied.current) {
           pollApplied.current = ticket
           setSourceState(POLICY_SOURCE_UNAVAILABLE)
         }
         return
       }
-      if (signal?.aborted || ticket < pollApplied.current) return
+      if (signal?.aborted || ticket <= pollApplied.current) return
       pollApplied.current = ticket
       const [policies, effective, history] = responses
       if (policies?.ok) setWorkspace(toPolicyWorkspace(policies.data))
       if (effective?.ok) setMatrix(toEffectiveMatrix(effective.data))
       if (history?.ok) setAudit(toPolicyAudit(history.data))
       const answered = responses.filter(response => response !== null)
-      setSourceState(
-        answered.every(response => response?.ok)
-          ? POLICY_SOURCE_AVAILABLE
-          : POLICY_SOURCE_UNAVAILABLE,
-      )
+      if (!answered.every(response => response?.ok)) {
+        setSourceState(POLICY_SOURCE_UNAVAILABLE)
+        return
+      }
+      // Aggregate gets its OWN state. Reporting `available` while the matrix and
+      // the history were never fetched leaves those two panels claiming a read
+      // that is not happening — a self-contradictory pair.
+      setSourceState(aggregate ? POLICY_SOURCE_AGGREGATE : POLICY_SOURCE_AVAILABLE)
     },
     [fetcher, repo],
   )
@@ -189,15 +197,16 @@ export function usePolicyWorkspace({
           { method: 'POST', body: mutation },
         )
       } catch {
-        if (ticket >= previewApplied.current) {
+        if (ticket > previewApplied.current) {
           previewApplied.current = ticket
           setRejection('storage-unavailable')
         }
         return null
       }
-      // A preview that landed after a NEWER preview would show the operator the
-      // consequences of an edit they have already moved on from.
-      if (ticket < previewApplied.current) return null
+      // A preview that landed after a NEWER preview — or after the draft it
+      // described was edited — would show the operator the consequences of an
+      // edit they have already moved on from.
+      if (ticket <= previewApplied.current) return null
       previewApplied.current = ticket
       const vm = response?.ok ? toPolicyPreview(response.data) : null
       setPreview(vm)
@@ -241,6 +250,11 @@ export function usePolicyWorkspace({
   )
 
   const clearPreview = useCallback(() => {
+    // Retire the ticket as well as the state. Nulling `preview` alone leaves an
+    // in-flight preview free to land afterwards and re-enable Save — for a
+    // draft the operator has already changed, which is exactly the
+    // "previewed before it is written" contract the button claims.
+    previewApplied.current = previewIssued.current
     setPreview(null)
     setRejection(null)
   }, [])

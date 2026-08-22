@@ -40,6 +40,20 @@ if TYPE_CHECKING:
 OPERATOR_TOKEN_ENV = "HYDRAFLOW_OPERATOR_TOKEN"
 """Env-only operator credential. Deliberately not a config field (see module doc)."""
 
+OPERATOR_TOKEN_PREFIX = "hfop_"
+"""The RECOMMENDED grammar: ``hfop_`` + ``secrets.token_urlsafe(32)``.
+
+There is no minter, exactly as there is none for the gateway control token —
+any value long enough to resist guessing authenticates. The prefix is a
+convention with one job: it makes a leaked token detectable **on its own**, with
+no surrounding variable name, by ``secret_scrub``'s canonical pattern set. A
+token minted any other way is still accepted here, and is still caught in the
+``OPERATOR_TOKEN=...`` assignment form — but a bare bearer value echoed into a
+transcript is only redacted if it carries the prefix. Mint one with::
+
+    python -c "import secrets; print('hfop_' + secrets.token_urlsafe(32))"
+"""
+
 OPERATOR_ID_ENV = "HYDRAFLOW_OPERATOR_ID"
 """Env-only, non-secret label recorded as the actor on every audited mutation."""
 

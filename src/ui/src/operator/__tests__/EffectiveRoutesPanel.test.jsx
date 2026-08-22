@@ -145,3 +145,32 @@ describe('EffectiveRoutesPanel', () => {
     expect(screen.getByTestId('effective-feed-notice')).toHaveTextContent('NOT "no policy"')
   })
 })
+
+describe('EffectiveRoutesPanel — what it may not claim', () => {
+  it('does not describe a snapshot state it has not fetched', () => {
+    render(<EffectiveRoutesPanel />)
+    expect(screen.queryByTestId('effective-snapshot-note')).toBeNull()
+  })
+
+  it('does not call an unfetched grid an empty one', () => {
+    render(<EffectiveRoutesPanel />)
+    expect(screen.queryByTestId('effective-empty')).toBeNull()
+  })
+
+  it('tells an aggregate reader to pick a repository, not that it is loading', () => {
+    // Aggregate never fetches the per-repository detail routes, so "Reading
+    // this repository's policy state…" would describe a fetch that is not
+    // happening — forever.
+    render(<EffectiveRoutesPanel sourceState="aggregate" />)
+    expect(screen.getByTestId('effective-feed-notice')).toHaveTextContent(
+      'Pick a repository',
+    )
+  })
+
+  it('says a feed that loaded and then died is no longer current', () => {
+    render(<EffectiveRoutesPanel matrix={matrix()} sourceState="unavailable" />)
+    expect(screen.getByTestId('effective-feed-notice')).toHaveTextContent(
+      'stopped answering',
+    )
+  })
+})

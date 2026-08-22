@@ -21,7 +21,11 @@
 
 import React from 'react'
 import { Badge, Text, useTokens } from '../styles/primitives'
-import { EMPTY_POLICY_AUDIT_VM, feedNotice } from './model/policyWorkspace'
+import {
+  EMPTY_POLICY_AUDIT_VM,
+  feedIsCurrent,
+  feedNotice,
+} from './model/policyWorkspace'
 
 function makeStyles(t) {
   return {
@@ -118,8 +122,9 @@ export default function PolicyAuditPanel({
   const styles = makeStyles(t)
   const notice = feedNotice(sourceState, audit.loaded)
   // `verified` is a THREE-state fact: verified, broken, or never read. Only the
-  // first two are claims this panel is entitled to make.
-  const unread = audit.verified == null
+  // first two are claims this panel is entitled to make — and only while the
+  // source is still answering. A frozen last-known chain is not a verified one.
+  const unread = audit.verified == null || !feedIsCurrent(sourceState)
 
   return (
     <div style={styles.card} data-testid="policy-audit">
@@ -135,7 +140,13 @@ export default function PolicyAuditPanel({
           tone={unread ? 'neutral' : audit.verified ? 'info' : 'danger'}
           data-testid="policy-audit-verified"
         >
-          {unread ? 'chain unread' : audit.verified ? 'chain verified' : 'chain broken'}
+          {unread
+            ? audit.loaded
+              ? 'chain not re-read'
+              : 'chain unread'
+            : audit.verified
+              ? 'chain verified'
+              : 'chain broken'}
         </Badge>
       </div>
       {notice ? (

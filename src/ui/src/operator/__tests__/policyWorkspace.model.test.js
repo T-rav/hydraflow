@@ -8,10 +8,16 @@
 
 import { describe, it, expect } from 'vitest'
 import {
+  AGGREGATE_MESSAGE,
   EMPTY_EFFECTIVE_MATRIX_VM,
   EMPTY_POLICY_AUDIT_VM,
   EMPTY_POLICY_WORKSPACE_VM,
+  LOADING_MESSAGE,
+  STALE_MESSAGE,
+  UNAVAILABLE_MESSAGE,
   cellTone,
+  feedIsCurrent,
+  feedNotice,
   draftToPolicy,
   policyToDraft,
   rejectionMessage,
@@ -277,5 +283,59 @@ describe('operator-facing prose', () => {
 
   it('renders an empty requirement as an empty label rather than "undefined"', () => {
     expect(requirementLabel(null)).toBe('')
+  })
+})
+
+describe('feedNotice — what a panel is entitled to claim', () => {
+  it('says nothing once a current payload has landed', () => {
+    expect(feedNotice('available', true)).toBe('')
+  })
+
+  it('says the feed is still loading before anything lands', () => {
+    expect(feedNotice('loading', false)).toBe(LOADING_MESSAGE)
+  })
+
+  it('says a dead feed is NOT an empty repository', () => {
+    expect(feedNotice('unavailable', false)).toBe(UNAVAILABLE_MESSAGE)
+  })
+
+  it('keeps speaking once a feed that loaded then died', () => {
+    // The hook keeps the last-known VM on failure, so silence here would leave
+    // the panel rendering a frozen revision as though it were current.
+    expect(feedNotice('unavailable', true)).toBe(STALE_MESSAGE)
+  })
+
+  it('tells an aggregate reader to pick a repository', () => {
+    expect(feedNotice('aggregate', false)).toBe(AGGREGATE_MESSAGE)
+  })
+
+  it('marks only an unavailable source as not current', () => {
+    expect(
+      ['loading', 'available', 'aggregate', 'unavailable'].map(feedIsCurrent),
+    ).toEqual([true, true, true, false])
+  })
+})
+
+describe('toPolicyAudit — verification is three-state', () => {
+  it('invents no verification when the payload does not carry one', () => {
+    expect(toPolicyAudit({ records: [] }).verified).toBeNull()
+  })
+
+  it('reports a verified chain when the payload says so', () => {
+    expect(toPolicyAudit({ records: [], verified: true }).verified).toBe(true)
+  })
+
+  it('reports a broken chain when the payload says so', () => {
+    expect(toPolicyAudit({ records: [], verified: false }).verified).toBe(false)
+  })
+
+  it('offers each committed revision exactly once as a rollback target', () => {
+    const record = revision => ({
+      seq: revision - 1,
+      payload: { outcome: 'committed', new_revision: revision, diff: {} },
+    })
+    const vm = toPolicyAudit({ verified: true, records: [record(1), record(1), record(2)] })
+
+    expect(vm.rollbackTargets).toEqual([0, 1, 2])
   })
 })

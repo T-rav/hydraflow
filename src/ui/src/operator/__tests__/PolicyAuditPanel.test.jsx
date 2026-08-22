@@ -115,3 +115,19 @@ describe('PolicyAuditPanel — what it may not claim', () => {
     )
   })
 })
+
+describe('PolicyAuditPanel — verification is only claimable while current', () => {
+  it('stops asserting verification once the source stops answering', () => {
+    // The hook keeps the last-known chain on failure. A "chain verified" badge
+    // over it is a positive tamper-evidence claim the panel can no longer back.
+    render(
+      <PolicyAuditPanel
+        audit={toPolicyAudit({ records: [record()], verified: true })}
+        sourceState="unavailable"
+      />,
+    )
+    expect(screen.getByTestId('policy-audit-verified')).toHaveTextContent(
+      'chain not re-read',
+    )
+  })
+})

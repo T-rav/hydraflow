@@ -8,8 +8,8 @@
  */
 
 import React from 'react'
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { OperatorConsoleView } from '../OperatorConsole'
 import { toGatewayAccounts, toGatewayLiveRoutes } from '../model/gatewayRouting'
 import {
@@ -257,5 +257,71 @@ describe('OperatorConsole routing policy views (#11538)', () => {
     render(<OperatorConsoleView socket={idleSocket()} policy={POLICY_FEED} />)
 
     expect(screen.getByTestId('policy-audit')).toBeInTheDocument()
+  })
+})
+
+// The container seam that let a HIGH defect ship through a review pass: every
+// other test injects a `policy` fixture, so the wiring between the console's
+// live selection and the policy feed was never exercised.
+describe('OperatorConsole policy feed wiring (#11538)', () => {
+  let originalHref
+
+  beforeEach(() => {
+    originalHref = window.location.href
+    window.history.replaceState({}, '', '/')
+  })
+
+  afterEach(() => {
+    window.history.replaceState({}, '', originalHref)
+  })
+
+  function recordingFetcher() {
+    return vi.fn(() =>
+      Promise.resolve({ ok: true, status: 200, data: { scope: 'repo', policies: [] } }),
+    )
+  }
+
+  it('does not poll the policy plane while Routing is closed', async () => {
+    const fetcher = recordingFetcher()
+    render(<OperatorConsoleView socket={idleSocket()} policyFetcher={fetcher} />)
+    await waitFor(() => expect(screen.getByTestId('mode-toggle-routing')).toBeInTheDocument())
+
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('starts polling when the operator opens Routing', async () => {
+    // `useOperatorSelection` is per-caller state seeded from the URL at mount,
+    // so a second instance would freeze here and the feed would never enable.
+    const fetcher = recordingFetcher()
+    render(<OperatorConsoleView socket={idleSocket()} policyFetcher={fetcher} />)
+
+    fireEvent.click(screen.getByTestId('mode-toggle-routing'))
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalled())
+  })
+
+  it('scopes the feed to the repository the operator selected', async () => {
+    const fetcher = recordingFetcher()
+    window.history.replaceState({}, '', '/?mode=routing&repo=acme%2Fchosen')
+    render(<OperatorConsoleView socket={idleSocket()} policyFetcher={fetcher} />)
+
+    await waitFor(() => expect(fetcher).toHaveBeenCalled())
+
+    expect(fetcher.mock.calls.every(([url]) => url.includes('repo=acme%2Fchosen'))).toBe(true)
+  })
+
+  it('does not poll at all when a fixture feed is supplied', async () => {
+    const fetcher = recordingFetcher()
+    window.history.replaceState({}, '', '/?mode=routing')
+    render(
+      <OperatorConsoleView
+        socket={idleSocket()}
+        policy={POLICY_FEED}
+        policyFetcher={fetcher}
+      />,
+    )
+    await waitFor(() => expect(screen.getByTestId('routing-mode')).toBeInTheDocument())
+
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })

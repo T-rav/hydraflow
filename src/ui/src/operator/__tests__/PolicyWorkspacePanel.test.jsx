@@ -448,3 +448,110 @@ describe('PolicyWorkspacePanel — what it may not claim', () => {
     expect(screen.queryByTestId('policy-conflict')).toBeNull()
   })
 })
+
+describe('PolicyWorkspacePanel — a feed that stopped answering', () => {
+  it('closes the editor rather than writing against a frozen revision', () => {
+    render(
+      <PolicyWorkspacePanel workspace={workspace()} sourceState="unavailable" />,
+    )
+    expect(screen.queryByTestId('policy-editor')).toBeNull()
+  })
+
+  it('says the state on screen is the last one that loaded', () => {
+    render(
+      <PolicyWorkspacePanel workspace={workspace()} sourceState="unavailable" />,
+    )
+    expect(screen.getByTestId('policy-feed-notice')).toHaveTextContent(
+      'stopped answering',
+    )
+  })
+})
+
+describe('PolicyWorkspacePanel — rollback is only offered from a chain that verifies', () => {
+  it('offers no rollback while the chain is broken', () => {
+    // The write plane already refuses with `audit-chain-broken`, and the Audit
+    // view already says the targets cannot be trusted.
+    const broken = toPolicyAudit({
+      verified: false,
+      broken_at_seq: 1,
+      records: [
+        {
+          seq: 0,
+          payload: { outcome: 'committed', new_revision: 1, actor: 'travis', diff: {} },
+        },
+      ],
+    })
+    render(<PolicyWorkspacePanel workspace={workspace()} audit={broken} />)
+
+    expect(screen.queryByTestId('policy-rollback-1')).toBeNull()
+  })
+
+  it('offers rollback when the chain verifies', () => {
+    render(<PolicyWorkspacePanel workspace={workspace()} audit={AUDIT} />)
+    expect(screen.getByTestId('policy-rollback-1')).toBeInTheDocument()
+  })
+})
+
+describe('PolicyWorkspacePanel — the pin follows the repository', () => {
+  it('re-pins when the workspace switches to another repository', () => {
+    const { rerender } = render(<PolicyWorkspacePanel workspace={workspace()} />)
+    rerender(
+      <PolicyWorkspacePanel
+        workspace={workspace({ repo: 'acme/other', revision: 2 })}
+      />,
+    )
+
+    expect(screen.queryByTestId('policy-rebased')).toBeNull()
+  })
+
+  it('keeps the pin when a save reports no revision', () => {
+    // Dropping it would silently restore the unpinned behaviour, where
+    // expected_revision follows the live poll and the 409 can never fire.
+    const onSave = vi.fn(() => Promise.resolve({ ok: true }))
+    const onPreview = vi.fn()
+    const { rerender } = render(
+      <PolicyWorkspacePanel
+        workspace={workspace()}
+        preview={WRITABLE_PREVIEW}
+        onSave={onSave}
+        onPreview={onPreview}
+      />,
+    )
+    fillEditor()
+    fireEvent.click(screen.getByTestId('policy-save-button'))
+    rerender(
+      <PolicyWorkspacePanel
+        workspace={workspace({ revision: 9 })}
+        preview={WRITABLE_PREVIEW}
+        onSave={onSave}
+        onPreview={onPreview}
+      />,
+    )
+
+    expect(screen.getByTestId('policy-rebased')).toBeInTheDocument()
+  })
+})
+
+describe('PolicyWorkspacePanel — aggregate', () => {
+  it('declares itself read-only', () => {
+    render(
+      <PolicyWorkspacePanel
+        workspace={toPolicyWorkspace({ scope: 'aggregate', repos: [] })}
+        sourceState="aggregate"
+      />,
+    )
+    expect(screen.getByTestId('policy-aggregate-readonly')).toHaveTextContent(
+      'read-only',
+    )
+  })
+
+  it('renders an empty roster as an explicit statement', () => {
+    render(
+      <PolicyWorkspacePanel
+        workspace={toPolicyWorkspace({ scope: 'aggregate', repos: [] })}
+        sourceState="aggregate"
+      />,
+    )
+    expect(screen.getByTestId('policy-aggregate-empty')).toBeInTheDocument()
+  })
+})

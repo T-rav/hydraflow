@@ -31,6 +31,7 @@ import {
   REQUIREMENT_CHOICES,
   WORKER_ROLE_CHOICES,
   draftToPolicy,
+  feedIsCurrent,
   feedNotice,
   policyToDraft,
   rejectionMessage,
@@ -306,13 +307,21 @@ export default function PolicyWorkspacePanel({
   // WINNER's revision, so the 409 that stops a lost update could never fire
   // from this console (ADR-0140 D3).
   const [basis, setBasis] = React.useState(null)
+  // Which repository the pin belongs to. Without it, switching repositories
+  // carries repo A's revision onto repo B's form and the editor opens already
+  // "re-based" — a false alarm on the one surface whose job is to make that
+  // alarm mean something.
+  const [basisRepo, setBasisRepo] = React.useState(null)
 
   React.useEffect(() => {
-    setBasis(prev => (prev === null && workspace.loaded ? workspace.revision : prev))
-  }, [workspace.loaded, workspace.revision])
+    if (!workspace.loaded) return
+    setBasis(prev => (prev === null || basisRepo !== workspace.repo ? workspace.revision : prev))
+    setBasisRepo(workspace.repo)
+  }, [basisRepo, workspace.loaded, workspace.repo, workspace.revision])
 
   const notice = feedNotice(sourceState, workspace.loaded)
-  const editable = workspace.editable && workspace.scope === 'repo'
+  const current = feedIsCurrent(sourceState)
+  const editable = workspace.editable && workspace.scope === 'repo' && current
   const pinned = basis === null ? workspace.revision : basis
   // Somebody else's revision landed under this form. The edit is not
   // necessarily wrong, but it was reasoned against a route matrix that no
@@ -357,13 +366,20 @@ export default function PolicyWorkspacePanel({
   const commit = async body => {
     const result = await onSave(body, token)
     setConflict(result && result.ok === false ? result : null)
-    if (result && result.ok) setBasis(result.revision ?? null)
+    // `?? basis`, never `?? null`: dropping the pin would silently restore the
+    // unpinned behaviour, where `expected_revision` follows the live poll and
+    // the 409 can no longer fire.
+    if (result && result.ok) setBasis(result.revision ?? basis)
   }
 
   // Rolling back to the revision already in force would write a redundant new
   // revision, so it is not offered; the list is bounded because the audit route
   // returns up to fifty records and fifty controls is not a control.
-  const rollbackTargets = (audit?.rollbackTargets || [])
+  // A chain that does not verify has no trustworthy target, and the write plane
+  // already refuses with `audit-chain-broken` — offering the control anyway is
+  // offering a button the console knows will fail. `verified === null` (unread)
+  // yields no targets either, because the empty VM carries none.
+  const rollbackTargets = (audit?.verified === true ? audit.rollbackTargets : [])
     .filter(target => target !== pinned)
     .slice(-MAX_ROLLBACK_BUTTONS)
 
@@ -377,6 +393,21 @@ export default function PolicyWorkspacePanel({
           Aggregate mode is read-only. Pick one repository to edit its routing
           policy; class and global rules belong to a host-admin scope.
         </Notice>
+        {notice ? (
+          <Notice
+            tone={current ? 'muted' : 'danger'}
+            styles={styles}
+            testid="policy-feed-notice"
+          >
+            {notice}
+          </Notice>
+        ) : null}
+        {workspace.repos.length === 0 && workspace.loaded && (
+          <Text role="status" size="sm" tone="muted" data-testid="policy-aggregate-empty">
+            No repository on this host has a canonical owner/repo identity, so
+            none can carry a routing policy.
+          </Text>
+        )}
         <div style={styles.rows}>
           {workspace.repos.map(row => (
             <div style={styles.row} key={row.repo} data-testid={`policy-repo-${row.slug}`}>

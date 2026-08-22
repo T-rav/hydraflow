@@ -36,7 +36,7 @@ from starlette.responses import JSONResponse
 
 from dashboard_routes._common import REPO_ALL
 from driver_contracts import ModelRequirement, ModelRequirementKind
-from hydraflow_gateway.routing_policy import canonicalize_repo
+from hydraflow_gateway.routing_policy import canonicalize_repo, runtime_slug_for
 from hydraflow_gateway.routing_workspace import (
     DEFAULT_HISTORY_LIMIT,
     MAX_HISTORY_LIMIT,
@@ -159,6 +159,22 @@ def build_gateway_policy_router(
                     "policy can name it (ADR-0139 D2)"
                 ),
             )
+        # `resolve_runtime` FALLS BACK to the host runtime for a slug that is
+        # registered but not started — deliberately, so a read-only dashboard
+        # still renders. On the one write route that fallback is a silent
+        # retarget: a mutation naming an unstarted repository would land on the
+        # host repository's snapshot, authorised by the host repository's gate.
+        # A request that names a repository the server did not resolve to is a
+        # 404, never somebody else's policy.
+        requested = None if repo is None else repo.strip().lower()
+        if requested not in (None, canonical, runtime_slug_for(canonical)):
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"no running repository resolves to {repo!r}; refusing to "
+                    f"serve {canonical} under another repository's name"
+                ),
+            )
         return PolicyWorkspace(routing_dir(resolved), repo=canonical)
 
     def _gate(repo: str | None = None) -> WriteGate:
@@ -174,7 +190,14 @@ def build_gateway_policy_router(
         host = write_gate(config, env=env)
         if host is not WriteGate.ENABLED or repo is None:
             return host
-        return write_gate(_config_for(repo), env=env)
+        # Only the kill switch on the second pass. Re-running the whole gate
+        # would re-read `dashboard_host` from a per-repository config, and a
+        # repository runtime's copy of the bind is not the bind — it would
+        # report `dashboard-not-loopback` for a socket that IS loopback, which
+        # is a refusal an operator cannot act on.
+        if not getattr(_config_for(repo), "gateway_policy_workspace_enabled", False):
+            return WriteGate.WORKSPACE_DISABLED
+        return WriteGate.ENABLED
 
     @router.get("")
     async def read_policies(repo: RepoSlugParam = None) -> dict[str, Any]:
@@ -209,7 +232,9 @@ def build_gateway_policy_router(
 
     @router.post("/preview")
     async def preview_mutation(
-        body: PolicyMutation, repo: RepoSlugParam = None
+        body: PolicyMutation,
+        repo: RepoSlugParam = None,
+        requirement: RequirementSelectors = None,
     ) -> dict[str, Any]:
         """Resolve a candidate edit and its before/after matrix, writing nothing.
 
@@ -221,12 +246,17 @@ def build_gateway_policy_router(
         preview = await asyncio.to_thread(workspace.preview, body)
         repo_class = repo_class_for(_config_for(repo))
         accounts = local_account_availability()
+        # The SAME rows the effective grid can render: a before/after diff over
+        # a narrower requirement set than the grid would silently answer "this
+        # route is unaffected" for a row it never resolved.
+        requirements = _requirements(requirement or [])
         before = build_effective_matrix(
             repo=workspace.repo,
             repo_class=repo_class,
             accounts=accounts,
             snapshot=preview.before,
             snapshot_state=preview.snapshot_state,
+            requirements=requirements,
         )
         after = build_effective_matrix(
             repo=workspace.repo,
@@ -234,6 +264,7 @@ def build_gateway_policy_router(
             accounts=accounts,
             snapshot=preview.after,
             snapshot_state=preview.snapshot_state,
+            requirements=requirements,
         )
         return _preview_json(preview, before=before, after=after)
 
@@ -289,11 +320,17 @@ def build_gateway_policy_router(
     async def read_audit(
         repo: RepoSlugParam = None,
         limit: int = Query(default=DEFAULT_HISTORY_LIMIT, ge=1, le=MAX_HISTORY_LIMIT),
-    ) -> dict[str, Any]:
+    ) -> Any:
         """The append-only mutation history and whether the chain still verifies."""
-        # The one O(file) read on this plane: it takes the writer's lock and
-        # hash-verifies the whole chain, so it never runs on the event loop.
-        history = await asyncio.to_thread(_workspace(repo).history, limit=limit)
+        workspace = _workspace(repo)
+        try:
+            # The one O(file) read on this plane: it takes the writer's lock and
+            # hash-verifies the whole chain, so it never runs on the event loop.
+            history = await asyncio.to_thread(workspace.history, limit=limit)
+        except OSError as exc:
+            # A chain this process cannot read is an unavailable source, not a
+            # crash — and emphatically not an empty history.
+            return _error(503, "storage-unavailable", f"the chain is unreadable: {exc}")
         return {
             "records": [_record_json(record) for record in history.records],
             "truncated": history.truncated,

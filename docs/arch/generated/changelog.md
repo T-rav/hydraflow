@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `eb3b1d0` — fix(gateway): review pass 1 — the console could not fire its own 409, and empty feeds lied *(2026-08-22)*
 - `daeb841` — fix(gateway): drop the B008 suppression on the matrix requirement selector *(2026-08-22)*
 - `f3937c7` — docs(adr): ADR-0140 — revision-safe policy workspace and the operator write boundary *(2026-08-22)*
 - `1bc8a56` — feat(gateway): revision-safe policy workspace core and the ADR-0138 D5 write gate *(2026-08-22)*

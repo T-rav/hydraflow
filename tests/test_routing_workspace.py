@@ -13,6 +13,7 @@ persistence path beside them.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import threading
 from datetime import UTC, datetime
@@ -21,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from driver_contracts import WorkerRole
+from hydraflow_gateway import routing_workspace
 from hydraflow_gateway.models import ProviderBinding, RepoClass
 from hydraflow_gateway.routing_policy import (
     PolicyValidationCode,
@@ -33,6 +35,7 @@ from hydraflow_gateway.routing_policy import (
 from hydraflow_gateway.routing_store import POLICY_SNAPSHOT_FILENAME
 from hydraflow_gateway.routing_workspace import (
     POLICY_JOURNAL_FILENAME,
+    POLICY_MUTATION_LOCK_FILENAME,
     JournalOutcome,
     MutationRejection,
     PolicyMutation,
@@ -1091,3 +1094,106 @@ def test_an_aborted_record_names_the_revision_that_remains_authoritative(
     workspace.recover(now=_NOW)
 
     assert workspace.history().records[-1].payload["new_revision"] == 1
+
+
+def test_the_history_read_takes_the_writers_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``append_jsonl`` can tear a large record across writes; the lock is the fix.
+
+    A reader that caught the gap would see a half line and report a BROKEN CHAIN
+    on the one panel whose entire job is trustworthiness.
+    """
+    workspace = _workspace(tmp_path)
+    _create(workspace, _policy())
+    taken: list[Path] = []
+    real = routing_workspace.file_lock
+
+    @contextlib.contextmanager
+    def recording(path: Path, **kwargs: object):
+        taken.append(path)
+        with real(path, **kwargs):
+            yield
+
+    monkeypatch.setattr(routing_workspace, "file_lock", recording)
+
+    workspace.history()
+
+    assert taken == [tmp_path / "routing" / POLICY_MUTATION_LOCK_FILENAME]
+
+
+def test_reading_a_history_that_does_not_exist_creates_nothing(
+    tmp_path: Path,
+) -> None:
+    """A pure read must not leave a routing directory and a lock file behind."""
+    _workspace(tmp_path).history()
+
+    assert not (tmp_path / "routing").exists()
+
+
+def test_an_aborted_record_does_not_suppress_a_later_committed_one(
+    tmp_path: Path,
+) -> None:
+    """``mutation_id`` names the transaction, not what became of it.
+
+    With an injected clock — which every test and scenario in this repo uses —
+    a retry reuses the id. If an ``aborted`` head suppressed the ``committed``
+    append, a revision would sit authoritative on disk with no record: not
+    replayable, and permanently un-rollback-to-able.
+    """
+    workspace = _workspace(tmp_path)
+    intent = {
+        "mutation_id": "retried",
+        "kind": "create",
+        "repo": _REPO,
+        "actor": _ACTOR,
+        "prior_revision": 0,
+        "next_revision": 1,
+        "next_content_hash": "sha256:" + "f" * 64,
+        "recorded_at": _NOW.isoformat(),
+        "policy_ids": ["pin-zai"],
+    }
+    _write_journal(tmp_path, intent)
+    workspace.recover(now=_NOW)
+    workspace.store.save((_policy(),))
+    _write_journal(
+        tmp_path,
+        {**intent, "next_content_hash": workspace.read().content_hash},
+    )
+
+    workspace.recover(now=_NOW)
+
+    assert [record.payload["outcome"] for record in workspace.history().records] == [
+        "aborted",
+        "committed",
+    ]
+
+
+def test_an_aborted_record_never_pairs_a_revision_with_another_revisions_hash(
+    tmp_path: Path,
+) -> None:
+    """A false pair on a tamper-evident chain is worse than no record at all."""
+    workspace = _workspace(tmp_path)
+    _create(workspace, _policy())
+    landed = workspace.read().content_hash
+    (tmp_path / "routing" / POLICY_SNAPSHOT_FILENAME).write_text("{", encoding="utf-8")
+    _write_journal(
+        tmp_path,
+        {
+            "mutation_id": "aborted-over-corrupt",
+            "kind": "create",
+            "repo": _REPO,
+            "actor": _ACTOR,
+            "prior_revision": 1,
+            "prior_content_hash": landed,
+            "next_revision": 2,
+            "next_content_hash": "sha256:" + "f" * 64,
+            "recorded_at": _NOW.isoformat(),
+            "policy_ids": ["never-landed"],
+        },
+    )
+
+    workspace.recover(now=_NOW)
+    payload = workspace.history().records[-1].payload
+
+    assert (payload["new_revision"], payload["new_content_hash"]) == (1, landed)

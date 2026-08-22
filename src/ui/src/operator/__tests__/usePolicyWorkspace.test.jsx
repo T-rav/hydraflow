@@ -16,6 +16,7 @@ import {
   POLICY_ENDPOINT,
   POLICY_MUTATIONS_ENDPOINT,
   POLICY_PREVIEW_ENDPOINT,
+  POLICY_SOURCE_AGGREGATE,
   POLICY_SOURCE_AVAILABLE,
   POLICY_SOURCE_UNAVAILABLE,
   REPO_ALL,
@@ -290,5 +291,55 @@ describe('usePolicyWorkspace', () => {
     renderHook(() => usePolicyWorkspace({ fetcher, repo: 'acme/other' }))
     await waitFor(() => expect(fetcher).toHaveBeenCalled())
     expect(fetcher.mock.calls.every(([url]) => url.includes('repo=acme%2Fother'))).toBe(true)
+  })
+})
+
+describe('usePolicyWorkspace — honesty of the source state', () => {
+  it('does not load a workspace from an error body', async () => {
+    // A FastAPI refusal is `{"detail": ...}`, which reduces to a VM that would
+    // otherwise render "No policy has been written for this repository".
+    const fetcher = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 500, data: { detail: 'boom' } }),
+    )
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
+    await waitFor(() =>
+      expect(result.current.sourceState).toBe(POLICY_SOURCE_UNAVAILABLE),
+    )
+    expect(result.current.workspace.loaded).toBe(false)
+  })
+
+  it('reports aggregate as its own state, not as available', async () => {
+    // `available` beside an unfetched matrix and history is a self-contradictory
+    // pair those two panels resolve as "still loading", forever.
+    const fetcher = readFetcher(1)
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher }))
+    await waitFor(() => expect(result.current.workspace.loaded).toBe(true))
+    expect(result.current.sourceState).toBe(POLICY_SOURCE_AGGREGATE)
+  })
+
+  it('retires an in-flight preview when the draft changes', async () => {
+    // Nulling `preview` alone lets the older preview land afterwards and
+    // re-enable Save for a draft that was never previewed.
+    const gates = []
+    const fetcher = vi.fn(url => {
+      if (url.startsWith(POLICY_PREVIEW_ENDPOINT)) {
+        return new Promise(resolve => {
+          gates.push(resolve)
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, data: workspacePayload(1) })
+    })
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
+    await waitFor(() => expect(result.current.workspace.loaded).toBe(true))
+
+    await act(async () => {
+      const pending = result.current.requestPreview({ kind: 'create', expected_revision: 1 })
+      await waitFor(() => expect(gates.length).toBe(1))
+      result.current.clearPreview()
+      gates[0]({ ok: true, status: 200, data: { writable: true, cells: [], diff: {} } })
+      await pending
+    })
+
+    expect(result.current.preview).toBeNull()
   })
 })

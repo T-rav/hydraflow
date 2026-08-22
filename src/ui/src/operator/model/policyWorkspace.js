@@ -115,16 +115,32 @@ export const UNAVAILABLE_MESSAGE =
 export const LOADING_MESSAGE =
   'Reading this repository’s policy state…'
 
+export const STALE_MESSAGE =
+  'The policy plane has stopped answering. Everything below is the last state that loaded, not the current one — reload before writing.'
+
+export const AGGREGATE_MESSAGE =
+  'Pick a repository to see its effective routes and mutation history. Aggregate mode reads the per-repository summary only.'
+
 /**
  * The one line a panel renders instead of an empty state it has not earned.
  *
- * Returns `''` once a real payload has landed, so a genuinely empty repository
- * still gets its calm "no policy has been written" copy — the point is only
- * that "not fetched" may never wear it.
+ * `unavailable` is checked FIRST, and deliberately: the hook keeps the
+ * last-known view model on failure, so a feed that succeeded once and then died
+ * would otherwise go completely silent while the panel kept rendering a frozen
+ * revision as though it were current — and the audit badge kept asserting a
+ * chain verification it can no longer back. Returning `''` is reserved for a
+ * feed that is genuinely current, so a truly empty repository still gets its
+ * calm "no policy has been written" copy.
  */
 export function feedNotice(sourceState, loaded) {
-  if (loaded) return ''
-  return sourceState === 'unavailable' ? UNAVAILABLE_MESSAGE : LOADING_MESSAGE
+  if (sourceState === 'aggregate') return loaded ? '' : AGGREGATE_MESSAGE
+  if (sourceState === 'unavailable') return loaded ? STALE_MESSAGE : UNAVAILABLE_MESSAGE
+  return loaded ? '' : LOADING_MESSAGE
+}
+
+/** Whether a panel may still make a positive claim about what it is showing. */
+export function feedIsCurrent(sourceState) {
+  return sourceState !== 'unavailable'
 }
 
 export const EMPTY_POLICY_WORKSPACE_VM = Object.freeze({

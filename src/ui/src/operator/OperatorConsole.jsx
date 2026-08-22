@@ -59,11 +59,6 @@ import RoutingMode from './RoutingMode'
 import { useGatewayAccounts, useGatewayLiveRoutes } from './useGatewayRouting'
 import { usePolicyWorkspace } from './usePolicyWorkspace'
 import {
-  EMPTY_EFFECTIVE_MATRIX_VM,
-  EMPTY_POLICY_AUDIT_VM,
-  EMPTY_POLICY_WORKSPACE_VM,
-} from './model/policyWorkspace'
-import {
   EMPTY_GATEWAY_ACCOUNTS_VM,
   EMPTY_GATEWAY_LIVE_VM,
 } from './model/gatewayRouting'
@@ -197,32 +192,28 @@ function ModeToggle({ mode, select, styles }) {
   )
 }
 
-// The Routing Policies view's feed when the console is rendered from a fixture
-// rather than the live hook: every field present, nothing loaded, nothing
-// writable — so a test that forgets to pass one gets a read-only workspace
-// rather than an undefined-property crash.
-const EMPTY_POLICY_FEED = Object.freeze({
-  workspace: EMPTY_POLICY_WORKSPACE_VM,
-  matrix: EMPTY_EFFECTIVE_MATRIX_VM,
-  audit: EMPTY_POLICY_AUDIT_VM,
-  sourceState: 'loading',
-  preview: null,
-  rejection: null,
-  requestPreview: () => {},
-  save: () => {},
-  clearPreview: () => {},
-})
-
 /**
  * Presentational shell. Takes the socket state as a prop so it can be rendered
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM, policy = EMPTY_POLICY_FEED }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM, policy = null, policyFetcher = undefined }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
   const { repo, stage, item, mode, routingView, routingSelection, select, breadcrumb } = useOperatorSelection()
+  // Routing policy (#11538, ADR-0140) is owned HERE, not in the container.
+  // `useOperatorSelection` is per-caller `useState` seeded from the URL at
+  // mount, so a second instance in the container would freeze at whatever the
+  // URL said then: clicking the Routing tab would render the workspace while
+  // the feed stayed disabled, and a repo picked later would never reach it.
+  // One instance, one selection.
+  const livePolicy = usePolicyWorkspace({
+    repo,
+    enabled: mode === 'routing' && policy == null,
+    fetcher: policyFetcher,
+  })
+  const policyFeed = policy ?? livePolicy
   const events = socket.events ?? []
 
   const pipeline = useMemo(
@@ -390,18 +381,18 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                 <RoutingMode
                   accounts={gatewayAccounts}
                   live={gatewayLive}
-                  workspace={policy.workspace}
-                  matrix={policy.matrix}
-                  audit={policy.audit}
-                  policySourceState={policy.sourceState}
-                  preview={policy.preview}
-                  rejection={policy.rejection}
+                  workspace={policyFeed.workspace}
+                  matrix={policyFeed.matrix}
+                  audit={policyFeed.audit}
+                  policySourceState={policyFeed.sourceState}
+                  preview={policyFeed.preview}
+                  rejection={policyFeed.rejection}
                   routingView={routingView}
                   routingSelection={routingSelection}
                   select={select}
-                  onPreviewPolicy={policy.requestPreview}
-                  onSavePolicy={policy.save}
-                  onClearPreview={policy.clearPreview}
+                  onPreviewPolicy={policyFeed.requestPreview}
+                  onSavePolicy={policyFeed.save}
+                  onClearPreview={policyFeed.clearPreview}
                 />
               ) : mode === 'supervisor' ? (
                 <SupervisorMode
@@ -495,17 +486,7 @@ export function OperatorConsole() {
   // of the WS slice the shell otherwise renders from.
   const gatewayAccounts = useGatewayAccounts()
   const gatewayLive = useGatewayLiveRoutes()
-  // Routing policy (#11538, ADR-0140): the workspace snapshot, the effective-route
-  // matrix, and the mutation history on one sequence-guarded poll, plus the
-  // preview/save actions the Policies view writes through.
-  //
-  // Scoped to the console's canonical repo selection — an editor pointed at a
-  // repository the operator did not pick would write the wrong repo's policy —
-  // and only polled while the Routing mode is showing, because the audit read
-  // walks and hash-verifies a chain that never gets pruned.
-  const { repo, mode } = useOperatorSelection()
-  const policy = usePolicyWorkspace({ repo, enabled: mode === 'routing' })
-  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} policy={policy} />
+  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} />
 }
 
 export default OperatorConsole

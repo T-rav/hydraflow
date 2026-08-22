@@ -8,6 +8,7 @@ dashboard bound beyond loopback.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -15,14 +16,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import dashboard_routes._gateway_policy_routes as gateway_policy_routes
 from dashboard_routes._gateway_policy_routes import build_gateway_policy_router
 from driver_contracts import WorkerRole
 from hydraflow_gateway.models import ProviderBinding
 from hydraflow_gateway.routing_policy import canonicalize_repo
 from hydraflow_gateway.routing_store import POLICY_SNAPSHOT_FILENAME
-from hydraflow_gateway.routing_workspace import PolicyWorkspace
+from hydraflow_gateway.routing_workspace import MutationRejection, PolicyWorkspace
 from operator_identity import OPERATOR_ID_ENV, OPERATOR_TOKEN_ENV
 from route_shadow import routing_dir
+from routing_matrix import MAX_MATRIX_REQUIREMENTS
 from tests.helpers import ConfigFactory
 
 if TYPE_CHECKING:
@@ -669,3 +672,138 @@ def test_a_repo_editor_cannot_write_a_system_safety_rule(tmp_path: Path) -> None
     )
 
     assert (response.status_code, response.json()["code"]) == (422, "out-of-scope")
+
+
+# --------------------------------------------------------------------------
+# Resolution, offload, and totality
+# --------------------------------------------------------------------------
+
+
+def test_a_slug_the_server_cannot_resolve_is_not_served_as_the_host_repo(
+    tmp_path: Path,
+) -> None:
+    """``resolve_runtime`` falls back to the host runtime for an unstarted repo.
+
+    That is right for a read-only dashboard and wrong for the one write route:
+    a mutation naming an unstarted repository would land on the HOST
+    repository's snapshot, authorised by the host repository's gate.
+    """
+    client = _multi_repo_client(tmp_path, repo_enabled=True)
+
+    response = client.post(
+        "/api/gateway/policies/mutations?repo=acme%2Fnot-registered",
+        json={"kind": "create", "expected_revision": 0, "policy": _policy_body()},
+        headers=_AUTH,
+    )
+
+    assert response.status_code == 404
+
+
+def test_an_unresolvable_slug_is_refused_on_the_reads_too(tmp_path: Path) -> None:
+    """A read that silently answered for another repository would mislead a save."""
+    client = _multi_repo_client(tmp_path, repo_enabled=True)
+
+    assert (
+        client.get("/api/gateway/policies?repo=acme%2Fnot-registered").status_code
+        == 404
+    )
+
+
+def test_the_repository_s_own_slug_still_resolves(tmp_path: Path) -> None:
+    """The refusal must not reject the canonical slug the console actually sends."""
+    client = _multi_repo_client(tmp_path, repo_enabled=True)
+
+    assert client.get(f"/api/gateway/policies?repo={_REPO}").status_code == 200
+
+
+def test_a_per_repo_bind_cannot_close_a_loopback_socket(tmp_path: Path) -> None:
+    """The bind is ONE socket. Only the kill switch is a per-repository fact.
+
+    Re-running the whole gate against a repository config would report
+    ``dashboard-not-loopback`` for a dashboard that is bound to loopback — a
+    refusal naming something the operator cannot fix.
+    """
+    host = _config(tmp_path)
+    repo_config = _config(tmp_path, host="0.0.0.0")  # noqa: S104
+    app = FastAPI()
+    app.include_router(
+        build_gateway_policy_router(
+            host, _Registry(host, repo_config, _REPO), env=_ENV, clock=lambda: _NOW
+        )
+    )
+
+    response = TestClient(app).post(
+        f"/api/gateway/policies/mutations?repo={_REPO}",
+        json={"kind": "create", "expected_revision": 0, "policy": _policy_body()},
+        headers=_AUTH,
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("/api/gateway/policies", id="the-snapshot-read"),
+        pytest.param("/api/gateway/policies/effective", id="the-effective-matrix"),
+        pytest.param("/api/gateway/policies/audit", id="the-mutation-history"),
+        pytest.param("/api/gateway/policies?repo=__all__", id="the-aggregate-summary"),
+    ],
+)
+def test_every_read_hands_its_disk_io_to_a_worker_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """One dashboard shares one event loop with five async loops (ADR-0001).
+
+    The audit read in particular walks and hash-verifies a chain this phase
+    deliberately never prunes.
+    """
+    offloaded: list[str] = []
+    real = asyncio.to_thread
+
+    async def recording(func, /, *args, **kwargs):
+        offloaded.append(getattr(func, "__name__", repr(func)))
+        return await real(func, *args, **kwargs)
+
+    monkeypatch.setattr(gateway_policy_routes.asyncio, "to_thread", recording)
+
+    _client(_config(tmp_path)).get(path)
+
+    assert offloaded != []
+
+
+def test_every_refusal_code_maps_to_a_status(tmp_path: Path) -> None:
+    """A new rejection code without a row is a bare KeyError — a 500 on a write."""
+    del tmp_path
+
+    assert set(MutationRejection) == set(gateway_policy_routes._REJECTION_STATUS)
+
+
+def test_a_preview_resolves_the_same_requirement_rows_the_grid_can(
+    tmp_path: Path,
+) -> None:
+    """A diff over fewer rows than the grid answers "unaffected" for rows it skipped."""
+    client = _client(_config(tmp_path))
+
+    payload = client.post(
+        "/api/gateway/policies/preview?requirement=capability:balanced"
+        "&requirement=literal_family:claude-opus",
+        json={"kind": "create", "expected_revision": 0, "policy": _policy_body()},
+    ).json()
+
+    assert {cell["requirement"]["value"] for cell in payload["after"]["cells"]} == {
+        "balanced",
+        "claude-opus",
+    }
+
+
+def test_more_requirement_rows_than_the_matrix_allows_are_refused(
+    tmp_path: Path,
+) -> None:
+    """A bound that silently truncated would drop the row an operator asked about."""
+    client = _client(_config(tmp_path))
+    query = "&".join(
+        ["requirement=capability:balanced"] * (MAX_MATRIX_REQUIREMENTS + 1)
+    )
+
+    assert client.get(f"/api/gateway/policies/effective?{query}").status_code == 422
