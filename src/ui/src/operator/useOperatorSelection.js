@@ -30,11 +30,23 @@ import { OPERATOR_STAGES } from './model/pipeline'
 const DEFAULT_MODE = 'focus'
 const VALID_MODES = new Set([DEFAULT_MODE, 'all-active', 'instruments', 'supervisor', 'routing'])
 
-// Routing sub-view (#11534, ADR-0138). The routing-control-plane design reserves
-// `accounts|effective|policies|live|audit`; P0 delivers the two read-only views
-// and later phases of epic #11531 add the rest without changing this contract.
+// Routing sub-view (#11534 ADR-0138, #11538 ADR-0140). The routing-control-plane
+// design reserves `accounts|effective|policies|live|audit`; P0 delivered the two
+// read-only views and P2 fills in the remaining three, exactly as reserved — no
+// URL break for a link an operator already shared.
 const DEFAULT_ROUTING_VIEW = 'accounts'
-const VALID_ROUTING_VIEWS = new Set([DEFAULT_ROUTING_VIEW, 'live'])
+const VALID_ROUTING_VIEWS = new Set([
+  DEFAULT_ROUTING_VIEW,
+  'effective',
+  'policies',
+  'live',
+  'audit',
+])
+
+// One free-form selection WITHIN a routing view: a policy id in `policies`, a
+// matrix cell key in `effective`. Bounded so a hand-edited URL cannot push an
+// unbounded string into the query string or a data-testid.
+const MAX_ROUTING_SELECTION = 128
 
 /** Human label for a stage key, falling back to the raw key. */
 function stageLabel(key) {
@@ -66,6 +78,7 @@ export function readSelectionFromUrl(search) {
   const params = new URLSearchParams(source)
   const rawMode = cleanParam(params.get('mode'))
   const rawRoutingView = cleanParam(params.get('routingView'))
+  const rawRoutingSelection = cleanParam(params.get('routingSelection'))
   return {
     repo: cleanParam(params.get('repo')),
     stage: cleanParam(params.get('stage')),
@@ -75,6 +88,9 @@ export function readSelectionFromUrl(search) {
       rawRoutingView && VALID_ROUTING_VIEWS.has(rawRoutingView)
         ? rawRoutingView
         : DEFAULT_ROUTING_VIEW,
+    routingSelection: rawRoutingSelection
+      ? rawRoutingSelection.slice(0, MAX_ROUTING_SELECTION)
+      : null,
   }
 }
 
@@ -101,6 +117,7 @@ function writeSelectionToUrl(selection) {
     'routingView',
     selection.routingView === DEFAULT_ROUTING_VIEW ? null : selection.routingView,
   )
+  setOrDelete(params, 'routingSelection', selection.routingSelection)
   const qs = params.toString()
   const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
   window.history.replaceState(window.history.state, '', next)
@@ -121,11 +138,20 @@ export function applySelect(prev, kind, value) {
     case 'mode':
       return { ...prev, mode: v && VALID_MODES.has(v) ? v : DEFAULT_MODE }
     case 'routingView':
-      // Orthogonal to the drill-down, like `mode`: it selects which read-only
-      // routing view is showing and never clears repo/stage/item.
+      // Orthogonal to the drill-down, like `mode`: it selects which routing view
+      // is showing and never clears repo/stage/item. It DOES clear
+      // `routingSelection`, because a policy id and a matrix cell key are not
+      // the same kind of thing and carrying one into the other view would
+      // highlight nothing while still sitting in a shared URL.
       return {
         ...prev,
         routingView: v && VALID_ROUTING_VIEWS.has(v) ? v : DEFAULT_ROUTING_VIEW,
+        routingSelection: null,
+      }
+    case 'routingSelection':
+      return {
+        ...prev,
+        routingSelection: v == null ? null : String(v).slice(0, MAX_ROUTING_SELECTION),
       }
     default:
       return prev
@@ -164,6 +190,7 @@ export function useOperatorSelection() {
     item: selection.item,
     mode: selection.mode,
     routingView: selection.routingView,
+    routingSelection: selection.routingSelection,
     select,
     breadcrumb,
   }

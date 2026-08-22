@@ -42,15 +42,15 @@ graph LR
     src -- "5" --> src_disturbance
     src -- "23" --> src_erosion
     src -- "9" --> src_escape
-    src -- "6" --> src_flows
-    src -- "11" --> src_hydraflow_gateway
+    src -- "4" --> src_flows
+    src -- "14" --> src_hydraflow_gateway
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
     src -- "18" --> src_preflight
     src -- "1" --> src_review_phase
     src -- "1" --> src_runners
     src -- "1" --> src_signal_control
-    src -- "72" --> src_state
+    src -- "61" --> src_state
     src -- "6" --> src_vitals
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch
@@ -59,7 +59,7 @@ graph LR
     src_audit -- "1" --> src_escape
     src_dashboard_routes -- "2" --> src_audit
     src_dashboard_routes -- "1" --> src_escape
-    src_dashboard_routes -- "2" --> src_hydraflow_gateway
+    src_dashboard_routes -- "7" --> src_hydraflow_gateway
     src_dashboard_routes -- "3" --> src_onboarding
     src_dashboard_routes -- "1" --> src_preflight
     src_dashboard_routes -- "2" --> src_state
