@@ -95,13 +95,20 @@ driving the whole pipeline, and a compose stack on it during production hours
 competes with the factory for the resource it needs most.
 
 To verify a scenario, dispatch the **Sandbox Scenario (dispatch)** workflow
-(`.github/workflows/sandbox-dispatch.yml`) instead — it takes a `ref` and a
-`scenario` (a name, `fast`, or `all`), runs on a GitHub runner, and prints the
-PASS/FAIL tail into the job summary:
+(`.github/workflows/sandbox-dispatch.yml`) instead — it runs on a GitHub
+runner and prints the PASS/FAIL tail into the job summary:
 
 ```
-gh workflow run "Sandbox Scenario (dispatch)" -f ref=my-branch -f scenario=s01_happy_single_issue
+gh workflow run "Sandbox Scenario (dispatch)" --ref my-branch -f ref=my-branch -f scenario=s01_happy_single_issue
 ```
+
+`--ref` selects the branch that is actually checked out; the `ref` input
+restates it and the job fails fast if the two disagree. Both are needed on
+purpose: checking out a branch named by an *input* while the run sits on
+another branch is a cache-poisoning shape (CodeQL
+`actions/cache-poisoning/poisonable-step`), so the run's own ref is the one
+verified and the input is only an assertion of intent. `scenario` takes a
+scenario name, `fast`, or `all`.
 
 See `docs/wiki/testing.md` → "Sandbox verification runs belong in CI, not on
 the factory host".

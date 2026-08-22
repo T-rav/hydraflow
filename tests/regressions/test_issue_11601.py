@@ -125,10 +125,35 @@ def test_buildx_binary_is_not_written_to_the_actions_cache() -> None:
     assert all((s.get("with") or {}).get("cache-binary") is False for s in buildx)
 
 
-def test_dispatch_refuses_pull_request_refs_before_checkout() -> None:
-    # The vector behind the CodeQL rule: `refs/pull/N/merge` is fetchable from
-    # this repo and, for a fork PR, is outsider-controlled code. Order matters
-    # — after checkout, `pip install -e .` alone runs repo-authored hooks.
+def test_dispatch_checkout_names_no_ref() -> None:
+    # THE cache-poisoning fix. `ref: <input>` made the dispatch job execute one
+    # branch's code while holding write access to another branch's Actions
+    # cache scope — the privilege mismatch CodeQL's rule is about. Checking out
+    # the RUN'S OWN ref collapses the two, so the code that executes and the
+    # cache scope it can write are the same branch.
+    #
+    # `cache-binary: false` alone did NOT clear it: any step executing the tree
+    # holds the runtime cache token regardless of which actions are called.
+    workflow = yaml.safe_load(DISPATCH_WORKFLOW.read_text(encoding="utf-8"))
+    checkouts = [
+        s
+        for job in workflow["jobs"].values()
+        for s in (job.get("steps") or [])
+        if isinstance(s, dict)
+        and str(s.get("uses", "")).startswith("actions/checkout@")
+    ]
+    assert checkouts, "sanity: the dispatch lane must still check out the repo"
+    for step in checkouts:
+        assert "ref" not in (step.get("with") or {}), (
+            "the dispatch lane must check out its own run ref; naming a ref "
+            "from an input reintroduces the cache-poisoning shape"
+        )
+
+
+def test_dispatch_ref_input_is_asserted_against_the_run_ref() -> None:
+    # The `ref` input survives as an assertion of intent (the deliverable asks
+    # for it, and a silent mismatch would verify the wrong branch). It must be
+    # reconciled against github.ref_name before the checkout.
     workflow = yaml.safe_load(DISPATCH_WORKFLOW.read_text(encoding="utf-8"))
     steps = [
         s
@@ -137,13 +162,13 @@ def test_dispatch_refuses_pull_request_refs_before_checkout() -> None:
         if isinstance(s, dict)
     ]
     guard = next(
-        (i for i, s in enumerate(steps) if "refs/pull/*" in str(s.get("run", ""))),
-        None,
+        (i for i, s in enumerate(steps) if "RUN_REF" in str(s.get("env", ""))), None
     )
-    assert guard is not None, "the pull-request-ref guard is gone"
+    assert guard is not None, "the ref interlock is gone"
     checkout = next(
         i
         for i, s in enumerate(steps)
         if str(s.get("uses", "")).startswith("actions/checkout@")
     )
     assert guard < checkout
+    assert "exit 1" in str(steps[guard]["run"])

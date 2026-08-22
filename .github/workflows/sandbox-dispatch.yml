@@ -29,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to verify (branch, tag, or full SHA). Defaults to the default branch."
+        description: "Branch being verified. MUST equal the ref this run was dispatched on (`--ref`); it is an asserted intent, not the thing checked out. Defaults to the default branch."
         required: false
         default: staging
         type: string
@@ -43,15 +43,17 @@ permissions:
   contents: read
 
 concurrency:
-  # One dispatch per (ref, scenario) at a time; a second press queues rather
-  # than racing the first for the same runner-side docker state.
+  # One dispatch per (branch, scenario) at a time; a second press queues
+  # rather than racing the first for the same runner-side docker state.
   #
-  # `inputs.*`, not `github.event.inputs.*`: the latter carries only what the
-  # caller explicitly sent, so a CLI/API dispatch that omits a field yields ''
-  # instead of the declared default and two runs that ARE the same (ref,
-  # scenario) land in different concurrency groups. The `inputs` context
+  # The branch comes from `github.ref_name` (what actually gets checked out),
+  # not `inputs.ref`. For the scenario, `inputs.*` and NOT
+  # `github.event.inputs.*`: the latter carries only what the caller
+  # explicitly sent, so a CLI/API dispatch that omits the field yields ''
+  # instead of the declared default and two runs that ARE the same
+  # (branch, scenario) land in different groups. The `inputs` context
   # resolves defaults and is available to workflow-level `concurrency`.
-  group: sandbox-dispatch-${{ inputs.ref }}-${{ inputs.scenario }}
+  group: sandbox-dispatch-${{ github.ref_name }}-${{ inputs.scenario }}
   cancel-in-progress: false
 
 jobs:
@@ -61,22 +63,21 @@ jobs:
     # `all` runs the full ~78-scenario suite unsharded; the fast subset is
     # ~15 min with a warm cache. Generous, but bounded.
     timeout-minutes: 180
-    # packages:read pulls the buildx layer cache. Read-only, deliberately: the
-    # dispatch ref is operator-chosen and can be ANY ref in the repo,
-    # including an unmerged branch, so this job must never be able to write
-    # the cache the required lanes read. The post-merge push lane is the only
-    # writer.
+    # packages:read pulls the buildx layer cache. Read-only, deliberately:
+    # this lane runs against any branch an operator selects, so it must never
+    # be able to write the GHCR cache the required lanes read. The post-merge
+    # push lane is the only writer.
     permissions:
       contents: read
       packages: read
     steps:
-      # Runs BEFORE the checkout, deliberately: a rejected ref must never
-      # reach the runner's disk, let alone a later step that executes it
-      # (`pip install -e .` alone runs repo-authored build hooks). This step
-      # needs no repository, only the inputs.
+      # Runs BEFORE the checkout: nothing untrusted should reach the runner's
+      # disk, let alone a later step that executes it (`pip install -e .`
+      # alone runs repo-authored build hooks). Needs no repository.
       - name: Validate dispatch inputs
         env:
           REF: ${{ inputs.ref }}
+          RUN_REF: ${{ github.ref_name }}
           SCENARIO: ${{ inputs.scenario }}
         run: |
           set -euo pipefail
@@ -86,43 +87,44 @@ jobs:
             echo "::error::invalid scenario input: must match ^[a-z0-9_]+$"
             exit 1
           fi
-          # Refuse pull-request refs. `refs/pull/N/merge` is fetchable from
-          # this repo and, for a FORK PR, is code an outside contributor
-          # controls — running it here would execute untrusted code in a
-          # workflow_dispatch job holding default-branch privilege. That is
-          # the real vector behind the cache-poisoning rule, so it is closed
-          # rather than annotated. Verify a same-repo branch by name instead;
-          # a fork PR is what the `pull_request` sandbox lanes are for.
-          case "$REF" in
-            refs/pull/*|*/merge|*/head)
-              echo "::error::refusing a pull-request ref ($REF): dispatch runs with default-branch privilege. Use a branch name, tag, or SHA."
-              exit 1
-              ;;
-          esac
+          # THE INTERLOCK. `ref` is an assertion of intent, never the thing
+          # checked out — see the checkout's comment below for why. The run's
+          # own ref is what gets verified, so the two must agree or the job
+          # would silently verify something other than what was asked for.
+          if [ "$REF" != "$RUN_REF" ]; then
+            echo "::error::ref mismatch: asked for '$REF' but this run is on '$RUN_REF'. Dispatch selects the ref, so pass both: gh workflow run \"Sandbox Scenario (dispatch)\" --ref $REF -f ref=$REF -f scenario=$SCENARIO"
+            exit 1
+          fi
 
-      # TRUST: `inputs.ref` is a workflow_dispatch input — not a job output,
-      # and not reachable by an outside contributor: GitHub accepts a dispatch
-      # only from an actor with write access, and this workflow has no
-      # `pull_request`/`workflow_run` trigger. Two mitigations back that up
-      # rather than relying on the claim: the step above refuses
-      # pull-request refs (the one class of in-repo ref an outsider can write
-      # to), and this job writes NO cache at all — `packages: read` with no
-      # `push-cache`, and the composite action pins `cache-binary: false` on
-      # setup-buildx so not even the buildx binary reaches the Actions cache.
-      # Sweep: tests/architecture/test_staging_rc_dryrun_workflow_shape.py.
+      # No `ref:` on purpose — this is the fix for CodeQL
+      # actions/cache-poisoning/poisonable-step (high), which fired here on
+      # #11621 with the same rule as alert #108/#11518.
+      #
+      # `ref: ${{ inputs.ref }}` is a privileged checkout of input-designated
+      # code: a workflow_dispatch run can WRITE the cache scope of the branch
+      # it runs on, so a run sitting on the default branch while executing
+      # some other ref's code lets that code poison the default-branch cache
+      # every other workflow restores from. Pinning `cache-binary: false`
+      # does not fix it — any step executing the tree holds the runtime cache
+      # token regardless of which actions we call.
+      #
+      # Checking out the RUN'S OWN ref removes the mismatch entirely: the
+      # code executed and the cache scope written are the same branch, which
+      # is exactly the isolation the rule asks for. Selecting the ref moves
+      # from an input to `--ref` (the branch selector) — where dispatch was
+      # always going to put it — and the `ref` input above stays as the
+      # asserted intent, mirroring the pin-and-assert shape `staging-rc-
+      # dryrun.yml` already uses for this same alert class.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Record what is being verified
         id: target
         env:
-          REF: ${{ inputs.ref }}
           SCENARIO: ${{ inputs.scenario }}
         run: |
           set -euo pipefail
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "Verifying ref=${REF} scenario=${SCENARIO} at $(git rev-parse HEAD)"
+          echo "Verifying ref=${GITHUB_REF_NAME} scenario=${SCENARIO} at $(git rev-parse HEAD)"
 
       - uses: actions/setup-python@v5
         with:
@@ -194,7 +196,6 @@ jobs:
       - name: Write PASS/FAIL tail to the job summary
         if: always()
         env:
-          REF: ${{ inputs.ref }}
           SCENARIO: ${{ inputs.scenario }}
           SHA: ${{ steps.target.outputs.sha }}
           OUTCOME: ${{ steps.run.outcome }}
@@ -205,7 +206,7 @@ jobs:
             echo
             echo "| field | value |"
             echo "| --- | --- |"
-            echo "| ref | \`${REF}\` |"
+            echo "| ref | \`${GITHUB_REF_NAME}\` |"
             echo "| commit | \`${SHA:-unresolved}\` |"
             echo "| scenario | \`${SCENARIO}\` |"
             echo

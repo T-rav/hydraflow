@@ -390,15 +390,19 @@ class TestDispatchWorkflow:
         inputs = _triggers(dispatch)["workflow_dispatch"]["inputs"]
         assert inputs["scenario"]["default"] == "fast"
 
-    def test_concurrency_group_resolves_input_defaults(self, dispatch: dict) -> None:
-        # `github.event.inputs.*` carries only what the caller explicitly sent,
-        # so a CLI/API dispatch omitting a field yields '' rather than the
-        # declared default — and two runs that ARE the same (ref, scenario)
-        # land in different concurrency groups. The `inputs` context resolves
-        # defaults and is available to workflow-level `concurrency`.
+    def test_concurrency_group_keys_on_the_branch_actually_checked_out(
+        self, dispatch: dict
+    ) -> None:
+        # The branch comes from `github.ref_name` (what is checked out), not
+        # `inputs.ref` (the asserted intent). For the scenario, `inputs.*` and
+        # NOT `github.event.inputs.*`: the latter carries only what the caller
+        # explicitly sent, so a dispatch omitting the field yields '' rather
+        # than the declared default and two identical runs land in different
+        # groups.
         group = str((dispatch.get("concurrency") or {}).get("group", ""))
         assert "github.event.inputs" not in group
-        assert "inputs.ref" in group and "inputs.scenario" in group
+        assert "github.ref_name" in group
+        assert "inputs.scenario" in group
 
     def test_it_runs_the_sandbox_harness(self, dispatch_job: dict) -> None:
         bodies = " ".join(str(s.get("run", "")) for s in _steps(dispatch_job))
@@ -427,11 +431,24 @@ class TestDispatchWorkflow:
             if str(step.get("uses", "")) == ACTION_USES:
                 assert "push-cache" not in (step.get("with") or {})
 
-    def test_the_guard_step_needs_no_checkout(self, dispatch_job: dict) -> None:
-        # It must not depend on the repo it is guarding against.
+    def test_the_interlock_runs_before_checkout_and_needs_no_repo(
+        self, dispatch_job: dict
+    ) -> None:
+        # `inputs.ref` is an assertion of intent; the run's own ref is what is
+        # verified. They must be reconciled BEFORE anything is on disk, and
+        # the check must not depend on the repository it guards.
         steps = _steps(dispatch_job)
-        guard = next(s for s in steps if "refs/pull/*" in str(s.get("run", "")))
-        assert "git " not in str(guard["run"])
+        guard_idx = next(
+            i for i, s in enumerate(steps) if "RUN_REF" in str(s.get("env", ""))
+        )
+        checkout_idx = next(
+            i
+            for i, s in enumerate(steps)
+            if str(s.get("uses", "")).startswith("actions/checkout@")
+        )
+        assert guard_idx < checkout_idx
+        assert "git " not in str(steps[guard_idx]["run"])
+        assert "exit 1" in str(steps[guard_idx]["run"])
 
 
 class TestFastSubsetHasOneMeaning:
