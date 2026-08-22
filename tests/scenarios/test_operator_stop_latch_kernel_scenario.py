@@ -18,6 +18,14 @@ pinned to "verified correct", so only the status body decides).
    operator (``orch.stop()`` directly — a crash stand-in) → status idle/done,
    latch false → kernel START. Down-recovery is intact; only a deliberate
    Stop is respected.
+
+A second scenario covers the other half of the Start transition (#11611): a
+line whose pipeline workers are disabled — in state AND in the live
+orchestrator's in-memory enabled map, the shape the 2026-08-21 launchd boot
+was found in — comes back with the pipeline enabled after Start, while a
+non-pipeline kill-switch stays off. Only a real orchestrator over the real
+route exercises both writes; the in-memory half is invisible to state-level
+unit tests because ``StateRestorer`` only ever *adds* disabled flags.
 """
 
 from __future__ import annotations
@@ -32,6 +40,7 @@ import pytest
 from scripts.liveness import boot_guard
 from scripts.liveness.boot_guard import BootAction
 
+from operator_start import DEFAULT_PIPELINE_WORKERS
 from repo_runtime import RepoRuntime, RepoRuntimeRegistry
 from tests.helpers import find_endpoint, make_dashboard_router
 
@@ -147,6 +156,58 @@ async def test_operator_stop_holds_kernel_and_crash_still_restarts(
         assert body["status"] in _STARTABLE
         assert body["operator_stopped"] is False
         assert _kernel_decision(body).action is BootAction.START
+    finally:
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(host_runtime.stop(), timeout=15.0)
+
+
+@pytest.mark.asyncio
+async def test_operator_start_reenables_the_pipeline_over_real_seams(
+    mock_world, tmp_path: Path
+) -> None:
+    """Start on a line whose pipeline workers are disabled brings them back."""
+    config = mock_world.harness.config
+    bus = mock_world.harness.bus
+    state = mock_world.harness.state
+
+    orch = await mock_world._build_wired_orchestrator(config, bus, state)
+    host_runtime = RepoRuntime.from_shared(config, bus, state)
+    host_runtime._orchestrator = orch
+    registry = RepoRuntimeRegistry()
+    registry.add(host_runtime)
+
+    # A kill-switch on a REGISTERED non-pipeline loop: an unknown worker name
+    # would be dropped by prune_stale_disabled_workers at restore time, which
+    # is not the behaviour under test.
+    kill_switched = sorted(
+        orch.registered_bg_loop_names() - set(DEFAULT_PIPELINE_WORKERS)
+    )[0]
+    # The shape found live: two pipeline workers and one unrelated worker
+    # disabled, in the persisted set AND in the running process's map.
+    for name in ("plan", "triage", kill_switched):
+        orch.set_bg_worker_enabled(name, False)
+
+    router, _ = make_dashboard_router(
+        config,
+        bus,
+        state,
+        tmp_path,
+        get_orch=lambda: orch,
+        registry=registry,
+        default_repo_slug=host_runtime.slug,
+    )
+    start = find_endpoint(router, "/api/control/start")
+
+    try:
+        assert json.loads((await start()).body)["status"] == "started"
+        await _poll_until(lambda: orch.run_status == "running")
+
+        # The live map is what gates the loops; the persisted set is what the
+        # next boot restores from. Both must show the pipeline back on.
+        assert orch.is_bg_worker_enabled("plan") is True
+        assert state.get_disabled_workers().isdisjoint({"plan", "triage"})
+        # The unrelated kill-switch is untouched — Start is not "enable all".
+        assert kill_switched in state.get_disabled_workers()
     finally:
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(host_runtime.stop(), timeout=15.0)
