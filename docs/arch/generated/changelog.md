@@ -6,7 +6,12 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `be03174` — fix(liveness): event-loop watchdog attributes starvation vs block before hard restart (#11604) (#11604) *(2026-08-21)*
+- `751d911` — fix(sandbox): pin the moved prompt-shipping invariant to the resolver (#11590, #11589) *(2026-08-21)*
+- `44a4f50` — test(arch): bind RESOURCE_TREES to the shipped trees in both directions (#11589) (#11589) *(2026-08-21)*
+- `32740b5` — chore(arch): regenerate generated artifacts after the resource move (#11589) (#11589) *(2026-08-21)*
+- `454d89c` — fix(packaging): resolve repo-root resources through a package-aware helper (#11589) (#11589) *(2026-08-21)*
+- `72faffb` — feat(ci): cache the agent image and add a dispatchable sandbox-scenario run (#11601) (#11621) (#11621) *(2026-08-21)*
+- `faaaa9e` — fix(liveness): event-loop stall — attribute starvation vs block before hard restart (#11604) (#11622) (#11622) *(2026-08-21)*
 - `ca6f42c` — chore(loops): remove the retired activity-based ADR-drift loops (#11600) (#11620) (#11620) *(2026-08-21)*
 - `2a2fb8c` — feat(triage): honor 'Blocked by: #N' so phase-ordered children flow in order (#11614) (#11616) (#11616) *(2026-08-21)*
 - `c298996` — fix(sandbox): air-gap the composition-root AutoAgentRunner constructions (#11602) (#11615) (#11615) *(2026-08-21)*

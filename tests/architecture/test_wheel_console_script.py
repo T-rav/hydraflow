@@ -21,12 +21,19 @@ agreement without building anything:
    checkout's directory, not a package in the wheel, so ``from src.foo import
    bar`` only ever resolved because the repo root happened to be on
    ``sys.path`` (and it yields a *second* module object, #10906);
-4. every non-Python file inside a packaged package (today:
-   ``src/assets/model_pricing.json``, read by ``model_pricing.py`` relative to
-   ``__file__``) is declared as package data.
+4. every non-Python file inside a packaged package (``src/assets/*.json`` read
+   by ``model_pricing.py``; the ``src/hydraflow_resources/`` trees read through
+   ``package_resources``) is declared as package data;
+5. no packaged module walks up from ``__file__`` to guess a repo root — the
+   #11589 class. ``Path(__file__).resolve().parent.parent`` names the checkout
+   root from ``<repo>/src/mod.py`` and ``lib/python3.11/`` from
+   ``site-packages/mod.py``, so it silently resolves to a directory that does
+   not exist in a wheel install. ``package_resources`` answers both questions
+   the idiom conflated, and this guard keeps the idiom from growing back.
 
 The wheel is actually built and its console script executed in
-``tests/regressions/test_issue_11580.py``.
+``tests/regressions/test_issue_11580.py``; a migrated resource is resolved
+from an installed wheel in ``tests/regressions/test_issue_11589.py``.
 """
 
 from __future__ import annotations
@@ -34,6 +41,7 @@ from __future__ import annotations
 import ast
 import fnmatch
 import importlib.util
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +50,21 @@ import pytest
 from setuptools import find_namespace_packages
 
 _SKIP_DIRS = {"__pycache__", "node_modules"}
+
+#: ``__file__`` walked up past its own directory — ``.parent.parent``,
+#: ``.parents[n]``, or nested ``dirname()``. A single ``.parent`` /
+#: ``dirname()`` (``model_pricing.py``'s ``Path(__file__).parent / "assets"``)
+#: is package-relative and correct, so only two-or-more levels are flagged.
+_WALK_UP = re.compile(
+    r"__file__.*?(?:\.parent\.parent|\.parents\s*\[)"
+    r"|dirname\([^()]*dirname\(.*?__file__"
+)
+
+#: Modules allowed to walk up from ``__file__``. ``package_resources`` is the
+#: one place the question is answered — grandfather nothing else: every site
+#: the #11589 sweep found was migrated, so this list must stay a singleton
+#: unless a new module has a reason no reviewer can refute.
+_WALK_UP_ALLOWED = frozenset({"package_resources.py"})
 
 
 @dataclass(frozen=True)
@@ -266,3 +289,94 @@ def test_runtime_data_files_are_declared_package_data(packaging: Packaging) -> N
     )
     assert "assets/model_pricing.json" not in undeclared
     assert "assets" in packaging.packages, "assets/ must be a discovered package"
+
+
+def test_every_declared_resource_tree_is_packaged(packaging: Packaging) -> None:
+    """``package_resources.RESOURCE_TREES`` and the wheel cannot disagree.
+
+    The trees are runtime inputs (auto-agent prompts, the dashboard's fallback
+    template + JS): code that names one and packaging that omits it is the
+    #11589 failure in a new shape — importable wheel, unusable server.
+    """
+    from package_resources import RESOURCE_PACKAGE, RESOURCE_TREES
+
+    resources = packaging.src / RESOURCE_PACKAGE
+    missing = sorted(t for t in RESOURCE_TREES if not (resources / t).is_dir())
+    assert missing == [], (
+        f"package_resources.RESOURCE_TREES names trees that do not exist under "
+        f"src/{RESOURCE_PACKAGE}/: {missing}"
+    )
+    assert RESOURCE_PACKAGE in packaging.packages
+    assert packaging.package_data.get(RESOURCE_PACKAGE), (
+        f"src/{RESOURCE_PACKAGE}/ holds no .py files, so setuptools ships "
+        "nothing from it without a [tool.setuptools.package-data] entry"
+    )
+
+
+def test_no_resource_tree_ships_without_being_named(packaging: Packaging) -> None:
+    """A tree under ``src/hydraflow_resources/`` that code cannot ask for is dead weight."""
+    from package_resources import RESOURCE_PACKAGE, RESOURCE_TREES
+
+    resources = packaging.src / RESOURCE_PACKAGE
+    on_disk = sorted(p.name for p in resources.iterdir() if p.is_dir())
+    assert on_disk == sorted(RESOURCE_TREES), (
+        f"src/{RESOURCE_PACKAGE}/ and package_resources.RESOURCE_TREES disagree: "
+        f"on disk {on_disk}, declared {sorted(RESOURCE_TREES)}"
+    )
+
+
+def test_resource_trees_are_one_package_not_many(
+    packaging: Packaging, pyproject: dict
+) -> None:
+    """The nested trees must not be discovered as their own packages.
+
+    ``package-data`` belongs to the package that owns the file. If
+    ``hydraflow_resources.prompts.auto_agent`` were discovered as a package,
+    the parent's recursive glob would stop covering it and a newly added
+    sub-directory would ship empty.
+    """
+    from package_resources import RESOURCE_PACKAGE
+
+    exclude = pyproject["tool"]["setuptools"]["packages"]["find"]["exclude"]
+    assert f"{RESOURCE_PACKAGE}.*" in exclude
+    found = find_namespace_packages(where=str(packaging.src), exclude=exclude)
+    nested = sorted(p for p in found if p.startswith(f"{RESOURCE_PACKAGE}."))
+    assert nested == [], f"resource sub-trees discovered as packages: {nested}"
+
+
+def _walk_up_sites(path: Path, src: Path) -> list[str]:
+    """``file:line`` for each expression in *path* that walks up from ``__file__``."""
+    tree = ast.parse(path.read_text("utf-8"))
+    lines = {
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute | ast.Subscript | ast.Call)
+        and _WALK_UP.search(ast.unparse(node))
+    }
+    return [f"{path.relative_to(src.parent)}:{line}" for line in sorted(lines)]
+
+
+def test_packaged_modules_never_derive_a_root_from_dunder_file(
+    packaging: Packaging,
+) -> None:
+    """No module reinvents "the repo root" from ``__file__`` (#11589).
+
+    ``Path(__file__).resolve().parent.parent`` means ``<repo>`` from
+    ``<repo>/src/mod.py`` and ``lib/python3.11/`` from ``site-packages/mod.py``,
+    so every resource read through it was a silent wrong-directory lookup once
+    the wheel became installable (#11580). Use ``package_resources``:
+    ``resource_dir``/``resource_path`` for data that ships with HydraFlow,
+    ``checkout_root``/``checkout_path`` for development-only inputs, and
+    ``HydraFlowConfig.repo_root`` for the repository being operated on.
+    """
+    offenders: list[str] = []
+    for py in _packaged_python_files(packaging):
+        if py.name in _WALK_UP_ALLOWED and py.parent == packaging.src:
+            continue
+        offenders += _walk_up_sites(py, packaging.src)
+    assert offenders == [], (
+        "Packaged modules deriving a root by walking up from __file__ — this "
+        "resolves inside site-packages in a wheel install (#11589). Route the "
+        "lookup through src/package_resources.py instead. Offenders:\n  "
+        + "\n  ".join(offenders)
+    )

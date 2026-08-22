@@ -22,6 +22,7 @@ from pydantic import (
 )
 
 import file_util
+from package_resources import ResourceNotFoundError, checkout_path
 from queue_strategy import BandWeights, QueueStrategy
 
 logger = logging.getLogger("hydraflow.config")
@@ -6373,23 +6374,23 @@ class HydraFlowConfig(BaseModel):
         """Resolve the factory-autonomy merge policy file (CH-3, #9731).
 
         A managed repo's own ``docs/standards/factory_autonomy/policy.yaml``
-        when present; otherwise the packaged policy shipped with this
-        HydraFlow checkout (the standard applies to every HydraFlow-format
-        project). ``merge_policy.enforce_merge_policy`` fails CLOSED when
-        the resolved file is missing or invalid.
+        when present; otherwise the copy in the HydraFlow *checkout* (the
+        standard applies to every HydraFlow-format project). ``docs/`` is
+        documentation, not package data, so a wheel install has no second
+        copy — the property then names the managed repo's own expected
+        location, which is the one path an operator can act on.
+        ``merge_policy.enforce_merge_policy`` fails CLOSED on a missing or
+        invalid file either way (#11589).
         """
         repo_local = (
             self.repo_root / "docs" / "standards" / "factory_autonomy" / "policy.yaml"
         )
         if repo_local.exists():
             return repo_local
-        return (
-            Path(__file__).resolve().parent.parent
-            / "docs"
-            / "standards"
-            / "factory_autonomy"
-            / "policy.yaml"
-        )
+        try:
+            return checkout_path("docs", "standards", "factory_autonomy", "policy.yaml")
+        except ResourceNotFoundError:
+            return repo_local
 
     def base_branch(self) -> str:
         """Return the branch agent PRs should target.

@@ -18,6 +18,7 @@ from config import HydraFlowConfig, build_credentials
 from events import EventType, HydraFlowEvent
 from factory_autostart import maybe_autostart_host
 from log import setup_logging
+from package_resources import ResourceNotFoundError, checkout_path, checkout_root
 from prompt_gate import most_restrictive_data_class
 from runtime_config import (
     DEFAULT_LOG_FILE,
@@ -206,9 +207,13 @@ async def _boot_factory(
     # overrides, #10658) into the runtime registry.
     await _restore_registered_repos(repo_store, registry)
 
-    # Auto-register parent repo when running as a git submodule
-    hydraflow_root = Path(__file__).resolve().parent.parent
-    submodule_parent = _detect_submodule_parent(hydraflow_root)
+    # Auto-register parent repo when running as a git submodule. Only a
+    # source checkout can BE a submodule; an installed wheel has no enclosing
+    # repository, so there is nothing to detect (#11589).
+    hydraflow_root = checkout_root()
+    submodule_parent = (
+        _detect_submodule_parent(hydraflow_root) if hydraflow_root is not None else None
+    )
     if submodule_parent is not None:
         try:
             parent_slug = await _detect_remote_slug(submodule_parent)
@@ -426,10 +431,10 @@ def package_version() -> str:
         return importlib.metadata.version("hydraflow")
     except importlib.metadata.PackageNotFoundError:
         pass
-    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
     try:
+        pyproject = checkout_path("pyproject.toml")
         return str(tomllib.loads(pyproject.read_text("utf-8"))["project"]["version"])
-    except (OSError, KeyError, tomllib.TOMLDecodeError):
+    except (ResourceNotFoundError, OSError, KeyError, tomllib.TOMLDecodeError):
         return "unknown"
 
 

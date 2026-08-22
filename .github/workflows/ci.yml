@@ -89,13 +89,17 @@ jobs:
               # console_ledger filter below, OR'd into the `audit` job's
               # `if:` (#11164; see tests/regressions/test_issue_11164.py).
               - 'agents/**'
-              # prompts/**: the auto-agent Markdown templates are model-bound
-              # prompts. tests/test_audit_prompts.py renders one of them
-              # (preflight_auto_agent) and prompt_observatory reconciles all of
-              # them, so editing a template must run those tests. Found by
+              # src/hydraflow_resources/**: the shipped runtime resources —
+              # the auto-agent Markdown prompts plus the dashboard's fallback
+              # template and JS. They live under src/ so the wheel carries
+              # them (#11589), but `src/**/*.py` does not match a .md/.html,
+              # so they need their own entry. tests/test_audit_prompts.py
+              # renders one prompt (preflight_auto_agent) and
+              # prompt_observatory reconciles all of them, so editing a
+              # template must run those tests. Found by
               # tests/test_ci_path_filter_completeness.py, which exists because
               # this same omission caused two incidents in two days.
-              - 'prompts/**'
+              - 'src/hydraflow_resources/**'
             # console_ledger: a narrower agents/** signal used only to make
             # the `audit` job (which runs `make console-conformance`) fire
             # for ledger-only PRs, without widening core_python's heavier
@@ -226,7 +230,7 @@ jobs:
           predicate-quantifier: 'every'
           filters: |
             core_python:
-              - '{src/**/*.py,tests/**,gateway/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,prompts/**,control/**}'
+              - '{src/**/*.py,src/hydraflow_resources/**,tests/**,gateway/**,pyproject.toml,uv.lock,scripts/**,docs/wiki/**,control/**}'
               - '!src/arch/**'
               - '!tests/architecture/**'
               - '!tests/regressions/**'

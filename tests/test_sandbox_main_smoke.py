@@ -751,7 +751,7 @@ def test_auditor_defaults_to_materialized_canonical_baseline(tmp_path) -> None:
     """No canonical_dir: the fixed baseline is materialized under data root.
 
     The sandbox image ships no repo ``docs/`` (Dockerfile.agent copies only
-    src/tests/templates/static), so the default must not depend on it.
+    src/ and tests/ only), so the default must not depend on it.
     """
     import asyncio
 
