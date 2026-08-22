@@ -17,12 +17,15 @@ and returns the flagged-count. Repeated ``--samples`` runs feed
 :class:`~finder_calibration.FinderFloor` + a :class:`~finder_faceplate.BaselineProvenance`
 row land in the calibration ledgers under ``<data_root>/calibration/``.
 
-Only the three deterministic finders are supported — their detection already
+Only the deterministic finders are supported — their detection already
 lives in reusable, LLM-free modules:
 
 * ``wiki_rot``    → :func:`wiki_rot_citations.count_broken_cites`
-* ``adr_drift``   → :func:`adr_citation_resolve.unresolved_citations`
 * ``edge_proposer`` → :func:`edge_proposer_loop.count_edge_proposals`
+
+(``adr_drift`` was a third until ADR-0136 deleted the loop it measured; a floor
+only means something for a generative finder, and its stand-in detector was the
+citation gate CI already runs on every PR.)
 
 The LLM finders (``erosion_metrics``, ``term_proposer``, ``entry_evidence``) are
 DEFERRED: they are skipped with a logged reason, NEVER a fabricated ``0``.
@@ -93,7 +96,7 @@ def _detect_edge_proposer(worktree: Path) -> int:
     return count_edge_proposals(worktree)
 
 
-#: ``finder_id`` -> deterministic, read-only detector. Only these three are
+#: ``finder_id`` -> deterministic, read-only detector. Only these are
 #: supported; everything else in the catalog is deferred (LLM-driven).
 DETERMINISTIC_DETECTORS: dict[str, Detector] = {
     "wiki_rot": _detect_wiki_rot,
