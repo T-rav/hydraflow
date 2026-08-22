@@ -37,6 +37,12 @@ from hydraflow_gateway.observer import (
     SseUsageObserver,
     UsageSnapshot,
 )
+from hydraflow_gateway.routing_account_state import AccountRuntimeState
+from hydraflow_gateway.routing_accounts import AccountPool
+from hydraflow_gateway.routing_fallback import (
+    TerminalDecisionIndex,
+    condition_for_terminal,
+)
 from hydraflow_gateway.settings import (
     GatewaySettings,
     UpstreamAuthStyle,
@@ -56,6 +62,8 @@ _HOP_BY_HOP_HEADERS = {
 }
 _CLIENT_AUTH_HEADERS = {b"authorization", b"x-api-key"}
 _MAX_LEDGER_PATH_CHARS = 2048
+_REQUEST_CAPACITY_REFUSAL = "request-capacity-exhausted"
+"""Why a request was turned away at an account's concurrent ceiling."""
 
 
 class GatewayCredentialError(ValueError):
@@ -119,6 +127,12 @@ class _GatewayAttempt:
             # upstream status — still clears the in-flight row instead of
             # leaving a phantom "streaming" route for the process lifetime.
             proxy.active_routes.discard(self.request_id)
+            # Same reasoning, same place, for the account's concurrent-request
+            # slot: released here rather than inside `_finalize_attempt` so a
+            # raise in there cannot leak one slot per crashed finalize until the
+            # process restarts. The reservation is keyed on the request id, so
+            # this is a no-op when nothing was ever reserved.
+            proxy.release_request_slot(self.request_id)
 
 
 class _ObservedStreamingResponse(StreamingResponse):
@@ -155,6 +169,9 @@ class GatewayProxy:
         body_store: GatewayBodyStore,
         pricing: ModelPricingTable,
         active_routes: ActiveRouteRegistry | None = None,
+        account_pool: AccountPool | None = None,
+        account_state: AccountRuntimeState | None = None,
+        terminals: TerminalDecisionIndex | None = None,
         wall_clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
         request_id_factory: Callable[[], str] | None = None,
@@ -165,6 +182,9 @@ class GatewayProxy:
         self._body_store = body_store
         self._pricing = pricing
         self._active_routes = active_routes or ActiveRouteRegistry()
+        self._pool = account_pool
+        self._account_state = account_state
+        self._terminals = terminals
         self._wall_clock = wall_clock
         self._monotonic = monotonic
         self._request_id_factory = request_id_factory or (lambda: str(ULID()))
@@ -180,6 +200,22 @@ class GatewayProxy:
         """Observation-only registry of leases-in-use and streaming requests."""
         return self._active_routes
 
+    def _upstream_for(self, identity: GatewayIdentity) -> UpstreamSettings | None:
+        """The origin and credential this key's *account* is reached with.
+
+        A v1 key names a lane and nothing else, so it keeps resolving through
+        the legacy upstream map exactly as before. A route-bound key names the
+        account the mint selected, which is the only way a second account on one
+        lane can be reached at all — resolving a pooled key by its binding would
+        send every hop back to the account the fallback was moving away from.
+        """
+        binding = identity.route_binding
+        if binding is not None and self._pool is not None:
+            upstream = self._pool.upstream(binding.account_id)
+            if upstream is not None:
+                return upstream
+        return self._settings.upstreams.get(identity.provider_binding)
+
     def ensure_telemetry_healthy(self) -> None:
         """Fail future traffic closed after a persistence boundary fails."""
         if not self._telemetry_healthy:
@@ -191,7 +227,7 @@ class GatewayProxy:
         self, request: Request, identity: GatewayIdentity
     ) -> StreamingResponse:
         """Start one upstream attempt and return its raw streaming response."""
-        upstream = self._settings.upstreams.get(identity.provider_binding)
+        upstream = self._upstream_for(identity)
         if upstream is None:
             raise HTTPException(status_code=503, detail="bound upstream is unavailable")
         attempt = _GatewayAttempt(
@@ -221,6 +257,7 @@ class GatewayProxy:
                 client_aborted=False,
             )
             raise
+        self._admit_request(attempt, identity)
         if identity.route_binding is None and self._settings.governs(
             identity.repo_slug
         ):
@@ -478,6 +515,62 @@ class GatewayProxy:
                 self.mark_telemetry_unhealthy()
         return body
 
+    def release_request_slot(self, request_id: str) -> None:
+        """Return one account's concurrent-request slot. Idempotent per request."""
+        if self._account_state is not None:
+            self._account_state.release_request(request_id)
+
+    def _admit_request(
+        self, attempt: _GatewayAttempt, identity: GatewayIdentity
+    ) -> None:
+        """Take one concurrent-request slot, or refuse without blocking.
+
+        A separate ceiling from the lease, and admitted here rather than at the
+        mint because they measure different things: a burst of keys that never
+        sends a request must not consume an account's request budget, and a long
+        stream must not consume a lease slot twice. The gateway never *waits* —
+        the design says so outright — so an account at its ceiling answers 429
+        and the caller's own retry decides what happens next.
+        """
+        binding = identity.route_binding
+        if self._account_state is None or binding is None:
+            return
+        if self._account_state.reserve_request(
+            binding.account_id, holder=attempt.request_id
+        ):
+            return
+        attempt.refusal_reason = _REQUEST_CAPACITY_REFUSAL
+        attempt.finalize(self, status_code=429, completed=False, client_aborted=False)
+        raise HTTPException(status_code=429, detail=_REQUEST_CAPACITY_REFUSAL)
+
+    def _record_terminal_evidence(
+        self,
+        identity: GatewayIdentity,
+        *,
+        status_code: int,
+        status: GatewayRequestStatus,
+    ) -> None:
+        """Feed one terminal outcome to the circuit and the fallback authority.
+
+        This is the *only* writer of both, and it writes from the row the proxy
+        has already committed to — so "the account was rate-limited" and "a hop
+        is licensed" are the same observation rather than two that can disagree.
+        A caller's account of what happened never reaches either.
+        """
+        binding = identity.route_binding
+        if binding is None:
+            return
+        condition = condition_for_terminal(status_code=status_code, status=status)
+        if self._account_state is not None:
+            self._account_state.record_terminal(binding.account_id, condition=condition)
+        if self._terminals is not None:
+            self._terminals.record(
+                binding.mint_decision_id,
+                account_id=binding.account_id,
+                condition=condition,
+                now=self._wall_clock(),
+            )
+
     def _refuse_governed(
         self,
         attempt: _GatewayAttempt,
@@ -589,6 +682,17 @@ class GatewayProxy:
                 if identity.route_binding is None
                 else identity.route_binding.route_decision_id
             ),
+            account_id=(
+                None
+                if identity.route_binding is None
+                else identity.route_binding.account_id
+            ),
+        )
+        # Recorded from the row this attempt actually committed to, and before
+        # the ledger append: a persistence failure must not also cost the circuit
+        # and the fallback authority the one observation they exist to hold.
+        self._record_terminal_evidence(
+            identity, status_code=status_code, status=request_status
         )
         try:
             self._ledger.append(row)

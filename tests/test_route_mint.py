@@ -13,11 +13,16 @@ import threading
 from datetime import UTC, datetime
 
 import pytest
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 from driver_contracts import ModelRequirementKind, WorkerRole
 from hydraflow_gateway.keys import VirtualKeyStore
-from hydraflow_gateway.models import ProviderBinding, RepoClass, binding_for_model
+from hydraflow_gateway.models import (
+    ProviderBinding,
+    RepoClass,
+    binding_for_model,
+    legacy_account_id,
+)
 from hydraflow_gateway.route_mint import (
     CredentialState,
     MintAttemptConflict,
@@ -25,9 +30,41 @@ from hydraflow_gateway.route_mint import (
     MintV2Request,
     RouteMintStore,
 )
+from hydraflow_gateway.routing_accounts import AccountPool, build_account_registry
 from hydraflow_gateway.routing_policy import DecisionOutcome, RequestFace
+from hydraflow_gateway.settings import UpstreamAuthStyle, UpstreamSettings
 
 _ALL_BINDINGS = frozenset(ProviderBinding)
+
+
+def _upstream(base_url: str) -> UpstreamSettings:
+    return UpstreamSettings(
+        base_url=base_url,
+        api_key=SecretStr("route-mint-test-key"),
+        auth_style=UpstreamAuthStyle.BEARER,
+    )
+
+
+def _pool(
+    configured_bindings: frozenset[ProviderBinding] = _ALL_BINDINGS,
+) -> AccountPool:
+    """A legacy-only pool whose configured lanes are exactly *configured_bindings*.
+
+    One account per lane, which is the shape every deployment has before an
+    accounts file exists — so the invariants below are asserted against the
+    default configuration rather than against a pool the tests invented.
+    """
+    upstreams = {
+        binding: _upstream(f"https://{binding.value}.test")
+        for binding in configured_bindings
+    }
+    return AccountPool(
+        build_account_registry(upstreams=upstreams),
+        {
+            legacy_account_id(binding): upstream
+            for binding, upstream in upstreams.items()
+        },
+    )
 
 
 def _request(**overrides: object) -> MintV2Request:
@@ -63,7 +100,10 @@ def _store(**overrides: object) -> RouteMintStore:
     )
     return RouteMintStore(
         key_store=key_store,
-        configured_bindings=overrides.pop("configured_bindings", _ALL_BINDINGS),  # type: ignore[arg-type]
+        pool=overrides.pop("pool", None)
+        or _pool(
+            overrides.pop("configured_bindings", _ALL_BINDINGS)  # type: ignore[arg-type]
+        ),
         wall_clock=overrides.pop("wall_clock", lambda: 1_700_000_000.0),  # type: ignore[arg-type]
     )
 
@@ -384,7 +424,7 @@ def test_the_attempt_store_reaps_records_it_no_longer_needs() -> None:
     clock = 1_700_000_000.0
     store = RouteMintStore(
         key_store=VirtualKeyStore(max_ttl_seconds=86_400),
-        configured_bindings=_ALL_BINDINGS,
+        pool=_pool(),
         wall_clock=lambda: clock,
         attempt_retention_seconds=60,
     )
@@ -403,7 +443,7 @@ def test_a_reaped_attempt_is_no_longer_replayable() -> None:
 
     store = RouteMintStore(
         key_store=VirtualKeyStore(max_ttl_seconds=86_400),
-        configured_bindings=_ALL_BINDINGS,
+        pool=_pool(),
         wall_clock=wall_clock,
         attempt_retention_seconds=60,
     )
@@ -420,7 +460,7 @@ def test_a_saturated_attempt_table_holds_rather_than_evicting() -> None:
     """Evicting a live attempt would licence exactly the second lease AC3 forbids."""
     store = RouteMintStore(
         key_store=VirtualKeyStore(max_ttl_seconds=86_400),
-        configured_bindings=_ALL_BINDINGS,
+        pool=_pool(),
         wall_clock=lambda: 1_700_000_000.0,
         max_tracked_attempts=1,
     )
@@ -441,7 +481,7 @@ def test_a_capacity_refusal_does_not_itself_consume_capacity() -> None:
     """
     store = RouteMintStore(
         key_store=VirtualKeyStore(max_ttl_seconds=86_400),
-        configured_bindings=_ALL_BINDINGS,
+        pool=_pool(),
         wall_clock=lambda: 1_700_000_000.0,
         max_tracked_attempts=1,
     )

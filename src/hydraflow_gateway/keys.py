@@ -6,7 +6,7 @@ import hashlib
 import secrets
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -78,6 +78,20 @@ class VirtualKeyStore:
         )
         self._records: dict[str, _KeyRecord] = {}
         self._lock = threading.Lock()
+        self._on_release: Callable[[str], object] | None = None
+
+    def on_release(self, callback: Callable[[str], object]) -> None:
+        """Register the one hook called when a key leaves this store.
+
+        Every path that ends a key — explicit revoke, expiry noticed on resolve,
+        the reaper, and an account-wide revocation — funnels through
+        :meth:`_release`, and the callback is invoked exactly once per key
+        because the dict removal is what decides. That is what lets an account's
+        lease accounting be correct without every call site remembering to
+        release: ADR-0142's "cancellation and expiry release capacity exactly
+        once" is a property of this seam rather than of four callers.
+        """
+        self._on_release = callback
 
     def mint(self, request: MintKeyRequest) -> MintKeyResponse:
         """Mint and retain one high-entropy token for the requested identity."""
@@ -187,21 +201,52 @@ class VirtualKeyStore:
         """Return identity for a valid token or raise without echoing the token."""
         key_id = _key_id_from_token(token)
         now = self._monotonic()
+        expired = False
         with self._lock:
             record = self._records.get(key_id)
             if record is None:
                 raise InvalidVirtualKey("unknown virtual key")
             if now >= record.expires_at_monotonic:
                 del self._records[key_id]
-                raise ExpiredVirtualKey("expired virtual key")
-            if not secrets.compare_digest(record.token_digest, _digest(token)):
+                expired = True
+            elif not secrets.compare_digest(record.token_digest, _digest(token)):
                 raise InvalidVirtualKey("invalid virtual key")
-            return record.identity
+        if expired:
+            # Announced outside the lock, like every other release: the callback
+            # takes the capacity table's lock, and taking two locks in two orders
+            # across this store's methods is how a deadlock arrives later.
+            self._release((key_id,))
+            raise ExpiredVirtualKey("expired virtual key")
+        return record.identity
 
     def revoke(self, key_id: str) -> bool:
         """Revoke a key immediately; return whether it was active."""
         with self._lock:
-            return self._records.pop(key_id, None) is not None
+            removed = self._records.pop(key_id, None) is not None
+        if removed:
+            self._release((key_id,))
+        return removed
+
+    def revoke_for_account(self, account_id: str) -> tuple[str, ...]:
+        """Revoke every route-bound key on one account; return the ids ended.
+
+        The explicit blast-radius action behind ``revoke-leases``. It names only
+        route-bound keys, because an unbound v1 key has no account to belong to —
+        revoking those as collateral would let an account-scoped action end
+        leases it was never told about.
+        """
+        target = account_id.strip().lower()
+        with self._lock:
+            revoked = [
+                key_id
+                for key_id, record in self._records.items()
+                if record.identity.route_binding is not None
+                and record.identity.route_binding.account_id.strip().lower() == target
+            ]
+            for key_id in revoked:
+                del self._records[key_id]
+        self._release(revoked)
+        return tuple(revoked)
 
     def reap_expired(self) -> int:
         """Remove every expired key and return the number reaped."""
@@ -214,7 +259,15 @@ class VirtualKeyStore:
             ]
             for key_id in expired_ids:
                 del self._records[key_id]
+        self._release(expired_ids)
         return len(expired_ids)
+
+    def _release(self, key_ids: Sequence[str]) -> None:
+        """Announce keys that have left the store, exactly once each."""
+        if self._on_release is None:
+            return
+        for key_id in key_ids:
+            self._on_release(key_id)
 
     @property
     def active_count(self) -> int:

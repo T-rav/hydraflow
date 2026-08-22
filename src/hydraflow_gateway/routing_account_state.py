@@ -34,10 +34,15 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from hydraflow_gateway.accounts import AdministrativeState
+from hydraflow_gateway.accounts import (
+    AccountLiveFacts,
+    AdministrativeState,
+    CircuitStateName,
+)
 from hydraflow_gateway.routing_policy import (
     AccountRejection,
     AccountRejectionReason,
@@ -298,6 +303,38 @@ def select_account(
             )
         rejected.append(AccountRejection(account_id=account_id, reason=reason))
     return AccountSelection(account_id=None, position=None, rejected=tuple(rejected))
+
+
+def live_facts(
+    *, pool: AccountPool, state: AccountRuntimeState
+) -> dict[str, AccountLiveFacts]:
+    """Project the live pool state onto the read model's own fact type.
+
+    The adapter lives here, not in ``accounts``: the read model is a pure
+    projection that takes facts as arguments, and reaching into a mutable
+    runtime object from it would make a dashboard poll depend on the module that
+    admits leases. The two ``CircuitState`` spellings are joined by *value* so
+    the read model can stay a leaf, and a guard pins that they publish the same
+    strings.
+    """
+    facts: dict[str, AccountLiveFacts] = {}
+    for account in pool.registry.accounts:
+        circuit = state.circuit(account.account_id)
+        facts[account.account_id] = AccountLiveFacts(
+            lease_capacity=account.lease_capacity,
+            request_capacity=account.request_capacity,
+            circuit_state=CircuitStateName(circuit.state.value),
+            circuit_consecutive_failures=circuit.consecutive_failures,
+            circuit_reset_at=(
+                None
+                if circuit.reset_at is None
+                else datetime.fromtimestamp(circuit.reset_at, tz=UTC)
+            ),
+            circuit_last_condition=(
+                None if circuit.last_condition is None else circuit.last_condition.value
+            ),
+        )
+    return facts
 
 
 def _live_rejection(

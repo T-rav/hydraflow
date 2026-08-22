@@ -53,10 +53,53 @@ from hydraflow_gateway.route_mint import (
     MintV2Response,
     RouteMintStore,
 )
+from hydraflow_gateway.routing_account_admin import (
+    DEFAULT_HISTORY_LIMIT,
+    MAX_HISTORY_LIMIT,
+    AccountAdminAuditView,
+    AccountAdminRejected,
+    AccountAdminStore,
+    AccountStateRequest,
+    AccountStateResponse,
+    AdminRejection,
+    RevokeLeasesRequest,
+    RevokeLeasesResponse,
+    audit_view,
+)
+from hydraflow_gateway.routing_account_admin import (
+    AdminMutationResult as _AdminResult,
+)
+from hydraflow_gateway.routing_account_state import AccountRuntimeState, live_facts
+from hydraflow_gateway.routing_accounts import AccountPool, load_account_pool
+from hydraflow_gateway.routing_fallback import TerminalDecisionIndex
 from hydraflow_gateway.settings import GatewaySettings
 from model_pricing import ModelPricingTable, load_pricing
 
 _DATA_PLANE_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
+
+_ADMIN_REJECTION_STATUS: dict[AdminRejection, int] = {
+    # A stale revision is a lost update, not a bad request: the same 409 the
+    # policy workspace answers, so one operator console can handle both the same
+    # way — reload, re-read the revision, decide again.
+    AdminRejection.STALE_REVISION: status.HTTP_409_CONFLICT,
+    AdminRejection.UNKNOWN_ACCOUNT: status.HTTP_404_NOT_FOUND,
+    # An unverifiable chain is a server-side integrity failure, and the caller
+    # cannot fix it by asking differently.
+    AdminRejection.AUDIT_CHAIN_BROKEN: status.HTTP_503_SERVICE_UNAVAILABLE,
+}
+
+
+def _administer(mutate: Callable[[], _AdminResult]) -> _AdminResult:
+    """Run one administrative mutation, mapping its refusal onto a status code."""
+    try:
+        return mutate()
+    except AccountAdminRejected as exc:
+        raise HTTPException(
+            status_code=_ADMIN_REJECTION_STATUS.get(
+                exc.rejection, status.HTTP_422_UNPROCESSABLE_CONTENT
+            ),
+            detail=exc.rejection.value,
+        ) from exc
 
 
 class _ControlPlaneBoundary:
@@ -160,6 +203,9 @@ def create_app(
     body_store: GatewayBodyStore | None = None,
     pricing: ModelPricingTable | None = None,
     active_routes: ActiveRouteRegistry | None = None,
+    account_pool: AccountPool | None = None,
+    account_state: AccountRuntimeState | None = None,
+    admin_store: AccountAdminStore | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     wall_clock: Callable[[], float] = time.time,
 ) -> FastAPI:
@@ -176,14 +222,31 @@ def create_app(
     resolved_active_routes = active_routes or ActiveRouteRegistry(
         started_at=_as_utc(wall_clock())
     )
+    resolved_pool = account_pool or load_account_pool(resolved_settings)
+    resolved_account_state = account_state or AccountRuntimeState(
+        resolved_pool.registry, wall_clock=wall_clock
+    )
+    resolved_admin = admin_store or AccountAdminStore(
+        resolved_settings.account_state_dir
+    )
+    resolved_terminals = TerminalDecisionIndex()
     route_mint = RouteMintStore(
         key_store=resolved_store,
-        # What this deployment can actually serve. An account whose credential
-        # is absent is never eligible, which is the failure table's first row.
-        configured_bindings=frozenset(resolved_settings.upstreams),
+        # What this deployment can actually serve, in the order it serves it. An
+        # account whose credential is absent is never eligible, which is the
+        # failure table's first row.
+        pool=resolved_pool,
+        account_state=resolved_account_state,
+        admin=resolved_admin,
+        terminals=resolved_terminals,
+        max_fallback_hops=resolved_settings.max_fallback_hops,
         wall_clock=wall_clock,
         attempt_retention_seconds=resolved_settings.max_key_ttl_seconds,
     )
+    # One release seam for both halves of a key's life: the store hands back a
+    # lease slot on revoke, expiry, reap and shutdown, and the reservation is
+    # keyed on the key id so none of those paths can release it twice.
+    resolved_store.on_release(resolved_account_state.release_lease)
     owns_client = client is None
     resolved_client = client or _build_http_client(resolved_settings)
     proxy = GatewayProxy(
@@ -193,6 +256,9 @@ def create_app(
         body_store=resolved_body_store,
         pricing=resolved_pricing,
         active_routes=resolved_active_routes,
+        account_pool=resolved_pool,
+        account_state=resolved_account_state,
+        terminals=resolved_terminals,
         # One clock behind the whole observation path: a read model that
         # compared a fake `as_of` against real row timestamps would silently
         # drop evidence out of its own window.
@@ -317,7 +383,69 @@ def create_app(
             window_seconds=window_seconds,
             evidence_since=resolved_active_routes.started_at,
             evidence_truncated=resolved_active_routes.truncated(),
+            pool=resolved_pool,
+            administrative=dict(resolved_admin.read().states),
+            live=live_facts(pool=resolved_pool, state=resolved_account_state),
         )
+
+    @app.patch(
+        "/control/v2/accounts/{account_id}/state",
+        response_model=AccountStateResponse,
+    )
+    async def set_account_state(
+        account_id: str, payload: AccountStateRequest
+    ) -> AccountStateResponse:
+        # Optimistic concurrency in the body rather than an `If-Match` header,
+        # matching ADR-0140's policy workspace: one convention for "the revision
+        # I composed this against" across the whole routing control plane, and
+        # the stale case is a 409 with no partial write either way.
+        result = _administer(
+            lambda: resolved_admin.set_state(
+                account_id,
+                payload.administrative_state,
+                expected_revision=payload.expected_revision,
+                actor=payload.actor,
+                recorded_at=_as_utc(wall_clock()).isoformat(),
+                registry=resolved_pool.registry,
+            )
+        )
+        return AccountStateResponse(
+            account_id=account_id.strip().lower(),
+            administrative_state=payload.administrative_state,
+            revision=result.revision,
+        )
+
+    @app.post(
+        "/control/v2/accounts/{account_id}/revoke-leases",
+        response_model=RevokeLeasesResponse,
+    )
+    async def revoke_account_leases(
+        account_id: str, payload: RevokeLeasesRequest
+    ) -> RevokeLeasesResponse:
+        # The revocation happens *inside* the audited mutation, after its
+        # revision check: a stale request must revoke nothing, and a committed
+        # one must record the ids it actually ended.
+        result = _administer(
+            lambda: resolved_admin.record_revocation(
+                account_id,
+                expected_revision=payload.expected_revision,
+                actor=payload.actor,
+                recorded_at=_as_utc(wall_clock()).isoformat(),
+                registry=resolved_pool.registry,
+                revoke=lambda: resolved_store.revoke_for_account(account_id),
+            )
+        )
+        return RevokeLeasesResponse(
+            account_id=account_id.strip().lower(),
+            revoked_key_ids=tuple(result.record.payload.get("revoked_key_ids", ())),
+            revision=result.revision,
+        )
+
+    @app.get("/control/v2/accounts/audit", response_model=AccountAdminAuditView)
+    async def read_account_audit(
+        limit: int = Query(default=DEFAULT_HISTORY_LIMIT, ge=1, le=MAX_HISTORY_LIMIT),
+    ) -> AccountAdminAuditView:
+        return audit_view(resolved_admin, limit=limit)
 
     @app.get("/control/v2/routes/active", response_model=ActiveRoutesView)
     async def read_active_routes() -> ActiveRoutesView:

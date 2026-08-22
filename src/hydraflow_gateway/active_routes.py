@@ -63,6 +63,9 @@ class InFlightRoute:
     started_at: datetime
     mint_decision_id: str | None = None
     route_decision_id: str | None = None
+    # ADR-0142: which account of the lane actually served this, when the key was
+    # route-bound. ``None`` on every v1 row, where the lane IS the account.
+    account_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +91,7 @@ class TerminalRoute:
     cost_unknown: bool
     mint_decision_id: str | None = None
     route_decision_id: str | None = None
+    account_id: str | None = None
 
 
 class LeaseView(BaseModel):
@@ -251,6 +255,7 @@ class ActiveRouteRegistry:
             started_at=started_at,
             mint_decision_id=(None if binding is None else binding.mint_decision_id),
             route_decision_id=(None if binding is None else binding.route_decision_id),
+            account_id=(None if binding is None else binding.account_id),
         )
         with self._lock:
             self._in_flight[request_id] = route
@@ -327,6 +332,7 @@ def _terminal_route(row: GatewayLedgerRow) -> TerminalRoute:
         cost_unknown=row.cost_unknown,
         mint_decision_id=row.mint_decision_id,
         route_decision_id=row.route_decision_id,
+        account_id=row.account_id,
     )
 
 
@@ -338,7 +344,13 @@ def lease_view(identity: GatewayIdentity, *, now: datetime) -> LeaseView:
     """Project one resolved key identity onto its sanitized lease row."""
     return LeaseView(
         key_id=identity.key_id,
-        account_id=legacy_account_id(identity.provider_binding),
+        # The bound account when the key names one; otherwise the lane's own
+        # compiled identity, which is what a v1 key has always reported.
+        account_id=(
+            legacy_account_id(identity.provider_binding)
+            if identity.route_binding is None
+            else identity.route_binding.account_id
+        ),
         provider_binding=identity.provider_binding,
         repo_slug=identity.repo_slug,
         repo_class=identity.repo_class,
@@ -377,7 +389,8 @@ def build_active_routes_view(
         in_flight=tuple(
             InFlightRouteView(
                 request_id=route.request_id,
-                account_id=legacy_account_id(route.provider_binding),
+                account_id=route.account_id
+                or legacy_account_id(route.provider_binding),
                 provider_binding=route.provider_binding,
                 repo_slug=route.repo_slug,
                 repo_class=route.repo_class,
@@ -415,7 +428,8 @@ def build_recent_routes_view(
         routes=tuple(
             TerminalRouteView(
                 request_id=route.request_id,
-                account_id=legacy_account_id(route.provider_binding),
+                account_id=route.account_id
+                or legacy_account_id(route.provider_binding),
                 provider_binding=route.provider_binding,
                 repo_slug=route.repo_slug,
                 repo_class=route.repo_class,

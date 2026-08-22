@@ -34,6 +34,7 @@ from hydraflow_gateway.models import (
     ProviderBinding,
     legacy_account_id,
 )
+from hydraflow_gateway.routing_accounts import AccountPool, build_account_registry
 from hydraflow_gateway.settings import GatewaySettings
 
 DEFAULT_HEALTH_WINDOW_SECONDS = 900
@@ -88,6 +89,37 @@ class AccountHealthReason(StrEnum):
     UPSTREAM_ERRORS = "upstream-errors"
 
 
+class CircuitStateName(StrEnum):
+    """The two dispositions passive evidence can put an account's lane in.
+
+    Declared here rather than imported from ``routing_account_state`` so the read
+    model stays a leaf: the live state module reads this one for
+    :class:`AdministrativeState`, and importing back would close a cycle. The
+    two enums publish the same strings, and a guard pins that they cannot drift.
+    """
+
+    CLOSED = "closed"
+    OPEN = "open"
+
+
+class AccountLiveFacts(BaseModel):
+    """One account's live pool facts, as the read model publishes them.
+
+    Passed *in* to :func:`build_accounts_view` rather than read from a runtime
+    object, so the projection stays pure and the module that owns the mutable
+    state is the one that reads it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    lease_capacity: int | None = Field(default=None, gt=0)
+    request_capacity: int | None = Field(default=None, gt=0)
+    circuit_state: CircuitStateName = CircuitStateName.CLOSED
+    circuit_consecutive_failures: int = Field(default=0, ge=0)
+    circuit_reset_at: datetime | None = None
+    circuit_last_condition: str | None = None
+
+
 class AccountView(BaseModel):
     """One account's identity plus its independent, sanitized observation facts."""
 
@@ -101,6 +133,16 @@ class AccountView(BaseModel):
     credential_env: str | None = None
     configured: bool
     administrative_state: AdministrativeState
+    # ADR-0142 pool facts. Capacity is ``None`` when the account declares no
+    # ceiling, which is what every legacy account has always had — a rendered
+    # "0 of null" is a UI bug, and publishing the absence honestly is what stops
+    # a panel inventing a limit nobody set.
+    lease_capacity: int | None = None
+    request_capacity: int | None = None
+    circuit_state: CircuitStateName = CircuitStateName.CLOSED
+    circuit_consecutive_failures: int = Field(default=0, ge=0)
+    circuit_reset_at: datetime | None = None
+    circuit_last_condition: str | None = None
     leased: bool
     lease_count: int = Field(ge=0)
     in_flight: bool
@@ -145,6 +187,14 @@ class AccountsView(BaseModel):
     accounts: tuple[AccountView, ...]
 
 
+def _identity_account(identity: GatewayIdentity) -> str:
+    """Which account a live lease belongs to. A v1 key belongs to its lane's."""
+    binding = identity.route_binding
+    if binding is not None:
+        return binding.account_id
+    return legacy_account_id(identity.provider_binding)
+
+
 def base_origin(base_url: str) -> str:
     """Return the validated scheme+authority of an upstream, dropping its path."""
     parsed = urlsplit(base_url)
@@ -179,27 +229,56 @@ def build_accounts_view(
     window_seconds: int = DEFAULT_HEALTH_WINDOW_SECONDS,
     evidence_since: datetime,
     evidence_truncated: bool = False,
+    pool: AccountPool | None = None,
+    administrative: Mapping[str, AdministrativeState] | None = None,
+    live: Mapping[str, AccountLiveFacts] | None = None,
 ) -> AccountsView:
-    """Compile every provider binding into one sanitized account read model."""
+    """Compile every registered account into one sanitized read model.
+
+    With no *pool*, the registry is exactly ADR-0138's two compiled legacy
+    identities and this produces byte-identical output to the phase before
+    pools existed — which is what makes turning a pool on an additive change to
+    the operator's view rather than a rewrite of it.
+
+    Every count is keyed on the **account**, not the lane. A v1 key names only a
+    lane, so its lease and its requests are attributed to that lane's compiled
+    account, which is the only account it could have used.
+    """
     cutoff = now - timedelta(seconds=window_seconds)
-    lease_counts: dict[ProviderBinding, int] = {}
+    registry = (
+        pool.registry
+        if pool is not None
+        else build_account_registry(upstreams=settings.upstreams)
+    )
+    overlay = administrative or {}
+    facts = live or {}
+    lease_counts: dict[str, int] = {}
     for identity in leases:
-        lease_counts[identity.provider_binding] = (
-            lease_counts.get(identity.provider_binding, 0) + 1
-        )
-    in_flight_counts: dict[ProviderBinding, int] = {}
+        key = _identity_account(identity)
+        lease_counts[key] = lease_counts.get(key, 0) + 1
+    in_flight_counts: dict[str, int] = {}
     for route in in_flight:
-        in_flight_counts[route.provider_binding] = (
-            in_flight_counts.get(route.provider_binding, 0) + 1
-        )
+        key = route.account_id or legacy_account_id(route.provider_binding)
+        in_flight_counts[key] = in_flight_counts.get(key, 0) + 1
 
     accounts: list[AccountView] = []
-    for binding in ProviderBinding:
-        upstream = settings.upstreams.get(binding)
+    for account in registry.accounts:
+        account_id = account.account_id
+        configured = (
+            account.provider_binding in settings.upstreams
+            if pool is None
+            else pool.configured(account_id)
+        )
+        upstream = (
+            settings.upstreams.get(account.provider_binding)
+            if pool is None
+            else pool.upstream(account_id)
+        )
         observed_rows = [
             row
             for row in recent
-            if row.provider_binding is binding and row.started_at >= cutoff
+            if (row.account_id or legacy_account_id(row.provider_binding)) == account_id
+            and row.started_at >= cutoff
         ]
         # A client hang-up says nothing about the account, so it is neither
         # qualifying evidence nor a failure.
@@ -212,24 +291,27 @@ def build_accounts_view(
             1 for row in qualifying if row.status is GatewayRequestStatus.UPSTREAM_ERROR
         )
         health, reason = derive_health(
-            configured=upstream is not None,
+            configured=configured,
             request_count=len(qualifying),
             error_count=error_count,
         )
-        lease_count = lease_counts.get(binding, 0)
-        in_flight_count = in_flight_counts.get(binding, 0)
+        lease_count = lease_counts.get(account_id, 0)
+        in_flight_count = in_flight_counts.get(account_id, 0)
+        fact = facts.get(account_id, AccountLiveFacts())
         accounts.append(
             AccountView(
-                account_id=legacy_account_id(binding),
-                display_name=ACCOUNT_DISPLAY_NAMES[binding],
-                provider_binding=binding,
+                account_id=account_id,
+                display_name=account.display_name or account_id,
+                provider_binding=account.provider_binding,
                 base_origin=None
                 if upstream is None
                 else base_origin(upstream.base_url),
                 auth_style=None if upstream is None else upstream.auth_style.value,
-                credential_env=CREDENTIAL_ENV_NAMES[binding],
-                configured=upstream is not None,
-                administrative_state=AdministrativeState.ENABLED,
+                credential_env=account.credential_env,
+                configured=configured,
+                administrative_state=overlay.get(
+                    account_id, AdministrativeState.ENABLED
+                ),
                 leased=lease_count > 0,
                 lease_count=lease_count,
                 in_flight=in_flight_count > 0,
@@ -245,6 +327,12 @@ def build_accounts_view(
                 ),
                 health=health,
                 health_reason=reason,
+                lease_capacity=fact.lease_capacity,
+                request_capacity=fact.request_capacity,
+                circuit_state=fact.circuit_state,
+                circuit_consecutive_failures=fact.circuit_consecutive_failures,
+                circuit_reset_at=fact.circuit_reset_at,
+                circuit_last_condition=fact.circuit_last_condition,
             )
         )
     accounts.sort(key=lambda account: account.account_id)
