@@ -77,7 +77,12 @@ class StateGCMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by CoreMixin
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
+
+        def save(self) -> None: ...
 
     def prune_issue_scoped_state(self, live_issue_numbers: set[int]) -> dict[str, int]:
         """Drop per-issue entries whose issue is not in *live_issue_numbers*.

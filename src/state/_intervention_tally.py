@@ -24,7 +24,12 @@ class InterventionTallyStateMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by CoreMixin
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
+
+        def save(self) -> None: ...
 
     def get_intervention_tally_last_processed_ts(self) -> str:
         return self._data.intervention_tally_last_processed_ts

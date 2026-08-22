@@ -42,7 +42,12 @@ class PrRedRepairStateMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by CoreMixin
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
+
+        def save(self) -> None: ...
 
     def get_pr_red_rerun_attempts(self, pr_number: int) -> int:
         """Return the current rerun-attempt count for *pr_number* (0 if absent)."""

@@ -9,8 +9,10 @@ helpers it shares with the squash path.
 ``PRManager`` inherits :class:`PRManagerPromotionMixin`, so every method here
 is still reachable exactly as before (``PRManager().merge_promotion_pr`` etc.)
 and ``from pr_manager import PRManager`` callers are unaffected. The mixin is
-not intended for standalone use — it declares the host seams it needs as
-stubs, all provided by ``PRManager``.
+not intended for standalone use — it declares the host seams it needs under
+``if TYPE_CHECKING:``, all provided by ``PRManager``. Those declarations must
+stay typing-only: a *runtime* stub body is a real class attribute and would
+win the MRO over a sibling mixin's implementation (#11629).
 """
 
 from __future__ import annotations
@@ -53,35 +55,34 @@ class PRManagerPromotionMixin:
     _bus: EventBus
     _credentials: Credentials
 
-    def _assert_repo(self) -> None: ...  # provided by PRManager
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
 
-    async def _run_gh(
-        self, *cmd: str, cwd: Path | None = None
-    ) -> str: ...  # provided by PRManager
+        def _assert_repo(self) -> None: ...
 
-    async def _run_with_body_file(
-        self,
-        *cmd: str,
-        body: str,
-        cwd: Path | None = None,
-        file_flag: str = "--body-file",
-    ) -> str: ...  # provided by PRManager
+        async def _run_gh(self, *cmd: str, cwd: Path | None = None) -> str: ...
 
-    async def wait_for_ci(
-        self,
-        pr_number: int,
-        timeout: int,
-        poll_interval: int,
-        stop_event: asyncio.Event,
-    ) -> tuple[bool, str]: ...  # provided by PRManager
+        async def _run_with_body_file(
+            self,
+            *cmd: str,
+            body: str,
+            cwd: Path | None = None,
+            file_flag: str = "--body-file",
+        ) -> str: ...
 
-    async def get_pr_diff_stats(
-        self, pr_number: int
-    ) -> PRDiffStats: ...  # provided by PRManager
+        async def wait_for_ci(
+            self,
+            pr_number: int,
+            timeout: int,
+            poll_interval: int,
+            stop_event: asyncio.Event,
+        ) -> tuple[bool, str]: ...
 
-    async def list_branch_refs(
-        self, prefix: str
-    ) -> list[tuple[str, str]]: ...  # provided by PRManager
+        async def get_pr_diff_stats(self, pr_number: int) -> PRDiffStats: ...
+
+        async def list_branch_refs(self, prefix: str) -> list[tuple[str, str]]: ...
 
     # ------------------------------------------------------------------
     # Promotion / RC lifecycle (moved verbatim from pr_manager.py)

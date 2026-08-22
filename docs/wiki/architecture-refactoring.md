@@ -277,3 +277,21 @@ _Source: #6354 (plan)_
 ```json:entry
 {"id":"01KQP0DZNDCVJVV0YHTG430T3E","title":"Use underscore prefix for local implementation details in module-level functions","topic":null,"source_type":"plan","source_issue":6354,"source_repo":null,"created_at":"2026-05-03T04:09:34.637727+00:00","updated_at":"2026-05-03T04:09:34.637728+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"medium","stale":false,"corroborations":1}
 ```
+
+
+## Mixin decomposition: declare host seams under TYPE_CHECKING, never as runtime stubs
+
+The house god-class recipe — extract a cohesive cluster into a mixin module and have the host class inherit it — needs each mixin to name collaborators it does not own. Declaring those seams as *runtime* stubs (`def _run_gh(self, *cmd: str) -> str: ...`) is safe with exactly ONE mixin, because the host's real definition always precedes the mixin in `__mro__`. It stops being safe at two or more: attribute lookup walks the MRO left to right and stops at the FIRST class carrying the name, so a stub in an earlier mixin silently wins over a *sibling* mixin's real implementation. A `...` body returns `None` instead of raising, so the call site gets `None` back and fails somewhere else entirely — or not at all. ruff stays clean, pyright stays clean (the stub type-checks fine), and the module imports fine.
+
+Guard method stubs with `if TYPE_CHECKING:` so no runtime class attribute is ever created — a non-existent attribute cannot shadow anything. Attribute *annotations* (`_config: HydraFlowConfig`) stay safe unguarded: a bare annotation creates no class attribute. A `raise NotImplementedError` body is the weaker fix — the stub still wins the MRO, it just converts a silent wrong answer into a crash.
+
+Example: PR #11628 split `PRManager` into ten mixins; `PRManagerIssuesMixin` stubbed `_remove_label` while `PRManagerLabelsMixin` implemented it, so `PRManager._remove_label` resolved to `...` and `close_issue` stopped stripping stale pipeline-stage labels. `tests/architecture/test_mixin_seam_stub_shadowing.py` now fails the build both on the shadowing itself and on any runtime `...` method body in a class another `src/` class inherits (`Protocol` and `abc.ABC` subclasses exempt).
+
+**Why:** MRO shadowing is invisible to every gate the factory runs — lint, types, import, and often tests. Removing the runtime attribute removes the failure mode instead of detecting it after it ships.
+
+_Source: #11629 (manual)_
+
+
+```json:entry
+{"id":"01M0M7JNV07P5TTBS5TH4ER2M5","title":"Mixin decomposition: declare host seams under TYPE_CHECKING, never as runtime stubs","topic":null,"source_type":"manual","source_issue":11629,"source_repo":null,"created_at":"2026-08-22T00:00:00+00:00","updated_at":"2026-08-22T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

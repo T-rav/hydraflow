@@ -28,7 +28,12 @@ class TriageRetryStateMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by CoreMixin
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
+
+        def save(self) -> None: ...
 
     def get_triage_retry_attempts(self, issue_number: int) -> int:
         key = str(issue_number)

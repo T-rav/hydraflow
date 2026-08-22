@@ -23,10 +23,15 @@ class RouteBackStateMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by CoreMixin
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
 
-    @staticmethod
-    def _key(issue_id: int | str) -> str: ...  # provided by StateTracker; noqa: ARG004
+        def save(self) -> None: ...
+
+        @staticmethod
+        def _key(issue_id: int | str) -> str: ...
 
     def get_route_back_count(self, issue_id: int) -> int:
         """Return the current route-back count for *issue_id* (0 if none)."""
