@@ -872,7 +872,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     (
         "auto_agent_light_intake_enabled",
         "HYDRAFLOW_AUTO_AGENT_LIGHT_INTAKE_ENABLED",
-        False,
+        True,
     ),
     (
         "auto_pr_preflight_gate_enabled",
@@ -5438,13 +5438,16 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     auto_agent_light_intake_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
             "#11298 light lane: PlanPhase routes issues triaged at or below "
             "auto_agent_light_max_complexity to the single-session auto-agent "
             "(one spawn: read issue -> implement -> test -> PR) instead of the "
             "staged plan/review pipeline. Exhaustion falls back to the staged "
-            "pipeline, never to a human. Default OFF - the operator flips it."
+            "pipeline, never to a human. Default ON since 2026-08-21 (operator "
+            "ruling after the throughput analysis: attempts per merged issue "
+            "had doubled on the staged path, #11568); set False to route every "
+            "issue through the staged pipeline."
         ),
     )
     auto_agent_light_max_complexity: int = Field(

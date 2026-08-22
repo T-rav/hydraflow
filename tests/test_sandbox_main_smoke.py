@@ -818,3 +818,186 @@ def test_seed_staging_enabled_applies_to_config(tmp_path) -> None:
         config, MockWorldSeed(staging_enabled=True)
     )
     assert config.staging_enabled is True
+
+
+# ---------------------------------------------------------------------------
+# #11298 light lane: AutoAgentPreflightLoop spawn air-gap
+# ---------------------------------------------------------------------------
+
+
+def _light_lane_world():
+    from mockworld.fakes.fake_github import FakeGitHub
+    from mockworld.fakes.fake_llm import FakeLLM
+    from tests.helpers import ConfigFactory
+
+    github = FakeGitHub()
+    github.add_issue(
+        7, "Fix typo", "One-line copy fix.", labels=["hydraflow-auto-light"]
+    )
+    return FakeLLM(), github, ConfigFactory.create()
+
+
+async def test_seeded_auto_agent_spawn_resolved_mints_pr_through_the_port() -> None:
+    from mockworld.sandbox_main import build_seeded_auto_agent_spawn_builder
+    from preflight.runner import parse_agent_response
+
+    llm, github, config = _light_lane_world()
+    llm.script_auto_agent(7, [{"status": "resolved", "diagnosis": "fixed"}])
+    spawn = build_seeded_auto_agent_spawn_builder(llm, prs=github, config=config)(7)
+
+    result = await spawn(prompt="do the thing", worktree_path="/tmp/wt")
+
+    assert result.crashed is False
+    parsed = parse_agent_response(result.output_text)
+    assert parsed["status"] == "resolved"
+    assert parsed["diagnosis"] == "fixed"
+    pr = github.pr_for_issue(7)
+    assert pr is not None, "resolved spawn must mint the PR via PRPort.create_pr"
+    assert pr.branch == config.auto_agent_branch_for_issue(7)
+    assert parsed["pr_url"] == pr.url
+    assert result.prompt_hash.startswith("sha256:")
+    assert llm.auto_agent_calls == [7]
+
+
+async def test_seeded_auto_agent_spawn_honours_failure_scripts() -> None:
+    from mockworld.sandbox_main import build_seeded_auto_agent_spawn_builder
+    from preflight.runner import parse_agent_response
+
+    llm, github, config = _light_lane_world()
+    llm.script_auto_agent(
+        7,
+        [
+            {
+                "status": "needs_human",
+                "blocked_reason": "needs_credentials",
+                "diagnosis": "no token",
+            },
+            {"crashed": True, "output_text": "boom"},
+        ],
+    )
+    build = build_seeded_auto_agent_spawn_builder(llm, prs=github, config=config)
+
+    first = await build(7)(prompt="p", worktree_path="w")
+    parsed = parse_agent_response(first.output_text)
+    assert first.crashed is False
+    assert parsed["status"] == "needs_human"
+    assert parsed["blocked_reason"] == "needs_credentials"
+    assert parsed["pr_url"] is None
+    assert github.pr_for_issue(7) is None, "a non-resolve must not mint a PR"
+
+    second = await build(7)(prompt="p", worktree_path="w")
+    assert second.crashed is True
+    assert second.output_text == "boom"
+
+
+async def test_seeded_auto_agent_spawn_unscripted_is_crashed_and_logged(
+    caplog,
+) -> None:
+    from mockworld.sandbox_main import build_seeded_auto_agent_spawn_builder
+
+    llm, github, config = _light_lane_world()
+    spawn = build_seeded_auto_agent_spawn_builder(llm, prs=github, config=config)(7)
+
+    with caplog.at_level("WARNING", logger="hydraflow.sandbox_main"):
+        result = await spawn(prompt="p", worktree_path="w")
+
+    assert result.crashed is True
+    assert "no scripted auto-agent spawn for issue #7" in caplog.text
+    assert github.pr_for_issue(7) is None
+    assert llm.auto_agent_calls == [7]
+
+
+async def test_air_gap_runner_sentinels_rebinds_preflight_spawn_builder(
+    tmp_path, monkeypatch
+) -> None:
+    """The shared air-gap helper must rebind ``_build_spawn_fn`` so the
+    loop never constructs/runs a real ``AutoAgentRunner`` (#11298)."""
+    from auto_agent_preflight_loop import AutoAgentPreflightLoop
+    from mockworld.fakes.fake_github import FakeGitHub
+    from mockworld.fakes.fake_llm import FakeLLM
+    from mockworld.sandbox_main import air_gap_runner_sentinels
+    from preflight.audit import PreflightAuditStore
+    from tests.helpers import make_bg_loop_deps
+
+    deps = make_bg_loop_deps(tmp_path)
+    github = FakeGitHub()
+    loop = AutoAgentPreflightLoop(
+        config=deps.config,
+        state=SimpleNamespace(),
+        pr_manager=github,
+        wiki_store=None,
+        audit_store=PreflightAuditStore(deps.config.data_root),
+        deps=deps.loop_deps,
+    )
+
+    async def _never(*_a, **_kw):
+        raise AssertionError("real AutoAgentRunner.run reached under the air-gap")
+
+    monkeypatch.setattr("preflight.auto_agent_runner.AutoAgentRunner.run", _never)
+    svc = SimpleNamespace(
+        health_monitor_loop=SimpleNamespace(),
+        reviewers=SimpleNamespace(),
+        planner_phase=SimpleNamespace(),
+        implementer=SimpleNamespace(),
+        diagnostic_loop=SimpleNamespace(),
+        auto_agent_preflight_loop=loop,
+    )
+    llm = FakeLLM()
+
+    air_gap_runner_sentinels(svc, llm)  # type: ignore[arg-type]
+
+    assert "_build_spawn_fn" in vars(loop), "must be an instance-level rebinding"
+    result = await loop._build_spawn_fn(5)(prompt="p", worktree_path="w")
+    assert result.crashed is True  # unscripted → deterministic failure, no spawn
+    assert llm.auto_agent_calls == [5]
+
+
+def test_auto_agent_scripts_load_identically_through_both_seed_loaders(
+    tmp_path,
+) -> None:
+    """Dual-loader parity: sandbox_main's generic ``script_<phase>`` dispatch
+    and ``MockWorld.apply_seed`` must build the same auto_agent FIFO from the
+    same JSON seed (int-coerced issue keys included)."""
+    from mockworld.fakes.fake_llm import FakeLLM
+    from mockworld.seed import MockWorldSeed
+    from tests.scenarios.fakes.mock_world import MockWorld
+
+    seed = MockWorldSeed.from_json(
+        MockWorldSeed(
+            issues=[{"number": 7, "title": "t", "body": "b", "labels": []}],
+            scripts={"auto_agent": {7: [{"status": "retry"}, {"status": "resolved"}]}},
+        ).to_json()
+    )
+
+    docker_llm = FakeLLM()
+    for phase, by_issue in seed.scripts.items():  # sandbox_main.main()'s loop
+        for issue_number, results in by_issue.items():
+            getattr(docker_llm, f"script_{phase}")(issue_number, results)
+
+    world = MockWorld(tmp_path).apply_seed(seed)
+
+    assert dict(docker_llm.auto_agent) == dict(world._llm.auto_agent)
+    assert list(world._llm.auto_agent[7]) == [
+        {
+            "status": "retry",
+            "pr_url": None,
+            "diagnosis": "",
+            "confidence": "high",
+            "blocked_reason": "none",
+            "cost_usd": 0.0,
+            "tokens": 0,
+            "crashed": False,
+            "output_text": None,
+        },
+        {
+            "status": "resolved",
+            "pr_url": None,
+            "diagnosis": "",
+            "confidence": "high",
+            "blocked_reason": "none",
+            "cost_usd": 0.0,
+            "tokens": 0,
+            "crashed": False,
+            "output_text": None,
+        },
+    ]

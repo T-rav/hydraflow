@@ -136,6 +136,12 @@ async def test_boot_during_credit_pause_pauses_instead_of_erroring(
         authoritative=True,
     )
 
+    # The light lane (#11298) is ON by default since #11590 and would route
+    # this simple issue to the auto-agent instead of plan() — the scripted
+    # credit exhaustion lives on the plan seam, so pin the lane off here.
+    mock_world.harness.config = mock_world.harness.config.model_copy(
+        update={"auto_agent_light_intake_enabled": False}
+    )
     host_runtime, orch = await _build_air_gapped_host_runtime(mock_world)
 
     started = await maybe_autostart_host(

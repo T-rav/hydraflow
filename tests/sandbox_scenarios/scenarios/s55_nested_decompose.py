@@ -5,11 +5,24 @@ lineage (ADR-0105 / #9757).
 Flow (deterministic FakeGitHub numbering — create_issue = max(issues)+1):
 - seed #1 (hitl-escalation, auto-agent exhausted) → decomposes into root epic
   E1 (#2) with children #3, #4 (hop 1, like s54).
-- child #3 runs the pipeline and fails review three times → diagnostic loop
-  escalates it to hitl-escalation; its auto-agent counter is pre-seeded to the
-  cap, so it decomposes into E2 (#5) with grandchildren #6, #7 (hop 2). Because
-  #3 is a child of E1, E2 is stamped parent_epic=2, superseded_issue=3.
-- child #4 and grandchildren #6/#7 pass review → merge/close.
+- #11298 (light lane ON by default): every child is triaged by the default
+  fake (complexity 0 ≤ ``auto_agent_light_max_complexity``), so PlanPhase
+  routes it to the single-session auto-agent (claim label
+  ``hydraflow-auto-light``) instead of the staged plan/implement pipeline.
+- child #3's auto-agent counter is pre-seeded to the cap, so on its first
+  light-lane tick the decompose-or-escalate terminal fires BEFORE any spawn:
+  it decomposes into E2 (#5) with grandchildren #6, #7 (hop 2). Because #3 is
+  a child of E1, E2 is stamped parent_epic=2, superseded_issue=3. (Pre-#11298
+  the same hop was reached the long way round — #3 failed review three times,
+  the diagnostic loop escalated it to hitl-escalation, and the exhausted
+  counter decomposed it from there.)
+- child #4 and grandchildren #6/#7 take one scripted light-lane spawn each
+  (``scripts["auto_agent"]``): the sandbox's fake spawn seam mints the PR
+  through the PRPort, the claim releases to review, the scripted review
+  approves → merge/close. An UNSCRIPTED spawn is a deterministic crash under
+  the air-gap (and, before the seam existed, a real in-container ``claude``
+  that wedged this scenario on CLI auth retries — the children never
+  completed and /api/epics never reached ``completed``).
 - E2 closes once #6/#7 finish; its close propagates up the lineage so the root
   epic E1 (#2) converges only after the transitive grandchild work is done.
 
@@ -68,6 +81,9 @@ def _direction(epic_title: str, a: str, b: str) -> str:
 _APPROVE = json.dumps(
     {"decision": "approve", "confidence": "high", "reasoning": "Sound split."}
 )
+# Light-lane spawn outcome for each leaf child (#11298): resolved with no
+# explicit pr_url → the seam mints the PR on ``agent/auto-agent-<n>``.
+_LIGHT_RESOLVED = {"status": "resolved", "diagnosis": "Leaf shipped in one session."}
 
 # Hop 1: root #1 → E1 (#2) [#3, #4]. Hop 2: child #3 → E2 (#5) [#6, #7].
 _DIR1 = _direction("Epic: split issue #1", "Child A", "Child B")
@@ -97,33 +113,25 @@ def seed() -> MockWorldSeed:
         auto_agent_attempts={1: 3, 3: 3},
         scripts={
             "decomposition": {1: [_DIR1, _APPROVE], 3: [_DIR2, _APPROVE]},
-            # Children start at hydraflow-find; triage them to ready.
+            # Children start at hydraflow-find; triage them to ready. The
+            # default complexity (0) routes every child to the light lane.
             "triage": {
                 3: [{"ready": True}],
                 4: [{"ready": True}],
                 6: [{"ready": True}],
                 7: [{"ready": True}],
             },
-            "plan": {
-                3: [{"success": True}],
-                4: [{"success": True}],
-                6: [{"success": True}],
-                7: [{"success": True}],
+            # Light-lane spawns (#11298). #3 has NO spawn script: it is at the
+            # attempt cap, so its first tick decomposes (hop 2) before any
+            # spawn would happen. #4, #6, #7 resolve in one session each.
+            "auto_agent": {
+                4: [_LIGHT_RESOLVED],
+                6: [_LIGHT_RESOLVED],
+                7: [_LIGHT_RESOLVED],
             },
-            "implement": {
-                3: [{"success": True, "branch": "hf/issue-3"}] * 4,
-                4: [{"success": True, "branch": "hf/issue-4"}],
-                6: [{"success": True, "branch": "hf/issue-6"}],
-                7: [{"success": True, "branch": "hf/issue-7"}],
-            },
-            # #3 fails review 3× → review-fix-cap → diagnostic → hitl-escalation.
-            # #4, #6, #7 pass → merge/close.
+            # The light-lane PRs still go through the review stage: #4, #6,
+            # #7 pass → merge/close.
             "review": {
-                3: [
-                    {"verdict": "request-changes", "comments": ["bad 1"]},
-                    {"verdict": "request-changes", "comments": ["bad 2"]},
-                    {"verdict": "request-changes", "comments": ["bad 3"]},
-                ],
                 4: [{"verdict": "approve", "comments": []}],
                 6: [{"verdict": "approve", "comments": []}],
                 7: [{"verdict": "approve", "comments": []}],

@@ -67,6 +67,7 @@ graph LR
     src_disturbance_detectors -- "5" --> src_disturbance
     src_erosion -- "4" --> src_arch
     src_intervention -- "3" --> src_escape
+    src_mockworld -- "1" --> src_preflight
     src_mockworld_fakes -- "30" --> src_mockworld
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
