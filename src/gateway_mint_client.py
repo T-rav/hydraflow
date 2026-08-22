@@ -5,9 +5,11 @@ module past the mass threshold. The cluster is cohesive on its own terms: it is
 the entire HydraFlow-side client for the gateway's control plane, and nothing in
 it knows about prompts, telemetry, or subprocess streaming.
 
-``runner_utils`` re-exports every public name here so the seams keep one import
-identity — a second definition of ``GatewayMintError`` or ``GatewayControlClient``
-would be two types that look alike and never compare equal.
+``runner_utils`` imports the names it uses and no others; every other caller
+imports from here directly. There is deliberately no re-export shim, so each
+name has exactly one definition and one import path — a second definition of
+``GatewayMintError`` or ``GatewayControlClient`` would be two types that look
+alike and never compare equal.
 
 Two properties belong to this module rather than to its callers:
 
@@ -18,6 +20,8 @@ Two properties belong to this module rather than to its callers:
   well-formed attempt with 200 and a decision, so
   :func:`_require_selected_route_decision` is what turns a held, rejected, or
   replayed outcome into the same fail-closed error a transport failure produces.
+  A caller that only checked the status code would spawn on a decision that
+  held.
 """
 
 from __future__ import annotations
@@ -214,6 +218,15 @@ class _HttpGatewayControlClient:
                 )
                 response.raise_for_status()
                 payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            # The status code, and nothing else from the response: a 409 means
+            # this attempt id was already spent on a different intent, which is
+            # a caller bug rather than a transport blip, and collapsing the two
+            # into one message makes the difference undiagnosable. The body is
+            # never quoted — it can flow through caretaker logs.
+            raise GatewayMintError(
+                f"gateway credential mint failed with HTTP {exc.response.status_code}"
+            ) from None
         except (httpx.HTTPError, json.JSONDecodeError):
             # Never include a response body or credential in this exception: the
             # failure can flow through caretaker logs.

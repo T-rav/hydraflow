@@ -73,7 +73,7 @@ class MintRefusal(StrEnum):
 
     LITERAL_FAMILY_UNSATISFIABLE = "literal-family-unsatisfiable"
     ACCOUNT_NOT_CONFIGURED = "account-not-configured"
-    UNSUPPORTED_REQUEST_FACE = "unsupported-request-face"
+    UNBINDABLE_REQUEST_FACE = "unbindable-request-face"
     REPO_IDENTITY_NOT_CANONICAL = "repo-identity-not-canonical"
     EFFECTIVE_MODEL_MISSING = "effective-model-missing"
     MINT_CAPACITY_EXHAUSTED = "mint-capacity-exhausted"
@@ -242,7 +242,7 @@ def evaluate_attempt(
     if request.request_face not in MINTABLE_REQUEST_FACES:
         return (
             DecisionOutcome.REJECTED,
-            MintRefusal.UNSUPPORTED_REQUEST_FACE.value,
+            MintRefusal.UNBINDABLE_REQUEST_FACE.value,
             None,
         )
     if canonicalize_repo(request.repo) is None:
@@ -319,13 +319,24 @@ class RouteMintStore:
             if len(self._attempts) >= self._max_tracked_attempts:
                 self._reap_locked(now)
             if len(self._attempts) >= self._max_tracked_attempts:
-                return self._refused(
-                    request,
-                    signature,
-                    now,
-                    outcome=DecisionOutcome.HELD,
-                    reason=MintRefusal.MINT_CAPACITY_EXHAUSTED.value,
-                    binding=None,
+                # Answered but NOT recorded. Recording it would consume a slot
+                # in the very table that is full, so a retry loop against a
+                # saturated gateway would grow the table one record per attempt
+                # for a whole retention window — the unbounded growth this
+                # ceiling exists to prevent, arriving through the ceiling.
+                # Nothing is lost by not recording: no lease was reserved, so
+                # there is no outcome a replay could need to be told about.
+                return self._answer(
+                    self._view(
+                        request,
+                        signature,
+                        now,
+                        outcome=DecisionOutcome.HELD,
+                        reason=MintRefusal.MINT_CAPACITY_EXHAUSTED.value,
+                        binding=None,
+                        key_id=None,
+                        effective_model=None,
+                    )
                 )
             outcome, reason, binding = evaluate_attempt(
                 request, configured_bindings=self._configured_bindings
@@ -340,6 +351,12 @@ class RouteMintStore:
                     binding=binding,
                 )
             return self._mint(request, signature, now, binding=binding, reason=reason)
+
+    @property
+    def tracked_attempts(self) -> int:
+        """How many attempt records are retained right now. Never a credential."""
+        with self._lock:
+            return len(self._attempts)
 
     def reap_expired_attempts(self) -> int:
         """Drop attempt records whose lease can no longer exist. Returns the count."""
@@ -435,6 +452,11 @@ class RouteMintStore:
         self._attempts[request.mint_attempt_id] = _Attempt(
             signature=signature, decision=decision, recorded_epoch=now
         )
+        return self._answer(decision)
+
+    @staticmethod
+    def _answer(decision: MintDecisionView) -> MintV2Response:
+        """A decision with no lease behind it, and therefore no credential."""
         return MintV2Response(
             key_id=None,
             token=None,

@@ -1067,6 +1067,13 @@ async def resolve_harness_env(
     open: mint/config failures raise before any worker process starts.
     """
     base_url = harness_base_url(provider, config)
+    if provider == _GATEWAY and not base_url:
+        # The docstring's "gateway selection never falls open" promise, held.
+        # ``gateway_base_url`` declares ``min_length=1``, but the env-override
+        # table assigns after construction, so an empty override reaches here —
+        # and returning {} would spawn the policy-chosen model against whatever
+        # ambient credential the host happens to have.
+        raise GatewayMintError("gateway selected but gateway_base_url is unset")
     if not base_url:
         return {}
     if provider == _GATEWAY:
@@ -1494,12 +1501,6 @@ async def run_lightweight_agent(
             f"for source {source!r}"
         )
         raise ValueError(msg)
-    runner, owned_runner = _terminal_gateway_runner(
-        runner,
-        config,
-        transport_provider,
-    )
-
     # Backend selection (pluggable one-shot provider). The chosen backend owns
     # its own credit-exhaustion detection (CLI: output text; OpenRouter: HTTP
     # 429/402). Both spawns live in THIS seam module so the CH-6 gate (above)
@@ -1560,6 +1561,15 @@ async def run_lightweight_agent(
     if route is not None:
         model = route.effective_model
         cmd = _telemetry_cmd(transport_provider, tool, model)
+    # Only now, past every early return: ``_terminal_gateway_runner`` may open a
+    # Docker API client, and the one path that returns between here and the
+    # ``finally`` that closes it would leak one per refused attempt — and a held
+    # route is a persistent state a caretaker loop retries.
+    runner, owned_runner = _terminal_gateway_runner(
+        runner,
+        config,
+        transport_provider,
+    )
     start = time.monotonic()
     success = False
     record_row = False

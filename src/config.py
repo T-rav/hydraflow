@@ -7027,7 +7027,7 @@ def _validate_gateway_enforcement_canary(config: HydraFlowConfig) -> None:
     can still arrive without passing through here — but a value written to the
     config file is refused where the mistake is still cheap.
     """
-    from hydraflow_gateway.routing_policy import canonicalize_repo  # noqa: PLC0415
+    from hydraflow_gateway.routing_policy import canonicalize_repo
 
     raw = str(config.gateway_enforcement_canary_repo or "").strip()
     if raw and canonicalize_repo(raw) is None:

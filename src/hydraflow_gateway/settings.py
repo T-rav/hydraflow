@@ -172,8 +172,29 @@ def _positive_int(environ: Mapping[str, str], name: str, *, default: int) -> int
 
 
 def _repo_slug_allowlist(raw: str) -> frozenset[str]:
-    """Parse exact, case-insensitive repository slugs owned by the gateway."""
-    return frozenset(slug.strip().lower() for slug in raw.split(",") if slug.strip())
+    """Parse exact, case-insensitive repository slugs owned by the gateway.
+
+    Accepts either identity space and stores the runtime slug, because the two
+    ends of the canary name a repository differently: HydraFlow's dial is the
+    canonical ``owner/repo`` (ADR-0139 §D2 refuses anything else) while a mint
+    request and a resolved identity both carry the path-safe ``owner-repo``. An
+    operator copying the canonical form from ``.env.sample`` into
+    ``GATEWAY_GOVERNED_REPOS`` would otherwise get an allow-list that can never
+    match — a security control failing open on a format difference, with no log
+    line and no startup error.
+    """
+    # Deferred: ``routing_policy`` reaches back into ``accounts``, which reads
+    # this module, so importing it at module scope closes a cycle.
+    from hydraflow_gateway.routing_policy import canonicalize_repo, runtime_slug_for
+
+    slugs: set[str] = set()
+    for entry in raw.split(","):
+        candidate = entry.strip().lower()
+        if not candidate:
+            continue
+        canonical = canonicalize_repo(candidate)
+        slugs.add(runtime_slug_for(canonical) if canonical is not None else candidate)
+    return frozenset(slugs)
 
 
 def _add_upstream(

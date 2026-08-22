@@ -47,9 +47,17 @@ def test_only_the_enumerated_message_faces_are_supported(
     assert governed_path_supported(path) is supported
 
 
-def test_the_supported_face_set_is_the_one_the_module_publishes() -> None:
-    """The predicate and the published constant cannot drift apart."""
-    assert all(governed_path_supported(path) for path in GOVERNED_MESSAGE_PATHS)
+def test_the_supported_face_set_is_exactly_the_two_message_faces() -> None:
+    """Widening the allow-list is a reviewed act, not an incidental one.
+
+    Asserting the set membership predicate against the set it is defined from
+    would be a tautology; this pins the *contents*, so adding a face has to come
+    with the compatibility evidence ADR-0141's non-goals demand.
+    """
+    assert (
+        frozenset({"/v1/messages", "/v1/messages/count_tokens"})
+        == GOVERNED_MESSAGE_PATHS
+    )
 
 
 def _refusal(**kwargs: object) -> PreflightRefusal:
@@ -113,7 +121,7 @@ def test_a_body_that_honours_its_binding_is_accepted(
         pytest.param(
             b'{"model": "glm-5.3", "model": "claude-opus-4-8"}',
             "application/json",
-            PreflightRefusal.DUPLICATE_MODEL_KEY,
+            PreflightRefusal.DUPLICATE_JSON_KEY,
             id="a-duplicated-model-key-is-refused-not-last-write-wins",
         ),
         pytest.param(
@@ -176,7 +184,7 @@ def test_a_duplicate_key_elsewhere_in_the_body_is_still_refused() -> None:
             bound_model="glm-5.3",
             content_type="application/json",
         )
-        is PreflightRefusal.DUPLICATE_MODEL_KEY
+        is PreflightRefusal.DUPLICATE_JSON_KEY
     )
 
 

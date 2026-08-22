@@ -186,7 +186,7 @@ def test_the_key_is_bound_to_the_effective_model() -> None:
         ),
         pytest.param(
             {"request_face": RequestFace.UNKNOWN},
-            MintRefusal.UNSUPPORTED_REQUEST_FACE,
+            MintRefusal.UNBINDABLE_REQUEST_FACE,
             id="an-unclassified-face-cannot-be-bound",
         ),
     ],
@@ -441,8 +441,8 @@ def test_the_binding_helper_and_the_mint_agree_on_the_account() -> None:
     assert response.decision.provider_binding is binding_for_model("glm-5.3")
 
 
-def test_a_held_decision_reports_a_utc_timestamp() -> None:
-    """Every decision is timestamped from the injected clock, never from the wall."""
+def test_a_decision_is_timestamped_from_the_injected_clock() -> None:
+    """Never from the wall clock: a decision's time is part of its evidence."""
     response = _store().resolve_and_mint(_request())
 
     assert response.decision.recorded_at == datetime.fromtimestamp(

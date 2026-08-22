@@ -25,6 +25,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import base_runner
 import credit_failover
 from base_runner import BaseRunner
 from hydraflow_gateway.routing_policy import RoutingAction, RoutingMatch, RoutingPolicy
@@ -203,29 +204,41 @@ async def test_the_armed_canary_actually_moves_the_subprocess_command(
 async def test_clearing_the_dial_restores_the_agentic_command_exactly(
     tmp_path: Path,
 ) -> None:
-    """One empty field, and the argv is the one the phase before this produced."""
+    """One empty field, and the argv is the one the phase before this produced.
+
+    Both runs read the SAME snapshot on disk; the only difference between them
+    is the dial. Asserting that the armed argv moved first is what keeps the
+    second assertion from comparing two disarmed runs.
+    """
     armed = _config(tmp_path, canary=_CANARY)
     _write_canary_policy(armed)
     disarmed = _config(tmp_path, canary="")
-    _write_canary_policy(disarmed)
 
-    _, before = await _agentic_route(_config(tmp_path, canary=""), tmp_path)
-    _, after = await _agentic_route(disarmed, tmp_path)
+    _, moved = await _agentic_route(armed, tmp_path)
+    _, restored = await _agentic_route(disarmed, tmp_path)
 
-    assert after == before
+    assert moved == ["claude", "--model", _POLICY_MODEL, "-p"]
+    assert restored == ["claude", "--model", _BASELINE_MODEL, "-p"]
 
 
 @pytest.mark.asyncio
-async def test_the_rollback_leaves_the_policy_snapshot_on_disk(
+async def test_re_arming_after_a_rollback_needs_no_new_policy(
     tmp_path: Path,
 ) -> None:
-    """The rollback removes the authority, not the rule — nothing to re-author."""
-    config = _config(tmp_path, canary="")
-    _write_canary_policy(config)
+    """The rollback removes the authority, not the rule — nothing to re-author.
 
-    await _agentic_route(config, tmp_path)
+    Written as a round trip rather than as "the file still exists", because
+    nothing on any path ever deletes a snapshot: the claim worth pinning is that
+    the SAME snapshot governs again the moment the dial comes back.
+    """
+    armed = _config(tmp_path, canary=_CANARY)
+    _write_canary_policy(armed)
+    await _agentic_route(armed, tmp_path)
+    await _agentic_route(_config(tmp_path, canary=""), tmp_path)
 
-    assert policy_snapshot_path(config).exists()
+    _, re_armed = await _agentic_route(armed, tmp_path)
+
+    assert re_armed == ["claude", "--model", _POLICY_MODEL, "-p"]
 
 
 @pytest.mark.asyncio
@@ -296,3 +309,50 @@ async def test_the_canary_never_promotes_a_spawn_onto_the_gateway(
     provider, _ = await _agentic_route(config, tmp_path)
 
     assert provider == "claude"
+
+
+@pytest.mark.asyncio
+async def test_a_disarmed_seam_does_not_even_build_a_stage_trail(
+    tmp_path: Path,
+) -> None:
+    """ADR-0141 §D1: the *cost* of the canary is bounded by the same field.
+
+    Each seam checks ``canary_armed`` before it compiles the legacy stage trail
+    and hands a worker thread the resolve. Deleting those four guards would leave
+    every behavioural test in this file green — the predicate would still answer
+    "outside" — while quietly putting four model constructions and a thread hop
+    on every spawn in the fleet. This is the assertion that dies instead.
+    """
+    config = _config(tmp_path, canary="")
+    _write_canary_policy(config)
+    calls = 0
+    original = base_runner.agentic_route_stages
+
+    def counting_stages(**kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return original(**kwargs)
+
+    with patch.object(base_runner, "agentic_route_stages", counting_stages):
+        await _agentic_route(config, tmp_path)
+
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_an_armed_seam_does_build_one(tmp_path: Path) -> None:
+    """The affirmative half: the guard skips work, it does not skip the feature."""
+    config = _config(tmp_path, canary=_CANARY)
+    _write_canary_policy(config)
+    calls = 0
+    original = base_runner.agentic_route_stages
+
+    def counting_stages(**kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return original(**kwargs)
+
+    with patch.object(base_runner, "agentic_route_stages", counting_stages):
+        await _agentic_route(config, tmp_path)
+
+    assert calls == 1

@@ -1425,3 +1425,41 @@ class TestGovernedDataPlane:
         _, seen = await self._post(tmp_path, **kwargs)
 
         assert seen == []
+
+    async def test_a_refused_request_names_its_reason_on_the_durable_row(
+        self, tmp_path: Path
+    ) -> None:
+        """A 409 an operator cannot classify afterwards is a 409 they cannot fix."""
+        seen, handler = self._origin()
+        settings = _settings(tmp_path)
+        client, token = _governed_client(tmp_path, handler)
+        async with client:
+            await client.post(
+                "/v1/messages",
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                },
+                json={"model": "claude-opus-4-8"},
+            )
+        rows = GatewayLedger(settings.ledger_path).read_all()
+
+        assert [row.refusal_reason for row in rows] == ["model-not-bound"]
+
+    async def test_a_served_request_names_no_refusal(self, tmp_path: Path) -> None:
+        """The column is null for everything that was not refused."""
+        seen, handler = self._origin()
+        settings = _settings(tmp_path)
+        client, token = _governed_client(tmp_path, handler)
+        async with client:
+            await client.post(
+                "/v1/messages",
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                },
+                json={"model": _BOUND_MODEL},
+            )
+        rows = GatewayLedger(settings.ledger_path).read_all()
+
+        assert [row.refusal_reason for row in rows] == [None]

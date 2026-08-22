@@ -428,3 +428,17 @@ def test_the_shadow_record_and_the_enforced_route_share_one_decision_id(
     assert recorded is not None
     assert route is not None
     assert recorded.proposed.decision_id == route.decision.decision_id
+
+
+def test_the_dial_the_predicate_reads_is_declared_on_the_real_config() -> None:
+    """``canary_repo`` reads the dial by ``getattr`` with an empty default.
+
+    That default is deliberate — an absent dial disarms, which is the safe
+    direction, and ``test_a_config_without_the_dial_at_all_enforces_nothing``
+    pins it. Its cost is that renaming the field on ``HydraFlowConfig`` would
+    silently disarm the canary everywhere while every test above kept passing,
+    because they all use a stub config. This is the assertion that notices.
+    """
+    from config import HydraFlowConfig
+
+    assert "gateway_enforcement_canary_repo" in HydraFlowConfig.model_fields

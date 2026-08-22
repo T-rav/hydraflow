@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+import runner_utils as runner_utils_module
 from config import HydraFlowConfig
 from execution import SimpleResult
 from gateway_mint_client import (
@@ -30,6 +31,7 @@ from runner_utils import (
     stream_claude_with_telemetry,
 )
 from subprocess_util import gateway_sensitive_env_keys
+from tests.helpers import ConfigFactory
 
 
 @dataclass
@@ -729,3 +731,80 @@ async def test_stream_with_telemetry_stamps_anthropic_usage_shape(
 
     assert record_mock.call_args.kwargs["cmd"][0] == "gateway"
     assert record_mock.call_args.kwargs["usage_shape"] == "anthropic"
+
+
+@pytest.mark.asyncio
+async def test_gateway_selection_refuses_an_unset_base_url_rather_than_falling_open() -> (
+    None
+):
+    """The docstring's promise, held: gateway selection never falls open.
+
+    ``gateway_base_url`` declares ``min_length=1``, but the env-override table
+    assigns after construction, so an empty override reaches the resolver. A
+    silent ``{}`` there would spawn the policy-chosen model against whatever
+    ambient credential the host happens to have — enforcement's exact inverse.
+    """
+    config = HydraFlowConfig()
+    config.gateway_base_url = ""
+
+    with pytest.raises(GatewayMintError, match="gateway_base_url"):
+        await resolve_harness_env("gateway", config, model="glm-5.3")
+
+
+@pytest.mark.asyncio
+async def test_a_refused_canary_route_leaves_no_owned_runner_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A held route must not construct the thing whose cleanup it then skips.
+
+    ``_terminal_gateway_runner`` may open a Docker API client, and a held route
+    is a *persistent* state — an unconfigured account, an unsatisfiable literal
+    family — so a caretaker loop retries it. Building the runner before the
+    refusal leaked one client per attempt for the process lifetime.
+    """
+    from hydraflow_gateway.routing_policy import (
+        RoutingAction,
+        RoutingMatch,
+        RoutingPolicy,
+    )
+    from hydraflow_gateway.routing_store import RoutingPolicyStore
+    from route_shadow import policy_snapshot_path
+    from runner_utils import run_lightweight_agent
+
+    monkeypatch.setenv("ZAI_API_KEY", "k")
+    monkeypatch.setenv("HYDRAFLOW_GATEWAY_CONTROL_TOKEN", "t" * 40)
+    config = ConfigFactory.create(repo_root=tmp_path / "repo", repo="acme/project-x")
+    config.gateway_route_shadow_enabled = False
+    config.gateway_enforcement_canary_repo = "acme/project-x"
+    # A bare provider lock meeting a named Claude model: ADR-0139 D4 holds.
+    RoutingPolicyStore(policy_snapshot_path(config)).save(
+        [
+            RoutingPolicy(
+                id="project-x-zai",
+                match=RoutingMatch(repo_ids=("acme/project-x",)),
+                action=RoutingAction(provider_lock="zai-harness"),
+            )
+        ]
+    )
+    built = 0
+    original = runner_utils_module._terminal_gateway_runner
+
+    def counting(*args: Any, **kwargs: Any) -> Any:
+        nonlocal built
+        built += 1
+        return original(*args, **kwargs)
+
+    with patch.object(runner_utils_module, "_terminal_gateway_runner", counting):
+        result = await run_lightweight_agent(
+            runner=MagicMock(),
+            config=config,
+            tool="claude",
+            model="claude-sonnet-4-6",
+            prompt="p",
+            source="adr_reviewer",
+            timeout=10,
+            provider="gateway",
+        )
+
+    assert result.returncode == -1
+    assert built == 0

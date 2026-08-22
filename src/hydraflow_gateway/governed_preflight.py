@@ -48,10 +48,10 @@ class PreflightRefusal(StrEnum):
     """Why a governed request was refused before any upstream byte."""
 
     UNBOUND_GOVERNED_KEY = "unbound-governed-key"
-    UNSUPPORTED_REQUEST_FACE = "unsupported-request-face"
+    UNSUPPORTED_REQUEST_PATH = "unsupported-request-path"
     UNSUPPORTED_CONTENT_TYPE = "unsupported-content-type"
     BODY_NOT_JSON_OBJECT = "body-not-json-object"
-    DUPLICATE_MODEL_KEY = "duplicate-model-key"
+    DUPLICATE_JSON_KEY = "duplicate-json-key"
     MISSING_MODEL_KEY = "missing-model-key"
     MODEL_NOT_BOUND = "model-not-bound"
 
@@ -97,7 +97,7 @@ def check_governed_body(body: bytes, *, bound_model: str, content_type: str) -> 
     try:
         payload = json.loads(body, object_pairs_hook=_reject_duplicates)
     except _DuplicateKey as exc:
-        raise GovernedRequestRefused(PreflightRefusal.DUPLICATE_MODEL_KEY) from exc
+        raise GovernedRequestRefused(PreflightRefusal.DUPLICATE_JSON_KEY) from exc
     except _JSON_ERRORS as exc:
         raise GovernedRequestRefused(PreflightRefusal.BODY_NOT_JSON_OBJECT) from exc
     if not isinstance(payload, dict):

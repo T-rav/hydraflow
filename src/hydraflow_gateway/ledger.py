@@ -70,6 +70,9 @@ class GatewayLedgerRow(BaseModel):
     # governed request is told apart from an ungoverned one after the fact.
     mint_decision_id: str | None = None
     route_decision_id: str | None = None
+    # Why the pre-upstream binding check refused this request, when it did. A
+    # code, never prose and never any part of the body it refused.
+    refusal_reason: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="before")
     @classmethod

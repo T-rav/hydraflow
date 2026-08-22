@@ -79,6 +79,7 @@ class _GatewayAttempt:
     capture: GatewayBodyCapture | None = None
     capture_failed: bool = False
     finalized: bool = False
+    refusal_reason: str | None = None
 
     def finalize(
         self,
@@ -107,6 +108,7 @@ class _GatewayAttempt:
                 completed=completed,
                 client_aborted=client_aborted,
                 capture_failed=self.capture_failed,
+                refusal_reason=self.refusal_reason,
             )
         finally:
             # The request is over on EVERY path that reaches here, and this
@@ -426,11 +428,16 @@ class GatewayProxy:
         if not governed_path_supported(request.url.path):
             self._refuse_governed(
                 attempt,
-                PreflightRefusal.UNSUPPORTED_REQUEST_FACE,
+                PreflightRefusal.UNSUPPORTED_REQUEST_PATH,
                 status_code=403,
             )
         buffered = bytearray(first_chunk)
         try:
+            # Checked before the loop as well: relying on the stream to deliver a
+            # terminal empty chunk would make the ceiling a property of the ASGI
+            # server rather than of this proxy.
+            if len(buffered) > self._settings.max_request_bytes:
+                raise RequestBodyTooLarge
             async for chunk in downstream_stream:
                 buffered.extend(chunk)
                 if len(buffered) > self._settings.max_request_bytes:
@@ -479,6 +486,11 @@ class GatewayProxy:
         *,
         status_code: int,
     ) -> NoReturn:
+        # The code goes on the durable row, not only into the response the CLI
+        # swallows: without it every refusal is an indistinguishable 409 or 403
+        # after the fact, and "which binding did this repository keep breaking?"
+        # is the first question an operator asks of a canary.
+        attempt.refusal_reason = refusal.value
         attempt.finalize(
             self, status_code=status_code, completed=False, client_aborted=False
         )
@@ -499,6 +511,7 @@ class GatewayProxy:
         completed: bool,
         client_aborted: bool,
         capture_failed: bool,
+        refusal_reason: str | None = None,
     ) -> None:
         if capture is not None:
             try:
@@ -557,6 +570,7 @@ class GatewayProxy:
             usage_complete=usage_complete,
             cost_usd=cost_usd,
             cost_unknown=cost_usd is None,
+            refusal_reason=refusal_reason,
             mint_decision_id=(
                 None
                 if identity.route_binding is None

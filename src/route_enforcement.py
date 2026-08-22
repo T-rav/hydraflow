@@ -60,7 +60,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from config import HydraFlowConfig
-    from hydraflow_gateway.routing_policy import AccountAvailability
     from route_shadow import RouteStage
     from routing_matrix import MatrixCellDiff
 
@@ -199,7 +198,6 @@ def canary_blast_radius(
     config: HydraFlowConfig,
     snapshot: PolicySnapshot,
     snapshot_state: SnapshotState = SnapshotState.OK,
-    accounts: Sequence[AccountAvailability] | None = None,
 ) -> tuple[MatrixCellDiff, ...]:
     """Every effective route this snapshot moves for the armed canary repository.
 
@@ -213,9 +211,10 @@ def canary_blast_radius(
     armed = canary_repo(config)
     if armed is None:
         return ()
-    available = (
-        tuple(accounts) if accounts is not None else local_account_availability()
-    )
+    # This host's own view of which accounts have a credential — the same
+    # conservative reading every shadow decision records (ADR-0139), so the
+    # answer here cannot be rosier than the one a spawn will get.
+    available = local_account_availability()
     repo_class = repo_class_for(config)
     before = build_effective_matrix(
         repo=armed,

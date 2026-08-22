@@ -16,7 +16,7 @@ mock's call list.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -106,7 +106,11 @@ class InProcessGatewayControlClient:
         response = await self.client.post(
             f"{base_url.rstrip('/')}{route}",
             headers={"authorization": f"Bearer {control_token}"},
-            json=asdict(request),
+            # ``wire_payload()``, not ``asdict()``: the production body omits
+            # unset attribution rather than sending nulls, and the control
+            # models forbid extras — a scenario posting the dataclass verbatim
+            # would never exercise the shape a real spawn sends.
+            json=request.wire_payload(),
         )
         response.raise_for_status()
         payload = response.json()
