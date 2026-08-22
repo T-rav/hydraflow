@@ -133,7 +133,7 @@ class GatewaySettings(BaseModel):
             body_capture_repo_slugs=_repo_slug_allowlist(
                 env.get("GATEWAY_BODY_CAPTURE_REPOS", "")
             ),
-            governed_repo_slugs=_repo_slug_allowlist(
+            governed_repo_slugs=_governed_repo_allowlist(
                 env.get("GATEWAY_GOVERNED_REPOS", "")
             ),
             max_key_ttl_seconds=_positive_int(
@@ -174,14 +174,30 @@ def _positive_int(environ: Mapping[str, str], name: str, *, default: int) -> int
 def _repo_slug_allowlist(raw: str) -> frozenset[str]:
     """Parse exact, case-insensitive repository slugs owned by the gateway.
 
-    Accepts either identity space and stores the runtime slug, because the two
-    ends of the canary name a repository differently: HydraFlow's dial is the
-    canonical ``owner/repo`` (ADR-0139 §D2 refuses anything else) while a mint
-    request and a resolved identity both carry the path-safe ``owner-repo``. An
-    operator copying the canonical form from ``.env.sample`` into
-    ``GATEWAY_GOVERNED_REPOS`` would otherwise get an allow-list that can never
-    match — a security control failing open on a format difference, with no log
-    line and no startup error.
+    Exact, deliberately: ``body_capture_repo_slugs`` is matched against whatever
+    ``MintKeyRequest.repo_slug`` carries, which is the caller's own runtime slug
+    and is not guaranteed to be in any canonical form. Normalising here would
+    silently stop authorising a repository whose slug does not round-trip.
+    """
+    return frozenset(slug.strip().lower() for slug in raw.split(",") if slug.strip())
+
+
+def _governed_repo_allowlist(raw: str) -> frozenset[str]:
+    """Parse the governed set, accepting either identity space (ADR-0141 §D4).
+
+    The two ends of the enforcement canary name a repository differently:
+    HydraFlow's dial is the canonical ``owner/repo`` (ADR-0139 §D2 refuses
+    anything else), while a mint request and a resolved identity both carry the
+    path-safe ``owner-repo``. An operator copying the canonical form out of
+    ``.env.sample`` into ``GATEWAY_GOVERNED_REPOS`` would otherwise get a set
+    that can never match — a security control failing open on a format
+    difference, with no log line and no startup error. Canonical entries are
+    translated; everything else is kept verbatim, so a genuine runtime slug
+    still works.
+
+    Unlike :func:`_repo_slug_allowlist` this normalises, because the governed
+    set is authored by an operator against a documented grammar rather than
+    matched against a caller-supplied string.
     """
     # Deferred: ``routing_policy`` reaches back into ``accounts``, which reads
     # this module, so importing it at module scope closes a cycle.

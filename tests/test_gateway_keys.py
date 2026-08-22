@@ -23,6 +23,8 @@ from hydraflow_gateway.settings import (
     GatewaySettings,
     UpstreamAuthStyle,
     UpstreamSettings,
+    _governed_repo_allowlist,
+    _repo_slug_allowlist,
 )
 from mockworld.fakes.fake_clock import FakeClock
 
@@ -308,3 +310,47 @@ class TestAttribution:
     def test_attribution_rejects_non_positive_numbers(self, field: str) -> None:
         with pytest.raises(ValidationError):
             _request(**{field: 0})
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        pytest.param(
+            "acme/project-x",
+            frozenset({"acme-project-x"}),
+            id="a-canonical-entry-is-translated-to-the-runtime-slug",
+        ),
+        pytest.param(
+            "acme-project-x",
+            frozenset({"acme-project-x"}),
+            id="a-runtime-slug-is-kept-verbatim",
+        ),
+        pytest.param(
+            "ACME/Project-X , other-repo",
+            frozenset({"acme-project-x", "other-repo"}),
+            id="both-forms-mix-and-case-does-not-matter",
+        ),
+        pytest.param("", frozenset(), id="the-empty-default-governs-nothing"),
+    ],
+)
+def test_the_governed_set_accepts_either_identity_space(
+    raw: str, expected: frozenset[str]
+) -> None:
+    """ADR-0141 §D4: a security control must not fail open on a format difference.
+
+    HydraFlow's canary dial is the canonical ``owner/repo``; a mint request
+    carries the path-safe ``owner-repo``. An operator copying the value across
+    would otherwise arm nothing, silently.
+    """
+    assert _governed_repo_allowlist(raw) == expected
+
+
+def test_the_body_capture_allowlist_is_still_matched_exactly() -> None:
+    """It shares a shape with the governed set but not its semantics.
+
+    ``body_capture_repo_slugs`` is compared against whatever
+    ``MintKeyRequest.repo_slug`` carries — a caller-supplied string with no
+    guaranteed form — so normalising it would silently de-authorise a repository
+    whose slug does not round-trip.
+    """
+    assert _repo_slug_allowlist("acme/hydraflow") == frozenset({"acme/hydraflow"})
