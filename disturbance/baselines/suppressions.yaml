@@ -38,7 +38,12 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ re-snapshot 2026-08-22: god-class decomposition (Refs #11547) moved 88 suppressions\
   \ verbatim out of pr_manager.py and review_phase/_phase.py into the extracted mixin\
   \ modules \u2014 net-zero move, total unchanged at 770 and every untouched file\
-  \ byte-identical; no suppression was added, removed, widened, or rewritten."
+  \ byte-identical; no suppression was added, removed, widened, or rewritten. re-snapshot\
+  \ 2026-08-22: god-class decomposition batch 2 (Refs #11547) moved 11 suppressions\
+  \ verbatim out of orchestrator.py and plan_phase.py into the extracted mixin modules\
+  \ \u2014 net-zero move, total unchanged at 768 (+11 new keys, -11 resolved keys,\
+  \ all inside the two touched families) and every untouched file byte-identical;\
+  \ no suppression was added, removed, widened, or rewritten."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -198,14 +203,16 @@ entries:
   "src/models.py::noqa:UP035\u2014neededatruntimeforPydantictoexcludefromfields": 1
   src/models.py::type-ignore[assignment]: 2
   src/models.py::type-ignore[return-value]: 2
-  src/orchestrator.py::noqa:BLE001: 1
   src/orchestrator.py::noqa:PLC0415: 1
+  src/orchestrator_lifecycle.py::noqa:BLE001: 1
   src/phase_utils.py::noqa:BLE001: 2
   src/phase_utils.py::noqa:F401: 2
   src/phase_utils.py::noqa:PLC0415: 5
-  src/plan_phase.py::noqa:BLE001: 7
-  src/plan_phase.py::noqa:PLC0415: 2
-  src/plan_phase.py::type-ignore[union-attr]: 1
+  src/plan_phase_epic.py::noqa:BLE001: 1
+  src/plan_phase_flow.py::noqa:BLE001: 3
+  src/plan_phase_flow.py::noqa:PLC0415: 2
+  src/plan_phase_flow.py::type-ignore[union-attr]: 1
+  src/plan_phase_records.py::noqa:BLE001: 3
   src/plan_phase_wiki_ingest.py::noqa:BLE001: 2
   src/plan_phase_wiki_ingest.py::noqa:PLC0415: 4
   src/plan_phase_wiki_ingest.py::noqa:TCH004: 1

@@ -1,5 +1,8 @@
 """Regression pins for #11298 size-tiered plan review.
 
+Renamed from ``test_plan_review_tiering_11298.py`` when the tier gate moved
+to ``src/plan_phase_tiering.py`` (#11547).
+
 The tier gate trades plan-stage ceremony for tokens on simple issues; these
 pins protect the two invariants that make that trade safe:
 

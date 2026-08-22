@@ -42,7 +42,7 @@ async def test_false_positive_restarts_loop_not_orphaned(config) -> None:
     factories: list = [("plan", _noop_loop)]
     exc = CreditExhaustedError("Your credit balance is too low")
 
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=True)):
+    with patch("orchestrator_credits.probe_credit_availability", AsyncMock(return_value=True)):
         await orch._handle_credit_exhaustion(exc, "plan", tasks, factories)
 
     assert tasks["plan"] is not old  # restarted — not left pointing at the dead task
@@ -59,7 +59,7 @@ async def test_pause_for_credits_returns_false_on_false_positive(config) -> None
     factories: list = [("plan", _noop_loop)]
     exc = CreditExhaustedError("usage limit reached")
 
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=True)):
+    with patch("orchestrator_credits.probe_credit_availability", AsyncMock(return_value=True)):
         paused = await orch._pause_for_credits(exc, "plan", {}, factories)
 
     assert paused is False
@@ -75,7 +75,7 @@ async def test_pause_for_credits_returns_true_on_real_exhaustion(config) -> None
     factories: list = [("plan", _noop_loop)]
     exc = CreditExhaustedError("usage limit reached")
 
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=False)):
+    with patch("orchestrator_credits.probe_credit_availability", AsyncMock(return_value=False)):
         paused = await orch._pause_for_credits(exc, "plan", {}, factories)
 
     assert paused is True

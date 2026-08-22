@@ -177,7 +177,7 @@ async def test_credit_pause_publishes_alerts_and_restores_loops(tmp_path) -> Non
         # Probe confirms the cap is real (#9807), so the pause/resume flow runs
         # instead of being treated as a false-positive and skipped.
         with patch(
-            "orchestrator.probe_credit_availability",
+            "orchestrator_credits.probe_credit_availability",
             AsyncMock(return_value=False),
         ):
             await orch._pause_for_credits(exc, "triage", tasks, loop_factories)

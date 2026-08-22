@@ -60,6 +60,7 @@ _STRUCTURAL_MARKERS: tuple[str, ...] = (
     "src/ports.py",
     "service_registry",
     "orchestrator.py",
+    "orchestrator_",  # the orchestrator mixin family (#11547)
     "base_background_loop",
 )
 

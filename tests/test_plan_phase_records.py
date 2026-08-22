@@ -1,5 +1,9 @@
 """Tests for PlanPhase ↔ PlanTouchpointExpander wiring (ADR-0063 W3b).
 
+Renamed from ``test_plan_phase_touchpoint_expander_wiring.py`` when
+``_write_plan_records`` / ``_maybe_expand_touchpoints`` moved to
+``src/plan_phase_records.py`` (#11547).
+
 The expander is invoked at one specific seam: inside
 ``PlanPhase._write_plan_records`` immediately after the FIRST
 ``PlanReviewer.review`` call returns blocking findings. The expander's

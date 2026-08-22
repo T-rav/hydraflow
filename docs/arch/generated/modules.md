@@ -42,7 +42,7 @@ graph LR
     src -- "5" --> src_disturbance
     src -- "23" --> src_erosion
     src -- "9" --> src_escape
-    src -- "4" --> src_flows
+    src -- "6" --> src_flows
     src -- "11" --> src_hydraflow_gateway
     src -- "6" --> src_intervention
     src -- "1" --> src_observability
@@ -50,7 +50,7 @@ graph LR
     src -- "1" --> src_review_phase
     src -- "1" --> src_runners
     src -- "1" --> src_signal_control
-    src -- "61" --> src_state
+    src -- "72" --> src_state
     src -- "6" --> src_vitals
     src_arch -- "1" --> src_disturbance
     src_arch_extractors -- "7" --> src_arch

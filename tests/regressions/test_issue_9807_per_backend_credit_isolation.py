@@ -53,7 +53,7 @@ async def test_anthropic_cap_spares_kimi_routed_worker() -> None:
     orch = _make_orch(wiki_compilation_provider="kimi")
     exc = CreditExhaustedError("usage limit reached")  # provider defaults anthropic
 
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=False)):
+    with patch("orchestrator_credits.probe_credit_availability", AsyncMock(return_value=False)):
         paused = await orch._pause_for_credits(exc, "plan", dict(_TASKS), _FACTORIES)
 
     assert paused is True
@@ -70,7 +70,7 @@ async def test_backend_cap_scopes_to_backend_and_spares_harness() -> None:
     orch = _make_orch(wiki_compilation_provider="kimi")
     exc = CreditExhaustedError("kimi 429: rate limit", provider="kimi")
 
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=False)):
+    with patch("orchestrator_credits.probe_credit_availability", AsyncMock(return_value=False)):
         paused = await orch._pause_for_credits(
             exc, "repo_wiki", dict(_TASKS), _FACTORIES
         )
@@ -92,7 +92,7 @@ async def test_backend_probe_targets_the_affected_backend() -> None:
     exc = CreditExhaustedError("zai 402", provider="zai")
 
     probe = AsyncMock(return_value=False)
-    with patch("orchestrator.probe_credit_availability", probe):
+    with patch("orchestrator_credits.probe_credit_availability", probe):
         await orch._pause_for_credits(exc, "repo_wiki", dict(_TASKS), _FACTORIES)
 
     # Probed with provider="zai" (positional) rather than the Anthropic default.
@@ -106,7 +106,7 @@ async def test_backend_false_positive_does_not_pause_claude() -> None:
     orch = _make_orch(wiki_compilation_provider="zai")
     exc = CreditExhaustedError("zai quoted prose", provider="zai")
 
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=True)):
+    with patch("orchestrator_credits.probe_credit_availability", AsyncMock(return_value=True)):
         paused = await orch._pause_for_credits(
             exc, "repo_wiki", dict(_TASKS), _FACTORIES
         )

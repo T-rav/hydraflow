@@ -186,7 +186,7 @@ class TestOrchestratorHooksInvokeReaper:
         orch = self._orch(config)
         with (
             patch.object(orch, "_build_interrupted_issues", AsyncMock(return_value=[])),
-            patch("orchestrator.reap_all_tracked_processes", return_value=2) as reap,
+            patch("orchestrator_lifecycle.reap_all_tracked_processes", return_value=2) as reap,
         ):
             await orch.stop()
 
@@ -201,7 +201,7 @@ class TestOrchestratorHooksInvokeReaper:
             await asyncio.sleep(0)
 
         task = asyncio.create_task(_noop())
-        with patch("orchestrator.reap_all_tracked_processes") as reap:
+        with patch("orchestrator_credits.reap_all_tracked_processes") as reap:
             await orch._cancel_all_loops_and_runners({"x": task})
 
         reap.assert_called_once()

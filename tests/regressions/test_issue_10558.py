@@ -88,7 +88,7 @@ async def test_authoritative_weekly_limit_pauses_despite_probe_available(
     exc = CreditExhaustedError(WEEKLY_MSG, resume_at=resume, authoritative=True)
 
     with patch(
-        "orchestrator.probe_credit_availability", AsyncMock(return_value=True)
+        "orchestrator_credits.probe_credit_availability", AsyncMock(return_value=True)
     ) as probe:
         paused = await orch._pause_for_credits(exc, "plan", {}, factories)
 
@@ -116,7 +116,7 @@ async def test_prose_derived_signal_still_refuted_by_probe(
     exc = CreditExhaustedError("usage limit reached", authoritative=False)
 
     with patch(
-        "orchestrator.probe_credit_availability", AsyncMock(return_value=True)
+        "orchestrator_credits.probe_credit_availability", AsyncMock(return_value=True)
     ) as probe:
         paused = await orch._pause_for_credits(exc, "plan", {}, factories)
 

@@ -67,7 +67,9 @@ async def test_prose_signal_does_not_engage_failover(
     exc = CreditExhaustedError(
         "usage limit reached", provider="anthropic", authoritative=False
     )
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=False)):
+    with patch(
+        "orchestrator_credits.probe_credit_availability", AsyncMock(return_value=False)
+    ):
         await orch._handle_credit_exhaustion(exc, "plan", {}, [("plan", _noop_loop)])
     assert credit_failover.is_active() is False  # prose → normal pause, no failover
     assert orch._credits_paused_until is not None
@@ -191,7 +193,9 @@ async def test_probe_clears_failover_when_claude_available(config) -> None:
         resume_at=None,
         cooldown_minutes=15,
     )  # probe_after in the past → due
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=True)):
+    with patch(
+        "orchestrator_credits.probe_credit_availability", AsyncMock(return_value=True)
+    ):
         cleared = await orch._probe_claude_for_switchback()
     assert cleared is True
     assert credit_failover.is_active() is False
@@ -205,7 +209,9 @@ async def test_probe_advances_when_claude_still_capped(config) -> None:
         resume_at=None,
         cooldown_minutes=15,
     )
-    with patch("orchestrator.probe_credit_availability", AsyncMock(return_value=False)):
+    with patch(
+        "orchestrator_credits.probe_credit_availability", AsyncMock(return_value=False)
+    ):
         cleared = await orch._probe_claude_for_switchback()
     assert cleared is False
     assert credit_failover.is_active() is True
@@ -219,7 +225,7 @@ async def test_probe_noop_before_due(config) -> None:
         now=datetime.now(UTC), resume_at=None, cooldown_minutes=15
     )  # probe_after = +15m → not due
     probe = AsyncMock(return_value=True)
-    with patch("orchestrator.probe_credit_availability", probe):
+    with patch("orchestrator_credits.probe_credit_availability", probe):
         cleared = await orch._probe_claude_for_switchback()
     assert cleared is False
     probe.assert_not_called()

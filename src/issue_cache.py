@@ -253,7 +253,7 @@ class IssueCache:
         ``clarity_score`` / ``needs_discovery`` (ADR-0107) mirror
         ``TriageResult``'s fields. Triage no longer treats them as a
         routing verdict — instead the planner's decision gate
-        (``plan_phase.py:_should_discover_helper``) reads them back via
+        (``plan_phase_prepass.py:_should_discover_helper``) reads them back via
         :meth:`latest_classification` as HINTS for whether an on-demand
         discover/shape helper is warranted before planning. Defaults
         (``10``, ``False``) describe a well-specified

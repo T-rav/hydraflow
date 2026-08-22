@@ -286,7 +286,7 @@ def _compute_patches(names: dict[str, str], description: str) -> list[tuple[Path
     ctrl_text = ctrl_path.read_text()
     # Anchor after a stable caretaker entry, NOT the list head — the
     # first seven entries are pipeline workers pinned by
-    # tests/test_bg_worker_status.py (detector_calibration dogfood finding).
+    # tests/test_orchestrator_bg_workers.py (detector_calibration dogfood finding).
     defs_marker = '        "wiki_rot_detector",\n'
     if defs_marker in ctrl_text:
         entry = (

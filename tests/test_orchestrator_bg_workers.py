@@ -1,4 +1,8 @@
-"""Tests for background worker status tracking and API endpoints."""
+"""Tests for background worker status tracking and API endpoints.
+
+Renamed from ``test_bg_worker_status.py`` when the orchestrator's background-
+worker facade moved to ``src/orchestrator_bg_workers.py`` (#11547).
+"""
 
 from __future__ import annotations
 
