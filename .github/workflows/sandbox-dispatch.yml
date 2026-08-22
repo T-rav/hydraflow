@@ -1,0 +1,210 @@
+name: Sandbox Scenario (dispatch)
+
+# Remote sandbox verification, on demand (#11601).
+#
+# The factory host is a single Mac driving 20+ merged PRs/day. Booting a
+# docker compose stack on it to verify a scenario steals the exact resource
+# the factory needs, and does it during production hours. This workflow moves
+# that run onto a GitHub runner: a builder or operator dispatches it against a
+# ref, gets the PASS/FAIL verdict in the job summary, and never touches the
+# host's docker daemon.
+#
+# Local `docker compose` runs remain the right tool for *developing* a
+# scenario (fast edit/run loop, `sandbox_scenario.py shell`). They are not the
+# right tool for *verifying* one. See docs/wiki/testing.md, entry
+# "Sandbox verification runs belong in CI, not on the factory host".
+#
+# This is a MANUAL lane, never a required check — it must not attach to a PR
+# or gate a merge. The required sandbox lanes stay exactly where they are in
+# ci.yml; deliberately not refactored into a shared reusable workflow, because
+# a `workflow_call` conversion of `sandbox-fast` / `sandbox-shard` renames the
+# check contexts branch protection requires (see
+# docs/standards/branch_protection/ADDING-A-GATE.md). The two share what is
+# actually worth sharing — the cached image build
+# (.github/actions/build-agent-image) — and the fast-subset scenario list is
+# held identical by tests/architecture/test_sandbox_ci_cache.py rather than by
+# a risky refactor of a required lane.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to verify (branch, tag, or full SHA). Defaults to the default branch."
+        required: false
+        default: staging
+        type: string
+      scenario:
+        description: "Scenario name (e.g. s01_happy_single_issue), `fast` for the PR→staging fast subset, or `all` for the whole suite."
+        required: false
+        default: fast
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # One dispatch per (ref, scenario) at a time; a second press queues rather
+  # than racing the first for the same runner-side docker state.
+  #
+  # `inputs.*`, not `github.event.inputs.*`: the latter carries only what the
+  # caller explicitly sent, so a CLI/API dispatch that omits a field yields ''
+  # instead of the declared default and two runs that ARE the same (ref,
+  # scenario) land in different concurrency groups. The `inputs` context
+  # resolves defaults and is available to workflow-level `concurrency`.
+  group: sandbox-dispatch-${{ inputs.ref }}-${{ inputs.scenario }}
+  cancel-in-progress: false
+
+jobs:
+  sandbox:
+    name: Sandbox scenario run
+    runs-on: ubuntu-latest
+    # `all` runs the full ~78-scenario suite unsharded; the fast subset is
+    # ~15 min with a warm cache. Generous, but bounded.
+    timeout-minutes: 180
+    # packages:read pulls the buildx layer cache. Read-only, deliberately: the
+    # dispatch ref is operator-chosen and can be ANY ref in the repo,
+    # including an unmerged branch, so this job must never be able to write
+    # the cache the required lanes read. The post-merge push lane is the only
+    # writer.
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      # TRUST: `inputs.ref` is a workflow_dispatch input, not a job output and
+      # not attacker-supplied — GitHub only accepts a dispatch from an actor
+      # with write access to the repository, and this workflow has no
+      # `pull_request`/`workflow_run` trigger through which an outside
+      # contributor could reach it. The job is nevertheless cache-*reading*
+      # only (`packages: read`, no `push-cache`), so even a mistaken dispatch
+      # against a junk branch cannot poison the layer cache the required
+      # sandbox lanes in ci.yml consume. Sweep:
+      # tests/architecture/test_staging_rc_dryrun_workflow_shape.py.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Record what is being verified
+        id: target
+        env:
+          REF: ${{ inputs.ref }}
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          set -euo pipefail
+          # Scenario names are python module names; reject anything else
+          # before it reaches the harness.
+          if ! printf '%s' "$SCENARIO" | grep -Eq '^[a-z0-9_]+$'; then
+            echo "::error::invalid scenario input: must match ^[a-z0-9_]+$"
+            exit 1
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Verifying ref=${REF} scenario=${SCENARIO} at $(git rev-parse HEAD)"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install uv && uv pip install --system -e ".[dev]"
+
+      - name: Build agent image (GHCR layer cache)
+        uses: ./.github/actions/build-agent-image
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # `hydraflow` is absent on purpose — the step above built and loaded it.
+      - run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway ui playwright
+
+      - name: Run scenario(s)
+        id: run
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          set -uo pipefail
+          LOG=/tmp/sandbox-dispatch.log
+          VERDICT=/tmp/sandbox-dispatch-verdict.txt
+          : > "$LOG"
+          : > "$VERDICT"
+          rc=0
+
+          run_one() {
+            local name="$1"
+            echo "::group::sandbox $name"
+            if python scripts/sandbox_scenario.py run "$name" 2>&1 | tee -a "$LOG"; then
+              echo "PASSED  $name" >> "$VERDICT"
+              echo "::notice::sandbox $name PASSED"
+            else
+              echo "FAILED  $name" >> "$VERDICT"
+              echo "::error::sandbox $name FAILED"
+              rc=1
+            fi
+            echo "::endgroup::"
+          }
+
+          case "$SCENARIO" in
+            all)
+              # run-all prints its own summary table; capture it wholesale.
+              if python scripts/sandbox_scenario.py run-all 2>&1 | tee -a "$LOG"; then
+                echo "PASSED  full suite" >> "$VERDICT"
+              else
+                echo "FAILED  full suite" >> "$VERDICT"
+                rc=1
+              fi
+              ;;
+            fast)
+              # Keep this list byte-identical to the `sandbox-fast` job in
+              # ci.yml — tests/architecture/test_sandbox_ci_cache.py fails if
+              # the two (or the README) drift apart. Aggregate failures; never
+              # early-exit, or a broken leading scenario hides the rest.
+              for s in s01_happy_single_issue s06_kill_switch_via_ui s53_model_routing_settings_ui s54_decompose_to_converge s55_nested_decompose s58_work_queue_settings_ui s59_queue_strategy_board_badge s91_gateway_session_tap; do
+                run_one "$s"
+              done
+              ;;
+            *)
+              run_one "$SCENARIO"
+              ;;
+          esac
+          exit $rc
+
+      # always(): the verdict is the whole point of a dispatch, and a red run
+      # is exactly when the operator needs the tail without opening the log.
+      - name: Write PASS/FAIL tail to the job summary
+        if: always()
+        env:
+          REF: ${{ inputs.ref }}
+          SCENARIO: ${{ inputs.scenario }}
+          SHA: ${{ steps.target.outputs.sha }}
+          OUTCOME: ${{ steps.run.outcome }}
+        run: |
+          set -uo pipefail
+          {
+            echo "## Sandbox dispatch — ${OUTCOME:-not run}"
+            echo
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| ref | \`${REF}\` |"
+            echo "| commit | \`${SHA:-unresolved}\` |"
+            echo "| scenario | \`${SCENARIO}\` |"
+            echo
+            echo "### Verdict"
+            echo
+            echo '```'
+            cat /tmp/sandbox-dispatch-verdict.txt 2>/dev/null || echo "(no scenarios ran)"
+            echo '```'
+            echo
+            echo "### Log tail"
+            echo
+            echo '```'
+            tail -n 80 /tmp/sandbox-dispatch.log 2>/dev/null || echo "(no log captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-dispatch-results
+          path: |
+            /tmp/sandbox-results/
+            /tmp/sandbox-dispatch.log
+            /tmp/sandbox-dispatch-verdict.txt
+          if-no-files-found: warn
+          retention-days: 7

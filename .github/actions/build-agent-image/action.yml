@@ -1,0 +1,128 @@
+name: Build sandbox agent image
+description: >
+  Build Dockerfile.agent with a GHCR-backed buildx layer cache and load it into
+  the runner's docker daemon under the tag docker-compose.sandbox.yml pins for
+  the `hydraflow` service. Every sandbox lane calls this instead of letting
+  `docker compose build hydraflow` rebuild the ~3 GB image from scratch.
+
+# Why a registry cache and not `type=gha`:
+#
+#   * `build-agent-image.yml` already spends the repo's 10 GB Actions-cache
+#     budget on `type=gha,mode=max` for this same Dockerfile. Adding four more
+#     sandbox scopes on top of it would thrash that budget (LRU eviction) and
+#     take the uv/npm caches down with it.
+#   * The Actions cache is branch-scoped (a PR reads its base branch's entries,
+#     writes only its own). A registry ref is a single object every lane on
+#     every branch reads, so a PR to `staging` and an `rc/*` PR to `main` share
+#     one warm cache.
+#   * `mode=max` is required, not optional: Dockerfile.agent is multi-stage and
+#     the expensive layers (apt, NodeSource, npm -g, uv sync) live in the
+#     `base`/`tools` stages that the runtime stage only `COPY --from`s.
+#     `mode=min` would cache none of them — i.e. none of what this fixes.
+#
+# INVALIDATION: buildkit cache entries are keyed by layer content, not by the
+# ref, so the single mutable tag never goes stale — a changed apt line, a
+# changed uv.lock, a new COPY all miss on their own and everything above them
+# still hits. The ref is therefore not a "cache key" that could rot. If it ever
+# needs a hard reset (a corrupt export, a registry-side mishap), delete the
+# `sandbox-buildcache` tag from the GHCR package; the next writer republishes.
+#
+# WHO WRITES THE CACHE: only trusted, non-PR contexts pass `push-cache: 'true'`
+# (post-merge push to staging/main, and the nightly). PR lanes read it. A
+# mutable cache ref that any PR could overwrite is a cache-poisoning sink in a
+# public repo, and pull_request jobs on this repo must never need
+# `packages: write`.
+
+inputs:
+  token:
+    description: >
+      Token used to authenticate to ghcr.io for the layer cache. Pass
+      `${{ secrets.GITHUB_TOKEN }}`; the calling job needs `packages: read`
+      (plus `packages: write` when `push-cache` is 'true').
+    required: true
+  push-cache:
+    description: >
+      'true' to export layers back to the registry cache. ONLY set this in
+      push/schedule jobs — never on `pull_request`.
+    required: false
+    default: "false"
+  tag:
+    description: >
+      Local tag to load the built image as. Must match the `image:` key of the
+      `hydraflow` service in docker-compose.sandbox.yml, or compose will
+      rebuild the image this action just built.
+    required: false
+    default: hydraflow-agent-sandbox:local
+
+outputs:
+  cache-ref:
+    description: The GHCR ref used for the buildx layer cache.
+    value: ${{ steps.resolve.outputs.cache-ref }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve GHCR layer-cache ref
+      id: resolve
+      shell: bash
+      env:
+        OWNER: ${{ github.repository_owner }}
+      run: |
+        # GHCR rejects uppercase path components; the owner is `T-rav`.
+        owner=$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')
+        echo "cache-ref=ghcr.io/${owner}/hydraflow-agent:sandbox-buildcache" \
+          >> "$GITHUB_OUTPUT"
+
+    # A hand-rolled `docker login` rather than `docker/login-action`, on
+    # purpose: this repo is PUBLIC, so a fork PR's GITHUB_TOKEN cannot read a
+    # private package, and a failed login must degrade to "build from
+    # scratch" instead of reddening a verification lane. Composite action
+    # steps support neither `continue-on-error` nor `steps.<id>.outcome`
+    # (only `steps.<id>.outputs`), so the fallback is carried in an explicit
+    # output that `cache-from`/`cache-to` below both gate on — buildx is
+    # never handed a ref it cannot reach. buildx picks the credentials up
+    # from ~/.docker/config.json, exactly as the login action would.
+    - name: Log in to GHCR (layer cache)
+      id: ghcr-login
+      shell: bash
+      env:
+        ACTOR: ${{ github.actor }}
+        TOKEN: ${{ inputs.token }}
+      run: |
+        if printf '%s' "$TOKEN" \
+          | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null 2>&1; then
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::GHCR login failed — building the agent image with no layer cache"
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build agent image (registry layer cache)
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: Dockerfile.agent
+        # Pinned rather than left native so the cache key is identical across
+        # every lane that reads this ref.
+        platforms: linux/amd64
+        load: true
+        tags: ${{ inputs.tag }}
+        cache-from: ${{ steps.ghcr-login.outputs.ok == 'true' && format('type=registry,ref={0}', steps.resolve.outputs.cache-ref) || '' }}
+        # ignore-error: a cache export failure (quota, permissions, registry
+        # blip) must not red a verification lane — the build itself already
+        # succeeded by the time the export runs.
+        cache-to: ${{ (inputs.push-cache == 'true' && steps.ghcr-login.outputs.ok == 'true') && format('type=registry,ref={0},mode=max,ignore-error=true', steps.resolve.outputs.cache-ref) || '' }}
+
+    # The harness (`scripts/sandbox_scenario.py`) rebuilds every compose
+    # service before each scenario. The runner's daemon-side builder does NOT
+    # share buildx's cache, so letting it rebuild `hydraflow` would throw away
+    # everything above and pay the full ~10 min per scenario. Telling the
+    # harness which services are already built is what makes this action
+    # actually save time.
+    - name: Tell the sandbox harness `hydraflow` is already built
+      shell: bash
+      run: |
+        echo "SANDBOX_BUILD_SERVICES=fake-llm-http gateway ui playwright" >> "$GITHUB_ENV"

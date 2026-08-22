@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -28,6 +29,21 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 COMPOSE_FILE = REPO_ROOT / "docker-compose.sandbox.yml"
 SEEDS_DIR = REPO_ROOT / "tests" / "sandbox_scenarios" / "seeds"
 RESULTS_DIR = Path("/tmp/sandbox-results")  # noqa: S108  # nosec B108  # Sandbox CLI artifacts dir; not a security boundary, contents are mkdir'd per-run.
+
+#: Compose services `run`/`run-all` build before booting the stack.
+#: ``playwright`` must be built explicitly because the MS image ships no test
+#: runner — ``Dockerfile.playwright`` adds pytest at build time so
+#: ``compose run playwright pytest …`` works on the air-gapped network.
+DEFAULT_BUILD_SERVICES: tuple[str, ...] = (
+    "fake-llm-http",
+    "gateway",
+    "hydraflow",
+    "ui",
+    "playwright",
+)
+
+#: Env var that narrows :data:`DEFAULT_BUILD_SERVICES` (space-separated).
+BUILD_SERVICES_ENV = "SANDBOX_BUILD_SERVICES"
 
 # Ensure `tests.sandbox_scenarios.scenarios.*` and `mockworld.*` are
 # importable when this script is invoked directly (e.g.
@@ -91,6 +107,36 @@ def _cleanup_run_seed(seed_path: Path, scenario_link: Path) -> None:
     scenario_link.unlink(missing_ok=True)  # transient per-run symlink
     if not _is_committed_seed(seed_path):
         seed_path.unlink(missing_ok=True)
+
+
+def build_services() -> tuple[str, ...]:
+    """Compose services to build before booting, honouring the env override.
+
+    CI pre-builds the ``hydraflow`` service's image (Dockerfile.agent, ~3 GB)
+    with buildx and a GHCR layer cache, then loads it under the tag compose
+    pins. The runner daemon's own builder does NOT share buildx's cache, so a
+    subsequent ``docker compose build hydraflow`` would discard that work and
+    rebuild from scratch — the exact ~10 min/lane this exists to avoid. The
+    composite action therefore exports ``SANDBOX_BUILD_SERVICES`` naming only
+    the services still to build.
+
+    Unset, blank, or whitespace-only ⇒ the full default list, so local
+    development and any caller that does not opt in behaves exactly as before.
+    Names are validated against :data:`DEFAULT_BUILD_SERVICES`: a typo must
+    fail here rather than silently skip a build and surface as a confusing
+    "image not found" three steps later.
+    """
+    raw = os.environ.get(BUILD_SERVICES_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_BUILD_SERVICES
+    requested = tuple(raw.split())
+    unknown = [s for s in requested if s not in DEFAULT_BUILD_SERVICES]
+    if unknown:
+        raise ValueError(
+            f"{BUILD_SERVICES_ENV}={raw!r} names unknown compose service(s) "
+            f"{unknown}; valid: {list(DEFAULT_BUILD_SERVICES)}"
+        )
+    return requested
 
 
 def _compose(*args: str) -> subprocess.CompletedProcess:
@@ -164,18 +210,9 @@ def cmd_run(name: str) -> int:
     # the finally below removes anything this run materialized that isn't a
     # committed golden (#10980).
     try:
-        print("[2/5] Building images (cached when possible)...")
-        # ``playwright`` must be built explicitly because the MS image ships no
-        # test runner — ``Dockerfile.playwright`` adds pytest at build time so
-        # ``compose run playwright pytest …`` works on the air-gapped network.
-        rc = _compose(
-            "build",
-            "fake-llm-http",
-            "gateway",
-            "hydraflow",
-            "ui",
-            "playwright",
-        ).returncode
+        services = build_services()
+        print(f"[2/5] Building images (cached when possible): {' '.join(services)}")
+        rc = _compose("build", *services).returncode
         if rc != 0:
             print(f"BUILD FAILED ({rc})")
             return 2

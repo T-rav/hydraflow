@@ -75,6 +75,33 @@ enrichment without creating live GitHub issues.
 ## CI
 
 The sandbox-{fast,full,nightly} CI jobs run scenarios at 3 cadences:
-- **fast** (PR→staging): s01, s06, s53, s54, s55, s58, s59, s91 (the list lives in `.github/workflows/ci.yml`)
-- **full** (rc/* promotion PR): all scenarios, with auto-fix label routing on failure
+- **fast** (PR→staging): s01_happy_single_issue, s06_kill_switch_via_ui, s53_model_routing_settings_ui, s54_decompose_to_converge, s55_nested_decompose, s58_work_queue_settings_ui, s59_queue_strategy_board_badge, s91_gateway_session_tap
+- **full** (rc/* promotion PR): all scenarios, sharded 6 ways, with auto-fix label routing on failure
 - **nightly** (03:00 UTC schedule): all scenarios, opens hydraflow-find issue on failure
+
+The fast list above is the one `.github/workflows/ci.yml` actually runs;
+`tests/architecture/test_sandbox_ci_cache.py` fails if this line, the
+`sandbox-fast` job, and the `Sandbox Scenario (dispatch)` workflow drift apart.
+Full module names deliberately — the guard compares them to the workflow's
+`for s in …` list, which short forms like "s01, s06" cannot be checked against.
+It said "s01, s06 only" for six scenarios longer than it was true (#11601).
+
+## Running a verification
+
+Local `docker compose` runs are for **developing** a scenario — the fast
+edit/run loop, `python scripts/sandbox_scenario.py shell`, poking the stack by
+hand. They are not for **verifying** one: the factory host is a single machine
+driving the whole pipeline, and a compose stack on it during production hours
+competes with the factory for the resource it needs most.
+
+To verify a scenario, dispatch the **Sandbox Scenario (dispatch)** workflow
+(`.github/workflows/sandbox-dispatch.yml`) instead — it takes a `ref` and a
+`scenario` (a name, `fast`, or `all`), runs on a GitHub runner, and prints the
+PASS/FAIL tail into the job summary:
+
+```
+gh workflow run "Sandbox Scenario (dispatch)" -f ref=my-branch -f scenario=s01_happy_single_issue
+```
+
+See `docs/wiki/testing.md` → "Sandbox verification runs belong in CI, not on
+the factory host".
