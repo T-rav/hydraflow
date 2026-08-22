@@ -221,9 +221,8 @@ class GatewayProxy:
                 client_aborted=False,
             )
             raise
-        if (
-            identity.route_binding is None
-            and identity.repo_slug.strip().lower() in self._settings.governed_repo_slugs
+        if identity.route_binding is None and self._settings.governs(
+            identity.repo_slug
         ):
             # A v1 key minted before this repository was governed. The mint route
             # refuses new ones; this refuses the ones already in flight, before a
@@ -566,7 +565,16 @@ class GatewayProxy:
             client_aborted=client_aborted,
             observer_malformed_events=usage.malformed_events,
             body_capture_id=capture.capture_id if capture is not None else None,
-            body_capture_complete=(None if capture is None else not capture_failed),
+            # A refused governed request opened a capture (the body store is
+            # started before the body is read) and then wrote nothing to it.
+            # Reporting that as a complete capture would have the row assert a
+            # prompt/response pair that does not exist, so a refusal reports the
+            # capture as incomplete — which is exactly what it is.
+            body_capture_complete=(
+                None
+                if capture is None
+                else not capture_failed and refusal_reason is None
+            ),
             usage_complete=usage_complete,
             cost_usd=cost_usd,
             cost_unknown=cost_usd is None,

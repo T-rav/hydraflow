@@ -612,11 +612,6 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("gateway_base_url", "HYDRAFLOW_GATEWAY_BASE_URL", "http://127.0.0.1:8080"),
     ("gateway_ledger_path", "HYDRAFLOW_GATEWAY_LEDGER_PATH", ""),
     ("gateway_repo_class", "HYDRAFLOW_GATEWAY_REPO_CLASS", "personal"),
-    (
-        "gateway_enforcement_canary_repo",
-        "HYDRAFLOW_GATEWAY_ENFORCEMENT_CANARY_REPO",
-        "",
-    ),
     ("judge_independent_model", "HYDRAFLOW_JUDGE_INDEPENDENT_MODEL", ""),
     (
         "security_patch_severity_threshold",
@@ -3115,7 +3110,10 @@ class HydraFlowConfig(BaseModel):
             "the routing policy resolver instead of by legacy dials. Empty "
             "(the default) enforces nothing anywhere; clearing it is the "
             "one-action rollback. Anything that is not exactly owner/repo — a "
-            "runtime slug included — arms nothing."
+            "runtime slug included — arms nothing. Deliberately NOT an env "
+            "override: an env var that re-applies whenever the field is at its "
+            "default would mean clearing the field did not disarm, and a "
+            "rollback with two places to look is not one action (ADR-0141 D5)."
         ),
     )
     gateway_fleet_ratchet_enabled: bool = Field(

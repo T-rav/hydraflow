@@ -249,6 +249,27 @@ def test_a_canary_dial_that_could_arm_nothing_is_refused_at_load(value: str) -> 
         HydraFlowConfig(gateway_enforcement_canary_repo=value)
 
 
+def test_the_canary_dial_is_deliberately_not_env_overridable() -> None:
+    """ADR-0141 §D5: a rollback with two places to look is not one action.
+
+    HydraFlow's env overrides apply *whenever the field is at its default*, and
+    the disarmed value IS the default — so an env var here would mean clearing
+    the dial in the config file or the settings UI did not disarm anything, and
+    the canary's headline property would be false. The house convention is a
+    Field/env-row/registry trio; this field takes two of the three on purpose.
+    """
+    from config import _ENV_STR_OVERRIDES
+
+    assert not [row for row in _ENV_STR_OVERRIDES if "canary" in row[0]]
+
+
+def test_the_canary_dial_is_still_runtime_editable() -> None:
+    """Dropping the env row must not cost the liveness the rollback depends on."""
+    from settings_registry import SETTINGS
+
+    assert SETTINGS["gateway_enforcement_canary_repo"].live is True
+
+
 def test_an_empty_canary_dial_is_the_valid_disarmed_default() -> None:
     """Empty is not a typo — it is the shipped state and the rollback target."""
     assert HydraFlowConfig().gateway_enforcement_canary_repo == ""

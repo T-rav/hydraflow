@@ -81,6 +81,24 @@ class GatewaySettings(BaseModel):
     max_connections: int = Field(default=100, gt=0)
     max_keepalive_connections: int = Field(default=20, ge=0)
 
+    def governs(self, repo_slug: str) -> bool:
+        """Whether this deployment requires a route-bound key for *repo_slug*.
+
+        Both sides are normalised at the moment of the decision rather than when
+        the set is built, and that placement is the point. A field validator is
+        skipped by ``model_copy`` and by any construction path that does not
+        validate, so an authorization boundary resting on one would be as strong
+        as however its settings object happened to be assembled. Normalising
+        here also means neither the operator's spelling (``owner/repo``, the
+        form ``.env.sample`` documents) nor the caller's (``MintKeyRequest``
+        carries a free string) can open it. ADR-0141 §D4.
+        """
+        target = normalise_repo_slug(repo_slug)
+        return any(
+            normalise_repo_slug(declared) == target
+            for declared in self.governed_repo_slugs
+        )
+
     @field_validator("control_token")
     @classmethod
     def validate_control_token(cls, value: SecretStr) -> SecretStr:
@@ -133,7 +151,7 @@ class GatewaySettings(BaseModel):
             body_capture_repo_slugs=_repo_slug_allowlist(
                 env.get("GATEWAY_BODY_CAPTURE_REPOS", "")
             ),
-            governed_repo_slugs=_governed_repo_allowlist(
+            governed_repo_slugs=_repo_slug_allowlist(
                 env.get("GATEWAY_GOVERNED_REPOS", "")
             ),
             max_key_ttl_seconds=_positive_int(
@@ -182,35 +200,25 @@ def _repo_slug_allowlist(raw: str) -> frozenset[str]:
     return frozenset(slug.strip().lower() for slug in raw.split(",") if slug.strip())
 
 
-def _governed_repo_allowlist(raw: str) -> frozenset[str]:
-    """Parse the governed set, accepting either identity space (ADR-0141 §D4).
+def normalise_repo_slug(value: str) -> str:
+    """Reduce a repository name to the one form the governed set is keyed on.
 
-    The two ends of the enforcement canary name a repository differently:
-    HydraFlow's dial is the canonical ``owner/repo`` (ADR-0139 §D2 refuses
-    anything else), while a mint request and a resolved identity both carry the
-    path-safe ``owner-repo``. An operator copying the canonical form out of
-    ``.env.sample`` into ``GATEWAY_GOVERNED_REPOS`` would otherwise get a set
-    that can never match — a security control failing open on a format
-    difference, with no log line and no startup error. Canonical entries are
-    translated; everything else is kept verbatim, so a genuine runtime slug
-    still works.
-
-    Unlike :func:`_repo_slug_allowlist` this normalises, because the governed
-    set is authored by an operator against a documented grammar rather than
-    matched against a caller-supplied string.
+    ``owner/repo`` becomes ``owner-repo``; everything else is lower-cased and
+    returned as it stands. Both the allow-list and every match against it go
+    through here, because normalising only the operator's spelling would leave
+    the boundary decided by the *caller's*: ``MintKeyRequest.repo_slug`` is a
+    free string with no format constraint, so a caller sending the canonical
+    form would miss a governed set holding the slug — and ADR-0141 §D4's whole
+    claim is that the set is owned by the deployment and cannot be asserted by
+    the caller.
     """
     # Deferred: ``routing_policy`` reaches back into ``accounts``, which reads
     # this module, so importing it at module scope closes a cycle.
     from hydraflow_gateway.routing_policy import canonicalize_repo, runtime_slug_for
 
-    slugs: set[str] = set()
-    for entry in raw.split(","):
-        candidate = entry.strip().lower()
-        if not candidate:
-            continue
-        canonical = canonicalize_repo(candidate)
-        slugs.add(runtime_slug_for(canonical) if canonical is not None else candidate)
-    return frozenset(slugs)
+    candidate = value.strip().lower()
+    canonical = canonicalize_repo(candidate)
+    return runtime_slug_for(canonical) if canonical is not None else candidate
 
 
 def _add_upstream(

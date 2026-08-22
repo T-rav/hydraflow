@@ -42,7 +42,10 @@ gateway rejects missing, expired, or ambiguous credentials and never supports
 a direct-provider bypass.
 
 `GATEWAY_GOVERNED_REPOS` (empty by default) is the server-owned, comma-separated
-list of exact repository slugs whose keys **must** be route-bound (ADR-0141).
+list of repositories whose keys **must** be route-bound (ADR-0141). Either
+spelling works — the canonical `owner/repo` or the path-safe `owner-repo` — and
+both sides of the comparison are reduced to one form, so neither the operator's
+spelling nor the caller's can open the boundary.
 While a slug is listed, `POST /control/v1/keys` refuses that repository and the
 data plane turns away any key without a route binding — so a caller cannot
 declare itself ungoverned. It is a deployment control on the far side of the

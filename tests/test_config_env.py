@@ -147,9 +147,6 @@ class TestEnvVarOverrideTable:
     # the generic tests cannot feed them an arbitrary string.
     _VALID_VALUES: dict[str, str] = {
         "gateway_repo_class": "client",
-        # ADR-0141 refuses anything that is not an exact canonical owner/repo,
-        # because a value that silently arms nothing is worse than an error.
-        "gateway_enforcement_canary_repo": "acme/project-x",
     }
 
     # Valid non-default explicit values for Literal-typed string fields.
@@ -157,7 +154,6 @@ class TestEnvVarOverrideTable:
     _EXPLICIT_VALUES: dict[str, str] = {
         "execution_mode": "docker",
         "gateway_repo_class": "hydraflow",
-        "gateway_enforcement_canary_repo": "acme/other-project",
         "security_patch_severity_threshold": "critical",
     }
 

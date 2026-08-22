@@ -1249,15 +1249,18 @@ def _governed_client(
     *,
     governed_repo_slugs: frozenset[str] = frozenset(),
     bind_route: bool = True,
+    capture_bodies: bool = False,
+    max_request_bytes: int = 33_554_432,
 ) -> tuple[httpx.AsyncClient, str]:
     """A gateway holding one key, route-bound or deliberately not."""
-    settings = _settings(tmp_path).model_copy(
+    settings = _settings(tmp_path, max_request_bytes=max_request_bytes).model_copy(
         update={"governed_repo_slugs": governed_repo_slugs}
     )
     store = VirtualKeyStore(
         max_ttl_seconds=600,
         id_factory=lambda: "key-1",
         secret_factory=lambda: "virtual-secret",
+        body_capture_repo_slugs=frozenset({"acme-hydraflow"}),
     )
     if bind_route:
         minted = store.mint_bound(
@@ -1265,7 +1268,7 @@ def _governed_client(
             repo_slug="acme-hydraflow",
             repo_class=RepoClass.HYDRAFLOW,
             provider_binding=ProviderBinding.ZAI_HARNESS,
-            capture_bodies=False,
+            capture_bodies=capture_bodies,
             ttl_seconds=300,
             route_binding=RouteBinding(
                 mint_decision_id="gwd_1",
@@ -1393,6 +1396,18 @@ class TestGovernedDataPlane:
                 403,
                 id="an-unbound-key-for-a-governed-repository-is-refused",
             ),
+            pytest.param(
+                {
+                    # The operator wrote the canonical form; the caller sends
+                    # the slug. ADR-0141 §D4: the set is owned by the
+                    # deployment and cannot be asserted by the caller, so a
+                    # spelling difference must not open the boundary.
+                    "governed_repo_slugs": frozenset({"acme/hydraflow"}),
+                    "bind_route": False,
+                },
+                403,
+                id="the-callers-spelling-cannot-escape-the-governed-set",
+            ),
         ],
     )
     async def test_a_request_that_defeats_the_binding_is_refused(
@@ -1463,3 +1478,59 @@ class TestGovernedDataPlane:
         rows = GatewayLedger(settings.ledger_path).read_all()
 
         assert [row.refusal_reason for row in rows] == [None]
+
+    async def test_a_refused_request_does_not_claim_a_complete_capture(
+        self, tmp_path: Path
+    ) -> None:
+        """The capture was opened before the body was read, and never written."""
+        seen, handler = self._origin()
+        settings = _settings(tmp_path)
+        client, token = _governed_client(tmp_path, handler, capture_bodies=True)
+        async with client:
+            await client.post(
+                "/v1/messages",
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                },
+                json={"model": "claude-opus-4-8"},
+            )
+        rows = GatewayLedger(settings.ledger_path).read_all()
+
+        assert [row.body_capture_complete for row in rows] == [False]
+
+    async def test_a_governed_body_over_the_ceiling_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The buffered path must honour the same bound the streamed one does."""
+        seen, handler = self._origin()
+        client, token = _governed_client(tmp_path, handler, max_request_bytes=256)
+        async with client:
+            response = await client.post(
+                "/v1/messages",
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                },
+                json={"model": _BOUND_MODEL, "padding": "x" * 4096},
+            )
+
+        assert response.status_code == 413
+
+    async def test_an_oversized_governed_body_sends_zero_upstream_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        """Refused for size is still refused before an upstream request exists."""
+        seen, handler = self._origin()
+        client, token = _governed_client(tmp_path, handler, max_request_bytes=256)
+        async with client:
+            await client.post(
+                "/v1/messages",
+                headers={
+                    "authorization": f"Bearer {token}",
+                    "content-type": "application/json",
+                },
+                json={"model": _BOUND_MODEL, "padding": "x" * 4096},
+            )
+
+        assert seen == []

@@ -189,6 +189,11 @@ def test_the_key_is_bound_to_the_effective_model() -> None:
             MintRefusal.UNBINDABLE_REQUEST_FACE,
             id="an-unclassified-face-cannot-be-bound",
         ),
+        pytest.param(
+            {"repo_slug": "acme-somewhere-else"},
+            MintRefusal.REPO_IDENTITY_MISMATCH,
+            id="the-two-repository-fields-must-name-one-repository",
+        ),
     ],
 )
 def test_a_refused_attempt_is_a_decision_with_a_code(
@@ -469,3 +474,18 @@ def test_a_decision_is_timestamped_from_the_injected_clock() -> None:
     assert response.decision.recorded_at == datetime.fromtimestamp(
         1_700_000_000.0, tz=UTC
     )
+
+
+def test_a_lease_is_never_attributable_to_a_repository_the_decision_omitted() -> None:
+    """The mismatch is refused before a key exists, not merely recorded.
+
+    ``repo`` is what the route was resolved against; ``repo_slug`` is what every
+    downstream join uses — the key record, the ledger row, the lease view. A
+    lease issued on two disagreeing names is worse than no lease.
+    """
+    key_store = VirtualKeyStore(max_ttl_seconds=86_400)
+    _store(key_store=key_store).resolve_and_mint(
+        _request(repo_slug="acme-somewhere-else")
+    )
+
+    assert key_store.active_count == 0

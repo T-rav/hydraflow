@@ -42,7 +42,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from driver_contracts import ModelRequirement, ModelRequirementKind, WorkerRole
 from hydraflow_gateway.keys import KeyPolicyError, VirtualKeyStore
 from hydraflow_gateway.models import (
-    BodyCapturePolicy,
     Principal,
     PrincipalKind,
     ProviderBinding,
@@ -55,6 +54,7 @@ from hydraflow_gateway.routing_policy import (
     DecisionOutcome,
     RequestFace,
     canonicalize_repo,
+    runtime_slug_for,
 )
 
 GOVERNED_MINT_SCHEMA_VERSION = 1
@@ -75,6 +75,7 @@ class MintRefusal(StrEnum):
     ACCOUNT_NOT_CONFIGURED = "account-not-configured"
     UNBINDABLE_REQUEST_FACE = "unbindable-request-face"
     REPO_IDENTITY_NOT_CANONICAL = "repo-identity-not-canonical"
+    REPO_IDENTITY_MISMATCH = "repo-identity-mismatch"
     EFFECTIVE_MODEL_MISSING = "effective-model-missing"
     MINT_CAPACITY_EXHAUSTED = "mint-capacity-exhausted"
     KEY_POLICY_REFUSED = "key-policy-refused"
@@ -152,13 +153,6 @@ class MintV2Request(BaseModel):
             pr_number=self.pr_number,
         )
 
-    @property
-    def body_capture_policy(self) -> BodyCapturePolicy:
-        """Translate the wire boolean to the durable policy enum."""
-        if self.capture_bodies:
-            return BodyCapturePolicy.FULL
-        return BodyCapturePolicy.METADATA_ONLY
-
     def signature(self) -> str:
         """A canonical digest of this attempt's whole identity and intent.
 
@@ -230,6 +224,40 @@ def _mint_decision_id(signature: str, outcome: DecisionOutcome, reason: str) -> 
     return f"gwd_{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:32]}"
 
 
+def _inadmissible(request: MintV2Request) -> str | None:
+    """Return why this attempt could never become a lease, or ``None``.
+
+    Every clause here is a *rejection*: the attempt itself is malformed or
+    unbindable, independently of which accounts this deployment happens to have.
+    Held outcomes — where the route is right and something operational is
+    missing — are decided by the caller.
+    """
+    if request.request_face not in MINTABLE_REQUEST_FACES:
+        return MintRefusal.UNBINDABLE_REQUEST_FACE.value
+    canonical = canonicalize_repo(request.repo)
+    if canonical is None:
+        return MintRefusal.REPO_IDENTITY_NOT_CANONICAL.value
+    if runtime_slug_for(canonical) != request.repo_slug.strip().lower():
+        # The request carries a repository twice: the canonical identity the
+        # decision was resolved against, and the path-safe slug every downstream
+        # join uses — the key record, the ledger row, the active-route views. If
+        # they disagree, a governed lease is attributable to a repository the
+        # decision never named, which is worse than a refusal.
+        return MintRefusal.REPO_IDENTITY_MISMATCH.value
+    if not request.effective_model.strip():
+        return MintRefusal.EFFECTIVE_MODEL_MISSING.value
+    requirement = request.requirement()
+    # Only the literal-family arm is re-checked. A policy may legitimately map a
+    # capability — or remap a concrete request — onto another model; ADR-0139 §D4
+    # constrains exactly one thing, and re-deriving more than that here would be
+    # the gateway inventing a second, divergent policy engine.
+    if requirement.kind is ModelRequirementKind.LITERAL_FAMILY and (
+        not requirement.satisfied_by(request.effective_model.strip())
+    ):
+        return MintRefusal.LITERAL_FAMILY_UNSATISFIABLE.value
+    return None
+
+
 def evaluate_attempt(
     request: MintV2Request, *, configured_bindings: frozenset[ProviderBinding]
 ) -> tuple[DecisionOutcome, str, ProviderBinding | None]:
@@ -239,40 +267,10 @@ def evaluate_attempt(
     this answers the narrower question it can answer alone: may the model the
     policy chose be served, and by which account?
     """
-    if request.request_face not in MINTABLE_REQUEST_FACES:
-        return (
-            DecisionOutcome.REJECTED,
-            MintRefusal.UNBINDABLE_REQUEST_FACE.value,
-            None,
-        )
-    if canonicalize_repo(request.repo) is None:
-        return (
-            DecisionOutcome.REJECTED,
-            MintRefusal.REPO_IDENTITY_NOT_CANONICAL.value,
-            None,
-        )
-    effective = request.effective_model.strip()
-    if not effective:
-        return (
-            DecisionOutcome.REJECTED,
-            MintRefusal.EFFECTIVE_MODEL_MISSING.value,
-            None,
-        )
-    requirement = request.requirement()
-    # Only the literal-family arm is re-checked. A policy may legitimately map a
-    # capability — or remap a concrete request — onto another model; ADR-0139 §D4
-    # constrains exactly one thing, and re-deriving more than that here would be
-    # the gateway inventing a second, divergent policy engine.
-    if (
-        requirement.kind is ModelRequirementKind.LITERAL_FAMILY
-        and not requirement.satisfied_by(effective)
-    ):
-        return (
-            DecisionOutcome.REJECTED,
-            MintRefusal.LITERAL_FAMILY_UNSATISFIABLE.value,
-            None,
-        )
-    binding = binding_for_model(effective)
+    rejection = _inadmissible(request)
+    if rejection is not None:
+        return DecisionOutcome.REJECTED, rejection, None
+    binding = binding_for_model(request.effective_model.strip())
     if binding not in configured_bindings:
         # An operational gap, not a policy verdict: the route is right and the
         # credential is missing, so the honest answer is hold.

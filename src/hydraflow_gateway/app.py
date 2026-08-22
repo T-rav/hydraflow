@@ -271,7 +271,7 @@ def create_app(
         # provider and no route lineage, so one v1 key would be a policy-free
         # lane into an enforced repository — and refusing at the mint means the
         # attempt never becomes a credential, let alone an upstream byte.
-        if payload.repo_slug.strip().lower() in resolved_settings.governed_repo_slugs:
+        if resolved_settings.governs(payload.repo_slug):
             raise HTTPException(
                 status_code=422,
                 detail="governed repository requires the v2 route-aware mint",
