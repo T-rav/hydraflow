@@ -680,9 +680,10 @@ def _build_fable_director(
         stage_labels=_driver_stage_labels(config),
         stop_event=stop_event,
         usd_budget_per_boundary=config.director_shadow_usd_budget,
-        usd_ceiling=config.director_shadow_usd_ceiling,
-        # A live read, not a captured value: the kill switch must work without
-        # a restart even though the dials that select the director cannot.
+        # Both live reads, not captured values. The settings registry marks
+        # both live, and a live badge on a captured value is the lie that
+        # registry's own honesty rule forbids.
+        usd_ceiling=lambda: config.director_shadow_usd_ceiling,
         is_enabled=lambda: config.director_shadow_enabled,
     )
 

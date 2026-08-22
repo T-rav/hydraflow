@@ -146,7 +146,30 @@ class DriverTickReport:
 
     @property
     def did_work(self) -> bool:
-        return bool(self.admitted or self.advanced or self.released)
+        """Whether this tick did anything that earns an immediate re-poll.
+
+        An ``IDLE`` advance is by definition **not** work: the driver had no
+        phase to run, so re-ticking it immediately can only produce another
+        ``IDLE``. Counting it made ``_polling_loop`` take its ``if did_work:
+        continue`` branch and skip the sleep, so a single PARKED or
+        HITL_WAIT driver spun the allocator at loop speed indefinitely rather
+        than at ``poll_interval``.
+
+        That was invisible while nothing hung off the tick — the wasted work
+        was a dict lookup. #11537 hung an observer off it, and the spin turned
+        into an fsync per iteration. The observer's own docstring assumed a
+        turn "every poll_interval", which was wrong in the safe direction for
+        spawns and the unsafe direction for writes. Fixed at the cause rather
+        than worked around at the observer, because every future consumer of
+        the tick inherits the same trap otherwise.
+        """
+        return bool(
+            self.admitted
+            or self.released
+            or any(
+                advance.outcome is not AdvanceOutcome.IDLE for advance in self.advanced
+            )
+        )
 
 
 class PipelineLabelAdapter:
