@@ -521,10 +521,16 @@ class TestServedAndConfiguredModelsPriced:
     def test_every_configurable_model_default_is_priced(self) -> None:
         from config import HydraFlowConfig
 
+        # Fields whose name ends in ``_model`` but whose value is not a model
+        # id. The sweep is a name heuristic, so a genuinely unrelated field
+        # has to be named here rather than renamed to satisfy the heuristic —
+        # ``scheduling_model`` is ubiquitous-language for the phase_requeue /
+        # issue_controller dial (#11535, ADR-0137), not an LLM.
+        not_an_llm = {"scheduling_model"}
         defaults = {
             name: field.default
             for name, field in HydraFlowConfig.model_fields.items()
-            if name == "model" or name.endswith("_model")
+            if (name == "model" or name.endswith("_model")) and name not in not_an_llm
         }
         assert len(defaults) >= 10, "model-field sweep found too few fields"
 

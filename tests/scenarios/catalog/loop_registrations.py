@@ -1707,6 +1707,12 @@ def _build_auto_agent_preflight(ports: dict[str, Any], config: Any, deps: Any) -
         workspaces=ports.get("workspaces"),
         epic_manager=ports.get("auto_agent_epic_manager"),
         runner=ports.get("auto_agent_decompose_runner"),
+        # #11535 single-owner interlock. Unseeded (the common case) means no
+        # registry, which is exactly the Classic factory this catalog models:
+        # nothing is driver-owned, so intake behaves as it always has. A
+        # scenario exercising the controller seeds a real
+        # ``DriverOwnershipRegistry`` here.
+        driver_ownership=ports.get("driver_ownership"),
     )
     spawn_builder = ports.get("auto_agent_spawn_builder")
     if spawn_builder is not None:
