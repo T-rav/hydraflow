@@ -145,7 +145,7 @@ Because it is a marker and not a stage, it is absent from the stage-routing map
 
 ## Related
 
-- `src/pr_manager.py:PRManager.swap_pipeline_labels` — atomic swap implementation
+- `src/pr_manager_labels.py:PRManagerLabelsMixin.swap_pipeline_labels` — atomic swap implementation
 - `src/config.py:HydraFlowConfig.all_pipeline_labels` — the full label set (stage labels +
   orthogonal markers `human-required`, `in_progress_label`)
 - `src/config.py:HydraFlowConfig.in_progress_label` — the `hydraflow-in-progress` build-claim

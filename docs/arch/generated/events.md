@@ -19,7 +19,7 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 | **AGENT_ACTIVITY** | `src.runner_utils:_stream_and_collect` | ★ all (fan-out) |
 | **BACKGROUND_WORKER_STATUS** | `src.base_background_loop:BaseBackgroundLoop._execute_cycle`<br>`src.base_background_loop:BaseBackgroundLoop._report_cycle_failure`<br>`src.orchestrator:HydraFlowOrchestrator._seed_background_worker_statuses` | ★ all (fan-out) |
 | **BASELINE_UPDATE** | `src.baseline_policy:BaselinePolicy.check_approval`<br>`src.baseline_policy:BaselinePolicy.rollback` | ★ all (fan-out) |
-| **CI_CHECK** | `src.pr_manager:PRManager.wait_for_ci`<br>`src.reviewer:ReviewRunner.fix_ci` | ★ all (fan-out) |
+| **CI_CHECK** | `src.pr_manager_ci:PRManagerCIMixin.wait_for_ci`<br>`src.reviewer:ReviewRunner.fix_ci` | ★ all (fan-out) |
 | **CONCERN_ADDRESSED** ⚠️ | — | — |
 | **CONCERN_FORWARDED** | `src.adversarial_retry_loop:AdversarialRetryLoop._emit_concerns_forwarded` | ★ all (fan-out) |
 | **DIAGNOSTIC_UPDATE** | `src.diagnostic_loop:DiagnosticLoop._publish_update` | ★ all (fan-out) |
@@ -29,9 +29,9 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 | **EPIC_RELEASING** | `src.epic:EpicManager._execute_release` | ★ all (fan-out) |
 | **EPIC_UPDATE** | `src.epic:EpicManager._publish_update` | ★ all (fan-out) |
 | **ERROR** | `src.base_background_loop:BaseBackgroundLoop._report_cycle_failure`<br>`src.orchestrator:HydraFlowOrchestrator._polling_loop`<br>`src.orchestrator:HydraFlowOrchestrator._restart_loop` | ★ all (fan-out) |
-| **HITL_ESCALATION** | `src.dashboard_routes._routes:create_router.request_changes`<br>`src.review_phase._phase:ReviewPhase._escalate_to_hitl` | ★ all (fan-out) |
+| **HITL_ESCALATION** | `src.dashboard_routes._routes:create_router.request_changes`<br>`src.review_phase._insights:ReviewInsightsMixin._escalate_to_hitl` | ★ all (fan-out) |
 | **HITL_UPDATE** | `src.dashboard_routes._hitl_routes:register._resolve_hitl_item`<br>`src.dashboard_routes._hitl_routes:register.hitl_correct`<br>`src.hitl_phase:HITLPhase._process_one_hitl`<br>`src.hitl_runner:HITLRunner.run`<br>`src.pr_unsticker:PRUnsticker.unstick` | ★ all (fan-out) |
-| **ISSUE_CREATED** | `src.pr_manager:PRManager.create_issue` | ★ all (fan-out) |
+| **ISSUE_CREATED** | `src.pr_manager_issues:PRManagerIssuesMixin.create_issue` | ★ all (fan-out) |
 | **ISSUE_REFINEMENT_UPDATE** | `src.issue_refinement_loop:IssueRefinementLoop._publish_refinement_event` | ★ all (fan-out) |
 | **LOOP_FITNESS_UPDATE** | `src.fitness_scorecard_loop:FitnessScorecardLoop._do_work` | ★ all (fan-out) |
 | **MEMORY_SYNC** ⚠️ | — | — |
@@ -53,7 +53,7 @@ HydraFlow's `EventBus` fans out **every** published event to all *fan-out* subsc
 | **SHIPPED_WITH_KNOWN_GAP** | `src.post_merge_handler:PostMergeHandler._maybe_emit_shipped_with_known_gap` | ★ all (fan-out) |
 | **SUPERVISOR_OBSERVATION** | `src.goal_supervisor_loop:GoalSupervisorLoop._emit` | ★ all (fan-out) |
 | **SYSTEM_ALERT** | `src.close_verification:reconcile_false_close`<br>`src.cost_budget_alerts:check_daily_budget`<br>`src.cost_budget_alerts:check_issue_cost`<br>`src.dependabot_merge_loop:DependabotMergeLoop._do_work`<br>`src.epic:EpicManager.check_stale_epics`<br>`src.health_monitor_loop:HealthMonitorLoop._check_persistent_worker_errors`<br>`src.health_monitor_loop:HealthMonitorLoop._check_stale_code`<br>`src.health_monitor_loop:HealthMonitorLoop._check_worker_staleness`<br>`src.health_monitor_loop:HealthMonitorLoop._run_fleet_vitals`<br>`src.merge_state_watcher_loop:MergeStateWatcherLoop._alert_on_capture_gap`<br>`src.orchestrator:HydraFlowOrchestrator._deferred_pipeline_start`<br>`src.orchestrator:HydraFlowOrchestrator._handle_auth_error`<br>`src.orchestrator:HydraFlowOrchestrator._maybe_engage_failover`<br>`src.orchestrator:HydraFlowOrchestrator._pause_for_credits`<br>`src.orchestrator:HydraFlowOrchestrator._polling_loop`<br>`src.orchestrator:HydraFlowOrchestrator._probe_claude_for_switchback`<br>`src.orchestrator:HydraFlowOrchestrator._resume_loops_after_credit_pause`<br>`src.post_merge_handler:PostMergeHandler._safe_hook`<br>`src.post_merge_handler:PostMergeHandler.handle_approved`<br>`src.prompt_gate_alerts:alert_prompt_gate_block`<br>`src.review_advisor:PostVerifyAdvisor._alarm_fail_open`<br>`src.runs_gc_loop:RunsGCLoop._tend_audit_chains`<br>`src.server:_check_and_publish_boot_gap`<br>`src.staging_promotion_loop:StagingPromotionLoop._compile_evidence_pack`<br>`src.staging_promotion_loop:StagingPromotionLoop._handle_open_promotion`<br>`src.triage:TriageRunner._emit_injection_alert`<br>`src.unpushed_branch_alert:check_and_alert_unpushed_branches` | ★ all (fan-out) |
-| **SYSTEM_REROUTE** | `src.review_phase._phase:ReviewPhase._review_single_adr`<br>`src.review_phase._phase:ReviewPhase._run_post_verify_advisor_for_adr`<br>`src.triage_phase:TriagePhase._flow_route` | ★ all (fan-out) |
+| **SYSTEM_REROUTE** | `src.review_phase._adr:AdrReviewMixin._review_single_adr`<br>`src.review_phase._adr:AdrReviewMixin._run_post_verify_advisor_for_adr`<br>`src.triage_phase:TriagePhase._flow_route` | ★ all (fan-out) |
 | **TRANSCRIPT_LINE** | `src.runner_utils:_stream_and_collect`<br>`src.triage:TriageRunner._emit_transcript`<br>`src.triage_phase:TriagePhase._hold_for_blockers` | ★ all (fan-out) |
 | **TRANSCRIPT_SUMMARY** | `src.transcript_summarizer:TranscriptSummarizer._summarize_and_comment_inner` | ★ all (fan-out) |
 | **TRIAGE_UPDATE** | `src.triage:TriageRunner._emit_status` | ★ all (fan-out) |

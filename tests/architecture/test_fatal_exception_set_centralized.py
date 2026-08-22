@@ -53,7 +53,6 @@ _GRANDFATHERED = frozenset(
         "plan_council.py",
         "post_merge_handler.py",
         "pr_unsticker.py",
-        "review_phase/_phase.py",
         "subprocess_util.py",
         "term_proposer_loop.py",
     }

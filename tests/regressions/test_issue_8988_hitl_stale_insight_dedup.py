@@ -190,14 +190,14 @@ class TestReviewPhaseFallbackDedup:
         with (
             patch("review_phase.analyze_patterns", return_value=[]),
             patch(
-                "review_phase._phase.verify_proposals",
+                "review_phase._insights.verify_proposals",
                 return_value=["missing_tests"],
             ),
             patch(
-                "review_phase._phase.CATEGORY_DESCRIPTIONS",
+                "review_phase._insights.CATEGORY_DESCRIPTIONS",
                 {"missing_tests": "Missing test coverage"},
             ),
-            patch("review_phase._phase._PROPOSAL_STALE_DAYS", 30),
+            patch("review_phase._insights._PROPOSAL_STALE_DAYS", 30),
         ):
             await phase._record_review_insight(result)
 
@@ -238,14 +238,14 @@ class TestReviewPhaseFallbackDedup:
         with (
             patch("review_phase.analyze_patterns", return_value=[]),
             patch(
-                "review_phase._phase.verify_proposals",
+                "review_phase._insights.verify_proposals",
                 return_value=["missing_tests"],
             ),
             patch(
-                "review_phase._phase.CATEGORY_DESCRIPTIONS",
+                "review_phase._insights.CATEGORY_DESCRIPTIONS",
                 {"missing_tests": "Missing test coverage"},
             ),
-            patch("review_phase._phase._PROPOSAL_STALE_DAYS", 30),
+            patch("review_phase._insights._PROPOSAL_STALE_DAYS", 30),
         ):
             # First tick: fires through to create_task.
             await phase._record_review_insight(result)
