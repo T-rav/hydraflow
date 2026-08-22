@@ -53,6 +53,8 @@ from diagram_loop import DiagramLoop  # noqa: TCH001
 from discover_runner import DiscoverRunner
 from disturbance_dampener_loop import DisturbanceDampenerLoop
 from docker_runner import get_docker_runner
+from driver_manager import DriverManager
+from driver_ownership import DriverOwnershipRegistry
 from edge_proposer_loop import EdgeProposerLoop
 from entry_evidence_loop import EntryEvidenceLoop
 from epic import EpicCompletionChecker, EpicManager
@@ -339,6 +341,11 @@ class ServiceRegistry:
     contract_refresh_loop: ContractRefreshLoop
     corpus_learning_loop: CorpusLearningLoop
     auto_agent_preflight_loop: AutoAgentPreflightLoop
+    # #11535 scheduling model. The registry is always present but disabled
+    # under Classic; the manager is ``None`` under Classic and is the object
+    # whose absence makes the Classic path byte-identical.
+    driver_ownership: DriverOwnershipRegistry
+    driver_manager: DriverManager | None
     gateway_coverage_loop: GatewayCoverageLoop
     detector_calibration_loop: DetectorCalibrationLoop
     sandbox_failure_fixer_loop: SandboxFailureFixerLoop
@@ -571,6 +578,96 @@ def make_gh_open_pr_exists(
 def build_state_tracker(config: HydraFlowConfig) -> StateTracker:
     """Construct a file-backed ``StateTracker``."""
     return StateTracker(config.state_file)
+
+
+#: ``DriverState`` -> the pipeline label that state maps to, in forward order.
+#: Insertion order is load-bearing twice over: it resolves a shared label to the
+#: *nominal* state (``REVIEW`` before ``DIAGNOSE``, ``HITL_WAIT`` before
+#: ``HITL_APPLY``) per ADR-0137 B1c, and reading it in order gives the
+#: most-advanced-wins tie-break for an issue left carrying two labels by a
+#: crash mid-swap.
+def _driver_stage_labels(config: HydraFlowConfig) -> dict[str, str]:
+    return {
+        "TRIAGE": config.find_label[0],
+        "PLAN": config.planner_label[0],
+        "READY": config.ready_label[0],
+        "REVIEW": config.review_label[0],
+        "DIAGNOSE": config.review_label[0],
+        "HITL_WAIT": config.hitl_label[0],
+        "HITL_APPLY": config.hitl_label[0],
+    }
+
+
+def _build_driver_manager(
+    *,
+    config: HydraFlowConfig,
+    store: IssueStorePort,
+    prs: PRPort,
+    planner_phase: PlanPhase,
+    implementer: ImplementPhase,
+    reviewer: ReviewPhase,
+    hitl_phase: HITLPhase,
+    fetcher: IssueFetcher,
+    ownership: DriverOwnershipRegistry,
+) -> DriverManager:
+    """Assemble the ``issue_controller`` allocator over the existing phases.
+
+    Every collaborator here already exists and is unmodified — the adapters
+    wrap the same per-issue code paths the Classic pools call, so the planner,
+    implementer, reviewer and HITL contracts and output markers are shared by
+    both schedulers rather than duplicated for one of them.
+
+    The per-stage caps handed to the allocator are today's ``max_planners`` /
+    ``max_workers`` / ``max_reviewers`` / ``max_hitl_workers``: ADR-0137 C4 says
+    the allocator *respects* the existing throttles rather than replacing them.
+    """
+    from driver_contracts import DriverPhase
+    from driver_journal import DriverJournal
+    from driver_manager import PipelineLabelAdapter
+    from driver_phase_adapters import (
+        HITLPhaseAdapter,
+        ImplementPhaseAdapter,
+        PlanPhaseAdapter,
+        ReviewPhaseAdapter,
+    )
+
+    stage_labels = _driver_stage_labels(config)
+    adapters = {
+        DriverPhase.PLAN: PlanPhaseAdapter(
+            planner_phase, ready_label=config.ready_label[0]
+        ),
+        DriverPhase.IMPLEMENT: ImplementPhaseAdapter(
+            implementer, review_label=config.review_label[0]
+        ),
+        DriverPhase.REVIEW: ReviewPhaseAdapter(reviewer, fetcher),
+        DriverPhase.HITL: HITLPhaseAdapter(hitl_phase),
+    }
+    return DriverManager(
+        store=store,
+        labels=PipelineLabelAdapter(
+            prs,
+            # Ascending priority, mirroring ``IssueStore._STAGE_PRIORITY``.
+            ordered_labels=(
+                config.find_label[0],
+                config.planner_label[0],
+                config.ready_label[0],
+                config.review_label[0],
+                config.hitl_label[0],
+            ),
+        ),
+        journal=DriverJournal(config.state_file.parent / "driver_journal.jsonl"),
+        ownership=ownership,
+        adapters=adapters,
+        stage_labels=stage_labels,
+        repo_slug=config.repo,
+        max_in_flight=config.driver_max_in_flight,
+        stage_caps={
+            DriverPhase.PLAN: config.max_planners,
+            DriverPhase.IMPLEMENT: config.max_workers,
+            DriverPhase.REVIEW: config.max_reviewers,
+            DriverPhase.HITL: config.max_hitl_workers,
+        },
+    )
 
 
 def build_services(
@@ -1796,6 +1893,11 @@ def build_services(
         deps=loop_deps,
     )
 
+    # #11535 single-owner interlock. Constructed disabled under Classic, where
+    # ``owns()`` then answers False for every issue without consulting state —
+    # so every guard that reads it is provably inert unless an operator opts in.
+    driver_ownership = DriverOwnershipRegistry(enabled=config.uses_issue_driver())
+
     auto_agent_audit_store = PreflightAuditStore(config.data_root)
     auto_agent_preflight_loop = AutoAgentPreflightLoop(  # noqa: F841
         config=config,
@@ -1812,6 +1914,7 @@ def build_services(
         # as every other loop) rather than constructing loop-local copies.
         epic_manager=epic_manager,
         runner=subprocess_runner,
+        driver_ownership=driver_ownership,
     )
 
     # Sandbox-tier auto-fixer reuses the AutoAgentRunner subprocess wrapper
@@ -1952,6 +2055,26 @@ def build_services(
         repo_root=config.repo_root,
     )
 
+    # #11535: the capacity allocator exists ONLY under a preset that runs
+    # per-issue drivers. Under Classic it is ``None`` — not a disabled object
+    # with a dormant tick, but absent — so "nothing changes for an operator who
+    # does not opt in" is a property of the object graph, not of a flag check.
+    driver_manager = (
+        _build_driver_manager(
+            config=config,
+            store=store,
+            prs=prs,
+            planner_phase=planner_phase,
+            implementer=implementer,
+            reviewer=reviewer,
+            hitl_phase=hitl_phase,
+            fetcher=fetcher,
+            ownership=driver_ownership,
+        )
+        if config.uses_issue_driver()
+        else None
+    )
+
     return ServiceRegistry(
         observability=observability,
         workspaces=workspaces,
@@ -2033,6 +2156,8 @@ def build_services(
         contract_refresh_loop=contract_refresh_loop,
         corpus_learning_loop=corpus_learning_loop,
         auto_agent_preflight_loop=auto_agent_preflight_loop,
+        driver_ownership=driver_ownership,
+        driver_manager=driver_manager,
         gateway_coverage_loop=gateway_coverage_loop,
         detector_calibration_loop=detector_calibration_loop,
         sandbox_failure_fixer_loop=sandbox_failure_fixer_loop,

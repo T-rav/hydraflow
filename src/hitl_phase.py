@@ -62,6 +62,9 @@ class HITLPhase:
         self._stop_event = stop_event
         self._active_issues_cb = active_issues_cb
         self._suggest_memory = MemorySuggester(config)
+        # Shared across every ``process_single_correction`` call so repeated
+        # single-item corrections still honour ``max_hitl_workers`` (#11535).
+        self._solo_semaphore: asyncio.Semaphore | None = None
         # HITL corrections: {issue_number: correction_text}
         self._hitl_corrections: dict[int, str] = {}
         # In-memory tracking of active HITL issues
@@ -145,6 +148,31 @@ class HITLPhase:
                     t.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
                 break
+
+    async def process_single_correction(
+        self, issue_number: int, correction: str
+    ) -> None:
+        """Apply exactly one pending correction (#11535).
+
+        The explicit single-item entry point ``issue_controller`` scheduling
+        needs. ``process_corrections`` snapshots and fans out *every* pending
+        correction, which is a scheduling decision the driver owns in controller
+        mode. This runs the same per-issue path under the same
+        ``max_hitl_workers`` semaphore, so the HITL contract and its output
+        markers are unchanged, and it consumes the correction from the pending
+        map exactly as the batch path does so a correction cannot be applied
+        twice.
+        """
+        self._hitl_corrections.pop(issue_number, None)
+        await self._process_one_hitl(
+            issue_number, correction, self._single_item_semaphore()
+        )
+
+    def _single_item_semaphore(self) -> asyncio.Semaphore:
+        """Shared ``max_hitl_workers`` semaphore for single-item corrections."""
+        if self._solo_semaphore is None:
+            self._solo_semaphore = asyncio.Semaphore(self._config.max_hitl_workers)
+        return self._solo_semaphore
 
     async def _process_one_hitl(
         self,
