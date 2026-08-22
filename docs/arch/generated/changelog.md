@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `e13ca23` — test(gateway): pin the decision chain against #11637's new credential patterns *(2026-08-22)*
 - `42d8442` — fix(gateway): close the fourth spawn seam and the Anthropic-lane hole (review round 1) *(2026-08-22)*
 - `6061fad` — refactor(gateway): drop new lint suppressions; align routing tests with the gateway coverage gate *(2026-08-22)*
 - `03e79b1` — feat(gateway): P1 shadow routing policy resolver, explanation, and hash-linked decisions (ADR-0139) *(2026-08-22)*

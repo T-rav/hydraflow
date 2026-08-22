@@ -92,7 +92,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0136 | enforced | `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations`, `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` |
 | ADR-0137 | enforced | `pytest:tests/test_driver_contracts.py`, `pytest:tests/test_director_capability_probe.py`, `pytest:tests/regressions/test_issue_11533_stale_driver_states.py`, `pytest:tests/test_issue_driver.py`, `pytest:tests/test_issue_driver_policy.py`, `pytest:tests/test_driver_manager.py`, `pytest:tests/test_scheduling_default_off.py`, `pytest:tests/regressions/test_issue_11535_kill_mid_transition.py` |
 | ADR-0138 | enforced | `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/test_accounts.py`, `pytest:tests/test_active_routes.py`, `pytest:tests/test_gateway_control_v2_read_api.py`, `pytest:tests/test_gateway_control_reader.py`, `pytest:tests/test_dashboard_gateway_routes.py`, `pytest:tests/regressions/test_issue_11534_in_flight_route_leak.py`, `pytest:tests/scenarios/test_gateway_account_visibility_scenario.py` |
-| ADR-0139 | enforced | `pytest:tests/test_gateway_routing_policy.py`, `pytest:tests/test_gateway_routing_store.py`, `pytest:tests/test_gateway_routing_audit.py`, `pytest:tests/test_route_shadow.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11536_shadow_route_is_inert.py`, `pytest:tests/scenarios/test_gateway_route_shadow_scenario.py` |
+| ADR-0139 | enforced | `pytest:tests/test_routing_policy.py`, `pytest:tests/test_routing_store.py`, `pytest:tests/test_routing_audit.py`, `pytest:tests/test_route_shadow.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11536_shadow_route_is_inert.py`, `pytest:tests/scenarios/test_gateway_route_shadow_scenario.py` |
 
 ## Check → ADRs it protects
 
@@ -189,9 +189,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_flows.py` | ADR-0111 |
 | `pytest:tests/test_gateway_control_reader.py` | ADR-0138 |
 | `pytest:tests/test_gateway_control_v2_read_api.py` | ADR-0138 |
-| `pytest:tests/test_gateway_routing_audit.py` | ADR-0139 |
-| `pytest:tests/test_gateway_routing_policy.py` | ADR-0139 |
-| `pytest:tests/test_gateway_routing_store.py` | ADR-0139 |
 | `pytest:tests/test_gateway_secret_absence.py` | ADR-0138, ADR-0139 |
 | `pytest:tests/test_human_steering.py` | ADR-0103 |
 | `pytest:tests/test_human_steering_actuator.py` | ADR-0103 |
@@ -241,6 +238,9 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_review_phase_hooks.py` | ADR-0015 |
 | `pytest:tests/test_route_back.py` | ADR-0071 |
 | `pytest:tests/test_route_shadow.py` | ADR-0139 |
+| `pytest:tests/test_routing_audit.py` | ADR-0139 |
+| `pytest:tests/test_routing_policy.py` | ADR-0139 |
+| `pytest:tests/test_routing_store.py` | ADR-0139 |
 | `pytest:tests/test_sandbox_scenario_contract.py` | ADR-0052, ADR-0083 |
 | `pytest:tests/test_scheduling_default_off.py` | ADR-0137 |
 | `pytest:tests/test_screenshot_scanner.py` | ADR-0018 |

@@ -9,9 +9,9 @@
 **Related:** [ADR-0085](0085-secrets-never-persist-in-audit-stream.md) (the redaction the decision chain writes through), [ADR-0110](0110-provider-harness-backend-split.md) (the provider/harness binding a route resolves to), [ADR-0119](0119-credit-failover-to-glm.md) (one of the legacy mechanisms this observes and does not touch), [ADR-0134](0134-per-repo-model-harness-selection.md) (the per-repo dial this observes and does not touch), [ADR-0137](0137-fenced-issue-driver-and-director-runtime-boundary.md) (`src/driver_contracts.py:WorkerRole` and `ModelRequirement`, the contracts this reuses rather than re-declaring), [ADR-0138](0138-gateway-account-identity-and-sanitized-route-visibility.md) (the account identities, state vocabulary, and zero-disclosure guards this joins to and extends). Design source: `docs/proposals/gateway-routing-control-plane.md` §"P1 — pure policy core and explanation". Issues: #11536 (this phase), #11531 (the epic), #11534 (the phase this builds on), #11538 / #11539 (the phases this unblocks).
 
 **Enforced by:**
-pytest:tests/test_gateway_routing_policy.py
-pytest:tests/test_gateway_routing_store.py
-pytest:tests/test_gateway_routing_audit.py
+pytest:tests/test_routing_policy.py
+pytest:tests/test_routing_store.py
+pytest:tests/test_routing_audit.py
 pytest:tests/test_route_shadow.py
 pytest:tests/test_gateway_secret_absence.py
 pytest:tests/regressions/test_issue_11536_shadow_route_is_inert.py

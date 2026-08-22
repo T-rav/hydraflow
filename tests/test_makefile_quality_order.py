@@ -95,7 +95,8 @@ def test_gateway_package_branch_coverage_gate_is_contractual() -> None:
     target_recipe = text[target_start:target_end]
 
     assert _make_assignment_tokens("GATEWAY_PACKAGE_TEST_PATHS") == {
-        "tests/test_gateway_*.py"
+        "tests/test_gateway_*.py",
+        "tests/test_routing_*.py",
     }
     assert _make_assignment_tokens("GATEWAY_PACKAGE_COVERAGE_MIN") == {"85"}
     command = _make_assignment_tokens("GATEWAY_PACKAGE_COVERAGE_CMD")
