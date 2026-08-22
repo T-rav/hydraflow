@@ -348,12 +348,6 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "HYDRAFLOW_SECOND_ORDER_VITALS_MIN_MERGE_THROUGHPUT",
         1,
     ),
-    ("adr_drift_resolver_interval", "HYDRAFLOW_ADR_DRIFT_RESOLVER_INTERVAL", 3600),
-    (
-        "adr_drift_resolver_max_triage_per_tick",
-        "HYDRAFLOW_ADR_DRIFT_RESOLVER_MAX_TRIAGE_PER_TICK",
-        5,
-    ),
     ("adr_review_interval", "HYDRAFLOW_ADR_REVIEW_INTERVAL", 86400),
     ("adr_review_approval_threshold", "HYDRAFLOW_ADR_REVIEW_APPROVAL_THRESHOLD", 2),
     ("adr_review_max_rounds", "HYDRAFLOW_ADR_REVIEW_MAX_ROUNDS", 3),
@@ -520,21 +514,6 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
         "wiki_rot_detector_max_issues_per_tick",
         "HYDRAFLOW_WIKI_ROT_DETECTOR_MAX_ISSUES_PER_TICK",
         10,
-    ),
-    (
-        "adr_touchpoint_auditor_interval",
-        "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_INTERVAL",
-        14400,
-    ),
-    (
-        "adr_drift_fleet_batch_threshold",
-        "HYDRAFLOW_ADR_DRIFT_FLEET_BATCH_THRESHOLD",
-        4,
-    ),
-    (
-        "adr_drift_shared_infra_fanout_threshold",
-        "HYDRAFLOW_ADR_DRIFT_SHARED_INFRA_FANOUT_THRESHOLD",
-        4,
     ),
     (
         "adr_conformance_interval",
@@ -933,11 +912,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
     # Static config gates — 34 loops (dark-factory §2.1 #3 defense-in-depth)
     ("adr_reviewer_loop_enabled", "HYDRAFLOW_ADR_REVIEWER_LOOP_ENABLED", True),
     (
-        "adr_touchpoint_auditor_loop_enabled",
-        "HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_LOOP_ENABLED",
-        False,  # #10540: activity-based ADR-drift retired; default OFF.
-    ),
-    (
         "adr_conformance_loop_enabled",
         "HYDRAFLOW_ADR_CONFORMANCE_LOOP_ENABLED",
         True,
@@ -1106,11 +1080,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
-        "adr_drift_resolver_loop_enabled",
-        "HYDRAFLOW_ADR_DRIFT_RESOLVER_LOOP_ENABLED",
-        False,  # #10540: activity-based ADR-drift retired; default OFF.
-    ),
-    (
         "human_branch_shepherd_enabled",
         "HYDRAFLOW_HUMAN_BRANCH_SHEPHERD_ENABLED",
         True,
@@ -1167,7 +1136,6 @@ _ENV_LITERAL_OVERRIDES: list[tuple[str, str]] = [
     ("triage_honeypot_provider", "HYDRAFLOW_TRIAGE_HONEYPOT_PROVIDER"),
     ("pr_unstick_provider", "HYDRAFLOW_PR_UNSTICK_PROVIDER"),
     ("term_proposer_provider", "HYDRAFLOW_TERM_PROPOSER_PROVIDER"),
-    ("adr_drift_resolver_provider", "HYDRAFLOW_ADR_DRIFT_RESOLVER_PROVIDER"),
     ("maintenance_provider", "HYDRAFLOW_MAINTENANCE_PROVIDER"),
 ]
 
@@ -1252,11 +1220,6 @@ _ENV_COMBO_OVERRIDES: list[tuple[str, str, str]] = [
     ("HYDRAFLOW_ADR_REVIEW", "adr_review_tool", "adr_review_model"),
     ("HYDRAFLOW_REPORT_ISSUE", "report_issue_tool", "report_issue_model"),
     ("HYDRAFLOW_TERM_PROPOSER", "term_proposer_tool", "term_proposer_model"),
-    (
-        "HYDRAFLOW_ADR_DRIFT_RESOLVER",
-        "adr_drift_resolver_tool",
-        "adr_drift_resolver_model",
-    ),
 ]
 
 
@@ -2591,29 +2554,6 @@ class HydraFlowConfig(BaseModel):
             "gates ordinary merges, or files fix PRs."
         ),
     )
-    adr_drift_resolver_interval: int = Field(
-        default=3600,
-        ge=900,
-        le=86400,
-        description=(
-            "AdrDriftResolverLoop cycle interval in seconds (#9976: "
-            "triage-before-escalate for adr_touchpoint_auditor's ADR-drift "
-            "rollups; default 1h)"
-        ),
-    )
-    adr_drift_resolver_max_triage_per_tick: int = Field(
-        default=5,
-        ge=1,
-        le=20,
-        description=(
-            "Max LLM triage calls AdrDriftResolverLoop attempts in one tick "
-            "(#9976) — every call ATTEMPTED counts against this budget, "
-            "including one that errors, not just successful triages "
-            "(#11181). Overflow candidates are simply retried next tick — "
-            "no carryover bookkeeping needed since the candidate set is "
-            "re-derived from state each tick."
-        ),
-    )
 
     # Hash-chained audit stream retention (CH-1, #9729). None = keep forever.
     # A set value is a retention FLOOR: RunsGCLoop may prune records strictly
@@ -3937,31 +3877,6 @@ class HydraFlowConfig(BaseModel):
         default="opus",
         description="Model for report-issue worker (codebase research + structured issue creation)",
     )
-    adr_drift_resolver_tool: Literal["claude", "codex"] = Field(
-        default="claude",
-        description="CLI backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
-    )
-    adr_drift_resolver_model: str = Field(
-        default="sonnet",
-        description=(
-            "Model for AdrDriftResolverLoop's TRIAGE call (#9976) — "
-            "classifying one ADR-drift rollup's cited diff against the "
-            "ADR's Decision/Context text. Sonnet is sufficient; the task is "
-            "structured classification, not deep reasoning."
-        ),
-    )
-    adr_drift_resolver_timeout: int = Field(
-        default=180,
-        ge=30,
-        le=1800,
-        description="Per-call timeout (seconds) for AdrDriftResolverLoop's TRIAGE call (#9976).",
-    )
-    adr_drift_resolver_provider: Literal[
-        "claude", "gateway", "openrouter", "zai", "kimi"
-    ] = Field(
-        default="claude",
-        description="Backend for AdrDriftResolverLoop's TRIAGE call (#9976).",
-    )
     report_issue_interval: int = Field(
         default=30,
         ge=10,
@@ -4817,45 +4732,6 @@ class HydraFlowConfig(BaseModel):
         description="Seconds between FakeCoverageAuditorLoop ticks (default 7d)",
     )
 
-    # Trust fleet — AdrTouchpointAuditorLoop (ADR-0056)
-    adr_touchpoint_auditor_interval: int = Field(
-        default=14400,
-        ge=900,
-        le=86400,
-        description="Seconds between AdrTouchpointAuditorLoop ticks (default 4h)",
-    )
-    adr_drift_label: list[str] = Field(
-        default=["hydraflow-adr-drift"],
-        description="Labels for ADR drift findings filed by adr_touchpoint_auditor",
-    )
-    adr_drift_stuck_label: list[str] = Field(
-        default=["hydraflow-adr-drift-stuck"],
-        description="Labels for stuck ADR drift escalations (paired with hitl_escalation_label)",
-    )
-    adr_drift_fleet_batch_threshold: int = Field(
-        default=4,
-        ge=2,
-        le=100,
-        description=(
-            "Distinct-ADR count at which a single PR's drift findings collapse "
-            "into ONE batched fleet rollup issue instead of N per-ADR rollups "
-            "(#9662 cross-cutting caretaker-fleet sweeps)"
-        ),
-    )
-    adr_drift_shared_infra_fanout_threshold: int = Field(
-        default=4,
-        ge=2,
-        le=100,
-        description=(
-            "Live (Accepted/Proposed) ADR count at which a bare-cited src/ "
-            "module is automatically treated as shared infra (suppressed from "
-            "drift the same as `_SHARED_INFRA_MODULES`) — churn-derived, so "
-            "the next high-churn shared module doesn't need a manual allowlist "
-            "edit (#10456). Floor of 2: fan-out counts the citing ADR itself, "
-            "so 1 would suppress every bare citation"
-        ),
-    )
-
     # Trust fleet — AdrConformanceLoop (ADR-0100)
     adr_conformance_interval: int = Field(
         default=86400,
@@ -4939,14 +4815,6 @@ class HydraFlowConfig(BaseModel):
             "capped, so ``reconcile_open`` cannot wrongly auto-close a live "
             "escalation for a merely rate-limited cite (patterns/0576)."
         ),
-    )
-
-    # Caretaker — AdrTouchpointAuditorLoop (ADR-0056)
-    adr_touchpoint_auditor_interval: int = Field(
-        default=14400,
-        ge=900,
-        le=86400,
-        description="Seconds between AdrTouchpointAuditorLoop ticks (default 4h)",
     )
 
     # Caretaker — AutoTightenLoop (auto-tightening ratchet)
@@ -5782,20 +5650,6 @@ class HydraFlowConfig(BaseModel):
         default=True,
         description="Deploy-time kill-switch for ADRReviewerLoop.",
     )
-    adr_touchpoint_auditor_loop_enabled: bool = Field(
-        default=False,
-        description=(
-            "Deploy-time kill-switch for AdrTouchpointAuditorLoop. Defaults "
-            "OFF (#10540): activity-based ADR-drift ('a cited module changed "
-            "in a PR', ~70% false positives) is retired in favour of the "
-            "deterministic violation-based citation gate "
-            "(tests/test_adr_citation_conformance.py). The loop code is kept "
-            "for now; set HYDRAFLOW_ADR_TOUCHPOINT_AUDITOR_LOOP_ENABLED=true "
-            "to re-enable. Deliberately EXCLUDED from the self-repair-on-by-"
-            "default set: its triage sibling adr_drift_resolver stays off, so "
-            "its false-positive rollups would pile up unhandled."
-        ),
-    )
     adr_conformance_loop_enabled: bool = Field(
         default=True,
         description=(
@@ -6108,19 +5962,6 @@ class HydraFlowConfig(BaseModel):
             "default; disable via the System tab). Also gated by "
             "sampled_audit_reaudit_enabled, so the air-gapped sandbox "
             "(which pins re-audit OFF) reaches no adjudicator spawn either."
-        ),
-    )
-    adr_drift_resolver_loop_enabled: bool = Field(
-        default=False,
-        description=(
-            "Deploy-time kill-switch for AdrDriftResolverLoop (#9976: "
-            "triage-before-escalate so ADR-drift rollups self-resolve). "
-            "Defaults OFF (#10540): it triaged the activity-based ADR-drift "
-            "rollups that are now retired in favour of the deterministic "
-            "violation-based citation gate "
-            "(tests/test_adr_citation_conformance.py), so there is nothing for "
-            "it to resolve. Loop code is kept; set "
-            "HYDRAFLOW_ADR_DRIFT_RESOLVER_LOOP_ENABLED=true to re-enable."
         ),
     )
     stale_issue_loop_enabled: bool = Field(
@@ -6759,7 +6600,6 @@ _MAINTENANCE_DIALED_ROLES: tuple[str, ...] = (
     "wiki_compilation",
     "adr_review",
     "transcript_summary",
-    "adr_drift_resolver",
     "term_proposer",
     "triage_honeypot",
     "pr_unstick",
@@ -6976,11 +6816,6 @@ def _tool_model_stage_pairs(config: HydraFlowConfig) -> tuple[_StageToolModel, .
         ("report_issue", config.report_issue_tool, config.report_issue_model),
         ("adr_review", config.adr_review_tool, config.adr_review_model),
         ("term_proposer", config.term_proposer_tool, config.term_proposer_model),
-        (
-            "adr_drift_resolver",
-            config.adr_drift_resolver_tool,
-            config.adr_drift_resolver_model,
-        ),
         (
             "sampled_audit",
             resolve_maintenance_tool(config),

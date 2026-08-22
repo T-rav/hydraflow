@@ -339,7 +339,7 @@ def scan_adr_directory(adr_dir: Path) -> list[ADR]:
 
     Emits a ``logger.warning`` for each ADR number claimed by more than one
     file. Two ADRs sharing a number silently collapse in every dict-keyed
-    downstream caller (``adrs_touching``, ``compute_drift``, the ``adr_xref``
+    downstream caller (``adrs_touching``, ``unresolved_citations``, the ``adr_xref``
     generator), so the colliding citations merge non-deterministically. The
     #9406 collisions went unnoticed for weeks because nothing on the runtime
     path signalled the duplicate; this warning surfaces it in logs / Sentry

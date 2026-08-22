@@ -58,16 +58,6 @@ HYDRAFLOW_LABELS: tuple[tuple[str, str, str], ...] = (
         "staging→main promotion stuck (repeated RC failures)",
     ),
     (
-        "adr_drift_label",
-        "5319e7",
-        "ADR drift — cited modules changed without ADR update",
-    ),
-    (
-        "adr_drift_stuck_label",
-        "b60205",
-        "ADR drift unresolved after retries",
-    ),
-    (
         "log_ingest_label",
         "d4c5f9",
         "Recurring log error/warning clustered + filed by LogIngestLoop",

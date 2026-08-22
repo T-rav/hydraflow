@@ -76,8 +76,6 @@ areas:
       the self-documenting architecture DiagramLoop.
     loops:
       - AdrConformanceLoop
-      - AdrDriftResolverLoop
-      - AdrTouchpointAuditorLoop
       - BranchProtectionAuditorLoop
       - ContractRefreshLoop
       - DiagramLoop

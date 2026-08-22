@@ -460,7 +460,6 @@ class TestGuardrails:
             "hydraflow-ready",
             "hydraflow-review",
             "hydraflow-hitl",
-            "hydraflow-adr-drift",
             "hitl-escalation",
             "hydraflow-refinement-digest",
             "hydraflow-diagnose",

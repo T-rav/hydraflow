@@ -40,9 +40,6 @@ entries:
   src/adr_conformance_loop.py::noqa:TCH001: 3
   src/adr_draft_opener.py::noqa:BLE001: 1
   src/adr_reviewer.py::noqa:PLC0415: 2
-  src/adr_touchpoint_auditor_loop.py::noqa:PLC0415: 1
-  src/adr_touchpoint_auditor_loop.py::noqa:PLR0915: 1
-  src/adr_touchpoint_auditor_loop.py::noqa:TCH001: 2
   src/adversarial_retry_loop.py::noqa:PLC0415: 4
   src/adversarial_retry_loop.py::noqa:S101: 4
   src/agent.py::noqa:BLE001: 2

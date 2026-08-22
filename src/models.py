@@ -2338,16 +2338,10 @@ class StateData(BaseModel):
     # issues per uncovered method. See `_handle_rollup` in
     # `fake_coverage_auditor_loop.py`.
     fake_coverage_rollup_issues: dict[str, int] = Field(default_factory=dict)
-    # AdrTouchpointAuditorLoop (ADR-0056) — cursor is ISO-8601 of last-scanned merged PR.
-    adr_audit_cursor: str = Field(default="")
-    adr_audit_attempts: dict[str, int] = Field(default_factory=dict)
-    # Per-ADR rollup tracking (#8987). Keyed by "ADR-NNNN"; value carries the
-    # rollup issue number + the set of PR numbers currently listed in the body.
-    # Used so subsequent ticks update the body in-place rather than re-filing.
-    adr_rollup_issues: dict[str, dict] = Field(default_factory=dict)
     # AdrConformanceLoop (ADR-0100) — remediation attempt counters + rollup
-    # tracking. Mirrors adr_audit_attempts/adr_rollup_issues above under a
-    # distinct namespace so the two auditors' counters never collide.
+    # tracking. (ADR-0136 removed the sibling adr_audit_*/adr_rollup_issues
+    # slice with AdrTouchpointAuditorLoop; StateData is extra="ignore", so any
+    # of those keys still on disk is dropped silently — no migration needed.)
     adr_conformance_attempts: dict[str, int] = Field(default_factory=dict)
     adr_conformance_rollup_issues: dict[str, dict] = Field(default_factory=dict)
     # Generic rollup tracking for RollupIssueManager (#9359 hygiene). Keyed by

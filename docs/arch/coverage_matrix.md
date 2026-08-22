@@ -64,7 +64,6 @@ None — every loop has substantive (non-roll-call) coverage when an ADR mention
 | Loop | ADR | Wiki | Generated | Standard | Unit | Scenario | Sandbox |
 |---|---|---|---|---|---|---|---|
 | `ADRReviewerLoop` | ❌ [bd:advisor-pg6] | ❌ [bd:advisor-4mj] | ❌ [bd:advisor-7yr] | ✅ (caretaking/caretaker loop) | ✅ `test_adr_reviewer_loop.py` | ✅ in catalog | ❌ [bd:advisor-dqz] |
-| `AdrTouchpointAuditorLoop` | ✅ [0056](../adr/0056-adr-touchpoint-gate-to-caretaker-loop.md) | ❌ [bd:advisor-4bd] | ❌ [bd:advisor-xll] | ❌ [bd:advisor-rd8] | ✅ `test_adr_touchpoint_auditor_loop.py` | ✅ in catalog | ❌ [bd:advisor-vch] |
 | `AutoAgentPreflightLoop` | ✅ [0050](../adr/0050-auto-agent-hitl-preflight.md) | ✅ `dark-factory.md` | ❌ [bd:advisor-563] | ❌ [bd:advisor-drv] | ✅ `test_auto_agent_preflight_loop.py` | ✅ in catalog | ❌ [bd:advisor-pn6] |
 | `CIMonitorLoop` | ✅ [0029](../adr/0029-caretaker-loop-pattern.md) | ❌ [bd:advisor-yr9] | ❌ [bd:advisor-9hj] | ❌ [bd:advisor-uu5] | ✅ `test_ci_monitor_loop.py` | ✅ in catalog | ❌ [bd:advisor-3e1] |
 | `ContractRefreshLoop` | ✅ [0045](../adr/0045-trust-architecture-hardening.md), [0047](../adr/0047-fake-adapter-contract-testing-cassettes.md) | ❌ [bd:advisor-uxt] | ❌ [bd:advisor-6t8] | ❌ [bd:advisor-vad] | ✅ `test_contract_refresh_loop.py` | ✅ in catalog | ❌ [bd:advisor-nwl] |
@@ -154,7 +153,7 @@ Cassette and Contract columns are N/A for all ports because ADR-0047 defines con
 
 If N < 9, the extractor logic was patched and the affected section was re-run before this entry was recorded.
 
-**Early extractor sample (post-Task 7, after snake() acronym-bug fix):** WorkspaceGCLoop, CostBudgetWatcherLoop, AdrTouchpointAuditorLoop. Result: 3/3 agree with manual grep. Run on commit `73cf6f28dcf6070a2f7fdba27eefe5075a057e3a`.
+**Early extractor sample (post-Task 7, after snake() acronym-bug fix):** WorkspaceGCLoop, CostBudgetWatcherLoop, AdrTouchpointAuditorLoop (since removed by ADR-0136). Result: 3/3 agree with manual grep. Run on commit `73cf6f28dcf6070a2f7fdba27eefe5075a057e3a`.
 
 ## Counts reconciliation
 

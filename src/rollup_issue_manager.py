@@ -4,8 +4,8 @@
 condition goes bad but never close it when the condition recovers, so resolved
 conditions accumulate as stale open issues (the bulk of the backlog this
 session pruned). This centralizes the proven rollup pattern from
-``AdrTouchpointAuditorLoop`` / ``FakeCoverageAuditorLoop`` /
-``LiveCorpusReplayLoop``:
+``FakeCoverageAuditorLoop`` / ``LiveCorpusReplayLoop`` (and the
+touchpoint auditor the pattern was first proven in, retired by ADR-0136):
 
 - :meth:`ensure` — create ONE issue per subject, or update its body in place
   when the variable content changes (no-op when unchanged).

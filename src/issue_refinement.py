@@ -508,7 +508,6 @@ _ACTIVE_PIPELINE_PHASE_LABELS: frozenset[str] = frozenset(
 # worked by another loop, not the refinement loop's to touch.
 _ESCALATION_LABELS: frozenset[str] = frozenset(
     {
-        "hydraflow-adr-drift",  # adr_drift_label (config.py) — ADR-drift finding
         # bare literal (prep.py HYDRAFLOW_LITERAL_LABELS) — stuck-loop HITL
         # escalation root, distinct from the hydraflow-hitl-escalation
         # config field

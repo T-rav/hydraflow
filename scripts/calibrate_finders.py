@@ -87,14 +87,6 @@ def _detect_wiki_rot(worktree: Path) -> int:
     return count_broken_cites(worktree)
 
 
-def _detect_adr_drift(worktree: Path) -> int:
-    from adr_citation_resolve import unresolved_citations  # noqa: PLC0415
-    from adr_index import ADRIndex  # noqa: PLC0415
-
-    index = ADRIndex(worktree / "docs" / "adr")
-    return len(unresolved_citations(index, repo_root=worktree))
-
-
 def _detect_edge_proposer(worktree: Path) -> int:
     from edge_proposer_loop import count_edge_proposals  # noqa: PLC0415
 
@@ -105,7 +97,6 @@ def _detect_edge_proposer(worktree: Path) -> int:
 #: supported; everything else in the catalog is deferred (LLM-driven).
 DETERMINISTIC_DETECTORS: dict[str, Detector] = {
     "wiki_rot": _detect_wiki_rot,
-    "adr_drift": _detect_adr_drift,
     "edge_proposer": _detect_edge_proposer,
 }
 

@@ -12,7 +12,7 @@ model {
   index = step 'ADRIndex(docs/adr).adrs()'
   corpus = step 'docs/adr/*.md'
   live = step 'ADR.is_live gate (Accepted | Proposed)'
-  drift = step 'compute_drift / _citation_drifts'
+  drift = step 'assert the pinned citation (as today)'
   boom = step 'CI RED on an unrelated PR'
   retire = step 'pytest.skip — pin self-retires'
 

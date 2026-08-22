@@ -52,18 +52,27 @@ The floors persist append-only to `<data_root>/calibration/finder_floors.jsonl` 
 |---|---|---|
 | `erosion_metrics` | `erosion` | ErosionMetricsLoop |
 | `edge_proposer` | `edges` | EdgeProposerLoop |
-| `adr_drift` | `adr-drift` | AdrTouchpointAuditorLoop |
 | `entry_evidence` | `wiki-evidence` | EntryEvidenceLoop |
 | `term_proposer` | `glossary-terms` | TermProposerLoop |
 | `wiki_rot` | `wiki-rot` | WikiRotDetectorLoop |
 
+> **Amended 2026-08-22 (#11600).** The catalog was six; it is five. The
+> `adr_drift` / `adr-drift` entry stood for `AdrTouchpointAuditorLoop`, which
+> [ADR-0136](0136-adr-drift-enforcement-deterministic-citation-gate.md) deleted.
+> A finder floor measures a *generative* loop's residual output against a clean
+> baseline; with no loop there is nothing generative to calibrate, and its
+> deterministic stand-in detector (unresolved ADR citations) is a CI invariant
+> the Tests lane already enforces on every PR, not LLM noise. The row, its
+> `DETERMINISTIC_DETECTORS` detector, and its `finder_faceplate` worker join
+> are removed; the rest of the catalog is unchanged.
+
 ## What is real today (this first slice) vs deferred
 
-**Real:** the pure core (`GoldenBaseline`, `NoiseSample`, `FinderFloor`, `GainProposal`, `measure_floor`, `threshold_above_floor`, `indistinguishable_from_floor`, `calibrate_finder`, `propose_gain`, `is_baseline_stale`, `drift_since`); the curated six-finder catalog; the injected `FinderRunner` seam + `collect_samples`; the append-only `CalibrationLedger`; and the full unit suite pinning the statistics on known distributions, the read-only-proposal guardrail (frozen models, input unchanged), the low-confidence and zero-floor edge cases, and the ledger round-trip.
+**Real:** the pure core (`GoldenBaseline`, `NoiseSample`, `FinderFloor`, `GainProposal`, `measure_floor`, `threshold_above_floor`, `indistinguishable_from_floor`, `calibrate_finder`, `propose_gain`, `is_baseline_stale`, `drift_since`); the curated finder catalog (six at authoring time, five since #11600); the injected `FinderRunner` seam + `collect_samples`; the append-only `CalibrationLedger`; and the full unit suite pinning the statistics on known distributions, the read-only-proposal guardrail (frozen models, input unchanged), the low-confidence and zero-floor edge cases, and the ledger round-trip.
 
 **Deferred (honestly):**
 
-- **Phase 2** — the real measurement seam: check out a golden baseline sha and invoke the actual finder loops against it (expensive, non-deterministic; excluded here on purpose). Broaden the catalog beyond the seed six.
+- **Phase 2** — the real measurement seam: check out a golden baseline sha and invoke the actual finder loops against it (expensive, non-deterministic; excluded here on purpose). Broaden the catalog beyond the seed set.
 - **Phase 2** — a slow-cadence calibration *loop* that re-measures floors on a schedule, watches `drift_since` / `mean_drift`, and files a `hydraflow-find` when a finder's live mix goes indistinguishable from its floor. This slice only *produces* the floor substrate; it does not watch it.
 - **Follow-up** — consolidate `upper_control_limit`, `shewhart_c_chart_ucl`, and this engine's individuals chart into one shared `shewhart` module.
 - No scenario / sandbox-e2e layer is added in this slice, and that is deliberate, not skipped: there is no new loop, no label transition, and no UI/docker wiring to exercise — the deliverable is a pure engine + ledger, whose whole contract is covered by fast unit tests. Those layers become load-bearing when the Phase-2 calibration loop lands.

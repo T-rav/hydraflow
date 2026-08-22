@@ -23,7 +23,6 @@ _CLASS_RE = re.compile(r"class\s+(\w+)\s*\(.*BaseBackgroundLoop.*\)")
 _GRANDFATHERED: frozenset[str] = frozenset(
     {
         "adr_reviewer_loop",
-        "adr_touchpoint_auditor_loop",
         "auto_agent_preflight_loop",
         "branch_protection_auditor_loop",
         "ci_monitor_loop",

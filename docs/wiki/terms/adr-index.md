@@ -20,7 +20,7 @@ proposal_imports_seen: 1
 
 ## Definition
 
-Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on first access and re-scans only when the directory mtime changes. Exposes parsed ADR records — including normalized status, context summary, cited source files, and symbol-level citations — to caretaker loops and agent prompts. Acts as the authoritative in-process view of architecture decisions, enabling loops such as AdrTouchpointAuditorLoop to check which Accepted ADRs cite a given source file without re-reading the filesystem on every tick. The module docstring frames it explicitly as load-bearing: agents must know what has already been decided before they plan.
+Mtime-based runtime cache over the ADR directory that parses docs/adr/*.md on first access and re-scans only when the directory mtime changes. Exposes parsed ADR records — including normalized status, context summary, cited source files, and symbol-level citations — to caretaker loops and agent prompts. Acts as the authoritative in-process view of architecture decisions, enabling callers such as `adr_citation_resolve.unresolved_citations` (the ADR-0136 citation gate) and AdrConformanceLoop to check what live ADRs cite without re-reading the filesystem on every access. The module docstring frames it explicitly as load-bearing: agents must know what has already been decided before they plan.
 
 ## Invariants
 

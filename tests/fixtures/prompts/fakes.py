@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from adr_drift_triage_llm import TriageContext
 from audit.models import AuditSample, MergedChange
 
 # `_DirectionProposal` is module-private to decomposition_council, but it is the
@@ -1007,138 +1006,11 @@ empty-state copy.""",
 # Same scenario, downstream: what the caretaker fleet did with PR #9820
 # ---------------------------------------------------------------------------
 # The loop-owned and subpackage builders below each read one after-effect of the
-# merge above. AdrTouchpointAuditorLoop flagged PR #9820 for touching
-# `src/escape/ledger.py`, which ADR-0114 cites, and rolled the finding up as
-# issue #9903. SampledAuditLoop sampled the same merge, re-audited it, and
-# disagreed. A human filed the bucketing defect the auditor named as bug #9861,
+# merge above. SampledAuditLoop sampled the merge, re-audited it, and
+# disagreed. A human filed the bucketing defect it named as bug #9861,
 # and the fix PR #9871 (branch `agent/issue-9861`) then went red in CI and in
 # the sandbox tier. Same pinning rule as the block above: no ULID defaults, no
 # now() — every rendered field is fixed so snapshots don't drift.
-
-_ADR_0114_MARKDOWN = """# ADR-0114: The escape ledger is append-only
-
-## Status
-
-Accepted
-
-## Context
-
-The first escape store (#10231) was a mutable JSON object keyed by escape id.
-Every human re-attribution overwrote the row it corrected, so by the time we
-wanted to ask "how often does a first attribution turn out to be wrong?" the
-evidence had been erased in place. The ledger is the factory's audit trail of
-defects that got past the gauntlet; a trail that can be edited is not evidence.
-
-Two forces pull the other way and are why this needs to be written down:
-
-1. Derived views want a compact table. A digest, a metrics rollup, and the
-   dashboard all want "current state per escape", not the full event stream.
-2. Long-running hosts want the file bounded. The 2026-07 host is at 41 rows and
-   180KB; a naive reader that parses the whole file per request is wasteful.
-
-## Decision
-
-The on-disk ledger is append-only. One JSONL row per event, appended, never
-rewritten.
-
-- A correction is a NEW row sharing the original's id (supersession), never an
-  edit of the original line. `append_resolution` is the only sanctioned writer
-  for human decisions and it appends.
-- `EscapeLedger` never opens the ledger file for writing in a mode other than
-  append. No compaction, pruning, or in-place disposition update without an ADR
-  that supersedes this one.
-- Readers collapse the stream to a current view on read (`latest_by_escape`,
-  two-stage: by id, then by `detection_ref`). Collapsing is a read concern.
-- Derived views (digests, metrics, dashboard panels) are computed from a read.
-  Caching a derived view IN MEMORY is explicitly allowed and expected; what is
-  forbidden is a cache that becomes a second source of truth on disk.
-
-## Consequences
-
-- The ledger grows monotonically. That is accepted: it is an audit trail, and
-  the growth rate is bounded by the escape rate, not by traffic.
-- Any consumer that wants "one row per escape" pays the collapse cost on read.
-- A reviewer can always reconstruct what was believed at any point in time.
-
-## Citations
-
-- `src/escape/ledger.py`
-- `src/escape/models.py`
-- `src/jsonl_ledger.py`
-"""
-
-# PR #9820's diff, already scoped by the loop to the module ADR-0114 cites.
-# The touchpoint detector cannot tell whether the added `append` override and
-# the new `_digest_cache` violate the append-only decision or are the in-memory
-# derived-view caching the ADR explicitly allows — which is exactly the
-# judgment the TRIAGE prompt exists to make.
-_LEDGER_SCOPED_DIFF_9820 = """diff --git a/src/escape/ledger.py b/src/escape/ledger.py
-index 4f21a90..b8c7d13 100644
---- a/src/escape/ledger.py
-+++ b/src/escape/ledger.py
-@@ -18,10 +18,13 @@
- from __future__ import annotations
-
- import logging
-+from collections.abc import Iterator
- from dataclasses import replace
- from pathlib import Path
-
-+from escape.digest import WeekBucket, build_digest
- from escape.metrics import escape_by_id, latest_by_escape, latest_by_id
- from escape.models import EncodedAs, EscapeRecord
- from jsonl_ledger import IdentifiedJsonlLedger
-
-@@ -40,6 +43,10 @@ class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
-
-     def __init__(self, path: Path) -> None:
-         super().__init__(path, EscapeRecord, logger=logger)
-+        # Derived-view cache for the weekly digest route (#9812), keyed by the
-+        # `weeks` window. Rebuilt from a read; never persisted. Cleared on
-+        # append so a freshly recorded escape can never be served stale.
-+        self._digest_cache: dict[int, list[WeekBucket]] = {}
-
-     def read_latest(self) -> list[EscapeRecord]:
-         return latest_by_escape(self.read_all())
-@@ -57,6 +64,27 @@ class EscapeLedger(IdentifiedJsonlLedger[EscapeRecord]):
-     def read_latest_index(self) -> dict[str, EscapeRecord]:
-         return escape_by_id(self.read_all())
-
-+    def iter_records(self) -> Iterator[EscapeRecord]:
-+        # Single-pass read for the digest: build_digest only needs one pass,
-+        # and the route was re-parsing the whole file per request.
-+        yield from self.read_all()
-+
-+    def weekly_digest(self, *, weeks: int = 8) -> list[WeekBucket]:
-+        cached = self._digest_cache.get(weeks)
-+        if cached is not None:
-+            return cached
-+        buckets = build_digest(self.iter_records(), weeks=weeks)
-+        self._digest_cache[weeks] = buckets
-+        return buckets
-+
-+    def append(self, record: EscapeRecord) -> None:
-+        # Invalidate the derived digest cache, then delegate. This override
-+        # adds no write path of its own: the base class append is still the
-+        # only thing that touches the file, still in append mode.
-+        self._digest_cache.clear()
-+        super().append(record)
-+
-     def append_resolution(
-         self,
-         escape_id: str,
-"""
-
-_TRIAGE_CONTEXT_PR_9820 = TriageContext(
-    adr_number=114,
-    adr_title="The escape ledger is append-only",
-    adr_markdown=_ADR_0114_MARKDOWN,
-    pr_number=9820,
-    pr_diff=_LEDGER_SCOPED_DIFF_9820,
-    issue_number=9903,
-    issue_labels=("hydraflow-find", "adr-drift", "adr:0114"),
-)
-
 
 # The re-auditor's disagreement on the merged PR #9820 — three named claims of
 # descending strength, so the adjudicator has something real to sort rather
@@ -1946,10 +1818,9 @@ _REGISTRY: dict[tuple[str, str], Any] = {
     ("b", "refinement_issue_9877"): _REFINEMENT_ISSUE_9877,
     ("issue", "refinement_issue_9877"): _REFINEMENT_ISSUE_9877,
     ("change", "merged_change_9820"): _MERGED_CHANGE_9820,
-    # Same scenario, downstream: ADR-drift triage of PR #9820 (rollup #9903),
-    # adjudication of the re-audit disagreement, the fix PR #9871 going red,
-    # the suppressions it left behind, and the next UL candidate.
-    ("ctx", "adr_drift_pr_9820"): _TRIAGE_CONTEXT_PR_9820,
+    # Same scenario, downstream: adjudication of the re-audit disagreement,
+    # the fix PR #9871 going red, the suppressions it left behind, and the
+    # next UL candidate.
     ("ctx", "term_proposer_audit_sample_ledger"): _DRAFT_CONTEXT_AUDIT_SAMPLE_LEDGER,
     ("sample", "audit_disagreement_9820"): _AUDIT_SAMPLE_9820,
     ("unit", "disturbance_suppressions_digest"): _BURNDOWN_UNIT_DIGEST,

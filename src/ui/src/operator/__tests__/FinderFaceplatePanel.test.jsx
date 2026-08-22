@@ -82,10 +82,10 @@ describe('FinderFaceplatePanel — header + rows', () => {
 
   it('renders the calm within-floor chip for a within_floor (gain-down candidate) finder', () => {
     render(<FinderFaceplatePanel faceplates={vm({
-      calibrated: [calibratedRow({ finderId: 'adr_drift', status: 'within_floor', liveRate: 0, threshold: 0, floorLabel: '0 ±0 deterministic' })],
+      calibrated: [calibratedRow({ finderId: 'entry_evidence', status: 'within_floor', liveRate: 0, threshold: 0, floorLabel: '0 ±0 deterministic' })],
       aboveFloorCount: 0,
     })} />)
-    expect(screen.getByTestId('faceplate-status-adr_drift')).toHaveTextContent('within floor')
+    expect(screen.getByTestId('faceplate-status-entry_evidence')).toHaveTextContent('within floor')
   })
 
   it('shows a provisional caveat marker (with an explaining title) on a low-confidence / unvetted floor', () => {

@@ -307,17 +307,15 @@ describe('WORKER_GROUPS', () => {
 // `data.worker` key the UI matches on). There is no JS-importable loop registry,
 // so it is hardcoded from the backend enumeration:
 //   grep -hoE "worker_name\s*=\s*['\"][a-z0-9_]+['\"]" src/*_loop.py
-//   (+ the 5 loops whose worker_name is the module-level _WORKER_NAME constant:
-//    edge_proposer, entry_evidence, term_proposer, term_pruner, adr_drift_resolver)
+//   (+ the 4 loops whose worker_name is the module-level _WORKER_NAME constant:
+//    edge_proposer, entry_evidence, term_proposer, term_pruner)
 // and cross-checked against docs/arch/generated/loops.md + functional_areas.yml.
 //
 // KEEP IN SYNC: when a loop is added/removed/renamed, update BOTH this list and
 // BACKGROUND_WORKERS in constants.js. The count sentinel below will red on drift.
 const LOOP_REGISTRY_WORKER_NAMES = [
   'adr_conformance',
-  'adr_drift_resolver',
   'adr_reviewer',
-  'adr_touchpoint_auditor',
   'auto_agent_preflight',
   'auto_tighten',
   'branch_protection_auditor',
@@ -383,13 +381,14 @@ describe('BACKGROUND_WORKERS loop-registry coverage (#10556)', () => {
   const workerKeys = new Set(BACKGROUND_WORKERS.map(w => w.key))
   const groupKeys = new Set(WORKER_GROUPS.map(g => g.key))
 
-  it('reference registry lists 63 loops (sentinel — update when loops change)', () => {
+  it('reference registry lists 61 loops (sentinel — update when loops change)', () => {
     // If the backend loop count changes, this red reminds you to reconcile the
     // reference list AND BACKGROUND_WORKERS. See docs/arch/generated/loops.md.
     // 64 -> 63: SentryLoop (sentry_ingest) removed by ADR-0118.
-    expect(LOOP_REGISTRY_WORKER_NAMES).toHaveLength(63)
+    // 63 -> 61: AdrTouchpointAuditorLoop + AdrDriftResolverLoop removed by ADR-0136.
+    expect(LOOP_REGISTRY_WORKER_NAMES).toHaveLength(61)
     // No accidental duplicates in the reference list.
-    expect(new Set(LOOP_REGISTRY_WORKER_NAMES).size).toBe(63)
+    expect(new Set(LOOP_REGISTRY_WORKER_NAMES).size).toBe(61)
   })
 
   it('every registered loop has a BACKGROUND_WORKERS entry (nothing falls into Other)', () => {
@@ -421,6 +420,6 @@ describe('BACKGROUND_WORKERS loop-registry coverage (#10556)', () => {
     const vm = toLoops(workers)
     const other = vm.categories.find(c => c.key === 'other')
     expect(other).toBeUndefined()
-    expect(vm.totals.total).toBe(63)
+    expect(vm.totals.total).toBe(61)
   })
 })

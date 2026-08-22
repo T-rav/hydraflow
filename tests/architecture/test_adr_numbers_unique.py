@@ -1,8 +1,9 @@
 """Durable guard against ADR-number corruption (issue #9406).
 
 Two different ADR files sharing one number silently corrupts the runtime
-index (``scan_adr_directory`` dedups by number; ``compute_drift`` merges both
-files' citations) and makes the ``adr_touchpoint_auditor`` unable to converge.
+index (``scan_adr_directory`` dedups by number; downstream citation lookups
+merge both files' citations), so one ADR's decision silently absorbs the
+other's enforcement anchors.
 ``tests/regressions/test_issue_9406.py`` guards invariant (1) via the live
 parser; this module adds the structural invariants that prevent a collision
 from being re-introduced and keep the index, headings, cross-links and README
