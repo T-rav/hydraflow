@@ -68,7 +68,7 @@ By declared `**Enforcement:**` kind: `enforced` 81 · `manual` 3 · `decision-of
 | ADR-0065 | REAL | — | enforced | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` |
 | ADR-0071 | REAL | — | enforced | `pytest:tests/test_route_back.py` |
 | ADR-0083 | REAL | — | enforced | `pytest:tests/test_sandbox_scenario_contract.py`, `pytest:tests/test_no_screenshot_regression_tests.py` |
-| ADR-0085 | REAL | — | enforced | `pytest:tests/test_secret_scrub.py`, `pytest:tests/regressions/test_issue_9143_codeql_suppression.py` |
+| ADR-0085 | REAL | — | enforced | `pytest:tests/test_secret_scrub.py`, `pytest:tests/regressions/test_issue_9143_codeql_suppression.py`, `pytest:tests/regressions/test_gateway_token_scrub_11635.py` |
 | ADR-0087 | REAL | — | enforced | `pytest:tests/test_prompt_registry_completeness.py`, `pytest:tests/test_audit_prompts.py` |
 | ADR-0088 | REAL | — | enforced | `pytest:tests/test_label_drift_watcher_loop.py`, `pytest:tests/test_label_drift_watcher_integration.py` |
 | ADR-0089 | REAL | — | enforced | `pytest:tests/test_memory_backlog_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
