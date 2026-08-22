@@ -9,6 +9,7 @@ unknown dependency is not evidence of a dependency.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -35,6 +36,20 @@ class _CountingGitHub(FakeGitHub):
     async def get_issue_body(self, issue_number: int) -> str:
         self.body_reads.append(issue_number)
         return await super().get_issue_body(issue_number)
+
+
+class _SlowGitHub(_CountingGitHub):
+    """Counting fake whose reads yield, so concurrent callers really overlap.
+
+    Without a yield point inside the read, ``asyncio.gather`` would run each
+    ``evaluate`` to completion in turn and a missing single-flight guard would
+    stay invisible.
+    """
+
+    async def get_issue_state(self, issue_number: int) -> str:
+        self.state_reads.append(issue_number)
+        await asyncio.sleep(0)
+        return await FakeGitHub.get_issue_state(self, issue_number)
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +267,20 @@ class TestLookupCost:
         assert (await gate.evaluate(gh, 1, "Blocked by: #100")).blocked is True
         await gh.close_issue(100)
         assert (await gate.evaluate(gh, 1, "Blocked by: #100")).blocked is False
+
+    async def test_concurrent_children_share_one_read_of_their_blocker(self) -> None:
+        """TriagePhase triages siblings in parallel — they must not all re-read."""
+        gh = _SlowGitHub()
+        gh.add_issue(100, "Shared prerequisite", "open")
+        gate = BlockerGate()
+
+        await asyncio.gather(
+            gate.evaluate(gh, 1, "Blocked by: #100"),
+            gate.evaluate(gh, 2, "Blocked by: #100"),
+            gate.evaluate(gh, 3, "Blocked by: #100"),
+        )
+
+        assert gh.state_reads == [100]
 
     async def test_memo_evicts_rather_than_growing_without_bound(self) -> None:
         """The gate outlives every tick; its memo must not leak issue by issue."""

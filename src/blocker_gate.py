@@ -32,6 +32,7 @@ so MockWorld and the sandbox stay air-gapped.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -150,6 +151,8 @@ class BlockerGate:
         # Parsed edges, not raw bodies: an issue body runs to tens of KB and
         # the cycle walk only ever needs its ``Blocked by`` refs.
         self._edges: dict[int, _CacheEntry[tuple[int, ...]]] = {}
+        # Per-issue single-flight locks — see _lock_for.
+        self._locks: dict[int, asyncio.Lock] = {}
 
     async def evaluate(
         self, prs: PRPort, issue_number: int, body: str | None
@@ -232,25 +235,57 @@ class BlockerGate:
         cached = self._fresh(self._states, number)
         if cached is not None:
             return cached
-        state = (await prs.get_issue_state(number) or "").upper()
-        if state in _UNRESOLVED_STATES:
-            logger.warning(
-                "Blocker #%d could not be read (state=%r) — treating it as unblocked",
-                number,
-                state,
-            )
-        self._store(self._states, number, state)
-        return state
+        async with self._lock_for(number):
+            # Re-check under the lock: while we waited, the worker that held it
+            # may already have read this exact blocker (see _lock_for).
+            cached = self._fresh(self._states, number)
+            if cached is not None:
+                return cached
+            state = (await prs.get_issue_state(number) or "").upper()
+            if state in _UNRESOLVED_STATES:
+                logger.warning(
+                    "Blocker #%d could not be read (state=%r) — treating it as "
+                    "unblocked",
+                    number,
+                    state,
+                )
+            self._store(self._states, number, state)
+            return state
 
     async def _edges_of(self, prs: PRPort, number: int) -> tuple[int, ...]:
         """Return *number*'s own declared blockers, memoised for the TTL."""
         cached = self._fresh(self._edges, number)
         if cached is not None:
             return cached
-        body = await prs.get_issue_body(number) or ""
-        edges = tuple(parse_blockers(body, self_number=number))
-        self._store(self._edges, number, edges)
-        return edges
+        async with self._lock_for(number):
+            cached = self._fresh(self._edges, number)
+            if cached is not None:
+                return cached
+            body = await prs.get_issue_body(number) or ""
+            edges = tuple(parse_blockers(body, self_number=number))
+            self._store(self._edges, number, edges)
+            return edges
+
+    def _lock_for(self, number: int) -> asyncio.Lock:
+        """Return the single-flight lock for *number*.
+
+        ``TriagePhase`` triages up to ``max_triagers`` issues concurrently, and
+        the whole point of the shared cache is that siblings of one epic
+        reference the same two or three blockers. Without single-flight, every
+        worker that misses the cache in the same instant issues its own read
+        for the same issue — the duplicate-read storm the cache exists to
+        prevent. Keyed per issue so unrelated blockers still resolve in
+        parallel. Idle locks are dropped once the map grows past the cache
+        ceiling.
+        """
+        lock = self._locks.get(number)
+        if lock is None:
+            lock = self._locks[number] = asyncio.Lock()
+        if len(self._locks) > _MAX_CACHE_ENTRIES:
+            for key, existing in list(self._locks.items()):
+                if key != number and not existing.locked():
+                    del self._locks[key]
+        return lock
 
     def _fresh(self, cache: dict[int, _CacheEntry[_T]], number: int) -> _T | None:
         """Return the cached value for *number* while it is inside the TTL."""
