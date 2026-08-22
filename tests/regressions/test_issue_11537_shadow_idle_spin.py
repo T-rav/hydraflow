@@ -195,6 +195,135 @@ class TestAParkedDriverStopsEarningImmediateRePolls:
         assert observer.offers == 2
 
 
+class WaitingOnAHumanAdapter:
+    """The HITL phase's real no-correction shape: a barrier, not an attempt."""
+
+    phase = DriverPhase.HITL
+    target_label = None
+    sub_state_target = None
+
+    async def run(self, task: Task, *, lease: object) -> PhaseOutcome:
+        return PhaseOutcome(
+            ok=False,
+            next_label=HITL_LABEL,
+            next_state="HITL_WAIT",
+            detail="awaiting operator correction",
+            no_progress=True,
+        )
+
+
+class TestABarrierIsNotAFailedAttempt:
+    """The half of the spin that ``IDLE`` alone did not cover.
+
+    A PARKED driver reports ``IDLE``, so excluding ``IDLE`` from ``did_work``
+    fixes it. A driver waiting on a *human* does not: the HITL adapter's
+    no-correction path returned ``ok=False``, which the driver read as a failed
+    attempt. So the loop still never slept for the one state that waits longest,
+    the attempt counter climbed once per tick for as long as the operator took to
+    answer — and that counter keys the boundary idempotency key — and a shadow
+    director bought a turn on every one of those ticks.
+
+    ``ReviewPhaseAdapter`` has documented this exact intent since #11535 ("rather
+    than burning a phase attempt on a propagation delay") without a field to
+    express it.
+    """
+
+    async def _driver(self, tmp_path: Path):
+        from issue_driver import IssueDriver
+
+        class Labels:
+            async def read_stage_label(
+                self, n: int, *, epoch: int = 0, phase_attempt: int = 0
+            ) -> str:
+                return HITL_LABEL
+
+            def record_intent(self, *a: object, **k: object) -> None: ...
+            def clear_intent(self, *a: object, **k: object) -> None: ...
+            async def commit_stage_label(self, *a: object, **k: object) -> None: ...
+
+        return IssueDriver(
+            issue_number=1,
+            driver_id="drv-1",
+            repo_slug="acme/widgets",
+            adapters={DriverPhase.HITL: WaitingOnAHumanAdapter()},
+            labels=Labels(),
+            journal=DriverJournal(tmp_path / "journal.jsonl"),
+            stage_labels={"HITL_WAIT": HITL_LABEL, "HITL_APPLY": HITL_LABEL},
+            driver_state="HITL_WAIT",
+        )
+
+    async def test_waiting_on_a_human_reports_idle_not_failed(
+        self, tmp_path: Path
+    ) -> None:
+        driver = await self._driver(tmp_path)
+
+        advance = await driver.advance(Task(id=1, title="escalated", tags=[]))
+
+        assert advance.outcome is AdvanceOutcome.IDLE
+
+    async def test_waiting_on_a_human_burns_no_phase_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        # The counter keys the boundary idempotency key, so an unbounded climb
+        # while nothing is wrong is not merely cosmetic.
+        driver = await self._driver(tmp_path)
+        task = Task(id=1, title="escalated", tags=[])
+
+        for _ in range(3):
+            await driver.advance(task)
+
+        assert driver.phase_attempt(DriverPhase.HITL) == 0
+
+    async def test_the_driver_still_holds_its_waiting_state(
+        self, tmp_path: Path
+    ) -> None:
+        # Reporting IDLE must not be mistaken for the driver having finished —
+        # it is still HITL_WAIT and must still be ticked so it sees the answer.
+        driver = await self._driver(tmp_path)
+
+        await driver.advance(Task(id=1, title="escalated", tags=[]))
+
+        assert (driver.driver_state, driver.is_retired) == ("HITL_WAIT", False)
+
+    async def test_a_genuine_failure_still_burns_an_attempt(
+        self, tmp_path: Path
+    ) -> None:
+        # The distinction has to cut both ways, or the attempt counter stops
+        # bounding retries at all.
+        from issue_driver import IssueDriver
+
+        class RealFailure(WaitingOnAHumanAdapter):
+            async def run(self, task: Task, *, lease: object) -> PhaseOutcome:
+                return PhaseOutcome(
+                    ok=False, next_label=HITL_LABEL, detail="the phase blew up"
+                )
+
+        class Labels:
+            async def read_stage_label(
+                self, n: int, *, epoch: int = 0, phase_attempt: int = 0
+            ) -> str:
+                return HITL_LABEL
+
+            def record_intent(self, *a: object, **k: object) -> None: ...
+            def clear_intent(self, *a: object, **k: object) -> None: ...
+            async def commit_stage_label(self, *a: object, **k: object) -> None: ...
+
+        driver = IssueDriver(
+            issue_number=1,
+            driver_id="drv-1",
+            repo_slug="acme/widgets",
+            adapters={DriverPhase.HITL: RealFailure()},
+            labels=Labels(),
+            journal=DriverJournal(tmp_path / "journal.jsonl"),
+            stage_labels={"HITL_WAIT": HITL_LABEL, "HITL_APPLY": HITL_LABEL},
+            driver_state="HITL_WAIT",
+        )
+
+        await driver.advance(Task(id=1, title="escalated", tags=[]))
+
+        assert driver.phase_attempt(DriverPhase.HITL) == 1
+
+
 class TestADeclinedBoundaryIsCountedNeverWritten:
     """Defence in depth: no decline may put a write on the tick's hot path."""
 

@@ -359,7 +359,18 @@ the tick sleeps a poll interval between rounds — which was false:
 `DriverTickReport.did_work` counted an `IDLE` advance as work, and the polling
 loop skips its sleep when a tick did work, so a single parked driver spun the
 allocator at loop speed. That is fixed at the cause — an `IDLE` advance is not
-work — and the observer keeps the defence in depth. The rule is now simply:
+work — and the observer keeps the defence in depth.
+
+**A barrier is not a failed attempt.** Excluding `IDLE` covers a PARKED driver
+but not one waiting on a *human*: the HITL phase's no-correction path returned
+`ok=False`, which the driver read as a failed attempt, so the loop still never
+slept for the state that waits longest and the phase-attempt counter — which
+keys the boundary idempotency key — climbed once per tick for as long as the
+operator took to answer. `PhaseOutcome.no_progress` now distinguishes the two:
+a barrier reports `IDLE`, burns no attempt, and is still ticked every cycle so
+it notices the answer. `ReviewPhaseAdapter` had documented exactly this intent
+since #11535 ("rather than burning a phase attempt on a propagation delay")
+without a field to express it; its PR-not-yet-visible path is corrected too. The rule is now simply:
 **a row on disk means a turn was attempted**, which is also what makes
 `observations` a denominator the agreement rate can honestly divide by.
 
