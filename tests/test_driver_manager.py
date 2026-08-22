@@ -363,6 +363,94 @@ async def test_a_driver_rebuilt_after_a_restart_takes_a_higher_epoch(
 
 
 # --------------------------------------------------------------------------
+# Boot recovery admits at the reconciled stage, not the most advanced label
+# --------------------------------------------------------------------------
+
+
+class NoopAdapter:
+    """An adapter that reports which phase was actually reached."""
+
+    def __init__(self, phase: DriverPhase) -> None:
+        self.phase = phase
+        self.target_label = None
+
+    async def run(self, task: Task, *, lease: object) -> PhaseOutcome:
+        return PhaseOutcome(ok=False, next_label=lease.expected_stage_label, detail="x")
+
+
+async def test_a_crashed_route_back_is_admitted_at_the_stage_its_intent_named(
+    tmp_path: Path,
+) -> None:
+    # The case the whole C5(a) correction exists for, at the moment it matters
+    # most. A DIAGNOSE -> READY route-back crashed mid-swap, so the issue
+    # carries review(5) + ready(4). Admitting by most-advanced-wins would put a
+    # driver on REVIEW and re-review an issue that was just sent back to be
+    # re-implemented.
+    task = Task(id=42, title="routed back", tags=[REVIEW_LABEL, READY_LABEL])
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        42, from_label=REVIEW_LABEL, to_label=READY_LABEL, epoch=0, phase_attempt=0
+    )
+    github = FakeGitHubLabels({42: [REVIEW_LABEL, READY_LABEL]})
+    manager = DriverManager(
+        store=FakeStore([task]),
+        labels=PipelineLabelAdapter(
+            github, ordered_labels=ORDERED_LABELS, transitions=transitions
+        ),
+        journal=DriverJournal(tmp_path / "driver_journal.jsonl"),
+        ownership=DriverOwnershipRegistry(enabled=True),
+        adapters={
+            DriverPhase.PLAN: NoopAdapter(DriverPhase.PLAN),
+            DriverPhase.IMPLEMENT: NoopAdapter(DriverPhase.IMPLEMENT),
+            DriverPhase.REVIEW: NoopAdapter(DriverPhase.REVIEW),
+        },
+        stage_labels=STAGE_LABELS,
+        repo_slug="acme/widgets",
+        max_in_flight=4,
+        stage_caps={},
+    )
+
+    await manager.tick()
+
+    assert manager._drivers[42].driver_state == "READY"  # noqa: SLF001
+
+
+async def test_a_consumed_intent_is_cleared_so_it_cannot_go_two_incarnations_stale(
+    tmp_path: Path,
+) -> None:
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        42, from_label=REVIEW_LABEL, to_label=READY_LABEL, epoch=0, phase_attempt=0
+    )
+    github = FakeGitHubLabels({42: [REVIEW_LABEL, READY_LABEL]})
+    adapter = PipelineLabelAdapter(
+        github, ordered_labels=ORDERED_LABELS, transitions=transitions
+    )
+
+    await adapter.reconcile(42, epoch=0, phase_attempt=0, consume=True)
+
+    assert transitions.get_stage_transition(42) is None
+
+
+async def test_a_live_boundary_read_does_not_consume_the_drivers_own_intent() -> None:
+    # The record covers a swap that has not happened yet; clearing it on a read
+    # would reopen the window it exists to close.
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        42, from_label=PLAN_LABEL, to_label=READY_LABEL, epoch=0, phase_attempt=0
+    )
+    adapter = PipelineLabelAdapter(
+        FakeGitHubLabels({42: [PLAN_LABEL]}),
+        ordered_labels=ORDERED_LABELS,
+        transitions=transitions,
+    )
+
+    await adapter.read_stage_label(42, epoch=0, phase_attempt=0)
+
+    assert transitions.get_stage_transition(42) is not None
+
+
+# --------------------------------------------------------------------------
 # PipelineLabelAdapter — reconcile against recorded intent (ADR-0137 C5(a))
 # --------------------------------------------------------------------------
 

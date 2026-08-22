@@ -153,14 +153,24 @@ class PipelineLabelAdapter:
         return frozenset(label for label in labels if label in self._ordered_labels)
 
     async def reconcile(
-        self, issue_number: int, *, epoch: int, phase_attempt: int
+        self,
+        issue_number: int,
+        *,
+        epoch: int,
+        phase_attempt: int,
+        consume: bool = True,
     ) -> StageReconciliation:
         """Resolve the issue's true stage, completing an interrupted swap.
 
         The record is honoured only when it belongs to the incarnation being
-        recovered, and it is cleared by the first reconciliation that observes
-        it — which is what makes it safe to honour a record written under the
-        epoch recovery has just fenced.
+        recovered, and a *consuming* reconciliation clears it — which is what
+        bounds it to one incarnation of staleness and makes it safe to honour a
+        record written under the epoch recovery has just fenced.
+
+        ``consume=False`` is for a **live** boundary read, where the driver's
+        own record is still doing its job: the swap it covers has not happened
+        yet, so discarding it there would reopen exactly the window it exists to
+        close. Only boot recovery consumes.
         """
         present = await self.read_pipeline_labels(issue_number)
         resolution = reconcile_stage_label(
@@ -175,7 +185,7 @@ class PipelineLabelAdapter:
             # landed, so re-issuing the swap removes the stale ``from_label``
             # through the same primitive rather than a bespoke delete.
             await self._prs.swap_pipeline_labels(issue_number, resolution.label)
-        if resolution.clear_stage_intent and self._transitions is not None:
+        if consume and resolution.clear_stage_intent and self._transitions is not None:
             self._transitions.clear_stage_transition(issue_number)
         if resolution.outcome is ReconcileOutcome.EXTERNAL_DRIFT:
             logger.warning(
@@ -199,7 +209,7 @@ class PipelineLabelAdapter:
         is the truth.
         """
         resolution = await self.reconcile(
-            issue_number, epoch=epoch, phase_attempt=phase_attempt
+            issue_number, epoch=epoch, phase_attempt=phase_attempt, consume=False
         )
         return resolution.label
 
@@ -317,7 +327,7 @@ class DriverManager:
 
         released = self._retire_finished()
         candidates = self._collect_candidates()
-        admitted = self._admit([task for task, _stage in candidates])
+        admitted = await self._admit([task for task, _stage in candidates])
         self._return_unadmitted(candidates)
         advanced = await self._advance_all(stop_requested=stop_requested)
         return DriverTickReport(
@@ -367,14 +377,14 @@ class DriverManager:
             if task.id not in self._drivers:
                 self._store.enqueue_transition(task, stage)
 
-    def _admit(self, candidates: list[Task]) -> list[int]:
+    async def _admit(self, candidates: list[Task]) -> list[int]:
         views: list[SchedulingView] = []
         by_number: dict[int, Task] = {}
         now = datetime.now(UTC)
         for task in candidates:
             if task.id in self._drivers:
                 continue
-            state = self._state_from_task(task)
+            state = await self._recovered_state(task)
             if state is None:
                 continue
             by_number[task.id] = task
@@ -409,8 +419,7 @@ class DriverManager:
         return admitted
 
     def _build_driver(self, issue_number: int, driver_state: str) -> IssueDriver:
-        prior = self._journal.last_epoch(issue_number)
-        epoch = 0 if prior is None else prior + 1
+        epoch = self._next_epoch(issue_number)
         return IssueDriver(
             issue_number=issue_number,
             driver_id=f"drv-{issue_number}-{uuid.uuid4().hex[:8]}",
@@ -479,36 +488,53 @@ class DriverManager:
 
     # -- helpers ------------------------------------------------------------
 
-    def _state_from_task(self, task: Task) -> str | None:
-        """The driver state implied by the task's most advanced pipeline label.
+    async def _recovered_state(self, task: Task) -> str | None:
+        """The driver state this issue is really in, resolved from label truth.
 
-        Recovery reads labels, never a cache (ADR-0137 C2). ``None`` means the
-        issue carries no label this preset drives, so it is not a candidate.
+        This is C2's boot reconciliation, and it goes through the same
+        intent-aware resolution a live boundary uses — **not** through the
+        task's cached ``tags`` by priority. Resolving here by
+        most-advanced-wins would reintroduce, at the one moment it matters most,
+        exactly the silent backward-transition reversal C5(a) was corrected to
+        prevent: an issue whose route-back crashed mid-swap would be admitted
+        at REVIEW and re-reviewed instead of re-implemented.
+
+        This is the *consuming* reconciliation: it runs once per admission,
+        which is what bounds a stale record to a single incarnation. It
+        reconciles at the epoch the new driver will take, so
+        :meth:`StageIntent.is_usable`'s one-back clause honours the record the
+        dead incarnation left behind.
+
+        ``None`` means the issue carries no label this preset drives.
         """
-        best: tuple[int, str] | None = None
-        for state, label in self._stage_labels.items():
-            if label not in task.tags:
-                continue
-            phase = phase_for_state(state)
-            rank = _PHASE_RANK.get(phase, -1) if phase is not None else -1
-            if best is None or rank > best[0]:
-                best = (rank, state)
-        if best is None:
+        epoch = self._next_epoch(task.id)
+        resolution = await self._labels.reconcile(
+            task.id, epoch=epoch, phase_attempt=0, consume=True
+        )
+        if resolution.label is None:
             return None
-        state = best[1]
+        state = self._state_for_label(resolution.label)
+        if state is None:
+            return None
         return state if phase_for_state(state) in self._adapters else None
 
+    def _state_for_label(self, label: str) -> str | None:
+        """Reverse the state→label map, nominal state first.
 
-#: Forward ordering of phases, so an issue carrying two pipeline labels after a
-#: mid-swap crash resolves to the more advanced one — the same
-#: most-advanced-wins rule ``IssueStore._compute_stage_map`` applies.
-_PHASE_RANK: Mapping[DriverPhase, int] = {
-    DriverPhase.TRIAGE: 0,
-    DriverPhase.PLAN: 1,
-    DriverPhase.IMPLEMENT: 2,
-    DriverPhase.REVIEW: 3,
-    DriverPhase.HITL: 4,
-}
+        Insertion order resolves a shared label to the nominal state
+        (``REVIEW`` before ``DIAGNOSE``, ``HITL_WAIT`` before ``HITL_APPLY``),
+        which is ADR-0137 B1(c)'s rule: resume at the nominal state and
+        re-detect the route-back fresh.
+        """
+        for state, stage_label in self._stage_labels.items():
+            if stage_label == label:
+                return state
+        return None
+
+    def _next_epoch(self, issue_number: int) -> int:
+        """The epoch a driver rebuilt for *issue_number* will take."""
+        prior = self._journal.last_epoch(issue_number)
+        return 0 if prior is None else prior + 1
 
 
 def _band_of(task: Task) -> str:

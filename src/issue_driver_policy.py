@@ -380,7 +380,19 @@ class StageReconciliation:
     """A stale ``from_label`` the driver should finish removing."""
 
     clear_stage_intent: bool = False
+    """Whether a *consuming* reconciliation should discard the record.
+
+    Set on every outcome: ADR-0137 requires the record be consumed by the first
+    reconciliation that observes it and cleared unconditionally, which is what
+    bounds it to one incarnation of staleness. A live boundary read does not
+    consume — see ``PipelineLabelAdapter.read_stage_label``.
+    """
     escalate: bool = False
+
+    @property
+    def is_interrupted_swap(self) -> bool:
+        """True when a swap had begun and this resolution finishes it."""
+        return self.outcome is ReconcileOutcome.COMPLETED_SWAP
 
 
 @dataclass(frozen=True)
@@ -400,11 +412,22 @@ class StageIntent:
     def is_usable(self, *, recovering_epoch: int, phase_attempt: int) -> bool:
         """True when this record belongs to the incarnation being recovered.
 
-        Recovery honours the record written by the incarnation it is replacing
-        and no older one, and the attempt must match the ledger's — anything
-        else is stale and is ignored rather than replayed.
+        Two cases, and they differ because recovery resets the attempt counter
+        along with the epoch:
+
+        * **the current incarnation's own record** — epoch and attempt must both
+          match, so a record left over from a previous attempt of the same
+          phase cannot be replayed against a newer one;
+        * **the record of the single incarnation this one is replacing**
+          (``recovering_epoch - 1``) — honoured on its epoch alone, because the
+          attempt counter it was written under no longer exists to compare
+          against. Exactly one back, never older: "no older one" is what stops
+          a record from a long-dead generation resurrecting a transition
+          somebody has since moved past.
         """
-        return self.epoch == recovering_epoch and self.phase_attempt == phase_attempt
+        if self.epoch == recovering_epoch:
+            return self.phase_attempt == phase_attempt
+        return self.epoch == recovering_epoch - 1
 
 
 def reconcile_stage_label(
@@ -465,6 +488,7 @@ def reconcile_stage_label(
             return StageReconciliation(
                 label=_most_advanced(outside, priority_order),
                 outcome=ReconcileOutcome.EXTERNAL_DRIFT,
+                clear_stage_intent=True,
                 escalate=True,
             )
         return StageReconciliation(
@@ -479,6 +503,7 @@ def reconcile_stage_label(
     return StageReconciliation(
         label=_most_advanced(present_labels, priority_order),
         outcome=ReconcileOutcome.PRIORITY_FALLBACK,
+        clear_stage_intent=True,
     )
 
 
