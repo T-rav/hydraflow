@@ -20,12 +20,14 @@ from config import Credentials, HydraFlowConfig
 from credit_failover import apply_credit_failover
 from events import EventBus
 from execution import get_default_runner
+from hydraflow_gateway.routing_policy import RequestFace
 from model_pricing import usage_shape_for_tool
 from models import LoopResult, TranscriptEventData
 from prompt_gate import GateResult, gate_prompt
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from repo_backend import apply_repo_provider
-from route_shadow import record_agentic_route_shadow
+from route_enforcement import enforce_canary_route
+from route_shadow import agentic_route_stages, record_agentic_route_shadow
 from runner_utils import (
     AuthenticationRetryError,
     StreamConfig,
@@ -316,6 +318,15 @@ class BaseRunner:
             )
             provider = rerouted
         _, resolved_model = parse_command_tool_model(cmd)
+        principal_id = str(event_data.get("source", self._phase_name))
+        stages = agentic_route_stages(
+            config=self._config,
+            dial_field=self.PROVIDER_FIELD,
+            dial_provider=dial_provider,
+            after_ratchet=after_ratchet,
+            after_repo_provider=pre_credit_provider,
+            final_provider=provider,
+        )
         # Routing shadow (#11536, ADR-0139): record what the policy resolver
         # WOULD have chosen beside the route legacy routing just chose. The
         # route is already fixed above; this observes it and returns nothing.
@@ -324,7 +335,7 @@ class BaseRunner:
         await asyncio.to_thread(
             record_agentic_route_shadow,
             config=self._config,
-            principal_id=str(event_data.get("source", self._phase_name)),
+            principal_id=principal_id,
             dial_field=self.PROVIDER_FIELD,
             dial_provider=dial_provider,
             after_ratchet=after_ratchet,
@@ -334,16 +345,35 @@ class BaseRunner:
             issue_number=_as_opt_int(raw_issue),
             pr_number=_as_opt_int(event_data.get("pr")),
         )
+        # Enforcement canary (#11539, ADR-0141): returns None — and runs no
+        # further code at all — unless this exact repository is the armed canary
+        # AND this spawn already transits the gateway. Inside that slice the
+        # decision above stops being an observation: it supplies the model and
+        # the mint's route lineage. Held or rejected raises, before any
+        # credential exists.
+        route = await asyncio.to_thread(
+            enforce_canary_route,
+            config=self._config,
+            principal_id=principal_id,
+            stages=stages,
+            final_provider=provider,
+            final_model=resolved_model,
+            request_face=RequestFace.AGENTIC,
+        )
+        if route is not None:
+            cmd = route.apply_to_command(cmd)
+            _, resolved_model = parse_command_tool_model(cmd)
         spawn_timeout = self._spawn_timeout(timeout_s)
         harness_env = await resolve_harness_env(
             provider,
             self._config,
             model=resolved_model,
-            source=str(event_data.get("source", self._phase_name)),
+            source=principal_id,
             session_id=getattr(self._bus, "current_session_id", None),
             timeout_seconds=spawn_timeout,
             issue_number=_as_opt_int(raw_issue),
             pr_number=_as_opt_int(event_data.get("pr")),
+            route=route,
         )
         billing_provider = harness_billing_provider(provider, resolved_model)
         spawn_runner = self._runner

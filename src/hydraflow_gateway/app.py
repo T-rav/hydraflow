@@ -47,6 +47,12 @@ from hydraflow_gateway.proxy import (
     GatewayProxy,
     extract_virtual_token,
 )
+from hydraflow_gateway.route_mint import (
+    MintAttemptConflict,
+    MintV2Request,
+    MintV2Response,
+    RouteMintStore,
+)
 from hydraflow_gateway.settings import GatewaySettings
 from model_pricing import ModelPricingTable, load_pricing
 
@@ -170,6 +176,14 @@ def create_app(
     resolved_active_routes = active_routes or ActiveRouteRegistry(
         started_at=_as_utc(wall_clock())
     )
+    route_mint = RouteMintStore(
+        key_store=resolved_store,
+        # What this deployment can actually serve. An account whose credential
+        # is absent is never eligible, which is the failure table's first row.
+        configured_bindings=frozenset(resolved_settings.upstreams),
+        wall_clock=wall_clock,
+        attempt_retention_seconds=resolved_settings.max_key_ttl_seconds,
+    )
     owns_client = client is None
     resolved_client = client or _build_http_client(resolved_settings)
     proxy = GatewayProxy(
@@ -191,6 +205,7 @@ def create_app(
             _reap_gateway_state(
                 resolved_store,
                 resolved_body_store,
+                route_mint,
                 interval_seconds=resolved_settings.reaper_interval_seconds,
                 body_retention_seconds=resolved_settings.body_retention_seconds,
                 sleep=sleep,
@@ -224,6 +239,7 @@ def create_app(
     app.state.gateway_http_client = resolved_client
     app.state.gateway_proxy = proxy
     app.state.gateway_active_routes = resolved_active_routes
+    app.state.gateway_route_mint = route_mint
 
     @app.get("/healthz", include_in_schema=False)
     async def health() -> object:
@@ -250,12 +266,32 @@ def create_app(
         status_code=status.HTTP_201_CREATED,
     )
     async def mint_key(payload: MintKeyRequest) -> MintKeyResponse:
+        # A governed repository has no unbound mint (ADR-0141 §D4). Refusing here
+        # is the whole authorization boundary: v1 carries a caller-selected
+        # provider and no route lineage, so one v1 key would be a policy-free
+        # lane into an enforced repository — and refusing at the mint means the
+        # attempt never becomes a credential, let alone an upstream byte.
+        if payload.repo_slug.strip().lower() in resolved_settings.governed_repo_slugs:
+            raise HTTPException(
+                status_code=422,
+                detail="governed repository requires the v2 route-aware mint",
+            )
         if payload.provider_binding not in resolved_settings.upstreams:
             raise HTTPException(status_code=422, detail="provider is unavailable")
         try:
             return resolved_store.mint(payload)
         except KeyPolicyError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/control/v2/keys", response_model=MintV2Response)
+    async def resolve_and_mint_key(payload: MintV2Request) -> MintV2Response:
+        try:
+            return route_mint.resolve_and_mint(payload)
+        except MintAttemptConflict as exc:
+            # Never auto-retried and never silently absorbed: the caller reused
+            # one idempotency key for two intents, and only it knows which one
+            # it meant.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.delete(
         "/control/v1/keys/{key_id}",
@@ -352,6 +388,7 @@ def _build_http_client(settings: GatewaySettings) -> httpx.AsyncClient:
 async def _reap_gateway_state(
     store: VirtualKeyStore,
     body_store: GatewayBodyStore,
+    route_mint: RouteMintStore,
     *,
     interval_seconds: float,
     body_retention_seconds: int,
@@ -362,6 +399,9 @@ async def _reap_gateway_state(
     while True:
         await sleep(interval_seconds)
         store.reap_expired()
+        # The idempotency table outlives its keys by exactly one key TTL, so a
+        # retry can never outrace a reap into a second lease.
+        route_mint.reap_expired_attempts()
         try:
             body_store.reap_older_than(wall_clock() - body_retention_seconds)
         except OSError:

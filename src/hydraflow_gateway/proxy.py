@@ -7,6 +7,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import NoReturn
 from urllib.parse import unquote_to_bytes
 
 import httpx
@@ -18,6 +19,12 @@ from starlette.types import Receive, Scope, Send
 from ulid import ULID
 
 from hydraflow_gateway.active_routes import ActiveRouteRegistry
+from hydraflow_gateway.governed_preflight import (
+    GovernedRequestRefused,
+    PreflightRefusal,
+    check_governed_body,
+    governed_path_supported,
+)
 from hydraflow_gateway.ledger import (
     GatewayBodyCapture,
     GatewayBodyStore,
@@ -212,6 +219,16 @@ class GatewayProxy:
                 client_aborted=False,
             )
             raise
+        if (
+            identity.route_binding is None
+            and identity.repo_slug.strip().lower() in self._settings.governed_repo_slugs
+        ):
+            # A v1 key minted before this repository was governed. The mint route
+            # refuses new ones; this refuses the ones already in flight, before a
+            # single byte is read from the client, let alone sent upstream.
+            self._refuse_governed(
+                attempt, PreflightRefusal.UNBOUND_GOVERNED_KEY, status_code=403
+            )
         try:
             enforce_request_size(request, self._settings.max_request_bytes)
             upstream_url = build_upstream_url(upstream.base_url, request)
@@ -259,6 +276,16 @@ class GatewayProxy:
             )
             raise
 
+        governed: bytes | None = None
+        if identity.route_binding is not None:
+            governed = await self._bind_governed_request(
+                request,
+                attempt,
+                first_chunk=first_chunk,
+                downstream_stream=downstream_stream,
+                bound_model=identity.route_binding.effective_model,
+            )
+
         async def request_content() -> AsyncIterator[bytes]:
             nonlocal request_bytes
             chunks = _prepend_chunk(first_chunk, downstream_stream)
@@ -275,7 +302,13 @@ class GatewayProxy:
                         self.mark_telemetry_unhealthy()
                 yield chunk
 
-        content = request_content() if first_chunk else None
+        if governed is not None:
+            # The body was fully read and checked above, so the upstream request
+            # carries bytes rather than a stream: re-reading the (already
+            # exhausted) downstream iterator would send an empty body.
+            content: AsyncIterator[bytes] | bytes | None = governed
+        else:
+            content = request_content() if first_chunk else None
         timeout = httpx.Timeout(
             connect=self._settings.connect_timeout_seconds,
             read=None,
@@ -374,6 +407,83 @@ class GatewayProxy:
         response.raw_headers = filter_response_headers(upstream_response.headers.raw)
         return response
 
+    async def _bind_governed_request(
+        self,
+        request: Request,
+        attempt: _GatewayAttempt,
+        *,
+        first_chunk: bytes,
+        downstream_stream: AsyncIterator[bytes],
+        bound_model: str,
+    ) -> bytes:
+        """Read and check a governed body BEFORE any upstream request exists.
+
+        A route-bound key names one model for its whole life, so the body it
+        carries has to be parsed in full before it can be compared — a streamed
+        check is a check performed after the bytes have already left. Every exit
+        from here except the last is a refusal that no upstream ever sees.
+        """
+        if not governed_path_supported(request.url.path):
+            self._refuse_governed(
+                attempt,
+                PreflightRefusal.UNSUPPORTED_REQUEST_FACE,
+                status_code=403,
+            )
+        buffered = bytearray(first_chunk)
+        try:
+            async for chunk in downstream_stream:
+                buffered.extend(chunk)
+                if len(buffered) > self._settings.max_request_bytes:
+                    raise RequestBodyTooLarge
+        except RequestBodyTooLarge as exc:
+            attempt.finalize(
+                self, status_code=413, completed=False, client_aborted=False
+            )
+            raise HTTPException(
+                status_code=413, detail="request body is too large"
+            ) from exc
+        except ClientDisconnect as exc:
+            attempt.finalize(
+                self, status_code=499, completed=False, client_aborted=True
+            )
+            raise HTTPException(status_code=499, detail="client disconnected") from exc
+        except asyncio.CancelledError:
+            attempt.finalize(
+                self, status_code=499, completed=False, client_aborted=True
+            )
+            raise
+        body = bytes(buffered)
+        try:
+            check_governed_body(
+                body,
+                bound_model=bound_model,
+                content_type=request.headers.get("content-type", ""),
+            )
+        except GovernedRequestRefused as exc:
+            self._refuse_governed(attempt, exc.refusal, status_code=409)
+        # Observation follows the check, not the other way round: a refused
+        # request never becomes a captured body or a request-model observation.
+        attempt.request_observer.feed(body)
+        if attempt.capture is not None and not attempt.capture_failed:
+            try:
+                attempt.capture.write_request(body)
+            except OSError:
+                attempt.capture_failed = True
+                self.mark_telemetry_unhealthy()
+        return body
+
+    def _refuse_governed(
+        self,
+        attempt: _GatewayAttempt,
+        refusal: PreflightRefusal,
+        *,
+        status_code: int,
+    ) -> NoReturn:
+        attempt.finalize(
+            self, status_code=status_code, completed=False, client_aborted=False
+        )
+        raise HTTPException(status_code=status_code, detail=refusal.value)
+
     def _finalize_attempt(
         self,
         *,
@@ -447,6 +557,16 @@ class GatewayProxy:
             usage_complete=usage_complete,
             cost_usd=cost_usd,
             cost_unknown=cost_usd is None,
+            mint_decision_id=(
+                None
+                if identity.route_binding is None
+                else identity.route_binding.mint_decision_id
+            ),
+            route_decision_id=(
+                None
+                if identity.route_binding is None
+                else identity.route_binding.route_decision_id
+            ),
         )
         try:
             self._ledger.append(row)

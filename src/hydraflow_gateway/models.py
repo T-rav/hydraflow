@@ -55,6 +55,24 @@ def legacy_account_id(binding: ProviderBinding) -> str:
     return LEGACY_ACCOUNT_IDS[binding]
 
 
+_ZAI_MODEL_PREFIX = "glm"
+
+
+def binding_for_model(model: str) -> ProviderBinding:
+    """Return the upstream account a concrete model id must be served by.
+
+    The single definition of "which lane serves this model", so the route-aware
+    mint and HydraFlow's own legacy classifier cannot disagree about it. ADR-0139
+    §D8 warns that two copies of one mapping is a guaranteed future disagreement;
+    ``route_shadow.provider_binding_for`` delegates here for its model branch.
+    """
+    return (
+        ProviderBinding.ZAI_HARNESS
+        if model.strip().lower().startswith(_ZAI_MODEL_PREFIX)
+        else ProviderBinding.ANTHROPIC
+    )
+
+
 class BodyCapturePolicy(StrEnum):
     """Whether request and response entities may be retained."""
 
@@ -136,6 +154,30 @@ class MintKeyRequest(BaseModel):
         return BodyCapturePolicy.METADATA_ONLY
 
 
+class RouteBinding(BaseModel):
+    """The immutable route one v2 key is bound to for its whole lifetime.
+
+    Fixed at mint and never renegotiated: a policy edit affects the *next* key,
+    never this one. ``effective_model`` is what the data plane checks every
+    request body against, and the policy lineage is what makes the resulting
+    ledger row joinable back to the decision that authorised it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    # The gateway's own identity for the decision that authorised this lease.
+    mint_decision_id: str = Field(min_length=1, max_length=128)
+    # The pure resolver's content-addressed decision id (ADR-0139), echoed so a
+    # ledger row joins back to the shadow chain that recorded the route.
+    route_decision_id: str = Field(min_length=1, max_length=128)
+    dispatch_id: str = Field(min_length=1, max_length=128)
+    account_id: str = Field(min_length=1, max_length=128)
+    effective_model: str = Field(min_length=1, max_length=128)
+    policy_id: str | None = Field(default=None, max_length=64)
+    policy_revision: int = Field(default=0, ge=0)
+    snapshot_hash: str = Field(default="", max_length=128)
+
+
 class GatewayIdentity(BaseModel):
     """Non-secret identity resolved from a valid virtual key."""
 
@@ -149,6 +191,9 @@ class GatewayIdentity(BaseModel):
     body_capture_policy: BodyCapturePolicy
     issued_at: datetime
     expires_at: datetime
+    # Absent on every v1 key, which is what makes "this key is governed" a
+    # structural fact rather than a claim the caller makes.
+    route_binding: RouteBinding | None = None
 
 
 class MintKeyResponse(BaseModel):

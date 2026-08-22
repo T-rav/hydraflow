@@ -60,6 +60,16 @@ class GatewaySettings(BaseModel):
     ledger_path: Path = Path(".hydraflow/gateway/requests.jsonl")
     body_dir: Path = Path(".hydraflow/gateway/bodies")
     body_capture_repo_slugs: frozenset[str] = frozenset()
+    governed_repo_slugs: frozenset[str] = frozenset()
+    """Repositories whose keys must be route-bound (ADR-0141 §D4).
+
+    Empty by default, and deliberately server-owned: a caller cannot declare
+    itself governed, and while this set names a repository, that repository's v1
+    mints are refused and its unbound keys are turned away by the data plane.
+    Arming it is a deployment act *after* the spawn side is already minting v2;
+    disarming runs the other way. ADR-0141 states the ordering and why the
+    operator-facing rollback is HydraFlow's own dial rather than this one.
+    """
     max_key_ttl_seconds: int = Field(default=86_400, gt=0)
     max_request_bytes: int = Field(default=33_554_432, gt=0)
     max_control_request_bytes: int = Field(default=16_384, gt=0)
@@ -122,6 +132,9 @@ class GatewaySettings(BaseModel):
             body_dir=Path(env.get("GATEWAY_BODY_DIR", ".hydraflow/gateway/bodies")),
             body_capture_repo_slugs=_repo_slug_allowlist(
                 env.get("GATEWAY_BODY_CAPTURE_REPOS", "")
+            ),
+            governed_repo_slugs=_repo_slug_allowlist(
+                env.get("GATEWAY_GOVERNED_REPOS", "")
             ),
             max_key_ttl_seconds=_positive_int(
                 env, "GATEWAY_MAX_KEY_TTL_SECONDS", default=86_400

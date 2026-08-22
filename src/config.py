@@ -612,6 +612,11 @@ _ENV_STR_OVERRIDES: list[tuple[str, str, str]] = [
     ("gateway_base_url", "HYDRAFLOW_GATEWAY_BASE_URL", "http://127.0.0.1:8080"),
     ("gateway_ledger_path", "HYDRAFLOW_GATEWAY_LEDGER_PATH", ""),
     ("gateway_repo_class", "HYDRAFLOW_GATEWAY_REPO_CLASS", "personal"),
+    (
+        "gateway_enforcement_canary_repo",
+        "HYDRAFLOW_GATEWAY_ENFORCEMENT_CANARY_REPO",
+        "",
+    ),
     ("judge_independent_model", "HYDRAFLOW_JUDGE_INDEPENDENT_MODEL", ""),
     (
         "security_patch_severity_threshold",
@@ -3092,6 +3097,25 @@ class HydraFlowConfig(BaseModel):
             "an authenticated operator identity (env-only "
             "HYDRAFLOW_OPERATOR_TOKEN) AND a loopback dashboard bind, so this "
             "dial off is the third, blunt way to close them (ADR-0140)."
+        ),
+    )
+    # Enforcement canary (#11539, ADR-0141). The FIRST dial on which a routing
+    # decision changes what gets spawned — and deliberately the smallest one
+    # that can: it names exactly one canonical `owner/repo`, and only that
+    # repository's gateway-transported spawns are bound by policy. Empty is off
+    # for every repository, which is both the default and the rollback: clearing
+    # it disarms enforcement on the next spawn, with no restart and no policy
+    # edit. It never promotes a spawn onto the gateway; it only binds traffic
+    # already there.
+    gateway_enforcement_canary_repo: str = Field(
+        default="",
+        max_length=512,
+        description=(
+            "Canonical 'owner/repo' whose gateway-routed spawns are bound by "
+            "the routing policy resolver instead of by legacy dials. Empty "
+            "(the default) enforces nothing anywhere; clearing it is the "
+            "one-action rollback. Anything that is not exactly owner/repo — a "
+            "runtime slug included — arms nothing."
         ),
     )
     gateway_fleet_ratchet_enabled: bool = Field(

@@ -66,6 +66,10 @@ class GatewayLedgerRow(BaseModel):
     usage_complete: bool
     cost_usd: float | None = Field(default=None, ge=0)
     cost_unknown: bool
+    # ADR-0141 route lineage. Null on every v1 row, which is exactly how a
+    # governed request is told apart from an ungoverned one after the fact.
+    mint_decision_id: str | None = None
+    route_decision_id: str | None = None
 
     @model_validator(mode="before")
     @classmethod

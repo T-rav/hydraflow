@@ -33,9 +33,11 @@ from hydraflow_gateway.settings import (
     UpstreamAuthStyle,
     UpstreamSettings,
 )
+from prompt_telemetry import parse_command_tool_model
 from runner_utils import (
     GatewayMintCredential,
     GatewayMintRequest,
+    GatewayMintV2Request,
     run_lightweight_agent,
 )
 
@@ -74,22 +76,45 @@ class FakeAnthropicOrigin:
         )
 
 
+class GovernedMintRefused(RuntimeError):
+    """The gateway answered a v2 attempt with a held or rejected decision."""
+
+
 @dataclass(slots=True)
 class InProcessGatewayControlClient:
-    """Runner control adapter that drives the gateway's real mint endpoint."""
+    """Runner control adapter that drives the gateway's real mint endpoints.
+
+    Routes by request type exactly as the production adapter does, so a scenario
+    exercising ADR-0141's canary reaches ``/control/v2/keys`` and a scenario
+    exercising the ungoverned path still reaches ``/control/v1/keys``. The last
+    decision is retained because the scenario needs to read the lineage the
+    gateway stamped, not a lineage the test invented.
+    """
 
     client: httpx.AsyncClient
+    decisions: list[dict[str, Any]] = field(default_factory=list)
 
     async def mint_key(
-        self, *, base_url: str, control_token: str, request: GatewayMintRequest
+        self,
+        *,
+        base_url: str,
+        control_token: str,
+        request: GatewayMintRequest | GatewayMintV2Request,
     ) -> GatewayMintCredential:
+        governed = isinstance(request, GatewayMintV2Request)
+        route = "/control/v2/keys" if governed else "/control/v1/keys"
         response = await self.client.post(
-            f"{base_url.rstrip('/')}/control/v1/keys",
+            f"{base_url.rstrip('/')}{route}",
             headers={"authorization": f"Bearer {control_token}"},
             json=asdict(request),
         )
         response.raise_for_status()
         payload = response.json()
+        if governed:
+            decision = dict(payload["decision"])
+            self.decisions.append(decision)
+            if decision["outcome"] != "selected":
+                raise GovernedMintRefused(f"{decision['outcome']}/{decision['reason']}")
         return GatewayMintCredential(
             key_id=str(payload["key_id"]),
             token=str(payload["token"]),
@@ -121,6 +146,10 @@ class GatewayHarnessRunner:
         **_kwargs: Any,
     ) -> SimpleResult:
         worker_env = dict(env or {})
+        # A real CLI sends the model it was invoked with. Reading it off the argv
+        # rather than hardcoding it is what lets a scenario observe a routing
+        # decision reaching the wire at all.
+        _, argv_model = parse_command_tool_model(list(_cmd))
         async with self._client.stream(
             "POST",
             "/v1/messages",
@@ -129,7 +158,7 @@ class GatewayHarnessRunner:
                 "anthropic-version": "2023-06-01",
             },
             json={
-                "model": TURN_MODEL,
+                "model": argv_model or TURN_MODEL,
                 "stream": True,
                 "messages": [{"role": "user", "content": "scenario"}],
             },
@@ -146,6 +175,7 @@ class GatewayTurn:
 
     returncode: int
     exchanges: list[tuple[str, bytes]]
+    decisions: list[dict[str, Any]] = field(default_factory=list)
 
 
 async def run_gateway_turn(
@@ -156,18 +186,28 @@ async def run_gateway_turn(
     virtual_secret: str,
     key_id: str = "gateway-scenario-key",
     source: str = "implementer",
+    zai_upstream: bool = False,
+    governed_repo_slugs: frozenset[str] = frozenset(),
 ) -> GatewayTurn:
     """Drive one real lightweight gateway spawn for *config* and report the wire."""
     ledger = GatewayLedger(gateway_ledger_path(config))
+    upstreams = {
+        ProviderBinding.ANTHROPIC: UpstreamSettings(
+            base_url="https://anthropic.test",
+            api_key=SecretStr(provider_key),
+            auth_style=UpstreamAuthStyle.X_API_KEY,
+        )
+    }
+    if zai_upstream:
+        upstreams[ProviderBinding.ZAI_HARNESS] = UpstreamSettings(
+            base_url="https://zai.test",
+            api_key=SecretStr(f"{provider_key}-zai"),
+            auth_style=UpstreamAuthStyle.BEARER,
+        )
     settings = GatewaySettings(
         control_token=SecretStr(control_token),
-        upstreams={
-            ProviderBinding.ANTHROPIC: UpstreamSettings(
-                base_url="https://anthropic.test",
-                api_key=SecretStr(provider_key),
-                auth_style=UpstreamAuthStyle.X_API_KEY,
-            )
-        },
+        upstreams=upstreams,
+        governed_repo_slugs=governed_repo_slugs,
         ledger_path=ledger.path,
         body_dir=config.data_root / "gateway" / "bodies",
         max_key_ttl_seconds=config.gateway_key_ttl_seconds,
@@ -188,6 +228,7 @@ async def run_gateway_turn(
     gateway_client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url=config.gateway_base_url
     )
+    control = InProcessGatewayControlClient(gateway_client)
     try:
         result = await run_lightweight_agent(
             runner=GatewayHarnessRunner(gateway_client),  # type: ignore[arg-type]
@@ -198,9 +239,13 @@ async def run_gateway_turn(
             source=source,
             timeout=10,
             provider="gateway",
-            gateway_client=InProcessGatewayControlClient(gateway_client),
+            gateway_client=control,
         )
     finally:
         await gateway_client.aclose()
         await upstream_client.aclose()
-    return GatewayTurn(returncode=result.returncode, exchanges=origin.exchanges)
+    return GatewayTurn(
+        returncode=result.returncode,
+        exchanges=origin.exchanges,
+        decisions=control.decisions,
+    )

@@ -11,6 +11,12 @@ supplies. A policy is durable, is written without redaction (``atomic_write``,
 unlike the audit chain's ``append_jsonl``), and is served back over an
 unauthenticated read route — so a credential pasted into a policy body is refused
 at write time, and the refusal does not quote it back.
+
+ADR-0141 extends it again for the route-aware mint. ``POST /control/v2/keys`` is
+the one route that both *receives* a caller-supplied identity and *returns* live
+credential material, so it is the nearest thing in the system to a disclosure —
+and its decision half, which is echoed onto a lease view, an in-flight view, a
+terminal view and a durable ledger row, must carry none of it.
 """
 
 from __future__ import annotations
@@ -30,6 +36,8 @@ from pydantic import SecretStr
 import dashboard_routes._gateway_policy_routes as gateway_policy_routes_module
 import hydraflow_gateway.accounts as accounts_module
 import hydraflow_gateway.active_routes as active_routes_module
+import hydraflow_gateway.governed_preflight as governed_preflight_module
+import hydraflow_gateway.route_mint as route_mint_module
 import hydraflow_gateway.routing_audit as routing_audit_module
 import hydraflow_gateway.routing_policy as routing_policy_module
 import hydraflow_gateway.routing_store as routing_store_module
@@ -53,7 +61,9 @@ from hydraflow_gateway.models import (
     MintKeyRequest,
     ProviderBinding,
     RepoClass,
+    RouteBinding,
 )
+from hydraflow_gateway.route_mint import MintDecisionView, MintV2Request
 from hydraflow_gateway.routing_policy import (
     AccountAvailability,
     LegacyRoute,
@@ -310,6 +320,14 @@ async def test_every_payload_section_actually_returned_a_row(
         # rather than growing one of their own.
         PolicyMutation,
         MutationIntent,
+        # ADR-0141's route-aware mint. ``MintV2Response`` is deliberately absent:
+        # it is the one-time credential envelope, exactly like ``MintKeyResponse``,
+        # and its ``token`` field is the payload rather than a leak. Its
+        # *decision* half is not, and neither is the binding stamped onto every
+        # governed identity, ledger row, and route view — so both are guarded.
+        MintV2Request,
+        MintDecisionView,
+        RouteBinding,
     ],
 )
 def test_read_model_declares_no_credential_shaped_field(model: type) -> None:
@@ -336,6 +354,8 @@ def test_read_model_declares_no_credential_shaped_field(model: type) -> None:
         routing_workspace_module,
         routing_matrix_module,
         gateway_policy_routes_module,
+        governed_preflight_module,
+        route_mint_module,
         # The one module that legitimately handles a credential: it must still
         # never unwrap a ``SecretStr`` into anything it returns or records.
         operator_identity_module,
@@ -493,3 +513,98 @@ def test_the_refusal_does_not_quote_the_credential_back(tmp_path: Path) -> None:
     )
 
     assert _ANTHROPIC_KEY not in response.text
+
+
+# --------------------------------------------------------------------------
+# ADR-0141's route-aware mint: the one route that returns live key material
+# --------------------------------------------------------------------------
+
+_V2_BODY = {
+    "mint_attempt_id": "att-1",
+    "dispatch_id": "disp-1",
+    "principal_kind": "spawn",
+    "principal_id": "implementer",
+    "spawn_id": "spawn-1",
+    "repo": "acme/hydraflow",
+    "repo_slug": "acme-hydraflow",
+    "repo_class": "hydraflow",
+    "worker_role": "implementer",
+    "request_face": "agentic",
+    "requirement_kind": "capability",
+    "requirement_value": "balanced",
+    "requested_model": "claude-sonnet-4-6",
+    "effective_model": "glm-5.3",
+    "route_decision_id": "dec_abc",
+    "policy_id": "project-x-zai",
+    "policy_revision": 4,
+    "snapshot_hash": "sha256:feed",
+    "capture_bodies": False,
+    "ttl_seconds": 300,
+}
+
+
+async def _governed_mint(tmp_path: Path) -> tuple[str, str]:
+    """Drive one real v2 mint and return (issued token, the decision payload)."""
+    app = create_app(_settings(tmp_path), wall_clock=_NOW.timestamp)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://gateway.test"
+    ) as client:
+        response = await client.post("/control/v2/keys", headers=_AUTH, json=_V2_BODY)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["decision"]["outcome"] == "selected", payload
+    return str(payload["token"]), json.dumps(payload["decision"])
+
+
+@pytest.mark.parametrize(
+    "credential",
+    [
+        pytest.param(_ANTHROPIC_KEY, id="the-anthropic-upstream-key"),
+        pytest.param(_ZAI_KEY, id="the-zai-upstream-key"),
+        pytest.param(_CONTROL_TOKEN, id="the-control-token-that-authorised-the-mint"),
+    ],
+)
+async def test_the_mint_decision_carries_no_credential(
+    tmp_path: Path, credential: str
+) -> None:
+    """All four shapes are covered: the fourth is the minted token, below."""
+    _, decision = await _governed_mint(tmp_path)
+
+    assert credential not in decision
+
+
+async def test_the_mint_decision_carries_no_part_of_the_key_it_authorised(
+    tmp_path: Path,
+) -> None:
+    """The decision is echoed onto a ledger row and three route views."""
+    token, decision = await _governed_mint(tmp_path)
+
+    assert token not in decision
+
+
+async def test_the_mint_decision_carries_no_virtual_token_secret_half(
+    tmp_path: Path,
+) -> None:
+    """``key_id`` is a published join column; the entropy behind it is not."""
+    token, decision = await _governed_mint(tmp_path)
+    secret_half = token.split(".", maxsplit=1)[1]
+
+    assert secret_half not in decision
+
+
+async def test_the_mint_decision_trips_no_canonical_secret_pattern(
+    tmp_path: Path,
+) -> None:
+    """The canonical detector (ADR-0085) finds nothing to redact."""
+    _, decision = await _governed_mint(tmp_path)
+
+    assert scan_for_secrets(decision) == []
+
+
+async def test_the_mint_decision_publishes_the_join_keys_it_is_meant_to(
+    tmp_path: Path,
+) -> None:
+    """The absence assertions above are not vacuous: the correlation IS present."""
+    _, decision = await _governed_mint(tmp_path)
+
+    assert "dec_abc" in decision

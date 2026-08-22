@@ -39,7 +39,12 @@ from credit_failover import zai_key_present
 from driver_contracts import ModelRequirement, ModelRequirementKind
 from exception_classify import exc_detail, reraise_on_credit_or_bug
 from hydraflow_gateway.accounts import AdministrativeState
-from hydraflow_gateway.models import ProviderBinding, RepoClass, legacy_account_id
+from hydraflow_gateway.models import (
+    ProviderBinding,
+    RepoClass,
+    binding_for_model,
+    legacy_account_id,
+)
 from hydraflow_gateway.routing_audit import RoutingAuditLog
 from hydraflow_gateway.routing_policy import (
     ROUTING_DECISION_SCHEMA_VERSION,
@@ -154,12 +159,15 @@ def provider_binding_for(provider: str, model: str) -> ProviderBinding:
     """Map a resolved harness provider + model onto its upstream account binding.
 
     Mirrors ``runner_utils.harness_billing_provider``: the gateway's own binding
-    is decided by the model (GLM ids bind to z.ai), while a direct lane binds to
-    whatever it is.
+    is decided by the model, while a direct lane binds to whatever it is. The
+    model branch delegates to :func:`hydraflow_gateway.models.binding_for_model`
+    — the same definition ADR-0141's route-aware mint derives an account from —
+    so this classifier and that mint cannot answer "which lane serves this
+    model?" differently for one spawn.
     """
     lane = provider.strip().lower()
     if lane == _GATEWAY:
-        lane = "zai" if model.strip().lower().startswith("glm") else "claude"
+        return binding_for_model(model)
     if lane in {"zai", "kimi", "openrouter"}:
         return ProviderBinding.ZAI_HARNESS
     return ProviderBinding.ANTHROPIC
@@ -327,23 +335,24 @@ def record_route_shadow(
         return None
 
 
-def record_agentic_route_shadow(
+def agentic_route_stages(
     *,
     config: HydraFlowConfig,
-    principal_id: str,
     dial_field: str | None,
     dial_provider: str,
     after_ratchet: str,
     after_repo_provider: str,
     final_provider: str,
-    final_model: str,
-    issue_number: int | None = None,
-    pr_number: int | None = None,
-) -> ShadowDecision | None:
-    """Shadow one tool-using spawn, given the provider after each legacy stage."""
-    if getattr(config, "gateway_route_shadow_enabled", False) is not True:
-        return None
-    stages = (
+) -> tuple[RouteStage, ...]:
+    """The ordered legacy stages a tool-using spawn passed through.
+
+    Public because ADR-0141's enforcement seam builds the same
+    :class:`~hydraflow_gateway.routing_policy.RouteContext` this recorder does,
+    from the same spawn. Two constructions of one stage trail would be two
+    answers to "which dial decided this route", and the shadow record and the
+    enforced decision would then disagree about a spawn they both describe.
+    """
+    return (
         RouteStage(
             mechanism=(
                 LegacyRouteMechanism.ROLE_DIAL
@@ -371,15 +380,76 @@ def record_agentic_route_shadow(
             )[:200],
         ),
     )
+
+
+def record_agentic_route_shadow(
+    *,
+    config: HydraFlowConfig,
+    principal_id: str,
+    dial_field: str | None,
+    dial_provider: str,
+    after_ratchet: str,
+    after_repo_provider: str,
+    final_provider: str,
+    final_model: str,
+    issue_number: int | None = None,
+    pr_number: int | None = None,
+) -> ShadowDecision | None:
+    """Shadow one tool-using spawn, given the provider after each legacy stage."""
+    if getattr(config, "gateway_route_shadow_enabled", False) is not True:
+        return None
     return record_route_shadow(
         config=config,
         principal_id=principal_id,
-        stages=stages,
+        stages=agentic_route_stages(
+            config=config,
+            dial_field=dial_field,
+            dial_provider=dial_provider,
+            after_ratchet=after_ratchet,
+            after_repo_provider=after_repo_provider,
+            final_provider=final_provider,
+        ),
         final_provider=final_provider,
         final_model=final_model,
         request_face=RequestFace.AGENTIC,
         issue_number=issue_number,
         pr_number=pr_number,
+    )
+
+
+def dialled_route_stages(
+    *,
+    config: HydraFlowConfig,
+    requested_provider: str | None,
+    transport_provider: str,
+) -> tuple[RouteStage, ...]:
+    """The ordered legacy stages a dial-routed spawn passed through.
+
+    Public for the same reason as :func:`agentic_route_stages`: ADR-0141's
+    enforcement seam needs the identical trail, and building it twice would let
+    the record and the decision disagree.
+    """
+    maintenance = str(getattr(config, "maintenance_provider", "claude") or "claude")
+    dialled = requested_provider if requested_provider is not None else maintenance
+    return (
+        RouteStage(
+            mechanism=(
+                LegacyRouteMechanism.ROLE_DIAL
+                if requested_provider is not None
+                else LegacyRouteMechanism.MAINTENANCE_DEFAULT
+            ),
+            provider=dialled or "claude",
+            detail=(
+                f"provider={requested_provider}"
+                if requested_provider is not None
+                else f"maintenance_provider={maintenance}"
+            )[:200],
+        ),
+        RouteStage(
+            mechanism=LegacyRouteMechanism.FLEET_RATCHET,
+            provider=transport_provider or "claude",
+            detail="gateway_fleet_ratchet_enabled=true",
+        ),
     )
 
 
@@ -405,32 +475,14 @@ def record_dialled_route_shadow(
     """
     if getattr(config, "gateway_route_shadow_enabled", False) is not True:
         return None
-    maintenance = str(getattr(config, "maintenance_provider", "claude") or "claude")
-    dialled = requested_provider if requested_provider is not None else maintenance
-    stages = (
-        RouteStage(
-            mechanism=(
-                LegacyRouteMechanism.ROLE_DIAL
-                if requested_provider is not None
-                else LegacyRouteMechanism.MAINTENANCE_DEFAULT
-            ),
-            provider=dialled or "claude",
-            detail=(
-                f"provider={requested_provider}"
-                if requested_provider is not None
-                else f"maintenance_provider={maintenance}"
-            )[:200],
-        ),
-        RouteStage(
-            mechanism=LegacyRouteMechanism.FLEET_RATCHET,
-            provider=transport_provider or "claude",
-            detail="gateway_fleet_ratchet_enabled=true",
-        ),
-    )
     return record_route_shadow(
         config=config,
         principal_id=principal_id,
-        stages=stages,
+        stages=dialled_route_stages(
+            config=config,
+            requested_provider=requested_provider,
+            transport_provider=transport_provider,
+        ),
         final_provider=transport_provider,
         final_model=model,
         request_face=request_face,
