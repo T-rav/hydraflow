@@ -290,7 +290,8 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
         # Routing shadow (#11536, ADR-0139): observation only — the route above
         # is already fixed and this records what policy would have chosen.
         # ``dial_field=None`` is the truth here: this seam has no role dial.
-        record_agentic_route_shadow(
+        await asyncio.to_thread(
+            record_agentic_route_shadow,
             config=self._config,
             principal_id=self._telemetry_source(),
             dial_field=None,

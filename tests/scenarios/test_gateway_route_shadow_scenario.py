@@ -33,6 +33,7 @@ from hydraflow_gateway.ledger import GatewayBodyStore, GatewayLedger
 from hydraflow_gateway.models import ProviderBinding
 from hydraflow_gateway.routing_audit import RoutingAuditLog
 from hydraflow_gateway.routing_policy import (
+    RequirementMapping,
     RouteTransport,
     RoutingAction,
     RoutingMatch,
@@ -47,6 +48,7 @@ from hydraflow_gateway.settings import (
 from route_shadow import (
     ShadowDivergence,
     policy_snapshot_path,
+    requirement_for_model,
     shadow_decision_log_path,
 )
 from runner_utils import (
@@ -248,9 +250,33 @@ async def _run_turn(
 
 
 def _zai_lock() -> RoutingPolicy:
-    """A policy that would send this repo to z.ai — if enforcement existed."""
+    """The design's "project X always uses z.ai", written the honest way.
+
+    The lock alone is not enough and must not be: this turn asks for
+    ``claude-sonnet-4-6``, and moving an Anthropic request onto a z.ai lane
+    requires an operator to say so in a mapping (ADR-0139 D4). ``_bare_zai_lock``
+    below is the same policy without that mapping, and it holds instead.
+    """
     return RoutingPolicy(
         id="project-x-zai",
+        priority=100,
+        match=RoutingMatch(repo_ids=(_REPO,)),
+        action=RoutingAction(
+            provider_lock=ProviderBinding.ZAI_HARNESS,
+            requirement_map=(
+                RequirementMapping(
+                    requirement=requirement_for_model("claude-sonnet-4-6"),
+                    effective_model="glm-5.3",
+                ),
+            ),
+        ),
+    )
+
+
+def _bare_zai_lock() -> RoutingPolicy:
+    """A provider lock with no mapping — it may not silently remap the model."""
+    return RoutingPolicy(
+        id="project-x-zai-bare",
         priority=100,
         match=RoutingMatch(repo_ids=(_REPO,)),
         action=RoutingAction(provider_lock=ProviderBinding.ZAI_HARNESS),
@@ -331,7 +357,7 @@ class TestGatewayRouteShadowScenario:
 
         assert lit.exchanges == dark.exchanges
 
-    async def test_that_policy_is_recorded_as_a_provider_divergence(
+    async def test_that_policy_is_recorded_as_a_route_divergence(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The measurement P2 burns in on: what enforcement *would* have changed."""
@@ -340,7 +366,21 @@ class TestGatewayRouteShadowScenario:
             tmp_path, monkeypatch, shadow=True, policies=[_zai_lock()]
         )
 
-        assert world.decisions[0]["divergence"] == ShadowDivergence.PROVIDER.value
+        assert (
+            world.decisions[0]["divergence"]
+            == ShadowDivergence.PROVIDER_AND_MODEL.value
+        )
+
+    async def test_a_bare_provider_lock_holds_rather_than_remapping_the_model(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A lock cannot move an Anthropic request to z.ai on its own authority."""
+        monkeypatch.setenv("ZAI_API_KEY", "scenario-zai-key")
+        world = await _run_turn(
+            tmp_path, monkeypatch, shadow=True, policies=[_bare_zai_lock()]
+        )
+
+        assert world.decisions[0]["proposed"]["outcome"] == "held"
 
     async def test_the_divergent_decision_cites_the_policy_that_proposed_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

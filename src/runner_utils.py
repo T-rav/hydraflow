@@ -705,6 +705,25 @@ async def stream_claude_with_telemetry(
     attributed_pr = (
         pr_number if pr_number is not None else _as_opt_int(event_data.get("pr"))
     )
+    # Routing shadow (#11536, ADR-0139): the fourth governed spawn seam. Like
+    # run_lightweight_agent it takes its dial as a `provider=` argument and then
+    # applies the fleet ratchet, so with the ratchet on this traffic is *gateway*
+    # transport — exactly what a policy would bind. Observation only; the
+    # transport is already resolved above.
+    from hydraflow_gateway.routing_policy import RequestFace
+    from route_shadow import record_dialled_route_shadow
+
+    await asyncio.to_thread(
+        record_dialled_route_shadow,
+        config=config,
+        principal_id=str(event_data.get("source", "unknown")),
+        requested_provider=provider,
+        transport_provider=transport_provider,
+        model=gate_model,
+        request_face=RequestFace.AGENTIC,
+        issue_number=attributed_issue,
+        pr_number=attributed_pr,
+    )
     # Point the CLI at the role's harness backend for this spawn only (empty for
     # native Anthropic — the main workers stay pristine), and carry the resolved
     # provider so a credit-out is scoped to the right backend.
@@ -1788,14 +1807,17 @@ async def run_lightweight_agent(
     # Routing shadow (#11536, ADR-0139): this is the seam the per-role
     # ``*_provider`` dials run through, so it is where a z.ai-pinned loop
     # becomes observable. Observation only — the transport is already resolved.
-    from route_shadow import record_one_shot_route_shadow
+    from hydraflow_gateway.routing_policy import RequestFace
+    from route_shadow import record_dialled_route_shadow
 
-    record_one_shot_route_shadow(
+    await asyncio.to_thread(
+        record_dialled_route_shadow,
         config=config,
         principal_id=source,
         requested_provider=provider,
         transport_provider=transport_provider,
         model=model,
+        request_face=RequestFace.ONE_SHOT,
         issue_number=issue_number,
         pr_number=pr_number,
     )

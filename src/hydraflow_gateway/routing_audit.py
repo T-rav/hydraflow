@@ -44,6 +44,31 @@ GENESIS_HASH = "sha256:" + "0" * 64
 _TAIL_READ_BYTES = 64 * 1024
 """Bounded seek for the last line: the chain head is O(1), not O(file)."""
 
+_append_locks: dict[str, threading.Lock] = {}
+_append_locks_guard = threading.Lock()
+
+
+def _append_lock(path: Path) -> threading.Lock:
+    """Return the process-wide lock guarding appends to *path*.
+
+    The lock has to be keyed on the **path**, not held per instance: callers
+    construct a fresh :class:`RoutingAuditLog` per record, and the append is a
+    read-then-write of the chain head. Two concurrent appends that each read the
+    same head produce two records claiming the same ``seq``, which breaks the
+    chain the log exists to guarantee. This mirrors ``file_util._thread_gate``,
+    which keys its own per-path gate the same way and for the same reason.
+
+    Scope is one process, which is the documented scope of one chain: a repo
+    line is owned by exactly one factory process (ADR-0139 D6).
+    """
+    key = str(path)
+    with _append_locks_guard:
+        lock = _append_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _append_locks[key] = lock
+        return lock
+
 
 class AuditChainError(ValueError):
     """The audit file could not be read as a coherent chain."""
@@ -103,7 +128,6 @@ class RoutingAuditLog:
 
     def __init__(self, path: Path) -> None:
         self._path = Path(path)
-        self._lock = threading.Lock()
 
     @property
     def path(self) -> Path:
@@ -116,7 +140,7 @@ class RoutingAuditLog:
         Raises :class:`OSError` if the sink is unwritable; the shadow caller
         treats that as "no record", never as a reason to change a route.
         """
-        with self._lock:
+        with _append_lock(self._path):
             head = self._head()
             seq = 0 if head is None else head.seq + 1
             prev = GENESIS_HASH if head is None else head.record_hash

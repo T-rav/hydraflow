@@ -18,20 +18,20 @@ pytest:tests/regressions/test_issue_11536_shadow_route_is_inert.py
 pytest:tests/scenarios/test_gateway_route_shadow_scenario.py
 
 **Precedent:** Shadow mode / dark launching — running a new decision path against live traffic and comparing its output with the incumbent's without letting it act (Google SRE's "shadow testing", GitHub's `scientist` library, Twitter's "diffy"). The comparison, not the new path, is the deliverable.
-**Divergence:** the classic shadow harness runs the *same* computation twice and diffs the results, so a disagreement is a bug in the candidate. Here the incumbent is a set of hand-maintained dials that were never a policy at all, so a disagreement is frequently the *candidate* being right and the incumbent being undocumented. The record therefore carries the incumbent's own mechanism as a first-class field (`LegacyRoute.mechanism`) rather than treating "legacy" as one opaque baseline: an operator reading a divergence has to be able to tell "policy disagrees with `adr_review_provider=zai`" from "policy disagrees with a credit failover that engaged four minutes ago", because only one of those is a policy gap (receipt: this repo pins five loops to z.ai through per-role dials that no policy describes — `.hydraflow/config.json`, and `docs/proposals/gateway-routing-control-plane.md` §"Precedence and conflict rules" level 9, "compiled legacy role defaults ... during migration only").
+**Divergence:** the classic shadow harness runs the *same* computation twice and diffs the results, so a disagreement is a bug in the candidate. Here the incumbent is a set of hand-maintained dials that were never a policy at all, so a disagreement is frequently the *candidate* being right and the incumbent being undocumented. The record therefore carries the incumbent's own mechanism as a first-class field (`LegacyRoute.mechanism`) rather than treating "legacy" as one opaque baseline: an operator reading a divergence has to be able to tell "policy disagrees with `adr_review_provider=zai`" from "policy disagrees with a credit failover that engaged four minutes ago", because only one of those is a policy gap (receipt: this repo pins six loops to z.ai through per-role dials that no policy describes — `.hydraflow/config.json`, and `docs/proposals/gateway-routing-control-plane.md` §"Precedence and conflict rules" level 9, "compiled legacy role defaults ... during migration only").
 
 ## Context
 
 ADR-0138 made accounts and routes *visible*. It deliberately stopped short of eligibility: "this account can satisfy *this* repo, role, request face, and model requirement at *this* policy revision" is a property of a route explanation, and there was no resolver to compute one. Epic #11531's delivery principle is **observe before enforce**, and this phase is the observation that has to come before any enforcement is credible.
 
-Routing today is not one decision seam. It is four mechanisms layered at three spawn sites:
+Routing today is not one decision seam. It is four mechanisms layered at four spawn sites:
 
-- a per-role `*_provider` dial (`config.adr_review_provider` and its siblings), which this repo currently pins to `zai` for five loops;
+- a per-role `*_provider` dial (`config.adr_review_provider` and its siblings), which this repo currently pins to `zai` for six loops (`wiki_compilation`, `adr_review`, `transcript_summary`, `triage_honeypot`, `term_proposer`, `pr_unstick`);
 - `config.repo_provider`, the repo-wide override (ADR-0134);
 - `gateway_fleet_ratchet_enabled`, which promotes untouched Claude spawns onto the tap;
 - ADR-0119 credit failover, which reroutes to GLM while Anthropic credits are exhausted.
 
-They are applied in `base_runner._execute`, `BaseSubprocessRunner.run`, and `runner_utils.run_lightweight_agent`. Nothing records *why* a given spawn ended up where it did, nothing can answer "what would a project-X-uses-z.ai policy have changed?", and the five z.ai-pinned loops do not reach the gateway at all — they are direct HTTP calls that no gateway policy could bind even if one existed.
+They are applied at **four** spawn seams: `base_runner._execute`, `BaseSubprocessRunner.run`, `runner_utils.run_lightweight_agent`, and `runner_utils.stream_claude_with_telemetry` — the last of which applies the fleet ratchet and is therefore *gateway* transport whenever the ratchet is on, i.e. precisely the traffic a policy could bind. Nothing records *why* a given spawn ended up where it did, nothing can answer "what would a project-X-uses-z.ai policy have changed?", and the z.ai-pinned loops do not reach the gateway at all — they are direct HTTP calls that no gateway policy could bind even if one existed.
 
 Three constraints shape the design:
 
@@ -43,7 +43,7 @@ Three constraints shape the design:
 
 ### D1: The resolver is a pure, total function, and enforcement is not built
 
-`src/hydraflow_gateway/routing_policy.py:explain` maps `(RouteContext, PolicySnapshot)` to exactly one `RouteDecision`. It performs no I/O, reads no clock, holds no state, and **raises on no input**: a corrupt snapshot, an ambiguous repository identity, an equal-precedence tie, a literal family a policy would answer with GLM, and a capability with no mapping are all typed `held`/`rejected` outcomes carrying a reason code.
+`src/hydraflow_gateway/routing_policy.py:explain` maps `(RouteContext, PolicySnapshot)` to exactly one `RouteDecision`. It performs no I/O, reads no clock, holds no state, and **raises on no input**: a corrupt snapshot, an equal-precedence tie, a literal family a policy would answer with GLM, and a capability with no mapping are all typed `held`/`rejected` outcomes carrying a reason code. (An ambiguous repository identity is *not* one of them: it makes every repo-scoped policy fail to match with `repo-identity-not-canonical`, and the decision then falls through to legacy compatibility — refusing the join, not the route. D2 has the detail.)
 
 Totality is not stylistic. The only caller in this phase is an observer standing beside a live spawn, and an exception thrown from a pure core would become a routing incident. `explain_batch` resolves many contexts against **one** snapshot, because an effective-route matrix whose rows saw different revisions is a race rather than a matrix.
 
@@ -77,6 +77,8 @@ Two independent checks, either of which alone would be enough, deliberately kept
 
 A provider-neutral `capability` resolves **only** through an explicit mapping; without one the decision is `held` with `capability-unmapped`. Guessing is how "high-reasoning" silently becomes whichever lane is cheapest.
 
+**The rule governs what a policy may resolve to, not what legacy already did.** A `legacy-compatibility` decision (D7) reports a route that has already happened, and ADR-0119 credit failover genuinely does put a `claude-opus` request on GLM. Reporting that accurately is the divergence signal this phase exists to produce; a resolver that hid it — by holding, or by rewriting the model it reports — would erase the one observation the burn-in needs. `test_no_managed_policy_ever_routes_a_literal_family_off_anthropic` sweeps the whole input matrix for the invariant, and `test_a_legacy_route_that_defies_the_requirement_is_reported_not_suppressed` pins the distinction so the two cannot be conflated later.
+
 ### D5: Snapshots are versioned and hashed; an unreadable one holds rather than routing
 
 `RoutingPolicyStore` writes one revision per save through `file_util.atomic_write`, validated first, with an order-independent `content_hash` over the policy set. `load()` returns a typed `SnapshotLoad` whose `state` is `ok`, `absent`, or `corrupt`, and the distinction is load-bearing:
@@ -85,6 +87,8 @@ A provider-neutral `capability` resolves **only** through an explicit mapping; w
 - **corrupt** — unparseable, or a `content_hash` that does not match its own contents — yields an *empty* snapshot and a `held` decision with `snapshot-unavailable`.
 
 Collapsing those two into "no policies" is the failure the design names directly: missing or corrupt policy evidence must never present as a coherent state. The hash is also the only thing standing between a hand-edited policy file and a route nobody authorised.
+
+A write **over** a corrupt snapshot is refused (`CorruptSnapshotError`) rather than performed. A corrupt load reports revision 0, so saving through it would restart the counter at 1 and leave two different policy sets both cited as revision 1 on a durable, hash-linked decision chain — silently destroying the one property that makes a decision replayable. Repair is an explicit operator act.
 
 **Writes are not exposed.** `save` exists so the format, the revision counter, and the hash are durable and tested now; there is no HTTP route to it in this phase, and therefore **ADR-0138 §D5 does not apply** — this phase adds no gateway write route, and no new gateway read route, through the dashboard proxy. The first such route (#11538's policy workspace) inherits §D5's precondition unchanged.
 

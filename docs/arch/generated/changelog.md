@@ -7,6 +7,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 ## 2026-W34
 
 - `9aa34d7` — docs(adr-0085): record the gateway-credential coverage and its residual limit *(2026-08-22)*
+- `7cfacb9` — refactor(gateway): drop new lint suppressions; align routing tests with the gateway coverage gate *(2026-08-22)*
 - `40fed57` — feat(gateway): P1 shadow routing policy resolver, explanation, and hash-linked decisions (ADR-0139) *(2026-08-22)*
 - `81e811e` — feat(scheduling): Fable P1 — deterministic IssueDriver behind an explicit scheduling_model dial (#11535) (#11634) (#11634) *(2026-08-22)*
 - `f16dcc5` — feat(gateway): read-only account and active-route visibility (ADR-0138) (#11633) (#11633) *(2026-08-22)*

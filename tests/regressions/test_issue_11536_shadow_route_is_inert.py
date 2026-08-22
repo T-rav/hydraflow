@@ -5,7 +5,10 @@ route it *would* choose beside every spawn, while the legacy routing path stays
 authoritative. That is the phase's entire safety property, so it is pinned here
 rather than left to the feature suite: the command and the harness provider
 handed to the spawn must be **byte-identical** with the resolver enabled and
-disabled, at both agentic seams and the one-shot seam.
+disabled, at both runner seams. The two dial-driven seams
+(``run_lightweight_agent`` and ``stream_claude_with_telemetry``) are pinned the
+same way one layer out, at the external HTTP boundary, by
+``tests/scenarios/test_gateway_route_shadow_scenario.py``.
 
 The last case pins the realistic operational failure: a shadow *sink* that
 cannot write (read-only data root, full disk) degrades to "no shadow record",

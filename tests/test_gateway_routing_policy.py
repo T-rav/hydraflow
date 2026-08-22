@@ -7,12 +7,16 @@ function of its arguments.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from itertools import product
+
 import pytest
 
 from driver_contracts import ModelRequirement, ModelRequirementKind, WorkerRole
 from hydraflow_gateway.accounts import AdministrativeState
 from hydraflow_gateway.models import ProviderBinding, RepoClass
 from hydraflow_gateway.routing_policy import (
+    MAX_EXPLAINED_POLICIES,
     AccountAvailability,
     AccountRejectionReason,
     DecisionOutcome,
@@ -30,6 +34,7 @@ from hydraflow_gateway.routing_policy import (
     RequestFace,
     RequirementMapping,
     RouteContext,
+    RouteDecision,
     RouteTransport,
     RoutingAction,
     RoutingMatch,
@@ -415,7 +420,7 @@ def test_a_zai_account_is_rejected_for_a_literal_family_with_a_reason_code() -> 
     }
 
     assert reasons["legacy-zai-harness"] is (
-        AccountRejectionReason.LITERAL_FAMILY_INCOMPATIBLE
+        AccountRejectionReason.ANTHROPIC_LANE_REQUIRED
     )
 
 
@@ -814,3 +819,378 @@ def test_a_repo_class_outside_the_policy_s_set_does_not_match() -> None:
     assert decision.explanation.considered[0].reason is (
         MatchReason.REPO_CLASS_NOT_IN_SET
     )
+
+
+# --- The two whole-matrix invariants ----------------------------------------
+#
+# Everything above pins one rule with one example. These two sweep the cross
+# product of every input dimension that can plausibly interact — requirement
+# kind, account population (including empty, duplicate ids, and a draining
+# lane), canonical vs lossy repo identity, a present and an absent legacy
+# route, an account pool naming an account that does not exist, every provider
+# lock, an honest and a dishonest requirement map, allow-patterns that match
+# and that exclude, and all three snapshot trust states — against three
+# snapshots including one whose content hash does not match its own contents.
+#
+# They exist because both properties are *universal* claims. "explain never
+# raises" and "a literal family never lands on a non-Anthropic account" cannot
+# be established by any number of chosen examples, and both are load-bearing:
+# the first is what makes the resolver safe to run beside a live spawn, and the
+# second is the epic's named hazard.
+
+
+def _matrix_contexts() -> Iterator[RouteContext]:
+    accounts = [
+        (),
+        (_ANTHROPIC,),
+        (_ANTHROPIC, _ZAI),
+        (
+            AccountAvailability(
+                account_id="dup",
+                provider_binding=ProviderBinding.ANTHROPIC,
+                configured=True,
+            ),
+            AccountAvailability(
+                account_id="dup",
+                provider_binding=ProviderBinding.ZAI_HARNESS,
+                configured=False,
+            ),
+        ),
+        (
+            AccountAvailability(
+                account_id="legacy-zai-harness",
+                provider_binding=ProviderBinding.ZAI_HARNESS,
+                configured=True,
+                administrative_state=AdministrativeState.DRAINING,
+            ),
+        ),
+    ]
+    repos = [
+        RepoIdentity.from_canonical("acme/project-x"),
+        RepoIdentity.from_runtime_slug("acme-project-x"),
+    ]
+    requirements = [
+        _CONCRETE_GLM,
+        _LITERAL_OPUS,
+        ModelRequirement(
+            kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+        ),
+        _HIGH_REASONING,
+        ModelRequirement(kind=ModelRequirementKind.CAPABILITY, value="balanced"),
+    ]
+    for repo, requirement, available, legacy in product(
+        repos, requirements, accounts, [None, _LEGACY]
+    ):
+        yield _context(
+            repo=repo,
+            model_requirement=requirement,
+            accounts=available,
+            legacy_route=legacy,
+        )
+
+
+def _matrix_snapshots() -> Iterator[tuple[PolicySnapshot, SnapshotState]]:
+    dishonest = RequirementMapping(requirement=_LITERAL_OPUS, effective_model="glm-5.3")
+    honest = RequirementMapping(requirement=_HIGH_REASONING, effective_model="glm-5.3")
+    for pool, lock, mapping, patterns in product(
+        [(), ("no-such-account",), ("legacy-zai-harness", "legacy-anthropic")],
+        [None, ProviderBinding.ANTHROPIC, ProviderBinding.ZAI_HARNESS],
+        [(), (honest,), (dishonest,)],
+        [(), ("glm-*",), ("no-such-model-*",)],
+    ):
+        policy = _zai_lock(
+            provider_lock=lock,
+            account_pool=pool,
+            requirement_map=mapping,
+            allowed_patterns=patterns,
+        )
+        tied = policy.model_copy(
+            update={"id": "tied", "action": RoutingAction(provider_lock=lock)}
+        )
+        yield _snapshot(policy), SnapshotState.OK
+        yield _snapshot(policy, tied), SnapshotState.OK
+        yield PolicySnapshot.empty(), SnapshotState.CORRUPT
+
+
+def test_explain_never_raises_anywhere_in_the_input_matrix() -> None:
+    """Totality: a shadow observer beside a live spawn must never throw."""
+    raised = [
+        (context, snapshot.content_hash, state)
+        for context, (snapshot, state) in product(
+            _matrix_contexts(), list(_matrix_snapshots())
+        )
+        if _raises(context, snapshot, state)
+    ]
+
+    assert raised == []
+
+
+def test_no_managed_policy_ever_routes_a_literal_family_off_anthropic() -> None:
+    """The epic's named hazard, as a universal rather than an example.
+
+    Scoped to ``managed-policy`` decisions on purpose: AC4 governs what a
+    *policy* may resolve to. A ``legacy-compatibility`` decision is a report of
+    a route that already happened, and reporting it accurately — including when
+    legacy put an Opus request on GLM — is the divergence signal this phase
+    exists to produce, not a violation of it. The test below pins that.
+    """
+    violations = [
+        decision
+        for context, (snapshot, state) in product(
+            _matrix_contexts(), list(_matrix_snapshots())
+        )
+        for decision in [explain(context, snapshot, snapshot_state=state)]
+        if _is_dishonest_literal_route(context, decision)
+    ]
+
+    assert violations == []
+
+
+def _raises(
+    context: RouteContext, snapshot: PolicySnapshot, state: SnapshotState
+) -> bool:
+    try:
+        explain(context, snapshot, snapshot_state=state)
+    except Exception:  # pragma: no cover - the assertion reports it
+        return True
+    return False
+
+
+def _is_dishonest_literal_route(context: RouteContext, decision: RouteDecision) -> bool:
+    requirement = context.model_requirement
+    if requirement.kind is not ModelRequirementKind.LITERAL_FAMILY:
+        return False
+    if decision.outcome is not DecisionOutcome.SELECTED:
+        return False
+    if decision.policy_source is not PolicySource.MANAGED_POLICY:
+        return False
+    if decision.provider_binding is not ProviderBinding.ANTHROPIC:
+        return True
+    served = decision.effective_model
+    return served is not None and not requirement.satisfied_by(served)
+
+
+def test_a_legacy_route_that_defies_the_requirement_is_reported_not_suppressed() -> (
+    None
+):
+    """Legacy putting an Opus request on GLM is the signal, not a violation.
+
+    Credit failover does exactly this. A resolver that hid it — by holding, or
+    by rewriting the reported model — would erase the one observation the
+    burn-in phase needs.
+    """
+    on_glm = LegacyRoute(
+        provider_binding=ProviderBinding.ZAI_HARNESS,
+        account_id="legacy-zai-harness",
+        model="glm-5.2",
+        transport=RouteTransport.HARNESS_DIRECT,
+        mechanism=LegacyRouteMechanism.CREDIT_FAILOVER,
+        mechanism_detail="credit_failover_model=glm-5.2",
+    )
+    decision = explain(
+        _context(model_requirement=_LITERAL_OPUS, legacy_route=on_glm),
+        PolicySnapshot.empty(),
+    )
+
+    assert decision.provider_binding is ProviderBinding.ZAI_HARNESS
+
+
+def test_such_a_legacy_route_is_never_attributed_to_a_managed_policy() -> None:
+    """It is reported as legacy compatibility, so nobody reads it as approved."""
+    on_glm = LegacyRoute(
+        provider_binding=ProviderBinding.ZAI_HARNESS,
+        account_id="legacy-zai-harness",
+        model="glm-5.2",
+        transport=RouteTransport.HARNESS_DIRECT,
+        mechanism=LegacyRouteMechanism.CREDIT_FAILOVER,
+        mechanism_detail="credit_failover_model=glm-5.2",
+    )
+    decision = explain(
+        _context(model_requirement=_LITERAL_OPUS, legacy_route=on_glm),
+        PolicySnapshot.empty(),
+    )
+
+    assert decision.policy_source is PolicySource.LEGACY_COMPATIBILITY
+
+
+# --- Containment: a scoped policy must not claim traffic it did not name -----
+#
+# The complement of the "does it match" tests above. A mutation pass showed
+# each of these dimensions could be deleted from `evaluate_match` with the whole
+# suite still green: matching was proven, *not matching* was not.
+
+
+def test_a_repo_scoped_policy_does_not_claim_a_different_repo() -> None:
+    """Otherwise one project's rule silently governs every other project."""
+    policy = _zai_lock("other-repo-only")
+    other = policy.model_copy(
+        update={"match": RoutingMatch(repo_ids=("acme/other-repo",))}
+    )
+    decision = explain(_context(model_requirement=_HIGH_REASONING), _snapshot(other))
+
+    assert decision.explanation.considered[0].reason is MatchReason.REPO_NOT_IN_SET
+
+
+def test_a_role_scoped_policy_does_not_claim_a_different_role() -> None:
+    """A reviewer rule must not route implementer traffic."""
+    policy = RoutingPolicy(
+        id="reviewer-only",
+        match=RoutingMatch(roles=(WorkerRole.REVIEWER,)),
+        action=RoutingAction(provider_lock=ProviderBinding.ZAI_HARNESS),
+    )
+    decision = explain(_context(worker_role=WorkerRole.IMPLEMENTER), _snapshot(policy))
+
+    assert decision.explanation.considered[0].reason is MatchReason.ROLE_NOT_IN_SET
+
+
+def test_a_principal_scoped_policy_does_not_claim_a_different_principal() -> None:
+    """Loop-scoped rules are exact, like every other dimension."""
+    policy = RoutingPolicy(
+        id="wiki-only",
+        match=RoutingMatch(principal_ids=("wiki_compiler",)),
+        action=RoutingAction(provider_lock=ProviderBinding.ZAI_HARNESS),
+    )
+    decision = explain(_context(principal_id="adr_reviewer"), _snapshot(policy))
+
+    assert decision.explanation.considered[0].reason is (
+        MatchReason.PRINCIPAL_NOT_IN_SET
+    )
+
+
+def test_a_requirement_scoped_policy_does_not_claim_a_different_requirement() -> None:
+    """A rule written for high-reasoning must not capture a concrete request."""
+    policy = RoutingPolicy(
+        id="high-reasoning-only",
+        match=RoutingMatch(model_requirements=(_HIGH_REASONING,)),
+        action=RoutingAction(provider_lock=ProviderBinding.ZAI_HARNESS),
+    )
+    decision = explain(_context(model_requirement=_CONCRETE_GLM), _snapshot(policy))
+
+    assert decision.explanation.considered[0].reason is (
+        MatchReason.REQUIREMENT_NOT_IN_SET
+    )
+
+
+# --- Anthropic-lane provenance ----------------------------------------------
+
+
+def test_a_bare_haiku_request_still_needs_an_anthropic_lane() -> None:
+    """``haiku`` has no ADR-0137 family, so only the CLI-alias set catches it."""
+    haiku = ModelRequirement(kind=ModelRequirementKind.CONCRETE_MODEL, value="haiku")
+    decision = explain(
+        _context(model_requirement=haiku), _snapshot(_zai_lock(allowed_patterns=()))
+    )
+
+    assert decision.outcome is not DecisionOutcome.SELECTED
+
+
+def test_an_unmapped_qualified_claude_model_still_needs_an_anthropic_lane() -> None:
+    """A z.ai lock cannot quietly serve ``claude-opus-4-8`` under its own name."""
+    qualified = ModelRequirement(
+        kind=ModelRequirementKind.CONCRETE_MODEL, value="claude-opus-4-8"
+    )
+    decision = explain(
+        _context(model_requirement=qualified),
+        _snapshot(_zai_lock(allowed_patterns=())),
+    )
+    reasons = {
+        item.account_id: item.reason for item in decision.explanation.rejected_accounts
+    }
+
+    assert reasons["legacy-zai-harness"] is (
+        AccountRejectionReason.ANTHROPIC_LANE_REQUIRED
+    )
+
+
+def test_an_explicit_mapping_to_glm_does_license_the_zai_lane() -> None:
+    """ "Project X always uses z.ai" has to keep working — explicitly."""
+    qualified = ModelRequirement(
+        kind=ModelRequirementKind.CONCRETE_MODEL, value="claude-opus-4-8"
+    )
+    decision = explain(
+        _context(model_requirement=qualified),
+        _snapshot(
+            _zai_lock(
+                requirement_map=(
+                    RequirementMapping(
+                        requirement=qualified, effective_model="glm-5.3"
+                    ),
+                )
+            )
+        ),
+    )
+
+    assert decision.account_id == "legacy-zai-harness"
+
+
+def test_a_glm_request_needs_no_anthropic_lane() -> None:
+    """The guard must not fire on a genuinely third-party request."""
+    decision = explain(
+        _context(model_requirement=_CONCRETE_GLM), _snapshot(_zai_lock())
+    )
+
+    assert decision.account_id == "legacy-zai-harness"
+
+
+# --- Reporting integrity ----------------------------------------------------
+
+
+def test_a_duplicate_account_id_reports_the_binding_that_was_actually_eligible() -> (
+    None
+):
+    """The reported binding comes from the account that passed, not the first id match."""
+    rejected_first = AccountAvailability(
+        account_id="shared-id",
+        provider_binding=ProviderBinding.ZAI_HARNESS,
+        configured=True,
+    )
+    eligible_second = AccountAvailability(
+        account_id="shared-id",
+        provider_binding=ProviderBinding.ANTHROPIC,
+        configured=True,
+    )
+    decision = explain(
+        _context(
+            model_requirement=_LITERAL_OPUS,
+            accounts=(rejected_first, eligible_second),
+        ),
+        _snapshot(
+            _zai_lock(provider_lock=None, allowed_patterns=(), requirement_map=())
+        ),
+    )
+
+    assert decision.provider_binding is ProviderBinding.ANTHROPIC
+
+
+def test_a_policy_beyond_the_rendered_trace_bound_can_still_win() -> None:
+    """Truncation bounds the explanation, never the candidate set."""
+    filler = tuple(
+        RoutingPolicy(
+            id=f"filler-{index:04d}",
+            match=RoutingMatch(repo_classes=(RepoClass.HYDRAFLOW,)),
+            action=RoutingAction(provider_lock=ProviderBinding.ANTHROPIC),
+        )
+        for index in range(MAX_EXPLAINED_POLICIES + 50)
+    )
+    decision = explain(
+        _context(model_requirement=_HIGH_REASONING), _snapshot(_zai_lock(), *filler)
+    )
+
+    assert decision.policy_id == "project-x-zai"
+
+
+def test_the_rendered_trace_stays_bounded() -> None:
+    """A snapshot of thousands of policies must not produce an unbounded record."""
+    filler = tuple(
+        RoutingPolicy(
+            id=f"filler-{index:04d}",
+            match=RoutingMatch(repo_classes=(RepoClass.HYDRAFLOW,)),
+            action=RoutingAction(provider_lock=ProviderBinding.ANTHROPIC),
+        )
+        for index in range(MAX_EXPLAINED_POLICIES + 50)
+    )
+    decision = explain(
+        _context(model_requirement=_HIGH_REASONING), _snapshot(_zai_lock(), *filler)
+    )
+
+    assert len(decision.explanation.considered) == MAX_EXPLAINED_POLICIES

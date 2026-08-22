@@ -17,6 +17,7 @@ from hydraflow_gateway.routing_policy import (
     hash_policies,
 )
 from hydraflow_gateway.routing_store import (
+    CorruptSnapshotError,
     PolicyValidationError,
     RoutingPolicyStore,
 )
@@ -179,3 +180,26 @@ def test_the_store_creates_its_parent_directory(tmp_path: Path) -> None:
     store.save([_policy()])
 
     assert store.path.parent.is_dir()
+
+
+def test_a_write_over_a_corrupt_snapshot_is_refused(tmp_path: Path) -> None:
+    """Saving over an unreadable file would restart the revision counter."""
+    store = _store(tmp_path)
+    store.save([_policy()])
+    store.save([_policy()])
+    store.path.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(CorruptSnapshotError):
+        store.save([_policy()])
+
+
+def test_a_refused_corrupt_write_leaves_the_file_untouched(tmp_path: Path) -> None:
+    """The operator's next move is an explicit repair, not a silent overwrite."""
+    store = _store(tmp_path)
+    store.save([_policy()])
+    store.path.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(CorruptSnapshotError):
+        store.save([_policy()])
+
+    assert store.path.read_text(encoding="utf-8") == "{not json"

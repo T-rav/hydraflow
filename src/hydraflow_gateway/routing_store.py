@@ -41,6 +41,18 @@ if TYPE_CHECKING:
 POLICY_SNAPSHOT_FILENAME = "policies.json"
 
 
+class CorruptSnapshotError(RuntimeError):
+    """A write was refused because the snapshot on disk could not be read."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        super().__init__(
+            f"refusing to write over an unreadable policy snapshot at {path}; "
+            "the revision counter would restart and the decision chain's "
+            "policy_revision would stop being monotonic"
+        )
+
+
 class PolicyValidationError(ValueError):
     """A policy set was refused before it could reach a durable snapshot."""
 
@@ -103,6 +115,12 @@ class RoutingPolicyStore:
         if issues:
             raise PolicyValidationError(issues)
         current = self.load()
+        if current.state is SnapshotState.CORRUPT:
+            # A corrupt load reports revision 0, so saving over it would restart
+            # the counter at 1 and make `policy_revision` on the durable decision
+            # chain non-monotonic — two different policy sets citing revision 1.
+            # Refusing keeps the operator's next move an explicit repair.
+            raise CorruptSnapshotError(self._path)
         snapshot = PolicySnapshot(
             revision=current.snapshot.revision + 1,
             policies=tuple(policies),

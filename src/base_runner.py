@@ -319,7 +319,10 @@ class BaseRunner:
         # Routing shadow (#11536, ADR-0139): record what the policy resolver
         # WOULD have chosen beside the route legacy routing just chose. The
         # route is already fixed above; this observes it and returns nothing.
-        record_agentic_route_shadow(
+        # Off the event loop: it reads a snapshot and fsyncs an append, and this
+        # seam already threads its other blocking work (see the gate above).
+        await asyncio.to_thread(
+            record_agentic_route_shadow,
             config=self._config,
             principal_id=str(event_data.get("source", self._phase_name)),
             dial_field=self.PROVIDER_FIELD,

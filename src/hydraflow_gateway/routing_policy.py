@@ -20,11 +20,13 @@ Three rules this module exists to make machine-checkable:
   differ are a *conflict*: :func:`validate_policies` rejects the write, and if
   one somehow reaches the resolver the decision is ``rejected``, never
   insertion-order roulette.
-* **A literal Opus/Sonnet requirement can never resolve to GLM.** The predicate
-  is :meth:`driver_contracts.ModelRequirement.satisfied_by` — ADR-0137's
-  allow-list — applied to the effective model, plus a binding check that refuses
-  a literal family on a non-Anthropic account whether a mapping exists or not.
-  A provider-neutral capability resolves only through an explicit mapping.
+* **An Anthropic request can never quietly resolve to GLM.** The predicate is
+  ADR-0137's own allow-list (:func:`driver_contracts.has_anthropic_provenance`,
+  behind :meth:`~driver_contracts.ModelRequirement.satisfied_by`), applied both
+  to a policy's declared mapping and to the *lane*: a literal family, and a
+  concrete request for an Anthropic id — the bare CLI aliases included — need an
+  Anthropic account unless an operator wrote an explicit remapping. A
+  provider-neutral capability resolves only through an explicit mapping.
 
 ``eligible`` lives here, inside an explanation, exactly where ADR-0138 §D2 said
 it belongs — never as an account-global field.
@@ -43,7 +45,12 @@ from functools import partial
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from driver_contracts import ModelRequirement, ModelRequirementKind, WorkerRole
+from driver_contracts import (
+    ModelRequirement,
+    ModelRequirementKind,
+    WorkerRole,
+    has_anthropic_provenance,
+)
 from hydraflow_gateway.accounts import AdministrativeState
 from hydraflow_gateway.models import ProviderBinding, RepoClass
 
@@ -51,7 +58,13 @@ ROUTING_DECISION_SCHEMA_VERSION = 1
 """Bumped only on a breaking change; additive optional fields do not bump it."""
 
 MAX_EXPLAINED_POLICIES = 200
-"""Upper bound on the considerations one explanation may carry."""
+"""Upper bound on the considerations one explanation *renders*.
+
+Matching always evaluates the whole snapshot: truncating the candidate set
+before matching would let policy #201 be silently unreachable, which is a
+routing bug wearing a bounded-payload costume. Only the rendered trace is
+capped, and it is capped from the most specific end, so the winner and its
+nearest rivals are always the rows that survive."""
 
 _REPO_PART = r"[A-Za-z0-9_][A-Za-z0-9._-]*"
 _CANONICAL_REPO_RE = re.compile(rf"^{_REPO_PART}/{_REPO_PART}$")
@@ -59,7 +72,15 @@ _CANONICAL_REPO_RE = re.compile(rf"^{_REPO_PART}/{_REPO_PART}$")
 _POLICY_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 _ANTHROPIC_ONLY_BINDINGS = frozenset({ProviderBinding.ANTHROPIC})
-"""Bindings whose accounts can serve a literal Anthropic model family."""
+"""Bindings whose accounts can serve an Anthropic model."""
+
+CLAUDE_CLI_ALIASES = frozenset({"opus", "sonnet", "haiku"})
+"""Bare aliases the Claude CLI accepts as ``--model``. They ARE Anthropic requests.
+
+``opus`` and ``sonnet`` classify as literal families; ``haiku`` has no family in
+ADR-0137's ``LITERAL_FAMILIES``, so without naming it here a ``--model haiku``
+spawn would read as an ordinary concrete request and lose the Anthropic-lane
+guard. Several maintenance loops still default to it."""
 
 
 class RepoIdentityVersion(StrEnum):
@@ -174,7 +195,7 @@ class AccountRejectionReason(StrEnum):
     ADMINISTRATIVE_DISABLED = "administrative-disabled"
     PROVIDER_LOCK_MISMATCH = "provider-lock-mismatch"
     NOT_IN_POOL = "not-in-pool"
-    LITERAL_FAMILY_INCOMPATIBLE = "literal-family-incompatible"
+    ANTHROPIC_LANE_REQUIRED = "anthropic-lane-required"
 
 
 class LegacyRouteMechanism(StrEnum):
@@ -704,17 +725,56 @@ def _rank(policy: RoutingPolicy) -> tuple[int, int, str]:
     return (int(precedence_level(policy)), -policy.priority, policy.id)
 
 
+def anthropic_lane_required(
+    requirement: ModelRequirement, mapped_model: str | None
+) -> bool:
+    """Whether only an Anthropic account can honestly serve this route.
+
+    *mapped_model* is the model an **explicit** ``requirement_map`` entry chose,
+    and ``None`` when the policy declared no mapping for this requirement. The
+    distinction is the whole rule: only an operator writing a mapping may move
+    an Anthropic request onto another lane.
+
+    * a mapping resolved a model, so that model's own provenance decides — a
+      policy mapping a request to ``glm-5.3`` has said out loud that a z.ai lane
+      serves it, which is how "project X always uses z.ai" works;
+    * otherwise a literal family always needs the Anthropic lane;
+    * otherwise a *concrete* request for an Anthropic id — including the bare
+      CLI aliases several loops still spawn with — needs it too. Passing the
+      *resolved* model here instead would defeat this clause, because an
+      unmapped concrete request resolves to itself: a ``--model haiku`` spawn
+      under a ``provider_lock: zai-harness`` policy would be recorded as a clean
+      ``selected`` on a z.ai account, the "GLM reported as a Claude model"
+      hazard wearing a different hat.
+    """
+    if mapped_model is not None:
+        return has_anthropic_provenance(mapped_model)
+    if requirement.kind is ModelRequirementKind.LITERAL_FAMILY:
+        return True
+    if requirement.kind is ModelRequirementKind.CONCRETE_MODEL:
+        candidate = requirement.value.strip().lower()
+        return candidate in CLAUDE_CLI_ALIASES or has_anthropic_provenance(candidate)
+    return False
+
+
 def _eligible_accounts(
-    context: RouteContext, action: RoutingAction
-) -> tuple[tuple[str, ...], tuple[AccountRejection, ...]]:
+    context: RouteContext, action: RoutingAction, *, anthropic_required: bool
+) -> tuple[tuple[AccountAvailability, ...], tuple[AccountRejection, ...]]:
+    """Partition the available accounts, keeping the objects, not just their ids.
+
+    The winning *object* is carried out rather than re-found by id afterwards:
+    ``account_id`` is not declared unique, and re-scanning for the first match
+    would let a rejected same-id account supply the reported binding.
+    """
     pool = {account_id.strip().lower() for account_id in action.account_pool}
-    literal = context.model_requirement.kind is ModelRequirementKind.LITERAL_FAMILY
-    eligible: list[str] = []
+    eligible: list[AccountAvailability] = []
     rejected: list[AccountRejection] = []
     for account in context.accounts:
-        reason = _account_rejection(account, action, pool=pool, literal=literal)
+        reason = _account_rejection(
+            account, action, pool=pool, anthropic_required=anthropic_required
+        )
         if reason is None:
-            eligible.append(account.account_id)
+            eligible.append(account)
         else:
             rejected.append(
                 AccountRejection(account_id=account.account_id, reason=reason)
@@ -724,9 +784,9 @@ def _eligible_accounts(
             account_id.strip().lower(): index
             for index, account_id in enumerate(action.account_pool)
         }
-        eligible.sort(key=lambda account_id: order[account_id.strip().lower()])
+        eligible.sort(key=lambda account: order[account.account_id.strip().lower()])
     else:
-        eligible.sort()
+        eligible.sort(key=lambda account: account.account_id)
     return tuple(eligible), tuple(rejected)
 
 
@@ -735,10 +795,15 @@ def _account_rejection(
     action: RoutingAction,
     *,
     pool: set[str],
-    literal: bool,
+    anthropic_required: bool,
 ) -> AccountRejectionReason | None:
     """Return the first independent fact that rules this account out, or None."""
-    return next(_account_failures(account, action, pool=pool, literal=literal), None)
+    return next(
+        _account_failures(
+            account, action, pool=pool, anthropic_required=anthropic_required
+        ),
+        None,
+    )
 
 
 def _account_failures(
@@ -746,7 +811,7 @@ def _account_failures(
     action: RoutingAction,
     *,
     pool: set[str],
-    literal: bool,
+    anthropic_required: bool,
 ) -> Iterator[AccountRejectionReason]:
     """Yield every reason this account cannot serve this route."""
     if not account.configured:
@@ -762,8 +827,8 @@ def _account_failures(
         yield AccountRejectionReason.PROVIDER_LOCK_MISMATCH
     if pool and account.account_id.strip().lower() not in pool:
         yield AccountRejectionReason.NOT_IN_POOL
-    if literal and account.provider_binding not in _ANTHROPIC_ONLY_BINDINGS:
-        yield AccountRejectionReason.LITERAL_FAMILY_INCOMPATIBLE
+    if anthropic_required and account.provider_binding not in _ANTHROPIC_ONLY_BINDINGS:
+        yield AccountRejectionReason.ANTHROPIC_LANE_REQUIRED
 
 
 def _mapped_model(
@@ -887,7 +952,7 @@ def explain(
             explanation=RouteExplanation(context=context),
         )
 
-    ranked = sorted(snapshot.policies, key=_rank)[:MAX_EXPLAINED_POLICIES]
+    ranked = sorted(snapshot.policies, key=_rank)
     considerations: list[PolicyConsideration] = []
     winners: list[RoutingPolicy] = []
     for policy in ranked:
@@ -906,6 +971,7 @@ def explain(
         )
         if matched:
             winners.append(policy)
+    considerations = considerations[:MAX_EXPLAINED_POLICIES]
 
     if not winners:
         return _legacy_decision(
@@ -987,8 +1053,18 @@ def _policy_decision(
     policy: RoutingPolicy,
     considerations: tuple[PolicyConsideration, ...],
 ) -> RouteDecision:
-    eligible, rejected = _eligible_accounts(context, policy.action)
+    # The model is resolved first because it decides which lanes can honestly
+    # serve the route: an explicit mapping to a GLM id licenses a z.ai account,
+    # while an unmapped Anthropic request does not.
+    mapped = _mapped_model(context.model_requirement, policy.action)
     model, model_failure = _effective_model(context, policy.action)
+    eligible, rejected = _eligible_accounts(
+        context,
+        policy.action,
+        anthropic_required=anthropic_lane_required(
+            context.model_requirement, None if mapped is None else mapped[0]
+        ),
+    )
     decide = partial(
         _build,
         context=context,
@@ -1001,7 +1077,7 @@ def _policy_decision(
         explanation=RouteExplanation(
             context=context,
             considered=considerations,
-            eligible_account_ids=eligible,
+            eligible_account_ids=tuple(account.account_id for account in eligible),
             rejected_accounts=rejected,
         ),
     )
@@ -1010,8 +1086,8 @@ def _policy_decision(
     if model_failure is not None:
         return decide(outcome=DecisionOutcome.REJECTED, reason=model_failure)
     if not eligible:
-        literal_blocked = any(
-            rejection.reason is AccountRejectionReason.LITERAL_FAMILY_INCOMPATIBLE
+        lane_blocked = any(
+            rejection.reason is AccountRejectionReason.ANTHROPIC_LANE_REQUIRED
             for rejection in rejected
         )
         return decide(
@@ -1022,20 +1098,19 @@ def _policy_decision(
             ),
             reason=(
                 DecisionReason.LITERAL_FAMILY_UNSATISFIABLE
-                if literal_blocked
+                if lane_blocked
                 else DecisionReason.NO_ELIGIBLE_ACCOUNT
             ),
         )
+    # The winning object, not a re-lookup by id: account ids are not declared
+    # unique, and re-scanning would let a rejected same-id account supply the
+    # binding this decision reports.
     chosen = eligible[0]
     return decide(
         outcome=DecisionOutcome.SELECTED,
         reason=DecisionReason.MATCHED_POLICY,
-        account_id=chosen,
-        provider_binding=next(
-            account.provider_binding
-            for account in context.accounts
-            if account.account_id == chosen
-        ),
+        account_id=chosen.account_id,
+        provider_binding=chosen.provider_binding,
         effective_model=model,
     )
 

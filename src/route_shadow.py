@@ -383,17 +383,26 @@ def record_agentic_route_shadow(
     )
 
 
-def record_one_shot_route_shadow(
+def record_dialled_route_shadow(
     *,
     config: HydraFlowConfig,
     principal_id: str,
     requested_provider: str | None,
     transport_provider: str,
     model: str,
+    request_face: RequestFace,
     issue_number: int | None = None,
     pr_number: int | None = None,
 ) -> ShadowDecision | None:
-    """Shadow one lightweight spawn — the seam the per-role z.ai dials run through."""
+    """Shadow a spawn routed by a caller-supplied dial rather than a runner's own.
+
+    Both the one-shot seam (``run_lightweight_agent``) and the streaming
+    telemetry seam (``stream_claude_with_telemetry``) take the dial as a
+    ``provider=`` argument and then apply the fleet ratchet, so they share one
+    implementation. *request_face* is required rather than inferred because it
+    is what separates them: the same ``zai`` dial means a direct HTTP backend at
+    the one-shot seam and the Claude CLI on GLM at the streaming one.
+    """
     if getattr(config, "gateway_route_shadow_enabled", False) is not True:
         return None
     maintenance = str(getattr(config, "maintenance_provider", "claude") or "claude")
@@ -424,7 +433,7 @@ def record_one_shot_route_shadow(
         stages=stages,
         final_provider=transport_provider,
         final_model=model,
-        request_face=RequestFace.ONE_SHOT,
+        request_face=request_face,
         issue_number=issue_number,
         pr_number=pr_number,
     )
