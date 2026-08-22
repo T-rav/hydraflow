@@ -4,6 +4,7 @@ audit-write chokepoint that uses it (ADR-0085 / SEC-AUDIT-001)."""
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -181,6 +182,33 @@ def test_gateway_patterns_leave_legitimate_content_intact(benign: str) -> None:
     # Over-matching is the other real failure direction: append_jsonl cannot
     # un-redact, so a pattern that ate any of these would corrupt retained records.
     assert scrub_secrets(benign) == benign
+
+
+def test_virtual_key_pattern_matches_a_key_id_at_the_ceiling() -> None:
+    # The 64-char ceiling on the key_id half must sit well clear of a real ULID
+    # key_id (26 chars), so bounding it for cost buys no under-matching.
+    token = "hfgw_" + "k" * 64 + "." + "s" * 43
+
+    assert scan_for_secrets(token) == ["HydraFlow gateway virtual key"]
+
+
+def test_virtual_key_scan_stays_linear_on_stacked_prefixes() -> None:
+    # DoS guard, not a micro-benchmark. Unbounded, the key_id half is quadratic:
+    # every "hfgw_" is a start position whose greedy class eats the rest of the
+    # record and then backtracks hunting the required ".". ADR-0085's threat model
+    # is attacker-triggerable (ADR-0092), and this runs on every durable write, so
+    # a crafted transcript could stall the whole write path. Measured on this
+    # 160 KB input: 17 ms with the ceiling, 4 495 ms without it (265x). The 1 s
+    # bound therefore sits ~59x above the real cost — no loaded CI box turns a
+    # 17 ms CPU-bound call into a second — while still failing decisively (4.5x)
+    # the moment someone "simplifies" the {8,64} ceiling back to {8,}.
+    hostile = "hfgw_" * 32_000
+
+    start = time.perf_counter()
+    scrub_secrets(hostile)
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 1.0
 
 
 def test_gateway_redaction_markers_do_not_re_match() -> None:

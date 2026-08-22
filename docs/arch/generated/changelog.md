@@ -6,6 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `9aa34d7` — docs(adr-0085): record the gateway-credential coverage and its residual limit *(2026-08-22)*
 - `81e811e` — feat(scheduling): Fable P1 — deterministic IssueDriver behind an explicit scheduling_model dial (#11535) (#11634) (#11634) *(2026-08-22)*
 - `f16dcc5` — feat(gateway): read-only account and active-route visibility (ADR-0138) (#11633) (#11633) *(2026-08-22)*
 - `798cdd2` — fix(driver): correct the B1 reconciliation rule and harden the P0 contracts (#11533) (#11632) (#11632) *(2026-08-21)*
