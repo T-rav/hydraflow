@@ -89,8 +89,11 @@ class TestFdLeakOnFdopenFailure:
             return original_fdopen(fd, *args, **kwargs)
 
         with (
-            patch("pr_manager.tempfile.mkstemp", return_value=(real_fd, real_path)),
-            patch("pr_manager.os.fdopen", side_effect=failing_fdopen),
+            patch(
+                "pr_manager_artifacts.tempfile.mkstemp",
+                return_value=(real_fd, real_path),
+            ),
+            patch("pr_manager_artifacts.os.fdopen", side_effect=failing_fdopen),
         ):
             result = await pm.upload_screenshot_gist(png_b64)
 
@@ -124,7 +127,10 @@ class TestFdLeakOnFdopenFailure:
             return "https://gist.github.com/abc123"
 
         with (
-            patch("pr_manager.tempfile.mkstemp", return_value=(real_fd, real_path)),
+            patch(
+                "pr_manager_artifacts.tempfile.mkstemp",
+                return_value=(real_fd, real_path),
+            ),
             patch.object(pm, "_run_gh", side_effect=fake_run_gh),
         ):
             await pm.upload_screenshot_gist(png_b64)

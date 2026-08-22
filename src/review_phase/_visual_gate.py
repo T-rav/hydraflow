@@ -80,10 +80,14 @@ class VisualGateMixin:
     _visual_validator: VisualValidator | None
     _harness_insights: HarnessInsightStore | None
 
-    # --- cross-slice methods provided by ``ReviewPhase`` (_phase.py) ---
-    # TYPE_CHECKING-only on purpose: a runtime `...` body would be a real
+    # --- cross-slice methods provided by sibling mixins ---
+    #
+    # TYPE_CHECKING-only on purpose: a runtime ``...`` body would be a real
     # class attribute and would win the MRO over a sibling mixin's
-    # implementation (#11629).
+    # implementation (#11629). That matters concretely here:
+    # ``_publish_review_status`` / ``_escalate_to_hitl`` live in ``_insights``
+    # and ``_run_post_verify_for_surface`` in ``_advisors`` (Refs #11547), all
+    # of which follow this mixin in ``ReviewPhase``'s MRO.
     if TYPE_CHECKING:
 
         async def _publish_review_status(

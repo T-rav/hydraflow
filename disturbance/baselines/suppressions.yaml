@@ -28,14 +28,17 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ that shadowed the module-level import). re-snapshot 2026-08: god-file decomposition\
   \ moved 3 BLE001 suppressions verbatim from dashboard_routes/_routes.py to the extracted\
   \ dashboard_routes/_ws_stream.py (net-zero move, no new suppressions). re-snapshot\
-  \ 2026-08-02: +1 _diagnostics_routes PLC0415 (5→6) for the supervisor-ack\
-  \ endpoint's lazy import of supervisor_observation.append_ack (#11002) —\
-  \ matches the route module's existing deferred-import convention (the sibling\
-  \ supervisor/thread endpoint lazy-imports read_thread the same way). re-snapshot
-  \ 2026-08-22 (#11600, ADR-0136): -4 adr_touchpoint_auditor_loop (PLC0415 1,
-  \ PLR0915 1, TCH001 2) with the deleted module, and -1 service_registry F841
-  \ (34\u219233) with the AdrTouchpointAuditorLoop construction it guarded. Pure
-  \ shrink \u2014 no suppression was moved or added."
+  \ 2026-08-02: +1 _diagnostics_routes PLC0415 (5\u21926) for the supervisor-ack endpoint's\
+  \ lazy import of supervisor_observation.append_ack (#11002) \u2014 matches the route\
+  \ module's existing deferred-import convention (the sibling supervisor/thread endpoint\
+  \ lazy-imports read_thread the same way). re-snapshot  2026-08-22 (#11600, ADR-0136):\
+  \ -4 adr_touchpoint_auditor_loop (PLC0415 1,  PLR0915 1, TCH001 2) with the deleted\
+  \ module, and -1 service_registry F841  (34\u219233) with the AdrTouchpointAuditorLoop\
+  \ construction it guarded. Pure  shrink \u2014 no suppression was moved or added.\
+  \ re-snapshot 2026-08-22: god-class decomposition (Refs #11547) moved 88 suppressions\
+  \ verbatim out of pr_manager.py and review_phase/_phase.py into the extracted mixin\
+  \ modules \u2014 net-zero move, total unchanged at 770 and every untouched file\
+  \ byte-identical; no suppression was added, removed, widened, or rewritten."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -168,7 +171,7 @@ entries:
   src/implement_spec_reviewer.py::noqa:PLC0415: 2
   src/issue_store.py::type-ignore[assignment]: 1
   src/issue_store.py::type-ignore[typeddict-item]: 2
-  "src/judge_calibration.py::noqa:BLE001—fail-soft:observingmustneverbreakreview": 1
+  "src/judge_calibration.py::noqa:BLE001\u2014fail-soft:observingmustneverbreakreview": 1
   src/label_drift_watcher_loop.py::noqa:TCH001: 2
   "src/live_corpus_replay_loop.py::noqa:BLE001\u2014replaymustcontinueondispatchererror": 1
   src/live_corpus_replay_loop.py::noqa:TCH001: 3
@@ -217,8 +220,14 @@ entries:
   "src/post_merge_handler.py::noqa:BLE001\u2014neverblockmergepathonwikiI/O": 1
   src/post_merge_handler.py::noqa:PLC0415: 5
   src/pr_manager.py::noqa:BLE001: 1
-  src/pr_manager.py::noqa:PLC0415: 24
-  src/pr_manager.py::type-ignore[arg-type]: 1
+  src/pr_manager.py::noqa:PLC0415: 4
+  src/pr_manager_branches.py::noqa:PLC0415: 3
+  src/pr_manager_ci.py::noqa:PLC0415: 3
+  src/pr_manager_common.py::noqa:PLC0415: 1
+  src/pr_manager_drift.py::type-ignore[arg-type]: 1
+  src/pr_manager_issues.py::noqa:PLC0415: 7
+  src/pr_manager_labels.py::noqa:PLC0415: 1
+  src/pr_manager_pr_queries.py::noqa:PLC0415: 5
   src/pr_manager_promotion.py::noqa:PLC0415: 2
   src/pr_unsticker.py::noqa:PLC0415: 3
   src/precheck.py::noqa:BLE001: 1
@@ -256,16 +265,27 @@ entries:
   src/review_insights.py::noqa:PLC0415: 4
   src/review_insights.py::noqa:TCH004: 1
   src/review_phase/__init__.py::noqa:E402: 3
+  src/review_phase/_adr.py::noqa:PLC0415: 3
+  src/review_phase/_advisors.py::noqa: 1
+  src/review_phase/_advisors.py::noqa:PLC0415: 11
+  src/review_phase/_ci.py::noqa:PLC0415: 2
   src/review_phase/_common.py::noqa:PLC0415: 1
-  src/review_phase/_phase.py::noqa: 1
-  src/review_phase/_phase.py::noqa:BLE001: 4
+  src/review_phase/_flow.py::noqa:PLC0415: 1
+  src/review_phase/_insights.py::noqa:PLC0415: 2
+  src/review_phase/_judge.py::noqa:BLE001: 1
+  src/review_phase/_judge.py::noqa:PLC0415: 5
+  src/review_phase/_judge.py::type-ignore[arg-type]: 2
+  src/review_phase/_outcome.py::noqa:PLC0415: 4
+  src/review_phase/_phase.py::noqa:BLE001: 1
   "src/review_phase/_phase.py::noqa:E402,F401\u2014usedbycallsitesbelow": 1
-  src/review_phase/_phase.py::noqa:PLC0415: 43
+  src/review_phase/_phase.py::noqa:PLC0415: 10
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__+sig": 1
   "src/review_phase/_phase.py::noqa:TCH004\u2014usedin__init__signature": 1
-  src/review_phase/_phase.py::type-ignore[arg-type]: 2
+  src/review_phase/_ultra.py::noqa:PLC0415: 1
   src/review_phase/_visual_gate.py::noqa:ARG002: 2
   src/review_phase/_visual_gate.py::noqa:PLC0415: 1
+  src/review_phase/_wiki_ingest.py::noqa:BLE001: 2
+  src/review_phase/_wiki_ingest.py::noqa:PLC0415: 4
   src/reviewer.py::noqa:PLC0415: 3
   src/route_back.py::noqa:BLE001: 8
   src/runner_utils.py::noqa:PLC0415: 7

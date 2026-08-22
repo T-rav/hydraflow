@@ -72,7 +72,7 @@ graph LR
     src_preflight -- "1" --> src_runners
     src_preflight -- "1" --> src_sentry
     src_review_phase -- "1" --> src_flows
-    src_review_phase -- "1" --> src_state
+    src_review_phase -- "8" --> src_state
     src_runners -- "1" --> src_preflight
     src_vitals -- "2" --> src_audit
     src_vitals -- "1" --> src_erosion

@@ -655,11 +655,11 @@ class TestUploadScreenshotGist:
 
         with (
             patch(
-                "pr_manager.tempfile.mkstemp",
+                "pr_manager_artifacts.tempfile.mkstemp",
                 return_value=(fake_fd, "/tmp/fake.png"),
             ),
-            patch("pr_manager.os.fdopen", side_effect=OSError("cannot open")),
-            patch("pr_manager.os.close") as mock_close,
+            patch("pr_manager_artifacts.os.fdopen", side_effect=OSError("cannot open")),
+            patch("pr_manager_artifacts.os.close") as mock_close,
         ):
             result = await mgr.upload_screenshot_gist(png_b64)
 

@@ -132,7 +132,7 @@ Dashboard workers that are not background loops: the label-routed pipeline phase
 | `implement` | `credit_failover_model`, `model`, `planner_model`, `review_model`, `test_adequacy_verifier_model`, `transcript_summary_model` | HITL escalation; PR review + merge gate | Runs coding agents to implement planned issues and open pull requests. |
 | `pipeline_poller` | — | — | Refreshes live pipeline snapshots for dashboard queue/status rendering. |
 | `plan` | `planner_model`, `transcript_summary_model`, `wiki_compilation_model` | HITL escalation | Builds implementation plans for triaged issues that are ready to execute. |
-| `review` | `background_model`, `judge_independent_model`, `review_model`, `review_ultra_model`, `transcript_summary_model`, `wiki_compilation_model` | HITL escalation | Reviews PRs, applies fixes, and merges approved work when checks pass. |
+| `review` | `review_model`, `transcript_summary_model`, `wiki_compilation_model` | HITL escalation | Reviews PRs, applies fixes, and merges approved work when checks pass. |
 | `review_insights` | — | HITL escalation | Aggregates recurring review feedback into improvement opportunities. |
 | `triage` | `planner_model`, `triage_model` | HITL escalation | Classifies freshly discovered issues and routes them into the pipeline. |
 
