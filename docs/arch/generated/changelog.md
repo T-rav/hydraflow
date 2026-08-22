@@ -6,9 +6,11 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `bbe5776` — feat(director): Fable P2 — isolated director and broker in shadow mode (#11537) (#11537) *(2026-08-22)*
+- `f0939e7` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0746 *(2026-08-22)*
+- `d227fab` — feat(director): Fable P2 — isolated director and broker in shadow mode (#11537) (#11638) (#11638) *(2026-08-22)*
 - `36468f8` — feat(gateway): P1 — policy resolver, explanation, and shadow decisions (ADR-0139) (#11639) (#11639) *(2026-08-22)*
 - `9b52c13` — fix(secret-scrub): redact gateway virtual keys and control tokens (#11635) (#11637) (#11637) *(2026-08-22)*
+- `8925ba1` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
 - `ddee723` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0456 *(2026-08-22)*
 - `81e811e` — feat(scheduling): Fable P1 — deterministic IssueDriver behind an explicit scheduling_model dial (#11535) (#11634) (#11634) *(2026-08-22)*
 - `f16dcc5` — feat(gateway): read-only account and active-route visibility (ADR-0138) (#11633) (#11633) *(2026-08-22)*
