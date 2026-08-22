@@ -82,7 +82,7 @@ async def test_refused_credit_pause_after_stop_does_not_wedge_stopping(
     # Probe returns True → the (weekly-limit-style) signal is refuted as a false
     # positive → _pause_for_credits returns False → refused pause path.
     with patch(
-        "orchestrator.probe_credit_availability",
+        "orchestrator_credits.probe_credit_availability",
         AsyncMock(return_value=True),
     ):
         # Operator stop has already been requested (and run() is not active, so

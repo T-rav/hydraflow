@@ -139,7 +139,7 @@ def test_patch_plan_covers_bg_worker_defs(fixture_names: dict[str, str]) -> None
     assert '"fixture_loop",' in control_routes
     assert "Fixture Loop" in control_routes
     # NOT at the list head: the first seven defs are pipeline workers
-    # pinned by tests/test_bg_worker_status.py.
+    # pinned by tests/test_orchestrator_bg_workers.py.
     assert (
         not control_routes.split("_bg_worker_defs = [", 1)[1]
         .lstrip()

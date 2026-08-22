@@ -699,7 +699,8 @@ class TestAuthFailure:
         # Probe confirms the auth failure is genuine/persistent (#9621), so the
         # factory halts rather than treating it as a transient blip.
         with patch(
-            "orchestrator.probe_auth_availability", AsyncMock(return_value=False)
+            "orchestrator_restart.probe_auth_availability",
+            AsyncMock(return_value=False),
         ):
             await orch.run()
 
@@ -730,7 +731,8 @@ class TestAuthFailure:
         orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.probe_auth_availability", AsyncMock(return_value=False)
+            "orchestrator_restart.probe_auth_availability",
+            AsyncMock(return_value=False),
         ):
             await orch.run()
 
@@ -765,7 +767,8 @@ class TestAuthFailure:
         orch._sleep_or_stop = instant_sleep  # type: ignore[method-assign]
 
         with patch(
-            "orchestrator.probe_auth_availability", AsyncMock(return_value=False)
+            "orchestrator_restart.probe_auth_availability",
+            AsyncMock(return_value=False),
         ):
             await orch.run()
 
@@ -811,7 +814,8 @@ class TestHandleLoopException:
         factories: list = []
 
         with patch(
-            "orchestrator.probe_auth_availability", AsyncMock(return_value=False)
+            "orchestrator_restart.probe_auth_availability",
+            AsyncMock(return_value=False),
         ):
             await orch._handle_loop_exception(
                 "plan", AuthenticationError("401"), tasks, factories
@@ -858,7 +862,7 @@ class TestHandleLoopException:
         exc = CreditExhaustedError("Your credit balance is too low")
 
         with patch(
-            "orchestrator.probe_credit_availability",
+            "orchestrator_credits.probe_credit_availability",
             AsyncMock(return_value=True),
         ):
             await orch._pause_for_credits(exc, "diagnostic", tasks, factories)
@@ -886,7 +890,7 @@ class TestHandleLoopException:
         exc = CreditExhaustedError("usage limit reached")
 
         with patch(
-            "orchestrator.probe_credit_availability",
+            "orchestrator_credits.probe_credit_availability",
             AsyncMock(return_value=False),
         ):
             await orch._pause_for_credits(exc, "plan", tasks, factories)
@@ -911,7 +915,7 @@ class TestHandleLoopException:
         exc = CreditExhaustedError("usage limit reached")
         probe = AsyncMock(return_value=True)
 
-        with patch("orchestrator.probe_credit_availability", probe):
+        with patch("orchestrator_credits.probe_credit_availability", probe):
             await orch._pause_for_credits(exc, "plan", tasks, factories)
 
         probe.assert_not_awaited()  # kill-switch: probe skipped

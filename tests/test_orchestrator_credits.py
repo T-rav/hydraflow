@@ -1,4 +1,10 @@
-"""Tests for credit exhaustion detection and pause mechanism."""
+"""Tests for credit exhaustion detection and pause mechanism.
+
+Renamed from ``test_credit_pause.py`` when the subsystem moved to
+``src/orchestrator_credits.py`` (#11547) — the file name now names the module
+under test, which is what the P10.2 unit-ring audit and ``impacted_tests``
+name-mapping both read.
+"""
 
 from __future__ import annotations
 
@@ -421,7 +427,7 @@ class TestCreditExhaustionPauseResume:
         exhaustion (returns False); otherwise it correctly treats the signal as a
         false positive and skips the pause."""
         with patch(
-            "orchestrator.probe_credit_availability",
+            "orchestrator_credits.probe_credit_availability",
             AsyncMock(return_value=False),
         ):
             yield
@@ -737,7 +743,7 @@ class TestTryClearCreditPause:
         probe tests patch ``subprocess_util.probe_credit_availability`` (a
         different reference), so this orchestrator-side patch never collides."""
         with patch(
-            "orchestrator.probe_credit_availability",
+            "orchestrator_credits.probe_credit_availability",
             AsyncMock(return_value=False),
         ):
             yield
@@ -1044,18 +1050,21 @@ class TestAsyncioEventResetGuard:
         import ast
         from pathlib import Path
 
-        src = (Path(__file__).parent.parent / "src" / "orchestrator.py").read_text()
-        tree = ast.parse(src)
-
-        orchestrator_cls = next(
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ClassDef) and node.name == "HydraFlowOrchestrator"
-        )
+        # ``HydraFlowOrchestrator`` is assembled from mixins (#11547), so
+        # ``__init__`` and ``reset`` no longer live in the same module: scan the
+        # whole ``orchestrator*`` family and treat every class it defines as
+        # part of the host. Same guard, one more file to look in.
+        src_dir = Path(__file__).parent.parent / "src"
+        orchestrator_bodies: list[ast.stmt] = []
+        for path in sorted(src_dir.glob("orchestrator*.py")):
+            tree = ast.parse(path.read_text())
+            for node in tree.body:
+                if isinstance(node, ast.ClassDef):
+                    orchestrator_bodies.extend(node.body)
 
         # Collect asyncio.Event() assignments in __init__: self._X = asyncio.Event()
         init_events: set[str] = set()
-        for method in orchestrator_cls.body:
+        for method in orchestrator_bodies:
             if isinstance(method, ast.FunctionDef) and method.name == "__init__":
                 for stmt in ast.walk(method):
                     if (
@@ -1074,7 +1083,7 @@ class TestAsyncioEventResetGuard:
 
         # Collect self._X.clear() calls in reset()
         reset_cleared: set[str] = set()
-        for method in orchestrator_cls.body:
+        for method in orchestrator_bodies:
             if isinstance(method, ast.FunctionDef) and method.name == "reset":
                 for stmt in ast.walk(method):
                     if (

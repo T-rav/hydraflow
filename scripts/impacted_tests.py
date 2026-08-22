@@ -88,6 +88,19 @@ HIGH_FANOUT_SRC: frozenset[str] = frozenset(
         "src/config.py",  # global config model, imported nearly everywhere
         "src/models.py",  # core domain models (State, Issue, PR, …)
         "src/orchestrator.py",  # the five concurrent async loops (ADR-0001)
+        # The orchestrator is assembled from mixins (#11547) — the code that
+        # used to live in orchestrator.py is just as high-fanout in its new
+        # module, and `orchestrator_loops` would otherwise name-map to a
+        # single test file instead of the full suite.
+        "src/orchestrator_bg_workers.py",
+        "src/orchestrator_common.py",
+        "src/orchestrator_credits.py",
+        "src/orchestrator_hitl.py",
+        "src/orchestrator_lifecycle.py",
+        "src/orchestrator_loops.py",
+        "src/orchestrator_restart.py",
+        "src/orchestrator_stats.py",
+        "src/orchestrator_work.py",
         "src/service_registry.py",  # dependency-injection wiring for all loops
         "src/ports.py",  # the Port boundary every runner/loop depends on
     }

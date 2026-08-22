@@ -142,7 +142,7 @@ auditable.
 
 - Follow-ups (not in the landing PR): route a top-level agentic *work* loop to
   z.ai with orchestrator pause-scoping (extend
-  `orchestrator.py:_BACKEND_WORKER_LOOPS`); telemetry cost attribution for
+  `orchestrator_common.py:_BACKEND_WORKER_LOOPS`); telemetry cost attribution for
   agentic-on-z.ai spend; a MockWorld scenario + sandbox e2e for the harness
   routing; a `sentry_provider` dial. The one-shot maintenance loops already
   route to z.ai over HTTP today.

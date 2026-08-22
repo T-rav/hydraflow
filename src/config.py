@@ -2903,7 +2903,8 @@ class HydraFlowConfig(BaseModel):
         description=(
             "Clarity score threshold (ADR-0107). Issues scoring below this are "
             "flagged to the planner's on-demand discover/shape decision gate "
-            "(plan_phase.py:_should_discover_helper) as a discovery hint, rather "
+            "(plan_phase_prepass.py:_should_discover_helper) as a discovery hint, "
+            "rather "
             "than routed to a standalone Discover phase at triage time."
         ),
     )

@@ -169,6 +169,7 @@ _MIGRATION_SUBSTRINGS: tuple[str, ...] = (
 _STRUCTURAL_SUBSTRINGS: tuple[str, ...] = (
     "docs/adr/",
     "src/orchestrator.py",
+    "src/orchestrator_",  # the orchestrator mixin family (#11547)
     "src/service_registry.py",
     "src/coordinator.py",
     "src/persistence/",
