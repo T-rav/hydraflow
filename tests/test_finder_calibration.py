@@ -340,7 +340,7 @@ def test_catalog_every_finder_has_a_signal_class() -> None:
 
 def test_catalog_index_matches_catalog() -> None:
     assert set(FINDERS_BY_ID) == {f.finder_id for f in GENERATIVE_FINDERS}
-    assert FINDERS_BY_ID["adr_drift"].signal_class == "adr-drift"
+    assert FINDERS_BY_ID["wiki_rot"].signal_class == "wiki-rot"
 
 
 # -- CalibrationLedger ----------------------------------------------------------

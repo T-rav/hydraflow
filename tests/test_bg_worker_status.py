@@ -329,7 +329,6 @@ class TestSystemWorkersEndpoint:
             "triage_retry",
             "sandbox_failure_fixer",
             "auto_agent_preflight",
-            "adr_touchpoint_auditor",
             "adr_conformance",
             "term_proposer",
             "term_pruner",

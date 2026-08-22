@@ -115,7 +115,7 @@ cadence and files remediation issues on drift.
 | [0053](0053-ubiquitous-language-as-living-artifact.md) | Ubiquitous Language as a Living Artifact | Accepted |
 | [0054](0054-term-auto-proposer-loop.md) | Term Auto-Proposer Loop (Dark-Factory Glossary Growth) | Accepted |
 | [0055](0055-otel-honeycomb-instrumentation.md) | OpenTelemetry Instrumentation as the Telemetry Layer | Superseded |
-| [0056](0056-adr-touchpoint-gate-to-caretaker-loop.md) | ADR touchpoint enforcement — synchronous gate → asynchronous caretaker loop | Accepted |
+| [0056](0056-adr-touchpoint-gate-to-caretaker-loop.md) | ADR touchpoint enforcement — synchronous gate → asynchronous caretaker loop | Superseded |
 | [0057](0057-term-pruner-loop.md) | Term-Pruner Loop (Dark-Factory Glossary Hygiene) | Accepted |
 | [0058](0058-edge-proposer-loop.md) | Edge-Proposer Loop (Dark-Factory Graph Densification) | Accepted |
 | [0059](0059-advisor-pattern-self-repairing-review.md) | Advisor Pattern — Self-Repairing Review | Proposed |
@@ -195,6 +195,7 @@ cadence and files remediation issues on drift.
 | [0133](0133-vitals-methodology-multiplicity-mde-tbe.md) | Vitals methodology — widened-limit multiplicity, published MDE, and time-between-events charts | Proposed |
 | [0134](0134-per-repo-model-harness-selection.md) | Per-repo model/harness selection — run Claude and GLM projects side by side | Accepted |
 | [0135](0135-factory-as-launchd-service-operator-stop-latch.md) | Factory runs as a launchd service; operator Stop is a latch honoured by autostart and the liveness kernel | Accepted |
+| [0136](0136-adr-drift-enforcement-deterministic-citation-gate.md) | ADR drift enforcement is a deterministic cited-symbol CI gate, not a caretaker loop | Accepted |
 
 ## Adding a new ADR
 

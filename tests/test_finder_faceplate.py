@@ -206,9 +206,9 @@ def test_baseline_ledger_latest_wins(tmp_path: Path) -> None:
 
     ledger.record(_prov(finder_id="wiki_rot", vetted_at=None))
     ledger.record(_prov(finder_id="wiki_rot", vetted_at=_NOW))
-    ledger.record(_prov(finder_id="adr_drift", vetted_at=_NOW))
+    ledger.record(_prov(finder_id="edge_proposer", vetted_at=_NOW))
 
     latest = ledger.latest_by_finder()
-    assert set(latest) == {"wiki_rot", "adr_drift"}
+    assert set(latest) == {"wiki_rot", "edge_proposer"}
     # Append-only: the later wiki_rot row (vouched) supersedes the earlier one.
     assert latest["wiki_rot"].vetted is True

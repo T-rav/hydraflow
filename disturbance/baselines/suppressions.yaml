@@ -31,7 +31,11 @@ comment: "suppressions disturbance baseline. MUST NOT grow (gate fails on increa
   \ 2026-08-02: +1 _diagnostics_routes PLC0415 (5→6) for the supervisor-ack\
   \ endpoint's lazy import of supervisor_observation.append_ack (#11002) —\
   \ matches the route module's existing deferred-import convention (the sibling\
-  \ supervisor/thread endpoint lazy-imports read_thread the same way)."
+  \ supervisor/thread endpoint lazy-imports read_thread the same way). re-snapshot
+  \ 2026-08-22 (#11600, ADR-0136): -4 adr_touchpoint_auditor_loop (PLC0415 1,
+  \ PLR0915 1, TCH001 2) with the deleted module, and -1 service_registry F841
+  \ (34\u219233) with the AdrTouchpointAuditorLoop construction it guarded. Pure
+  \ shrink \u2014 no suppression was moved or added."
 entries:
   src/acceptance_criteria.py::noqa:PLC0415: 2
   src/admin_tasks.py::noqa:PLC0415: 7
@@ -40,9 +44,6 @@ entries:
   src/adr_conformance_loop.py::noqa:TCH001: 3
   src/adr_draft_opener.py::noqa:BLE001: 1
   src/adr_reviewer.py::noqa:PLC0415: 2
-  src/adr_touchpoint_auditor_loop.py::noqa:PLC0415: 1
-  src/adr_touchpoint_auditor_loop.py::noqa:PLR0915: 1
-  src/adr_touchpoint_auditor_loop.py::noqa:TCH001: 2
   src/adversarial_retry_loop.py::noqa:PLC0415: 4
   src/adversarial_retry_loop.py::noqa:S101: 4
   src/agent.py::noqa:BLE001: 2
@@ -276,7 +277,7 @@ entries:
   src/sandbox_failure_fixer_loop.py::noqa:S101: 1
   src/sentry/reverse_lookup.py::noqa:BLE001: 1
   src/server.py::noqa:PLC0415: 13
-  src/service_registry.py::noqa:F841: 34
+  src/service_registry.py::noqa:F841: 33
   src/service_registry.py::noqa:PLC0415: 12
   src/service_registry.py::noqa:TCH001: 14
   "src/service_registry.py::noqa:TCH001\u2014dataclassannotation": 1

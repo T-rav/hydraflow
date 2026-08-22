@@ -48,7 +48,6 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0052 | enforced | `pytest:tests/test_mockworld_fakes_conformance.py`, `pytest:tests/test_sandbox_scenario_contract.py` |
 | ADR-0053 | enforced | `pytest:tests/test_ubiquitous_language_drift.py`, `pytest:tests/test_seed_terms.py` |
 | ADR-0054 | enforced | `pytest:tests/test_term_proposer_loop.py`, `pytest:tests/architecture/test_term_proposer_wiring.py` |
-| ADR-0056 | enforced | `pytest:tests/test_adr_touchpoint_auditor_loop.py` |
 | ADR-0057 | enforced | `pytest:tests/test_term_pruner_loop.py`, `pytest:tests/architecture/test_term_pruner_wiring.py` |
 | ADR-0058 | enforced | `pytest:tests/test_edge_proposer_loop.py`, `pytest:tests/architecture/test_edge_proposer_wiring.py` |
 | ADR-0060 | enforced | `pytest:tests/test_atlas_routes.py` |
@@ -90,6 +89,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0119 | enforced | `pytest:tests/test_credit_failover.py` |
 | ADR-0134 | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
 | ADR-0135 | enforced | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
+| ADR-0136 | enforced | `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations`, `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` |
 
 ## Check → ADRs it protects
 
@@ -107,6 +107,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` | ADR-0065 |
 | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` | ADR-0107 |
 | `pytest:tests/architecture/test_adr0112_clone_local_isolation.py::test_workspace_create_uses_git_clone_local` | ADR-0112 |
+| `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` | ADR-0136 |
 | `pytest:tests/architecture/test_edge_proposer_wiring.py` | ADR-0058 |
 | `pytest:tests/architecture/test_functional_area_coverage.py` | ADR-0089 |
 | `pytest:tests/architecture/test_loop_count_matches_adr0001.py` | ADR-0001 |
@@ -131,10 +132,10 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/scenarios/test_convergence_review_mockworld.py` | ADR-0094, ADR-0095 |
 | `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` | ADR-0062 |
 | `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` | ADR-0135 |
+| `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations` | ADR-0136 |
 | `pytest:tests/test_adr_conformance_coverage.py` | ADR-0100 |
 | `pytest:tests/test_adr_enforcement_completeness.py` | ADR-0116 |
 | `pytest:tests/test_adr_pre_validator.py` | ADR-0037 |
-| `pytest:tests/test_adr_touchpoint_auditor_loop.py` | ADR-0056 |
 | `pytest:tests/test_adversarial_retry_loop.py` | ADR-0064 |
 | `pytest:tests/test_agent_advanced.py` | ADR-0092 |
 | `pytest:tests/test_agent_cli.py` | ADR-0004, ADR-0092 |

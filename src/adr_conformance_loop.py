@@ -3,8 +3,8 @@
 Periodically evaluates every Accepted ADR's ``**Enforced by:**`` checks
 (via ``adr_conformance.evaluate_adrs`` + an injected ``ConformanceRunnerPort``)
 and remediates drift by filing/updating GitHub issues. Mirrors the shape of
-``AdrTouchpointAuditorLoop`` (ADR-0056): bounded retry via a per-ADR attempt
-counter, escalation to HITL once at the attempt threshold, kill-switch +
+the retired ``AdrTouchpointAuditorLoop`` (ADR-0056, removed by ADR-0136):
+bounded retry via a per-ADR attempt counter, escalation to HITL once at the attempt threshold, kill-switch +
 config-disabled short circuits, dedup keyed one issue per ADR.
 
 Issue-only write surface (load-bearing, ADR-0100): this loop's ONLY
@@ -296,8 +296,8 @@ class AdrConformanceLoop(BaseBackgroundLoop):
     async def _reconcile_closed_conformance_issues(self) -> None:
         """Clear dedup keys + attempt/rollup state for closed remediation issues.
 
-        Mirrors ``AdrTouchpointAuditorLoop._reconcile_closed_escalations``
-        (ADR-0056). Without this, a human closing a remediation issue
+        Mirrors the retired ``AdrTouchpointAuditorLoop`` reconcile pass
+        (ADR-0056, removed by ADR-0136). Without this, a human closing a remediation issue
         without fixing the underlying drift leaves the loop's rollup state
         pointed at a dead (closed) issue: ``_file_or_update_issue`` would
         keep calling ``update_issue_body`` on the closed issue number

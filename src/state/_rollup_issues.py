@@ -7,8 +7,9 @@ to accumulate. Keyed by ``"{namespace}:{subject}"``; value is
 ``{"issue_number": int, "content_hash": str}``.
 
 This is intentionally a NEW, generic field separate from the loop-specific
-``adr_rollup_issues`` / ``fake_coverage_rollup_issues`` (those already work and
-have their own schemas — re-plumbing them is out of scope).
+``fake_coverage_rollup_issues`` (that one already works and has its own schema
+— re-plumbing it is out of scope). The sibling ``adr_rollup_issues`` slice it
+was also kept separate from was removed with its loop by ADR-0136.
 """
 
 from __future__ import annotations

@@ -193,11 +193,6 @@ _bg_worker_defs = [
     # enforced by tests/test_loop_wiring_completeness.py). Labels/descriptions mirror
     # ui/src/constants.js BACKGROUND_WORKERS. ---
     (
-        "adr_touchpoint_auditor",
-        "ADR Touchpoint Auditor",
-        "Scans recently-merged PRs for ADR drift — cited src/ modules changed without the ADR being updated. Replaces the synchronous touchpoint gate. See ADR-0056.",
-    ),
-    (
         "adr_conformance",
         "ADR Conformance",
         "Evaluates every Accepted ADR's `Enforced by:` checks and files/updates remediation issues on drift. See ADR-0100.",
@@ -351,11 +346,6 @@ _bg_worker_defs = [
         "second_order_vitals",
         "Second-order Vitals",
         "The capstone residual monitor (read-only, Pattern B): reads the four instrument ledgers, gives each of five families its own Shewhart control limit, and computes the green-while-dying verdict (green/watch/diverging) — adverse drift across ≥3 families sustained over 2 windows while primary health is green. `diverging` files ONE never-batched find + HITL per episode; `watch` is a dashboard state change only. Never gates or fixes. See #10373.",
-    ),
-    (
-        "adr_drift_resolver",
-        "ADR Drift Resolver",
-        "Triage-before-escalate for adr_touchpoint_auditor's ADR-drift rollups: one LLM call classifies each as consistent (auto-close), real/over/dead-citation drift (relabel hydraflow-find with an ADR-edit brief), or low-confidence (HITL, rare). Fail-closed — only a confident consistent verdict auto-closes. See #9976.",
     ),
     (
         "issue_refinement",

@@ -144,8 +144,6 @@ _GRANDFATHERED_LOOPS: frozenset[str] = frozenset(
     {
         "ADRReviewerLoop",
         "AdrConformanceLoop",
-        "AdrDriftResolverLoop",
-        "AdrTouchpointAuditorLoop",
         "AutoAgentPreflightLoop",
         "AutoTightenLoop",
         "BranchProtectionAuditorLoop",

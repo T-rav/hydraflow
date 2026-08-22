@@ -43,7 +43,7 @@ def render_prompt(
     """
     # Strip the `hydraflow-` label prefix from the file-fallback stem. The
     # config-default escalation labels (fake_coverage_stuck_label =
-    # `hydraflow-fake-coverage-stuck`, adr_drift_stuck_label,
+    # `hydraflow-fake-coverage-stuck`,
     # memory_backlog_stuck_label) are prefixed, but their prompt files
     # (fake-coverage-stuck.md, ...) are unprefixed — so without this strip a
     # prefixed label falls through to _default.md instead of its specialist

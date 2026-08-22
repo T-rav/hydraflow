@@ -68,7 +68,6 @@ BASELINES_FILENAME = "finder_baselines.jsonl"
 FINDER_LOOP_WORKER: dict[str, str] = {
     "erosion_metrics": "erosion_metrics",
     "edge_proposer": "edge_proposer",
-    "adr_drift": "adr_touchpoint_auditor",
     "entry_evidence": "entry_evidence",
     "term_proposer": "term_proposer",
     "wiki_rot": "wiki_rot_detector",

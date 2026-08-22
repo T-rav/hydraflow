@@ -232,7 +232,6 @@ def test_ports_have_na_cassette_and_contract(matrix_md: str) -> None:
         ("DiagramLoop", "diagram_loop"),
         ("StaleIssueGCLoop", "stale_issue_gc_loop"),
         ("WorkspaceGCLoop", "workspace_gc_loop"),
-        ("AdrTouchpointAuditorLoop", "adr_touchpoint_auditor_loop"),
         ("StagingPromotionLoop", "staging_promotion_loop"),
         ("TrustFleetSanityLoop", "trust_fleet_sanity_loop"),
         ("RCBudgetLoop", "rc_budget_loop"),

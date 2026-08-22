@@ -32,7 +32,7 @@ Model HydraFlow's entire autonomous-loop layer as a **hierarchy of control loops
 
 ### Hierarchy of loops
 
-- **Regulators — the caretaker fleet (ADR-0029).** Each caretaker loop is a single-input regulator holding one measured quantity at a fixed set-point and rejecting disturbances (`WikiRotDetectorLoop`/`AdrTouchpointAuditorLoop`: drift→0; `FlakeTrackerLoop`: flakes→0; `StaleIssueGcLoop`: stale issues→0).
+- **Regulators — the caretaker fleet (ADR-0029).** Each caretaker loop is a single-input regulator holding one measured quantity at a fixed set-point and rejecting disturbances (`WikiRotDetectorLoop`: wiki-citation drift→0; `FlakeTrackerLoop`: flakes→0; `StaleIssueGcLoop`: stale issues→0).
 - **Servo — the IssueDriver (v2).** Drives one issue from its current `driver_state` to the MERGED set-point along a trajectory. The `HybridGate` (ADR-0094) is its inner controller; the `ConvergenceLedger` is its error/state register.
 - **Supervisory controller — the scheduler (v2 P2).** `DriverManager` + `SchedulingPolicy` allocate finite capacity across many servos: a pure control law (`select`) over a frozen sensor view (`SchedulingView`).
 - **Governor (v2 P3).** The saturation limiter and emergency brake beneath the supervisory controller.

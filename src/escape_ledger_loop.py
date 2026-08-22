@@ -594,9 +594,9 @@ class EscapeLedgerLoop(BaseBackgroundLoop):
             if not issue_number:
                 # create_issue's documented 0-sentinel: the gh call failed
                 # WITHOUT raising (ports.py). Leave the reason-scoped surfacing
-                # fingerprint UNSPENT so the next tick retries — mirrors
-                # adr_touchpoint_auditor_loop's "returned 0 → don't record"
-                # guard (#10585).
+                # fingerprint UNSPENT so the next tick retries — the
+                # "returned 0 → don't record" guard first written for the
+                # touchpoint auditor (#10585; loop retired by ADR-0136).
                 logger.warning(
                     "EscapeLedger: create_issue returned 0 (sentinel) for "
                     "finding %s (%s); leaving surfacing fingerprint unspent, "

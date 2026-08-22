@@ -275,7 +275,6 @@ class PromptFitness:
 PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "acceptance_criteria_build": frozenset({3, 4, 5}),
     "acceptance_criteria_precheck": frozenset({2, 3, 5, 8}),
-    "adr_drift_triage": frozenset({1, 3, 7, 8}),
     "adr_reviewer": frozenset({3, 7}),
     "adversarial_agent_compose": frozenset({1, 3, 4}),
     "agent_build_prompt_first_attempt": frozenset({1}),

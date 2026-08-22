@@ -30,7 +30,7 @@ Subsequent slices, sequenced in the implementing plan, extend the contract witho
 - Adding or changing a gate is editing one record, not hand-syncing prose, JSON, and a workflow.
 - The standard's prose cannot outrun what is enforced: a stale artifact or an orphan required context fails CI.
 - The guardrail shape is fixed while the set of gates can grow and vary by language, project type, and capability, which is what lets one standard fit repos that cannot run CodeQL or do not need browser e2e.
-- The staging baseline is two always-on checks; ADR enforcement stays with the `adr_touchpoint_auditor` loop (ADR-0056).
+- The staging baseline is two always-on checks; ADR enforcement lives outside the ruleset. (Amended 2026-08-22 by #11600: it was the `adr_touchpoint_auditor` loop when this ADR was written; that loop is retired and deleted, and ADR-to-code drift is now enforced inside the existing **Tests** lane by `test_no_unresolved_adr_citations` — see [ADR-0136](0136-adr-drift-enforcement-deterministic-citation-gate.md). No new required context: the check rides a gate the contract already declares, so the removed `ADR gate` context stays removed and this ADR's Slice-1 correction still holds.)
 - This extends the Enforcement section of ADR-0042; it does not supersede it.
 
 ## Alternatives considered
@@ -42,7 +42,8 @@ Subsequent slices, sequenced in the implementing plan, extend the contract witho
 ## Related
 
 - [ADR-0042](0042-two-tier-branch-release-promotion.md) — two-tier branch model; this ADR extends its Enforcement section
-- [ADR-0056](0056-adr-touchpoint-gate-to-caretaker-loop.md) — ADR enforcement moved from a CI gate to the `adr_touchpoint_auditor` loop
+- [ADR-0136](0136-adr-drift-enforcement-deterministic-citation-gate.md) — the live ADR-drift enforcement boundary: a deterministic cited-symbol check in the Tests lane, not a required context of its own
+- [ADR-0056](0056-adr-touchpoint-gate-to-caretaker-loop.md) — **Superseded.** ADR enforcement moved from a CI gate to the `adr_touchpoint_auditor` loop; that loop is retired (#10540) and deleted (#11600)
 - [ADR-0029](0029-caretaker-loop-pattern.md) — caretaker loop pattern (the drift-reconciliation loop)
 - `docs/standards/branch_protection/gates.toml` — the contract
 - `scripts/gates/` — loader, resolver, docs-table renderer, validator

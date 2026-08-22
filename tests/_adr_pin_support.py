@@ -1,6 +1,6 @@
 """Shared self-retiring ADR resolution for ADR-drift regression pins (#11186).
 
-Pin modules such as ``test_issue_9419_9421_adr_drift.py`` resolve a pinned
+Pin modules such as ``test_issue_10440.py`` resolve a pinned
 ADR by number and must degrade gracefully (skip, never raise or fail an
 assertion) once that ADR is renumbered, removed, or moves off
 Accepted/Proposed — see ``tests/regressions/test_issue_11186.py`` for the

@@ -509,8 +509,6 @@ def build_scripted_services(
     services.flake_tracker_loop = FakeBackgroundLoop()
     services.skill_prompt_eval_loop = FakeBackgroundLoop()
     services.fake_coverage_auditor_loop = FakeBackgroundLoop()
-    services.adr_touchpoint_auditor_loop = FakeBackgroundLoop()
-    services.adr_drift_resolver_loop = FakeBackgroundLoop()
     services.adr_conformance_loop = FakeBackgroundLoop()
     services.auto_tighten_loop = FakeBackgroundLoop()
     services.memory_backlog_loop = FakeBackgroundLoop()

@@ -24,6 +24,9 @@ _ADR_DIR = Path(__file__).resolve().parents[1] / "docs" / "adr"
 #: Accepted ADRs that predate the ADR-0123 ``Binds:`` field. SHRINK-ONLY: as
 #: each gains a ``- **Binds:** ...`` line, remove its number. Never add to this
 #: set — a newly Accepted ADR must declare its direction from the start.
+#: An ADR also leaves the baseline by leaving the Accepted population: #11600
+#: dropped 56 when ADR-0136 superseded it. Superseded ADRs are frozen history
+#: and carry no direction obligation, so the debt is retired either way.
 _GRANDFATHERED_NO_BINDS = frozenset(
     {
         1,
@@ -66,7 +69,6 @@ _GRANDFATHERED_NO_BINDS = frozenset(
         52,
         53,
         54,
-        56,
         57,
         58,
         60,
