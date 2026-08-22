@@ -22,9 +22,11 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from driver_contracts import WorkerRole
 from hydraflow_gateway.accounts import DEFAULT_HEALTH_WINDOW_SECONDS, AccountsView
 from hydraflow_gateway.active_routes import ActiveRoutesView, RecentRoutesView
+from hydraflow_gateway.routing_policy import (
+    canonical_worker_role as _resolver_worker_role,
+)
 
 logger = logging.getLogger("hydraflow.gateway.reader")
 
@@ -40,8 +42,6 @@ DEFAULT_RECENT_LIMIT = 50
 _ACCOUNTS_PATH = "/control/v2/accounts"
 _ACTIVE_ROUTES_PATH = "/control/v2/routes/active"
 _RECENT_ROUTES_PATH = "/control/v2/routes/recent"
-
-_ROLE_VALUES = frozenset(role.value for role in WorkerRole)
 
 
 class GatewaySourceState(StrEnum):
@@ -80,9 +80,14 @@ def canonical_worker_role(principal_id: str) -> str | None:
     Exact match only (ADR-0137 owns the vocabulary). A principal that is a loop
     name, a person, or an unmapped source stays ``None`` rather than being
     guessed into a role the routing resolver would later disagree with.
+
+    The match itself lives in :mod:`hydraflow_gateway.routing_policy`, which is
+    where the resolver reads it from. Two copies of "which principals are roles"
+    is exactly the drift ADR-0138 §D6 warned about — the observation layer and
+    the resolver disagreeing would read as a routing bug.
     """
-    candidate = principal_id.strip().lower()
-    return candidate if candidate in _ROLE_VALUES else None
+    role = _resolver_worker_role(principal_id)
+    return None if role is None else role.value
 
 
 def _annotate_roles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

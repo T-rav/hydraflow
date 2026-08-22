@@ -231,6 +231,11 @@ SETTINGS: dict[str, SettingSpec] = {
     # Live: repo_backend.apply_repo_provider re-reads both at every spawn.
     "repo_provider": SettingSpec("Model Routing", live=True, order=70),
     "repo_model": SettingSpec("Model Routing", live=True, order=71),
+    # --- Routing shadow (policy resolver observation, #11536 / ADR-0139) ---
+    # Live: route_shadow re-reads the switch at every spawn seam, so turning it
+    # off stops the next spawn's recording without a restart. Observation only —
+    # it can never change which provider or model a spawn uses.
+    "gateway_route_shadow_enabled": SettingSpec("Model Routing", live=True, order=80),
     # --- Issue Refinement (backlog dedup + priority scoring, #9957) ----------
     "issue_refinement_enabled": SettingSpec("Issue Refinement", live=True, order=0),
     "issue_refinement_pair_budget": SettingSpec("Issue Refinement", live=True, order=1),

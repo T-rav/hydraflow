@@ -849,6 +849,11 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_GATEWAY_FLEET_RATCHET_ENABLED",
         False,
     ),
+    (
+        "gateway_route_shadow_enabled",
+        "HYDRAFLOW_GATEWAY_ROUTE_SHADOW_ENABLED",
+        True,
+    ),
     ("auto_agent_preflight_enabled", "HYDRAFLOW_AUTO_AGENT_PREFLIGHT_ENABLED", True),
     ("auto_agent_redrive_enabled", "HYDRAFLOW_AUTO_AGENT_REDRIVE_ENABLED", True),
     (
@@ -2953,6 +2958,19 @@ class HydraFlowConfig(BaseModel):
             "Minimum lifetime requested for each per-spawn gateway virtual key. "
             "The runner raises the effective TTL when needed to cover the full "
             "subprocess timeout plus a cleanup grace period."
+        ),
+    )
+    # Routing-policy shadow (#11536, ADR-0139). Observation only: the resolver
+    # computes and records the route it *would* choose beside the route legacy
+    # routing actually took, and changes neither. Nothing here enforces a
+    # policy — enforcement is a later, separately gated phase.
+    gateway_route_shadow_enabled: bool = Field(
+        default=True,
+        description=(
+            "Record a shadow routing decision beside every spawn: what the "
+            "policy resolver would have chosen versus what legacy routing did. "
+            "Observation only — it never changes a provider, model, or command. "
+            "Set false to stop writing the per-repo shadow decision chain."
         ),
     )
     gateway_fleet_ratchet_enabled: bool = Field(
