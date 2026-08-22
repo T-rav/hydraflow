@@ -4,22 +4,22 @@
       "content_sha": "06adbd9ac4fc19c618d2eeff9d6d28a428e3fd798f9e01a01685e4eaa5067196"
     },
     "adr-conformance.md": {
-      "content_sha": "f1e5e06abc156dd7c134e5b494fda4f1cf92655d1c7a18f00f97fe0a7c0e3d6f"
+      "content_sha": "6fcadd7970a50940ea7f7c2e69c58ed3f038c9d0167aaeb5d4bae672f4b66164"
     },
     "adr-enforcement.md": {
-      "content_sha": "1c58fcf7a0bc4712ca2dc15a29149ed14b86952c46da9af3e9a65680e94a0cde"
+      "content_sha": "f83e0f93a1219dfb62097cf330fd908b6a2bd57540439a42c0381c4efefde667"
     },
     "adr-falsifiability.md": {
       "content_sha": "45e01cab7556aae6eb84b9376e283a23b0b5459006b60740282f6f2977e39b48"
     },
     "adr_xref.md": {
-      "content_sha": "0c1149be095ed79573dc99583cba4d78ad758a648462f438769a8b124265fa08"
+      "content_sha": "ea89149fe9efd16c7c8071d0b18d1188ec44426d1d516719837ebe78b235c6db"
     },
     "ai_system_inventory.md": {
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
     "changelog.md": {
-      "content_sha": "3548e78a68ef3ba663b7257254e072c4ef495c7ca6bc56f2b0a47ae5853afbc8"
+      "content_sha": "4c386678e95bef2096cd44e7440d7ef7b47f9ecd772aecfabbcc9e288054a4fe"
     },
     "coverage_matrix.md": {
       "content_sha": "e577c48a967a117dde6114523719893b7fd4b0ab5f5cbd1802308c3df917184f"
@@ -43,7 +43,7 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "7502db0085a27d5e711987bd45b70f065c67f06d883c3295b66e03a4de64d5d4"
+      "content_sha": "fc85436eb5dca51ba394a16fd3525f4b34ed98a87339ba92e4e9dcca3efb34ce"
     },
     "ports.md": {
       "content_sha": "c5694cc02e165570a5196a4f9443170f984d254d68710cbe41856bdd4da64cc0"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "a0ad7972b601e7af596b1df270f0750527abfe58b910fd8af337653c5a7c6c6d"
+  "content_sha": "cb83ec48a56ed00af2b04304ce7b8822d4b9a5606c8cb5455fd764955e039df7"
 }

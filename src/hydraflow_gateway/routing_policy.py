@@ -35,7 +35,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 from fnmatch import fnmatchcase
 from functools import partial
@@ -483,7 +484,36 @@ def hash_policies(policies: Sequence[RoutingPolicy]) -> str:
     return f"sha256:{digest}"
 
 
-def precedence_level(policy: RoutingPolicy) -> PrecedenceLevel:  # noqa: PLR0911 — one return per rung of the design's ordered ladder
+@dataclass(frozen=True, slots=True)
+class _MatchShape:
+    """Which dimensions a policy's match actually names. Drives its rung."""
+
+    repo: bool
+    repo_class: bool
+    role: bool
+    requirement: bool
+
+
+_PRECEDENCE_LADDER: tuple[
+    tuple[Callable[[_MatchShape], bool], PrecedenceLevel], ...
+] = (
+    (
+        lambda shape: shape.repo and shape.role and shape.requirement,
+        PrecedenceLevel.REPO_ROLE_REQUIREMENT,
+    ),
+    (lambda shape: shape.repo and shape.role, PrecedenceLevel.REPO_ROLE),
+    (lambda shape: shape.repo, PrecedenceLevel.REPO_ANY_ROLE),
+    (lambda shape: shape.repo_class and shape.role, PrecedenceLevel.CLASS_ROLE),
+    (lambda shape: shape.repo_class, PrecedenceLevel.CLASS_DEFAULT),
+    (
+        lambda shape: shape.role or shape.requirement,
+        PrecedenceLevel.GLOBAL_ROLE_OR_REQUIREMENT,
+    ),
+)
+"""The design's ordered ladder, most specific first. Order IS the precedence."""
+
+
+def precedence_level(policy: RoutingPolicy) -> PrecedenceLevel:
     """Return the ladder rung a policy occupies, from the shape of its match.
 
     Specificity is structural, not declared: a policy cannot claim a rung it has
@@ -491,56 +521,52 @@ def precedence_level(policy: RoutingPolicy) -> PrecedenceLevel:  # noqa: PLR0911
     """
     if policy.system_safety:
         return PrecedenceLevel.SYSTEM_SAFETY
-    has_repo = bool(policy.match.repo_ids)
-    has_class = bool(policy.match.repo_classes)
-    has_role = bool(policy.match.roles) or bool(policy.match.principal_ids)
-    has_requirement = bool(policy.match.model_requirements)
-    if has_repo and has_role and has_requirement:
-        return PrecedenceLevel.REPO_ROLE_REQUIREMENT
-    if has_repo and has_role:
-        return PrecedenceLevel.REPO_ROLE
-    if has_repo:
-        return PrecedenceLevel.REPO_ANY_ROLE
-    if has_class and has_role:
-        return PrecedenceLevel.CLASS_ROLE
-    if has_class:
-        return PrecedenceLevel.CLASS_DEFAULT
-    if has_role or has_requirement:
-        return PrecedenceLevel.GLOBAL_ROLE_OR_REQUIREMENT
-    return PrecedenceLevel.GLOBAL_DEFAULT
+    shape = _MatchShape(
+        repo=bool(policy.match.repo_ids),
+        repo_class=bool(policy.match.repo_classes),
+        role=bool(policy.match.roles) or bool(policy.match.principal_ids),
+        requirement=bool(policy.match.model_requirements),
+    )
+    return next(
+        (level for claims, level in _PRECEDENCE_LADDER if claims(shape)),
+        PrecedenceLevel.GLOBAL_DEFAULT,
+    )
 
 
-def evaluate_match(  # noqa: PLR0911 — one return per match dimension, each with its own reason code
-    policy: RoutingPolicy, context: RouteContext
-) -> MatchReason:
+def evaluate_match(policy: RoutingPolicy, context: RouteContext) -> MatchReason:
     """Return :attr:`MatchReason.MATCHED` or the first dimension that ruled it out."""
     if not policy.enabled:
         return MatchReason.POLICY_DISABLED
-    match = policy.match
+    return next(_match_failures(policy.match, context), MatchReason.MATCHED)
+
+
+def _match_failures(
+    match: RoutingMatch, context: RouteContext
+) -> Iterator[MatchReason]:
+    """Yield every dimension that rules this policy out, most decisive first."""
     if match.repo_ids:
         if context.repo.canonical is None:
-            return MatchReason.REPO_IDENTITY_NOT_CANONICAL
-        if context.repo.canonical not in match.repo_ids:
-            return MatchReason.REPO_NOT_IN_SET
+            yield MatchReason.REPO_IDENTITY_NOT_CANONICAL
+        elif context.repo.canonical not in match.repo_ids:
+            yield MatchReason.REPO_NOT_IN_SET
     if match.repo_classes and context.repo_class not in match.repo_classes:
-        return MatchReason.REPO_CLASS_NOT_IN_SET
+        yield MatchReason.REPO_CLASS_NOT_IN_SET
     if match.roles:
         if context.worker_role is None:
-            return MatchReason.ROLE_NOT_CANONICAL
-        if context.worker_role not in match.roles:
-            return MatchReason.ROLE_NOT_IN_SET
+            yield MatchReason.ROLE_NOT_CANONICAL
+        elif context.worker_role not in match.roles:
+            yield MatchReason.ROLE_NOT_IN_SET
     if match.principal_ids and context.principal_id.strip().lower() not in {
         principal.strip().lower() for principal in match.principal_ids
     }:
-        return MatchReason.PRINCIPAL_NOT_IN_SET
+        yield MatchReason.PRINCIPAL_NOT_IN_SET
     if (
         match.model_requirements
         and context.model_requirement not in match.model_requirements
     ):
-        return MatchReason.REQUIREMENT_NOT_IN_SET
+        yield MatchReason.REQUIREMENT_NOT_IN_SET
     if match.request_faces and context.request_face not in match.request_faces:
-        return MatchReason.REQUEST_FACE_NOT_IN_SET
-    return MatchReason.MATCHED
+        yield MatchReason.REQUEST_FACE_NOT_IN_SET
 
 
 def _dimensions_overlap(left: Sequence[object], right: Sequence[object]) -> bool:
@@ -704,43 +730,70 @@ def _eligible_accounts(
     return tuple(eligible), tuple(rejected)
 
 
-def _account_rejection(  # noqa: PLR0911 — one return per independent eligibility fact
+def _account_rejection(
     account: AccountAvailability,
     action: RoutingAction,
     *,
     pool: set[str],
     literal: bool,
 ) -> AccountRejectionReason | None:
+    """Return the first independent fact that rules this account out, or None."""
+    return next(_account_failures(account, action, pool=pool, literal=literal), None)
+
+
+def _account_failures(
+    account: AccountAvailability,
+    action: RoutingAction,
+    *,
+    pool: set[str],
+    literal: bool,
+) -> Iterator[AccountRejectionReason]:
+    """Yield every reason this account cannot serve this route."""
     if not account.configured:
-        return AccountRejectionReason.NOT_CONFIGURED
+        yield AccountRejectionReason.NOT_CONFIGURED
     if account.administrative_state is AdministrativeState.DISABLED:
-        return AccountRejectionReason.ADMINISTRATIVE_DISABLED
+        yield AccountRejectionReason.ADMINISTRATIVE_DISABLED
     if account.administrative_state is AdministrativeState.DRAINING:
-        return AccountRejectionReason.ADMINISTRATIVE_DRAINING
+        yield AccountRejectionReason.ADMINISTRATIVE_DRAINING
     if (
         action.provider_lock is not None
         and account.provider_binding is not action.provider_lock
     ):
-        return AccountRejectionReason.PROVIDER_LOCK_MISMATCH
+        yield AccountRejectionReason.PROVIDER_LOCK_MISMATCH
     if pool and account.account_id.strip().lower() not in pool:
-        return AccountRejectionReason.NOT_IN_POOL
+        yield AccountRejectionReason.NOT_IN_POOL
     if literal and account.provider_binding not in _ANTHROPIC_ONLY_BINDINGS:
-        return AccountRejectionReason.LITERAL_FAMILY_INCOMPATIBLE
+        yield AccountRejectionReason.LITERAL_FAMILY_INCOMPATIBLE
+
+
+def _mapped_model(
+    requirement: ModelRequirement, action: RoutingAction
+) -> tuple[str | None, DecisionReason | None] | None:
+    """Resolve an explicit ``requirement_map`` entry, or None when none applies.
+
+    The outer ``None`` means "this policy declares no mapping for this
+    requirement" — distinct from an inner ``(None, reason)``, which means the
+    mapping exists and is refused.
+    """
+    for mapping in action.requirement_map:
+        if mapping.requirement != requirement:
+            continue
+        if not _literal_family_model_is_honest(mapping):
+            return None, DecisionReason.LITERAL_FAMILY_UNSATISFIABLE
+        if not _model_allowed(mapping.effective_model, action.allowed_patterns):
+            return None, DecisionReason.MODEL_NOT_ALLOWED
+        return mapping.effective_model, None
     return None
 
 
-def _effective_model(  # noqa: PLR0911 — one return per model-resolution rule
+def _effective_model(
     context: RouteContext, action: RoutingAction
 ) -> tuple[str | None, DecisionReason | None]:
     """Resolve the model a policy would serve, or the code for why it cannot."""
     requirement = context.model_requirement
-    for mapping in action.requirement_map:
-        if mapping.requirement == requirement:
-            if not _literal_family_model_is_honest(mapping):
-                return None, DecisionReason.LITERAL_FAMILY_UNSATISFIABLE
-            if not _model_allowed(mapping.effective_model, action.allowed_patterns):
-                return None, DecisionReason.MODEL_NOT_ALLOWED
-            return mapping.effective_model, None
+    mapped = _mapped_model(requirement, action)
+    if mapped is not None:
+        return mapped
     if requirement.kind is ModelRequirementKind.CONCRETE_MODEL:
         if not _model_allowed(requirement.value, action.allowed_patterns):
             return None, DecisionReason.MODEL_NOT_ALLOWED

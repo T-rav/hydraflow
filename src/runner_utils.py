@@ -1788,7 +1788,7 @@ async def run_lightweight_agent(
     # Routing shadow (#11536, ADR-0139): this is the seam the per-role
     # ``*_provider`` dials run through, so it is where a z.ai-pinned loop
     # becomes observable. Observation only — the transport is already resolved.
-    from route_shadow import record_one_shot_route_shadow  # noqa: PLC0415
+    from route_shadow import record_one_shot_route_shadow
 
     record_one_shot_route_shadow(
         config=config,

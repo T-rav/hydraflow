@@ -55,7 +55,10 @@ from hydraflow_gateway.routing_policy import (
     canonical_worker_role,
     explain,
 )
-from hydraflow_gateway.routing_store import RoutingPolicyStore
+from hydraflow_gateway.routing_store import (
+    POLICY_SNAPSHOT_FILENAME,
+    RoutingPolicyStore,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -124,10 +127,6 @@ def routing_dir(config: HydraFlowConfig) -> Path:
 
 def policy_snapshot_path(config: HydraFlowConfig) -> Path:
     """Where this repo's durable policy snapshot lives."""
-    from hydraflow_gateway.routing_store import (  # noqa: PLC0415
-        POLICY_SNAPSHOT_FILENAME,
-    )
-
     return routing_dir(config) / POLICY_SNAPSHOT_FILENAME
 
 
@@ -322,7 +321,7 @@ def record_route_shadow(
             recorded_at=record.recorded_at.isoformat(),
         )
         return record
-    except Exception as exc:  # noqa: BLE001 - observation must not break a spawn
+    except Exception as exc:
         reraise_on_credit_or_bug(exc)
         logger.warning("route-shadow: recording skipped (%s)", exc_detail(exc))
         return None
