@@ -1765,15 +1765,27 @@ class RepoWikiStore:
                     corroborations = max(1, int(str(corroborations_raw).strip()))
                 except (TypeError, ValueError):
                     corroborations = 1
+                # ``source_issue`` is not always an issue number: the compiler
+                # stamps the literal ``synthesis`` on every entry it writes
+                # (see ``_render_tracked_entry``). Coercing it with a bare
+                # ``int()`` raised ValueError and dropped the WHOLE entry from
+                # the corroboration candidate pool — 441 of 1,122 active
+                # entries (39%), and every entry in the ``dependencies`` and
+                # ``patterns`` topics (#11606). Non-numeric provenance means
+                # "no originating issue", exactly as ``lint_tracked_entries``
+                # already treats it.
+                source_issue_raw = str(raw.get("source_issue") or "").strip()
+                try:
+                    source_issue: int | None = int(source_issue_raw)
+                except ValueError:
+                    source_issue = None
                 entry = WikiEntry(
                     id=raw.get("id") or "",
                     title=raw.get("title") or "(untitled)",
                     content=raw.get("body") or "",
                     topic=topic_dir.name,
                     source_type=raw.get("source_phase") or "unknown",
-                    source_issue=(
-                        int(raw["source_issue"]) if raw.get("source_issue") else None
-                    ),
+                    source_issue=source_issue,
                     created_at=raw.get("created_at") or datetime.now(UTC).isoformat(),
                     corroborations=corroborations,
                 )

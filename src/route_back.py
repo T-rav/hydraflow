@@ -33,6 +33,7 @@ import logging
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from exception_classify import reraise_on_credit_or_bug
 from giveup_window import SelfSolveOutcome
 
 if TYPE_CHECKING:
@@ -393,6 +394,18 @@ class RouteBackCoordinator:
                     issue_body=issue_body,
                 )
             except Exception as exc:  # noqa: BLE001
+                # The self-solver spawns subprocess work (the decompose
+                # terminal's `gh` reads and the council/decomposer runs), so
+                # this is a subprocess-runner handler and owes the standing
+                # reraise. ``PlanRetrySelfSolver.solve`` documents that it
+                # re-raises credit-exhaustion / real-bug exceptions rather
+                # than eating them; without the same call here that contract
+                # died one frame up — the billing signal was logged as a
+                # warning and converted into EXHAUSTED → human-required,
+                # burning attempt budget against an exhausted account and
+                # hiding genuine TypeError/KeyError bugs in the give-up path
+                # behind a "self-solve exhausted" line (#11609).
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "route_back: self-solve raised for issue #%d — treating as "
                     "exhausted (human-required): %s",
