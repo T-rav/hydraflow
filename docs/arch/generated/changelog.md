@@ -9,6 +9,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `94b544e` — fix(implement): anchor the test-adequacy demand and pin it across retries (#11644) (#11649) (#11649) *(2026-08-22)*
 - `1b110bf` — refactor(runner-utils): extract the gateway credential lifecycle; guard the canary hop *(2026-08-22)*
 - `4111fb8` — feat(gateway): P3 — bounded, reversible routing enforcement canary (ADR-0141) *(2026-08-22)*
+- `0d01114` — fix(gateway): the governed set and the body-capture set share a shape, not semantics *(2026-08-22)*
 - `620fe65` — fix(gateway): review pass 1 — a leaked runner, a vacuous rollback pin, and a door left open *(2026-08-22)*
 - `c5f5b2d` — feat(config): refuse a canary dial that could only arm nothing *(2026-08-22)*
 - `8bcd1e4` — refactor(runner-utils): extract the gateway credential lifecycle; guard the canary hop *(2026-08-22)*

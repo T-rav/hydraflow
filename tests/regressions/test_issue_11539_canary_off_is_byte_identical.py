@@ -356,3 +356,51 @@ async def test_an_armed_seam_does_build_one(tmp_path: Path) -> None:
         await _agentic_route(config, tmp_path)
 
     assert calls == 1
+
+
+def _unsatisfiable_policy(config: Any) -> None:
+    """A bare provider lock meeting a named Claude model (ADR-0139 §D4)."""
+    RoutingPolicyStore(policy_snapshot_path(config)).save(
+        [
+            RoutingPolicy(
+                id="project-x-zai",
+                match=RoutingMatch(repo_ids=(_CANARY,)),
+                action=RoutingAction(provider_lock="zai-harness"),
+            )
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_refused_route_never_reaches_a_credential_at_the_subprocess_seam(
+    tmp_path: Path,
+) -> None:
+    """AC5 at the seam the scenario cannot drive: no mint, so nothing to fall to.
+
+    The scenario proves the one-shot seam sends zero upstream bytes. This is the
+    same claim one layer earlier and at the other kind of seam: the refusal
+    happens before ``resolve_harness_env`` is called at all, so there is no
+    credential in existence to fall through to.
+    """
+    config = _config(tmp_path, canary=_CANARY)
+    _unsatisfiable_policy(config)
+    minted = 0
+
+    async def counting_resolve(*args: Any, **kwargs: Any) -> dict[str, str]:
+        nonlocal minted
+        minted += 1
+        return {}
+
+    bus = MagicMock()
+    bus.current_session_id = "test-session"
+    runner = _FakeRunner(config=config, event_bus=bus)
+    with patch(
+        "runners.base_subprocess_runner.resolve_harness_env",
+        side_effect=counting_resolve,
+    ):
+        result = await runner.run(
+            prompt="x", worktree_path=str(tmp_path), issue_number=1
+        )
+
+    assert minted == 0
+    assert result.crashed is True
