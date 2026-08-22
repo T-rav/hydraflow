@@ -730,3 +730,16 @@ def test_self_review_outranks_a_bookkeeping_rejection() -> None:
     )
 
     assert reason is RejectionReason.SELF_REVIEW_FORBIDDEN
+
+
+@pytest.mark.parametrize("served", ["zai.claude-sonnet-9", "vendor.claude-sonnet-4"])
+def test_a_region_prefix_without_anthropic_does_not_satisfy_a_family(
+    served: str,
+) -> None:
+    # Real Bedrock profiles always carry the `anthropic.` segment; a bare short
+    # prefix is a third-party id wearing Anthropic clothing.
+    requirement = ModelRequirement(
+        kind=ModelRequirementKind.LITERAL_FAMILY, value="claude-sonnet"
+    )
+
+    assert requirement.satisfied_by(served) is False

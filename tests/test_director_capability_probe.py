@@ -6,7 +6,10 @@ committed sanitized fixture's schema and the probe's pure/hermetic parts only.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import signal
 from pathlib import Path
 
 import pytest
@@ -24,6 +27,7 @@ from scripts.director_capability_probe import (
     _probe_environment_scrubbing,
     _probe_process_tree_teardown,
     _probe_short_lived_key_expiry,
+    _run_director_turn,
     build_scrubbed_env,
     captured_session_id,
     describe_id_shape,
@@ -519,3 +523,41 @@ def test_committed_evidence_records_the_denied_turn_produced_a_frame() -> None:
 
 def test_timed_out_turn_sentinel_is_distinguishable_from_a_real_exit_code() -> None:
     assert TURN_TIMED_OUT < 0
+
+
+def test_a_hung_turn_is_killed_at_its_budget_and_leaves_no_descendant(
+    tmp_path: Path,
+) -> None:
+    """The timeout path must reap the process GROUP, not just the direct child.
+
+    ``subprocess.run(timeout=...)`` kills only the immediate child, which would
+    leave the agent CLI's descendants alive — the leak ADR-0137 S6 forbids. This
+    stands in a fake CLI that forks a grandchild and then hangs.
+    """
+    marker = tmp_path / "pids.txt"
+    fake_cli = tmp_path / "fake-cli"
+    fake_cli.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+        f"open({str(marker)!r}, 'w').write(f'{{os.getpid()}}\\n{{child.pid}}\\n')\n"
+        "time.sleep(120)\n"
+    )
+    fake_cli.chmod(0o755)
+
+    rc, _out, _err = _run_director_turn(
+        cli=str(fake_cli), extra_args=[], timeout_seconds=5
+    )
+
+    pids = [int(x) for x in marker.read_text().split() if x.strip()]
+    survivors = []
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            continue
+        survivors.append(pid)
+        with contextlib.suppress(OSError):
+            os.kill(pid, signal.SIGKILL)
+
+    assert (rc, survivors) == (TURN_TIMED_OUT, [])

@@ -5,4 +5,4 @@ comment: 'High-water marks for structural test redundancy (erosion.suite_hygiene
   admission fences, and the probe''s measured observations'
 cross_file_duplicates: 26
 parametrize_copies: 712
-total_tests: 20625
+total_tests: 20627

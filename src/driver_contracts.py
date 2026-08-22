@@ -89,13 +89,15 @@ CAPABILITY_CLASSES = frozenset({"high-reasoning", "balanced"})
 LITERAL_FAMILY_TOKENS = {"claude-opus": "opus", "claude-sonnet": "sonnet"}
 """Family value -> the token a served model id must carry to satisfy it."""
 
-_ANTHROPIC_MODEL_ID = re.compile(r"^(?:[a-z]{2,8}\.)?(?:anthropic\.)?claude-")
+_ANTHROPIC_MODEL_ID = re.compile(r"^(?:[a-z]{2,8}\.anthropic\.|anthropic\.)?claude-")
 """Allow-list for a served model's provenance.
 
 Matches the first-party form (``claude-sonnet-4-6``) and the Bedrock forms,
 including cross-region inference profiles (``anthropic.claude-...``,
-``us.anthropic.claude-...``, ``global.anthropic.claude-...``, ``jp.anthropic...``). This is deliberately an
-allow-list: a deny-list of known third-party vendors is fail-open the moment a
+``us.anthropic.claude-...``, ``global.anthropic.claude-...``, ``jp.anthropic...``).
+A region prefix is accepted only when followed by ``anthropic.``, so a
+third-party id wearing a short prefix (``zai.claude-sonnet-9``) cannot slip
+through. This is deliberately an allow-list: a deny-list of known third-party vendors is fail-open the moment a
 new backend ships, which is precisely the failure mode ADR-0137's own tool-surface
 finding (F2) condemns. Do not reintroduce one as the primary check.
 """
