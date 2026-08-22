@@ -784,6 +784,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_FAIL_CLOSED",
         True,
     ),
+    ("triage_blocker_gate_enabled", "HYDRAFLOW_TRIAGE_BLOCKER_GATE_ENABLED", True),
     ("triage_honeypot_enabled", "HYDRAFLOW_TRIAGE_HONEYPOT_ENABLED", True),
     ("triage_honeypot_enforce", "HYDRAFLOW_TRIAGE_HONEYPOT_ENFORCE", False),
     ("approval_records_enabled", "HYDRAFLOW_APPROVAL_RECORDS_ENABLED", True),
@@ -3062,6 +3063,19 @@ class HydraFlowConfig(BaseModel):
             "agent exhausted the budget mid-verification and terminated with "
             "error_max_turns (exit 1, no verdict), so every code-citing issue "
             "parked (#10291)."
+        ),
+    )
+    triage_blocker_gate_enabled: bool = Field(
+        default=True,
+        description=(
+            "Honour ``Blocked by: #N[, #M]`` lines in issue bodies during "
+            "triage (#11614). A child whose declared prerequisite is still "
+            "OPEN is held on its current pipeline label and re-evaluated on "
+            "the next tick instead of being triaged into the plan queue, so "
+            "phase-ordered epic children flow in declared order rather than "
+            "all becoming eligible at once. Self-healing: no park, no extra "
+            "label, no second actor. Every unreadable blocker fails OPEN. "
+            "Kill switch for the gate; see src/blocker_gate.py."
         ),
     )
     triage_honeypot_enabled: bool = Field(

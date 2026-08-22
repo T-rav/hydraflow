@@ -855,3 +855,169 @@ class TestTriageConvergenceLedger:
         ledger = state.get_convergence_ledger(105)
         assert ledger is not None, "Ledger must be created"
         assert ledger.stage_state["triage"].last_verdict == "ADVANCE"
+
+
+# ---------------------------------------------------------------------------
+# Blocked-by gate (#11614)
+# ---------------------------------------------------------------------------
+
+
+def _wire_blocker_reads(prs, gh) -> None:
+    """Route the gate's two PRPort reads at a real FakeGitHub board.
+
+    Mirrors MockWorld's ``_wire_targets``: the gate must never see an
+    AsyncMock for these — a mock answers every state query truthily, which
+    would make an "is it OPEN?" assertion pass vacuously.
+    """
+    prs.get_issue_state = gh.get_issue_state
+    prs.get_issue_body = gh.get_issue_body
+
+
+def _blocked_child(issue_id: int, blocker: int):
+    return TaskFactory.create(
+        id=issue_id,
+        title="Gateway P1 — account inventory",
+        body=f"Parent: #11531\nBlocked by: #{blocker}\n\n" + "A" * 100,
+    )
+
+
+class TestBlockedByGate:
+    """A child declaring an OPEN blocker waits, self-healing, without parking."""
+
+    @pytest.mark.asyncio
+    async def test_open_blocker_skips_the_triage_llm(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from mockworld.fakes.fake_github import FakeGitHub
+
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        gh = FakeGitHub()
+        gh.add_issue(11533, "Fable P0", "the prerequisite")
+        _wire_blocker_reads(prs, gh)
+        store.get_triageable = supply_once([_blocked_child(11534, 11533)])
+
+        await phase.triage_issues()
+
+        triage.evaluate.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_open_blocker_does_not_park_the_issue(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from mockworld.fakes.fake_github import FakeGitHub
+
+        phase, _state, _triage, prs, store, _stop = make_triage_phase(config)
+        gh = FakeGitHub()
+        gh.add_issue(11533, "Fable P0", "the prerequisite")
+        _wire_blocker_reads(prs, gh)
+        store.get_triageable = supply_once([_blocked_child(11534, 11533)])
+
+        await phase.triage_issues()
+
+        prs.swap_pipeline_labels.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_open_blocker_does_not_transition_the_issue(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from mockworld.fakes.fake_github import FakeGitHub
+
+        phase, _state, _triage, prs, store, _stop = make_triage_phase(config)
+        gh = FakeGitHub()
+        gh.add_issue(11533, "Fable P0", "the prerequisite")
+        _wire_blocker_reads(prs, gh)
+        store.get_triageable = supply_once([_blocked_child(11534, 11533)])
+
+        await phase.triage_issues()
+
+        prs.transition.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_open_blocker_does_not_comment_on_the_issue(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """A comment would be re-posted every tick — the hold must stay silent."""
+        from mockworld.fakes.fake_github import FakeGitHub
+
+        phase, _state, _triage, prs, store, _stop = make_triage_phase(config)
+        gh = FakeGitHub()
+        gh.add_issue(11533, "Fable P0", "the prerequisite")
+        _wire_blocker_reads(prs, gh)
+        store.get_triageable = supply_once([_blocked_child(11534, 11533)])
+
+        await phase.triage_issues()
+
+        prs.post_comment.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_closed_blocker_lets_triage_run(
+        self, config: HydraFlowConfig
+    ) -> None:
+        from mockworld.fakes.fake_github import FakeGitHub
+
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        gh = FakeGitHub()
+        gh.add_issue(11533, "Fable P0", "shipped", state="closed")
+        _wire_blocker_reads(prs, gh)
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(issue_number=11534, ready=True)
+        )
+        store.get_triageable = supply_once([_blocked_child(11534, 11533)])
+
+        await phase.triage_issues()
+
+        triage.evaluate.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_unreadable_blocker_lets_triage_run(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """Fail-open: an unknown blocker must never hold the board."""
+        from mockworld.fakes.fake_github import FakeGitHub
+
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        gh = FakeGitHub()  # #11533 was never seeded → UNKNOWN
+        _wire_blocker_reads(prs, gh)
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(issue_number=11534, ready=True)
+        )
+        store.get_triageable = supply_once([_blocked_child(11534, 11533)])
+
+        await phase.triage_issues()
+
+        triage.evaluate.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_kill_switch_disables_the_gate(self, config: HydraFlowConfig) -> None:
+        from mockworld.fakes.fake_github import FakeGitHub
+
+        disabled = config.model_copy(update={"triage_blocker_gate_enabled": False})
+        phase, _state, triage, prs, store, _stop = make_triage_phase(disabled)
+        gh = FakeGitHub()
+        gh.add_issue(11533, "Fable P0", "the prerequisite")
+        _wire_blocker_reads(prs, gh)
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(issue_number=11534, ready=True)
+        )
+        store.get_triageable = supply_once([_blocked_child(11534, 11533)])
+
+        await phase.triage_issues()
+
+        triage.evaluate.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_unblocked_issue_reads_no_blocker_state(
+        self, config: HydraFlowConfig
+    ) -> None:
+        """An ordinary body declares nothing, so the gate costs zero gh reads."""
+        phase, _state, triage, prs, store, _stop = make_triage_phase(config)
+        triage.evaluate = AsyncMock(
+            return_value=TriageResultFactory.create(issue_number=1, ready=True)
+        )
+        store.get_triageable = supply_once(
+            [TaskFactory.create(id=1, title="Add pagination", body="A" * 100)]
+        )
+
+        await phase.triage_issues()
+
+        prs.get_issue_state.assert_not_called()

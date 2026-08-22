@@ -6,8 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `dcc5ba8` — refactor(agent): extract skill_gate module; register repair prompt; prune suppressions baseline *(2026-08-21)*
-- `55509a5` — feat(implement): test-adequacy gate repairs in-run before rejecting (#11593) (#11593) *(2026-08-21)*
+- `7af74dd` — feat(implement): test-adequacy gate repairs in-run before rejecting (#11593) (#11603) (#11603) *(2026-08-21)*
 - `9cf6452` — feat(factory): auto-rebase own dirty PRs when staging moves (#11595) (#11598) (#11598) *(2026-08-21)*
 - `98d9393` — feat(factory): run as a launchd service; liveness kernel honours operator Stop (#11594) (#11594) *(2026-08-21)*
 - `845ba5a` — feat(erosion): token-drift filing actuator on ErosionMetricsLoop (Fixes #11442) *(2026-08-21)*

@@ -11,11 +11,12 @@ from adr_utils import (
     check_adr_duplicate,
     is_adr_issue_title,
 )
+from blocker_gate import BlockerGate, BlockerVerdict
 from config import HydraFlowConfig
 from convergence_recording import record_stage_verdict
 from events import EventBus, EventType, HydraFlowEvent
 from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
-from models import Task
+from models import Task, TranscriptLinePayload
 from phase_utils import (
     _sentry_transaction,
     park_issue,
@@ -113,12 +114,13 @@ def _is_auditor_finding_stale(issue: Task, max_age_days: int) -> bool:
 #    is confined WITHIN ``classify``. The phase never calls the honeypot
 #    directly; extracting it would require refactoring the runner and would move
 #    a side-effect — out of scope for a parity-gated, no-flag refactor.
-# 2. The pre-classify screens (duplicate / ADR / stale-auditor) and the tracing
-#    setup/teardown stay in ``_triage_single`` (outer scaffolding). They run
-#    BEFORE ``begin_trace_run``; wiring them into the traced flow would move the
-#    trace boundary (extra trace runs + phase rollups for gauntlet-closed
-#    issues) — a behaviour change. The ``store_lifecycle`` / sentry span /
-#    stop-event scaffolding likewise stays in ``_triage_one``.
+# 2. The pre-classify screens (duplicate / ADR / stale-auditor / blocked-by,
+#    #11614) and the tracing setup/teardown stay in ``_triage_single`` (outer
+#    scaffolding). They run BEFORE ``begin_trace_run``; wiring them into the
+#    traced flow would move the trace boundary (extra trace runs + phase
+#    rollups for gauntlet-closed issues) — a behaviour change. The
+#    ``store_lifecycle`` / sentry span / stop-event scaffolding likewise stays
+#    in ``_triage_one``.
 
 
 def _flow_stopped(state: FlowState) -> bool:
@@ -153,6 +155,10 @@ class TriagePhase:
         self._epic_manager = epic_manager
         self._issue_cache = issue_cache
         self._bug_reproducer = bug_reproducer
+        # One gate per phase so its TTL caches are shared across the batch:
+        # the children of one ordered epic reference the same two or three
+        # blockers, and without the shared cache each child would re-read them.
+        self._blockers = BlockerGate()
 
     def _record_triage_verdict(self, issue_id: int, routing_outcome: str) -> None:
         """Record the ConvergenceLedger boundary verdict for a routing outcome.
@@ -297,6 +303,33 @@ class TriagePhase:
                 self._config.ready_label[0],
             )
 
+    async def _hold_for_blockers(self, issue: Task, verdict: BlockerVerdict) -> None:
+        """Leave a blocked issue exactly where it is, and say why (#11614).
+
+        Deliberately touches NOTHING durable: no label swap, no park, no
+        comment, no state write. The issue keeps its current pipeline label,
+        so the next triage tick re-runs this same screen and a closed blocker
+        unblocks it with no second actor involved — self-healing by
+        construction. A comment is avoided precisely because this runs every
+        tick; the transcript line carries the "waiting on #N" signal to the
+        board instead, so a held child reads as waiting rather than stalled.
+        """
+        logger.info(
+            "Issue #%d held at triage — %s (re-evaluated next tick)",
+            issue.id,
+            verdict.reason,
+        )
+        await self._bus.publish(
+            HydraFlowEvent(
+                type=EventType.TRANSCRIPT_LINE,
+                data=TranscriptLinePayload(
+                    issue=issue.id,
+                    line=f"{verdict.reason} — holding here; re-checked next tick",
+                    source="triage",
+                ),
+            )
+        )
+
     async def _triage_single(self, issue: Task) -> int:
         """Core triage logic for a single issue."""
         if await self._close_if_duplicate(issue):
@@ -332,6 +365,16 @@ class TriagePhase:
                 self._config.auditor_finding_max_age_days,
             )
             return 1
+
+        # Blocker screen (#11614). A pre-classify screen like the duplicate /
+        # ADR / stale-auditor gauntlet above: it runs BEFORE the trace + LLM,
+        # so a child waiting on its predecessor costs one cached issue-state
+        # read instead of a full triage evaluation.
+        if self._config.triage_blocker_gate_enabled and not self._config.dry_run:
+            verdict = await self._blockers.evaluate(self._prs, issue.id, issue.body)
+            if verdict.blocked:
+                await self._hold_for_blockers(issue, verdict)
+                return 0
 
         from trace_rollup import write_phase_rollup  # noqa: PLC0415
         from tracing_context import (  # noqa: PLC0415

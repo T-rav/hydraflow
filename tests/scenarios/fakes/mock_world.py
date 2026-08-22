@@ -348,6 +348,11 @@ class MockWorld:
             # board instead of the unwired PRManager method (a real ``gh``
             # subprocess).
             "get_issue_state",
+            # Issue-body read. Wired so triage's #11614 blocker gate can walk
+            # ``Blocked by:`` edges for its cycle guard against the fake board;
+            # an unwired AsyncMock body would make the walk raise and the gate
+            # fail open, hiding the ordering behaviour a scenario asserts.
+            "get_issue_body",
             # #11517: the ADR-0011 release path — resolve the promoted main
             # SHA, tag it, publish the release — so a scenario's FakeGitHub
             # records the tag ref instead of an unwired AsyncMock.
