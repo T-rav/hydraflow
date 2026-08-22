@@ -426,6 +426,27 @@ def test_a_saturated_attempt_table_holds_rather_than_evicting() -> None:
     ).decision.reason == (MintRefusal.MINT_CAPACITY_EXHAUSTED.value)
 
 
+def test_a_capacity_refusal_does_not_itself_consume_capacity() -> None:
+    """Otherwise the ceiling IS the growth: one record per refused attempt.
+
+    A saturated table answers ``mint-capacity-exhausted`` without recording the
+    attempt, because recording it would take a slot in the table that is already
+    full. Nothing is lost: no lease was reserved, so there is no outcome a replay
+    could need to be told about.
+    """
+    store = RouteMintStore(
+        key_store=VirtualKeyStore(max_ttl_seconds=86_400),
+        configured_bindings=_ALL_BINDINGS,
+        wall_clock=lambda: 1_700_000_000.0,
+        max_tracked_attempts=1,
+    )
+    store.resolve_and_mint(_request())
+    for index in range(20):
+        store.resolve_and_mint(_request(mint_attempt_id=f"att-{index + 2}"))
+
+    assert store.tracked_attempts == 1
+
+
 def test_the_expiry_reported_is_the_lease_the_key_store_issued() -> None:
     """A client that trusts a fabricated expiry would renew too late."""
     key_store = VirtualKeyStore(max_ttl_seconds=86_400)
