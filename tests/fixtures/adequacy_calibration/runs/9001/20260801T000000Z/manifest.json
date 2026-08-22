@@ -1,0 +1,10 @@
+{
+ "issue_number": 9001,
+ "timestamp": "20260801T000000Z",
+ "files": [
+  "manifest.json"
+ ],
+ "outcome": "failed",
+ "error": "test-adequacy failed: untested error path in `_resolve_target`",
+ "duration_seconds": 1740.0
+}

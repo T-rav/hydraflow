@@ -1,0 +1,4 @@
+{"id": "sample:aaa", "detected_at": "2026-08-06T00:00:00+00:00", "detection_source": "regression-pin", "originating_pr": 9101, "attribution_method": "fixes-chain", "attribution_confidence": "medium"}
+{"id": "sample:bbb", "detected_at": "2026-08-07T00:00:00+00:00", "detection_source": "bug-issue", "originating_pr": null, "attribution_method": "fixes-chain", "attribution_confidence": "low"}
+not-json-at-all
+{"id": "sample:ccc", "detected_at": "2026-08-08T00:00:00+00:00", "detection_source": "hotfix", "originating_pr": 9109, "attribution_method": "revert", "attribution_confidence": "high"}

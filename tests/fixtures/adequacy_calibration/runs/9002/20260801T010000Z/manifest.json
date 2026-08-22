@@ -1,0 +1,10 @@
+{
+ "issue_number": 9002,
+ "timestamp": "20260801T010000Z",
+ "files": [
+  "manifest.json"
+ ],
+ "outcome": "failed",
+ "error": "test-adequacy failed: Independent verifier overrode OK: two mutants survive the new guard, untested error path in `_probe`",
+ "duration_seconds": 1980.0
+}

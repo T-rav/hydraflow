@@ -1,0 +1,10 @@
+{
+ "issue_number": 9006,
+ "timestamp": "20260801T050000Z",
+ "files": [
+  "manifest.json"
+ ],
+ "outcome": "failed",
+ "error": "RuntimeError('Agent process timed out after 3600s')",
+ "duration_seconds": 3600.0
+}
