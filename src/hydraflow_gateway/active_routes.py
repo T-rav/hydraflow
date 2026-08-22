@@ -1,10 +1,16 @@
 """Ephemeral in-flight registry and bounded recent-route read model (ADR-0138).
 
 Observation only. Registering a route changes no routing decision, no mint
-semantics, and no proxied byte: the registry is written from the proxy's single
-idempotent terminal chokepoint (``GatewayProxy._finalize_attempt``) so an
-in-flight row cannot outlive its request on *any* path — success, upstream
-error, cancellation, client abort, telemetry failure, or shutdown.
+semantics, and no proxied byte.
+
+The in-flight view is cleared on two terminal paths, and needs both:
+:meth:`ActiveRouteRegistry.release` runs from the proxy's idempotent terminal
+chokepoint and records the route as recent evidence, while
+:meth:`ActiveRouteRegistry.discard` runs in a ``finally`` around the whole
+finalize path so a request whose terminal ledger row could not even be *built*
+still leaves the view. Together they cover success, upstream error,
+cancellation, client abort, telemetry failure, and a raise inside finalize;
+shutdown is covered by :meth:`ActiveRouteRegistry.clear` from the app lifespan.
 
 Every published field is non-secret by construction. The virtual token, its
 SHA-256 digest, request/response bodies, upstream credentials, and captured body
@@ -170,6 +176,9 @@ class RecentRoutesView(BaseModel):
     as_of: datetime
     evidence_since: datetime
     capacity: int = Field(gt=0)
+    # How many terminal routes the ring currently holds, versus how many this
+    # page returned — so a bounded page cannot read as a complete answer.
+    retained: int = Field(default=0, ge=0)
     truncated: bool
     routes: tuple[TerminalRouteView, ...]
 
@@ -242,6 +251,16 @@ class ActiveRouteRegistry:
             if len(self._recent) == self._recent_capacity:
                 self._dropped += 1
             self._recent.append(_terminal_route(row))
+
+    def discard(self, request_id: str) -> None:
+        """Clear one in-flight request without recording recent evidence.
+
+        The fail-safe half of :meth:`release`: the proxy calls it in a ``finally``
+        around the whole finalize path, so a request whose terminal row could not
+        be built still leaves the in-flight view. Idempotent after ``release``.
+        """
+        with self._lock:
+            self._in_flight.pop(request_id, None)
 
     def clear(self) -> None:
         """Drop every in-flight row at shutdown; the requests die with the process."""
@@ -353,6 +372,7 @@ def build_recent_routes_view(
     now: datetime,
     evidence_since: datetime,
     capacity: int,
+    retained: int = 0,
     truncated: bool,
 ) -> RecentRoutesView:
     """Assemble the bounded read model for finalized routes."""
@@ -360,6 +380,7 @@ def build_recent_routes_view(
         as_of=now,
         evidence_since=evidence_since,
         capacity=capacity,
+        retained=retained,
         truncated=truncated,
         routes=tuple(
             TerminalRouteView(

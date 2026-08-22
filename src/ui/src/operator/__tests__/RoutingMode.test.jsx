@@ -36,6 +36,7 @@ const ACCOUNTS = toGatewayAccounts({
         in_flight_count: 0,
         observed: false,
         observed_request_count: 0,
+        observed_aborted_count: 0,
         observed_error_count: 0,
         last_observed_at: null,
         health: 'unverified',
@@ -56,6 +57,7 @@ const ACCOUNTS = toGatewayAccounts({
         in_flight_count: 1,
         observed: true,
         observed_request_count: 5,
+        observed_aborted_count: 0,
         observed_error_count: 0,
         last_observed_at: '2026-08-22T12:00:00Z',
         health: 'healthy',
@@ -156,6 +158,54 @@ describe('RoutingMode accounts view', () => {
   it('shows an idle account as observed "none" rather than a zero-looking count', () => {
     render(<RoutingMode accounts={ACCOUNTS} live={LIVE} routingView="accounts" />)
     expect(screen.getByTestId('routing-account-observed-legacy-anthropic')).toHaveTextContent('none')
+  })
+
+  it('shows the error count against the qualifying denominator when degraded', () => {
+    const degraded = toGatewayAccounts({
+      available: true,
+      source_state: 'available',
+      data: {
+        window_seconds: 900,
+        summary: { configured: 1, enabled: 1, leased: 0, in_flight: 0 },
+        accounts: [
+          {
+            account_id: 'legacy-anthropic',
+            display_name: 'Anthropic',
+            provider_binding: 'anthropic',
+            configured: true,
+            administrative_state: 'enabled',
+            observed: true,
+            observed_request_count: 10,
+            observed_aborted_count: 6,
+            observed_error_count: 3,
+            health: 'degraded',
+            health_reason: 'upstream-errors',
+          },
+        ],
+      },
+    })
+    render(<RoutingMode accounts={degraded} routingView="accounts" />)
+    expect(screen.getByTestId('routing-account-errors-legacy-anthropic')).toHaveTextContent('3/4')
+  })
+
+  it('hides the error fact entirely when nothing failed', () => {
+    render(<RoutingMode accounts={ACCOUNTS} live={LIVE} routingView="accounts" />)
+    expect(screen.queryByTestId('routing-account-errors-legacy-zai-harness')).toBeNull()
+  })
+
+  it('warns when health was computed from an evicted subsample', () => {
+    const truncated = toGatewayAccounts({
+      available: true,
+      source_state: 'available',
+      data: {
+        window_seconds: 900,
+        evidence_truncated: true,
+        summary: { configured: 0, enabled: 0, leased: 0, in_flight: 0 },
+        accounts: [],
+      },
+    })
+    render(<RoutingMode accounts={truncated} routingView="accounts" />)
+    expect(screen.getByTestId('routing-accounts-truncated')).toBeInTheDocument()
   })
 
   it('explains an unavailable source instead of rendering an empty inventory', () => {

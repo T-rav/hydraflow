@@ -86,20 +86,30 @@ class _GatewayAttempt:
         if self.finalized:
             return
         self.finalized = True
-        proxy._finalize_attempt(
-            request_id=self.request_id,
-            identity=self.identity,
-            capture=self.capture,
-            request_observer=self.request_observer,
-            usage=usage or UsageSnapshot(),
-            started_epoch=self.started_epoch,
-            started_monotonic=self.started_monotonic,
-            path=self.path,
-            status_code=status_code,
-            completed=completed,
-            client_aborted=client_aborted,
-            capture_failed=self.capture_failed,
-        )
+        try:
+            proxy._finalize_attempt(
+                request_id=self.request_id,
+                identity=self.identity,
+                capture=self.capture,
+                request_observer=self.request_observer,
+                usage=usage or UsageSnapshot(),
+                started_epoch=self.started_epoch,
+                started_monotonic=self.started_monotonic,
+                path=self.path,
+                status_code=status_code,
+                completed=completed,
+                client_aborted=client_aborted,
+                capture_failed=self.capture_failed,
+            )
+        finally:
+            # The request is over on EVERY path that reaches here, and this
+            # attempt can never finalize again. Discarding by request id after
+            # the (already-idempotent) row-carrying release means a raise
+            # anywhere inside `_finalize_attempt` — a body-capture close, a
+            # pricing lookup, or a ledger-row validation error on a malformed
+            # upstream status — still clears the in-flight row instead of
+            # leaving a phantom "streaming" route for the process lifetime.
+            proxy.active_routes.discard(self.request_id)
 
 
 class _ObservedStreamingResponse(StreamingResponse):

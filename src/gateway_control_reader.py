@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -23,7 +23,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from driver_contracts import WorkerRole
-from hydraflow_gateway.accounts import AccountsView
+from hydraflow_gateway.accounts import DEFAULT_HEALTH_WINDOW_SECONDS, AccountsView
 from hydraflow_gateway.active_routes import ActiveRoutesView, RecentRoutesView
 
 logger = logging.getLogger("hydraflow.gateway.reader")
@@ -32,7 +32,9 @@ GATEWAY_CONTROL_TOKEN_ENV = "HYDRAFLOW_GATEWAY_CONTROL_TOKEN"
 """Env-only control credential, deliberately not a config field (see config.py)."""
 
 DEFAULT_READ_TIMEOUT_SECONDS = 5.0
-DEFAULT_ACCOUNT_WINDOW_SECONDS = 900
+DEFAULT_ACCOUNT_WINDOW_SECONDS = DEFAULT_HEALTH_WINDOW_SECONDS
+"""Borrowed from the gateway so a bound change cannot 422 every dashboard poll."""
+
 DEFAULT_RECENT_LIMIT = 50
 
 _ACCOUNTS_PATH = "/control/v2/accounts"
@@ -160,7 +162,11 @@ class GatewayControlReader:
         params: dict[str, Any],
         model: type[BaseModel],
     ) -> GatewayReadResult:
-        if not self._control_token:
+        # An absent base URL is "not configured", not "unreachable": telling an
+        # operator to go chase a gateway that was never deployed is the wrong
+        # instruction, and a relative request URL would otherwise surface as an
+        # httpx transport error.
+        if not self._control_token or not self._base_url:
             return GatewayReadResult(GatewaySourceState.NOT_CONFIGURED)
         try:
             async with self._open() as client:
@@ -188,6 +194,11 @@ class GatewayControlReader:
         )
 
     def _open(self) -> httpx.AsyncClient:
+        """Return a FRESH client per read; the caller closes it via ``async with``.
+
+        ``client_factory`` must therefore construct a client, never hand back a
+        shared one — the context manager exit would close it for everybody.
+        """
         if self._client_factory is not None:
             return self._client_factory()
         return httpx.AsyncClient(timeout=self._timeout_seconds, trust_env=False)
@@ -202,7 +213,3 @@ def reader_from_config(
         control_token=os.environ.get(GATEWAY_CONTROL_TOKEN_ENV, "").strip(),
         client_factory=client_factory,
     )
-
-
-ReaderFactory = Callable[[], GatewayControlReader]
-ReadCall = Callable[[GatewayControlReader], Awaitable[GatewayReadResult]]

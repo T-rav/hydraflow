@@ -10,10 +10,12 @@
 
 **Enforced by:**
 pytest:tests/test_gateway_secret_absence.py
-pytest:tests/test_gateway_accounts.py
-pytest:tests/test_gateway_active_routes.py
+pytest:tests/test_accounts.py
+pytest:tests/test_active_routes.py
 pytest:tests/test_gateway_control_v2_read_api.py
+pytest:tests/test_gateway_control_reader.py
 pytest:tests/test_dashboard_gateway_routes.py
+pytest:tests/regressions/test_issue_11534_in_flight_route_leak.py
 pytest:tests/scenarios/test_gateway_account_visibility_scenario.py
 
 **Precedent:** Read models separated from the write path — the CQRS/read-model tradition in which a query surface is a *projection* over authoritative state rather than a second source of truth (Young, "CQRS Documents", 2010; Fowler's `CQRS` bliki entry).
@@ -21,7 +23,7 @@ pytest:tests/scenarios/test_gateway_account_visibility_scenario.py
 
 ## Context
 
-The v1 session-tap gateway is deliberately small. `GatewaySettings.upstreams` is a dictionary keyed by provider binding, so there is at most one Anthropic and one z.ai-harness upstream; the mint caller picks the binding directly; the proxy performs exactly one attempt against that immutable binding; and the request ledger records the outcome. `VirtualKeyStore.active_count` is total-only and private, and `/healthz` reports a list of configured provider names.
+The v1 session-tap gateway is deliberately small. `GatewaySettings.upstreams` is a dictionary keyed by provider binding, so there is at most one Anthropic and one z.ai-harness upstream; the mint caller picks the binding directly; the proxy performs exactly one attempt against that immutable binding; and the request ledger records the outcome. `VirtualKeyStore` exposes only a total `active_count` with no per-account or per-repo breakdown, and `/healthz` reports a list of configured provider names.
 
 That leaves an operator with no answer to four separate questions, and — worse — one badge that invites them to be confused for each other:
 
@@ -59,24 +61,36 @@ Multi-account pools from a server-owned definition file are a later phase (#1154
 | `administrative_state` | `enabled` / `draining` / `disabled`. **P0 has no administrative overlay**, so every account reads `enabled`; the type exists so #11540 can add the overlay without a wire break. |
 | `leased` / `lease_count` | At least one unexpired virtual key is bound to this account. |
 | `in_flight` / `in_flight_count` | At least one authenticated request is streaming through it *right now*. |
-| `observed` / `observed_request_count` / `last_observed_at` | A terminal route used this account inside the published window. |
+| `observed` / `observed_request_count` / `observed_aborted_count` / `last_observed_at` | A terminal route used this account inside the published window. |
 | `health` + `health_reason` | `unverified` / `healthy` / `degraded`, with a reason **code** (not prose). |
 
 Three rules make this honest rather than decorative:
 
 - **`unverified` is the default, and it is not a failure.** An account with a credential but no terminal evidence in the window is `unverified` with reason `no-evidence`. It is never `healthy`. The UI renders `unverified` in a neutral tone, never a success tone.
-- **A client abort is not evidence about the account.** `GatewayRequestStatus.CLIENT_ABORTED` rows count as *observed* traffic (the account was reached) but are excluded from the health denominator entirely — a worker that hung up says nothing about the upstream. Four aborts in a row leave an account `unverified`, not `healthy` and not `degraded`.
+- **A client abort is not evidence about the account.** `GatewayRequestStatus.CLIENT_ABORTED` rows count as *observed* traffic (the account was reached) but are excluded from the health denominator entirely — a worker that hung up says nothing about the upstream. Four aborts in a row leave an account `unverified`, not `healthy` and not `degraded`. Because the excluded rows are still counted in `observed_request_count`, the aborted count is published alongside it: a reader recomputes the denominator the verdict actually used as `observed_request_count - observed_aborted_count`, so the verdict is reproducible from the wire rather than asserted by it.
 - **Degradation needs a floor and a ratio.** `accounts.py:derive_health` requires both `DEGRADED_MIN_ERRORS` (3) qualifying failures and a `DEGRADED_ERROR_RATIO` (0.5) share of them before flipping to `degraded`, so one bad request is noise rather than a red badge.
 
 **`eligible` is deliberately absent from the account model.** Eligibility means "this account can satisfy *this* repo, role, request face, and model requirement at *this* policy revision" — it is a property of a route explanation, not of an account, and computing it requires the resolver this phase does not build. The overview counts configured / enabled / leased / in-flight; it never counts "eligible ones".
 
 ### D3: The in-flight registry is written only from the proxy's single idempotent terminal chokepoint
 
-`src/hydraflow_gateway/active_routes.py:ActiveRouteRegistry` is registered from `GatewayProxy.forward` immediately after the attempt is constructed, and released inside `GatewayProxy._finalize_attempt` — in a `finally`, so a failed ledger append still clears the row.
+`src/hydraflow_gateway/active_routes.py:ActiveRouteRegistry` is registered from `GatewayProxy.forward` immediately after the attempt is constructed, and cleared on **two** paths, both terminal:
 
-This placement is the whole design. `_GatewayAttempt.finalize` is already guarded by a `finalized` flag and is already the *only* way an attempt terminates: telemetry-unhealthy rejection, oversized body, client disconnect before the first chunk, upstream transport error, `asyncio.CancelledError`, a normal stream close, and the `_ObservedStreamingResponse` abort path all funnel through it. Registering beside that chokepoint means the lifecycle cannot drift from the ledger's: there is no second code path that could leave a phantom "streaming" row behind an issue that finished an hour ago. Shutdown is the one terminal event *not* expressed as an attempt, so the app lifespan's `finally` calls `registry.clear()` explicitly.
+- `release(row)` inside `GatewayProxy._finalize_attempt` records the terminal route as recent evidence and clears the in-flight row;
+- `discard(request_id)` in a `finally` wrapping the *whole* of `_GatewayAttempt.finalize` clears it even when no terminal row could be built.
 
-Recent evidence is a bounded ring (`DEFAULT_RECENT_CAPACITY` = 200) fed with the same `GatewayLedgerRow` that is persisted, so the Live view and the ledger cannot disagree about what was served. The ring is process-local and resets on restart; the read model publishes `evidence_since` (when this process began observing) and `truncated` (whether the ring has already evicted), so the dashboard can never present it as a complete history.
+The second is not belt-and-braces theatre. `finalize` sets its `finalized` flag before delegating, so an attempt that raises on the way through can never finalize again — and `GatewayLedgerRow` construction *can* raise: `status_code` is bounded `0..599` while h11 will parse any three-digit status line, so a malformed upstream is enough to leave a permanently "streaming" phantom route. Body-capture close and pricing sit in the same unguarded stretch. `tests/regressions/test_issue_11534_in_flight_route_leak.py` drives exactly that case.
+
+The placement is otherwise the whole design. `_GatewayAttempt.finalize` is the *only* way an attempt terminates: telemetry-unhealthy rejection, oversized body, client disconnect before the first chunk, upstream transport error, `asyncio.CancelledError`, a normal stream close, and the `_ObservedStreamingResponse` abort path all funnel through it. Registering beside that chokepoint means the lifecycle cannot drift from the ledger's. Shutdown is the one terminal event *not* expressed as an attempt, so the app lifespan's `finally` calls `registry.clear()` explicitly.
+
+Recent evidence is a bounded ring (`DEFAULT_RECENT_CAPACITY` = 200) fed with the same `GatewayLedgerRow` that is persisted, so the Live view and the ledger cannot disagree about what was served. The ring is process-local and resets on restart.
+
+Truncation is published in **both** directions it can occur, because either one alone would let a partial view read as complete:
+
+- `RecentRoutesView.truncated` is true when the ring evicted rows **or** when the requested `limit` did not return everything retained, and `retained` publishes the ring's own count so the gap is checkable;
+- `AccountsView.evidence_truncated` says the same about the health window — once the ring has evicted, "healthy over 900s" was computed from a subsample, and the Accounts view states that rather than implying a complete window.
+
+`evidence_since` (when this process began observing) accompanies both.
 
 ### D4: Zero credential disclosure is a machine-checked property, not a convention
 

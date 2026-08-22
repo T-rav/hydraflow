@@ -107,6 +107,10 @@ class AccountView(BaseModel):
     in_flight_count: int = Field(ge=0)
     observed: bool
     observed_request_count: int = Field(ge=0)
+    # Client aborts are observed traffic but say nothing upstream, so they are
+    # excluded from the health verdict. Publishing the count keeps the verdict
+    # reproducible from the wire: qualifying = requests - aborted.
+    observed_aborted_count: int = Field(default=0, ge=0)
     observed_error_count: int = Field(ge=0)
     last_observed_at: datetime | None = None
     health: AccountHealth
@@ -133,6 +137,10 @@ class AccountsView(BaseModel):
     as_of: datetime
     window_seconds: int = Field(gt=0)
     evidence_since: datetime
+    # Health is derived from the gateway's bounded terminal-route ring. Once the
+    # ring has evicted, the window is a subsample and the view says so rather
+    # than presenting "healthy over 900s" computed from part of it.
+    evidence_truncated: bool = False
     summary: AccountSummary
     accounts: tuple[AccountView, ...]
 
@@ -170,6 +178,7 @@ def build_accounts_view(
     now: datetime,
     window_seconds: int = DEFAULT_HEALTH_WINDOW_SECONDS,
     evidence_since: datetime,
+    evidence_truncated: bool = False,
 ) -> AccountsView:
     """Compile every provider binding into one sanitized account read model."""
     cutoff = now - timedelta(seconds=window_seconds)
@@ -227,6 +236,7 @@ def build_accounts_view(
                 in_flight_count=in_flight_count,
                 observed=bool(observed_rows),
                 observed_request_count=len(observed_rows),
+                observed_aborted_count=len(observed_rows) - len(qualifying),
                 observed_error_count=error_count,
                 last_observed_at=(
                     max(row.started_at for row in observed_rows)
@@ -242,6 +252,7 @@ def build_accounts_view(
         as_of=now,
         window_seconds=window_seconds,
         evidence_since=evidence_since,
+        evidence_truncated=evidence_truncated,
         summary=AccountSummary(
             configured=sum(1 for account in accounts if account.configured),
             enabled=sum(

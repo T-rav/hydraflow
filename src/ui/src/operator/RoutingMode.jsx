@@ -155,7 +155,21 @@ function AccountRow({ account, styles }) {
           styles={styles}
           testid={`routing-account-observed-${account.accountId}`}
         />
-        <Badge tone={account.healthTone} data-testid={`routing-account-health-${account.accountId}`}>
+        {account.observedErrorCount > 0 && (
+          <Fact
+            label="errors"
+            value={`${account.observedErrorCount}/${
+              account.observedRequestCount - account.observedAbortedCount
+            }`}
+            styles={styles}
+            testid={`routing-account-errors-${account.accountId}`}
+          />
+        )}
+        <Badge
+          tone={account.healthTone}
+          title={account.healthReason || undefined}
+          data-testid={`routing-account-health-${account.accountId}`}
+        >
           {account.health}
         </Badge>
       </span>
@@ -194,6 +208,12 @@ function AccountsView({ accounts, styles }) {
       <Text as="span" size="xs" tone="muted" data-testid="routing-accounts-evidence">
         {`Observation evidence since ${accounts.evidenceSince || 'gateway start'}. Eligibility is not shown: it exists only inside a route explanation.`}
       </Text>
+      {accounts.evidenceTruncated && (
+        <Text as="span" size="xs" tone="warning" data-testid="routing-accounts-truncated">
+          Older routes have been evicted from the gateway's bounded ring, so health is
+          computed from a subsample of this window.
+        </Text>
+      )}
     </div>
   )
 }
@@ -327,7 +347,8 @@ function LiveView({ live, styles }) {
         )}
         {live.truncated && (
           <Text as="span" size="xs" tone="warning" data-testid="routing-recent-truncated">
-            Older routes have been evicted from the gateway's bounded ring — this view is not a complete history.
+            Older routes are not shown — the gateway's ring has evicted them, or this page
+            did not return them. This view is not a complete history.
           </Text>
         )}
       </div>

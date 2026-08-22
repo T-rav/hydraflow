@@ -1,19 +1,33 @@
-"""Sanitized account identity compilation and state derivation (ADR-0138)."""
+"""``hydraflow_gateway.accounts`` — identity compilation and state derivation.
+
+ADR-0138. Named for the module it covers (the P10.2 unit-ring rule), not for the
+``test_gateway_*`` grouping the rest of the gateway suite uses.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from pydantic import SecretStr
 
 from hydraflow_gateway.accounts import (
+    ACCOUNT_DISPLAY_NAMES,
+    CREDENTIAL_ENV_NAMES,
     AccountHealth,
     AccountHealthReason,
+    AccountsView,
+    AccountView,
     AdministrativeState,
     build_accounts_view,
 )
+from hydraflow_gateway.active_routes import InFlightRoute, TerminalRoute
 from hydraflow_gateway.models import (
+    LEGACY_ACCOUNT_IDS,
+    GatewayIdentity,
     GatewayRequestStatus,
+    Principal,
     PrincipalKind,
     ProviderBinding,
     RepoClass,
@@ -51,9 +65,7 @@ def _settings(*bindings: ProviderBinding) -> GatewaySettings:
     )
 
 
-def _lease(binding: ProviderBinding, *, key_id: str = "lease-1") -> object:
-    from hydraflow_gateway.models import GatewayIdentity, Principal
-
+def _lease(binding: ProviderBinding, *, key_id: str = "lease-1") -> GatewayIdentity:
     return GatewayIdentity(
         key_id=key_id,
         principal=Principal(kind=PrincipalKind.SPAWN, id="implementer", spawn_id="s1"),
@@ -66,9 +78,7 @@ def _lease(binding: ProviderBinding, *, key_id: str = "lease-1") -> object:
     )
 
 
-def _in_flight(binding: ProviderBinding, *, request_id: str = "req-1") -> object:
-    from hydraflow_gateway.active_routes import InFlightRoute
-
+def _in_flight(binding: ProviderBinding, *, request_id: str = "req-1") -> InFlightRoute:
     return InFlightRoute(
         request_id=request_id,
         provider_binding=binding,
@@ -89,9 +99,7 @@ def _recent(
     status: GatewayRequestStatus = GatewayRequestStatus.COMPLETED,
     age_seconds: int = 10,
     request_id: str = "req-old",
-) -> object:
-    from hydraflow_gateway.active_routes import TerminalRoute
-
+) -> TerminalRoute:
     return TerminalRoute(
         request_id=request_id,
         provider_binding=binding,
@@ -116,11 +124,11 @@ def _recent(
 def _view(
     settings: GatewaySettings,
     *,
-    leases: tuple[object, ...] = (),
-    in_flight: tuple[object, ...] = (),
-    recent: tuple[object, ...] = (),
+    leases: tuple[GatewayIdentity, ...] = (),
+    in_flight: tuple[InFlightRoute, ...] = (),
+    recent: tuple[TerminalRoute, ...] = (),
     window_seconds: int = 900,
-) -> object:
+) -> AccountsView:
     return build_accounts_view(
         settings=settings,
         leases=leases,
@@ -132,7 +140,7 @@ def _view(
     )
 
 
-def _account(view: object, account_id: str) -> object:
+def _account(view: AccountsView, account_id: str) -> AccountView:
     return next(a for a in view.accounts if a.account_id == account_id)
 
 
@@ -382,6 +390,48 @@ def test_view_pins_the_moment_observation_began() -> None:
     view = _view(_settings(ProviderBinding.ANTHROPIC))
 
     assert view.evidence_since == _EVIDENCE_SINCE
+
+
+def test_the_aborted_count_makes_the_health_verdict_reproducible() -> None:
+    """Publishing aborts lets a reader recompute the denominator health used."""
+    rows = (
+        _recent(
+            ProviderBinding.ANTHROPIC,
+            status=GatewayRequestStatus.CLIENT_ABORTED,
+            request_id="abort-0",
+        ),
+        _recent(ProviderBinding.ANTHROPIC, request_id="ok-0"),
+    )
+    account = _account(
+        _view(_settings(ProviderBinding.ANTHROPIC), recent=rows), "legacy-anthropic"
+    )
+
+    assert account.observed_request_count - account.observed_aborted_count == 1
+
+
+def test_truncated_evidence_is_declared_on_the_accounts_view() -> None:
+    """Health computed from an evicted subsample must not read as complete."""
+    view = build_accounts_view(
+        settings=_settings(ProviderBinding.ANTHROPIC),
+        leases=(),
+        in_flight=(),
+        recent=(),
+        now=_NOW,
+        evidence_since=_EVIDENCE_SINCE,
+        evidence_truncated=True,
+    )
+
+    assert view.evidence_truncated is True
+
+
+@pytest.mark.parametrize(
+    "table", [LEGACY_ACCOUNT_IDS, ACCOUNT_DISPLAY_NAMES, CREDENTIAL_ENV_NAMES]
+)
+def test_account_metadata_covers_every_provider_binding(
+    table: Mapping[ProviderBinding, str],
+) -> None:
+    """A new binding must not KeyError every v2 read endpoint at once."""
+    assert set(table) == set(ProviderBinding)
 
 
 def test_accounts_are_ordered_deterministically_by_id() -> None:

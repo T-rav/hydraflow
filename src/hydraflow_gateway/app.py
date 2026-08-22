@@ -162,6 +162,7 @@ def create_app(
     resolved_store = key_store or VirtualKeyStore(
         max_ttl_seconds=resolved_settings.max_key_ttl_seconds,
         body_capture_repo_slugs=resolved_settings.body_capture_repo_slugs,
+        wall_clock=wall_clock,
     )
     resolved_ledger = ledger or GatewayLedger(resolved_settings.ledger_path)
     resolved_body_store = body_store or GatewayBodyStore(resolved_settings.body_dir)
@@ -178,6 +179,10 @@ def create_app(
         body_store=resolved_body_store,
         pricing=resolved_pricing,
         active_routes=resolved_active_routes,
+        # One clock behind the whole observation path: a read model that
+        # compared a fake `as_of` against real row timestamps would silently
+        # drop evidence out of its own window.
+        wall_clock=wall_clock,
     )
 
     @asynccontextmanager
@@ -275,6 +280,7 @@ def create_app(
             now=_as_utc(wall_clock()),
             window_seconds=window_seconds,
             evidence_since=resolved_active_routes.started_at,
+            evidence_truncated=resolved_active_routes.truncated(),
         )
 
     @app.get("/control/v2/routes/active", response_model=ActiveRoutesView)
@@ -290,12 +296,18 @@ def create_app(
     async def read_recent_routes(
         limit: int = Query(default=50, ge=1, le=MAX_RECENT_LIMIT),
     ) -> RecentRoutesView:
+        retained = resolved_active_routes.recent()
         return build_recent_routes_view(
-            routes=resolved_active_routes.recent(limit=limit),
+            routes=retained[:limit],
             now=_as_utc(wall_clock()),
             evidence_since=resolved_active_routes.started_at,
             capacity=resolved_active_routes.recent_capacity,
-            truncated=resolved_active_routes.truncated(),
+            retained=len(retained),
+            # Truncation is BOTH kinds: rows the ring evicted and rows this page
+            # did not return. A page that silently drops 70 of 120 rows while
+            # reporting `truncated: false` is exactly the overclaim this view
+            # exists to prevent.
+            truncated=resolved_active_routes.truncated() or len(retained) > limit,
         )
 
     @app.api_route("/{path:path}", methods=_DATA_PLANE_METHODS)

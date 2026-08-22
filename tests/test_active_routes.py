@@ -1,4 +1,9 @@
-"""Active-route lifecycle: registered on accept, cleared on every terminal path."""
+"""``hydraflow_gateway.active_routes`` — registered on accept, cleared on every
+terminal path.
+
+ADR-0138. Named for the module it covers (the P10.2 unit-ring rule), not for the
+``test_gateway_*`` grouping the rest of the gateway suite uses.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +22,7 @@ from starlette.types import Message, Receive, Scope
 from hydraflow_gateway.active_routes import (
     DEFAULT_RECENT_CAPACITY,
     ActiveRouteRegistry,
+    build_active_routes_view,
 )
 from hydraflow_gateway.keys import VirtualKeyStore
 from hydraflow_gateway.ledger import GatewayBodyStore, GatewayLedger, GatewayLedgerRow
@@ -240,6 +246,25 @@ class TestRegistryLifecycle:
 
         assert registry.recent() == ()
 
+    def test_discard_clears_a_route_without_recording_evidence(self) -> None:
+        """The fail-safe path clears the row when no terminal row could be built."""
+        registry = ActiveRouteRegistry(started_at=_NOW)
+        _registered(registry)
+
+        registry.discard("request-1")
+
+        assert (registry.in_flight(), registry.recent()) == ((), ())
+
+    def test_discard_after_release_is_a_no_op(self) -> None:
+        """Belt-and-braces must not erase the recent row release just recorded."""
+        registry = ActiveRouteRegistry(started_at=_NOW)
+        _registered(registry)
+        registry.release(_row())
+
+        registry.discard("request-1")
+
+        assert len(registry.recent()) == 1
+
     def test_clear_drops_every_in_flight_route(self) -> None:
         """Shutdown ends every stream, so no in-flight row may survive it."""
         registry = ActiveRouteRegistry(started_at=_NOW)
@@ -447,8 +472,6 @@ class TestProxyLifecycle:
 class TestViewAssembly:
     def test_lease_age_is_measured_from_issue_time(self) -> None:
         """The Live view shows lease age, so it must be derived, not invented."""
-        from hydraflow_gateway.active_routes import build_active_routes_view
-
         store = VirtualKeyStore(max_ttl_seconds=600, id_factory=lambda: "key-1")
         view = build_active_routes_view(
             leases=[_identity(store)],
@@ -461,8 +484,6 @@ class TestViewAssembly:
 
     def test_lease_carries_its_compiled_account_id(self) -> None:
         """Leases join to accounts by the same stable id the Accounts view uses."""
-        from hydraflow_gateway.active_routes import build_active_routes_view
-
         store = VirtualKeyStore(max_ttl_seconds=600, id_factory=lambda: "key-1")
         view = build_active_routes_view(
             leases=[_identity(store)],

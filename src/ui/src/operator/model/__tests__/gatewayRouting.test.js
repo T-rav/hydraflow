@@ -33,6 +33,7 @@ const ACCOUNT = {
   in_flight_count: 1,
   observed: true,
   observed_request_count: 5,
+  observed_aborted_count: 0,
   observed_error_count: 0,
   last_observed_at: '2026-08-22T12:00:00Z',
   health: 'healthy',
@@ -162,6 +163,17 @@ describe('toGatewayAccounts', () => {
     const vm = toGatewayAccounts(accountsEnvelope({ health: 'unverified' }))
     expect([vm.accounts[0].configured, vm.accounts[0].health]).toEqual([true, 'unverified'])
   })
+
+  it('carries the aborted count that makes the health verdict reproducible', () => {
+    const vm = toGatewayAccounts(accountsEnvelope({ observed_aborted_count: 2 }))
+    expect(vm.accounts[0].observedAbortedCount).toBe(2)
+  })
+
+  it('surfaces truncated evidence so health cannot read as complete', () => {
+    const raw = accountsEnvelope()
+    raw.data.evidence_truncated = true
+    expect(toGatewayAccounts(raw).evidenceTruncated).toBe(true)
+  })
 })
 
 describe('healthTone', () => {
@@ -225,6 +237,14 @@ describe('toGatewayLiveRoutes', () => {
   it('surfaces a truncated ring so the view cannot claim completeness', () => {
     const vm = toGatewayLiveRoutes(activeEnvelope(), recentEnvelope({ truncated: true }))
     expect(vm.truncated).toBe(true)
+  })
+
+  it('treats an available envelope with no payload as malformed, not available', () => {
+    const vm = toGatewayLiveRoutes(
+      { available: true, source_state: 'available', data: null },
+      { available: true, source_state: 'available', data: { routes: [] } },
+    )
+    expect(vm.sourceState).toBe('invalid')
   })
 
   it('degrades the whole view when only the recent read failed', () => {

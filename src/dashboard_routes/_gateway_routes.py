@@ -12,7 +12,6 @@ phases of epic #11531.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Query
@@ -24,16 +23,19 @@ from gateway_control_reader import (
     reader_from_config,
 )
 
+# Bounds are borrowed from the gateway's own read plane, never re-declared here:
+# a proxy that validated against a stale copy would turn every poll into a 422
+# the operator would read as "gateway unreachable".
+from hydraflow_gateway.accounts import (
+    MAX_HEALTH_WINDOW_SECONDS,
+    MIN_HEALTH_WINDOW_SECONDS,
+)
+from hydraflow_gateway.active_routes import MAX_RECENT_LIMIT
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from config import HydraFlowConfig
-
-logger = logging.getLogger("hydraflow.dashboard.gateway")
-
-MIN_ACCOUNT_WINDOW_SECONDS = 60
-MAX_ACCOUNT_WINDOW_SECONDS = 86_400
-MAX_RECENT_LIMIT = 200
 
 
 def build_gateway_router(
@@ -59,8 +61,8 @@ def build_gateway_router(
     async def read_accounts(
         window_seconds: int = Query(
             default=DEFAULT_ACCOUNT_WINDOW_SECONDS,
-            ge=MIN_ACCOUNT_WINDOW_SECONDS,
-            le=MAX_ACCOUNT_WINDOW_SECONDS,
+            ge=MIN_HEALTH_WINDOW_SECONDS,
+            le=MAX_HEALTH_WINDOW_SECONDS,
         ),
     ) -> dict[str, Any]:
         result = await _reader().accounts(window_seconds=window_seconds)

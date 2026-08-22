@@ -80,6 +80,7 @@ export const EMPTY_GATEWAY_ACCOUNTS_VM = Object.freeze({
   asOf: null,
   evidenceSince: null,
   windowSeconds: 0,
+  evidenceTruncated: false,
   summary: Object.freeze({ configured: 0, enabled: 0, leased: 0, inFlight: 0 }),
   accounts: Object.freeze([]),
 })
@@ -95,10 +96,16 @@ export const EMPTY_GATEWAY_LIVE_VM = Object.freeze({
 })
 
 function envelopeState(raw) {
+  const data = raw?.data && typeof raw.data === 'object' ? raw.data : null
+  const declared = raw?.available === true
+  // An envelope that claims availability but carries no payload is malformed,
+  // not available — reporting it as `available` would let an empty view pass
+  // for a real one, which is the exact failure this whole model guards against.
+  const malformed = declared && data === null
   return {
-    available: raw?.available === true,
-    sourceState: str(raw?.source_state) || UNAVAILABLE_STATE,
-    data: raw?.data && typeof raw.data === 'object' ? raw.data : null,
+    available: declared && data !== null,
+    sourceState: malformed ? 'invalid' : str(raw?.source_state) || UNAVAILABLE_STATE,
+    data,
   }
 }
 
@@ -119,6 +126,7 @@ function toAccountRow(raw) {
     inFlightCount: num(raw?.in_flight_count),
     observed: raw?.observed === true,
     observedRequestCount: num(raw?.observed_request_count),
+    observedAbortedCount: num(raw?.observed_aborted_count),
     observedErrorCount: num(raw?.observed_error_count),
     lastObservedAt: orNull(raw?.last_observed_at),
     health,
@@ -133,7 +141,7 @@ function toAccountRow(raw) {
  */
 export function toGatewayAccounts(raw) {
   const { available, sourceState, data } = envelopeState(raw)
-  if (!available || !data) {
+  if (!available) {
     return { ...EMPTY_GATEWAY_ACCOUNTS_VM, sourceState }
   }
   const rows = Array.isArray(data.accounts) ? data.accounts : []
@@ -144,6 +152,7 @@ export function toGatewayAccounts(raw) {
     asOf: orNull(data.as_of),
     evidenceSince: orNull(data.evidence_since),
     windowSeconds: num(data.window_seconds),
+    evidenceTruncated: data.evidence_truncated === true,
     summary: {
       configured: num(summary.configured),
       enabled: num(summary.enabled),
@@ -208,8 +217,9 @@ export function toGatewayLiveRoutes(activeRaw, recentRaw) {
   const active = envelopeState(activeRaw)
   const recent = envelopeState(recentRaw)
   // Both reads come from one gateway: if either is unavailable the view is
-  // incomplete, so it reports the degraded state rather than a partial truth.
-  if (!active.available || !active.data || !recent.available || !recent.data) {
+  // incomplete, so it reports the degraded state rather than a partial truth —
+  // attributed to the read that actually failed, never to the healthy one.
+  if (!active.available || !recent.available) {
     const sourceState = !active.available ? active.sourceState : recent.sourceState
     return { ...EMPTY_GATEWAY_LIVE_VM, sourceState }
   }

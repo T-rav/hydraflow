@@ -43,8 +43,11 @@ from hydraflow_gateway.settings import (
 )
 from secret_scrub import scan_for_secrets
 
-# Credential-shaped values: if any of these leaked, ``scan_for_secrets`` would
-# name it, so the assertions below are not vacuous.
+# The two provider keys are deliberately shaped like real ones, so the
+# ``scan_for_secrets`` assertion is a live detector rather than a formality. The
+# control token and the virtual token are NOT recognised by that pattern set —
+# ``secret_scrub`` has no ``hfgw_`` or gateway-control-token pattern — so those
+# two are carried by their own explicit ``not in payload`` assertions below.
 _CONTROL_TOKEN = "gw-control-token-" + "c" * 40
 _ANTHROPIC_KEY = "sk-ant-" + "a" * 44
 _ZAI_KEY = "sk-" + "z" * 48
@@ -230,6 +233,26 @@ async def test_read_payloads_publish_the_lease_id_they_are_meant_to(
     key_id = token.removeprefix("hfgw_").split(".", maxsplit=1)[0]
 
     assert key_id in payload
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        pytest.param("req-live", id="the-in-flight-section-returned-a-row"),
+        pytest.param("req-done", id="the-recent-section-returned-a-row"),
+    ],
+)
+async def test_every_payload_section_actually_returned_a_row(
+    tmp_path: Path, marker: str
+) -> None:
+    """Absence assertions over an empty section would prove nothing at all.
+
+    ``body_capture_id`` only ever appears on a recent row, so the guard that
+    protects it goes silently vacuous the moment that section empties out.
+    """
+    _, payload = await _payloads(tmp_path)
+
+    assert marker in payload
 
 
 @pytest.mark.parametrize(

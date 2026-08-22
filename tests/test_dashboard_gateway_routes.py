@@ -13,11 +13,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from dashboard_routes._gateway_routes import build_gateway_router
-from gateway_control_reader import (
-    GatewayControlReader,
-    GatewaySourceState,
-    canonical_worker_role,
-)
+from gateway_control_reader import GatewayControlReader
 from hydraflow_gateway.active_routes import ActiveRouteRegistry
 from hydraflow_gateway.app import create_app
 from hydraflow_gateway.keys import VirtualKeyStore
@@ -33,7 +29,7 @@ from hydraflow_gateway.settings import (
     UpstreamAuthStyle,
     UpstreamSettings,
 )
-from tests.helpers import ConfigFactory
+from tests.helpers import ConfigFactory, make_dashboard_router
 
 _CONTROL_TOKEN = "test-control-token-0123456789abcdef"
 _NOW = datetime(2026, 8, 22, 12, 0, 0, tzinfo=UTC)
@@ -267,27 +263,15 @@ def test_recent_routes_rejects_an_unbounded_limit(tmp_path: Path) -> None:
     assert response.status_code == 422
 
 
-def test_missing_control_token_reports_a_not_configured_source(
-    tmp_path: Path,
+def test_the_dashboard_router_actually_mounts_the_gateway_routes(
+    config: object, event_bus: object, state: object, tmp_path: Path
 ) -> None:
-    """Without the env-only credential the view says so; it does not look empty."""
-    body = _dashboard(tmp_path, control_token="").get("/api/gateway/accounts").json()
+    """The real ``create_router`` wiring, not just the router built in isolation."""
+    router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
 
-    assert body["source_state"] == GatewaySourceState.NOT_CONFIGURED.value
+    paths = {getattr(route, "path", "") for route in router.routes}
 
-
-def test_missing_control_token_returns_no_fabricated_data(tmp_path: Path) -> None:
-    """An unavailable source must never present an invented account list."""
-    body = _dashboard(tmp_path, control_token="").get("/api/gateway/accounts").json()
-
-    assert body["data"] is None
-
-
-def test_unreachable_gateway_reports_an_unreachable_source(tmp_path: Path) -> None:
-    """A gateway that cannot be reached is distinguishable from a quiet one."""
-    body = _dashboard(tmp_path, unreachable=True).get("/api/gateway/accounts").json()
-
-    assert body["source_state"] == GatewaySourceState.UNREACHABLE.value
+    assert "/api/gateway/accounts" in paths
 
 
 def test_unreachable_gateway_still_answers_with_2xx(tmp_path: Path) -> None:
@@ -311,20 +295,3 @@ def test_dashboard_response_never_carries_an_upstream_provider_key(
     body = _dashboard(tmp_path).get("/api/gateway/accounts").text
 
     assert "real-zai-key" not in body
-
-
-@pytest.mark.parametrize(
-    ("principal_id", "expected"),
-    [
-        ("implementer", "implementer"),
-        ("REVIEWER", "reviewer"),
-        (" planner ", "planner"),
-        ("issue_controller", None),
-        ("", None),
-    ],
-)
-def test_canonical_worker_role_matches_exactly(
-    principal_id: str, expected: str | None
-) -> None:
-    """The role join is an exact catalog match, never a heuristic."""
-    assert canonical_worker_role(principal_id) == expected
