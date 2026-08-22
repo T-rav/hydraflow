@@ -37,7 +37,10 @@ from unittest.mock import AsyncMock
 from giveup_window import GiveUpClass, GiveUpTracker, GiveUpWindow, SelfSolveOutcome
 from issue_cache import IssueCache
 from mockworld.fakes.fake_route_back_counter import FakeRouteBackCounter
+from models import Task
+from precondition_gate import PreconditionGate
 from route_back import RouteBackCoordinator, RouteBackOutcome
+from stage_preconditions import Stage
 from state import StateTracker
 from subprocess_util import AuthenticationError, CreditExhaustedError
 
@@ -138,3 +141,77 @@ async def test_transient_failure_still_falls_back_to_human_required(
 
     assert (result.outcome, self_solve.calls) == (RouteBackOutcome.ESCALATED, 1)
     assert prs.swap_pipeline_labels.await_args_list[-1].args[1] == "human-required"
+
+
+class TestSignalSurvivesTheWholeGivingUpPath:
+    """End-to-end: reraising out of ``route_back`` is worth nothing if its
+    only caller swallows it.
+
+    ``PreconditionGate.filter_and_route`` is the sole call site of
+    ``RouteBackCoordinator.route_back`` in ``src/``, and it caught
+    ``Exception`` to drop the gated issue from the batch. That is correct for
+    an ordinary route-back failure and wrong for credit exhaustion: the phase
+    went on gating issue after issue against an exhausted account, which is
+    the very symptom #11609 describes. These pins run the real gate over the
+    real coordinator so the signal is followed all the way out.
+    """
+
+    def _gate(self, tmp_path: Path, exc: BaseException) -> PreconditionGate:
+        cache = IssueCache(tmp_path / "cache", enabled=True)
+        prs = AsyncMock()
+        prs.swap_pipeline_labels = AsyncMock()
+        coordinator = RouteBackCoordinator(
+            cache=cache,
+            prs=prs,
+            counter=FakeRouteBackCounter(),
+            hitl_label="human-required",
+            diagnose_label="hydraflow-diagnose",
+            max_route_backs=2,
+            give_up_tracker=GiveUpTracker(StateTracker(tmp_path / "state.json")),
+            plan_retry_window=GiveUpWindow(
+                GiveUpClass.PLAN_RETRY, max_restarts=1, window_seconds=3600
+            ),
+            self_solve=_RaisingSelfSolve(exc),
+        )
+        return PreconditionGate(cache=cache, coordinator=coordinator, enabled=True)
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            pytest.param(CreditExhaustedError("credit balance too low"), id="credit"),
+            pytest.param(AuthenticationError("invalid api key"), id="auth"),
+            pytest.param(KeyError("headRefName"), id="bug"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_signal_escapes_the_gate_to_reach_the_loop(
+        self, tmp_path: Path, exc: BaseException
+    ) -> None:
+        """It must propagate out of ``filter_and_route`` so the loop task
+        crashes into ``HydraFlowOrchestrator._handle_credit_exhaustion``,
+        which owns the global pause."""
+        gate = self._gate(tmp_path, exc)
+
+        # An issue with no cached records fails Stage.READY preconditions,
+        # which is what drives the route-back.
+        with pytest.raises(type(exc)) as raised:
+            await gate.filter_and_route(
+                [Task(id=_ISSUE, title="t", body="b")], Stage.READY
+            )
+
+        assert raised.value is exc
+
+    @pytest.mark.asyncio
+    async def test_ordinary_route_back_failure_still_drops_the_issue(
+        self, tmp_path: Path
+    ) -> None:
+        """The gate's documented contract is unchanged for everything else:
+        a transient failure drops the gated issue from the batch rather than
+        crashing the phase."""
+        gate = self._gate(tmp_path, RuntimeError("gh: connection reset by peer"))
+
+        result = await gate.filter_and_route(
+            [Task(id=_ISSUE, title="t", body="b")], Stage.READY
+        )
+
+        assert result == []

@@ -139,12 +139,14 @@ class TestSynthesisProvenanceEntriesStayLoadable:
             ("Numeric rule", 11176),
         ]
 
-    @pytest.mark.parametrize(
-        "source_issue", ["synthesis", "", "unknown", "#11176", "n/a"]
-    )
-    def test_no_provenance_shape_is_ever_dropped(
+    @pytest.mark.parametrize("source_issue", ["synthesis", "unknown", ""])
+    def test_every_sentinel_this_module_writes_is_loadable(
         self, tmp_path: Path, source_issue: str
     ) -> None:
+        """The exemption covers exactly the values the writers emit —
+        ``synthesis`` (`_write_tracked_synthesis_entry`) and ``unknown``
+        (`_render_tracked_entry`), which are the only non-numeric values
+        present in the live wiki."""
         topic_dir = tmp_path / "T-rav" / "hydraflow" / "testing"
         topic_dir.mkdir(parents=True)
         _write_tracked(
@@ -152,7 +154,31 @@ class TestSynthesisProvenanceEntriesStayLoadable:
         )
         store = RepoWikiStore(wiki_root=tmp_path, tracked_root=tmp_path)
 
-        assert len(store._load_tracked_topic_entries_with_paths(topic_dir)) == 1
+        pairs = store._load_tracked_topic_entries_with_paths(topic_dir)
+
+        assert [(e.title, e.source_issue) for e, _ in pairs] == [("A rule", None)]
+
+    @pytest.mark.parametrize("source_issue", ["not-a-number", "#11176", "n/a"])
+    def test_genuinely_corrupt_provenance_is_still_quarantined(
+        self, tmp_path: Path, source_issue: str
+    ) -> None:
+        """The fix must not widen into "any non-numeric value is fine".
+
+        A value that is neither a number nor a sentinel the writers emit
+        means the file is malformed, and dropping it with a DEBUG line plus
+        one aggregate WARNING is the signal (``TestMalformedTrackedEntryLogging``
+        in ``tests/test_compile_topic_tracked.py`` pins that behaviour)."""
+        topic_dir = tmp_path / "T-rav" / "hydraflow" / "testing"
+        topic_dir.mkdir(parents=True)
+        _write_tracked(
+            topic_dir, "2420-entry.md", source_issue=source_issue, title="Corrupt"
+        )
+        _write_tracked(topic_dir, "2421-entry.md", source_issue="11176", title="Fine")
+        store = RepoWikiStore(wiki_root=tmp_path, tracked_root=tmp_path)
+
+        pairs = store._load_tracked_topic_entries_with_paths(topic_dir)
+
+        assert [e.title for e, _ in pairs] == ["Fine"]
 
 
 class TestCandidatesAreRankedByTopicalSimilarity:

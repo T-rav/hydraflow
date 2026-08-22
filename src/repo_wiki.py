@@ -40,6 +40,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("hydraflow.repo_wiki")
 
+#: Frontmatter ``source_issue`` values this module writes when an entry has no
+#: originating issue number: ``synthesis`` from
+#: :func:`_write_tracked_synthesis_entry` and ``unknown`` from
+#: ``RepoWikiStore._render_tracked_entry``. Readers must parse these back to
+#: ``None`` rather than treating them as corrupt frontmatter (#11606); any
+#: OTHER non-numeric value really is a malformed file.
+_NO_ISSUE_PROVENANCE = frozenset({"", "synthesis", "unknown"})
+
 
 class RepoWikiReadOnlyError(RuntimeError):
     """Raised when a knowledge-content write is attempted on a read-only store.
@@ -1765,20 +1773,28 @@ class RepoWikiStore:
                     corroborations = max(1, int(str(corroborations_raw).strip()))
                 except (TypeError, ValueError):
                     corroborations = 1
-                # ``source_issue`` is not always an issue number: the compiler
-                # stamps the literal ``synthesis`` on every entry it writes
-                # (see ``_render_tracked_entry``). Coercing it with a bare
-                # ``int()`` raised ValueError and dropped the WHOLE entry from
-                # the corroboration candidate pool — 441 of 1,122 active
-                # entries (39%), and every entry in the ``dependencies`` and
-                # ``patterns`` topics (#11606). Non-numeric provenance means
-                # "no originating issue", exactly as ``lint_tracked_entries``
-                # already treats it.
+                # ``source_issue`` is not always an issue number. This module
+                # writes two sentinels itself — ``synthesis`` on every
+                # compiler-synthesized entry (``_write_tracked_synthesis_entry``)
+                # and ``unknown`` when an entry has no originating issue
+                # (``_render_tracked_entry``) — which together account for
+                # every non-numeric value in the live wiki (7,521 + 30).
+                # Coercing them with a bare ``int()`` raised ValueError and the
+                # handler below discarded the WHOLE entry, taking 441 of 1,122
+                # active entries (39%) out of the corroboration candidate pool,
+                # including all 17 in ``dependencies`` (#11606).
+                #
+                # Only these known sentinels are exempt. A genuinely corrupt
+                # value still raises through to the skip-and-log handler: a
+                # frontmatter field that is neither a number nor a sentinel the
+                # writer emits is a malformed file, and quarantining it is the
+                # signal (pinned by TestMalformedTrackedEntryLogging).
                 source_issue_raw = str(raw.get("source_issue") or "").strip()
-                try:
-                    source_issue: int | None = int(source_issue_raw)
-                except ValueError:
-                    source_issue = None
+                source_issue: int | None = (
+                    None
+                    if source_issue_raw in _NO_ISSUE_PROVENANCE
+                    else int(source_issue_raw)
+                )
                 entry = WikiEntry(
                     id=raw.get("id") or "",
                     title=raw.get("title") or "(untitled)",

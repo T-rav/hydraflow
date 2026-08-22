@@ -36,6 +36,7 @@ import logging
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from exception_classify import reraise_on_credit_or_bug
 from stage_preconditions import Stage, check_preconditions
 
 if TYPE_CHECKING:
@@ -128,7 +129,19 @@ class PreconditionGate:
                     feedback_context=result.reason,
                     issue_body=issue.body,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
+                # `route_back` reaches the give-up self-solver, which spawns
+                # subprocess work, so this handler owes the standing reraise.
+                # Dropping the issue is the right answer for an ordinary
+                # route-back failure, but credit exhaustion and real bugs are
+                # not per-issue failures: swallowing them here let the phase
+                # keep gating issue after issue against an exhausted account,
+                # which is the #11609 symptom one frame above
+                # `RouteBackCoordinator._self_solve_terminal`. Re-raised, it
+                # propagates out of the phase to the loop task, where
+                # `HydraFlowOrchestrator._handle_credit_exhaustion` owns the
+                # global pause.
+                reraise_on_credit_or_bug(exc)
                 # Route-back coordinator already logs at warning. The
                 # issue is still removed from this batch — the next
                 # cycle will see the unchanged label and try the gate
