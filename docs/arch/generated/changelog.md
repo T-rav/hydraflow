@@ -8,6 +8,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 - `174703b` — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold *(2026-08-22)*
 - `5128551` — feat(driver): ADR-0137 narrows ADR-0094, fixes driver contracts, proves the runtime boundary (#11533) (#11627) (#11627) *(2026-08-21)*
+- `8f2f8ed` — refactor(pr-manager,review-phase): follow the moved code in the location-keyed gates *(2026-08-22)*
+- `19c85ff` — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold *(2026-08-22)*
 - `980253f` — fix(pools): derive the worker-pool fatal set from one source of truth (#11626) (#11626) *(2026-08-21)*
 - `8fcd6a0` — fix(control): Start clears the pipeline-worker disable set on both branches (#11611) (#11623) (#11623) *(2026-08-21)*
 - `5c33050` — fix(packaging): resolve repo-root resources through a package-aware helper (#11589) (#11617) (#11617) *(2026-08-21)*
