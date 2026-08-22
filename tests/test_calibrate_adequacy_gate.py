@@ -178,6 +178,32 @@ def test_load_issue_facts_cache_degrades_to_empty_on_bad_input(
     assert load_issue_facts_cache(path) == {}
 
 
+@pytest.mark.parametrize(
+    "prs",
+    [
+        pytest.param(["n/a"], id="non-numeric-string"),
+        pytest.param([None], id="null"),
+        pytest.param([{"number": 1}], id="nested-object"),
+        pytest.param([True], id="bool"),
+        pytest.param("9101", id="not-a-list"),
+    ],
+)
+def test_load_issue_facts_cache_drops_a_junk_pr_entry(
+    tmp_path: Path, prs: object
+) -> None:
+    path = tmp_path / "outcomes.json"
+    path.write_text(json.dumps({"9001": {"prs": prs}}))
+    assert load_issue_facts_cache(path)[9001].closing_prs == ()
+
+
+def test_load_issue_facts_cache_keeps_the_good_entries_beside_a_junk_one(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "outcomes.json"
+    path.write_text(json.dumps({"9001": ["n/a", 9101]}))
+    assert load_issue_facts_cache(path)[9001].closing_prs == (9101,)
+
+
 def test_load_issue_facts_cache_returns_empty_for_a_missing_file(
     tmp_path: Path,
 ) -> None:

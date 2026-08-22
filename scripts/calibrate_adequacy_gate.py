@@ -225,6 +225,27 @@ def resolve_issue_facts(
     return resolved
 
 
+def _pr_numbers(raw: object) -> tuple[int, ...]:
+    """Coerce a cached PR list to ints, dropping anything that is not one.
+
+    A cache row is operator-supplied data, so a junk entry (``"n/a"``, ``null``,
+    a nested object) must cost that entry and nothing else. Dropping is the
+    honest failure here: an issue left with no closing PR is *unresolvable*,
+    which the engine already handles correctly, whereas raising loses the corpus.
+    """
+    if not isinstance(raw, list):
+        return ()
+    numbers: list[int] = []
+    for item in raw:
+        if isinstance(item, bool) or not isinstance(item, (int, str)):
+            continue
+        try:
+            numbers.append(int(item))
+        except ValueError:
+            continue
+    return tuple(numbers)
+
+
 def load_issue_facts_cache(path: Path) -> dict[int, IssueFacts]:
     """Read a cached issue→facts map; ``{}`` when the file is absent or broken.
 
@@ -232,6 +253,11 @@ def load_issue_facts_cache(path: Path) -> dict[int, IssueFacts]:
     ``[…]`` PR list (no close date). The bare form is honest but *weaker*: with
     no close date an escape-free reading can never age past the grace window, so
     it stays unresolved rather than being scored good.
+
+    Never raises. A malformed key, row, or PR entry is skipped individually — the
+    "or broken" promise has to hold for junk *inside* a well-formed JSON object,
+    not only for unparseable JSON, so one hand-edited bad entry cannot take the
+    rest of the cache with it.
     """
     try:
         raw = json.loads(path.read_text())
@@ -246,10 +272,10 @@ def load_issue_facts_cache(path: Path) -> dict[int, IssueFacts]:
         except (TypeError, ValueError):
             continue
         if isinstance(value, list):
-            facts[issue] = IssueFacts(closing_prs=tuple(int(v) for v in value))
+            facts[issue] = IssueFacts(closing_prs=_pr_numbers(value))
         elif isinstance(value, dict):
             facts[issue] = IssueFacts(
-                closing_prs=tuple(int(v) for v in value.get("prs") or ()),
+                closing_prs=_pr_numbers(value.get("prs")),
                 closed_at=parse_run_timestamp(value.get("closed_at")),
             )
     return facts
