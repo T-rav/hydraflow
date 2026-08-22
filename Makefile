@@ -622,15 +622,22 @@ quality-unlocked:
 # the pre-push gate and must stay fast (lint + typecheck + security only, no
 # test suites of any kind). UI drift is still caught by `make quality` locally
 # and by CI's Dashboard Build job on every PR.
+# Invoked through $(UV), NOT the bare $(VENV)/bin/... binaries. A bare
+# `.venv/bin/pyright` resolves its interpreter without VIRTUAL_ENV set, so in a
+# WORKTREE it analyses against a different environment than `make quality` and
+# CI do — and reports errors neither of them sees (a `models.SessionLog`
+# constructor inferring as `Unknown` on clean origin/staging, #11645). This is
+# the pre-push hook: a false red here blocks every push from every worktree, so
+# it must run the same way the authoritative gate does.
 quality-lite: deps
 	@echo "$(BLUE)Running lightweight quality checks...$(RESET)"
 	@cd $(HYDRAFLOW_DIR) && ( \
-		$(VENV)/bin/ruff check . && \
-		$(VENV)/bin/ruff format . --check && \
+		$(UV) ruff check . && \
+		$(UV) ruff format . --check && \
 		echo "[lint OK]" && \
-		$(VENV)/bin/pyright && \
+		$(UV) pyright && \
 		echo "[typecheck OK]" && \
-		$(VENV)/bin/bandit -c pyproject.toml -r . --severity-level medium && \
+		$(UV) bandit -c pyproject.toml -r . --severity-level medium && \
 		echo "[security OK]" \
 	)
 	@echo "$(GREEN)HydraFlow lightweight quality checks passed$(RESET)"
