@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -313,7 +314,7 @@ class TestRunRefillingPool:
 
         async def worker(_idx: int, item: int) -> int:
             if item == 2:
-                raise ValueError("bad")
+                raise RuntimeError("bad")
             return item
 
         results = await run_refilling_pool(supply, worker, 1, stop)
@@ -1013,6 +1014,81 @@ class TestCancelRemaining:
 
 
 # ---------------------------------------------------------------------------
+# handle_pool_worker_exception (shared pool policy)
+# ---------------------------------------------------------------------------
+
+
+class TestHandlePoolWorkerException:
+    """The one fatal-or-continue policy every worker pool shares (#11618)."""
+
+    @staticmethod
+    async def _never() -> int:
+        await asyncio.sleep(100)
+        return 1
+
+    @pytest.mark.asyncio
+    async def test_non_fatal_exception_returns_instead_of_raising(self) -> None:
+        from phase_utils import handle_pool_worker_exception
+
+        await handle_pool_worker_exception(
+            RuntimeError("gh timed out"), [], log=logging.getLogger(), context="ctx"
+        )  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_non_fatal_exception_is_logged_against_the_context(self) -> None:
+        from phase_utils import handle_pool_worker_exception
+
+        log = MagicMock()
+        await handle_pool_worker_exception(
+            RuntimeError("gh timed out"), [], log=log, context="Review worker failed"
+        )
+
+        assert log.warning.call_args.args[1] == "Review worker failed"
+
+    @pytest.mark.asyncio
+    async def test_fatal_exception_is_reraised(self) -> None:
+        from phase_utils import handle_pool_worker_exception
+
+        with pytest.raises(TypeError):
+            await handle_pool_worker_exception(
+                TypeError("bad unpack"), [], log=logging.getLogger(), context="ctx"
+            )
+
+    @pytest.mark.asyncio
+    async def test_fatal_exception_cancels_sibling_tasks(self) -> None:
+        from phase_utils import handle_pool_worker_exception
+
+        sibling: asyncio.Task[int] = asyncio.create_task(self._never())
+
+        with pytest.raises(TypeError):
+            await handle_pool_worker_exception(
+                TypeError("bad unpack"),
+                [sibling],
+                log=logging.getLogger(),
+                context="ctx",
+            )
+
+        assert sibling.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_accepts_a_set_of_siblings(self) -> None:
+        """The review pool passes the set ``asyncio.wait`` hands back."""
+        from phase_utils import handle_pool_worker_exception
+
+        sibling: asyncio.Task[int] = asyncio.create_task(self._never())
+
+        with pytest.raises(TypeError):
+            await handle_pool_worker_exception(
+                TypeError("bad unpack"),
+                {sibling},
+                log=logging.getLogger(),
+                context="ctx",
+            )
+
+        assert sibling.cancelled()
+
+
+# ---------------------------------------------------------------------------
 # _process_done_tasks (private helper)
 # ---------------------------------------------------------------------------
 
@@ -1058,7 +1134,7 @@ class TestProcessDoneTasks:
         from phase_utils import _process_done_tasks
 
         async def bad() -> int:
-            raise ValueError("oops")
+            raise RuntimeError("oops")
 
         task: asyncio.Task[int] = asyncio.create_task(bad())
         await asyncio.sleep(0)

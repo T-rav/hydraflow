@@ -12,6 +12,7 @@ from events import EventBus, EventType, HydraFlowEvent
 from hitl_runner import HITLRunner
 from models import HITLUpdatePayload
 from phase_utils import (
+    INFRA_FATAL_EXCEPTIONS,
     MemorySuggester,
     _sentry_transaction,
     log_exception_with_bug_classification,
@@ -352,7 +353,7 @@ class HITLPhase:
                                 issue_number,
                                 exc,
                             )
-                except (AuthenticationError, CreditExhaustedError, MemoryError):
+                except INFRA_FATAL_EXCEPTIONS:
                     raise
                 except Exception as exc:
                     log_exception_with_bug_classification(
