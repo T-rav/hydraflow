@@ -309,6 +309,18 @@ def test_every_declared_resource_tree_is_packaged(packaging: Packaging) -> None:
     )
 
 
+def test_no_resource_tree_ships_without_being_named(packaging: Packaging) -> None:
+    """A tree under ``src/hydraflow_resources/`` that code cannot ask for is dead weight."""
+    from package_resources import RESOURCE_PACKAGE, RESOURCE_TREES
+
+    resources = packaging.src / RESOURCE_PACKAGE
+    on_disk = sorted(p.name for p in resources.iterdir() if p.is_dir())
+    assert on_disk == sorted(RESOURCE_TREES), (
+        f"src/{RESOURCE_PACKAGE}/ and package_resources.RESOURCE_TREES disagree: "
+        f"on disk {on_disk}, declared {sorted(RESOURCE_TREES)}"
+    )
+
+
 def test_resource_trees_are_one_package_not_many(
     packaging: Packaging, pyproject: dict
 ) -> None:
