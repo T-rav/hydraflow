@@ -12,6 +12,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 - `c298996` — fix(sandbox): air-gap the composition-root AutoAgentRunner constructions (#11602) (#11615) (#11615) *(2026-08-21)*
 - `41b468b` — feat(config): light lane on by default — issues at complexity ≤3 take one spawn to PR (refs #11568) (#11590) (#11590) *(2026-08-21)*
 - `c104554` — chore(config): remove retired feature flags and their machinery (flag-rot audit) (#11599) (#11599) *(2026-08-21)*
+- `ca9cabd` — fix(packaging): resolve repo-root resources through a package-aware helper (#11589) (#11589) *(2026-08-21)*
 - `7af74dd` — feat(implement): test-adequacy gate repairs in-run before rejecting (#11593) (#11603) (#11603) *(2026-08-21)*
 - `9cf6452` — feat(factory): auto-rebase own dirty PRs when staging moves (#11595) (#11598) (#11598) *(2026-08-21)*
 - `98d9393` — feat(factory): run as a launchd service; liveness kernel honours operator Stop (#11594) (#11594) *(2026-08-21)*
