@@ -40,6 +40,7 @@ import logging
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -56,12 +57,27 @@ from adequacy_calibration import (  # noqa: E402
     ProportionInterval,
     calibrate,
     parse_run_manifest,
+    parse_run_timestamp,
 )
 
 logger = logging.getLogger("hydraflow.calibrate_adequacy_gate")
 
-#: Seam for the issue→closing-PR lookup, so tests never shell out to ``gh``.
-IssueQuery = Callable[[int], "list[int]"]
+
+@dataclass(frozen=True)
+class IssueFacts:
+    """What GitHub knows about one gated issue: its closing PRs and close date.
+
+    ``closed_at`` is what lets the engine age an escape-free reading past the
+    escape-detection grace window; without it a clean reading stays unresolved
+    rather than being scored good (see ``adequacy_calibration.resolved_escapes``).
+    """
+
+    closing_prs: tuple[int, ...] = ()
+    closed_at: datetime | None = None
+
+
+#: Seam for the issue lookup, so tests never shell out to ``gh``.
+IssueQuery = Callable[[int], IssueFacts]
 
 #: How long ``gh issue view`` may take before the lookup is abandoned.
 GH_TIMEOUT_SECONDS = 30
@@ -123,8 +139,13 @@ def load_escaped_prs(ledger_path: Path) -> set[int] | None:
     return escaped
 
 
-def gh_closing_prs(issue_number: int) -> list[int]:
-    """Closing PRs for one issue via ``gh``; ``[]`` on any failure (read-only)."""
+def gh_issue_facts(issue_number: int) -> IssueFacts:
+    """Closing PRs + close date for one issue via ``gh``; empty on any failure.
+
+    Read-only, and never raises: a missing/unauthenticated ``gh``, a timeout, or
+    a malformed payload all degrade to "we do not know", which the engine then
+    treats as unresolvable rather than as clean.
+    """
     try:
         completed = subprocess.run(  # noqa: S603 — fixed argv, no shell
             [
@@ -133,7 +154,7 @@ def gh_closing_prs(issue_number: int) -> list[int]:
                 "view",
                 str(issue_number),
                 "--json",
-                "closedByPullRequestsReferences",
+                "closedAt,closedByPullRequestsReferences",
             ],
             capture_output=True,
             text=True,
@@ -141,48 +162,60 @@ def gh_closing_prs(issue_number: int) -> list[int]:
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return []
+        return IssueFacts()
     if completed.returncode != 0:
-        return []
+        return IssueFacts()
     try:
         payload = json.loads(completed.stdout)
     except ValueError:
-        return []
+        return IssueFacts()
     refs = payload.get("closedByPullRequestsReferences") or []
-    return [r["number"] for r in refs if isinstance(r, dict) and "number" in r]
+    return IssueFacts(
+        closing_prs=tuple(
+            r["number"] for r in refs if isinstance(r, dict) and "number" in r
+        ),
+        closed_at=parse_run_timestamp(payload.get("closedAt")),
+    )
 
 
 def build_issue_outcomes(
     issues: Iterable[int],
-    closing_prs: dict[int, list[int]],
+    facts: dict[int, IssueFacts],
     escaped_prs: set[int] | None,
 ) -> list[IssueOutcome]:
     """Join issues → closing PRs → escape attribution.
 
-    ``escaped`` stays ``None`` — unresolvable — whenever the escape ledger is
-    unavailable (``escaped_prs is None``) or the issue has no known closing PR.
-    Only a known PR checked against a real ledger yields ``True``/``False``.
+    ``escaped`` stays ``None`` — the ledger could not be consulted — whenever it
+    is unavailable (``escaped_prs is None``) or the issue has no known closing
+    PR. Only a known PR checked against a real ledger yields ``True``/``False``,
+    and a ``False`` is only a *reading*: ``closed_at`` rides along so the engine
+    can hold it unresolved until it has aged past the grace window.
     """
     outcomes: list[IssueOutcome] = []
     for issue in sorted(set(issues)):
-        prs = tuple(closing_prs.get(issue) or ())
+        known = facts.get(issue) or IssueFacts()
         escaped: bool | None = None
-        if escaped_prs is not None and prs:
-            escaped = any(pr in escaped_prs for pr in prs)
+        if escaped_prs is not None and known.closing_prs:
+            escaped = any(pr in escaped_prs for pr in known.closing_prs)
         outcomes.append(
-            IssueOutcome(issue_number=issue, closing_prs=prs, escaped=escaped)
+            IssueOutcome(
+                issue_number=issue,
+                closing_prs=known.closing_prs,
+                escaped=escaped,
+                closed_at=known.closed_at,
+            )
         )
     return outcomes
 
 
-def resolve_closing_prs(
+def resolve_issue_facts(
     issues: Iterable[int],
     *,
-    cached: dict[int, list[int]] | None,
+    cached: dict[int, IssueFacts] | None,
     query: IssueQuery | None,
-) -> dict[int, list[int]]:
-    """Closing PRs per issue, from the cache first and the query for the rest."""
-    resolved: dict[int, list[int]] = dict(cached or {})
+) -> dict[int, IssueFacts]:
+    """Issue facts, from the cache first and the query for the rest."""
+    resolved: dict[int, IssueFacts] = dict(cached or {})
     if query is None:
         return resolved
     for issue in sorted(set(issues)):
@@ -190,6 +223,62 @@ def resolve_closing_prs(
             continue
         resolved[issue] = query(issue)
     return resolved
+
+
+def _pr_numbers(raw: object) -> tuple[int, ...]:
+    """Coerce a cached PR list to ints, dropping anything that is not one.
+
+    A cache row is operator-supplied data, so a junk entry (``"n/a"``, ``null``,
+    a nested object) must cost that entry and nothing else. Dropping is the
+    honest failure here: an issue left with no closing PR is *unresolvable*,
+    which the engine already handles correctly, whereas raising loses the corpus.
+    """
+    if not isinstance(raw, list):
+        return ()
+    numbers: list[int] = []
+    for item in raw:
+        if isinstance(item, bool) or not isinstance(item, (int, str)):
+            continue
+        try:
+            numbers.append(int(item))
+        except ValueError:
+            continue
+    return tuple(numbers)
+
+
+def load_issue_facts_cache(path: Path) -> dict[int, IssueFacts]:
+    """Read a cached issue→facts map; ``{}`` when the file is absent or broken.
+
+    Two accepted row shapes: ``{"prs": […], "closed_at": "…"}`` (full) and a bare
+    ``[…]`` PR list (no close date). The bare form is honest but *weaker*: with
+    no close date an escape-free reading can never age past the grace window, so
+    it stays unresolved rather than being scored good.
+
+    Never raises. A malformed key, row, or PR entry is skipped individually — the
+    "or broken" promise has to hold for junk *inside* a well-formed JSON object,
+    not only for unparseable JSON, so one hand-edited bad entry cannot take the
+    rest of the cache with it.
+    """
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    facts: dict[int, IssueFacts] = {}
+    for key, value in raw.items():
+        try:
+            issue = int(key)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, list):
+            facts[issue] = IssueFacts(closing_prs=_pr_numbers(value))
+        elif isinstance(value, dict):
+            facts[issue] = IssueFacts(
+                closing_prs=_pr_numbers(value.get("prs")),
+                closed_at=parse_run_timestamp(value.get("closed_at")),
+            )
+    return facts
 
 
 def gated_and_accepted_issues(records: Sequence[AdequacyRunRecord]) -> set[int]:
@@ -362,12 +451,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--issue-outcomes",
         type=Path,
         default=None,
-        help="JSON map {issue: [pr, ...]} to use instead of querying GitHub",
+        help=(
+            'JSON map {issue: {"prs": [...], "closed_at": "..."}} (or a bare PR '
+            "list, which cannot age a clean reading) instead of querying GitHub"
+        ),
     )
     parser.add_argument(
         "--fetch-closing-prs",
         action="store_true",
-        help="look up closing PRs with `gh` (read-only, one call per issue)",
+        help="look up closing PRs + close dates with `gh` (read-only, per issue)",
     )
     parser.add_argument("--json", action="store_true", help="emit the report as JSON")
     parser.add_argument("--out", type=Path, default=None, help="write output to a file")
@@ -387,18 +479,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     records = filter_since(records, args.since)
     escaped_prs = load_escaped_prs(args.escape_ledger)
 
-    cached: dict[int, list[int]] | None = None
-    if args.issue_outcomes and args.issue_outcomes.is_file():
-        raw = json.loads(args.issue_outcomes.read_text())
-        cached = {int(k): list(v) for k, v in raw.items()}
+    cached: dict[int, IssueFacts] | None = None
+    if args.issue_outcomes:
+        cached = load_issue_facts_cache(args.issue_outcomes)
 
     issues = gated_and_accepted_issues(records)
-    closing_prs = resolve_closing_prs(
+    facts = resolve_issue_facts(
         issues,
         cached=cached,
-        query=gh_closing_prs if args.fetch_closing_prs else None,
+        query=gh_issue_facts if args.fetch_closing_prs else None,
     )
-    outcomes = build_issue_outcomes(issues, closing_prs, escaped_prs)
+    outcomes = build_issue_outcomes(issues, facts, escaped_prs)
 
     report = calibrate(records, outcomes, now=datetime.now(UTC))
     text = (

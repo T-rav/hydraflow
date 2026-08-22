@@ -10,7 +10,7 @@ honest **under-determined** path when the reject arm has no resolvable outcome.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -33,6 +33,7 @@ from adequacy_calibration import (
     is_out_of_remit,
     parse_run_manifest,
     parse_run_timestamp,
+    resolved_escapes,
     split_findings,
     suspect_rejections,
     to_judge_verdicts,
@@ -40,6 +41,10 @@ from adequacy_calibration import (
 )
 
 _NOW = datetime(2026, 9, 1, 12, 0, 0, tzinfo=UTC)
+#: Closed long enough before ``_NOW`` to clear the escape-detection grace window.
+_AGED = datetime(2026, 8, 10, tzinfo=UTC)
+#: Closed inside the grace window — an escape could still surface.
+_FRESH = datetime(2026, 8, 30, tzinfo=UTC)
 
 
 # -- factories ------------------------------------------------------------------
@@ -550,14 +555,16 @@ def test_suspect_rejections_ignores_accepted_runs() -> None:
 
 def test_to_judge_verdicts_keys_an_acceptance_to_its_closing_pr() -> None:
     verdicts = to_judge_verdicts(
-        [_acceptance(9001)], [IssueOutcome(9001, closing_prs=(1234,), escaped=False)]
+        [_acceptance(9001)],
+        [IssueOutcome(9001, closing_prs=(1234,), escaped=False, closed_at=_AGED)],
     )
     assert [v.subject_id for v in verdicts] == ["pr:1234"]
 
 
 def test_to_judge_verdicts_keys_a_rejection_to_its_unjoinable_issue_subject() -> None:
     verdicts = to_judge_verdicts(
-        [_rejection(9001)], [IssueOutcome(9001, closing_prs=(1234,), escaped=False)]
+        [_rejection(9001)],
+        [IssueOutcome(9001, closing_prs=(1234,), escaped=False, closed_at=_AGED)],
     )
     assert [v.subject_id for v in verdicts] == ["issue:9001"]
 
@@ -644,8 +651,8 @@ def test_calibrate_never_resolves_a_rejection_outcome_even_with_full_outcomes() 
 
 def test_calibrate_resolves_the_accept_arm_against_the_escape_ledger() -> None:
     outcomes = [
-        IssueOutcome(9001, closing_prs=(1101,), escaped=False),
-        IssueOutcome(9005, closing_prs=(1105,), escaped=True),
+        IssueOutcome(9001, closing_prs=(1101,), escaped=False, closed_at=_AGED),
+        IssueOutcome(9005, closing_prs=(1105,), escaped=True, closed_at=_AGED),
     ]
     report = calibrate(_corpus(), outcomes, now=_NOW)
     assert report.identifiability.n_acceptances_resolved == 2
@@ -653,23 +660,23 @@ def test_calibrate_resolves_the_accept_arm_against_the_escape_ledger() -> None:
 
 def test_calibrate_scores_the_accept_arm_with_the_reused_judge_engine() -> None:
     outcomes = [
-        IssueOutcome(9001, closing_prs=(1101,), escaped=False),
-        IssueOutcome(9005, closing_prs=(1105,), escaped=True),
+        IssueOutcome(9001, closing_prs=(1101,), escaped=False, closed_at=_AGED),
+        IssueOutcome(9005, closing_prs=(1105,), escaped=True, closed_at=_AGED),
     ]
     report = calibrate(_corpus(), outcomes, now=_NOW)
     assert report.accept_arm_score.brier == pytest.approx(0.5)
 
 
 def test_calibrate_flags_a_thin_accept_arm_as_low_confidence() -> None:
-    outcomes = [IssueOutcome(9001, closing_prs=(1101,), escaped=False)]
+    outcomes = [IssueOutcome(9001, closing_prs=(1101,), escaped=False, closed_at=_AGED)]
     report = calibrate(_corpus(), outcomes, now=_NOW)
     assert report.accept_arm_score.low_confidence is True
 
 
 def test_calibrate_reports_the_post_rework_escape_rate_of_gated_issues() -> None:
     outcomes = [
-        IssueOutcome(9001, closing_prs=(1101,), escaped=True),
-        IssueOutcome(9002, closing_prs=(1102,), escaped=False),
+        IssueOutcome(9001, closing_prs=(1101,), escaped=True, closed_at=_AGED),
+        IssueOutcome(9002, closing_prs=(1102,), escaped=False, closed_at=_AGED),
     ]
     report = calibrate(_corpus(), outcomes, now=_NOW)
     override = next(
@@ -727,6 +734,61 @@ def test_calibrate_reports_the_corpus_window() -> None:
         datetime(2026, 8, 1, tzinfo=UTC),
         datetime(2026, 8, 6, tzinfo=UTC),
     )
+
+
+# -- grace window on the clean reading ------------------------------------------
+
+
+def test_resolved_escapes_resolves_an_attributed_escape_immediately() -> None:
+    outcome = IssueOutcome(9001, closing_prs=(1101,), escaped=True, closed_at=_FRESH)
+    assert resolved_escapes([outcome], now=_NOW) == {9001: True}
+
+
+def test_resolved_escapes_resolves_an_aged_clean_reading() -> None:
+    outcome = IssueOutcome(9001, closing_prs=(1101,), escaped=False, closed_at=_AGED)
+    assert resolved_escapes([outcome], now=_NOW) == {9001: False}
+
+
+def test_resolved_escapes_holds_a_clean_reading_inside_the_grace_window() -> None:
+    outcome = IssueOutcome(9001, closing_prs=(1101,), escaped=False, closed_at=_FRESH)
+    assert resolved_escapes([outcome], now=_NOW) == {}
+
+
+def test_resolved_escapes_holds_a_clean_reading_with_no_close_date() -> None:
+    outcome = IssueOutcome(9001, closing_prs=(1101,), escaped=False)
+    assert resolved_escapes([outcome], now=_NOW) == {}
+
+
+def test_resolved_escapes_skips_an_unconsulted_ledger() -> None:
+    outcome = IssueOutcome(9001, closing_prs=(1101,), escaped=None, closed_at=_AGED)
+    assert resolved_escapes([outcome], now=_NOW) == {}
+
+
+def test_resolved_escapes_skips_an_issue_with_no_closing_pr() -> None:
+    outcome = IssueOutcome(9001, escaped=False, closed_at=_AGED)
+    assert resolved_escapes([outcome], now=_NOW) == {}
+
+
+def test_calibrate_does_not_score_a_clean_reading_inside_the_grace_window() -> None:
+    outcomes = [
+        IssueOutcome(9001, closing_prs=(1101,), escaped=False, closed_at=_FRESH)
+    ]
+    report = calibrate(_corpus(), outcomes, now=_NOW)
+    assert report.identifiability.n_acceptances_resolved == 0
+
+
+def test_calibrate_names_the_grace_window_as_a_censoring_reason() -> None:
+    outcomes = [
+        IssueOutcome(9001, closing_prs=(1101,), escaped=False, closed_at=_FRESH)
+    ]
+    report = calibrate(_corpus(), outcomes, now=_NOW)
+    assert any("grace window" in reason for reason in report.identifiability.reasons)
+
+
+def test_calibrate_honours_a_widened_grace_window() -> None:
+    outcomes = [IssueOutcome(9001, closing_prs=(1101,), escaped=False, closed_at=_AGED)]
+    report = calibrate(_corpus(), outcomes, now=_NOW, grace_window=timedelta(days=365))
+    assert report.identifiability.n_acceptances_resolved == 0
 
 
 # -- calibrate: degenerate inputs -----------------------------------------------

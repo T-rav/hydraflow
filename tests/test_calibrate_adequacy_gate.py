@@ -19,16 +19,18 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from calibrate_adequacy_gate import (  # noqa: E402
+    IssueFacts,
     build_issue_outcomes,
     filter_since,
     gated_and_accepted_issues,
-    gh_closing_prs,
+    gh_issue_facts,
     load_escaped_prs,
+    load_issue_facts_cache,
     load_run_records,
     main,
     parse_since,
     render_report,
-    resolve_closing_prs,
+    resolve_issue_facts,
 )
 
 from adequacy_calibration import GateOutcome, RecordShape  # noqa: E402
@@ -98,8 +100,13 @@ def test_load_escaped_prs_returns_an_empty_set_for_an_empty_ledger(
 # -- outcome joining ------------------------------------------------------------
 
 
+_FACTS = {
+    9001: IssueFacts(closing_prs=(9101,), closed_at=datetime(2026, 8, 2, tzinfo=UTC))
+}
+
+
 def test_build_issue_outcomes_leaves_escape_unresolved_without_a_ledger() -> None:
-    outcomes = build_issue_outcomes([9001], {9001: [9101]}, None)
+    outcomes = build_issue_outcomes([9001], _FACTS, None)
     assert outcomes[0].escaped is None
 
 
@@ -109,33 +116,98 @@ def test_build_issue_outcomes_leaves_escape_unresolved_without_a_closing_pr() ->
 
 
 def test_build_issue_outcomes_marks_an_attributed_pr_as_escaped() -> None:
-    outcomes = build_issue_outcomes([9001], {9001: [9101]}, {9101})
+    outcomes = build_issue_outcomes([9001], _FACTS, {9101})
     assert outcomes[0].escaped is True
 
 
-def test_build_issue_outcomes_marks_an_unattributed_pr_as_clean() -> None:
-    outcomes = build_issue_outcomes([9001], {9001: [9101]}, {9999})
+def test_build_issue_outcomes_reads_an_unattributed_pr_as_escape_free() -> None:
+    outcomes = build_issue_outcomes([9001], _FACTS, {9999})
     assert outcomes[0].escaped is False
+
+
+def test_build_issue_outcomes_carries_the_close_date_for_grace_ageing() -> None:
+    outcomes = build_issue_outcomes([9001], _FACTS, {9999})
+    assert outcomes[0].closed_at == datetime(2026, 8, 2, tzinfo=UTC)
 
 
 # -- closing-PR resolution ------------------------------------------------------
 
 
-def test_resolve_closing_prs_returns_the_cache_when_no_query_is_given() -> None:
-    assert resolve_closing_prs([9001, 9002], cached={9001: [1]}, query=None) == {
-        9001: [1]
-    }
+def test_resolve_issue_facts_returns_the_cache_when_no_query_is_given() -> None:
+    cached = {9001: IssueFacts(closing_prs=(1,))}
+    assert resolve_issue_facts([9001, 9002], cached=cached, query=None) == cached
 
 
-def test_resolve_closing_prs_queries_only_the_uncached_issues() -> None:
+def test_resolve_issue_facts_queries_only_the_uncached_issues() -> None:
     asked: list[int] = []
 
-    def query(issue: int) -> list[int]:
+    def query(issue: int) -> IssueFacts:
         asked.append(issue)
-        return [issue + 100]
+        return IssueFacts(closing_prs=(issue + 100,))
 
-    resolve_closing_prs([9001, 9002], cached={9001: [1]}, query=query)
+    resolve_issue_facts([9001, 9002], cached={9001: IssueFacts()}, query=query)
     assert asked == [9002]
+
+
+def test_load_issue_facts_cache_reads_the_full_row_shape(tmp_path: Path) -> None:
+    path = tmp_path / "outcomes.json"
+    path.write_text(
+        json.dumps({"9001": {"prs": [9101], "closed_at": "20260802T000000Z"}})
+    )
+    assert load_issue_facts_cache(path)[9001] == IssueFacts(
+        closing_prs=(9101,), closed_at=datetime(2026, 8, 2, tzinfo=UTC)
+    )
+
+
+def test_load_issue_facts_cache_reads_a_bare_pr_list_without_a_close_date(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "outcomes.json"
+    path.write_text(json.dumps({"9001": [9101]}))
+    assert load_issue_facts_cache(path)[9001] == IssueFacts(closing_prs=(9101,))
+
+
+@pytest.mark.parametrize(
+    "body", ["", "{ broken", "[1, 2, 3]", '{"not-an-int": [1]}'], ids=range(4)
+)
+def test_load_issue_facts_cache_degrades_to_empty_on_bad_input(
+    tmp_path: Path, body: str
+) -> None:
+    path = tmp_path / "outcomes.json"
+    path.write_text(body)
+    assert load_issue_facts_cache(path) == {}
+
+
+@pytest.mark.parametrize(
+    "prs",
+    [
+        pytest.param(["n/a"], id="non-numeric-string"),
+        pytest.param([None], id="null"),
+        pytest.param([{"number": 1}], id="nested-object"),
+        pytest.param([True], id="bool"),
+        pytest.param("9101", id="not-a-list"),
+    ],
+)
+def test_load_issue_facts_cache_drops_a_junk_pr_entry(
+    tmp_path: Path, prs: object
+) -> None:
+    path = tmp_path / "outcomes.json"
+    path.write_text(json.dumps({"9001": {"prs": prs}}))
+    assert load_issue_facts_cache(path)[9001].closing_prs == ()
+
+
+def test_load_issue_facts_cache_keeps_the_good_entries_beside_a_junk_one(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "outcomes.json"
+    path.write_text(json.dumps({"9001": ["n/a", 9101]}))
+    assert load_issue_facts_cache(path)[9001].closing_prs == (9101,)
+
+
+def test_load_issue_facts_cache_returns_empty_for_a_missing_file(
+    tmp_path: Path,
+) -> None:
+    assert load_issue_facts_cache(tmp_path / "absent.json") == {}
 
 
 def test_gated_and_accepted_issues_excludes_runs_that_never_reached_the_gate() -> None:
@@ -143,14 +215,14 @@ def test_gated_and_accepted_issues_excludes_runs_that_never_reached_the_gate() -
     assert 9006 not in gated_and_accepted_issues(records)
 
 
-def test_gh_closing_prs_returns_empty_when_the_cli_is_unavailable(
+def test_gh_issue_facts_returns_empty_when_the_cli_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         "calibrate_adequacy_gate.subprocess.run",
         lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("gh")),
     )
-    assert gh_closing_prs(9001) == []
+    assert gh_issue_facts(9001) == IssueFacts()
 
 
 # -- window filtering -----------------------------------------------------------
@@ -186,7 +258,10 @@ def _report_text() -> str:
     records, skipped = load_run_records(RUNS_ROOT)
     outcomes = build_issue_outcomes(
         gated_and_accepted_issues(records),
-        {9001: [9101], 9008: [9108]},
+        {
+            9001: IssueFacts((9101,), datetime(2026, 8, 2, tzinfo=UTC)),
+            9008: IssueFacts((9108,), datetime(2026, 8, 3, tzinfo=UTC)),
+        },
         load_escaped_prs(LEDGER),
     )
     report = calibrate(records, outcomes, now=datetime(2026, 9, 1, tzinfo=UTC))
@@ -224,7 +299,14 @@ def test_main_writes_a_json_report(tmp_path: Path) -> None:
 
 def test_main_honours_a_cached_issue_outcome_map(tmp_path: Path) -> None:
     cache = tmp_path / "outcomes.json"
-    cache.write_text(json.dumps({"9001": [9101], "9008": [9108]}))
+    cache.write_text(
+        json.dumps(
+            {
+                "9001": {"prs": [9101], "closed_at": "20260802T000000Z"},
+                "9008": {"prs": [9108], "closed_at": "20260803T000000Z"},
+            }
+        )
+    )
     out = tmp_path / "calibration.json"
     main(
         [
