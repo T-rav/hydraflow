@@ -6,8 +6,8 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 - **Population:** Accepted (82 ADRs)
 - **Mean density** (per-ADR, unweighted): 96%
-- **Executable fraction** (check-weighted): 98% (151 of 154 cited checks)
-- **Check kinds:** pytest 150, make 1, script 0, prose 3
+- **Executable fraction** (check-weighted): 98% (152 of 155 cited checks)
+- **Check kinds:** pytest 151, make 1, script 0, prose 3
 - **Prose-count control limit** (Shewhart c-chart UCL): 0.61
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 

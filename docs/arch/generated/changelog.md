@@ -6,8 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `a1305f0` — chore(loops): fix ADR-0136 self-citation + prune the resolved suppression entry *(2026-08-21)*
-- `181df15` — chore(loops): remove the retired activity-based ADR-drift loops (#11600) (#11600) *(2026-08-21)*
+- `be03174` — fix(liveness): event-loop watchdog attributes starvation vs block before hard restart (#11604) (#11604) *(2026-08-21)*
+- `ca6f42c` — chore(loops): remove the retired activity-based ADR-drift loops (#11600) (#11620) (#11620) *(2026-08-21)*
 - `2a2fb8c` — feat(triage): honor 'Blocked by: #N' so phase-ordered children flow in order (#11614) (#11616) (#11616) *(2026-08-21)*
 - `c298996` — fix(sandbox): air-gap the composition-root AutoAgentRunner constructions (#11602) (#11615) (#11615) *(2026-08-21)*
 - `41b468b` — feat(config): light lane on by default — issues at complexity ≤3 take one spawn to PR (refs #11568) (#11590) (#11590) *(2026-08-21)*
