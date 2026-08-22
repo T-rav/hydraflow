@@ -1,11 +1,12 @@
 /**
- * RoutingMode — the read-only gateway Routing workspace (#11534, ADR-0138).
+ * RoutingMode — the gateway Routing workspace (#11534 ADR-0138, #11538 ADR-0140).
  *
- * Two URL-addressable views behind `?mode=routing&routingView=accounts|live`,
- * the sub-view keys the routing-control-plane design reserves. The remaining
- * design views (`effective`, `policies`, `audit`) belong to later phases of
- * epic #11531 and are deliberately absent — this phase observes, it does not
- * enforce.
+ * All five URL-addressable views the routing-control-plane design reserves, at
+ * `?mode=routing&routingView=accounts|effective|policies|live|audit`. P0 shipped
+ * the two read-only ones; P2 fills in the remaining three, and one of them —
+ * POLICIES — is the console's first write surface. Enforcement is still not
+ * built: editing a policy changes what the shadow resolver would decide and
+ * records the disagreement; legacy routing still decides every live spawn.
  *
  * ACCOUNTS shows each compiled gateway account with its facts kept SEPARATE:
  * credential configured, administrative state, leases, in-flight requests,
@@ -30,14 +31,25 @@
 
 import React from 'react'
 import { Badge, Text, useTokens } from '../styles/primitives'
+import EffectiveRoutesPanel from './EffectiveRoutesPanel'
+import PolicyAuditPanel from './PolicyAuditPanel'
+import PolicyWorkspacePanel from './PolicyWorkspacePanel'
 import {
   EMPTY_GATEWAY_ACCOUNTS_VM,
   EMPTY_GATEWAY_LIVE_VM,
 } from './model/gatewayRouting'
+import {
+  EMPTY_EFFECTIVE_MATRIX_VM,
+  EMPTY_POLICY_AUDIT_VM,
+  EMPTY_POLICY_WORKSPACE_VM,
+} from './model/policyWorkspace'
 
 export const ROUTING_VIEWS = [
   { key: 'accounts', label: 'Accounts' },
+  { key: 'effective', label: 'Effective routes' },
+  { key: 'policies', label: 'Policies' },
   { key: 'live', label: 'Live' },
+  { key: 'audit', label: 'Audit' },
 ]
 
 const SOURCE_MESSAGES = {
@@ -357,13 +369,27 @@ function LiveView({ live, styles }) {
 }
 
 /**
- * @param {{ accounts?: object, live?: object, routingView?: string, select?: Function }} props
+ * @param {{
+ *   accounts?: object, live?: object, workspace?: object, matrix?: object,
+ *   audit?: object, preview?: object|null, rejection?: string|null,
+ *   routingView?: string, routingSelection?: string|null, select?: Function,
+ *   onPreviewPolicy?: Function, onSavePolicy?: Function, onClearPreview?: Function,
+ * }} props
  */
 export default function RoutingMode({
   accounts = EMPTY_GATEWAY_ACCOUNTS_VM,
   live = EMPTY_GATEWAY_LIVE_VM,
+  workspace = EMPTY_POLICY_WORKSPACE_VM,
+  matrix = EMPTY_EFFECTIVE_MATRIX_VM,
+  audit = EMPTY_POLICY_AUDIT_VM,
+  preview = null,
+  rejection = null,
   routingView = 'accounts',
+  routingSelection = null,
   select = () => {},
+  onPreviewPolicy = () => {},
+  onSavePolicy = () => {},
+  onClearPreview = () => {},
 }) {
   const t = useTokens()
   const styles = makeStyles(t)
@@ -386,11 +412,68 @@ export default function RoutingMode({
           </button>
         ))}
       </div>
-      {view === 'live' ? (
-        <LiveView live={live} styles={styles} />
-      ) : (
-        <AccountsView accounts={accounts} styles={styles} />
-      )}
+      {renderView({
+        view,
+        accounts,
+        live,
+        workspace,
+        matrix,
+        audit,
+        preview,
+        rejection,
+        routingSelection,
+        select,
+        onPreviewPolicy,
+        onSavePolicy,
+        onClearPreview,
+        styles,
+      })}
     </div>
   )
+}
+
+/** One place deciding which view is showing, so the toggle cannot drift from it. */
+function renderView({
+  view,
+  accounts,
+  live,
+  workspace,
+  matrix,
+  audit,
+  preview,
+  rejection,
+  routingSelection,
+  select,
+  onPreviewPolicy,
+  onSavePolicy,
+  onClearPreview,
+  styles,
+}) {
+  if (view === 'live') return <LiveView live={live} styles={styles} />
+  if (view === 'effective') {
+    return (
+      <EffectiveRoutesPanel
+        matrix={matrix}
+        selection={routingSelection}
+        select={select}
+      />
+    )
+  }
+  if (view === 'policies') {
+    return (
+      <PolicyWorkspacePanel
+        workspace={workspace}
+        preview={preview}
+        rejection={rejection}
+        audit={audit}
+        selection={routingSelection}
+        select={select}
+        onPreview={onPreviewPolicy}
+        onSave={onSavePolicy}
+        onClearPreview={onClearPreview}
+      />
+    )
+  }
+  if (view === 'audit') return <PolicyAuditPanel audit={audit} />
+  return <AccountsView accounts={accounts} styles={styles} />
 }

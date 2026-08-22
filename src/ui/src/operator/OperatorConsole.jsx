@@ -57,6 +57,12 @@ import { toSupervisorGauges } from './model/supervisorGauges'
 import { EMPTY_TRUST_FLEET_VM } from './model/trustFleet'
 import RoutingMode from './RoutingMode'
 import { useGatewayAccounts, useGatewayLiveRoutes } from './useGatewayRouting'
+import { usePolicyWorkspace } from './usePolicyWorkspace'
+import {
+  EMPTY_EFFECTIVE_MATRIX_VM,
+  EMPTY_POLICY_AUDIT_VM,
+  EMPTY_POLICY_WORKSPACE_VM,
+} from './model/policyWorkspace'
 import {
   EMPTY_GATEWAY_ACCOUNTS_VM,
   EMPTY_GATEWAY_LIVE_VM,
@@ -191,16 +197,31 @@ function ModeToggle({ mode, select, styles }) {
   )
 }
 
+// The Routing Policies view's feed when the console is rendered from a fixture
+// rather than the live hook: every field present, nothing loaded, nothing
+// writable — so a test that forgets to pass one gets a read-only workspace
+// rather than an undefined-property crash.
+const EMPTY_POLICY_FEED = Object.freeze({
+  workspace: EMPTY_POLICY_WORKSPACE_VM,
+  matrix: EMPTY_EFFECTIVE_MATRIX_VM,
+  audit: EMPTY_POLICY_AUDIT_VM,
+  preview: null,
+  rejection: null,
+  requestPreview: () => {},
+  save: () => {},
+  clearPreview: () => {},
+})
+
 /**
  * Presentational shell. Takes the socket state as a prop so it can be rendered
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM, policy = EMPTY_POLICY_FEED }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
-  const { repo, stage, item, mode, routingView, select, breadcrumb } = useOperatorSelection()
+  const { repo, stage, item, mode, routingView, routingSelection, select, breadcrumb } = useOperatorSelection()
   const events = socket.events ?? []
 
   const pipeline = useMemo(
@@ -368,8 +389,17 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                 <RoutingMode
                   accounts={gatewayAccounts}
                   live={gatewayLive}
+                  workspace={policy.workspace}
+                  matrix={policy.matrix}
+                  audit={policy.audit}
+                  preview={policy.preview}
+                  rejection={policy.rejection}
                   routingView={routingView}
+                  routingSelection={routingSelection}
                   select={select}
+                  onPreviewPolicy={policy.requestPreview}
+                  onSavePolicy={policy.save}
+                  onClearPreview={policy.clearPreview}
                 />
               ) : mode === 'supervisor' ? (
                 <SupervisorMode
@@ -463,7 +493,11 @@ export function OperatorConsole() {
   // of the WS slice the shell otherwise renders from.
   const gatewayAccounts = useGatewayAccounts()
   const gatewayLive = useGatewayLiveRoutes()
-  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} />
+  // Routing policy (#11538, ADR-0140): the workspace snapshot, the effective-route
+  // matrix, and the mutation history on one sequence-guarded poll, plus the
+  // preview/save actions the Policies view writes through.
+  const policy = usePolicyWorkspace()
+  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} policy={policy} />
 }
 
 export default OperatorConsole
