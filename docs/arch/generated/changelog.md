@@ -6,10 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `751d911` — fix(sandbox): pin the moved prompt-shipping invariant to the resolver (#11590, #11589) *(2026-08-21)*
-- `44a4f50` — test(arch): bind RESOURCE_TREES to the shipped trees in both directions (#11589) (#11589) *(2026-08-21)*
-- `32740b5` — chore(arch): regenerate generated artifacts after the resource move (#11589) (#11589) *(2026-08-21)*
-- `454d89c` — fix(packaging): resolve repo-root resources through a package-aware helper (#11589) (#11589) *(2026-08-21)*
+- `8fcd6a0` — fix(control): Start clears the pipeline-worker disable set on both branches (#11611) (#11623) (#11623) *(2026-08-21)*
+- `5c33050` — fix(packaging): resolve repo-root resources through a package-aware helper (#11589) (#11617) (#11617) *(2026-08-21)*
 - `72faffb` — feat(ci): cache the agent image and add a dispatchable sandbox-scenario run (#11601) (#11621) (#11621) *(2026-08-21)*
 - `faaaa9e` — fix(liveness): event-loop stall — attribute starvation vs block before hard restart (#11604) (#11622) (#11622) *(2026-08-21)*
 - `ca6f42c` — chore(loops): remove the retired activity-based ADR-drift loops (#11600) (#11620) (#11620) *(2026-08-21)*

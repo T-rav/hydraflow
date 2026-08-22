@@ -10,9 +10,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from exception_classify import (
+    FATAL_EXCEPTIONS,
+    INFRA_FATAL_EXCEPTIONS,
     LIKELY_BUG_EXCEPTIONS,
     capture_if_bug,
     exc_detail,
+    is_fatal,
     is_likely_bug,
     reraise_on_credit_or_bug,
 )
@@ -86,6 +89,50 @@ class TestIsLikelyBug:
         assert set(LIKELY_BUG_EXCEPTIONS) == expected
 
 
+class TestFatalExceptionSet:
+    """The single source of truth for "must never be swallowed" (#11618)."""
+
+    def test_infra_fatal_holds_the_three_unrecoverable_infra_failures(self) -> None:
+        from subprocess_util import AuthenticationError, CreditExhaustedError
+
+        assert set(INFRA_FATAL_EXCEPTIONS) == {
+            AuthenticationError,
+            CreditExhaustedError,
+            MemoryError,
+        }
+
+    def test_fatal_is_infra_fatal_plus_the_likely_bug_class(self) -> None:
+        assert set(FATAL_EXCEPTIONS) == {
+            *INFRA_FATAL_EXCEPTIONS,
+            *LIKELY_BUG_EXCEPTIONS,
+        }
+
+    def test_type_error_is_fatal(self) -> None:
+        assert is_fatal(TypeError("bad type")) is True
+
+    def test_key_error_is_fatal(self) -> None:
+        assert is_fatal(KeyError("missing")) is True
+
+    def test_memory_error_is_fatal(self) -> None:
+        assert is_fatal(MemoryError("OOM")) is True
+
+    def test_credit_exhausted_error_is_fatal(self) -> None:
+        from subprocess_util import CreditExhaustedError
+
+        assert is_fatal(CreditExhaustedError("no credits")) is True
+
+    def test_authentication_error_is_fatal(self) -> None:
+        from subprocess_util import AuthenticationError
+
+        assert is_fatal(AuthenticationError("bad token")) is True
+
+    def test_runtime_error_is_not_fatal(self) -> None:
+        assert is_fatal(RuntimeError("transient")) is False
+
+    def test_os_error_is_not_fatal(self) -> None:
+        assert is_fatal(OSError("disk full")) is False
+
+
 class TestReraiseOnCreditOrBug:
     def test_reraises_credit_exhausted_error(self) -> None:
         from subprocess_util import CreditExhaustedError
@@ -116,6 +163,14 @@ class TestReraiseOnCreditOrBug:
         with pytest.raises(KeyError):
             try:
                 raise KeyError("missing key")
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+
+    def test_reraises_memory_error(self) -> None:
+        """OOM shares the must-not-swallow set every hand-rolled guard used."""
+        with pytest.raises(MemoryError):
+            try:
+                raise MemoryError("out of memory")
             except Exception as exc:
                 reraise_on_credit_or_bug(exc)
 

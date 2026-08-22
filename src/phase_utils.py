@@ -5,13 +5,25 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine, Generator
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Collection,
+    Coroutine,
+    Generator,
+)
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any, TypeVar
 
 from config import HydraFlowConfig
 from events import EventBus, EventType, HydraFlowEvent
-from exception_classify import is_likely_bug, reraise_on_credit_or_bug  # noqa: F401
+from exception_classify import (  # noqa: F401
+    INFRA_FATAL_EXCEPTIONS,
+    is_fatal,
+    is_likely_bug,
+    reraise_on_credit_or_bug,
+)
 from harness_insights import FailureCategory, FailureRecord, HarnessInsightStore
 from issue_state import issue_state_is_resolved  # noqa: F401
 from models import EscalationContext, PipelineStage, PRInfo, ReviewUpdatePayload, Task
@@ -71,12 +83,39 @@ async def _fill_pending_slots(
     return worker_id_counter
 
 
-async def _cancel_remaining(pending: dict[asyncio.Task[Any], Any]) -> None:
+async def _cancel_remaining(pending: Collection[asyncio.Task[Any]]) -> None:
     """Cancel all tasks in pending and await their completion."""
     for t in pending:
         t.cancel()
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def handle_pool_worker_exception(
+    exc: BaseException,
+    siblings: Collection[asyncio.Task[Any]],
+    *,
+    log: logging.Logger,
+    context: str,
+) -> None:
+    """Apply the fatal-or-continue policy to one failed worker in a pool.
+
+    Every concurrent worker pool needs the same decision: does this failure
+    poison the whole batch, or only its own item?  A fatal exception cancels
+    *siblings* and re-raises so the loop above sees it; anything else is
+    logged at WARNING against *context* and the batch runs on.
+
+    "Fatal" is :func:`exception_classify.is_fatal` — the same set
+    :func:`reraise_on_credit_or_bug` enforces off-pool, so a ``TypeError``
+    escalates identically whether or not it happened inside a pool.  Pools
+    used to restate that set as a literal tuple and the copy drifted: it
+    omitted the likely-bug class, so a real code bug in a pooled worker was
+    logged as a transient failure and the cycle reported success (#11618).
+    """
+    if is_fatal(exc):
+        await _cancel_remaining(siblings)
+        raise exc
+    log.warning("%s: %s", context, exc, exc_info=exc)
 
 
 async def _process_done_tasks(
@@ -86,26 +125,19 @@ async def _process_done_tasks(
 ) -> None:
     """Process completed tasks: collect results or handle exceptions.
 
-    Fatal exceptions (AuthenticationError, CreditExhaustedError, MemoryError)
-    cancel remaining pending tasks and re-raise. Non-fatal exceptions are
-    logged at WARNING; the pool continues.
+    Fatal exceptions cancel remaining pending tasks and re-raise; non-fatal
+    ones are logged at WARNING and the pool continues.  See
+    :func:`handle_pool_worker_exception` for what counts as fatal.
     """
-    from subprocess_util import (  # noqa: PLC0415
-        AuthenticationError,
-        CreditExhaustedError,
-    )
-
-    _FATAL = (AuthenticationError, CreditExhaustedError, MemoryError)
     for task in done:
         del pending[task]
         exc = task.exception()
         if exc is None:
             results.append(task.result())
-        elif isinstance(exc, _FATAL):
-            await _cancel_remaining(pending)
-            raise exc
         else:
-            logger.warning("Pool worker failed: %s", exc, exc_info=exc)
+            await handle_pool_worker_exception(
+                exc, pending, log=logger, context="Pool worker failed"
+            )
 
 
 async def _collect_batch_results(
@@ -507,19 +539,17 @@ async def run_with_fatal_guard(
 ) -> T:
     """Await *coro*, re-raising fatal errors and classifying the rest.
 
-    Fatal errors (``AuthenticationError``, ``CreditExhaustedError``,
-    ``MemoryError``) propagate immediately.  All other exceptions are
-    logged via :func:`log_exception_with_bug_classification` and
-    ``on_failure(exc_type_name)`` is returned as the result.
+    Infrastructure-fatal errors (:data:`~exception_classify.INFRA_FATAL_EXCEPTIONS`)
+    propagate immediately.  All other exceptions — likely bugs included — are
+    logged via :func:`log_exception_with_bug_classification` (which escalates a
+    likely bug to CRITICAL) and ``on_failure(exc_type_name)`` is returned as the
+    result.  That classify-and-degrade contract is deliberate here: unlike a
+    worker pool, this guard hands the caller a substitute result rather than
+    dropping the failure on the floor.
     """
-    from subprocess_util import (  # noqa: PLC0415 — deferred to avoid circular import
-        AuthenticationError,
-        CreditExhaustedError,
-    )
-
     try:
         return await coro
-    except (AuthenticationError, CreditExhaustedError, MemoryError):
+    except INFRA_FATAL_EXCEPTIONS:
         raise
     except Exception as exc:
         log_exception_with_bug_classification(log, exc, context)

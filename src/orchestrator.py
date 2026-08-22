@@ -39,7 +39,9 @@ from models import (
     WorkFn,
 )
 from phase_utils import (
+    INFRA_FATAL_EXCEPTIONS,
     escalate_to_hitl,
+    handle_pool_worker_exception,
     is_likely_bug,
     log_exception_with_bug_classification,
     release_batch_in_flight,
@@ -1793,7 +1795,7 @@ class HydraFlowOrchestrator:
                 continue
             try:
                 did_work = bool(await work_fn())
-            except (AuthenticationError, CreditExhaustedError, MemoryError):
+            except INFRA_FATAL_EXCEPTIONS:
                 raise
             except Exception as exc:
                 display = name.replace("_", " ").capitalize()
@@ -2050,17 +2052,11 @@ class HydraFlowOrchestrator:
             for task in done:
                 exc = task.exception()
                 if exc is not None:
-                    if isinstance(
-                        exc, AuthenticationError | CreditExhaustedError | MemoryError
-                    ):
-                        # Cancel remaining and propagate fatal errors
-                        for t in pending:
-                            t.cancel()
-                        await asyncio.gather(*pending, return_exceptions=True)
-                        raise exc
-                    logger.exception(
-                        "Review worker failed unexpectedly",
-                        exc_info=exc,
+                    await handle_pool_worker_exception(
+                        exc,
+                        pending,
+                        log=logger,
+                        context="Review worker failed unexpectedly",
                     )
                 elif task.result():
                     did_work = True
