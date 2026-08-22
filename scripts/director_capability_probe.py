@@ -61,6 +61,12 @@ if str(_REPO_ROOT / "src") not in sys.path:
 
 DIRECTOR_PROBE_SCHEMA_VERSION = 1
 
+TURN_TIMED_OUT = -1
+"""Exit code the probe assigns when it killed a turn at its own budget."""
+
+_SHA256_DIGEST_BYTES = 32
+"""A retained key record must hold exactly a SHA-256 digest, never the token."""
+
 # --------------------------------------------------------------------------
 # The environment allow-list — the whole scrub contract, in one place.
 # --------------------------------------------------------------------------
@@ -90,9 +96,23 @@ _SECRET_NAME_PATTERN = re.compile(
 _SAFE_DESCRIPTOR = re.compile(r"^[a-z0-9][a-z0-9 ._:+-]{0,60}$")
 """String observations must match this lowercase descriptor grammar.
 
-A whitelist, not a blacklist. Real credentials (``sk-live-AbC123…``, base64
-tokens, JWTs) carry uppercase or ``/``+``=`` and are refused outright, so a
-secret cannot reach the artifact even under a benign-looking field name.
+A whitelist, not a blacklist: anything carrying uppercase, ``/`` or ``=`` — most
+base64 tokens and JWTs — is refused outright. The grammar alone is not enough
+though, because plenty of secrets are lowercase (a raw UUID session id, a hex
+digest, a ``ghp_`` token), so :data:`_SECRET_SHAPES` rejects those shapes too.
+"""
+
+_SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"),
+    re.compile(r"[0-9a-f]{16,}"),
+    re.compile(r"^(?:gh[pousr]_|sk-|hf-|xox[baprs]-|eyj)"),
+)
+"""Lowercase shapes that pass the descriptor grammar but are still secrets.
+
+In order: a raw UUID (exactly the vendor session id ``describe_id_shape``
+exists to avoid recording), any long hex run (digests, key ids), and the common
+token prefixes. Sanitization is claimed to be enforced by the schema rather than
+by discipline, so it has to actually hold.
 """
 
 # Tool names the CLI advertises today plus the two it does NOT advertise but
@@ -173,14 +193,19 @@ class ProofResult(BaseModel):
         for key, value in self.observations.items():
             if not isinstance(value, str):
                 continue
+            if value.startswith(("/users/", "/home/", "/Users/", "/home")):
+                raise ValueError(f"observation {key!r} leaks a host home path")
             if not _SAFE_DESCRIPTOR.fullmatch(value):
                 raise ValueError(
                     f"observation {key!r} holds {value[:16]!r}…, which is not a "
                     "lowercase shape descriptor; record a bool, an int, or a "
                     "descriptor instead of raw content"
                 )
-            if value.startswith("/users/") or value.startswith("/home/"):
-                raise ValueError(f"observation {key!r} leaks a host home path")
+            if any(shape.search(value) for shape in _SECRET_SHAPES):
+                raise ValueError(
+                    f"observation {key!r} holds a secret-shaped value (uuid, hex "
+                    "digest, or token prefix); record a shape descriptor instead"
+                )
         if self.verdict is Verdict.PASS_WITH_CONSTRAINT and not self.constraint:
             raise ValueError(f"{self.proof} passed with a constraint but named none")
         return self
@@ -212,7 +237,13 @@ class ProbeEvidence(BaseModel):
 
     @property
     def overall_verdict(self) -> Verdict:
-        """Fail-closed: any FAIL or NOT_RUN sinks the whole artifact."""
+        """Worst verdict across the proofs.
+
+        ``FAIL`` means a boundary claim was falsified — the only verdict that
+        makes the run exit non-zero. ``NOT_RUN`` means the artifact is
+        *incomplete* (the default hermetic run leaves the live lane unrun), which
+        is expected locally but disqualifies the artifact as ADR evidence.
+        """
         verdicts = {p.verdict for p in self.proofs}
         if Verdict.FAIL in verdicts:
             return Verdict.FAIL
@@ -292,6 +323,21 @@ def parse_stream_json(raw: str) -> list[dict[str, Any]]:
     return frames
 
 
+def _frames_or_empty(raw: str) -> list[dict[str, Any]]:
+    """Parse frames, degrading to empty rather than aborting the whole probe.
+
+    The framing proof itself uses :func:`parse_stream_json` directly so that
+    unframed output is recorded as a failure; every other proof only needs the
+    frames it can get, and must not lose its own verdict to a banner line.
+    """
+    if not raw.strip():
+        return []
+    try:
+        return parse_stream_json(raw)
+    except ValueError:
+        return []
+
+
 def turn_failed(frames: list[dict[str, Any]]) -> bool:
     """True when the turn failed, keyed on ``is_error`` — never on ``subtype``.
 
@@ -361,8 +407,16 @@ def _probe_environment_scrubbing() -> ProofResult:
         gateway_token="hf-virtual-REDACTED",
     )
     leaked = leaked_secret_names(scrubbed)
+    offered_secrets = leaked_secret_names(hostile)
     unexpected = sorted(set(scrubbed) - DIRECTOR_ENV_ALLOWLIST)
-    ok = not leaked and not unexpected and scrubbed["HOME"] == "/sandbox/home"
+    # `offered_secrets` guards against a vacuous pass: zero leaks out of zero
+    # secrets offered would prove nothing.
+    ok = (
+        bool(offered_secrets)
+        and not leaked
+        and not unexpected
+        and scrubbed["HOME"] == "/sandbox/home"
+    )
     return ProofResult(
         proof=ProofName.ENVIRONMENT_SCRUBBING,
         lane=Lane.HERMETIC,
@@ -373,6 +427,7 @@ def _probe_environment_scrubbing() -> ProofResult:
         ),
         observations={
             "hostile_vars_offered": len(hostile),
+            "secret_shaped_vars_offered": len(offered_secrets),
             "vars_surviving": len(scrubbed),
             "secret_shaped_leaks": len(leaked),
             "vars_outside_allowlist": len(unexpected),
@@ -384,11 +439,28 @@ def _probe_environment_scrubbing() -> ProofResult:
     )
 
 
+def _pid_alive(pid: int) -> bool:
+    """True when *pid* still exists (signal 0 probes without delivering)."""
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
 def _probe_process_tree_teardown() -> ProofResult:
     """Spawn a real process group with a grandchild, then reap the whole tree."""
+    marker = Path(tempfile.mkdtemp(prefix="fablep0-teardown-")) / "pids.txt"
+    try:
+        return _teardown_proof(marker)
+    finally:
+        shutil.rmtree(marker.parent, ignore_errors=True)
+
+
+def _teardown_proof(marker: Path) -> ProofResult:
+    """Spawn the tree, reap it, and report survivors."""
     from process_group import kill_process_group  # noqa: PLC0415 — script-local import
 
-    marker = Path(tempfile.mkdtemp(prefix="fablep0-teardown-")) / "pids.txt"
     # Parent forks a grandchild; both write their pid and sleep well past the probe.
     script = (
         "import os, sys, time, subprocess\n"
@@ -413,19 +485,21 @@ def _probe_process_tree_teardown() -> ProofResult:
         pids = [int(x) for x in marker.read_text().split() if x.strip()]
 
     kill_process_group(proc)
-    proc.wait(timeout=15)
-    time.sleep(0.4)
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        proc.wait(timeout=15)
 
-    survivors = []
-    for pid in pids:
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            continue
-        survivors.append(pid)
-        with contextlib.suppress(OSError):  # never leave a probe process behind
+    # Poll for the group to drain rather than sleeping a fixed interval, which
+    # is a flake window on a loaded runner.
+    survivors = list(pids)
+    deadline = time.monotonic() + 10.0
+    while survivors and time.monotonic() < deadline:
+        survivors = [pid for pid in survivors if _pid_alive(pid)]
+        if survivors:
+            time.sleep(0.05)
+
+    for pid in survivors:  # never leave a probe process behind
+        with contextlib.suppress(OSError):
             os.kill(pid, signal.SIGKILL)
-    shutil.rmtree(marker.parent, ignore_errors=True)
 
     ok = bool(pids) and not survivors
     return ProofResult(
@@ -475,6 +549,19 @@ def _probe_short_lived_key_expiry() -> ProofResult:
     )
     resolved_before = store.resolve(minted.token) is not None
 
+    # Sample the retained record BEFORE advancing the clock: resolve() deletes
+    # an expired record, so inspecting afterwards would always find nothing and
+    # the retention claim would be vacuously true.
+    record = next(iter(getattr(store, "_records", {}).values()), None)
+    retained = getattr(record, "token_digest", None)
+    digest_only = (
+        record is not None
+        and isinstance(retained, bytes)
+        and len(retained) == _SHA256_DIGEST_BYTES
+        and retained != minted.token.encode()
+        and minted.token not in repr(record)
+    )
+
     clock["t"] += 61.0
     expired = False
     try:
@@ -482,11 +569,7 @@ def _probe_short_lived_key_expiry() -> ProofResult:
     except ExpiredVirtualKey:
         expired = True
 
-    token_in_store = any(
-        minted.token.encode() == getattr(rec, "token_digest", b"")
-        for rec in getattr(store, "_records", {}).values()
-    )
-    ok = resolved_before and expired and not token_in_store
+    ok = resolved_before and expired and digest_only
     return ProofResult(
         proof=ProofName.SHORT_LIVED_KEY_EXPIRY,
         lane=Lane.HERMETIC,
@@ -496,9 +579,10 @@ def _probe_short_lived_key_expiry() -> ProofResult:
             "the store retains only a SHA-256 digest, never the token."
         ),
         observations={
+            "record_sampled_before_expiry": record is not None,
             "resolved_before_ttl": resolved_before,
             "refused_after_ttl": expired,
-            "plaintext_token_retained": token_in_store,
+            "plaintext_token_retained": not digest_only,
             "ttl_seconds": 60,
             "active_records_after_expiry": store.active_count,
         },
@@ -523,9 +607,45 @@ def _run_director_turn(
     cli: str,
     extra_args: list[str],
     plant_hostile_project_files: bool = False,
-) -> tuple[int, str, str, Path]:
-    """Spawn one isolated ``claude -p`` turn and return (rc, stdout, stderr, cwd)."""
+    gateway_base_url: str | None = None,
+    gateway_token: str | None = None,
+    timeout_seconds: int = 180,
+) -> tuple[int, str, str]:
+    """Spawn one isolated ``claude -p`` turn and return (rc, stdout, stderr).
+
+    The disposable sandbox is created and torn down here, so a timeout or a
+    missing binary cannot leak a temp tree onto the operator's machine.
+    """
     home, cwd, cfg = _sandbox_dirs()
+    try:
+        return _spawn_turn(
+            cli=cli,
+            extra_args=extra_args,
+            plant_hostile_project_files=plant_hostile_project_files,
+            home=home,
+            cwd=cwd,
+            cfg=cfg,
+            gateway_base_url=gateway_base_url,
+            gateway_token=gateway_token,
+            timeout_seconds=timeout_seconds,
+        )
+    finally:
+        shutil.rmtree(cwd.parent, ignore_errors=True)
+
+
+def _spawn_turn(
+    *,
+    cli: str,
+    extra_args: list[str],
+    plant_hostile_project_files: bool,
+    home: Path,
+    cwd: Path,
+    cfg: Path,
+    gateway_base_url: str | None = None,
+    gateway_token: str | None = None,
+    timeout_seconds: int = 180,
+) -> tuple[int, str, str]:
+    """Run the turn inside an already-created sandbox."""
     if plant_hostile_project_files:
         (cwd / ".claude").mkdir()
         (cwd / ".claude" / "settings.json").write_text(
@@ -533,7 +653,13 @@ def _run_director_turn(
         )
         (cwd / "CLAUDE.md").write_text("HOSTILE PROJECT MEMORY — must not be loaded\n")
 
-    env = build_scrubbed_env(dict(os.environ), home=str(home), config_dir=str(cfg))
+    env = build_scrubbed_env(
+        dict(os.environ),
+        home=str(home),
+        config_dir=str(cfg),
+        gateway_base_url=gateway_base_url,
+        gateway_token=gateway_token,
+    )
     cmd = [
         cli,
         "-p",
@@ -546,25 +672,40 @@ def _run_director_turn(
         "1",
         *extra_args,
     ]
-    proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+    from process_group import kill_process_group  # noqa: PLC0415 — script-local import
+
+    # Popen + kill_process_group rather than subprocess.run(timeout=...): on a
+    # timeout subprocess.run kills only the direct child, leaving the CLI's
+    # descendants alive — the exact leak S6 forbids, and the timeout path is
+    # reached in practice by the credential turn.
+    proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
         cmd,
         cwd=cwd,
         env=env,
-        input="probe\n",
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=180,
-        check=False,
         start_new_session=True,
     )
-    return proc.returncode, proc.stdout, proc.stderr, cwd
+    try:
+        stdout, stderr = proc.communicate("probe\n", timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        kill_process_group(proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=15)
+        except subprocess.TimeoutExpired:  # pragma: no cover — defensive
+            stdout, stderr = "", ""
+        # rc -1 marks "killed at the probe's budget", which is a materially
+        # weaker observation than a clean non-zero exit and is reported as such.
+        return TURN_TIMED_OUT, stdout or "", stderr or ""
+    return proc.returncode, stdout, stderr
 
 
 def _probe_framing_and_session(cli: str) -> tuple[ProofResult, ProofResult]:
-    rc, stdout, _stderr, cwd = _run_director_turn(
+    rc, stdout, _stderr = _run_director_turn(
         cli=cli, extra_args=["--disallowedTools", ",".join(DIRECTOR_DENIED_TOOLS)]
     )
-    shutil.rmtree(cwd.parent, ignore_errors=True)
     try:
         frames = parse_stream_json(stdout)
         framing_ok = True
@@ -630,7 +771,7 @@ def _probe_framing_and_session(cli: str) -> tuple[ProofResult, ProofResult]:
 
 def _probe_resume_loss(cli: str) -> ProofResult:
     dead_session = "00000000-0000-4000-8000-000000000000"
-    rc, stdout, stderr, cwd = _run_director_turn(
+    rc, stdout, stderr = _run_director_turn(
         cli=cli,
         extra_args=[
             "--resume",
@@ -639,8 +780,7 @@ def _probe_resume_loss(cli: str) -> ProofResult:
             ",".join(DIRECTOR_DENIED_TOOLS),
         ],
     )
-    shutil.rmtree(cwd.parent, ignore_errors=True)
-    frames = parse_stream_json(stdout) if stdout.strip() else []
+    frames = _frames_or_empty(stdout)
     # Work "proceeded" only if the model actually produced a turn. A lone
     # terminal result frame reporting the failure is the fail-closed signal,
     # not evidence that a fresh session silently took over.
@@ -677,46 +817,113 @@ def _probe_resume_loss(cli: str) -> ProofResult:
     )
 
 
-def _probe_isolation_and_tool_surface(cli: str) -> tuple[ProofResult, ProofResult]:
-    baseline_rc, baseline_out, _e, baseline_cwd = _run_director_turn(
-        cli=cli, extra_args=[], plant_hostile_project_files=True
-    )
-    shutil.rmtree(baseline_cwd.parent, ignore_errors=True)
-    baseline_init = last_init_frame(parse_stream_json(baseline_out)) or {}
+def _init_of(
+    cli: str, extra_args: list[str], **kw: object
+) -> tuple[dict[str, Any], int, bool]:
+    """Run one turn and return (last init frame, exit code, init-frame-seen).
 
-    denied_rc, denied_out, _e2, denied_cwd = _run_director_turn(
-        cli=cli,
-        extra_args=["--disallowedTools", ",".join(DIRECTOR_DENIED_TOOLS)],
+    The third element matters: a turn that produced no init frame yields an
+    empty dict, and several derived observations would read that as a *positive*
+    result ("the allow-list narrowed the surface to zero"). Callers must gate on
+    it so a failed turn can never masquerade as a finding.
+    """
+    rc, out, _err = _run_director_turn(cli=cli, extra_args=extra_args, **kw)  # type: ignore[arg-type]
+    init = last_init_frame(_frames_or_empty(out))
+    return init or {}, rc, init is not None
+
+
+def _probe_isolation_and_tool_surface(cli: str) -> tuple[ProofResult, ProofResult]:
+    # Five turns, because every claim the ADR makes must be MEASURED here rather
+    # than asserted from an operator's exploratory session.
+    baseline_init, baseline_rc, baseline_seen = _init_of(
+        cli, [], plant_hostile_project_files=True
+    )
+    baseline_tools = list(baseline_init.get("tools") or [])
+
+    # (2) allow-list: does naming one tool narrow the surface at all?
+    allowlist_init, _, allowlist_seen = _init_of(cli, ["--allowedTools", "Read"])
+    allowlist_tools = list(allowlist_init.get("tools") or [])
+
+    # (3) deny exactly what the CLI advertised: is the advertised array complete?
+    deny_advertised = [t for t in baseline_tools if isinstance(t, str)]
+    advertised_init, _, advertised_seen = _init_of(
+        cli,
+        ["--disallowedTools", ",".join(deny_advertised)] if deny_advertised else [],
+    )
+    after_denying_advertised = list(advertised_init.get("tools") or [])
+
+    # (4) exhaustive deny-list: can the surface actually reach empty?
+    denied_init, denied_rc, denied_seen = _init_of(
+        cli,
+        ["--disallowedTools", ",".join(DIRECTOR_DENIED_TOOLS)],
         plant_hostile_project_files=True,
     )
-    shutil.rmtree(denied_cwd.parent, ignore_errors=True)
-    denied_init = last_init_frame(parse_stream_json(denied_out)) or {}
+
+    # (5) the RUNTIME configuration: the virtual gateway key is present and
+    # points at a dead local endpoint. If the CLI silently fell back to the
+    # operator's keychain this turn would authenticate; it must not.
+    cred_rc, cred_out, cred_err = _run_director_turn(
+        cli=cli,
+        extra_args=["--disallowedTools", ",".join(DIRECTOR_DENIED_TOOLS)],
+        gateway_base_url="http://127.0.0.1:9/gateway-probe",
+        gateway_token="hf-virtual-probe-not-a-real-key",
+        timeout_seconds=90,
+    )
+    cred_frames = _frames_or_empty(cred_out)
+    cred_init = last_init_frame(cred_frames) or {}
+    cred_init_frames = [
+        f
+        for f in cred_frames
+        if f.get("type") == "system" and f.get("subtype") == "init"
+    ]
+    cred_text = (json.dumps(cred_frames) + cred_out + cred_err).lower()
+    cred_timed_out = cred_rc == TURN_TIMED_OUT
+    # A turn is only *observed* to have completed if it produced a terminal
+    # result frame. Without one, `turn_failed` is trivially true and would let a
+    # timeout satisfy the credential claim by default — so authentication is
+    # judged as "observed to have authenticated", and the absence of an
+    # observation is reported separately rather than counted as a pass.
+    cred_completed = any(f.get("type") == "result" for f in cred_frames)
+    authenticated = cred_completed and not turn_failed(cred_frames)
+    used_injected_endpoint = any(
+        marker in cred_text
+        for marker in ("connection refused", "econnrefused", "127.0.0.1")
+    )
 
     memory_paths = json.dumps(baseline_init.get("memory_paths") or {})
-    config_dir_scoped = "fablep0-sandbox-" in memory_paths
+    # The sandbox lays out <root>/home, <root>/cwd, <root>/cfg. A memory path
+    # under /cfg/ is the isolated config dir (expected); a path under /cwd/ means
+    # the hostile CLAUDE.md planted in the working directory WAS loaded.
+    config_dir_scoped = "/cfg/" in memory_paths
+    project_memory_loaded = "/cwd/" in memory_paths
     home_leaked = "/Users/" in memory_paths or "/home/" in memory_paths
 
     isolation = ProofResult(
         proof=ProofName.ISOLATED_SETTINGS_HOME,
         lane=Lane.LIVE,
-        verdict=Verdict.PASS if config_dir_scoped and not home_leaked else Verdict.FAIL,
+        verdict=(
+            Verdict.PASS
+            if config_dir_scoped and not home_leaked and not project_memory_loaded
+            else Verdict.FAIL
+        ),
         summary=(
-            "With env -i, a disposable HOME and CLAUDE_CONFIG_DIR and an empty cwd, "
-            "the turn loads no MCP server and no plugin, and its memory path is "
-            "confined to the disposable config dir. A hostile .claude/settings.json "
-            "and CLAUDE.md planted in the cwd are not loaded."
+            "With an allow-list environment, a disposable HOME and CLAUDE_CONFIG_DIR "
+            "and an empty working directory, the turn loads no MCP server and no "
+            "plugin, and its only memory path is inside the disposable config dir. "
+            "A hostile .claude/settings.json and CLAUDE.md planted in the working "
+            "directory produce no project memory path."
         ),
         observations={
             "mcp_servers_loaded": len(baseline_init.get("mcp_servers") or []),
             "plugins_loaded": len(baseline_init.get("plugins") or []),
             "memory_path_confined_to_sandbox": config_dir_scoped,
             "operator_home_path_leaked": home_leaked,
-            "hostile_project_settings_planted": True,
+            "hostile_project_files_planted": True,
+            "hostile_project_memory_loaded": project_memory_loaded,
             "cli_exit_code": baseline_rc,
         },
     )
 
-    baseline_tools = list(baseline_init.get("tools") or [])
     denied_tools = list(denied_init.get("tools") or [])
     api_key_source = (
         re.sub(
@@ -726,40 +933,78 @@ def _probe_isolation_and_tool_surface(cli: str) -> tuple[ProofResult, ProofResul
         )[:40]
         or "absent"
     )
-    surface_empty = not denied_tools
+    # S4 is only satisfied if the key is PRESENT and empty. An absent or renamed
+    # `tools` key must read as unverified, never as "empty".
+    tools_key_present = "tools" in denied_init
+    residual_channels = sum(
+        len(denied_init.get(channel) or [])
+        for channel in ("agents", "skills", "slash_commands", "mcp_servers", "plugins")
+    )
+    surface_empty = (
+        denied_seen and tools_key_present and not denied_tools and not authenticated
+    )
 
     credentials = ProofResult(
         proof=ProofName.NO_AMBIENT_TOOLS_OR_CREDENTIALS,
         lane=Lane.LIVE,
         verdict=Verdict.PASS_WITH_CONSTRAINT if surface_empty else Verdict.FAIL,
         summary=(
-            "No ambient credential reaches the isolated child — the turn reports no "
-            "api key source and fails authentication outright, proving the keychain/"
-            "OAuth path does not cross the sandbox. The tool surface reaches empty "
-            "only under an explicit exhaustive deny-list."
+            "No ambient credential reaches the isolated child: with no credential the "
+            "turn fails authentication, and with only the virtual gateway key present "
+            "it is never observed to authenticate against the host keychain. The tool "
+            "surface reaches empty only under an explicit exhaustive deny-list, and "
+            "only the deny-list turn's own init frame can attest to it."
         ),
         constraint=(
-            "Isolation alone does NOT empty the tool surface: the baseline turn still "
-            "exposed Bash, Write, Edit, WebFetch and Task. An allow-list does not "
-            "narrow it at all, and the advertised tool array is incomplete (denying "
-            "every advertised name still left Glob and Grep). A name deny-list is "
-            "therefore fail-open across CLI upgrades. The runtime MUST assert the "
-            "observed init tool array is EMPTY and refuse to dispatch otherwise. "
-            "apiKeySource is not a trustworthy provenance signal and must not gate anything."
+            "Isolation alone does NOT empty the tool surface, an allow-list does not "
+            "narrow it, and the advertised tool array is incomplete — so a name "
+            "deny-list is fail-open across CLI upgrades. The runtime MUST assert the "
+            "init tools key is PRESENT and empty (absent/renamed reads as unverified), "
+            "and must also account for the agents, skills and slash-command channels, "
+            "which stay populated at zero tools. apiKeySource is not a trustworthy "
+            "provenance signal and must not gate anything. The assertion is post-hoc: "
+            "it inspects a turn that already ran, so the residual exposure is one turn."
         ),
         observations={
             "tools_with_isolation_only": len(baseline_tools),
+            "baseline_init_frame_seen": baseline_seen,
+            "allowlist_init_frame_seen": allowlist_seen,
+            "tools_with_allowlist_of_one": len(allowlist_tools),
+            "allowlist_narrows_surface": (
+                allowlist_seen
+                and baseline_seen
+                and len(allowlist_tools) < len(baseline_tools)
+            ),
+            "advertised_denial_init_frame_seen": advertised_seen,
+            "tools_after_denying_every_advertised_name": len(after_denying_advertised),
+            "advertised_tool_array_is_complete": (
+                advertised_seen and not after_denying_advertised
+            ),
             "tools_with_exhaustive_denylist": len(denied_tools),
-            "allowlist_narrows_surface": False,
-            "advertised_tool_array_is_complete": False,
-            "ambient_credential_reached_child": False,
+            "tools_key_present_on_init": tools_key_present,
+            "credential_turn_completed": cred_completed,
+            "credential_turn_killed_at_probe_budget": cred_timed_out,
+            "credential_turn_authenticated": authenticated,
+            "credential_turn_used_injected_endpoint": used_injected_endpoint,
+            "ambient_credential_reached_child": authenticated,
+            "credential_turn_init_frames": len(cred_init_frames),
+            "credential_turn_api_key_source": (
+                re.sub(
+                    r"[^a-z0-9._-]",
+                    "",
+                    str(cred_init.get("apiKeySource") or "absent").lower(),
+                )[:40]
+                or "absent"
+            ),
             "api_key_source_reported": api_key_source,
             "residual_agents_advertised": len(denied_init.get("agents") or []),
             "residual_skills_advertised": len(denied_init.get("skills") or []),
             "residual_slash_commands_advertised": len(
                 denied_init.get("slash_commands") or []
             ),
+            "residual_capability_entries_outside_tools": residual_channels,
             "cli_exit_code": denied_rc,
+            "credential_turn_exit_code": cred_rc,
         },
     )
     return isolation, credentials
