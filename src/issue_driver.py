@@ -123,6 +123,21 @@ class PhaseOutcome:
     next_state: str | None = None
     artifact: Mapping[str, object] = field(default_factory=dict)
     detail: str = ""
+    no_progress: bool = False
+    """The phase could not run yet — a barrier, not a failed attempt.
+
+    A HITL phase with no correction pending is waiting on a human; a review
+    phase whose PR has not propagated yet is waiting on GitHub. Neither is an
+    attempt that failed, and treating them as one costs three things at once:
+    the phase-attempt counter climbs without bound while nothing is wrong (and
+    that counter keys the boundary idempotency key), the allocator's tick
+    reports work so the polling loop never sleeps, and — since #11537 — a
+    shadow director turn is bought on every one of those ticks.
+
+    ``ReviewPhaseAdapter`` has documented this intent since #11535 ("rather
+    than burning a phase attempt on a propagation delay") without a field to
+    express it. This is that field.
+    """
 
 
 @dataclass(frozen=True)
@@ -563,11 +578,7 @@ class IssueDriver:
             return refused
 
         if not outcome.ok:
-            self._phase_attempts[phase] = lease.phase_attempt + 1
-            self._state = self._resolve_state(outcome, expected_label)
-            return self._advance(
-                AdvanceOutcome.FAILED, phase=phase, detail=outcome.detail
-            )
+            return self._unsuccessful(outcome, phase, lease, expected_label)
 
         # --- C8 steps 2-4, in order, with nothing between them.
         #
@@ -610,6 +621,32 @@ class IssueDriver:
         return self._advance(
             AdvanceOutcome.COMMITTED, phase=phase, detail=outcome.detail
         )
+
+    def _unsuccessful(
+        self,
+        outcome: PhaseOutcome,
+        phase: DriverPhase,
+        lease: DriverLease,
+        expected_label: str,
+    ) -> DriverAdvance:
+        """A phase that did not succeed: a barrier, or a genuine failed attempt.
+
+        The distinction is the whole point. A barrier — a HITL phase with no
+        correction pending, a review phase whose PR has not propagated — is not
+        an attempt, so it leaves the attempt counter alone (that counter keys the
+        boundary idempotency key), reports ``IDLE`` so
+        ``DriverTickReport.did_work`` falls to False and the polling loop sleeps,
+        and tells a shadow observer there was no decision here to compare. The
+        driver is still ticked every cycle — that is how it notices the human has
+        answered — it just stops claiming to have tried.
+        """
+        self._state = self._resolve_state(outcome, expected_label)
+        if outcome.no_progress:
+            return self._advance(
+                AdvanceOutcome.IDLE, phase=phase, detail=outcome.detail
+            )
+        self._phase_attempts[phase] = lease.phase_attempt + 1
+        return self._advance(AdvanceOutcome.FAILED, phase=phase, detail=outcome.detail)
 
     def _preempt(self, live_label: str | None, *, phase: DriverPhase) -> DriverAdvance:
         """Adopt the externally set label rather than clobbering it."""

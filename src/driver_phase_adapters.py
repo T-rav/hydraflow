@@ -203,6 +203,9 @@ class ReviewPhaseAdapter:
                 ok=False,
                 next_label=lease.expected_stage_label,
                 detail="pr not visible yet",
+                # A propagation delay, not an attempt. This class has said so in
+                # prose since #11535; ``no_progress`` is what makes it true.
+                no_progress=True,
             )
         results = await self._reviewer.review_prs(
             prs[:1], [i.to_task() for i in issues[:1]] or [task]
@@ -274,6 +277,10 @@ class HITLPhaseAdapter:
                 next_label=lease.expected_stage_label,
                 next_state=self._waiting_state,
                 detail="awaiting operator correction",
+                # Waiting on a human is a barrier, not a failed attempt. Without
+                # this the attempt counter climbed once per tick for as long as
+                # the operator took to answer, and the allocator never slept.
+                no_progress=True,
             )
         await self._hitl.process_single_correction(task.id, correction)
         return PhaseOutcome(

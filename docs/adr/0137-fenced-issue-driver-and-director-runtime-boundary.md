@@ -26,6 +26,7 @@ pytest:tests/test_director_turn_runner_env.py
 pytest:tests/test_dashboard_routes_scheduling.py
 pytest:tests/architecture/test_director_no_authority.py
 pytest:tests/regressions/test_issue_11537_shadow_safety.py
+pytest:tests/regressions/test_issue_11537_shadow_idle_spin.py
 
 **Precedent:** Fenced leases over a durable log — the epoch/fencing-token discipline for a single-writer owner whose liveness cannot be trusted (Chubby, Burrows 2006; Kafka's producer epoch; Lamport's "the lease holder may already be dead").
 **Divergence:** classical fencing assumes the shared store enforces the token, but HydraFlow's durable store is the GitHub label set, which has no compare-and-swap and whose swap primitive is add-first-then-best-effort-remove (`src/pr_manager.py:PRManager.swap_pipeline_labels`), so the fence is enforced at the *admission* boundary instead and multi-label crash states are reconciled against a transition intent recorded before the swap rather than prevented — priority-based reconciliation alone silently reverts backward transitions (receipt: #11533, and the adversarial panel on #10038).
@@ -319,6 +320,13 @@ is applied **before** the turn's command is parsed: a turn whose surface cannot
 be proven empty has its output discarded rather than parsed and then refused.
 The residual one-turn exposure window named in D2 is unchanged.
 
+**S4's version fence fires at boot as well as per turn.** The per-turn assertion
+is still the load-bearing one, but it runs *after* a turn has been paid for and
+discarded, so a CLI upgrade would otherwise mean every boundary buys a turn that
+is thrown away until the spend ceiling stops it. Preflight already holds both the
+observed version and the evidence's, so it compares them and refuses — which is
+what "a version mismatch re-arms this gate" has to mean in practice.
+
 **One clause is implemented stricter than S4 as written, deliberately.** S4(3)
 says the residual channels must be "empty or unchanged", which permits a renamed
 channel key to read as *empty* and therefore verify — the same fail-open shape
@@ -340,7 +348,36 @@ Two further bounds exist because nothing else in the design bounds turn *count*:
 `director_shadow_usd_ceiling` is an aggregate spend ceiling that stops turns
 being started, and `director_shadow_enabled` is a **live** kill switch, because
 the dials that select the director are restart-required and a director turn
-costs money.
+costs money. Both are read per boundary rather than captured at construction,
+so the live badge the settings registry gives them is true.
+
+**A decline is counted, never written.** An idle tick, a stop, the kill switch
+and the spend ceiling all reach the observer on paths the allocator takes for
+every driver on every tick, so a durable row for any of them puts an `fsync` on
+a hot path. The first implementation wrote one, justified by an assumption that
+the tick sleeps a poll interval between rounds — which was false:
+`DriverTickReport.did_work` counted an `IDLE` advance as work, and the polling
+loop skips its sleep when a tick did work, so a single parked driver spun the
+allocator at loop speed. That is fixed at the cause — an `IDLE` advance is not
+work — and the observer keeps the defence in depth.
+
+**A barrier is not a failed attempt.** Excluding `IDLE` covers a PARKED driver
+but not one waiting on a *human*: the HITL phase's no-correction path returned
+`ok=False`, which the driver read as a failed attempt, so the loop still never
+slept for the state that waits longest and the phase-attempt counter — which
+keys the boundary idempotency key — climbed once per tick for as long as the
+operator took to answer. `PhaseOutcome.no_progress` now distinguishes the two:
+a barrier reports `IDLE`, burns no attempt, and is still ticked every cycle so
+it notices the answer. `ReviewPhaseAdapter` had documented exactly this intent
+since #11535 ("rather than burning a phase attempt on a propagation delay")
+without a field to express it; its PR-not-yet-visible path is corrected too. The rule is now simply:
+**a row on disk means a turn was attempted**, which is also what makes
+`observations` a denominator the agreement rate can honestly divide by.
+
+Because the counters are per-run and the log's tail is bounded, the cumulative
+**spend** is persisted in its own file beside the log. Deriving it from the tail
+let a bounded window evict every costed row, silently re-arming the whole budget
+on each restart — a ceiling that resets is not a ceiling.
 
 **Evidence is minted honestly.** A refusal produces a real `WorkerReceipt`
 (`REJECTED`, deterministic reason code, no served model). An *admitted* request

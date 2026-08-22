@@ -189,3 +189,59 @@ class TestPreflightRefusesWithoutACredential:
         )
 
         assert await runner.preflight() == "2.1.239"
+
+
+class TestTheProductionPathReadsTheRealEnvironment:
+    """The default branch of ``_parent_env()`` — the one production takes.
+
+    Every other test in this file injects ``source_env``, which is exactly why
+    it needed writing: reverting ``_parent_env`` to the B1 regression
+    (``dict(self._source_env or {})``) left the whole file green, so the fix for
+    "the allow-list was filtering nothing" was itself unguarded on the only path
+    that ships.
+    """
+
+    async def test_path_is_inherited_from_the_real_process_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PATH", "/sentinel/bin")
+        spawner = SpawnRecorder()
+        runner = DirectorTurnRunner(
+            runner=spawner,  # type: ignore[arg-type]
+            mint_credential=_mint,
+        )
+
+        await runner.run_turn("hi")
+
+        assert spawner.envs[0]["PATH"] == "/sentinel/bin"
+
+    async def test_a_secret_in_the_real_environment_still_does_not_survive(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-really-in-os-environ")
+        spawner = SpawnRecorder()
+        runner = DirectorTurnRunner(
+            runner=spawner,  # type: ignore[arg-type]
+            mint_credential=_mint,
+        )
+
+        await runner.run_turn("hi")
+
+        assert "ANTHROPIC_API_KEY" not in spawner.envs[0]
+
+    async def test_the_environment_is_read_at_spawn_not_at_construction(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A runner built at the composition root outlives many turns; capturing
+        # os.environ once would pin whatever the process happened to hold at
+        # boot.
+        spawner = SpawnRecorder()
+        runner = DirectorTurnRunner(
+            runner=spawner,  # type: ignore[arg-type]
+            mint_credential=_mint,
+        )
+        monkeypatch.setenv("PATH", "/changed/after/construction")
+
+        await runner.run_turn("hi")
+
+        assert spawner.envs[0]["PATH"] == "/changed/after/construction"

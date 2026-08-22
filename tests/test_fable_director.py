@@ -21,6 +21,9 @@ import json
 import re
 from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 import pytest
 
 from director_broker import ShadowDispatchBroker
@@ -177,7 +180,7 @@ def _director(
     *,
     stop_event: asyncio.Event | None = None,
     budget: float = 5.0,
-    ceiling: float = 25.0,
+    ceiling: Callable[[], float] | float = 25.0,
     is_enabled=None,
 ) -> tuple[FableDirector, ShadowObservationLog]:
     log = ShadowObservationLog(tmp_path / "director_shadow_log.jsonl")
@@ -358,16 +361,19 @@ async def test_a_stop_request_starts_no_turn_at_all(tmp_path: Path) -> None:
     assert runner.prompts == []
 
 
-async def test_a_stop_request_is_recorded_as_a_failure_not_as_a_yield(
+async def test_a_stop_request_is_counted_as_a_decline_not_as_a_yield(
     tmp_path: Path,
 ) -> None:
+    # Counted, not written: the allocator reaches this for every driver on every
+    # tick, so a durable row here would put an fsync on the hot path. The
+    # distinction that matters is that it is never scored as agreement.
     stop = asyncio.Event()
     stop.set()
     director, log = _director(tmp_path, FakeTurnRunner(_yield_turn()), stop_event=stop)
 
     await _observe(director)
 
-    assert log.recent()[0].turn_failure is TurnFailure.STOPPED
+    assert log.summary()["stopped"] == 1
 
 
 async def test_a_timed_out_turn_is_recorded_as_timed_out(tmp_path: Path) -> None:
@@ -632,13 +638,23 @@ async def test_an_idle_tick_starts_no_turn(tmp_path: Path) -> None:
     assert runner.prompts == []
 
 
-async def test_an_idle_tick_is_recorded_rather_than_dropped(tmp_path: Path) -> None:
-    # Recorded, so the ratio of real boundaries to idle ticks stays visible.
+async def test_an_idle_tick_is_counted_rather_than_dropped(tmp_path: Path) -> None:
+    # Counted, so the ratio of real boundaries to idle ticks stays visible —
+    # without putting a durable write on a path the allocator reaches for every
+    # parked driver on every tick.
     director, log = _director(tmp_path, FakeTurnRunner(_yield_turn()))
 
     await _observe(director, AdvanceOutcome.IDLE)
 
-    assert log.recent()[0].turn_failure is TurnFailure.NOT_A_BOUNDARY
+    assert log.summary()["not_a_boundary"] == 1
+
+
+async def test_an_idle_tick_writes_nothing_to_disk(tmp_path: Path) -> None:
+    director, log = _director(tmp_path, FakeTurnRunner(_yield_turn()))
+
+    await _observe(director, AdvanceOutcome.IDLE)
+
+    assert log.path.exists() is False
 
 
 async def test_an_idle_tick_never_scores_as_agreement(tmp_path: Path) -> None:
@@ -667,7 +683,7 @@ async def test_the_kill_switch_records_why_it_declined(tmp_path: Path) -> None:
 
     await _observe(director)
 
-    assert log.recent()[0].turn_failure is TurnFailure.DISABLED
+    assert log.summary()["disabled"] == 1
 
 
 async def test_the_aggregate_spend_ceiling_stops_further_turns(
@@ -714,3 +730,158 @@ async def test_an_unmapped_outcome_records_the_boundary_rather_than_losing_it(
         shadow_log_module._AGREEING_COMMAND.update(original)
 
     assert log.summary()["observations"] == 1
+
+
+# --------------------------------------------------------------------------
+# The bounds must be live, and the spend must survive a restart
+# --------------------------------------------------------------------------
+
+
+async def test_the_spend_ceiling_is_read_live_not_captured(tmp_path: Path) -> None:
+    # It is registered as a LIVE setting. A live badge on a value captured at
+    # construction is exactly the lie the settings registry forbids — its
+    # neighbour, the kill switch, was wired as a callable from the start and
+    # this one was given the badge without the wiring.
+    ceiling = 25.0
+    runner = FakeTurnRunner(_yield_turn(cost=0.5))
+    director, _log = _director(tmp_path, runner, ceiling=lambda: ceiling)
+    await _observe(director)
+
+    ceiling = 0.1
+    await _observe(director)
+
+    assert len(runner.prompts) == 1
+
+
+async def test_the_cumulative_spend_survives_a_restart(tmp_path: Path) -> None:
+    # Derived from the log's tail, this reset to ~$0 whenever the tail filled
+    # with cheaper rows — silently re-arming the whole budget on every restart.
+    director, log = _director(tmp_path, FakeTurnRunner(_yield_turn(cost=0.75)))
+    await _observe(director)
+
+    reloaded = ShadowObservationLog(log.path)
+
+    assert reloaded.summary()["usd_cost_total"] == pytest.approx(0.75)
+
+
+async def test_the_ceiling_still_bites_after_a_restart(tmp_path: Path) -> None:
+    director, log = _director(
+        tmp_path, FakeTurnRunner(_yield_turn(cost=0.75)), ceiling=0.5
+    )
+    await _observe(director)
+
+    runner = FakeTurnRunner(_yield_turn(cost=0.75))
+    revived = FableDirector(
+        runner=runner,  # type: ignore[arg-type]
+        broker=ShadowDispatchBroker(),
+        shadow_log=ShadowObservationLog(log.path),
+        evidence=EVIDENCE,
+        repo_slug="acme/widgets",
+        route_policy_revision="route-v1",
+        stage_labels=STAGE_LABELS,
+        usd_ceiling=0.5,
+    )
+    await _observe(revived)
+
+    assert runner.prompts == []
+
+
+# --------------------------------------------------------------------------
+# S4's version fence, applied at boot rather than one paid turn at a time
+# --------------------------------------------------------------------------
+
+
+async def test_preflight_refuses_when_the_cli_has_moved_past_the_evidence(
+    tmp_path: Path,
+) -> None:
+    # The per-turn assertion still runs and is still load-bearing, but it fires
+    # AFTER the turn is paid for. Without this, a CLI upgrade means every
+    # boundary buys a turn that is then discarded as sandbox_unverified.
+    runner = FakeTurnRunner(_yield_turn())
+    runner.cli_version = "9.9.9"
+    director, _log = _director(tmp_path, runner)
+
+    with pytest.raises(DirectorSandboxError, match="re-run"):
+        await director.preflight()
+
+
+async def test_preflight_passes_when_the_cli_matches_the_evidence(
+    tmp_path: Path,
+) -> None:
+    director, _log = _director(tmp_path, FakeTurnRunner(_yield_turn()))
+
+    await director.preflight()
+
+
+# --------------------------------------------------------------------------
+# An unmapped outcome is unscored, not "no command"
+# --------------------------------------------------------------------------
+
+
+async def test_an_unmapped_outcome_is_recorded_as_unscored(tmp_path: Path) -> None:
+    # NO_COMMAND meant "the turn produced nothing usable". Filing a command that
+    # WAS read under it produced a row saying "no command" beside the command it
+    # names, and hid a wiring gap in the same bucket as a broken turn.
+    import director_shadow_log as shadow_log_module
+
+    director, log = _director(tmp_path, FakeTurnRunner(_yield_turn()))
+    original = dict(shadow_log_module._AGREEING_COMMAND)
+    del shadow_log_module._AGREEING_COMMAND[AdvanceOutcome.COMMITTED]
+    try:
+        await _observe(director, AdvanceOutcome.COMMITTED)
+    finally:
+        shadow_log_module._AGREEING_COMMAND.update(original)
+
+    assert log.recent()[0].agreement is ShadowAgreement.UNSCORED
+
+
+async def test_an_unscored_row_still_names_the_command_it_read(
+    tmp_path: Path,
+) -> None:
+    import director_shadow_log as shadow_log_module
+
+    director, log = _director(tmp_path, FakeTurnRunner(_yield_turn()))
+    original = dict(shadow_log_module._AGREEING_COMMAND)
+    del shadow_log_module._AGREEING_COMMAND[AdvanceOutcome.COMMITTED]
+    try:
+        await _observe(director, AdvanceOutcome.COMMITTED)
+    finally:
+        shadow_log_module._AGREEING_COMMAND.update(original)
+
+    assert log.recent()[0].command_kind == "yield"
+
+
+# --------------------------------------------------------------------------
+# The rollup must account for every failure kind
+# --------------------------------------------------------------------------
+
+
+async def test_a_generic_turn_error_is_visible_in_the_rollup(
+    tmp_path: Path,
+) -> None:
+    turn = _turn([CLEAN_INIT, _assistant("{}"), _result(is_error=True)])
+    director, log = _director(tmp_path, FakeTurnRunner(turn))
+
+    await _observe(director)
+
+    assert log.summary()["turn_error"] == 1
+
+
+async def test_the_observation_count_reconciles_with_the_agreement_buckets(
+    tmp_path: Path,
+) -> None:
+    # observations == agreed + diverged + no_command + unscored. It could not be
+    # reconciled before, because declines shared the denominator.
+    director, log = _director(tmp_path, FakeTurnRunner(_dispatch_turn()))
+    await _observe(director, AdvanceOutcome.COMMITTED)
+    await _observe(director, AdvanceOutcome.IDLE)
+    summary = log.summary()
+
+    buckets = (
+        summary["agreed"]
+        + summary["diverged"]
+        + summary["no_command"]
+        + summary["unscored"]
+    )
+
+    assert buckets == summary["observations"]

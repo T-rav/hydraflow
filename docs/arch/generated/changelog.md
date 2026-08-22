@@ -6,6 +6,9 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `99a839e` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0838 *(2026-08-22)*
+- `dfd0e25` — fix(director): the shadow observer spun the allocator and fsync'd per tick (#11641) (#11641) *(2026-08-22)*
+- `8531cd5` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
 - `f0939e7` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-0746 *(2026-08-22)*
 - `d227fab` — feat(director): Fable P2 — isolated director and broker in shadow mode (#11537) (#11638) (#11638) *(2026-08-22)*
 - `36468f8` — feat(gateway): P1 — policy resolver, explanation, and shadow decisions (ADR-0139) (#11639) (#11639) *(2026-08-22)*
