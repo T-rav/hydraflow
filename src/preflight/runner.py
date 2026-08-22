@@ -7,12 +7,12 @@ This module owns prompt rendering; spawning happens in PreflightAgent (agent.py)
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
+from package_resources import resource_dir
 from untrusted_text import UNTRUSTED_DATA_PREAMBLE, fence_untrusted
 
-_PROMPT_DIR = Path(__file__).parent.parent.parent / "prompts" / "auto_agent"
+_PROMPT_DIR = resource_dir("prompts") / "auto_agent"
 
 
 def render_prompt(

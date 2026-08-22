@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from base_background_loop import BaseBackgroundLoop, LoopDeps
 from config import HydraFlowConfig
 from exception_classify import reraise_on_credit_or_bug
+from package_resources import resource_path
 
 if TYPE_CHECKING:
     from ports import PRPort, WorkspacePort
@@ -42,7 +43,7 @@ class SandboxFailureFixerLoop(BaseBackgroundLoop):
     For each candidate that is not opted out via ``no-auto-fix``:
 
     * If attempts < ``auto_agent_max_attempts``, bump the counter and call
-      ``runner.run`` with the ``prompts/auto_agent/sandbox_fix.md`` envelope.
+      ``runner.run`` with the ``prompts/auto_agent/sandbox_fix.md`` resource.
     * Otherwise swap labels (``sandbox-fail-auto-fix`` → ``sandbox-hitl``)
       so the PR shows up in the HITL queue for human triage.
 
@@ -207,14 +208,7 @@ class SandboxFailureFixerLoop(BaseBackgroundLoop):
         patterns on each attempt.  Both sources degrade gracefully to
         placeholder text on fetch failure.
         """
-        from pathlib import Path
-
-        envelope_path = (
-            Path(__file__).resolve().parent.parent
-            / "prompts"
-            / "auto_agent"
-            / "sandbox_fix.md"
-        )
+        envelope_path = resource_path("prompts", "auto_agent", "sandbox_fix.md")
         envelope = envelope_path.read_text()
 
         # --- Context expansion (ADR-0063 W3c) ---

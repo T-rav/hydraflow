@@ -27,7 +27,7 @@ Coverage is counted against `prompt_fitness.discovered_builders()`, an AST walk 
 | `make_prompt()` | **no** — all 11 gates green |
 | `assemble_instructions()` | **no** — all 11 gates green |
 
-Three real builders had in fact been evading it (`agent._build_tdd_subagent_plan`, `review_advisor.format_mid_flight_for_prompt`, `prompt_refiner.assemble_refine_context`) and were renamed to conform. That fixed the instances and not the mechanism. Separately, 18 Markdown templates under `prompts/auto_agent/` are model-bound prompts that are not Python functions at all, so the AST walk cannot see them in principle (#10858).
+Three real builders had in fact been evading it (`agent._build_tdd_subagent_plan`, `review_advisor.format_mid_flight_for_prompt`, `prompt_refiner.assemble_refine_context`) and were renamed to conform. That fixed the instances and not the mechanism. Separately, 18 Markdown templates under `src/hydraflow_resources/prompts/auto_agent/` are model-bound prompts that are not Python functions at all, so the AST walk cannot see them in principle (#10858).
 
 **The defect is structural: an inferred denominator cannot report what it fails to enumerate.** A gate whose scope is defined by a regex reports full coverage of the set it happens to match, and says nothing about the set it does not. That is the same class of error as ADR-0116 §9's measurement bugs — a measure reporting better news than reality — one level further out.
 

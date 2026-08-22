@@ -36,9 +36,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 
-_REPO = Path(__file__).resolve().parent.parent
-_SRC = _REPO / "src"
-_AUDIT = _REPO / "scripts" / "audit_prompts.py"
+from package_resources import checkout_path
+
+# Both inputs are development artefacts the wheel deliberately does not ship:
+# this module reads HydraFlow's own source tree to discover prompt builders,
+# and executes scripts/audit_prompts.py for the registry. They resolve through
+# the checkout — and are resolved lazily, so importing this module from an
+# installed wheel is fine and only *using* it raises a named error instead of
+# walking site-packages as if it were src/ (#11589).
+
+
+def _src_root() -> Path:
+    """HydraFlow's own ``src/`` tree — the corpus this module walks."""
+    return checkout_path("src")
+
+
+def _audit_script() -> Path:
+    """``scripts/audit_prompts.py`` — holder of ``PROMPT_REGISTRY``."""
+    return checkout_path("scripts", "audit_prompts.py")
+
 
 # A prompt builder assembles model-bound text. Convention: build/compose/render
 # + "prompt", or the bare ``_build_prompt`` / ``_build_prompt_with_stats`` used
@@ -127,13 +143,13 @@ def _module_name(path: Path) -> str:
     The dotted name is also the importable name, so a registry entry can be
     constructed from it directly.
     """
-    return ".".join(path.relative_to(_SRC).with_suffix("").parts)
+    return ".".join(path.relative_to(_src_root()).with_suffix("").parts)
 
 
 def discovered_builders() -> dict[str, list[str]]:
     """Dotted module name -> prompt-builder function names, found by AST walk."""
     out: dict[str, list[str]] = {}
-    for path in sorted(_SRC.rglob("*.py")):
+    for path in sorted(_src_root().rglob("*.py")):
         module = _module_name(path)
         if module in EXCLUDED_MODULES or path.stem in EXCLUDED_MODULES:
             continue
@@ -604,9 +620,10 @@ def load_audit_module() -> ModuleType:
     calls never return the same object, so callers must not rely on
     identity across calls.
     """
-    spec = importlib.util.spec_from_file_location("_audit_prompts", _AUDIT)
+    audit = _audit_script()
+    spec = importlib.util.spec_from_file_location("_audit_prompts", audit)
     if spec is None or spec.loader is None:  # pragma: no cover - defensive
-        raise ImportError(f"cannot load {_AUDIT}")
+        raise ImportError(f"cannot load {audit}")
     module = importlib.util.module_from_spec(spec)
     sys.modules.setdefault("_audit_prompts", module)
     spec.loader.exec_module(module)

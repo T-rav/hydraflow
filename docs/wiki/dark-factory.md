@@ -127,7 +127,7 @@ document clearly in the prompt envelope AND rely on principles-audit + CI
 to catch violations. Don't lie about enforcement boundaries — operators
 reading docs during incident triage need to know what's runtime-enforced
 vs what's post-hoc-audited. The Auto-Agent `_envelope.md` revision
-(`prompts/auto_agent/_envelope.md`) is the reference: clearly separates
+(`src/hydraflow_resources/prompts/auto_agent/_envelope.md`) is the reference: clearly separates
 "Enforced by the Claude Code CLI" from "Enforced post-hoc by CI /
 principles audit".
 

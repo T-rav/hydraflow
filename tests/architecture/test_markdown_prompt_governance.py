@@ -1,7 +1,7 @@
 """Ratchet: every Markdown prompt template is governed (#10858).
 
 ``prompt_fitness.discovered_builders()`` walks ``src/**/*.py`` only, so the
-model-bound Markdown prompts under ``prompts/auto_agent/*.md`` (loaded by
+model-bound Markdown prompts under ``src/hydraflow_resources/prompts/auto_agent/*.md`` (loaded by
 ``preflight.runner.render_prompt``) and the agent contracts under
 ``.claude/agents/*.md`` are prompts by every definition ADR-0116 uses, yet the
 coverage series never sees them: it reads 100% while a whole artifact class sits
@@ -22,7 +22,7 @@ from __future__ import annotations
 import pathlib
 
 _REPO = pathlib.Path(__file__).resolve().parent.parent.parent
-_AUTO_AGENT = _REPO / "prompts" / "auto_agent"
+_AUTO_AGENT = _REPO / "src" / "hydraflow_resources" / "prompts" / "auto_agent"
 _CLAUDE_AGENTS = _REPO / ".claude" / "agents"
 
 #: Templates a registered fixture already renders + scores. ``_default.md`` and
@@ -31,8 +31,8 @@ _CLAUDE_AGENTS = _REPO / ".claude" / "agents"
 #: registered in PR #10856).
 _MEASURED = frozenset(
     {
-        "prompts/auto_agent/_default.md",
-        "prompts/auto_agent/_envelope.md",
+        "src/hydraflow_resources/prompts/auto_agent/_default.md",
+        "src/hydraflow_resources/prompts/auto_agent/_envelope.md",
     }
 )
 
@@ -44,25 +44,25 @@ _GRANDFATHERED = frozenset(
         # #11298 light-lane builder — declared at introduction; burn-down:
         # register a preflight_auto_agent-style fixture rendering the
         # auto-light template and move to _MEASURED.
-        "prompts/auto_agent/auto-light.md",
-        # prompts/auto_agent specialist sub-label templates
-        "prompts/auto_agent/discover-stuck.md",
-        "prompts/auto_agent/fake-coverage-stuck.md",
-        "prompts/auto_agent/fake-drift-stuck.md",
-        "prompts/auto_agent/flaky-test-stuck.md",
-        "prompts/auto_agent/implement-cap-exhausted.md",
-        "prompts/auto_agent/implement-stuck.md",
-        "prompts/auto_agent/plan-stuck.md",
-        "prompts/auto_agent/pr_red_fix.md",
-        "prompts/auto_agent/rc-duration-stuck.md",
-        "prompts/auto_agent/rc-red-bisect-exhausted.md",
-        "prompts/auto_agent/revert-conflict.md",
-        "prompts/auto_agent/review-stuck.md",
-        "prompts/auto_agent/sandbox_fix.md",
-        "prompts/auto_agent/skill-prompt-stuck.md",
-        "prompts/auto_agent/triage-stuck.md",
-        "prompts/auto_agent/trust-loop-anomaly.md",
-        "prompts/auto_agent/wiki-rot-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/auto-light.md",
+        # src/hydraflow_resources/prompts/auto_agent specialist sub-label templates
+        "src/hydraflow_resources/prompts/auto_agent/discover-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/fake-coverage-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/fake-drift-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/flaky-test-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/implement-cap-exhausted.md",
+        "src/hydraflow_resources/prompts/auto_agent/implement-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/plan-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/pr_red_fix.md",
+        "src/hydraflow_resources/prompts/auto_agent/rc-duration-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/rc-red-bisect-exhausted.md",
+        "src/hydraflow_resources/prompts/auto_agent/revert-conflict.md",
+        "src/hydraflow_resources/prompts/auto_agent/review-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/sandbox_fix.md",
+        "src/hydraflow_resources/prompts/auto_agent/skill-prompt-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/triage-stuck.md",
+        "src/hydraflow_resources/prompts/auto_agent/trust-loop-anomaly.md",
+        "src/hydraflow_resources/prompts/auto_agent/wiki-rot-stuck.md",
         # .claude/agents contracts (the issue notes the same gap applies)
         ".claude/agents/hf.code-quality-enforcer.md",
         ".claude/agents/hf.test-audit.md",

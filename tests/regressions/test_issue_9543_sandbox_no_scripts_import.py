@@ -51,7 +51,7 @@ def test_sandbox_main_never_imports_scripts_package() -> None:
     assert offenders == [], (
         f"src/mockworld/sandbox_main.py imports the `scripts` package at "
         f"{offenders} — that package is NOT shipped into the sandbox docker "
-        "image (Dockerfile.agent copies only src/tests/templates/static), so "
+        "image (Dockerfile.agent copies only src/ and tests/), so "
         "the import wedges the air-gapped sandbox at boot or seam-wiring "
         "time. Use a duck-typed local stand-in instead (see "
         "SeededActivationProposal)."

@@ -7,7 +7,11 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-exclude = ["ui*", "templates*", "tests*"]
+# hydraflow_resources.* is excluded so the resource tree is ONE package whose
+# package-data glob below covers every file beneath it. Discovered as separate
+# sub-packages, each nested directory would need its own package-data entry
+# and a new prompts sub-directory would ship empty (#11589).
+exclude = ["ui*", "templates*", "tests*", "hydraflow_resources.*"]
 
 # The ~340 flat top-level modules under src/ (server.py, config.py, ...) are
 # enumerated by setup.py at build time — packages.find sees directories only
@@ -15,6 +19,11 @@ exclude = ["ui*", "templates*", "tests*"]
 # __file__ must be declared here or the wheel boots and fails on first use.
 [tool.setuptools.package-data]
 assets = ["*.json"]
+# prompts/, templates/ and static/ — the runtime resources resolved through
+# src/package_resources.py. They live under src/ precisely so that one
+# expression (`package_root() / "hydraflow_resources"`) finds them in a
+# checkout and in site-packages alike (#11589).
+hydraflow_resources = ["**/*"]
 
 [project]
 name = "hydraflow"
@@ -141,7 +150,7 @@ exclude = [
     "tests",
     "**/__pycache__",
     "**/node_modules",
-    "templates",
+    "src/hydraflow_resources",
     ".cache",
     ".cache/**",
     ".uv-cache",
@@ -218,7 +227,7 @@ filterwarnings = [
 
 [tool.coverage.run]
 source = ["src"]
-omit = ["tests/*", "*/__init__.py", "venv/*", ".venv/*", "templates/*"]
+omit = ["tests/*", "*/__init__.py", "venv/*", ".venv/*", "src/hydraflow_resources/*"]
 
 [tool.coverage.report]
 fail_under = 91.3

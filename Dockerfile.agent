@@ -153,16 +153,16 @@ COPY scripts/docker-smoke-test.sh /opt/hydraflow/docker-smoke-test.sh
 # `tests.trust.contracts._schema` at module load time (the schema lives
 # next to its consumers in tests/). PYTHONPATH includes /opt/hydraflow
 # so `tests.*` resolves.
+#
+# The runtime resources (auto-agent prompts, the dashboard's fallback template
+# + JS) each needed a COPY line of their own here, and forgetting one was
+# invisible until a loop tried to read the file: no auto-agent spawn could run
+# inside the image because prompts/auto_agent/_default.md was absent, found
+# only when the light lane went default-on (#11590). They now live under
+# src/hydraflow_resources/ (#11589), so `COPY src` carries every one of them
+# and there is nothing left to forget.
 COPY --chown=hydraflow:hydraflow src /opt/hydraflow/src
 COPY --chown=hydraflow:hydraflow tests /opt/hydraflow/tests
-COPY --chown=hydraflow:hydraflow templates /opt/hydraflow/templates
-COPY --chown=hydraflow:hydraflow static /opt/hydraflow/static
-# prompts/ ships too: AutoAgentPreflightLoop (and every auto-agent spawn)
-# renders prompts/auto_agent/<playbook>.md via src/preflight/runner.py, which
-# resolves the directory relative to src/. Without it no auto-agent spawn can
-# run inside the sandbox image (FileNotFoundError on _default.md; found when
-# the light lane went default-on, #11590).
-COPY --chown=hydraflow:hydraflow prompts /opt/hydraflow/prompts
 ENV PYTHONPATH=/opt/hydraflow/src:/opt/hydraflow
 
 CMD ["bash"]
