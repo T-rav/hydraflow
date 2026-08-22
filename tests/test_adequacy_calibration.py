@@ -574,7 +574,20 @@ def test_pinned_overlap_excludes_a_pin_that_cannot_discriminate() -> None:
     result = pinned_demand_overlap(
         [_rejection(9001, pinned_findings=("a.py:b — no test",))]
     )
-    assert result.n_pinned_rejections == 0
+    assert result.n_pinned_runs == 0
+
+
+def test_pinned_overlap_counts_a_waived_retry_that_passed() -> None:
+    """The waived retry is where the bar moved furthest — excluding it biases up."""
+    waived = AdequacyRunRecord(
+        issue_number=9001,
+        recorded_at=datetime(2026, 8, 2, tzinfo=UTC),
+        gate_outcome=GateOutcome.ACCEPTED,
+        findings=("`truncate_span` boundary untested",),
+        pinned_findings=("`rebuild_index` has no failure test",),
+        advisory_findings=("`truncate_span` boundary untested",),
+    )
+    assert pinned_demand_overlap([waived]).n_disjoint == 1
 
 
 # -- suspect rejections ---------------------------------------------------------

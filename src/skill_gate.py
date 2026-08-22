@@ -327,10 +327,20 @@ async def run_skill_check(
         )
         if not result.passed:
             verdict_source = "verifier-override"
-            findings = _stated_findings(verifier_gaps, result.summary)
             # The override arm routes through the same contract as the finder
             # (#11644): its threshold, model independence and explicit-OK
-            # trigger are untouched — only what its findings may DEMAND is.
+            # trigger are untouched — only what its ENUMERATED gaps may DEMAND.
+            #
+            # Deliberately NO summary fallback here, unlike the finder arm. The
+            # verifier's fail-closed policy (#9546) rejects a DEGRADED run — an
+            # empty transcript — with a fabricated summary and no gaps; that
+            # sentence is a policy decision, not a stated demand, and splitting
+            # it into findings would let the contract absorb it and waive the
+            # very rejection the fail-closed default exists to make. An
+            # override that enumerated nothing therefore blocks unconditionally,
+            # which also keeps this arm — the better-evidenced subset per
+            # #11643 — strictly no looser than before.
+            findings = list(verifier_gaps)
             result, demand = _apply_demand_contract(
                 result,
                 findings,

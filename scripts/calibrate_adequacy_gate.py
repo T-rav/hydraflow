@@ -414,7 +414,7 @@ def render_report(report: CalibrationReport, *, skipped: int = 0) -> str:
     else:
         mean = "n/a" if pinned.mean_jaccard is None else f"{pinned.mean_jaccard:.2f}"
         lines.append(
-            f"  retries judged against a pin: {pinned.n_pinned_rejections}   "
+            f"  retries judged against a pin: {pinned.n_pinned_runs}   "
             f"mean overlap with the pin: {mean}"
         )
         lines.append(

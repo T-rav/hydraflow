@@ -332,15 +332,20 @@ class PinnedDemandOverlap:
 
     :class:`DemandStationarity` infers the moving bar from consecutive
     rejections; this measures it directly, from the pin the gate carried onto
-    the retry. ``n_pinned_rejections == 0`` means no run in the corpus enforced
-    a pin — the pre-#11644 state, reported as "not enforced" rather than as a
+    the retry. ``n_pinned_runs == 0`` means no run in the corpus enforced a
+    pin — the pre-#11644 state, reported as "not enforced" rather than as a
     perfect or a zero score.
+
+    Counted over runs of **either** outcome, not rejections only: a retry the
+    pin *waived* is the case where the demand moved furthest, so scoring only
+    the retries that still failed would bias the overlap upward and hide
+    exactly what the metric exists to show.
 
     ``n_advisory_findings`` is the count the pin absorbed: findings that were
     both new *and* unanchored, recorded instead of rejecting the run.
     """
 
-    n_pinned_rejections: int
+    n_pinned_runs: int
     n_disjoint: int
     mean_jaccard: float | None
     disjoint_rate: ProportionInterval | None
@@ -350,11 +355,11 @@ class PinnedDemandOverlap:
     @property
     def enforced(self) -> bool:
         """Did any run in this corpus carry a pinned demand?"""
-        return self.n_pinned_rejections > 0
+        return self.n_pinned_runs > 0
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
-            "n_pinned_rejections": self.n_pinned_rejections,
+            "n_pinned_runs": self.n_pinned_runs,
             "n_disjoint": self.n_disjoint,
             "mean_jaccard": self.mean_jaccard,
             "disjoint_rate": (
@@ -814,22 +819,27 @@ def pinned_demand_overlap(
     :func:`demand_stationarity` *infers* the moving bar by pairing consecutive
     rejections; this reads the pin the run carried and compares it with what
     that run then demanded. A corpus where nothing enforced a pin reports
-    ``n_pinned_rejections=0`` and ``mean_jaccard=None`` — "not enforced", never
-    a fabricated score.
+    ``n_pinned_runs=0`` and ``mean_jaccard=None`` — "not enforced", never a
+    fabricated score.
 
-    A pin carrying no topical tokens of its own (short symbol names only) is
-    excluded rather than scored: it cannot be compared with anything, so a
-    Jaccard of 0.0 against it would read as "demanded something entirely new"
-    when the truth is "not comparable". The live gate treats the same case as
-    "no pin in force" and blocks on every finding, so the exclusion matches
-    what actually happened.
+    Runs of either outcome count: a retry the pin *waived* still stated a
+    demand (its absorbed findings ride ``findings``), and it is the case where
+    the bar moved furthest, so restricting the denominator to rejections would
+    bias the overlap upward.
+
+    Two exclusions, both "not comparable" rather than "no overlap":
+
+    * a run that stated no findings — there is nothing to compare with the pin;
+    * a pin carrying no topical tokens of its own (short symbol names only) —
+      a Jaccard of 0.0 against it would read as "demanded something entirely
+      new" when the truth is "cannot discriminate". The live gate treats that
+      same case as "no pin in force" and blocks on every finding, so the
+      exclusion matches what actually happened.
     """
     pinned_runs = [
         r
         for r in records
-        if r.gate_outcome is GateOutcome.REJECTED
-        and r.pinned_findings
-        and demand_tokens(r.pinned_findings)
+        if r.pinned_findings and r.findings and demand_tokens(r.pinned_findings)
     ]
     scores = [
         _jaccard(demand_tokens(r.pinned_findings), demand_tokens(r.findings))
@@ -837,7 +847,7 @@ def pinned_demand_overlap(
     ]
     disjoint = sum(1 for s in scores if s == 0.0)
     return PinnedDemandOverlap(
-        n_pinned_rejections=len(pinned_runs),
+        n_pinned_runs=len(pinned_runs),
         n_disjoint=disjoint,
         mean_jaccard=statistics.fmean(scores) if scores else None,
         disjoint_rate=wilson_interval(disjoint, len(scores)),

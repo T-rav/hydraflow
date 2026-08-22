@@ -144,7 +144,12 @@ def build_test_adequacy_repair_prompt(
     so the pass is never sent chasing a bar that no longer rejects the run.
     """
     source_label = _VERDICT_SOURCE_LABELS.get(verdict_source, verdict_source)
-    anchored_set = set(anchored_findings or findings)
+    # ``None`` means the caller supplied no anchoring split (pre-#11644 call
+    # sites) — treat everything as anchored and render the original single
+    # list. An empty LIST is a different statement: nothing is anchored, which
+    # is the corpus's majority case (75 %) and precisely when the locate-it-
+    # first instruction matters most. Truthiness would collapse the two.
+    anchored_set = set(findings if anchored_findings is None else anchored_findings)
     anchored = [f for f in findings if f in anchored_set]
     unanchored = [f for f in findings if f not in anchored_set]
 

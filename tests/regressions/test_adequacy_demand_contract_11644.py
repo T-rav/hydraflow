@@ -122,6 +122,34 @@ async def test_the_contract_never_waives_a_rejection_it_must_not(
 
 
 @pytest.mark.asyncio
+async def test_a_fail_closed_degraded_verifier_is_not_absorbed_by_the_pin(
+    config, event_bus: EventBus, agent_task, tmp_path: Path
+) -> None:
+    """#9546's fail-closed default rejects a DEGRADED verifier run with a
+    fabricated summary and no gaps. Recovering findings from that sentence
+    (as the finder arm legitimately does) let the contract classify it as a
+    new, unanchored demand and waive the very rejection the default exists to
+    make. The override arm is judged on its ENUMERATED gaps only.
+    """
+    runner = _runner(config, event_bus)
+    config.test_adequacy_verifier_enabled = True
+    config.test_adequacy_verifier_fail_closed = True
+    # Finder says OK (triggers the verifier); the verifier returns nothing.
+    execute = AsyncMock(side_effect=["TEST_ADEQUACY_RESULT: OK", ""])
+    p = _patches(runner, execute, [])
+    with p[0], p[1], p[2], p[3]:
+        result = await runner._run_skill(
+            TEST_ADEQUACY,
+            agent_task,
+            tmp_path,
+            "branch",
+            worker_id=0,
+            pinned_findings=_PIN,
+        )
+    assert result.passed is False
+
+
+@pytest.mark.asyncio
 async def test_the_gate_kill_switch_still_disables_everything(
     config, event_bus: EventBus, agent_task, tmp_path: Path
 ) -> None:

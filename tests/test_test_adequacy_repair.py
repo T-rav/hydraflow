@@ -146,6 +146,35 @@ class TestRepairPromptBuilder:
         assert "src/foo.py:30" not in prompt
         assert "(+ 10 more)" in prompt
 
+    @pytest.mark.parametrize(
+        ("anchored", "wants_locate_section"),
+        [
+            pytest.param(
+                None, False, id="no-split-supplied-renders-the-legacy-single-list"
+            ),
+            pytest.param(
+                [], True, id="nothing-anchored-still-asks-for-the-referent-first"
+            ),
+        ],
+    )
+    def test_an_empty_anchored_list_is_not_the_same_as_no_split(
+        self, anchored: list[str] | None, wants_locate_section: bool
+    ) -> None:
+        """75 % of real findings are unanchored — the majority case must not
+        collapse into the legacy "treat everything as locatable" branch.
+        """
+        prompt = build_test_adequacy_repair_prompt(
+            issue_number=42,
+            issue_title="Fix it",
+            verdict_source="llm-fail",
+            summary="edge-case-coverage",
+            findings=["edge-case-coverage"],
+            anchored_findings=anchored,
+            pass_number=1,
+            max_passes=1,
+        )
+        assert ("Unlocatable demands" in prompt) is wants_locate_section
+
 
 # ---------------------------------------------------------------------------
 # Repair budget resolution
@@ -709,18 +738,37 @@ class TestPinnedDemand:
         assert result.passed is False
 
     @pytest.mark.asyncio
-    async def test_a_verifier_override_of_a_new_unanchored_gap_does_not_reject(
-        self, config, event_bus: EventBus, agent_task, tmp_path: Path
-    ) -> None:
-        """The override arm routes through the same contract as the finder."""
-        runner = _runner(config, event_bus, passes=0, verifier=True)
-        execute = AsyncMock(
-            side_effect=[
-                _FINDER_OK,
+    @pytest.mark.parametrize(
+        ("verifier_transcript", "expected_pass"),
+        [
+            pytest.param(
+                "TEST_ADEQUACY_VERIFIER_RESULT: OVERRIDE\n"
+                "SUMMARY: gaps\n"
+                "GAPS:\n"
+                "- boundary-condition gap in truncation logic\n",
+                True,
+                id="enumerated-new-unanchored-gap-is-absorbed",
+            ),
+            pytest.param(
                 "TEST_ADEQUACY_VERIFIER_RESULT: OVERRIDE\n"
                 "SUMMARY: boundary-condition gap in truncation logic\n",
-            ]
-        )
+                False,
+                id="override-enumerating-nothing-blocks-unconditionally",
+            ),
+        ],
+    )
+    async def test_the_override_arm_is_judged_on_its_enumerated_gaps_only(
+        self,
+        config,
+        event_bus: EventBus,
+        agent_task,
+        tmp_path: Path,
+        verifier_transcript: str,
+        expected_pass: bool,
+    ) -> None:
+        """No summary fallback here: the fail-closed policy fabricates one."""
+        runner = _runner(config, event_bus, passes=0, verifier=True)
+        execute = AsyncMock(side_effect=[_FINDER_OK, verifier_transcript])
         p = _gate_patches(runner, execute)
         with p[0], p[1], p[2], p[3]:
             result = await runner._run_skill(
@@ -731,7 +779,7 @@ class TestPinnedDemand:
                 worker_id=0,
                 pinned_findings=_PIN,
             )
-        assert result.passed is True
+        assert result.passed is expected_pass
 
 
 # ---------------------------------------------------------------------------
