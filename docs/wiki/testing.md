@@ -468,3 +468,26 @@ _Source: #11602 (implement)_
 ```json:entry
 {"id":"01KRSUBPROCRUNNERCONSTRUCT11602","title":"A BaseSubprocessRunner construction is a spawn site the seam scan cannot see (#11602)","topic":null,"source_type":"implement","source_issue":11602,"source_repo":null,"created_at":"2026-08-22T00:00:00.000000+00:00","updated_at":"2026-08-22T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
 ```
+
+## Sandbox verification runs belong in CI, not on the factory host (#11601)
+
+Local `docker compose -f docker-compose.sandbox.yml` runs are for **developing** a scenario: the fast edit/run loop, `python scripts/sandbox_scenario.py shell`, poking the stack by hand while the assertions are still being written. They are **not** how a scenario gets verified. The factory host is one Mac driving the whole pipeline toward 20+ merged PRs/day; a compose stack booted on it during production hours competes for the exact CPU/RAM/docker daemon the factory needs, and sandbox e2e was the last heavy workload still tied to that host.
+
+Verification runs go to a GitHub runner via the **Sandbox Scenario (dispatch)** workflow (`.github/workflows/sandbox-dispatch.yml`): `workflow_dispatch` with a `ref` (default the default branch) and a `scenario` (a scenario name, `fast` for the PR→staging subset, or `all`). It runs `scripts/sandbox_scenario.py run <name>` on the runner and prints the PASS/FAIL verdict plus an 80-line log tail into `$GITHUB_STEP_SUMMARY`, so the operator reads the answer without opening the log or the host. `gh workflow run "Sandbox Scenario (dispatch)" --ref <branch> -f ref=<branch> -f scenario=<name>`. It is a manual lane only — never a required check, never attached to a PR.
+
+The branch is named twice on purpose. The checkout takes **no** `ref:` — it uses the run's own ref — and the `ref` input is only an assertion the job reconciles against `github.ref_name` before anything reaches disk. Checking out a ref named by an input is CodeQL's `actions/cache-poisoning/poisonable-step` (high): a `workflow_dispatch` run can WRITE the Actions cache scope of the branch it runs on, so executing a *different* branch's code in that run lets that code poison the cache every other workflow restores from. Turning off a specific caching action does not fix it — any step that executes the tree holds the runtime cache token. Collapsing "code executed" and "cache scope written" onto one branch is the fix, and it mirrors the pin-and-assert shape `staging-rc-dryrun.yml` already uses for the same alert class (#11518).
+
+What made that affordable is the layer cache. Every sandbox lane used to run `docker compose build … hydraflow …`, rebuilding the ~3 GB `Dockerfile.agent` image from scratch: ~10 min per lane, and the entire exposure surface for the recurring NodeSource CDN 403 flake (the apt/NodeSource/uv layers are re-fetched on every single run). The lanes now call the `.github/actions/build-agent-image` composite action, which builds with buildx against a GHCR registry cache (`ghcr.io/<owner>/hydraflow-agent:sandbox-buildcache`, `mode=max` — required, because the expensive layers live in `base`/`tools` stages the runtime stage only `COPY --from`s) and loads the result as `hydraflow-agent-sandbox:local`, the tag `docker-compose.sandbox.yml` now pins for the `hydraflow` service.
+
+Two couplings make that actually save time rather than merely look cached. First, compose only builds a service whose image is absent, so the pre-loaded tag short-circuits it — but the workflow's own `docker compose build` list must then **omit** `hydraflow`. Second, `scripts/sandbox_scenario.py` rebuilds every service before each scenario, and the runner daemon's builder does **not** share buildx's cache; the composite action therefore exports `SANDBOX_BUILD_SERVICES` so the harness skips the service it already built. Forget either and the cache is silently thrown away with no red anywhere.
+
+Only trusted push/schedule lanes write the cache (`push-cache: 'true'` + `packages: write` on the post-merge-smoke and nightly jobs); every `pull_request` lane reads it with `packages: read`. A mutable cache ref a PR could overwrite is a cache-poisoning sink in a public repo, and the cache-writing context must only ever see already-merged code.
+
+**Why:** at 20+ PRs/day the host is the constraint, and "verify it locally" quietly spends the constraint. Moving verification to CI only helps if CI is fast: 10 min × every sandbox lane × every PR was the reason people ran it locally in the first place. The 2 GB agent-image size gate stays exactly where it was (`build-agent-image.yml`, rc/* → main) — caching changes how the image is built, never what ships in it.
+
+_Source: #11601 (plan)_
+
+
+```json:entry
+{"id":"01KSANDBOXCIDISPATCH11601WIKI","title":"Sandbox verification runs belong in CI, not on the factory host (#11601)","topic":null,"source_type":"plan","source_issue":11601,"source_repo":null,"created_at":"2026-08-22T00:00:00.000000+00:00","updated_at":"2026-08-22T00:00:00.000000+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```

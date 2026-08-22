@@ -56,6 +56,11 @@ jobs:
     name: Staging RC dry-run shard
     runs-on: ubuntu-latest
     needs: [resolve]
+    # packages:read pulls the buildx layer cache for Dockerfile.agent. Never
+    # `write` here — see the build step's comment below.
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false # run every shard so all failures surface in one pass
       matrix:
@@ -99,8 +104,17 @@ jobs:
           python-version: "3.11"
       - if: steps.pin.outputs.matched == 'true'
         run: pip install uv && uv pip install --system -e ".[dev]"
+      # Read-only cache access. This job runs with default-branch privilege on
+      # a schedule; it reads the layer cache the post-merge push lane
+      # publishes, and deliberately does not write it — one writer, in the one
+      # context that only ever sees merged code.
+      - name: Build agent image (GHCR layer cache)
+        if: steps.pin.outputs.matched == 'true'
+        uses: ./.github/actions/build-agent-image
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       - if: steps.pin.outputs.matched == 'true'
-        run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway hydraflow ui playwright
+        run: docker compose -f docker-compose.sandbox.yml build fake-llm-http gateway ui playwright
       - name: Run shard ${{ matrix.shard }}/6 against staging HEAD
         if: steps.pin.outputs.matched == 'true'
         run: |

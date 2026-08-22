@@ -70,6 +70,15 @@ services:
       start_period: 2s
 
   hydraflow:
+    # Pinned tag (same convention as `gateway` above) so CI can pre-build this
+    # image with buildx + a GHCR layer cache
+    # (.github/actions/build-agent-image) and have compose *use* it instead of
+    # rebuilding the ~3 GB image from scratch. `docker compose up` only builds
+    # a service whose image is absent, so a pre-loaded tag short-circuits the
+    # build. Local dev is unaffected: `make sandbox-up` passes `--build`.
+    # tests/architecture/test_sandbox_ci_cache.py pins this against the tag the
+    # composite action loads.
+    image: hydraflow-agent-sandbox:local
     build:
       context: .
       dockerfile: Dockerfile.agent
