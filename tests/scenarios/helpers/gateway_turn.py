@@ -24,6 +24,11 @@ from pydantic import SecretStr
 
 from execution import SimpleResult
 from gateway_coverage import gateway_ledger_path
+from gateway_mint_client import (
+    GatewayMintCredential,
+    GatewayMintRequest,
+    GatewayMintV2Request,
+)
 from hydraflow_gateway.app import create_app
 from hydraflow_gateway.keys import VirtualKeyStore
 from hydraflow_gateway.ledger import GatewayBodyStore, GatewayLedger
@@ -34,12 +39,7 @@ from hydraflow_gateway.settings import (
     UpstreamSettings,
 )
 from prompt_telemetry import parse_command_tool_model
-from runner_utils import (
-    GatewayMintCredential,
-    GatewayMintRequest,
-    GatewayMintV2Request,
-    run_lightweight_agent,
-)
+from runner_utils import run_lightweight_agent
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence

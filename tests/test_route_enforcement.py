@@ -33,7 +33,7 @@ from route_enforcement import (
     canary_blast_radius,
     enforce_canary_route,
 )
-from route_shadow import RouteStage, policy_snapshot_path
+from route_shadow import RouteStage, policy_snapshot_path, record_route_shadow
 
 _CANARY = "acme/project-x"
 
@@ -48,6 +48,7 @@ class _Config:
         self.gateway_repo_class = "hydraflow"
         self.gateway_enforcement_canary_repo = _CANARY
         self.gateway_capture_bodies = False
+        self.gateway_route_shadow_enabled = True
         for key, value in overrides.items():
             setattr(self, key, value)
 
@@ -394,3 +395,36 @@ def test_the_one_shot_face_inside_the_canary_is_enforced_too(tmp_path: Path) -> 
     _write_policies(tmp_path, _zai_policy())
 
     assert _enforce(_Config(tmp_path), request_face=RequestFace.ONE_SHOT) is not None
+
+
+# --------------------------------------------------------------------------
+# AC8 — the enforced route and the shadow record name the same decision
+# --------------------------------------------------------------------------
+
+
+def test_the_shadow_record_and_the_enforced_route_share_one_decision_id(
+    tmp_path: Path,
+) -> None:
+    """The join between the child's own chain and the gateway's ledger row.
+
+    ``decision_id`` is content-addressed over the context and the snapshot
+    (ADR-0139), so the observation and the enforcement of ONE spawn derive the
+    same id independently. That is what lets a ledger row carrying
+    ``route_decision_id`` be traced back to the hash-linked record of why the
+    spawn routed where it did — without either side inventing an identity.
+    """
+    config = _Config(tmp_path)
+    _write_policies(tmp_path, _zai_policy())
+    recorded = record_route_shadow(
+        config=config,
+        principal_id="implementer",
+        stages=_stages("gateway"),
+        final_provider="gateway",
+        final_model="claude-sonnet-4-6",
+        request_face=RequestFace.AGENTIC,
+    )
+    route = _enforce(config)
+
+    assert recorded is not None
+    assert route is not None
+    assert recorded.proposed.decision_id == route.decision.decision_id

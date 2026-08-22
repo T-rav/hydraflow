@@ -58,22 +58,41 @@ def _refusal(**kwargs: object) -> PreflightRefusal:
     return caught.value.refusal
 
 
-def test_a_body_naming_the_bound_model_passes() -> None:
-    """The affirmative case, so every refusal assertion below is not vacuous."""
-    check_governed_body(
-        b'{"model": "glm-5.3", "messages": []}',
-        bound_model="glm-5.3",
-        content_type="application/json",
-    )
+@pytest.mark.parametrize(
+    ("body", "content_type"),
+    [
+        pytest.param(
+            b'{"model": "glm-5.3", "messages": []}',
+            "application/json",
+            id="a-body-naming-the-bound-model-passes",
+        ),
+        pytest.param(
+            b'{"model": " glm-5.3 "}',
+            "application/json",
+            id="surrounding-whitespace-is-not-a-binding-violation",
+        ),
+        pytest.param(
+            b'{"model": "GLM-5.3"}',
+            "application/json",
+            id="a-case-difference-is-not-a-binding-violation",
+        ),
+        pytest.param(
+            b'{"model": "glm-5.3"}',
+            "application/json; charset=utf-8",
+            id="the-cli-own-charset-parameter-is-accepted",
+        ),
+    ],
+)
+def test_a_body_that_honours_its_binding_is_accepted(
+    body: bytes, content_type: str
+) -> None:
+    """The affirmative cases, so every refusal assertion below is not vacuous.
 
-
-def test_a_bound_model_comparison_ignores_surrounding_whitespace() -> None:
-    """A trailing space in an argv-derived model is not a binding violation."""
-    check_governed_body(
-        b'{"model": " glm-5.3 "}',
-        bound_model="glm-5.3",
-        content_type="application/json",
-    )
+    The model travels through an argv and a JSON body written by different code,
+    so whitespace and case differences are not binding violations. Everything
+    else is, and the refusal table below is the exhaustive statement of it.
+    """
+    check_governed_body(body, bound_model="glm-5.3", content_type=content_type)
 
 
 @pytest.mark.parametrize(
@@ -142,15 +161,6 @@ def test_every_way_a_body_can_defeat_the_binding_is_refused(
     assert (
         _refusal(body=body, bound_model="glm-5.3", content_type=content_type)
         is expected
-    )
-
-
-def test_a_charset_parameter_does_not_defeat_the_content_type_check() -> None:
-    """``application/json; charset=utf-8`` is the CLI's own header."""
-    check_governed_body(
-        b'{"model": "glm-5.3"}',
-        bound_model="glm-5.3",
-        content_type="application/json; charset=utf-8",
     )
 
 

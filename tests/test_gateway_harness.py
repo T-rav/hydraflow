@@ -14,17 +14,19 @@ import pytest
 
 from config import HydraFlowConfig
 from execution import SimpleResult
-from runner_utils import (
+from gateway_mint_client import (
     GatewayMintCredential,
     GatewayMintError,
     GatewayMintRequest,
+    renew_gateway_key_if_needed,
+    revoke_gateway_key,
+)
+from runner_utils import (
     StreamConfig,
     _claude_cli_complete,
     _HttpGatewayControlClient,
     harness_billing_provider,
-    renew_gateway_key_if_needed,
     resolve_harness_env,
-    revoke_gateway_key,
     stream_claude_with_telemetry,
 )
 from subprocess_util import gateway_sensitive_env_keys

@@ -23,6 +23,7 @@ from gateway_coverage import (
     gateway_coverage_snapshot_path,
     gateway_ledger_path,
 )
+from gateway_mint_client import GatewayMintCredential, GatewayMintRequest
 from hydraflow_gateway.app import create_app
 from hydraflow_gateway.keys import InvalidVirtualKey, VirtualKeyStore
 from hydraflow_gateway.ledger import GatewayBodyStore, GatewayLedger
@@ -32,11 +33,7 @@ from hydraflow_gateway.settings import (
     UpstreamAuthStyle,
     UpstreamSettings,
 )
-from runner_utils import (
-    GatewayMintCredential,
-    GatewayMintRequest,
-    _claude_cli_complete,
-)
+from runner_utils import _claude_cli_complete
 from tests.helpers import ConfigFactory
 from tests.scenarios.fakes.mock_world import MockWorld
 

@@ -686,7 +686,8 @@ class TestRunLightweightAgentDispatch:
 
         from config import HydraFlowConfig
         from execution import HostRunner, SimpleResult
-        from runner_utils import GatewayMintCredential, run_lightweight_agent
+        from gateway_mint_client import GatewayMintCredential
+        from runner_utils import run_lightweight_agent
 
         isolated_runner = AsyncMock()
         isolated_runner.run_simple.return_value = SimpleResult(
