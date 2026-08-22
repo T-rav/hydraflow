@@ -435,6 +435,7 @@ class TestSpecReviewFeedsNextAttempt:
             attempt_number: int = 0,
             known_traps: str = "",
             timeout_s: int | None = None,
+            pinned_adequacy_findings: list[str] | None = None,
         ) -> WorkerResult:
             captured.append(prior_failure)
             return WorkerResultFactory.create(
@@ -486,6 +487,7 @@ class TestSpecReviewFeedsNextAttempt:
             attempt_number: int = 0,
             known_traps: str = "",
             timeout_s: int | None = None,
+            pinned_adequacy_findings: list[str] | None = None,
         ) -> WorkerResult:
             captured.append(prior_failure)
             return WorkerResultFactory.create(

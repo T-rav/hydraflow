@@ -135,7 +135,6 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
     ("test_adequacy_repair_passes", "HYDRAFLOW_TEST_ADEQUACY_REPAIR_PASSES", 1),
-    ("test_adequacy_pin_demand", "HYDRAFLOW_TEST_ADEQUACY_PIN_DEMAND", True),
     (
         "test_adequacy_coverage_timeout_secs",
         "HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS",
@@ -771,6 +770,7 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         "HYDRAFLOW_TEST_ADEQUACY_VERIFIER_FAIL_CLOSED",
         True,
     ),
+    ("test_adequacy_pin_demand", "HYDRAFLOW_TEST_ADEQUACY_PIN_DEMAND", True),
     ("triage_blocker_gate_enabled", "HYDRAFLOW_TRIAGE_BLOCKER_GATE_ENABLED", True),
     ("triage_honeypot_enabled", "HYDRAFLOW_TRIAGE_HONEYPOT_ENABLED", True),
     ("triage_honeypot_enforce", "HYDRAFLOW_TRIAGE_HONEYPOT_ENFORCE", False),

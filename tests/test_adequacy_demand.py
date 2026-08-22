@@ -188,23 +188,34 @@ def test_a_restated_pinned_finding_still_blocks() -> None:
     assert verdict.restated == ("src/a.py:frob still has no error-path test",)
 
 
-def test_a_restated_pinned_finding_is_in_the_blocking_set() -> None:
+@pytest.mark.parametrize(
+    ("finding", "blocks"),
+    [
+        pytest.param(
+            "src/a.py:frob still has no error-path test",
+            True,
+            id="restated-pinned-demand-blocks",
+        ),
+        pytest.param(
+            "edge-case-coverage of the truncation logic",
+            False,
+            id="new-and-unlocatable-does-not-block",
+        ),
+        pytest.param(
+            "src/other.py:widget has no test",
+            True,
+            id="new-but-anchored-still-blocks",
+        ),
+    ],
+)
+def test_what_a_pinned_retry_may_be_rejected_on(finding: str, blocks: bool) -> None:
+    """The 0.04-overlap pathology: a fresh bar rejects only if it can be located."""
     verdict = evaluate_demand(
-        ["src/a.py:frob still has no error-path test"],
+        [finding],
         pinned=("src/a.py:frob missing error test",),
         pinned_enforced=True,
     )
-    assert verdict.blocks is True
-
-
-def test_a_new_unanchored_finding_does_not_block_a_pinned_retry() -> None:
-    """The 0.04-overlap pathology: a fresh, unlocatable bar cannot reject a retry."""
-    verdict = evaluate_demand(
-        ["edge-case-coverage of the truncation logic"],
-        pinned=("src/a.py:frob missing error test",),
-        pinned_enforced=True,
-    )
-    assert verdict.blocks is False
+    assert verdict.blocks is blocks
 
 
 def test_a_new_unanchored_finding_is_recorded_as_advisory() -> None:
@@ -224,16 +235,6 @@ def test_a_new_unanchored_finding_is_still_recorded_as_new() -> None:
         pinned_enforced=True,
     )
     assert verdict.new == ("boundary-condition gap in truncation logic",)
-
-
-def test_a_genuinely_new_anchored_finding_still_blocks() -> None:
-    """A retry may raise a new bar — but only one it can point at."""
-    verdict = evaluate_demand(
-        ["src/other.py:widget has no test"],
-        pinned=("src/a.py:frob missing error test",),
-        pinned_enforced=True,
-    )
-    assert verdict.blocks is True
 
 
 def test_a_genuinely_new_anchored_finding_is_recorded_as_new() -> None:
