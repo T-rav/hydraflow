@@ -16,6 +16,7 @@ from bg_worker_manager import BGWorkerManager
 from config import HydraFlowConfig, resolve_maintenance_model
 from event_loop_watchdog import build_event_loop_watchdog
 from events import EventBus, EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from hitl_controller import HITLController
 from human_steering import apply_steering, resolve_redo_phase
 from issue_store import STAGE_NAME_MAP, IssueStoreStage
@@ -2020,6 +2021,26 @@ class HydraFlowOrchestrator:
         if manager is None:  # pragma: no cover — not registered under Classic
             await self._stop_event.wait()
             return
+
+        # #11537: a shadow director proves its runtime boundary before the loop
+        # starts, and refuses rather than degrades (ADR-0137 S1/S4). The refusal
+        # is scoped to the director: the deterministic controller is unaffected
+        # and keeps running the pipeline, which is exactly the shadow-mode
+        # contract — an observer that cannot observe must not take the factory
+        # with it, and must not be believed to be observing either.
+        director = self._svc.fable_director
+        if director is not None:
+            try:
+                await director.preflight()
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
+                logger.error(
+                    "issue_driver: the Fable director could not prove its runtime "
+                    "boundary and is DETACHED for this run; the deterministic "
+                    "controller continues unchanged: %s",
+                    exc,
+                )
+                manager.detach_observer()
 
         async def _work() -> object:
             report = await manager.tick(stop_requested=self._stop_event.is_set())

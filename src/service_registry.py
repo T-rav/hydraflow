@@ -64,6 +64,7 @@ from erosion_metrics_loop import ErosionMetricsLoop
 from escape_ledger_loop import EscapeLedgerLoop
 from events import EventBus
 from execution import SubprocessRunner
+from fable_director import FableDirector
 from fail_open_monitor_loop import FailOpenMonitorLoop
 from fake_coverage_auditor_loop import FakeCoverageAuditorLoop
 from fitness_scorecard_loop import FitnessScorecardLoop
@@ -346,6 +347,11 @@ class ServiceRegistry:
     # whose absence makes the Classic path byte-identical.
     driver_ownership: DriverOwnershipRegistry
     driver_manager: DriverManager | None
+    # #11537 shadow mode. ``None`` under Classic AND under the deterministic
+    # controller — the director exists only when an operator selects
+    # ``execution_runtime=fable_director``, which is a strictly narrower
+    # condition than running drivers at all.
+    fable_director: FableDirector | None
     gateway_coverage_loop: GatewayCoverageLoop
     detector_calibration_loop: DetectorCalibrationLoop
     sandbox_failure_fixer_loop: SandboxFailureFixerLoop
@@ -598,6 +604,89 @@ def _driver_stage_labels(config: HydraFlowConfig) -> dict[str, str]:
     }
 
 
+def _build_fable_director(
+    *,
+    config: HydraFlowConfig,
+    stop_event: asyncio.Event,
+    subprocess_runner: SubprocessRunner,
+) -> FableDirector:
+    """Assemble the shadow director, or refuse to build one (#11537).
+
+    **Fail-closed at construction.** ADR-0137's go is conditional on S4, and S4
+    asserts against committed probe evidence: if that evidence cannot be loaded,
+    the tool-surface assertion cannot be armed, and a director whose boundary
+    cannot be proven must refuse to run rather than degrade to trusting the
+    flags it passed. So this raises out of ``build_services`` — the factory does
+    not start, instead of starting with an observer that silently verifies
+    nothing.
+
+    The CLI's own reachability is proven separately, in
+    :meth:`FableDirector.preflight`, because it needs an event loop.
+    """
+    from director_broker import ShadowDispatchBroker
+    from director_sandbox import DirectorSandboxError
+    from director_shadow_log import ShadowObservationLog
+    from director_turn_runner import DirectorTurnRunner
+    from package_resources import ResourceNotFoundError
+    from runner_utils import resolve_harness_env, revoke_gateway_key
+
+    try:
+        evidence = FableDirector.load_evidence(config.director_probe_evidence_path())
+    except ResourceNotFoundError as exc:
+        msg = (
+            "the director probe evidence is not present in this installation, so "
+            "ADR-0137's S4 tool-surface assertion cannot be armed; the director "
+            f"refuses to run: {exc}"
+        )
+        raise DirectorSandboxError(msg) from exc
+
+    async def _mint_director_key() -> dict[str, str]:
+        """ADR-0137 S2: the director's one credential, per turn.
+
+        Routed through the same ``resolve_harness_env`` gateway path every other
+        spawn uses rather than a bespoke one, so the director inherits the
+        existing fail-closed mint (``GatewayMintError`` rather than a fall
+        through to an ambient provider key) and the existing revoke lease. The
+        principal is the director itself, not a worker: it is a parent, and the
+        key it holds must not be able to reach a worker account.
+        """
+        return await resolve_harness_env(
+            "gateway",
+            config,
+            source="fable-director",
+            timeout_seconds=float(config.director_turn_timeout_seconds),
+        )
+
+    return FableDirector(
+        runner=DirectorTurnRunner(
+            # Injected from the composition root so the sandbox's
+            # FakeSubprocessRunner replaces the spawn (#11602/#11615).
+            runner=subprocess_runner,
+            timeout_seconds=config.director_turn_timeout_seconds,
+            mint_credential=_mint_director_key,
+            revoke_credential=revoke_gateway_key,
+        ),
+        broker=ShadowDispatchBroker(),
+        shadow_log=ShadowObservationLog(
+            config.state_file.parent / "director_shadow_log.jsonl"
+        ),
+        evidence=evidence,
+        repo_slug=config.repo,
+        # The routing view a dispatch is judged against. Derived from the dials
+        # that actually decide a route, so an operator changing the model or the
+        # harness moves the revision and a director working from the old view is
+        # refused with ROUTE_POLICY_REVISION_STALE rather than silently served.
+        route_policy_revision=f"{config.model}:{config.execution_runtime.value}"[:64],
+        stage_labels=_driver_stage_labels(config),
+        stop_event=stop_event,
+        usd_budget_per_boundary=config.director_shadow_usd_budget,
+        usd_ceiling=config.director_shadow_usd_ceiling,
+        # A live read, not a captured value: the kill switch must work without
+        # a restart even though the dials that select the director cannot.
+        is_enabled=lambda: config.director_shadow_enabled,
+    )
+
+
 def _build_driver_manager(
     *,
     config: HydraFlowConfig,
@@ -610,6 +699,7 @@ def _build_driver_manager(
     hitl_phase: HITLPhase,
     fetcher: IssueFetcher,
     ownership: DriverOwnershipRegistry,
+    observer: FableDirector | None = None,
 ) -> DriverManager:
     """Assemble the ``issue_controller`` allocator over the existing phases.
 
@@ -674,6 +764,9 @@ def _build_driver_manager(
         stage_caps=stage_caps,
         # ADR-0137 C9: the second intent slot, same ledger-backed accessor set.
         sub_states=state,
+        # #11537: the shadow director, or ``None``. The allocator discards
+        # whatever it returns, so attaching one cannot change a live effect.
+        observer=observer,
     )
 
 
@@ -2066,6 +2159,21 @@ def build_services(
     # per-issue drivers. Under Classic it is ``None`` — not a disabled object
     # with a dormant tick, but absent — so "nothing changes for an operator who
     # does not opt in" is a property of the object graph, not of a flag check.
+    # #11537: the shadow director is narrower still — it exists only under
+    # ``fable_director``, so an operator on the deterministic controller has no
+    # director object either. Built BEFORE the allocator because it is handed
+    # to it as the boundary observer, and built here at the composition root
+    # rather than inside a method so its runner is injectable and a MockWorld
+    # fake can be attached to it (#11602/#11615).
+    fable_director = (
+        _build_fable_director(
+            config=config,
+            stop_event=stop_event,
+            subprocess_runner=subprocess_runner,
+        )
+        if config.uses_fable_director()
+        else None
+    )
     driver_manager = (
         _build_driver_manager(
             config=config,
@@ -2078,6 +2186,7 @@ def build_services(
             hitl_phase=hitl_phase,
             fetcher=fetcher,
             ownership=driver_ownership,
+            observer=fable_director,
         )
         if config.uses_issue_driver()
         else None
@@ -2166,6 +2275,7 @@ def build_services(
         auto_agent_preflight_loop=auto_agent_preflight_loop,
         driver_ownership=driver_ownership,
         driver_manager=driver_manager,
+        fable_director=fable_director,
         gateway_coverage_loop=gateway_coverage_loop,
         detector_calibration_loop=detector_calibration_loop,
         sandbox_failure_fixer_loop=sandbox_failure_fixer_loop,
