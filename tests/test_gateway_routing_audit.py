@@ -184,3 +184,32 @@ def test_the_persisted_record_carries_its_own_schema_version(tmp_path: Path) -> 
     row: dict[str, Any] = json.loads(log.path.read_text().splitlines()[0])
 
     assert row["schema_version"] == 1
+
+
+def test_a_gateway_virtual_key_in_a_payload_is_redacted(tmp_path: Path) -> None:
+    """#11637 taught ``secret_scrub`` this shape; the chain writes through it."""
+    log = _log(tmp_path)
+    token = "hfgw_01JQZX9WKTM4NRVB8YCDEFGH12.s3cr3t-half-of-the-virtual-key-xyz"
+
+    log.append({"detail": token}, recorded_at=_AT)
+
+    assert "hfgw_01JQZX9WKTM4NRVB8YCDEFGH12" not in log.path.read_text(encoding="utf-8")
+
+
+def test_a_redacted_gateway_virtual_key_leaves_the_chain_verifiable(
+    tmp_path: Path,
+) -> None:
+    """Scrub-before-hash has to hold for every pattern, not just the old ones."""
+    log = _log(tmp_path)
+    token = "hfgw_01JQZX9WKTM4NRVB8YCDEFGH12.s3cr3t-half-of-the-virtual-key-xyz"
+    log.append({"detail": token}, recorded_at=_AT)
+
+    assert log.verify().ok
+
+
+def test_a_gateway_control_token_in_a_payload_is_redacted(tmp_path: Path) -> None:
+    """The canonical ``hfgwctl_`` grammar #11637 added is caught here too."""
+    log = _log(tmp_path)
+    log.append({"detail": "hfgwctl_" + "A" * 40}, recorded_at=_AT)
+
+    assert "hfgwctl_" + "A" * 40 not in log.path.read_text(encoding="utf-8")

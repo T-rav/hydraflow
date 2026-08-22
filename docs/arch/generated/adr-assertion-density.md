@@ -6,8 +6,8 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 - **Population:** Accepted (85 ADRs)
 - **Mean density** (per-ADR, unweighted): 96%
-- **Executable fraction** (check-weighted): 98% (175 of 178 cited checks)
-- **Check kinds:** pytest 174, make 1, script 0, prose 3
+- **Executable fraction** (check-weighted): 98% (176 of 179 cited checks)
+- **Check kinds:** pytest 175, make 1, script 0, prose 3
 - **Prose-count control limit** (Shewhart c-chart UCL): 0.60
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 
@@ -66,7 +66,7 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0065 | Remove CodeGroomingLoop | 100% | 1 | 0 |
 | ADR-0071 | RouteBackCounterPort: Testable Counter for Precondition Route-Backs | 100% | 1 | 0 |
 | ADR-0083 | No ignored automated test gates | 100% | 2 | 0 |
-| ADR-0085 | Secrets never persist in the canonical audit stream | 100% | 2 | 0 |
+| ADR-0085 | Secrets never persist in the canonical audit stream | 100% | 3 | 0 |
 | ADR-0087 | Prompt structure standard (XML tags, 8-criterion rubric, mechanical scoring) | 100% | 2 | 0 |
 | ADR-0088 | LabelDriftWatcherLoop — Cross-Entity State-Machine Drift Caretaker | 100% | 2 | 0 |
 | ADR-0089 | MemoryBacklogLoop — promote session-memory feedback to the find queue | 100% | 3 | 0 |
