@@ -15,6 +15,11 @@ def _loop(config) -> AutoAgentPreflightLoop:
     loop._config = config
     loop._prs = SimpleNamespace(list_issues_by_label=AsyncMock(return_value=[]))
     loop._state = SimpleNamespace(get_hitl_origin=lambda _n: None)
+    # Classic factory: nothing is owned by an IssueDriver (#11535). This
+    # scaffold bypasses __init__, so the attribute is set here rather than
+    # letting production code carry a getattr default for a case only test
+    # scaffolding can produce.
+    loop._driver_ownership = None
     return loop
 
 

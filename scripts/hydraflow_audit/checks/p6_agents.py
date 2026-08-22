@@ -148,6 +148,11 @@ def _atomic_label_swap(ctx: CheckContext) -> Finding:
         return skip
     candidates = [
         ctx.root / "src" / "pr_manager.py",
+        # PRManager's label surface was extracted to its own mixin module in
+        # the Refs #11547 god-class decomposition; the helper is reachable
+        # unchanged as PRManager.swap_pipeline_labels, but this probe greps
+        # files rather than following inheritance.
+        ctx.root / "src" / "pr_manager_labels.py",
         ctx.root / "src" / "label_manager.py",
         ctx.root / "src" / "labels.py",
     ]

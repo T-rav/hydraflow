@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "director_capability_probe",
+  "recorded_at": "2026-08-22T08:22:44Z",
+  "platform": "darwin",
+  "live_lane_ran": true,
+  "agent_cli_version": "2.1.239 (Claude Code)",
+  "proofs": [
+    {
+      "proof": "json_framing",
+      "lane": "live",
+      "verdict": "pass_with_constraint",
+      "summary": "Every stream-json line parses as a JSON object; frame types are system/init, assistant and result.",
+      "constraint": "Two framing hazards are real and the parser MUST handle both: a single turn can emit MANY system/init frames under upstream retry (last-init-wins), and result.subtype can read 'success' while result.is_error is true. is_error is authoritative; subtype must never gate success.",
+      "observations": {
+        "frames_parsed": 3,
+        "unparseable_lines": 0,
+        "parse_error_shape": "none",
+        "init_frames_observed": 1,
+        "result_frame_present": true,
+        "subtype_reported_success": true,
+        "is_error_reported": true,
+        "subtype_disagrees_with_is_error": true,
+        "cli_exit_code": 1
+      }
+    },
+    {
+      "proof": "session_id_capture",
+      "lane": "live",
+      "verdict": "pass",
+      "summary": "The vendor session id is captured from the turn's frames and is recorded as a rotation hint only, never as ownership.",
+      "constraint": null,
+      "observations": {
+        "session_id_captured": true,
+        "session_id_shape": "uuid-v4-shape",
+        "captured_even_on_failed_turn": true,
+        "is_hydraflow_factory_session_id": false
+      }
+    },
+    {
+      "proof": "resume_loss",
+      "lane": "live",
+      "verdict": "pass",
+      "summary": "Resuming a dead vendor session fails closed: non-zero exit, a diagnostic on stderr, and a terminal result frame with is_error true. No assistant turn is produced, so a lost session can never be mistaken for a fresh one — the driver reconstructs from the capsule rather than proceeding blind.",
+      "constraint": null,
+      "observations": {
+        "cli_exit_code": 1,
+        "frames_on_stdout": 1,
+        "diagnostic_on_stderr": true,
+        "result_frame_subtype": "error_during_execution",
+        "result_frame_is_error": true,
+        "assistant_turn_produced": false,
+        "silently_started_fresh_session": false,
+        "resume_loss_is_detectable": true
+      }
+    },
+    {
+      "proof": "isolated_settings_home",
+      "lane": "live",
+      "verdict": "pass",
+      "summary": "With an allow-list environment, a disposable HOME and CLAUDE_CONFIG_DIR and an empty working directory, the turn loads no MCP server and no plugin, and its only memory path is inside the disposable config dir. A hostile .claude/settings.json and CLAUDE.md planted in the working directory produce no project memory path.",
+      "constraint": null,
+      "observations": {
+        "mcp_servers_loaded": 0,
+        "plugins_loaded": 0,
+        "memory_path_confined_to_sandbox": true,
+        "operator_home_path_leaked": false,
+        "hostile_project_files_planted": true,
+        "hostile_project_memory_loaded": false,
+        "cli_exit_code": 1
+      }
+    },
+    {
+      "proof": "environment_scrubbing",
+      "lane": "hermetic",
+      "verdict": "pass",
+      "summary": "Child env is built from an allow-list; provider keys, gh tokens, the gateway control token and the ssh agent socket are all dropped.",
+      "constraint": null,
+      "observations": {
+        "hostile_vars_offered": 8,
+        "secret_shaped_vars_offered": 4,
+        "vars_surviving": 6,
+        "secret_shaped_leaks": 0,
+        "vars_outside_allowlist": 0,
+        "home_overwritten": true,
+        "only_credential_is_virtual_key": true
+      }
+    },
+    {
+      "proof": "process_tree_teardown",
+      "lane": "hermetic",
+      "verdict": "pass",
+      "summary": "kill_process_group reaps a real two-level process tree; no descendant of a cancelled director turn survives.",
+      "constraint": null,
+      "observations": {
+        "descendants_spawned": 2,
+        "descendants_surviving_after_teardown": 0,
+        "start_new_session_used": true
+      }
+    },
+    {
+      "proof": "short_lived_key_expiry",
+      "lane": "hermetic",
+      "verdict": "pass",
+      "summary": "A 60s virtual key resolves before its TTL and is refused after it; the store retains only a SHA-256 digest, never the token.",
+      "constraint": null,
+      "observations": {
+        "record_sampled_before_expiry": true,
+        "resolved_before_ttl": true,
+        "refused_after_ttl": true,
+        "plaintext_token_retained": false,
+        "ttl_seconds": 60,
+        "active_records_after_expiry": 0
+      }
+    },
+    {
+      "proof": "no_ambient_tools_or_credentials",
+      "lane": "live",
+      "verdict": "pass_with_constraint",
+      "summary": "No ambient credential reaches the isolated child: with no credential the turn fails authentication, and with only the virtual gateway key present it is never observed to authenticate against the host keychain. The tool surface reaches empty only under an explicit exhaustive deny-list, and only the deny-list turn's own init frame can attest to it.",
+      "constraint": "Isolation alone does NOT empty the tool surface, an allow-list does not narrow it, and the advertised tool array is incomplete — so a name deny-list is fail-open across CLI upgrades. The runtime MUST assert the init tools key is PRESENT and empty (absent/renamed reads as unverified), and must also account for the agents, skills and slash-command channels, which stay populated at zero tools. apiKeySource is not a trustworthy provenance signal and must not gate anything. The assertion is post-hoc: it inspects a turn that already ran, so the residual exposure is one turn.",
+      "observations": {
+        "tools_with_isolation_only": 22,
+        "baseline_init_frame_seen": true,
+        "allowlist_init_frame_seen": true,
+        "tools_with_allowlist_of_one": 22,
+        "allowlist_narrows_surface": false,
+        "advertised_denial_init_frame_seen": true,
+        "tools_after_denying_every_advertised_name": 2,
+        "advertised_tool_array_is_complete": false,
+        "tools_with_exhaustive_denylist": 0,
+        "tools_key_present_on_init": true,
+        "credential_turn_completed": false,
+        "credential_turn_killed_at_probe_budget": true,
+        "credential_turn_authenticated": false,
+        "credential_turn_used_injected_endpoint": false,
+        "ambient_credential_reached_child": false,
+        "credential_turn_init_frames": 1,
+        "credential_turn_api_key_source": "none",
+        "api_key_source_reported": "none",
+        "residual_agents_advertised": 5,
+        "residual_skills_advertised": 15,
+        "residual_slash_commands_advertised": 42,
+        "residual_capability_entries_outside_tools": 62,
+        "cli_exit_code": 1,
+        "credential_turn_exit_code": -1
+      }
+    }
+  ],
+  "sanitization": {
+    "raw_prompt_omitted": true,
+    "raw_model_output_omitted": true,
+    "vendor_session_ids_omitted": true,
+    "virtual_key_ids_and_tokens_omitted": true,
+    "host_paths_omitted": true,
+    "raw_captures_deleted": true
+  }
+}

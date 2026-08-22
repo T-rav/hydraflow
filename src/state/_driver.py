@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from models import ConvergenceLedger
+from models import (
+    ConvergenceLedger,
+    PendingStageTransition,
+    PendingSubStateTransition,
+)
 
 if TYPE_CHECKING:
     from models import DriverState, StateData, SuspendRecord
@@ -21,10 +25,15 @@ class DriverStateMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by CoreMixin
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
 
-    @staticmethod
-    def _key(issue_id: int | str) -> str: ...  # provided by StateTracker
+        def save(self) -> None: ...
+
+        @staticmethod
+        def _key(issue_id: int | str) -> str: ...
 
     def _ledger_or_new(self, issue_number: int) -> ConvergenceLedger:
         key = self._key(issue_number)
@@ -64,3 +73,72 @@ class DriverStateMixin:
         cl.pending_correction = None
         self.save()
         return text
+
+    # --- ADR-0137 C5(a)/C9 transition intent -----------------------------
+    #
+    # Two slots, never one. C5(a) rule 1 clears the *stage* record whenever
+    # exactly one pipeline label is present, which is the normal condition
+    # for a sub-state transition — a shared slot would delete the sub-state
+    # commit on the very path C9 exists to protect.
+
+    def record_stage_transition(
+        self,
+        issue_number: int,
+        *,
+        from_label: str,
+        to_label: str,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None:
+        """Record where a label swap is going, **before** it is issued."""
+        self._ledger_or_new(
+            issue_number
+        ).pending_stage_transition = PendingStageTransition(
+            from_label=from_label,
+            to_label=to_label,
+            epoch=epoch,
+            phase_attempt=phase_attempt,
+        )
+        self.save()
+
+    def get_stage_transition(self, issue_number: int) -> PendingStageTransition | None:
+        cl = self._data.convergence_ledgers.get(self._key(issue_number))
+        return cl.pending_stage_transition if cl else None
+
+    def clear_stage_transition(self, issue_number: int) -> None:
+        cl = self._data.convergence_ledgers.get(self._key(issue_number))
+        if cl is not None and cl.pending_stage_transition is not None:
+            cl.pending_stage_transition = None
+            self.save()
+
+    def record_sub_state_transition(
+        self,
+        issue_number: int,
+        *,
+        from_state: DriverState,
+        to_state: DriverState,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None:
+        """Record entry into a sub-state that writes no pipeline label."""
+        self._ledger_or_new(
+            issue_number
+        ).pending_sub_state_transition = PendingSubStateTransition(
+            from_state=from_state,
+            to_state=to_state,
+            epoch=epoch,
+            phase_attempt=phase_attempt,
+        )
+        self.save()
+
+    def get_sub_state_transition(
+        self, issue_number: int
+    ) -> PendingSubStateTransition | None:
+        cl = self._data.convergence_ledgers.get(self._key(issue_number))
+        return cl.pending_sub_state_transition if cl else None
+
+    def clear_sub_state_transition(self, issue_number: int) -> None:
+        cl = self._data.convergence_ledgers.get(self._key(issue_number))
+        if cl is not None and cl.pending_sub_state_transition is not None:
+            cl.pending_sub_state_transition = None
+            self.save()

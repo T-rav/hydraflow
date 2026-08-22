@@ -240,40 +240,40 @@ def test_make_clean_env_does_not_mutate_os_environ() -> None:
 
 
 class TestIsRetryableError:
-    def test_not_retryable_on_rate_limit(self) -> None:
-        """Rate limits are handled by the global cooldown, not per-call retry."""
-        assert _is_retryable_error("API rate limit exceeded") is False
-
-    def test_retryable_on_timeout(self) -> None:
-        assert _is_retryable_error("connection timeout") is True
-
-    def test_retryable_on_connection_error(self) -> None:
-        assert _is_retryable_error("connection refused") is True
-
-    def test_retryable_on_502(self) -> None:
-        assert _is_retryable_error("502 Bad Gateway") is True
-
-    def test_retryable_on_503(self) -> None:
-        assert _is_retryable_error("503 Service Unavailable") is True
-
-    def test_retryable_on_504(self) -> None:
-        assert _is_retryable_error("504 Gateway Timeout") is True
-
-    def test_not_retryable_on_401(self) -> None:
-        assert _is_retryable_error("401 Unauthorized") is False
-
-    def test_not_retryable_on_403_without_rate_limit(self) -> None:
-        assert _is_retryable_error("403 Forbidden") is False
-
-    def test_not_retryable_on_403_with_rate_limit(self) -> None:
-        """403 rate limits are handled by the global cooldown, not per-call retry."""
-        assert _is_retryable_error("403 rate limit exceeded") is False
-
-    def test_not_retryable_on_404(self) -> None:
-        assert _is_retryable_error("404 Not Found") is False
-
-    def test_not_retryable_on_generic_error(self) -> None:
-        assert _is_retryable_error("something else went wrong") is False
+    @pytest.mark.parametrize(
+        ("message", "expected"),
+        [
+            # Rate limits are handled by the global cooldown, not per-call retry.
+            pytest.param(
+                "API rate limit exceeded", False, id="not_retryable_on_rate_limit"
+            ),
+            pytest.param("connection timeout", True, id="retryable_on_timeout"),
+            pytest.param(
+                "connection refused", True, id="retryable_on_connection_error"
+            ),
+            pytest.param("502 Bad Gateway", True, id="retryable_on_502"),
+            pytest.param("503 Service Unavailable", True, id="retryable_on_503"),
+            pytest.param("504 Gateway Timeout", True, id="retryable_on_504"),
+            pytest.param("401 Unauthorized", False, id="not_retryable_on_401"),
+            pytest.param(
+                "403 Forbidden", False, id="not_retryable_on_403_without_rate_limit"
+            ),
+            # A 403 that IS a rate limit still goes to the cooldown, not to retry.
+            pytest.param(
+                "403 rate limit exceeded",
+                False,
+                id="not_retryable_on_403_with_rate_limit",
+            ),
+            pytest.param("404 Not Found", False, id="not_retryable_on_404"),
+            pytest.param(
+                "something else went wrong",
+                False,
+                id="not_retryable_on_generic_error",
+            ),
+        ],
+    )
+    def test_retryability_of_message(self, message: str, expected: bool) -> None:
+        assert _is_retryable_error(message) is expected
 
     def test_not_retryable_on_graphql_node_limit(self) -> None:
         """GraphQL node-cost errors are deterministic — never succeed on retry.
@@ -980,12 +980,16 @@ class TestRateLimitCooldown:
         import subprocess_util
 
         configure_gh_concurrency(5)
+        # Build the runner BEFORE arming the deadline: mock construction can cost
+        # tens of ms on a loaded host, and any time spent between `datetime.now()`
+        # and `start` is silently deducted from the measured wait (it eats into
+        # the 0.1s deadline without being counted), which made the 0.08s floor
+        # fail for reasons unrelated to the cooldown.
+        runner, stats = TestGhApiSemaphore._make_tracking_runner(delay=0)
         # Set cooldown to expire in 0.1s
         subprocess_util._rate_limit_until = datetime.now(tz=UTC) + timedelta(
             seconds=0.1
         )
-
-        runner, stats = TestGhApiSemaphore._make_tracking_runner(delay=0)
         start = asyncio.get_event_loop().time()
         await run_subprocess("gh", "api", "test", runner=runner)
         elapsed = asyncio.get_event_loop().time() - start

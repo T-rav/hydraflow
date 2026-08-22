@@ -1964,6 +1964,51 @@ class SuspendRecord(BaseModel):
     resume_state: DriverState
 
 
+class PendingStageTransition(BaseModel):
+    """Intent to swap an issue's pipeline label, recorded *before* the swap.
+
+    ADR-0137 C5(a). ``swap_pipeline_labels`` adds the new label before removing
+    the old one, so a crash inside that window leaves an issue carrying two
+    pipeline labels and reconciliation has to pick one. Picking by
+    ``_STAGE_PRIORITY`` most-advanced-wins is wrong for this pipeline, because
+    its crash-interesting edges run *backward*: a ``DIAGNOSE → READY``
+    route-back crashing mid-swap leaves ``review`` + ``ready`` and priority
+    picks ``review``, silently undoing the route-back; a ``HITL → READY``
+    resume is silently reverted the same way.
+
+    So the driver records where it is going before it goes, and recovery
+    resolves against that intent rather than against a direction heuristic.
+    The record is written before the label add, so a crash before it leaves
+    exactly one label and the transition simply never happened.
+    """
+
+    from_label: str
+    to_label: str
+    epoch: int
+    phase_attempt: int
+
+
+class PendingSubStateTransition(BaseModel):
+    """Intent to enter a sub-state that writes no pipeline label (ADR-0137 C9).
+
+    ``DIAGNOSE``, ``HITL_APPLY`` and ``PARKED`` are sub-states of an
+    already-labelled stage, so C8's durable commit — the label swap — does not
+    exist for them and this record *is* their commit.
+
+    It lives in a slot of its own rather than sharing the stage slot, because
+    C5(a) rule 1 clears the stage record whenever exactly one pipeline label is
+    present — which is the normal condition for a sub-state transition. A
+    shared slot would therefore delete the very commit this record exists to
+    protect, losing (for example) a HITL correction taken from the ledger but
+    not yet applied.
+    """
+
+    from_state: DriverState
+    to_state: DriverState
+    epoch: int
+    phase_attempt: int
+
+
 class PolicyEvent(BaseModel):
     """One issue-level orchestration decision, recorded for audit/replay."""
 
@@ -2040,6 +2085,11 @@ class ConvergenceLedger(BaseModel):
     route_backs: dict[str, int] = Field(default_factory=dict)
     issue_attempts: int = 0
     policy_log: list[PolicyEvent] = Field(default_factory=list)
+    # ADR-0137 C5(a)/C9 — the two transition-intent slots, deliberately
+    # separate. See the model docstrings for why a shared slot loses the
+    # sub-state commit.
+    pending_stage_transition: PendingStageTransition | None = None
+    pending_sub_state_transition: PendingSubStateTransition | None = None
 
     def _stage(self, stage: str) -> StageRecord:
         rec = self.stage_state.get(stage)

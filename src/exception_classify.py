@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from subprocess_util import AuthenticationError, CreditExhaustedError
+
 if TYPE_CHECKING:
     from ports import ObservabilityPort
 
@@ -33,9 +35,41 @@ LIKELY_BUG_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 
 
+#: Infrastructure failures that make further work pointless: the harness has
+#: no usable credential, no remaining billing budget, or no memory headroom.
+#: None of the three is retryable, so a handler that would otherwise absorb an
+#: exception must let these through.  Use this in an ``except`` clause that
+#: re-raises ahead of a handler which already classifies the rest.
+INFRA_FATAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    AuthenticationError,
+    CreditExhaustedError,
+    MemoryError,
+)
+
+#: The canonical "must never be swallowed" set — the infrastructure failures
+#: above plus the likely-bug class.  This is the ONE definition of fatal;
+#: re-stating it as a literal tuple at a call site is how the concurrent
+#: worker pools drifted from it and quietly dropped ``TypeError`` (#11618).
+FATAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    *INFRA_FATAL_EXCEPTIONS,
+    *LIKELY_BUG_EXCEPTIONS,
+)
+
+
 def is_likely_bug(exc: BaseException) -> bool:
     """Return True if *exc* is likely a code bug rather than a transient failure."""
     return isinstance(exc, LIKELY_BUG_EXCEPTIONS)
+
+
+def is_fatal(exc: BaseException) -> bool:
+    """Return True if *exc* must not be swallowed by a catch-all handler.
+
+    The predicate behind :func:`reraise_on_credit_or_bug`, exposed separately
+    for handlers that need to *do* something before re-raising — a worker pool
+    cancelling its sibling tasks, say.  Both must agree on what fatal means:
+    the divergence between them is exactly what #11618 fixed.
+    """
+    return isinstance(exc, FATAL_EXCEPTIONS)
 
 
 def exc_detail(exc: BaseException) -> str:
@@ -94,10 +128,8 @@ def reraise_on_credit_or_bug(exc: BaseException) -> None:
 
         except Exception as exc:
             reraise_on_credit_or_bug(exc)
-    """
-    from subprocess_util import AuthenticationError, CreditExhaustedError
 
-    if isinstance(exc, AuthenticationError | CreditExhaustedError) or is_likely_bug(
-        exc
-    ):
+    "Fatal" is :data:`FATAL_EXCEPTIONS` — see :func:`is_fatal`.
+    """
+    if is_fatal(exc):
         raise exc

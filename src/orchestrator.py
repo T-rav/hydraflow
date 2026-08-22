@@ -39,7 +39,9 @@ from models import (
     WorkFn,
 )
 from phase_utils import (
+    INFRA_FATAL_EXCEPTIONS,
     escalate_to_hitl,
+    handle_pool_worker_exception,
     is_likely_bug,
     log_exception_with_bug_classification,
     release_batch_in_flight,
@@ -543,6 +545,15 @@ class HydraFlowOrchestrator:
                 "Stop: reaped %d subprocess group(s) beyond the runner-owned sets",
                 reaped,
             )
+
+        # #11535 stop fence: drop every driver and its ownership claim before
+        # the loops are cancelled, so nothing is admitted or advanced after a
+        # stop and no claim survives a drain. "Zero post-stop spawns" is one of
+        # the counters the ADR-0137 B5 canary bar measures. No-op under
+        # Classic, where no manager was ever constructed.
+        if self._svc.driver_manager is not None:
+            self._svc.driver_manager.release_all()
+        self._svc.driver_ownership.release_all()
 
         # Checkpoint interrupted issues before cancelling tasks
         interrupted = await self._build_interrupted_issues()
@@ -1608,6 +1619,25 @@ class HydraFlowOrchestrator:
 
         await self._restart_loop(name, exc, tasks, loop_factories)
 
+    def stage_loop_names_and_factories(
+        self,
+    ) -> list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]]:
+        """The pipeline stage loops this factory will run (#11535).
+
+        Exposed rather than inlined so the default-off invariant is directly
+        assertable: with Classic defaults this returns exactly today's four
+        stage loops and no driver loop, which is the whole "nothing changes for
+        an operator who does not opt in" claim, checked rather than argued.
+        """
+        if self._svc.driver_manager is not None:
+            return [("issue_driver", self._issue_driver_loop)]
+        return [
+            ("plan", self._plan_loop),
+            ("implement", self._implement_loop),
+            ("review", self._review_loop),
+            ("hitl", self._hitl_loop),
+        ]
+
     async def _supervise_loops(self) -> None:
         """Run all loops plus the IssueStore poller, restarting any that crash."""
 
@@ -1621,13 +1651,20 @@ class HydraFlowOrchestrator:
                     return
                 await self._sleep_or_stop(self._config.poll_interval)
 
+        # #11535: the pipeline half of the fleet depends on the scheduling
+        # model, and the two are mutually exclusive by construction. Under
+        # Classic the four stage loops run exactly as they always have. Under
+        # ``issue_controller`` they are replaced by a single driver loop, so an
+        # issue cannot be claimed by both a stage pool and a driver — the
+        # duplicate-owner hazard is removed structurally rather than by a check
+        # that could be forgotten on a new intake path. Triage stays Classic in
+        # both: an issue is not driver-owned until triage has decided it is
+        # workable at all.
+        stage_loops = self.stage_loop_names_and_factories()
         loop_factories: list[tuple[str, Callable[[], Coroutine[Any, Any, None]]]] = [
             ("store", _store_loop),
             ("triage", self._triage_loop),
-            ("plan", self._plan_loop),
-            ("implement", self._implement_loop),
-            ("review", self._review_loop),
-            ("hitl", self._hitl_loop),
+            *stage_loops,
             ("human_steering_actuator", self._human_steering_actuator_loop),
             ("pr_unsticker", self._svc.pr_unsticker_loop.run),
             ("merge_state_watcher", self._svc.merge_state_watcher_loop.run),
@@ -1793,7 +1830,7 @@ class HydraFlowOrchestrator:
                 continue
             try:
                 did_work = bool(await work_fn())
-            except (AuthenticationError, CreditExhaustedError, MemoryError):
+            except INFRA_FATAL_EXCEPTIONS:
                 raise
             except Exception as exc:
                 display = name.replace("_", " ").capitalize()
@@ -1971,6 +2008,31 @@ class HydraFlowOrchestrator:
             is_pipeline=True,
         )
 
+    async def _issue_driver_loop(self) -> None:
+        """Tick the ``issue_controller`` allocator (#11535, ADR-0137).
+
+        Registered *instead of* the plan/implement/review/HITL loops, never
+        alongside them, so exactly one consumer owns each stage queue. Runs
+        only when ``scheduling_model=issue_controller``; under Classic this
+        coroutine is never scheduled because the loop is not registered.
+        """
+        manager = self._svc.driver_manager
+        if manager is None:  # pragma: no cover — not registered under Classic
+            await self._stop_event.wait()
+            return
+
+        async def _work() -> object:
+            report = await manager.tick(stop_requested=self._stop_event.is_set())
+            return report.did_work
+
+        await self._polling_loop(
+            "issue_driver",
+            _work,
+            self._config.poll_interval,
+            enabled_name="issue_driver",
+            is_pipeline=True,
+        )
+
     async def _human_steering_actuator_loop(self) -> None:
         """Continuously enact pending steering directives (ADR-0099 #4).
 
@@ -2050,17 +2112,11 @@ class HydraFlowOrchestrator:
             for task in done:
                 exc = task.exception()
                 if exc is not None:
-                    if isinstance(
-                        exc, AuthenticationError | CreditExhaustedError | MemoryError
-                    ):
-                        # Cancel remaining and propagate fatal errors
-                        for t in pending:
-                            t.cancel()
-                        await asyncio.gather(*pending, return_exceptions=True)
-                        raise exc
-                    logger.exception(
-                        "Review worker failed unexpectedly",
-                        exc_info=exc,
+                    await handle_pool_worker_exception(
+                        exc,
+                        pending,
+                        log=logger,
+                        context="Review worker failed unexpectedly",
                     )
                 elif task.result():
                     did_work = True

@@ -206,7 +206,8 @@ async def test_A6_github_rate_limit_at_triage_halts_pipeline(tmp_path) -> None:
     (find_existing_issue in the triage duplicate-check) raises RateLimitError.
     `phase_utils.run_refilling_pool` catches non-fatal exceptions and logs
     them as warnings — it does NOT re-raise RateLimitError because it is
-    neither AuthenticationError, CreditExhaustedError, nor MemoryError.
+    outside `exception_classify.FATAL_EXCEPTIONS` (the infra-fatal trio plus
+    the likely-bug class, #11618).
 
     Observable behavior:
     - `run_pipeline` returns normally (no raise).
@@ -730,10 +731,9 @@ async def test_A18_rate_limit_heals_mid_pipeline(tmp_path) -> None:
 async def test_A16_credit_exhausted_halts_pipeline(tmp_path) -> None:
     """CreditExhaustedError from _execute propagates out of run_pipeline.
 
-    _process_done_tasks's re-raise allowlist in src/phase_utils.py
-    re-raises CreditExhaustedError (along with AuthenticationError and
-    MemoryError) after cancelling sibling tasks. Non-allowlisted exceptions
-    are swallowed and logged at warning.
+    `phase_utils.handle_pool_worker_exception` re-raises CreditExhaustedError
+    (with the rest of `exception_classify.FATAL_EXCEPTIONS`) after cancelling
+    sibling tasks. Non-fatal exceptions are absorbed and logged at warning.
     """
     from unittest import mock
 
@@ -1051,8 +1051,8 @@ async def test_A24_rate_limit_in_implement_phase_no_special_handling(tmp_path) -
     Finding (#8366): there is no create_pr-specific retry/backoff/HITL path.
     The implement phase's GitHub calls (label/PR ops including create_pr) all
     route through `FakeGitHub._maybe_rate_limit`; the resulting `RateLimitError`
-    is neither `AuthenticationError`, `CreditExhaustedError`, nor `MemoryError`,
-    so `phase_utils.run_refilling_pool` absorbs it as a non-fatal warning (same
+    is outside `exception_classify.FATAL_EXCEPTIONS`, so
+    `phase_utils.run_refilling_pool` absorbs it as a non-fatal warning (same
     path as A6). Targeting create_pr *exactly* would need a fragile tuned
     `remaining=N` budget — the issue explicitly accepts documenting the
     phase-level finding instead.

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import sys
-from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,7 +13,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from adr_utils import next_adr_number
 from events import EventType
 from exception_classify import LIKELY_BUG_EXCEPTIONS
 from harness_insights import FailureCategory, HarnessInsightStore
@@ -315,7 +314,7 @@ class TestRunRefillingPool:
 
         async def worker(_idx: int, item: int) -> int:
             if item == 2:
-                raise ValueError("bad")
+                raise RuntimeError("bad")
             return item
 
         results = await run_refilling_pool(supply, worker, 1, stop)
@@ -647,71 +646,10 @@ class TestPublishReviewStatus:
 
 
 # ---------------------------------------------------------------------------
-# next_adr_number
+# next_adr_number lives in adr_utils; its tests live with it, in
+# tests/test_adr_utils.py::TestNextAdrNumber (the copy that used to sit here
+# was a verbatim leftover from before the move).
 # ---------------------------------------------------------------------------
-
-
-class TestNextAdrNumber:
-    @pytest.fixture(autouse=True)
-    def _clear_assigned(self) -> Generator[None, None, None]:
-        """Reset the module-level assigned set before and after each test."""
-        import adr_utils
-
-        adr_utils._assigned_adr_numbers.clear()
-        yield
-        adr_utils._assigned_adr_numbers.clear()
-
-    def test_returns_one_for_empty_dir(self, tmp_path: Path) -> None:
-        assert next_adr_number(tmp_path) == 1
-
-    def test_returns_one_for_missing_dir(self, tmp_path: Path) -> None:
-        assert next_adr_number(tmp_path / "nonexistent") == 1
-
-    def test_increments_past_highest(self, tmp_path: Path) -> None:
-        (tmp_path / "0001-first.md").touch()
-        (tmp_path / "0003-third.md").touch()
-        assert next_adr_number(tmp_path) == 4
-
-    def test_ignores_non_adr_files(self, tmp_path: Path) -> None:
-        (tmp_path / "0005-fifth.md").touch()
-        (tmp_path / "README.md").touch()
-        (tmp_path / "template.md").touch()
-        assert next_adr_number(tmp_path) == 6
-
-    def test_concurrent_calls_return_unique_numbers(self, tmp_path: Path) -> None:
-        """Simulate concurrent workers — each call must return a distinct number."""
-        (tmp_path / "0002-existing.md").touch()
-        results = [next_adr_number(tmp_path) for _ in range(5)]
-        assert results == [3, 4, 5, 6, 7]
-
-    def test_scans_primary_adr_dir(self, tmp_path: Path) -> None:
-        """The primary repo dir should be checked even if the local dir differs."""
-        local = tmp_path / "worktree" / "docs" / "adr"
-        local.mkdir(parents=True)
-        (local / "0001-local.md").touch()
-
-        primary = tmp_path / "primary" / "docs" / "adr"
-        primary.mkdir(parents=True)
-        (primary / "0010-primary.md").touch()
-
-        result = next_adr_number(local, primary_adr_dir=primary)
-        assert result == 11
-
-    def test_assigned_set_tracks_numbers(self, tmp_path: Path) -> None:
-        """Returned numbers must be recorded in the module-level set."""
-        import adr_utils
-
-        next_adr_number(tmp_path)
-        next_adr_number(tmp_path)
-        assert adr_utils._assigned_adr_numbers == {1, 2}
-
-    def test_assigned_numbers_override_disk(self, tmp_path: Path) -> None:
-        """Previously assigned numbers beat what's on disk."""
-        import adr_utils
-
-        adr_utils._assigned_adr_numbers.add(20)
-        result = next_adr_number(tmp_path)
-        assert result == 21
 
 
 # ---------------------------------------------------------------------------
@@ -1076,6 +1014,81 @@ class TestCancelRemaining:
 
 
 # ---------------------------------------------------------------------------
+# handle_pool_worker_exception (shared pool policy)
+# ---------------------------------------------------------------------------
+
+
+class TestHandlePoolWorkerException:
+    """The one fatal-or-continue policy every worker pool shares (#11618)."""
+
+    @staticmethod
+    async def _never() -> int:
+        await asyncio.sleep(100)
+        return 1
+
+    @pytest.mark.asyncio
+    async def test_non_fatal_exception_returns_instead_of_raising(self) -> None:
+        from phase_utils import handle_pool_worker_exception
+
+        await handle_pool_worker_exception(
+            RuntimeError("gh timed out"), [], log=logging.getLogger(), context="ctx"
+        )  # must not raise
+
+    @pytest.mark.asyncio
+    async def test_non_fatal_exception_is_logged_against_the_context(self) -> None:
+        from phase_utils import handle_pool_worker_exception
+
+        log = MagicMock()
+        await handle_pool_worker_exception(
+            RuntimeError("gh timed out"), [], log=log, context="Review worker failed"
+        )
+
+        assert log.warning.call_args.args[1] == "Review worker failed"
+
+    @pytest.mark.asyncio
+    async def test_fatal_exception_is_reraised(self) -> None:
+        from phase_utils import handle_pool_worker_exception
+
+        with pytest.raises(TypeError):
+            await handle_pool_worker_exception(
+                TypeError("bad unpack"), [], log=logging.getLogger(), context="ctx"
+            )
+
+    @pytest.mark.asyncio
+    async def test_fatal_exception_cancels_sibling_tasks(self) -> None:
+        from phase_utils import handle_pool_worker_exception
+
+        sibling: asyncio.Task[int] = asyncio.create_task(self._never())
+
+        with pytest.raises(TypeError):
+            await handle_pool_worker_exception(
+                TypeError("bad unpack"),
+                [sibling],
+                log=logging.getLogger(),
+                context="ctx",
+            )
+
+        assert sibling.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_accepts_a_set_of_siblings(self) -> None:
+        """The review pool passes the set ``asyncio.wait`` hands back."""
+        from phase_utils import handle_pool_worker_exception
+
+        sibling: asyncio.Task[int] = asyncio.create_task(self._never())
+
+        with pytest.raises(TypeError):
+            await handle_pool_worker_exception(
+                TypeError("bad unpack"),
+                {sibling},
+                log=logging.getLogger(),
+                context="ctx",
+            )
+
+        assert sibling.cancelled()
+
+
+# ---------------------------------------------------------------------------
 # _process_done_tasks (private helper)
 # ---------------------------------------------------------------------------
 
@@ -1121,7 +1134,7 @@ class TestProcessDoneTasks:
         from phase_utils import _process_done_tasks
 
         async def bad() -> int:
-            raise ValueError("oops")
+            raise RuntimeError("oops")
 
         task: asyncio.Task[int] = asyncio.create_task(bad())
         await asyncio.sleep(0)

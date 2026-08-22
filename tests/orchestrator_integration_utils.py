@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 from config import HydraFlowConfig
+from driver_ownership import DriverOwnershipRegistry
 from issue_store import IssueStore
 from models import (
     GitHubIssue,
@@ -535,6 +536,11 @@ def build_scripted_services(
     services.fitness_scorecard_loop = FakeBackgroundLoop()
     services.convergence_oscillation_loop = FakeBackgroundLoop()
     services.entry_evidence_loop = FakeBackgroundLoop()
+    # #11535: scripted services model a Classic factory, so there is no driver
+    # manager. The orchestrator reads ``driver_manager is None`` to decide which
+    # pipeline loops to register, and ``driver_ownership`` on stop.
+    services.driver_manager = None
+    services.driver_ownership = DriverOwnershipRegistry()
     services.repo_wiki_store = SimpleNamespace(
         is_ingested=MagicMock(return_value=False),
         mark_ingested=MagicMock(),

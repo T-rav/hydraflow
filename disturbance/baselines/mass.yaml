@@ -47,9 +47,6 @@ classes:
   src/post_merge_handler.py:PostMergeHandler:
     loc: 696
     methods: 13
-  src/pr_manager.py:PRManager:
-    loc: 3181
-    methods: 110
   src/pr_unsticker.py:PRUnsticker:
     loc: 903
     methods: 20
@@ -59,9 +56,6 @@ classes:
   src/repo_wiki_loop.py:RepoWikiLoop:
     loc: 826
     methods: 17
-  src/review_phase/_phase.py:ReviewPhase:
-    loc: 3097
-    methods: 78
   src/reviewer.py:ReviewRunner:
     loc: 983
     methods: 21
@@ -89,8 +83,11 @@ classes:
 comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC or\
   \ method count >= class thresholds) \u2014 the mass sensor (erosion.mass). The gate\
   \ flags NEW entries beyond this set; the ErosionMetricsLoop files the burn-down\
-  \ roster. Last moved: initial baseline at sensor introduction (rebased onto staging\
-  \ b91594d)"
+  \ roster. Last moved: 2026-08-22 \u2014 targeted removal of the four entries decomposed\
+  \ in the batch-1 erosion burn-down (Refs #11547): PRManager 3302\u2192482 LOC /\
+  \ 112\u219218 methods and ReviewPhase 3101\u2192550 LOC / 78\u219222 methods, both\
+  \ now under both thresholds, plus their two files. Hand-edited rather than regenerated\
+  \ so no unrelated god-class growth is laundered through this change."
 files:
   src/config.py: 7198
   src/dashboard_routes/_routes.py: 2103
@@ -100,7 +97,5 @@ files:
   src/models.py: 2844
   src/orchestrator.py: 2087
   src/plan_phase.py: 1975
-  src/pr_manager.py: 3307
   src/repo_wiki.py: 1589
-  src/review_phase/_phase.py: 3228
   src/service_registry.py: 1636

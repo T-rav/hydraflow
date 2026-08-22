@@ -59,7 +59,17 @@ class TestBuildServices:
         # hindsight is None when not configured — that's expected
         # live_corpus_replay_loop is None when shadow_corpus_enabled is off
         # (default) — see service_registry.py and #8786 Phase 2.
-        optional_fields = {"hindsight", "hindsight_wal", "live_corpus_replay_loop"}
+        # driver_manager is None under Classic scheduling (the default) — and
+        # deliberately so: #11535's default-off invariant is that the allocator
+        # is not constructed at all unless an operator opts in, not that it is
+        # constructed and dormant. tests/test_scheduling_default_off.py pins
+        # both halves of that.
+        optional_fields = {
+            "hindsight",
+            "hindsight_wal",
+            "live_corpus_replay_loop",
+            "driver_manager",
+        }
         for field_name in ServiceRegistry.__dataclass_fields__:
             if field_name in optional_fields:
                 continue

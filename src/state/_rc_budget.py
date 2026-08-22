@@ -13,7 +13,12 @@ class RCBudgetStateMixin:
 
     _data: StateData
 
-    def save(self) -> None: ...  # provided by CoreMixin
+    # Host seams — implemented by the host class, declared here for typing
+    # only. A runtime `...` body would be a real class attribute and would
+    # win the MRO over a sibling mixin's implementation (#11629).
+    if TYPE_CHECKING:
+
+        def save(self) -> None: ...
 
     def get_rc_budget_duration_history(self) -> list[RcBudgetDurationEntry]:
         return list(self._data.rc_budget_duration_history)

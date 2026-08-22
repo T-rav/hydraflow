@@ -333,7 +333,13 @@ class TestPlanPhase:
         """max_planners=1 means at most 1 planner runs concurrently."""
         concurrency_counter = {"current": 0, "peak": 0}
 
-        async def fake_plan(issue: Task, worker_id: int = 0) -> PlanResult:
+        async def fake_plan(
+            issue: Task,
+            worker_id: int = 0,
+            research_context: str = "",
+            guidance: str = "",
+            force_scale: object | None = None,
+        ) -> PlanResult:
             concurrency_counter["current"] += 1
             concurrency_counter["peak"] = max(
                 concurrency_counter["peak"], concurrency_counter["current"]
@@ -481,7 +487,13 @@ class TestPlanPhase:
         ]
         call_count = {"n": 0}
 
-        async def fake_plan(issue: Task, worker_id: int = 0) -> PlanResult:
+        async def fake_plan(
+            issue: Task,
+            worker_id: int = 0,
+            research_context: str = "",
+            guidance: str = "",
+            force_scale: object | None = None,
+        ) -> PlanResult:
             call_count["n"] += 1
             if call_count["n"] == 1:
                 stop_event.set()

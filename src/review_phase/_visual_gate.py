@@ -19,8 +19,11 @@ Three sub-concerns, all "visual" checks on a PR:
 * HITL escalation carrying visual evidence — ``escalate_visual_failure``.
 
 Cross-slice collaborators (``_publish_review_status``, ``_escalate_to_hitl``,
-``_run_post_verify_for_surface``) are declared as stubs below and provided by
-``ReviewPhase`` in ``_phase.py``.
+``_run_post_verify_for_surface``) are provided by ``ReviewPhase`` in
+``_phase.py`` and declared below under ``if TYPE_CHECKING:`` — a *runtime*
+stub body would be a real class attribute and would win the MRO over a
+sibling mixin's implementation the moment ``ReviewPhase`` inherits more than
+one mixin (#11629).
 """
 
 from __future__ import annotations
@@ -77,28 +80,37 @@ class VisualGateMixin:
     _visual_validator: VisualValidator | None
     _harness_insights: HarnessInsightStore | None
 
-    # --- cross-slice methods provided by ``ReviewPhase`` (_phase.py) ---
-    async def _publish_review_status(
-        self, pr: PRInfo, worker_id: int, status: str
-    ) -> None: ...
+    # --- cross-slice methods provided by sibling mixins ---
+    #
+    # TYPE_CHECKING-only on purpose: a runtime ``...`` body would be a real
+    # class attribute and would win the MRO over a sibling mixin's
+    # implementation (#11629). That matters concretely here:
+    # ``_publish_review_status`` / ``_escalate_to_hitl`` live in ``_insights``
+    # and ``_run_post_verify_for_surface`` in ``_advisors`` (Refs #11547), all
+    # of which follow this mixin in ``ReviewPhase``'s MRO.
+    if TYPE_CHECKING:
 
-    async def _escalate_to_hitl(self, esc: HitlEscalation) -> None: ...
+        async def _publish_review_status(
+            self, pr: PRInfo, worker_id: int, status: str
+        ) -> None: ...
 
-    async def _run_post_verify_for_surface(
-        self,
-        *,
-        surface: str,
-        diff: str,
-        spec: str | None,
-        executor_verdict_summary: str,
-        executor_fix_diff: str | None = None,
-        pre_flight_plan: ReviewPlan | None = None,
-        attempt_number: int = 0,
-        issue_number: int,
-        log_pr_number: int | None = None,
-        lens: Literal["correctness", "security", "spec"] | None = None,
-        classification_paths: list[str] | None = None,
-    ) -> PostVerifyResult | None: ...
+        async def _escalate_to_hitl(self, esc: HitlEscalation) -> None: ...
+
+        async def _run_post_verify_for_surface(
+            self,
+            *,
+            surface: str,
+            diff: str,
+            spec: str | None,
+            executor_verdict_summary: str,
+            executor_fix_diff: str | None = None,
+            pre_flight_plan: ReviewPlan | None = None,
+            attempt_number: int = 0,
+            issue_number: int,
+            log_pr_number: int | None = None,
+            lens: Literal["correctness", "security", "spec"] | None = None,
+            classification_paths: list[str] | None = None,
+        ) -> PostVerifyResult | None: ...
 
     def _compute_visual_validation(
         self, diff: str, task: Task

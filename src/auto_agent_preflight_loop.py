@@ -46,6 +46,7 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         workspaces: Any | None = None,
         epic_manager: Any | None = None,
         runner: Any | None = None,
+        driver_ownership: Any | None = None,
     ) -> None:
         super().__init__(
             worker_name="auto_agent_preflight",
@@ -58,6 +59,12 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
         self._wiki_store = wiki_store
         self._audit_store = audit_store
         self._workspaces = workspaces
+        # #11535: the single-owner interlock. Under ``issue_controller`` a
+        # fenced IssueDriver may already own an escalated issue, and this loop
+        # would otherwise become its second owner. ``None`` (and the disabled
+        # registry the Classic composition root supplies) means "nothing is
+        # driver-owned", so the Classic path is unchanged.
+        self._driver_ownership = driver_ownership
 
         # ADR-0105 decompose-to-converge: both are optional so the loop keeps
         # working (falling straight through to today's human-required
@@ -383,7 +390,26 @@ class AutoAgentPreflightLoop(BaseBackgroundLoop):
             eligible.extend(await self._poll_widened_hitl_issues(seen))
         if self._config.auto_agent_light_intake_enabled:
             eligible.extend(await self._poll_light_issues(seen))
-        return eligible
+        return [i for i in eligible if not self._is_driver_owned(i)]
+
+    def _is_driver_owned(self, issue: dict[str, Any]) -> bool:
+        """True when a live IssueDriver already owns *issue* (#11535).
+
+        Applied to every intake path at once, after they have been gathered,
+        so a future path cannot be added that forgets the interlock. Always
+        False under Classic — the registry is constructed disabled there and
+        answers without consulting any state.
+        """
+        if self._driver_ownership is None:
+            return False
+        number = int(issue.get("number", 0) or 0)
+        if not number or not self._driver_ownership.owns(number):
+            return False
+        logger.info(
+            "auto_agent_preflight: skipping #%d — owned by a live IssueDriver",
+            number,
+        )
+        return True
 
     async def _poll_light_issues(self, seen: set[int]) -> list[dict[str, Any]]:
         """#11298 light lane: poll issues PlanPhase routed to the

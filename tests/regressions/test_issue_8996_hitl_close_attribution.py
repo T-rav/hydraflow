@@ -275,15 +275,15 @@ class TestReviewPhaseFallbackBotVsHumanClose:
 
         with (
             patch("review_phase.analyze_patterns", return_value=[]),
-            patch("review_phase._phase.verify_proposals", return_value=[_CATEGORY]),
-            patch("review_phase._phase.CATEGORY_DESCRIPTIONS", {_CATEGORY: _DESC}),
+            patch("review_phase._insights.verify_proposals", return_value=[_CATEGORY]),
+            patch("review_phase._insights.CATEGORY_DESCRIPTIONS", {_CATEGORY: _DESC}),
             # The shared reconcile function lives in ``review_insights`` and
             # reads ITS OWN module-global ``CATEGORY_DESCRIPTIONS`` for the
             # desc->category reverse lookup — patch both bound names so the
             # filing path (``_phase``) and the reconcile path (shared
             # function) agree on the same category/desc mapping.
             patch("review_insights.CATEGORY_DESCRIPTIONS", {_CATEGORY: _DESC}),
-            patch("review_phase._phase._PROPOSAL_STALE_DAYS", 30),
+            patch("review_phase._insights._PROPOSAL_STALE_DAYS", 30),
         ):
             await phase._record_review_insight(result)
             assert phase._prs.create_task.await_count == 1
@@ -308,15 +308,15 @@ class TestReviewPhaseFallbackBotVsHumanClose:
 
         with (
             patch("review_phase.analyze_patterns", return_value=[]),
-            patch("review_phase._phase.verify_proposals", return_value=[_CATEGORY]),
-            patch("review_phase._phase.CATEGORY_DESCRIPTIONS", {_CATEGORY: _DESC}),
+            patch("review_phase._insights.verify_proposals", return_value=[_CATEGORY]),
+            patch("review_phase._insights.CATEGORY_DESCRIPTIONS", {_CATEGORY: _DESC}),
             # The shared reconcile function lives in ``review_insights`` and
             # reads ITS OWN module-global ``CATEGORY_DESCRIPTIONS`` for the
             # desc->category reverse lookup — patch both bound names so the
             # filing path (``_phase``) and the reconcile path (shared
             # function) agree on the same category/desc mapping.
             patch("review_insights.CATEGORY_DESCRIPTIONS", {_CATEGORY: _DESC}),
-            patch("review_phase._phase._PROPOSAL_STALE_DAYS", 30),
+            patch("review_phase._insights._PROPOSAL_STALE_DAYS", 30),
         ):
             await phase._record_review_insight(result)
             assert phase._prs.create_task.await_count == 1

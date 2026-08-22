@@ -104,6 +104,17 @@ export const JUDGE_CALIBRATION_POLL_MS = 60_000
 export const TRUST_FLEET_POLL_MS = 60_000
 
 /**
+ * Operator Routing-mode (Accounts + Live) REST-poll cadence (#11534, ADR-0138).
+ * The panels read `/api/gateway/accounts` and the two `/api/gateway/routes/*`
+ * endpoints, which the dashboard proxies from the gateway's in-memory account
+ * and active-route registries — cheap reads, but the thing they show (a request
+ * streaming right now) changes in seconds, so this polls twice as fast as the
+ * slow JSONL-scanning rollups while still being one pinned interval, aborted
+ * in-flight on unmount.
+ */
+export const GATEWAY_ROUTING_POLL_MS = 30_000
+
+/**
  * WebSocket reconnect backoff (PR5). A flapping socket previously re-ran the
  * heavy onopen fan-out (10+ fetches + history replay) every fixed 2s. We now
  * back off exponentially with full jitter — delay = random(0, min(BASE * 2**n,

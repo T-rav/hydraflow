@@ -927,3 +927,19 @@ A test whose input includes host state (`Path.home()`, installed tools, a live p
 ```json:entry
 {"id":"TELEMETRY-LOAD-BY-WINDOW-NOT-COUNT-001","source_type":"manual","topic":"gotchas","tags":["telemetry","token-drift","jsonl","row-cap","windowing","instrument-blindness","retention"],"rule":"A reader whose question is about a calendar window must stream the JSONL and keep rows by timestamp (PromptTelemetry.iter_inferences -> token_drift.load_window_rows / trailing_complete_weeks) with no row cap; a count-bounded load_inferences(limit=) is only for most-recent-activity views. A window the loader knows it could not cover (OSError mid-stream, retention floor inside the oldest week) is reported as TelemetryWindow.truncation and the engine degrades to insufficient_data instead of a verdict; the pin script refuses to pin.","anti_pattern":"Loading the newest N rows of inferences.jsonl (DRIFT_LOAD_LIMIT = 5000) and judging the trailing ISO week from them, so a 24k-row week either vanished (insufficient_data in high-burn weeks) or was mis-sampled mid-week into a confident wrong verdict","code_refs":["src/token_drift.py:load_window_rows","src/token_drift.py:trailing_complete_weeks","src/prompt_telemetry.py:PromptTelemetry.iter_inferences","scripts/pin_token_baseline.py","tests/regressions/test_issue_11581.py"],"source_issue":11581,"added":"2026-08-21"}
 ```
+
+
+## Runtime `...` stubs in a mixin shadow sibling mixins via the MRO
+
+A mixin that declares a host seam as a runtime stub (`def save(self) -> None: ...`) creates a real class attribute. Once the host inherits two or more mixins, that stub can win the MRO over a sibling mixin's real implementation and silently return `None`. Put method seams under `if TYPE_CHECKING:`; leave attribute annotations unguarded (they create no attribute).
+
+Example: `src/state/` mixes 55 mixins into `StateTracker`, every one of which declared `save`; the host's own `save` was the only thing keeping them harmless. See "Mixin decomposition: declare host seams under TYPE_CHECKING, never as runtime stubs" in `architecture-refactoring.md`.
+
+**Why:** The failure is invisible to ruff, pyright, and import — only a test that happens to cover the shadowed path catches it.
+
+_Source: #11629 (manual)_
+
+
+```json:entry
+{"id":"01M0M7JNV07P5TTBS5TH4ER2M6","title":"Runtime `...` stubs in a mixin shadow sibling mixins via the MRO","topic":null,"source_type":"manual","source_issue":11629,"source_repo":null,"created_at":"2026-08-22T00:00:00+00:00","updated_at":"2026-08-22T00:00:00+00:00","valid_to":null,"superseded_by":null,"superseded_reason":null,"confidence":"high","stale":false,"corroborations":1}
+```
