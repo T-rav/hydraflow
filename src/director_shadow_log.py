@@ -55,6 +55,15 @@ SHADOW_LOG_SCHEMA_VERSION = 1
 MAX_LOADED_OBSERVATIONS = 5000
 """How many trailing observations are read back into the rollup at startup."""
 
+MAX_LOADED_BYTES = 4 * 1024 * 1024
+"""How much of the log's tail is actually READ at startup.
+
+Bounding the parse without bounding the read is not a bound: the previous
+version sliced ``read_text().splitlines()``, which pulls the whole file into
+memory first. This seeks instead, so a log that has grown to hundreds of
+megabytes costs a few megabytes to reopen.
+"""
+
 
 class ShadowAgreement(StrEnum):
     """Whether the shadow director pointed where the controller actually went."""
@@ -63,6 +72,15 @@ class ShadowAgreement(StrEnum):
     DIVERGED = "diverged"
     NO_COMMAND = "no_command"
     """The turn produced no usable command at all — a failure, not a disagreement."""
+
+    UNSCORED = "unscored"
+    """A command was read but this outcome has no agreement rule.
+
+    Distinct from ``NO_COMMAND``, which means nothing usable came back. Filing
+    a read command under "no command" produced a row that said *no command*
+    beside the command it had just parsed, and quietly moved a wiring gap into
+    the same bucket as a broken turn.
+    """
 
 
 class TurnFailure(StrEnum):
@@ -103,6 +121,9 @@ class TurnFailure(StrEnum):
     STOPPED = "stopped"
     """The factory was stopping; the turn was never started (fail closed)."""
 
+    #: Members below this line describe a turn that was never started. They are
+    #: COUNTED, never written as a row — see :meth:`ShadowObservationLog.decline`.
+
     DISABLED = "disabled"
     """The live kill switch is off; the turn was never started."""
 
@@ -119,8 +140,11 @@ class TurnFailure(StrEnum):
     NOT_A_BOUNDARY = "not_a_boundary"
     """The driver had nothing to run, so there was no decision to compare.
 
-    Recorded rather than skipped silently so the ratio of real boundaries to
-    idle ticks is visible; it never runs a turn and never scores as agreement.
+    Counted rather than written. Recording a row for it — the first version of
+    this — put an fsync on a path the allocator reaches on every tick for every
+    parked driver, which is a firehose rather than telemetry. The ratio of real
+    boundaries to idle ticks is what an operator wants, and a counter carries
+    that exactly as well as a row does.
     """
 
 
@@ -226,27 +250,55 @@ class ShadowObservation(BaseModel):
 class ShadowObservationLog:
     """Append-only JSONL log of shadow observations, with a live rollup.
 
-    The rollup is maintained in memory as observations are appended rather than
-    recomputed by re-reading the file, because the operator status endpoint is
-    polled and the file grows without bound. On construction it is seeded by
-    reading whatever is already on disk once, so a restart does not reset the
-    numbers an operator is watching.
+    **A row on disk means a turn was attempted.** Everything that declined to
+    start one — an idle tick, a stop, the kill switch, the spend ceiling — is a
+    counter and nothing more (:meth:`decline`). That rule is what keeps
+    ``observations == agreed + diverged + no_command + unscored`` reconcilable,
+    and it is what keeps a parked driver from turning a telemetry file into a
+    write loop.
+
+    The rollup is maintained in memory as rows are appended rather than
+    recomputed from the file, because the status endpoint is polled and the file
+    grows without bound. Counters are per-run and start at zero; the cumulative
+    **spend** is the one number that must survive a restart, so it is persisted
+    separately (:attr:`spend_path`) rather than re-derived from a bounded tail
+    that could evict every costed row.
     """
 
     def __init__(self, path: Path) -> None:
         self._path = path
+        self._spend_path = path.with_suffix(".spend.json")
         self._recent: list[ShadowObservation] = []
         self._counts: dict[str, int] = {}
         self._usd_total = 0.0
         self._latency_total_ms = 0
         self._observations = 0
         self._load()
+        self._usd_total = self._load_spend()
 
     @property
     def path(self) -> Path:
         return self._path
 
+    @property
+    def spend_path(self) -> Path:
+        """Where the cumulative USD total lives, outside the tail window."""
+        return self._spend_path
+
     # -- writes -------------------------------------------------------------
+
+    def decline(self, kind: TurnFailure) -> None:
+        """Count a boundary where no turn was started. Writes nothing.
+
+        The allocator reaches this on every tick for every driver that has
+        nothing to run, so it must stay allocation-light and must never touch
+        the disk. It deliberately does **not** increment ``observations``: a
+        decline is not an observation of a director's judgement, and folding it
+        into the same denominator would dilute the agreement rate that
+        ADR-0137 B5's bar reads — the exact contamination the boundary filter
+        exists to prevent.
+        """
+        self._bump(kind.value)
 
     def record(self, observation: ShadowObservation) -> None:
         """Append one observation. Never raises into the caller's boundary.
@@ -257,6 +309,8 @@ class ShadowObservationLog:
         log degrades to a warning and an in-memory rollup.
         """
         self._fold(observation)
+        if observation.usd_cost:
+            self._persist_spend()
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a", encoding="utf-8") as handle:
@@ -287,11 +341,18 @@ class ShadowObservationLog:
             "no_command": self._counts.get(ShadowAgreement.NO_COMMAND.value, 0),
             "invalid_requests": self._counts.get("invalid_requests", 0),
             "route_revisions": self._counts.get("route_revisions", 0),
+            "unscored": self._counts.get(ShadowAgreement.UNSCORED.value, 0),
             "resume_failures": self._counts.get(TurnFailure.RESUME_LOSS.value, 0),
+            "turn_error": self._counts.get(TurnFailure.TURN_ERROR.value, 0),
+            # Declines: counted, never written. An operator who has just flipped
+            # the kill switch looks for ``disabled``, so omitting it made the one
+            # new live control invisible in the one place it is surfaced.
             "spend_ceiling_reached": self._counts.get(
                 TurnFailure.SPEND_CEILING.value, 0
             ),
             "not_a_boundary": self._counts.get(TurnFailure.NOT_A_BOUNDARY.value, 0),
+            "stopped": self._counts.get(TurnFailure.STOPPED.value, 0),
+            "disabled": self._counts.get(TurnFailure.DISABLED.value, 0),
             "timed_out": self._counts.get(TurnFailure.TIMED_OUT.value, 0),
             "sandbox_unverified": self._counts.get(
                 TurnFailure.SANDBOX_UNVERIFIED.value, 0
@@ -306,6 +367,37 @@ class ShadowObservationLog:
         }
 
     # -- internals ----------------------------------------------------------
+
+    def _persist_spend(self) -> None:
+        """Write the cumulative spend beside the log. Never raises."""
+        try:
+            self._spend_path.parent.mkdir(parents=True, exist_ok=True)
+            self._spend_path.write_text(
+                json.dumps({"usd_total": round(self._usd_total, 6)}), encoding="utf-8"
+            )
+        except OSError:
+            logger.warning(
+                "director shadow log: could not persist the spend total to %s",
+                self._spend_path,
+                exc_info=True,
+            )
+
+    def _load_spend(self) -> float:
+        """The cumulative spend, from its own file rather than the log's tail.
+
+        Deriving it from the tail was wrong twice: a bounded tail can evict
+        every costed row, and the ceiling would then silently re-arm with the
+        whole budget available again on each restart. The counters above are
+        honestly per-run; this one number is not allowed to be.
+        """
+        try:
+            payload = json.loads(self._spend_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return self._usd_total
+        recorded = payload.get("usd_total")
+        if not isinstance(recorded, int | float) or recorded < 0:
+            return self._usd_total
+        return float(recorded)
 
     def _fold(self, observation: ShadowObservation) -> None:
         self._observations += 1
@@ -326,14 +418,12 @@ class ShadowObservationLog:
         if not self._path.exists():
             return
         try:
-            # Only the tail is loaded. The rollup an operator watches is a live
-            # counter over a run, not a historical total, and re-reading an
-            # unbounded append-only file at every restart is how a telemetry
-            # log becomes a startup cost. The file itself is never truncated —
-            # it is the audit trail, and a human reads it with ``tail``.
-            lines = self._path.read_text(encoding="utf-8").splitlines()[
-                -MAX_LOADED_OBSERVATIONS:
-            ]
+            # Only the tail is READ, not merely parsed: re-reading an unbounded
+            # append-only file at every restart is how a telemetry log becomes a
+            # startup cost, and slicing after ``read_text`` bounds neither the
+            # read nor the peak memory. The file itself is never truncated — it
+            # is the audit trail, and a human reads it with ``tail``.
+            lines = self._read_tail()
         except OSError:
             logger.warning(
                 "director shadow log: could not read %s", self._path, exc_info=True
@@ -350,3 +440,23 @@ class ShadowObservationLog:
                 # older schema version leaves a line this model cannot load.
                 # Neither is corruption worth failing a rollup over.
                 logger.debug("director shadow log: skipping unloadable line")
+
+    def _read_tail(self) -> list[str]:
+        """The last :data:`MAX_LOADED_BYTES` of the log, whole lines only.
+
+        Seeks rather than reading the whole file and slicing. Bounding the parse
+        without bounding the read is not a bound: ``read_text().splitlines()``
+        pulls every byte into memory first, so a log that has grown to hundreds
+        of megabytes costs all of them at every restart — which is the cost the
+        comment on the caller claimed to be avoiding.
+        """
+        with self._path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(size - MAX_LOADED_BYTES, 0))
+            raw = handle.read()
+        lines = raw.decode("utf-8", "replace").splitlines()
+        if size > MAX_LOADED_BYTES and lines:
+            # The seek almost certainly landed mid-record; drop that fragment.
+            lines = lines[1:]
+        return lines[-MAX_LOADED_OBSERVATIONS:]

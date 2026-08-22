@@ -53,6 +53,7 @@ from director_sandbox import (
     DirectorSandboxError,
     ProbeEvidence,
     assert_observed_surface,
+    normalise_cli_version,
 )
 from director_shadow_log import (
     ShadowAgreement,
@@ -101,13 +102,18 @@ of the issue may be when the broker judges what it asked for.
 #:
 #: ``IDLE`` and ``ALREADY_COMMITTED`` are deliberately absent, and leaving them
 #: in was a real defect: a driver parked on a barrier reaches ``IDLE`` on *every*
-#: poll, so a turn would be spawned every ``poll_interval`` indefinitely — and
-#: because ``IDLE`` maps to "yield", where yielding is trivially right, those
-#: no-op ticks would then dominate the agreement rate. That rate is the headline
-#: number ADR-0137 B5's rollout bar reads, so contaminating it with ticks that
-#: contain no decision would corrupt the evidence the next phase's go/no-go
-#: rests on. They are recorded as ``NOT_A_BOUNDARY`` rather than dropped, so the
-#: ratio of real boundaries to idle ticks stays visible.
+#: tick, so a turn would be spawned indefinitely — and because ``IDLE`` maps to
+#: "yield", where yielding is trivially right, those no-op ticks would then
+#: dominate the agreement rate. That rate is the headline number ADR-0137 B5's
+#: rollout bar reads, so contaminating it with ticks that contain no decision
+#: would corrupt the evidence the next phase's go/no-go rests on.
+#:
+#: They are **counted**, not written: ``ShadowObservationLog.decline`` keeps the
+#: ratio of real boundaries to idle ticks visible without putting a disk write
+#: on a path the allocator reaches for every parked driver every tick. The first
+#: version wrote a row, on the assumption that the tick sleeps a poll interval
+#: between rounds — which was false, and is fixed at its cause in
+#: ``DriverTickReport.did_work``.
 OBSERVABLE_OUTCOMES: frozenset[AdvanceOutcome] = frozenset(
     {
         AdvanceOutcome.COMMITTED,
@@ -150,7 +156,7 @@ class FableDirector:
         stage_labels: dict[str, str],
         stop_event: asyncio.Event | None = None,
         usd_budget_per_boundary: float = 1.0,
-        usd_ceiling: float = 25.0,
+        usd_ceiling: Callable[[], float] | float = 25.0,
         is_enabled: Callable[[], bool] | None = None,
     ) -> None:
         self._runner = runner
@@ -162,12 +168,16 @@ class FableDirector:
         self._stage_labels = stage_labels
         self._stop_event = stop_event
         self._usd_budget_per_boundary = usd_budget_per_boundary
-        self._usd_ceiling = usd_ceiling
-        # Read per boundary, not captured once: it is a LIVE kill switch, and a
-        # kill switch that needs a restart is not a kill switch. The dials that
-        # select the director are restart-required; this one must not be,
-        # because a director turn costs money.
+        # Both of these are read per boundary rather than captured, because both
+        # are registered as LIVE settings and a live badge on a captured value
+        # is exactly the lie ``settings_registry`` forbids. The kill switch was
+        # wired correctly from the start; the ceiling was given the badge
+        # without the wiring, so editing it did nothing until a restart.
+        self._usd_ceiling = (
+            usd_ceiling if callable(usd_ceiling) else (lambda: float(usd_ceiling))
+        )
         self._is_enabled = is_enabled
+        self._ceiling_announced = False
 
     @property
     def shadow_log(self) -> ShadowObservationLog:
@@ -199,11 +209,34 @@ class FableDirector:
         the only moment an operator is looking.
         """
         version = await self._runner.preflight()
+        self._assert_evidence_describes_this_cli(version)
         logger.info(
             "fable_director: preflight ok — CLI %s, evidence recorded against %s",
             version,
             self._evidence.agent_cli_version,
         )
+
+    def _assert_evidence_describes_this_cli(self, version: str) -> None:
+        """S4's version fence, applied at boot instead of one turn at a time.
+
+        The per-turn assertion still runs and is still the load-bearing one, but
+        it fires *after* the turn is paid for and discarded. Preflight already
+        holds both numbers, so checking them here turns a CLI upgrade from "every
+        boundary buys a turn that is thrown away until the spend ceiling stops
+        it" into a refusal at boot with the remedy in the message — which is what
+        the ADR means by a version mismatch *re-arming the gate*.
+        """
+        expected = normalise_cli_version(self._evidence.agent_cli_version)
+        if normalise_cli_version(version) == expected:
+            return
+        msg = (
+            f"the director CLI reports {version!r} but the committed probe "
+            f"evidence was recorded against {expected!r}. A CLI upgrade "
+            "invalidates the evidence S4 asserts against, so the director "
+            "refuses to run until scripts/director_capability_probe.py is "
+            "re-run against this build (ADR-0137 S4, part 4)."
+        )
+        raise DirectorSandboxError(msg)
 
     # -- the observation seam ----------------------------------------------
 
@@ -219,10 +252,10 @@ class FableDirector:
         """
         refusal = self._refuse_before_spending()
         if refusal is not None:
-            self._record_failure(task, advance, driver, refusal)
+            self._shadow_log.decline(refusal)
             return
         if advance.outcome not in OBSERVABLE_OUTCOMES:
-            self._record_failure(task, advance, driver, TurnFailure.NOT_A_BOUNDARY)
+            self._shadow_log.decline(TurnFailure.NOT_A_BOUNDARY)
             return
         phase = advance.phase or phase_for_state(driver.driver_state)
         if phase is None:
@@ -432,15 +465,23 @@ class FableDirector:
             return TurnFailure.STOPPED
         if self._is_enabled is not None and not self._is_enabled():
             return TurnFailure.DISABLED
+        ceiling = self._usd_ceiling()
         spent = float(self._shadow_log.summary()["usd_cost_total"])
-        if spent >= self._usd_ceiling:
-            logger.warning(
-                "fable_director: aggregate spend ceiling reached ($%.2f of "
-                "$%.2f); no further shadow turns will be started this run",
-                spent,
-                self._usd_ceiling,
-            )
+        if spent >= ceiling:
+            # Announced once per run, not once per tick: the allocator reaches
+            # this for every driver on every tick, so an unconditional warning
+            # here is a log firehose rather than a signal. The counter in the
+            # rollup carries the frequency.
+            if not self._ceiling_announced:
+                self._ceiling_announced = True
+                logger.warning(
+                    "fable_director: aggregate spend ceiling reached ($%.2f of "
+                    "$%.2f); no further shadow turns will be started this run",
+                    spent,
+                    ceiling,
+                )
             return TurnFailure.SPEND_CEILING
+        self._ceiling_announced = False
         return None
 
     def _record_failure(
@@ -452,6 +493,13 @@ class FableDirector:
         *,
         detail: str = "",
     ) -> None:
+        """Write a row for a boundary whose turn was **attempted** and failed.
+
+        Declines — an idle tick, a stop, the kill switch, the spend ceiling —
+        never reach here; they go to ``ShadowObservationLog.decline`` and are
+        counted. The split is what keeps a row on disk meaning "a turn ran"
+        and keeps ``observations`` a denominator worth dividing by.
+        """
         self._record(
             task,
             advance,
@@ -526,11 +574,14 @@ def _agreement_or_no_command(
     if not has_agreement_rule(outcome):
         logger.error(
             "fable_director: no agreement rule for %s; recording the boundary "
-            "without an agreement verdict. Add a row to "
-            "director_shadow_log._AGREEING_COMMAND.",
+            "as unscored. Add a row to director_shadow_log._AGREEING_COMMAND.",
             outcome.value,
         )
-        return ShadowAgreement.NO_COMMAND
+        # UNSCORED, not NO_COMMAND: a command WAS read, and filing it under
+        # "no command" would produce a row saying "no command" beside the
+        # command it names, and would hide a wiring gap in the same bucket as
+        # a broken turn.
+        return ShadowAgreement.UNSCORED
     return classify_agreement(outcome, kind)
 
 
