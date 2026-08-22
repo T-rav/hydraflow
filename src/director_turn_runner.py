@@ -43,6 +43,16 @@ the frames as a rotation hint for the checkpoint and is never fed back in — so
 "can we reconstruct without it?" is not a question this runtime has to answer at
 recovery time, because it never depends on the answer.
 
+**Not a governed routing seam, and deliberately so** (ADR-0139, #11639). The
+route-shadow ledger exists to compare the route a *dial* selected against the
+route a policy would have selected, at the four seams where a worker's route is
+actually chosen. The director has no such choice to record: S2 permits it
+exactly one credential and exactly one route — the gateway — so it is pinned
+rather than dialled, and `canonical_worker_role("fable-director")` correctly
+returns ``None`` because a director is a parent, not a catalogued worker. When
+#11541 lets a director's *children* run, each of those is a worker spawn and
+goes through the governed seams like any other.
+
 Air-gap: two independent seams, because one of them being aspirational is how
 the s51/s56/s57 wedges happened. The ``SubprocessRunner`` is **injected** from
 the ``build_services`` composition root, so the sandbox's ``FakeSubprocessRunner``
