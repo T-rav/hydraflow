@@ -90,6 +90,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | ADR-0134 | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
 | ADR-0135 | enforced | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
 | ADR-0136 | enforced | `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations`, `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` |
+| ADR-0137 | enforced | `pytest:tests/test_driver_contracts.py`, `pytest:tests/test_director_capability_probe.py`, `pytest:tests/regressions/test_issue_11533_stale_driver_states.py` |
 
 ## Check → ADRs it protects
 
@@ -118,6 +119,7 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_inconclusive_still_reaches_a_human` | ADR-0115 |
 | `pytest:tests/regressions/test_escape_auto_diagnose_before_human.py::TestEscapeAutoDiagnoseBeforeHuman::test_real_and_encoded_is_auto_resolved_no_human_surface` | ADR-0115 |
 | `pytest:tests/regressions/test_issue_11176.py::test_aging_resolvable_escape_self_answers_despite_a_busy_ask_budget` | ADR-0115 |
+| `pytest:tests/regressions/test_issue_11533_stale_driver_states.py` | ADR-0137 |
 | `pytest:tests/regressions/test_issue_11604.py` | ADR-0106 |
 | `pytest:tests/regressions/test_issue_9143_codeql_suppression.py` | ADR-0085 |
 | `pytest:tests/regressions/test_issue_9552.py` | ADR-0106 |
@@ -160,6 +162,8 @@ Static structural map of ADR enforcement, derived purely from parsing Accepted A
 | `pytest:tests/test_dashboard_routes_repo.py` | ADR-0007, ADR-0008 |
 | `pytest:tests/test_dashboard_routes_state.py` | ADR-0134 |
 | `pytest:tests/test_data_migration_d2.py` | ADR-0021 |
+| `pytest:tests/test_director_capability_probe.py` | ADR-0137 |
+| `pytest:tests/test_driver_contracts.py` | ADR-0137 |
 | `pytest:tests/test_edge_proposer_loop.py` | ADR-0058 |
 | `pytest:tests/test_entry_evidence_loop.py` | ADR-0062 |
 | `pytest:tests/test_epic.py` | ADR-0011 |
