@@ -231,6 +231,36 @@ def test_refresh_entries_rejects_a_key_that_is_neither_baselined_nor_live(
         refresh_entries(_mixed_baseline(), _finding(), [key])
 
 
+@pytest.mark.parametrize(
+    ("keys", "expect_updated", "expect_removed"),
+    [
+        pytest.param(
+            ["a.py:A", "a.py:A"], ("a.py:A",), (), id="repeated-update-applies-once"
+        ),
+        pytest.param(
+            ["b.py:B", "b.py:B"], (), ("b.py:B",), id="repeated-removal-is-not-a-typo"
+        ),
+    ],
+)
+def test_refresh_entries_applies_a_repeated_key_once(
+    keys: list[str], expect_updated: tuple[str, ...], expect_removed: tuple[str, ...]
+) -> None:
+    """A duplicate `--only` on a long command line must be benign, not fatal.
+
+    Without dedup the second pass over a just-*removed* key finds it in neither
+    the baseline nor the live reading and raises the typo KeyError, throwing away
+    every other key's correct refresh with it.
+    """
+    finding = _finding(
+        files=(GodFile("a.py", 1900),),
+        classes=(GodClass("a.py", "A", 950, 26),),
+    )
+
+    _refreshed, updated, removed = refresh_entries(_mixed_baseline(), finding, keys)
+
+    assert (updated, removed) == (expect_updated, expect_removed)
+
+
 def test_targeted_refresh_rewrites_only_the_named_lines_on_disk(
     tmp_path: Path,
 ) -> None:

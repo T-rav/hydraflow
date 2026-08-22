@@ -163,9 +163,13 @@ def refresh_entries(
     *updated* names only the entries whose recorded numbers actually changed.
 
     Raises ``KeyError`` for a key that is neither baselined nor live: a typo must
-    never pass silently as a no-op refresh.
+    never pass silently as a no-op refresh. A key repeated in *keys* is applied
+    once — otherwise the second pass over a just-removed entry would find it in
+    neither table and accuse a correctly-spelled key of being a typo, discarding
+    the other keys' refreshes with it.
     """
     live = baseline_from(finding)
+    keys = list(dict.fromkeys(keys))
     files = dict(baseline.files)
     classes = dict(baseline.classes)
     updated: list[str] = []
