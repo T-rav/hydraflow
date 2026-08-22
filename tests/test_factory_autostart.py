@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -137,7 +137,7 @@ def _cfg_with_autostart(tmp_path: Path, *, factory_autostart: bool) -> HydraFlow
 
 
 def _fake_host_runtime(*, running: bool) -> SimpleNamespace:
-    return SimpleNamespace(running=running, start=AsyncMock())
+    return SimpleNamespace(running=running, start=AsyncMock(), orchestrator=MagicMock())
 
 
 @pytest.mark.asyncio
@@ -160,6 +160,45 @@ async def test_maybe_autostart_host_starts_when_eligible(tmp_path: Path) -> None
     ]
     assert len(published) == 1
     assert published[0].data["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_maybe_autostart_host_reenables_disabled_pipeline_workers(
+    tmp_path: Path,
+) -> None:
+    """Autostart mirrors operator Start (#11611): a host that boots with its
+    pipeline workers disabled has no path from the board to READY. The latch
+    never gates this — an operator kill-switch on `plan` leaves it False."""
+    from factory_autostart import maybe_autostart_host
+
+    config = _cfg_with_autostart(tmp_path, factory_autostart=True)
+    state = make_tracker(tmp_path)
+    state.set_disabled_workers({"plan", "triage", "principles_audit"})
+    host = _fake_host_runtime(running=False)
+
+    await maybe_autostart_host(
+        config=config, host_runtime=host, state=state, event_bus=EventBus()
+    )
+
+    assert state.get_disabled_workers() == {"principles_audit"}
+
+
+@pytest.mark.asyncio
+async def test_maybe_autostart_host_flips_the_orchestrators_enabled_flags(
+    tmp_path: Path,
+) -> None:
+    from factory_autostart import maybe_autostart_host
+
+    config = _cfg_with_autostart(tmp_path, factory_autostart=True)
+    state = make_tracker(tmp_path)
+    state.set_disabled_workers({"plan"})
+    host = _fake_host_runtime(running=False)
+
+    await maybe_autostart_host(
+        config=config, host_runtime=host, state=state, event_bus=EventBus()
+    )
+
+    host.orchestrator.set_bg_worker_enabled.assert_called_once_with("plan", True)
 
 
 @pytest.mark.asyncio

@@ -318,9 +318,10 @@ async def _boot_factory(
     await dashboard.start()
 
     # Autostart the host orchestrator once the server is healthy — the
-    # server-up != factory-running gap (#11208). Fires the exact same path
-    # POST /api/control/start does; suppressed by config, an active
-    # operator-stopped latch, or an already-running host (see
+    # server-up != factory-running gap (#11208). Applies the same
+    # operator-Start transition POST /api/control/start does (pipeline workers
+    # re-enabled, #11611) minus the latch clear; suppressed by config, an
+    # active operator-stopped latch, or an already-running host (see
     # factory_autostart.decide_autostart).
     await maybe_autostart_host(
         config=config, host_runtime=host_runtime, state=state, event_bus=bus

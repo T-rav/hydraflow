@@ -1995,6 +1995,61 @@ class TestRuntimeEndpointsWithRegistry:
         assert resp.status_code == 409
 
     @pytest.mark.asyncio
+    async def test_start_runtime_reenables_that_lines_pipeline_workers(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """A per-line Start carries the same intent as the factory Start (#11611):
+        a line that comes up with its pipeline workers disabled has no path from
+        the board to READY."""
+        from tests.conftest import make_state
+
+        line_state = make_state(tmp_path / "line")
+        line_state.set_disabled_workers({"plan", "triage", "principles_audit"})
+        mock_rt = MagicMock()
+        mock_rt.running = False
+        mock_rt.start = AsyncMock()
+        mock_rt.state = line_state
+
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = mock_rt
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = find_endpoint(router, "/api/runtimes/{slug}/start")
+
+        await endpoint("my-repo")
+
+        assert line_state.get_disabled_workers() == {"principles_audit"}
+
+    @pytest.mark.asyncio
+    async def test_start_runtime_does_not_clear_the_factory_stopped_latch(
+        self, config, event_bus: EventBus, state, tmp_path: Path
+    ) -> None:
+        """``operator_stopped`` is factory-level: only POST /api/control/start
+        clears it, or starting one line would arm boot autostart for all."""
+        from tests.conftest import make_state
+
+        line_state = make_state(tmp_path / "line")
+        line_state.set_operator_stopped(True)
+        mock_rt = MagicMock()
+        mock_rt.running = False
+        mock_rt.start = AsyncMock()
+        mock_rt.state = line_state
+
+        mock_registry = MagicMock()
+        mock_registry.get.return_value = mock_rt
+
+        router, _ = make_dashboard_router(
+            config, event_bus, state, tmp_path, registry=mock_registry
+        )
+        endpoint = find_endpoint(router, "/api/runtimes/{slug}/start")
+
+        await endpoint("my-repo")
+
+        assert line_state.get_operator_stopped() is True
+
+    @pytest.mark.asyncio
     async def test_stop_runtime_success(
         self, config, event_bus: EventBus, state, tmp_path: Path
     ) -> None:

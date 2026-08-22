@@ -4,13 +4,20 @@ A deliberate ``Stop`` must survive relaunch and suppress boot-time autostart
 (``factory_autostart.maybe_autostart_host``) until the operator explicitly
 hits ``Start`` again. These tests cover both the registry (host-line) and the
 legacy single-repo/test-wiring branches of the two control routes.
+
+They also pin the *other* half of the operator-Start transition (#11611):
+Start lifts the disable on the default pipeline workers (triage/plan/implement/
+review/hitl) so the line has a path from the board to READY, while every other
+entry in ``disabled_workers`` — a deliberate per-worker kill-switch — survives.
+Both branches must behave identically; the registry branch is the live path.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -186,6 +193,134 @@ async def test_legacy_start_clears_operator_stopped_latch(
 
     assert json.loads(response.body)["status"] == "started"
     assert state.get_operator_stopped() is False
+
+
+# ---------------------------------------------------------------------------
+# Start re-enables the default pipeline workers on BOTH branches (#11611)
+# ---------------------------------------------------------------------------
+
+
+def _stopped_orch() -> SimpleNamespace:
+    """A duck-typed, not-running orchestrator that records enable/disable calls."""
+    return SimpleNamespace(
+        running=False,
+        set_bg_worker_enabled=MagicMock(),
+        run=AsyncMock(),
+    )
+
+
+def _registry_start_router(config, event_bus, state, tmp_path: Path, orch=None):
+    registry = make_registry(
+        {
+            "slug": "org-a",
+            "config": _repo_cfg(tmp_path, "a"),
+            "state": state,
+            "event_bus": event_bus,
+            "running": False,
+        },
+    )
+    registry.get("org-a").start = AsyncMock()
+    router, _ = make_dashboard_router(
+        config,
+        event_bus,
+        state,
+        tmp_path,
+        registry=registry,
+        default_repo_slug="org-a",
+        get_orch=(lambda: orch),
+    )
+    return router
+
+
+@pytest.mark.asyncio
+async def test_registry_start_reenables_disabled_pipeline_workers(
+    config: HydraFlowConfig, event_bus, state, tmp_path: Path
+) -> None:
+    """The live failure of 2026-08-21: Start left ``[plan, triage]`` disabled."""
+    state.set_disabled_workers({"plan", "triage"})
+    router = _registry_start_router(config, event_bus, state, tmp_path)
+    start = find_endpoint(router, "/api/control/start")
+
+    await start()
+
+    assert state.get_disabled_workers() == set()
+
+
+@pytest.mark.asyncio
+async def test_registry_start_leaves_a_non_pipeline_kill_switch_disabled(
+    config: HydraFlowConfig, event_bus, state, tmp_path: Path
+) -> None:
+    """Start is not a "re-enable everything" button — kill-switches are durable."""
+    state.set_disabled_workers({"plan", "principles_audit"})
+    router = _registry_start_router(config, event_bus, state, tmp_path)
+    start = find_endpoint(router, "/api/control/start")
+
+    await start()
+
+    assert state.get_disabled_workers() == {"principles_audit"}
+
+
+@pytest.mark.asyncio
+async def test_registry_start_flips_the_live_orchestrators_enabled_flags(
+    config: HydraFlowConfig, event_bus, state, tmp_path: Path
+) -> None:
+    """State alone is not enough — running loops read the in-memory map."""
+    state.set_disabled_workers({"plan", "triage"})
+    orch = _stopped_orch()
+    router = _registry_start_router(config, event_bus, state, tmp_path, orch=orch)
+    start = find_endpoint(router, "/api/control/start")
+
+    await start()
+
+    assert sorted(c.args for c in orch.set_bg_worker_enabled.call_args_list) == [
+        ("plan", True),
+        ("triage", True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_registry_start_leaves_an_empty_disabled_set_empty(
+    config: HydraFlowConfig, event_bus, state, tmp_path: Path
+) -> None:
+    """Start invents no entries when nothing is disabled."""
+    router = _registry_start_router(config, event_bus, state, tmp_path)
+    start = find_endpoint(router, "/api/control/start")
+
+    await start()
+
+    assert state.get_disabled_workers() == set()
+
+
+@pytest.mark.asyncio
+async def test_legacy_start_reenables_disabled_pipeline_workers(
+    config: HydraFlowConfig, event_bus, state, tmp_path: Path
+) -> None:
+    state.set_disabled_workers({"plan", "triage"})
+    orch = _stopped_orch()
+    router, _ = make_dashboard_router(
+        config, event_bus, state, tmp_path, get_orch=lambda: orch, registry=None
+    )
+    start = find_endpoint(router, "/api/control/start")
+
+    await start()
+
+    assert state.get_disabled_workers() == set()
+
+
+@pytest.mark.asyncio
+async def test_legacy_start_leaves_a_non_pipeline_kill_switch_disabled(
+    config: HydraFlowConfig, event_bus, state, tmp_path: Path
+) -> None:
+    state.set_disabled_workers({"plan", "principles_audit"})
+    orch = _stopped_orch()
+    router, _ = make_dashboard_router(
+        config, event_bus, state, tmp_path, get_orch=lambda: orch, registry=None
+    )
+    start = find_endpoint(router, "/api/control/start")
+
+    await start()
+
+    assert state.get_disabled_workers() == {"principles_audit"}
 
 
 # ---------------------------------------------------------------------------
