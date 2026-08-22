@@ -7,8 +7,12 @@ count rises ABOVE its mark. Falling is never a failure — collapsing a group
 into one parametrized test is the point. Move the marks downward with
 ``scripts/regen_suite_hygiene_baseline.py --reason`` after a pruning pass.
 
-``total_tests`` is recorded for the trend reader, not gated: suite size is a
-consequence of coverage, and gating it would punish new assertions.
+Only the two gated counts are recorded. ``total_tests`` used to ride along "for
+the trend reader" — written, loaded, and compared by nobody, so it rotted +1010
+(20627 → 21637, +4.9 %) without a single reader noticing. The trend reader wants
+the *live* number, which ``SuiteHygieneFinding.total_tests`` already carries into
+the roster; a second, stale copy in the baseline was decorative data pretending
+to be a fact, so it is gone (#11646).
 """
 
 from __future__ import annotations
@@ -27,7 +31,6 @@ class SuiteHygieneBaseline:
 
     parametrize_copies: int | None = None
     cross_file_duplicates: int | None = None
-    total_tests: int | None = None
     comment: str = ""
 
 
@@ -44,7 +47,6 @@ def load_suite_hygiene_baseline(path: Path) -> SuiteHygieneBaseline:
     return SuiteHygieneBaseline(
         parametrize_copies=_int("parametrize_copies"),
         cross_file_duplicates=_int("cross_file_duplicates"),
-        total_tests=_int("total_tests"),
         comment=str(raw.get("comment", "")),
     )
 
@@ -58,7 +60,6 @@ def save_suite_hygiene_baseline(
         "comment": comment,
         "parametrize_copies": finding.parametrize_copies,
         "cross_file_duplicates": len(finding.cross_file_duplicates),
-        "total_tests": finding.total_tests,
     }
     path.write_text(yaml.safe_dump(payload, sort_keys=True), encoding="utf-8")
 

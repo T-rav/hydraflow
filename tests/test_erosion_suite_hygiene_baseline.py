@@ -50,13 +50,24 @@ def test_save_then_load_round_trips(tmp_path: Path) -> None:
     assert loaded.comment == "initial"
     assert loaded.parametrize_copies == 4
     assert loaded.cross_file_duplicates == 1
-    assert loaded.total_tests == 30
+
+
+def test_only_the_gated_marks_are_persisted(tmp_path: Path) -> None:
+    """`total_tests` was written, loaded and read by nobody — so it is not recorded.
+
+    A number that no consumer compares against cannot go stale loudly: the mark
+    drifted +1010 (20627 → 21637, +4.9 %) before anyone noticed. Absent data
+    beats decorative data (#11646).
+    """
+    path = tmp_path / "th.yaml"
+    save_suite_hygiene_baseline(path, _finding(copies=4, dups=1), comment="initial")
+
+    assert "total_tests" not in path.read_text(encoding="utf-8")
+    assert not hasattr(load_suite_hygiene_baseline(path), "total_tests")
 
 
 def test_exceeded_names_each_metric_above_its_mark() -> None:
-    baseline = SuiteHygieneBaseline(
-        parametrize_copies=4, cross_file_duplicates=1, total_tests=30
-    )
+    baseline = SuiteHygieneBaseline(parametrize_copies=4, cross_file_duplicates=1)
     messages = exceeded(_finding(copies=6, dups=3), baseline)
     assert len(messages) == 2
     assert "parametrize copies 6 > baseline 4" in messages[0]
@@ -64,7 +75,5 @@ def test_exceeded_names_each_metric_above_its_mark() -> None:
 
 
 def test_at_or_below_mark_is_not_exceeded() -> None:
-    baseline = SuiteHygieneBaseline(
-        parametrize_copies=4, cross_file_duplicates=1, total_tests=30
-    )
+    baseline = SuiteHygieneBaseline(parametrize_copies=4, cross_file_duplicates=1)
     assert exceeded(_finding(copies=4, dups=0), baseline) == ()
