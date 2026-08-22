@@ -36,9 +36,15 @@ description: >
 inputs:
   token:
     description: >
-      Token used to authenticate to ghcr.io for the layer cache. Pass
-      `${{ secrets.GITHUB_TOKEN }}`; the calling job needs `packages: read`
-      (plus `packages: write` when `push-cache` is 'true').
+      Token used to authenticate to ghcr.io for the layer cache. Callers pass
+      secrets.GITHUB_TOKEN; the calling job needs `packages: read` (plus
+      `packages: write` when `push-cache` is 'true'). NOTE: written without
+      expression braces on purpose — GitHub template-evaluates every `${{ }}`
+      in an action manifest, INCLUDING inside a description string, and the
+      `secrets` context does not exist in composite-action metadata. Quoting
+      it "as documentation" fails the action at load time with
+      "Unrecognized named-value: 'secrets'", taking every sandbox lane with
+      it. Guarded by tests/architecture/test_sandbox_ci_cache.py.
     required: true
   push-cache:
     description: >
@@ -97,8 +103,19 @@ runs:
           echo "ok=false" >> "$GITHUB_OUTPUT"
         fi
 
+    # cache-binary: false is load-bearing, not a tuning choice. The action
+    # otherwise stores the buildx binary in the GitHub Actions cache, and that
+    # write is a `actions/cache-poisoning/poisonable-step` sink: the dispatch
+    # lane checks out an operator-chosen ref and runs with default-branch
+    # privilege, so a cache it writes could be read by another workflow
+    # (CodeQL flagged exactly this on #11621, same rule as alert #108/#11518).
+    # The layer cache this action exists for is a REGISTRY cache and is
+    # unaffected; all we give up is re-downloading a ~50 MB binary in a job
+    # whose point is a multi-minute image build.
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
+      with:
+        cache-binary: false
 
     - name: Build agent image (registry layer cache)
       uses: docker/build-push-action@v6

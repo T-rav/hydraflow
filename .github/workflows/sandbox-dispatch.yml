@@ -70,21 +70,11 @@ jobs:
       contents: read
       packages: read
     steps:
-      # TRUST: `inputs.ref` is a workflow_dispatch input, not a job output and
-      # not attacker-supplied — GitHub only accepts a dispatch from an actor
-      # with write access to the repository, and this workflow has no
-      # `pull_request`/`workflow_run` trigger through which an outside
-      # contributor could reach it. The job is nevertheless cache-*reading*
-      # only (`packages: read`, no `push-cache`), so even a mistaken dispatch
-      # against a junk branch cannot poison the layer cache the required
-      # sandbox lanes in ci.yml consume. Sweep:
-      # tests/architecture/test_staging_rc_dryrun_workflow_shape.py.
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
-
-      - name: Record what is being verified
-        id: target
+      # Runs BEFORE the checkout, deliberately: a rejected ref must never
+      # reach the runner's disk, let alone a later step that executes it
+      # (`pip install -e .` alone runs repo-authored build hooks). This step
+      # needs no repository, only the inputs.
+      - name: Validate dispatch inputs
         env:
           REF: ${{ inputs.ref }}
           SCENARIO: ${{ inputs.scenario }}
@@ -96,6 +86,41 @@ jobs:
             echo "::error::invalid scenario input: must match ^[a-z0-9_]+$"
             exit 1
           fi
+          # Refuse pull-request refs. `refs/pull/N/merge` is fetchable from
+          # this repo and, for a FORK PR, is code an outside contributor
+          # controls — running it here would execute untrusted code in a
+          # workflow_dispatch job holding default-branch privilege. That is
+          # the real vector behind the cache-poisoning rule, so it is closed
+          # rather than annotated. Verify a same-repo branch by name instead;
+          # a fork PR is what the `pull_request` sandbox lanes are for.
+          case "$REF" in
+            refs/pull/*|*/merge|*/head)
+              echo "::error::refusing a pull-request ref ($REF): dispatch runs with default-branch privilege. Use a branch name, tag, or SHA."
+              exit 1
+              ;;
+          esac
+
+      # TRUST: `inputs.ref` is a workflow_dispatch input — not a job output,
+      # and not reachable by an outside contributor: GitHub accepts a dispatch
+      # only from an actor with write access, and this workflow has no
+      # `pull_request`/`workflow_run` trigger. Two mitigations back that up
+      # rather than relying on the claim: the step above refuses
+      # pull-request refs (the one class of in-repo ref an outsider can write
+      # to), and this job writes NO cache at all — `packages: read` with no
+      # `push-cache`, and the composite action pins `cache-binary: false` on
+      # setup-buildx so not even the buildx binary reaches the Actions cache.
+      # Sweep: tests/architecture/test_staging_rc_dryrun_workflow_shape.py.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Record what is being verified
+        id: target
+        env:
+          REF: ${{ inputs.ref }}
+          SCENARIO: ${{ inputs.scenario }}
+        run: |
+          set -euo pipefail
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Verifying ref=${REF} scenario=${SCENARIO} at $(git rev-parse HEAD)"
 
