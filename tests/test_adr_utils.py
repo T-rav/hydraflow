@@ -221,6 +221,22 @@ class TestNextAdrNumber:
         result = next_adr_number(local, primary_adr_dir=primary)
         assert result == 11
 
+    def test_assigned_set_tracks_numbers(self, tmp_path: Path) -> None:
+        """Returned numbers must be recorded in the module-level set."""
+        import adr_utils
+
+        next_adr_number(tmp_path)
+        next_adr_number(tmp_path)
+        assert adr_utils._assigned_adr_numbers == {1, 2}
+
+    def test_assigned_numbers_override_disk(self, tmp_path: Path) -> None:
+        """Previously assigned numbers beat what's on disk."""
+        import adr_utils
+
+        adr_utils._assigned_adr_numbers.add(20)
+        result = next_adr_number(tmp_path)
+        assert result == 21
+
     def test_persists_numbers_to_dotfile(self, tmp_path: Path) -> None:
         """Assigned numbers are saved to .adr_assigned_numbers.json."""
         import json

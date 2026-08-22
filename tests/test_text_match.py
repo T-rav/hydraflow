@@ -13,6 +13,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -20,43 +22,72 @@ from text_match import keyword_matches
 
 
 class TestKeywordMatchesWordBoundaries:
-    def test_matches_standalone_word(self) -> None:
-        assert keyword_matches("test", "test") is True
-
-    def test_matches_word_surrounded_by_spaces(self) -> None:
-        assert keyword_matches("type", "type error") is True
-
-    def test_matches_word_with_trailing_punctuation(self) -> None:
-        # non-word char after the keyword is a boundary
-        assert keyword_matches("type", "wrong type.") is True
-
-    def test_does_not_match_trailing_plural(self) -> None:
-        # full trailing \b means "test" does NOT match "tests"
-        assert keyword_matches("test", "3 tests failed") is False
-
-    def test_does_not_match_inside_larger_word_suffix(self) -> None:
-        assert keyword_matches("test", "latest build") is False
+    @pytest.mark.parametrize(
+        ("keyword", "text", "expected"),
+        [
+            pytest.param("test", "test", True, id="matches_standalone_word"),
+            pytest.param(
+                "type", "type error", True, id="matches_word_surrounded_by_spaces"
+            ),
+            # A non-word char after the keyword is a boundary.
+            pytest.param(
+                "type", "wrong type.", True, id="matches_word_with_trailing_punctuation"
+            ),
+            # The full trailing \b means "test" does NOT match "tests".
+            pytest.param(
+                "test", "3 tests failed", False, id="does_not_match_trailing_plural"
+            ),
+            pytest.param(
+                "test",
+                "latest build",
+                False,
+                id="does_not_match_inside_larger_word_suffix",
+            ),
+            pytest.param(
+                "format",
+                "information",
+                False,
+                id="does_not_match_substring_of_longer_word",
+            ),
+        ],
+    )
+    def test_word_boundary(self, keyword: str, text: str, expected: bool) -> None:
+        assert keyword_matches(keyword, text) is expected
 
     def test_does_not_match_inside_identifier(self) -> None:
         assert keyword_matches("type", "typeerror") is False
         assert keyword_matches("type", "prototype") is False
         assert keyword_matches("type", "typescript") is False
 
-    def test_does_not_match_substring_of_longer_word(self) -> None:
-        assert keyword_matches("format", "information") is False
-
 
 class TestKeywordMatchesNonWordChars:
-    def test_matches_phrase_with_literal_slash(self) -> None:
-        # non-word characters inside the keyword are matched literally
-        assert keyword_matches("try/except", "use a try/except block") is True
-
-    def test_trailing_boundary_applies_to_last_word_char_of_phrase(self) -> None:
-        # "try/except" must not match inside "try/exception"
-        assert keyword_matches("try/except", "try/exception raised") is False
-
-    def test_matches_multi_word_phrase(self) -> None:
-        assert keyword_matches("merge conflict", "a merge conflict here") is True
+    @pytest.mark.parametrize(
+        ("keyword", "text", "expected"),
+        [
+            # Non-word characters inside the keyword are matched literally.
+            pytest.param(
+                "try/except",
+                "use a try/except block",
+                True,
+                id="matches_phrase_with_literal_slash",
+            ),
+            # "try/except" must not match inside "try/exception".
+            pytest.param(
+                "try/except",
+                "try/exception raised",
+                False,
+                id="trailing_boundary_applies_to_last_word_char_of_phrase",
+            ),
+            pytest.param(
+                "merge conflict",
+                "a merge conflict here",
+                True,
+                id="matches_multi_word_phrase",
+            ),
+        ],
+    )
+    def test_non_word_chars(self, keyword: str, text: str, expected: bool) -> None:
+        assert keyword_matches(keyword, text) is expected
 
 
 class TestKeywordMatchesCaseSensitivity:

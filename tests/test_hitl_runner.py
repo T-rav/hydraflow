@@ -44,59 +44,79 @@ class TestHITLRunnerInheritance:
 
 
 class TestClassifyCause:
-    def test_ci_failure_maps_to_ci(self) -> None:
-        assert _classify_cause("CI failed after 2 fix attempt(s)") == "ci"
-
-    def test_check_keyword_maps_to_ci(self) -> None:
-        assert _classify_cause("Failed checks: lint, test") == "ci"
-
-    def test_test_fail_keyword_maps_to_ci(self) -> None:
-        assert _classify_cause("test fail in module") == "ci"
-
-    def test_merge_conflict_maps_correctly(self) -> None:
-        assert _classify_cause("Merge conflict with main branch") == "merge_conflict"
-
-    def test_insufficient_detail_maps_to_needs_info(self) -> None:
-        assert _classify_cause("Insufficient issue detail for triage") == "needs_info"
-
-    def test_needs_more_info_maps_to_needs_info(self) -> None:
-        assert _classify_cause("Needs more information") == "needs_info"
-
-    def test_unknown_cause_maps_to_default(self) -> None:
-        assert _classify_cause("Unknown escalation") == "default"
-
-    def test_pr_merge_failed_maps_to_default(self) -> None:
-        assert _classify_cause("PR merge failed on GitHub") == "default"
-
-    def test_empty_cause_maps_to_default(self) -> None:
-        assert _classify_cause("") == "default"
-
-    def test_visual_keyword_maps_to_visual(self) -> None:
-        assert _classify_cause("Visual validation failed on 3 screens") == "visual"
-
-    def test_screenshot_keyword_maps_to_visual(self) -> None:
-        assert _classify_cause("Screenshot diff exceeded threshold") == "visual"
-
-    def test_diff_image_keyword_maps_to_visual(self) -> None:
-        assert _classify_cause("diff image mismatch on login page") == "visual"
-
-    def test_visual_before_ci_priority(self) -> None:
-        """Visual keywords should match before CI keywords when both present."""
-        assert _classify_cause("Visual check failed in CI") == "visual"
-
-    def test_visual_before_needs_info_priority(self) -> None:
-        """Visual keywords should match before needs_info when summary contains 'needs'."""
-        assert (
-            _classify_cause(
-                "Visual validation failed: login screen needs baseline update"
-            )
-            == "visual"
-        )
-
-    def test_ci_word_boundary_not_substring(self) -> None:
-        """'ci' as a substring of a longer word should not match the ci category."""
-        # "deficit" contains "ci" as a substring — should not misclassify
-        assert _classify_cause("deficit in implementation coverage") == "default"
+    @pytest.mark.parametrize(
+        ("summary", "expected"),
+        [
+            pytest.param(
+                "CI failed after 2 fix attempt(s)", "ci", id="ci_failure_maps_to_ci"
+            ),
+            pytest.param(
+                "Failed checks: lint, test", "ci", id="check_keyword_maps_to_ci"
+            ),
+            pytest.param(
+                "test fail in module", "ci", id="test_fail_keyword_maps_to_ci"
+            ),
+            pytest.param(
+                "Merge conflict with main branch",
+                "merge_conflict",
+                id="merge_conflict_maps_correctly",
+            ),
+            pytest.param(
+                "Insufficient issue detail for triage",
+                "needs_info",
+                id="insufficient_detail_maps_to_needs_info",
+            ),
+            pytest.param(
+                "Needs more information",
+                "needs_info",
+                id="needs_more_info_maps_to_needs_info",
+            ),
+            pytest.param(
+                "Unknown escalation", "default", id="unknown_cause_maps_to_default"
+            ),
+            pytest.param(
+                "PR merge failed on GitHub",
+                "default",
+                id="pr_merge_failed_maps_to_default",
+            ),
+            pytest.param("", "default", id="empty_cause_maps_to_default"),
+            pytest.param(
+                "Visual validation failed on 3 screens",
+                "visual",
+                id="visual_keyword_maps_to_visual",
+            ),
+            pytest.param(
+                "Screenshot diff exceeded threshold",
+                "visual",
+                id="screenshot_keyword_maps_to_visual",
+            ),
+            pytest.param(
+                "diff image mismatch on login page",
+                "visual",
+                id="diff_image_keyword_maps_to_visual",
+            ),
+            # Visual keywords must match BEFORE CI keywords when both are present.
+            pytest.param(
+                "Visual check failed in CI", "visual", id="visual_before_ci_priority"
+            ),
+            # Visual keywords must match BEFORE needs_info when the text says "needs".
+            pytest.param(
+                "Visual validation failed: login screen needs baseline update",
+                "visual",
+                id="visual_before_needs_info_priority",
+            ),
+            # "deficit" contains "ci" as a substring — the word boundary must hold.
+            pytest.param(
+                "deficit in implementation coverage",
+                "default",
+                id="ci_word_boundary_not_substring",
+            ),
+        ],
+    )
+    def test_classify_cause_maps_summary_to_category(
+        self, summary: str, expected: str
+    ) -> None:
+        assert _classify_cause(summary) == expected
 
 
 # ---------------------------------------------------------------------------

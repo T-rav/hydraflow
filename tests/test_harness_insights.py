@@ -70,51 +70,72 @@ class TestFailureCategory:
 
 
 class TestExtractSubcategories:
-    def test_extracts_lint_error(self) -> None:
-        subs = extract_subcategories("ruff lint error on line 42")
-        assert "lint_error" in subs
-
-    def test_extracts_type_error(self) -> None:
-        subs = extract_subcategories("pyright type error: incompatible type")
-        assert "type_error" in subs
-
-    def test_extracts_test_failure(self) -> None:
-        subs = extract_subcategories("pytest failed: 3 tests failed, assertion error")
-        assert "test_failure" in subs
-
-    def test_extracts_import_error(self) -> None:
-        subs = extract_subcategories("ModuleNotFoundError: No module named 'foo'")
-        assert "import_error" in subs
-
-    def test_extracts_syntax_error(self) -> None:
-        subs = extract_subcategories("SyntaxError: unexpected token at line 5")
-        assert "syntax_error" in subs
-
-    def test_extracts_merge_conflict(self) -> None:
-        subs = extract_subcategories("Merge conflict in src/foo.py")
-        assert "merge_conflict" in subs
-
-    def test_extracts_timeout(self) -> None:
-        subs = extract_subcategories("Agent timed out after 600s")
-        assert "timeout" in subs
-
-    def test_extracts_missing_tests(self) -> None:
-        subs = extract_subcategories("No test file found for new module")
-        assert "missing_tests" in subs
-
-    def test_extracts_naming_violations(self) -> None:
-        subs = extract_subcategories(
-            "Naming convention violation: rename to snake_case"
-        )
-        assert "naming" in subs
-
-    def test_extracts_error_handling(self) -> None:
-        subs = extract_subcategories("Missing error handling for API exception")
-        assert "error_handling" in subs
-
-    def test_case_insensitive(self) -> None:
-        subs = extract_subcategories("RUFF LINT ERROR")
-        assert "lint_error" in subs
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            pytest.param(
+                "ruff lint error on line 42", "lint_error", id="extracts_lint_error"
+            ),
+            pytest.param(
+                "pyright type error: incompatible type",
+                "type_error",
+                id="extracts_type_error",
+            ),
+            pytest.param(
+                "pytest failed: 3 tests failed, assertion error",
+                "test_failure",
+                id="extracts_test_failure",
+            ),
+            pytest.param(
+                "ModuleNotFoundError: No module named 'foo'",
+                "import_error",
+                id="extracts_import_error",
+            ),
+            pytest.param(
+                "SyntaxError: unexpected token at line 5",
+                "syntax_error",
+                id="extracts_syntax_error",
+            ),
+            pytest.param(
+                "Merge conflict in src/foo.py",
+                "merge_conflict",
+                id="extracts_merge_conflict",
+            ),
+            pytest.param(
+                "Agent timed out after 600s", "timeout", id="extracts_timeout"
+            ),
+            pytest.param(
+                "No test file found for new module",
+                "missing_tests",
+                id="extracts_missing_tests",
+            ),
+            pytest.param(
+                "Naming convention violation: rename to snake_case",
+                "naming",
+                id="extracts_naming_violations",
+            ),
+            pytest.param(
+                "Missing error handling for API exception",
+                "error_handling",
+                id="extracts_error_handling",
+            ),
+            # Same needle as extracts_lint_error, shouted: matching is case-insensitive.
+            pytest.param("RUFF LINT ERROR", "lint_error", id="case_insensitive"),
+            pytest.param(
+                "screenshot diff exceeded threshold on login",
+                "visual_diff",
+                id="extracts_visual_diff",
+            ),
+            pytest.param(
+                "visual regression detected: baseline mismatch",
+                "visual_regression",
+                id="extracts_visual_regression",
+            ),
+        ],
+    )
+    def test_extracts_subcategory(self, text: str, expected: str) -> None:
+        subs = extract_subcategories(text)
+        assert expected in subs
 
     def test_multiple_subcategories(self) -> None:
         subs = extract_subcategories("ruff lint error and pytest test failure")
@@ -128,14 +149,6 @@ class TestExtractSubcategories:
     def test_returns_empty_for_empty_input(self) -> None:
         subs = extract_subcategories("")
         assert subs == []
-
-    def test_extracts_visual_diff(self) -> None:
-        subs = extract_subcategories("screenshot diff exceeded threshold on login")
-        assert "visual_diff" in subs
-
-    def test_extracts_visual_regression(self) -> None:
-        subs = extract_subcategories("visual regression detected: baseline mismatch")
-        assert "visual_regression" in subs
 
 
 # ---------------------------------------------------------------------------
