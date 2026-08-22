@@ -6,40 +6,33 @@ canonical into an epic + 5 parked children before anyone could build it;
 (2) advisory filings had budgets on FILING but none on RETIREMENT.
 
 Pins:
-1. Intake decomposition defaults OFF — complex issues plan whole; the
-   demand-driven ADR-0105 stall path remains the decomposition mechanism.
+1. Intake decomposition is REMOVED (hardened from the original default-OFF
+   flag): complex issues plan whole; the demand-driven ADR-0105 stall path
+   (``preflight.decompose_terminal``) is the only decomposition mechanism.
 2. The retirement valve defaults ON (budget 25, grace 2d) and its engine
    never touches protected classes.
 """
 
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 
 from config import HydraFlowConfig
-from models import TriageResult
 from triage_phase import TriagePhase
 
 
-def test_intake_decomposition_defaults_off() -> None:
-    assert HydraFlowConfig().epic_decompose_on_intake_enabled is False
+def test_intake_decomposition_path_removed() -> None:
+    """The #11298 root cause cannot recur: neither the flag nor the intake
+    decomposition method exists any more. A reintroduction under the same
+    names must consciously delete this pin."""
+    assert "epic_decompose_on_intake_enabled" not in HydraFlowConfig.model_fields
+    assert not hasattr(TriagePhase, "_maybe_decompose")
 
 
-def test_intake_decompose_gated_even_for_max_complexity() -> None:
-    phase = object.__new__(TriagePhase)
-    phase._config = HydraFlowConfig()
-    phase._epic_manager = object()
-    result = TriageResult(issue_number=1, ready=True, complexity_score=10)
-    issue = SimpleNamespace(id=1, tags=[])
-    assert asyncio.run(phase._maybe_decompose(issue, result)) is False
+def test_triage_runner_has_no_intake_decomposition_seam() -> None:
+    from triage import TriageRunner
 
-
-def test_intake_decompose_runs_when_explicitly_enabled() -> None:
-    """The flip restores the old behavior path (gate passes; the decompose
-    call itself is downstream and not exercised here)."""
-    config = HydraFlowConfig(epic_decompose_on_intake_enabled=True)
-    assert config.epic_decompose_on_intake_enabled is True
+    assert not hasattr(TriageRunner, "run_decomposition")
 
 
 def test_retirement_valve_defaults() -> None:

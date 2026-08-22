@@ -8,6 +8,18 @@
 - **Related:** [ADR-0002](0002-labels-as-state-machine.md) (label state machine); [ADR-0050](0050-auto-agent-hitl-preflight.md) (auto-agent pre-flight loop); [ADR-0029](0029-caretaker-loop-pattern.md) (caretaker loop pattern); [ADR-0044](0044-hydraflow-principles.md) (recursion safety); [ADR-0051](0051-iterative-production-readiness-review.md) (iterative review convergence); [ADR-0059](0059-advisor-pattern-self-repairing-review.md) (advisor / council pattern); [ADR-0032](0032-per-repo-wiki-knowledge-base.md) (wiki knowledge base informing the council).
 - **Enforced by:** `tests/test_issue_decomposer.py`; `tests/test_decomposition_council.py`; `tests/test_auto_agent_decompose_terminal.py`; `tests/test_decomposition_depth_cap.py`; `tests/scenarios/test_decompose_to_converge_scenario.py`; `tests/sandbox_scenarios/scenarios/s54_decompose_to_converge.py`. Nested-lineage follow-up (#9757): `tests/regressions/test_epic_lineage_nested_convergence.py`; `tests/regressions/test_epic_sweeper_lineage_gate.py`; `tests/regressions/test_epic_manager_lineage_propagation.py`; `tests/sandbox_scenarios/scenarios/s55_nested_decompose.py`.
 
+> **Note (2026-08-21, flag-rot cleanup):** the intake-triage decomposition
+> vector this ADR's Context and Decision reference in present tense
+> (`Triage.run_decomposition`, `TriagePhase._maybe_decompose`, and the
+> `epic_decompose_on_intake_enabled` gate that #11298 had already turned
+> default-OFF) has since been **removed outright**. The stall-path
+> decomposition this ADR introduces (`preflight/decompose_terminal.py` +
+> `DecompositionCouncil` + `IssueDecomposer`) is now the **sole**
+> decomposition mechanism, and the §4 depth-counter rationale no longer
+> needs to span two vectors — the only split vector left is the
+> depth-cap-bound stall path. The prose below describes the pre-removal
+> code and stands as written history.
+
 ## Context
 
 [ADR-0084](0084-auto-agent-universal-root-cause-gate.md) made the Auto-Agent a universal gate that intercepts `hitl-escalation` issues, attempts an autonomous fix, and pages a human only for genuinely novel failures. Its terminal, when the auto-agent's own budget (`auto_agent_max_attempts`, default 3) is spent, is to stamp **`human-required`** (`auto_agent_preflight_loop.py:_process_one`, `preflight/decision.py:apply_decision`) — a human-owned state.

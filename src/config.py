@@ -875,11 +875,6 @@ _ENV_BOOL_OVERRIDES: list[tuple[str, str, bool]] = [
         False,
     ),
     (
-        "epic_decompose_on_intake_enabled",
-        "HYDRAFLOW_EPIC_DECOMPOSE_ON_INTAKE_ENABLED",
-        False,
-    ),
-    (
         "auto_pr_preflight_gate_enabled",
         "HYDRAFLOW_AUTO_PR_PREFLIGHT_GATE_ENABLED",
         True,
@@ -1951,10 +1946,11 @@ class HydraFlowConfig(BaseModel):
         default=["auto-decomposed-child"],
         description=(
             "Label stamped on every child issue created by decompose-to-converge "
-            "(ADR-0105), on top of epic_child_label/find_label. Triage's intake "
-            "complexity path (_maybe_decompose) skips re-decomposing an issue "
-            "carrying this label so the depth counter can't be bypassed by "
-            "re-entering through the intake vector uncounted."
+            "(ADR-0105), on top of epic_child_label/find_label. Further splits "
+            "of a stamped child only happen through the stall-path call to "
+            "IssueDecomposer.create_epic_from_result(depth=...), which the "
+            "depth cap bounds (the #11298 intake auto-decomposition vector "
+            "was removed)."
         ),
     )
     epic_group_planning: bool = Field(
@@ -1971,19 +1967,12 @@ class HydraFlowConfig(BaseModel):
         default=8,
         ge=1,
         le=10,
-        description="Minimum triage complexity score to trigger decomposition",
-    )
-    epic_decompose_on_intake_enabled: bool = Field(
-        default=False,
         description=(
-            "#11298 board-churn root cause: intake auto-decomposition minted "
-            "epics + parked children at classification time (push), re-"
-            "expanding consolidated work before anyone could build it — one "
-            "class canonical became 6 open issues in a day. Default OFF: "
-            "complex issues plan WHOLE, and the demand-driven ADR-0105 "
-            "stall path (non-convergence -> decompose) remains the "
-            "decomposition mechanism. Flip on only if whole-planning of "
-            "epics measurably thrashes."
+            "Complexity score at which the triage cache ranks an issue "
+            "'high' (TriagePhase._complexity_rank). No longer gates any "
+            "decomposition action — the #11298 intake auto-decomposition "
+            "path was removed; splits happen only via the ADR-0105 "
+            "stall-path terminal."
         ),
     )
     backlog_budget: int = Field(
@@ -3703,11 +3692,6 @@ class HydraFlowConfig(BaseModel):
 
     # Hindsight + memory_auto_approve knobs removed in Phase 3 cutover.
 
-    memory_prune_stale_items: bool = Field(
-        default=True,
-        description="Remove local memory item files whose source issue is no longer active",
-    )
-
     # Observability context injection
     max_runtime_log_chars: int = Field(
         default=8_000,
@@ -4882,13 +4866,6 @@ class HydraFlowConfig(BaseModel):
             "(#10777). A batch of newly-pending mirror entries would otherwise "
             "file one issue each; over-cap entries are folded into a single "
             "summary issue instead."
-        ),
-    )
-    memory_backlog_enabled: bool = Field(
-        default=True,
-        description=(
-            "Static gate for MemoryBacklogLoop. Defense-in-depth alongside "
-            "the in-body ADR-0049 kill-switch."
         ),
     )
     memory_backlog_label: list[str] = Field(

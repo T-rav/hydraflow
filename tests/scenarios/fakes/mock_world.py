@@ -298,9 +298,6 @@ class MockWorld:
         """
         # Runners
         target.triage_runner.evaluate = self._llm.triage_runner.evaluate
-        target.triage_runner.run_decomposition = (
-            self._llm.triage_runner.run_decomposition
-        )
         target.planners.plan = self._llm.planners.plan
         target.planners.run_gap_review = self._llm.planners.run_gap_review
         target.agents.run = self._llm.agents.run

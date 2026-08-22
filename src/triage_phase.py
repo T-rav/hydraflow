@@ -15,8 +15,7 @@ from config import HydraFlowConfig
 from convergence_recording import record_stage_verdict
 from events import EventBus, EventType, HydraFlowEvent
 from flows import Edge, Flow, FlowState, KillSwitch, Node, NodeHook
-from issue_decomposer import IssueDecomposer
-from models import Task, TriageResult
+from models import Task
 from phase_utils import (
     _sentry_transaction,
     park_issue,
@@ -27,10 +26,6 @@ from phase_utils import (
 from state import StateTracker
 from task_source import TaskTransitioner
 from triage import TriageRunner
-from trust_fleet_anomaly_detectors import (
-    HITL_QUEUE_LABEL,
-    TRUST_LOOP_ANOMALY_LABEL,
-)
 
 if TYPE_CHECKING:
     from bug_reproducer import BugReproducer
@@ -51,7 +46,6 @@ _TRIAGE_VERDICT_MAP: dict[str, str] = {
     "plan": "ADVANCE",
     "sentry_noise_closed": "ADVANCE",
     "already_addressed": "ADVANCE",
-    "epic_decomposed": "ADVANCE",
     "bug_not_present": "ADVANCE",
     "parked": "LOOP_BACK",
 }
@@ -95,8 +89,8 @@ def _is_auditor_finding_stale(issue: Task, max_age_days: int) -> bool:
 #   runs the injection/honeypot screen internally — see the note below). An
 #   infra ``RuntimeError`` parks the issue (count 0) and ``dry_run`` short-
 #   circuits (count 1); both set ``state['_stop']`` and route to ``done``.
-# * ``route``     — the readiness disposition gate: ready → plan (or epic
-#   decompose), Sentry-noise close, already-addressed close, else park. Sets
+# * ``route``     — the readiness disposition gate: ready → plan,
+#   Sentry-noise close, already-addressed close, else park. Sets
 #   ``routing_outcome`` and performs the inline close/park side-effects exactly
 #   as before.
 # * ``record``    — mirror the classification into the IssueCache (best-effort).
@@ -191,11 +185,11 @@ class TriagePhase:
         """Convert a 0-10 complexity score into a coarse rank label.
 
         The ``"high"`` boundary is tied to
-        ``epic_decompose_complexity_threshold`` so the cache rank
-        agrees with the epic-decomposition routing decision. If an
-        operator lowers the epic threshold, issues at that score
-        level will be marked ``"high"`` in the cache, matching the
-        decomposition behavior instead of drifting out of sync.
+        ``epic_decompose_complexity_threshold``, which is this rank's
+        sole remaining consumer: the intake auto-decomposition path that
+        once shared the threshold was removed (#11298 flag-rot cleanup),
+        so lowering the threshold now only widens what the cache marks
+        ``"high"`` — it triggers no decomposition.
         """
         if score is None:
             return "unscored"
@@ -503,30 +497,26 @@ class TriagePhase:
         # discover/shape decision gate (plan_phase.py:_should_discover_helper),
         # not as a triage-time routing verdict.
         if result.ready:
-            if not await self._maybe_decompose(issue, result):
-                if result.enrichment:
-                    await self._transitioner.post_comment(issue.id, result.enrichment)
-                    logger.info(
-                        "Issue #%d enriched by triage before promotion",
-                        issue.id,
-                    )
-                # IMPORTANT: do NOT swap the label yet. We need to write
-                # the classification record AND run the bug reproducer
-                # (for bug-classified issues) BEFORE the plan loop can
-                # observe the new label and start work. The swap happens
-                # below after the cache writes complete. Setting
-                # routing_outcome here marks the intent for the
-                # post-cache transition block.
-                routing_outcome = "plan"
+            if result.enrichment:
+                await self._transitioner.post_comment(issue.id, result.enrichment)
                 logger.info(
-                    "Issue #%d triaged → %s (ready for planning, "
-                    "deferred swap until cache records written)",
+                    "Issue #%d enriched by triage before promotion",
                     issue.id,
-                    self._config.planner_label[0],
                 )
-            else:
-                # Auto-decomposed into an epic; children are the real work.
-                routing_outcome = "epic_decomposed"
+            # IMPORTANT: do NOT swap the label yet. We need to write
+            # the classification record AND run the bug reproducer
+            # (for bug-classified issues) BEFORE the plan loop can
+            # observe the new label and start work. The swap happens
+            # below after the cache writes complete. Setting
+            # routing_outcome here marks the intent for the
+            # post-cache transition block.
+            routing_outcome = "plan"
+            logger.info(
+                "Issue #%d triaged → %s (ready for planning, "
+                "deferred swap until cache records written)",
+                issue.id,
+                self._config.planner_label[0],
+            )
         elif _is_sentry_issue(issue):
             # Sentry-originated issues that fail triage are noise — auto-close
             await self._prs.post_comment(
@@ -737,87 +727,3 @@ class TriagePhase:
             self._record_triage_verdict(state["issue"].id, state["routing_outcome"])
         state.setdefault("count", 1)
         return state
-
-    async def _maybe_decompose(self, issue: Task, result: object) -> bool:
-        """Auto-decompose a complex issue into an epic + children.
-
-        Returns True if decomposition was performed (caller should skip
-        normal label transition).
-        """
-
-        if (
-            not self._config.epic_decompose_on_intake_enabled
-            or self._epic_manager is None
-            or not isinstance(result, TriageResult)
-            # Unscored (None) never auto-decomposes: absence of a score is
-            # not evidence of epic scale, and historically an absent score
-            # read as 0 here — preserve that never-fired behavior (#11298).
-            or result.complexity_score is None
-            or result.complexity_score
-            < self._config.epic_decompose_complexity_threshold
-        ):
-            return False
-
-        # Escalation-class guard (#11119): an anomaly escalation is a SIGNAL
-        # about a possibly-transient condition ("the anomaly IS the
-        # escalation", trust-fleet spec §12.1) — never a project to plan.
-        # The 2026-08-14 idle test showed cold-boot staleness observations
-        # decomposed into epics + children before the anomaly self-cleared
-        # one tick later: one boot artifact became four issues. Escalation
-        # labels opt out of auto-decomposition entirely.
-        escalation_labels = {TRUST_LOOP_ANOMALY_LABEL, HITL_QUEUE_LABEL}
-        if escalation_labels & set(issue.tags):
-            logger.info(
-                "Issue #%d carries an escalation label — anomaly escalations "
-                "are signals, not projects; skipping auto-decomposition",
-                issue.id,
-            )
-            return False
-
-        # Intake-vector guard (ADR-0105 §4): an issue stamped
-        # auto-decomposed-child was itself created by a prior decomposition
-        # (depth-cap-bound via create_epic_from_result). If intake's own
-        # complexity-gated path were allowed to decompose it again, the
-        # split would bypass the depth counter entirely — an uncounted
-        # re-split. Chosen fix (simpler-correct option per the task brief):
-        # skip intake decomposition outright for a stamped auto-child rather
-        # than plumbing its ancestor depth through this path. Further
-        # splitting of an auto-child, if ever needed, only happens through
-        # the stall-path call to create_epic_from_result(depth=...), which
-        # the depth-cap already bounds.
-        auto_child_label = self._config.auto_decomposed_child_label[0]
-        if auto_child_label in issue.tags:
-            logger.info(
-                "Issue #%d carries %r — skipping intake auto-decomposition "
-                "to avoid an uncounted re-split of an already-decomposed child",
-                issue.id,
-                auto_child_label,
-            )
-            return False
-
-        logger.info(
-            "Issue #%d scored %d complexity — attempting auto-decomposition",
-            issue.id,
-            result.complexity_score,
-        )
-
-        decomp = await self._triage.run_decomposition(issue)
-        if not decomp.should_decompose or len(decomp.children) < 2:
-            logger.info(
-                "Issue #%d decomposition declined (should_decompose=%s, children=%d)",
-                issue.id,
-                decomp.should_decompose,
-                len(decomp.children),
-            )
-            return False
-
-        decomposer = IssueDecomposer(
-            self._prs, self._epic_manager, self._state, self._config
-        )
-        epic_number = await decomposer.create_epic_from_result(
-            source_task=issue,
-            result=decomp,
-            depth=0,
-            stall_context=None,
-        )
-        return epic_number is not None

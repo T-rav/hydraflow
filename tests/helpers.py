@@ -367,7 +367,6 @@ class ConfigFactory:
         ui_dirs: list[str] | None = None,
         docker_network: str = "",
         docker_extra_mounts: list[str] | None = None,
-        memory_prune_stale_items: bool = True,
         harness_insight_window: int = 20,
         harness_pattern_threshold: int = 3,
         max_runtime_log_chars: int = 8_000,
@@ -391,7 +390,6 @@ class ConfigFactory:
         max_troubleshooting_prompt_chars: int = 3000,
         epic_group_planning: bool = False,
         epic_decompose_complexity_threshold: int = 8,
-        epic_decompose_on_intake_enabled: bool = False,
         epic_monitor_interval: int = 1800,
         epic_sweep_interval: int = 3600,
         workspace_gc_interval: int = 1800,
@@ -657,7 +655,6 @@ class ConfigFactory:
                 docker_extra_mounts=docker_extra_mounts
                 if docker_extra_mounts is not None
                 else [],
-                memory_prune_stale_items=memory_prune_stale_items,
                 harness_insight_window=harness_insight_window,
                 harness_pattern_threshold=harness_pattern_threshold,
                 max_runtime_log_chars=max_runtime_log_chars,
@@ -678,7 +675,6 @@ class ConfigFactory:
                 max_troubleshooting_prompt_chars=max_troubleshooting_prompt_chars,
                 epic_group_planning=epic_group_planning,
                 epic_decompose_complexity_threshold=epic_decompose_complexity_threshold,
-                epic_decompose_on_intake_enabled=epic_decompose_on_intake_enabled,
                 epic_monitor_interval=epic_monitor_interval,
                 epic_sweep_interval=epic_sweep_interval,
                 workspace_gc_interval=workspace_gc_interval,

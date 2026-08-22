@@ -464,8 +464,10 @@ class TestComplexityRank:
     """Tests for TriagePhase._complexity_rank threshold mapping (#6422).
 
     The "high" boundary is tied to
-    config.epic_decompose_complexity_threshold so the cache rank
-    label agrees with the epic-decomposition routing decision.
+    config.epic_decompose_complexity_threshold, whose sole remaining
+    consumer is this cache rank — the intake auto-decomposition path
+    that once shared the threshold was removed (#11298 flag-rot
+    cleanup).
     """
 
     def test_high_threshold_matches_config(self, config: HydraFlowConfig) -> None:

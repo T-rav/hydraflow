@@ -349,7 +349,9 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "test_adequacy_repair": frozenset({1, 3, 5, 7, 8}),
     "test_adequacy_verifier": frozenset({1, 3, 5, 7}),
     "triage_build_prompt": frozenset({1, 3}),
-    "triage_decomposition": frozenset({1, 3, 4, 8}),
+    # triage_decomposition removed: its builder went away with the #11298
+    # intake auto-decomposition path (flag-rot cleanup), so there is no
+    # prompt left to pin.
     "triage_honeypot": frozenset({1, 4, 8}),
     "ultra_review": frozenset({3, 4, 8}),
     "verification_judge_code_validation": frozenset({3, 4, 7}),

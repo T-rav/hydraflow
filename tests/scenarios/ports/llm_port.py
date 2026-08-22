@@ -21,7 +21,6 @@ from typing_extensions import Protocol
 @runtime_checkable
 class TriageRunnerPort(Protocol):
     async def evaluate(self, issue: Any, worker_id: int = 0) -> Any: ...
-    async def run_decomposition(self, task: Any) -> Any: ...
 
 
 @runtime_checkable

@@ -1,5 +1,4 @@
-"""Tests for decompose-to-converge depth + fan-out caps and the intake-vector
-guard (ADR-0105 §4, task 5).
+"""Tests for decompose-to-converge depth + fan-out caps (ADR-0105, task 5).
 
 Covers:
     (a) ``depth == max_decomposition_depth`` -> ``create_epic_from_result``
@@ -9,9 +8,11 @@ Covers:
         ``None``, zero ``create_issue`` calls (fanout-cap).
     (c) under both caps -> creates normally, and every child issue carries
         the ``auto_decomposed_child_label`` stamp.
-    (d) ``TriagePhase._maybe_decompose`` skips an issue that already carries
-        the ``auto_decomposed_child_label`` — the intake complexity path
-        must not re-split an already-decomposed child uncounted.
+
+The former (d) — the ADR-0105 §4 intake-vector guard in
+``TriagePhase._maybe_decompose`` — is structurally moot: the #11298 intake
+auto-decomposition path was removed outright, so the only split vector left
+is the depth-cap-bound stall path exercised here.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from issue_decomposer import IssueDecomposer
 from mockworld.fakes.fake_github import FakeGitHub
 from models import EpicDecompResult, EpicState, NewIssueSpec
-from tests.conftest import TaskFactory, TriageResultFactory
+from tests.conftest import TaskFactory
 from tests.helpers import ConfigFactory, make_tracker
 
 
@@ -255,152 +256,3 @@ class TestAutoChildStamp:
         epic_state = state.get_epic_state(epic_number)
         assert epic_state is not None
         assert epic_state.decomposition_depth == 1
-
-
-class TestMaybeDecomposeIntakeGuard:
-    """The intake complexity path must not re-split a stamped auto-child."""
-
-    def _make_phase(self, config, *, epic_manager=None):
-        import asyncio
-
-        from events import EventBus
-        from issue_store import IssueStore
-        from state import StateTracker
-        from triage_phase import TriagePhase
-
-        state = StateTracker(config.state_file)
-        bus = EventBus()
-        store = MagicMock(spec=IssueStore)
-        prs = AsyncMock()
-        triage = AsyncMock()
-        stop_event = asyncio.Event()
-
-        phase = TriagePhase(
-            config,
-            state,
-            store,
-            triage,
-            prs,
-            bus,
-            stop_event,
-            epic_manager=epic_manager,
-        )
-        return phase, state, prs, triage
-
-    @pytest.mark.asyncio
-    async def test_stamped_auto_child_skips_intake_decomposition(
-        self, tmp_path: Path
-    ) -> None:
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-            epic_decompose_complexity_threshold=8,
-            # #11298: intake decomposition defaults OFF; this guard test
-            # exercises the depth-cap mechanism, so enable it explicitly.
-            epic_decompose_on_intake_enabled=True,
-        )
-        mgr = AsyncMock()
-        phase, _state, prs, triage = self._make_phase(config, epic_manager=mgr)
-
-        task = TaskFactory.create(
-            id=10, tags=["ready", config.auto_decomposed_child_label[0]]
-        )
-        result = TriageResultFactory.create(
-            issue_number=10, ready=True, complexity_score=9
-        )
-
-        decomposed = await phase._maybe_decompose(task, result)
-
-        assert decomposed is False
-        # The uncounted-re-split vector: intake must not even attempt the
-        # decomposition council/single-shot call for a stamped auto-child.
-        triage.run_decomposition.assert_not_called()
-        prs.create_issue.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_unstamped_issue_still_decomposes_normally(
-        self, tmp_path: Path
-    ) -> None:
-        """Regression guard: the new check must not over-match plain issues."""
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-            epic_decompose_complexity_threshold=8,
-            epic_decompose_on_intake_enabled=True,
-        )
-        mgr = AsyncMock()
-        phase, _state, prs, triage = self._make_phase(config, epic_manager=mgr)
-
-        triage.run_decomposition = AsyncMock(
-            return_value=EpicDecompResult(
-                should_decompose=True,
-                epic_title="Epic: Big Work",
-                epic_body="## Sub-issues",
-                children=[
-                    NewIssueSpec(title="Child 1", body="Do 1"),
-                    NewIssueSpec(title="Child 2", body="Do 2"),
-                ],
-                reasoning="Too complex",
-            )
-        )
-        phase._triage = triage
-        prs.create_issue = AsyncMock(side_effect=[200, 201, 202])
-
-        task = TaskFactory.create(id=10, tags=["ready"])
-        result = TriageResultFactory.create(
-            issue_number=10, ready=True, complexity_score=9
-        )
-
-        decomposed = await phase._maybe_decompose(task, result)
-
-        assert decomposed is True
-        triage.run_decomposition.assert_called_once()
-
-
-class TestEscalationClassGuard:
-    """#11119: anomaly escalations are signals, not projects — never
-    auto-decomposed. The 2026-08-14 idle test showed a cold-boot staleness
-    observation grown into an epic + 3 children before it self-cleared."""
-
-    @pytest.mark.asyncio
-    async def test_trust_loop_anomaly_never_decomposes(self, tmp_path: Path) -> None:
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-            epic_decompose_complexity_threshold=8,
-        )
-        mgr = AsyncMock()
-        guard = TestMaybeDecomposeIntakeGuard()
-        phase, _state, prs, triage = guard._make_phase(config, epic_manager=mgr)
-
-        task = TaskFactory.create(id=11, tags=["ready", "trust-loop-anomaly"])
-        result = TriageResultFactory.create(
-            issue_number=11, ready=True, complexity_score=9
-        )
-
-        decomposed = await phase._maybe_decompose(task, result)
-
-        assert decomposed is False
-        triage.run_decomposition.assert_not_called()
-        prs.create_issue.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_hitl_escalation_never_decomposes(self, tmp_path: Path) -> None:
-        config = ConfigFactory.create(
-            repo_root=tmp_path / "repo",
-            state_file=tmp_path / "state.json",
-            epic_decompose_complexity_threshold=8,
-        )
-        mgr = AsyncMock()
-        guard = TestMaybeDecomposeIntakeGuard()
-        phase, _state, prs, triage = guard._make_phase(config, epic_manager=mgr)
-
-        task = TaskFactory.create(id=12, tags=["hitl-escalation"])
-        result = TriageResultFactory.create(
-            issue_number=12, ready=True, complexity_score=9
-        )
-
-        decomposed = await phase._maybe_decompose(task, result)
-
-        assert decomposed is False
-        triage.run_decomposition.assert_not_called()

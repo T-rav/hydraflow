@@ -47,13 +47,6 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Triage",
         "src/triage.py:194",
     ),
-    AuditTarget(
-        "triage_decomposition",
-        "triage.TriageRunner._build_decomposition_prompt",
-        "tests/fixtures/prompts/triage_decomposition.json",
-        "Triage",
-        "src/triage.py:511",
-    ),
     # Plan
     AuditTarget(
         "planner_build_prompt_first_attempt",

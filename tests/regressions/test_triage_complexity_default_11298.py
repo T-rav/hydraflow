@@ -8,10 +8,11 @@ essentially everything (observed live: epic-scale #11298 scored 0).
 
 Pins:
 1. Absent or non-numeric complexity parses to ``None``, never 0.
-2. A ``None`` score is conservative at BOTH consumers, whose safe
-   directions are opposite: the plan-tier gate reads it as maximally
-   complex (full review + full plan), while epic auto-decomposition
-   skips it (absence is not evidence of epic scale).
+2. A ``None`` score is conservative at the plan-tier gate: it reads as
+   maximally complex (full review + full plan). (The other consumer this
+   file originally pinned — intake epic auto-decomposition skipping a
+   ``None`` score — was removed outright with the #11298 intake
+   decomposition path; see test_board_churn_root_cause_11298.py.)
 3. The triage prompt actually requests the field — the root cause.
 """
 
@@ -57,21 +58,6 @@ def test_none_reads_as_max_complexity_at_the_tier_gate() -> None:
     assert complexity == 10
     assert skip is False
     assert phase._forced_plan_scale(SimpleNamespace(id=1)) is None
-
-
-def test_none_never_triggers_epic_decomposition() -> None:
-    import asyncio
-
-    from models import TriageResult
-    from triage_phase import TriagePhase
-
-    phase = object.__new__(TriagePhase)
-    phase._config = HydraFlowConfig()
-    phase._epic_manager = object()  # wired, so only the score gates
-    result = TriageResult(issue_number=1, ready=True, complexity_score=None)
-    issue = SimpleNamespace(id=1, tags=[])
-    decided = asyncio.run(phase._maybe_decompose(issue, result))
-    assert decided is False
 
 
 def test_prompt_requests_complexity_score() -> None:
