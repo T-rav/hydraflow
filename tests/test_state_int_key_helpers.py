@@ -104,10 +104,10 @@ class TestAccessorMethodsUseHelpers:
         tracker.remove_workspace(10)
         assert tracker.get_active_workspaces() == {}
 
-    def test_set_and_get_branch(self, tmp_path: Path) -> None:
-        tracker = make_tracker(tmp_path)
-        tracker.set_branch(5, "issue-5")
-        assert tracker.get_branch(5) == "issue-5"
+    # `test_set_and_get_branch` lived here as a verbatim copy of
+    # tests/test_state_tracking.py::TestBranchTracking::test_set_and_get_branch
+    # — a plain set/get round-trip that asserted nothing about the int↔str key
+    # conversion this class exists to pin. The owner is test_state_tracking.py.
 
     def test_get_branch_missing(self, tmp_path: Path) -> None:
         tracker = make_tracker(tmp_path)

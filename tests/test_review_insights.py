@@ -97,41 +97,56 @@ class TestReviewRecordRawFeedback:
 
 
 class TestExtractCategories:
-    def test_extracts_missing_tests(self) -> None:
-        cats = extract_categories("Missing test coverage for edge cases")
-        assert "missing_tests" in cats
-
-    def test_extracts_type_annotations(self) -> None:
-        cats = extract_categories("Missing type annotations on public functions")
-        assert "type_annotations" in cats
-
-    def test_extracts_security(self) -> None:
-        cats = extract_categories("Potential SQL injection vulnerability found")
-        assert "security" in cats
-
-    def test_extracts_naming(self) -> None:
-        cats = extract_categories("Poor naming convention for variables")
-        assert "naming" in cats
-
-    def test_extracts_edge_cases(self) -> None:
-        cats = extract_categories("No handling for empty input or null values")
-        assert "edge_cases" in cats
-
-    def test_extracts_error_handling(self) -> None:
-        cats = extract_categories("Missing error handling for API calls")
-        assert "error_handling" in cats
-
-    def test_extracts_code_quality(self) -> None:
-        cats = extract_categories("High complexity — consider refactor")
-        assert "code_quality" in cats
-
-    def test_extracts_lint_format(self) -> None:
-        cats = extract_categories("Ruff lint issues not addressed")
-        assert "lint_format" in cats
-
-    def test_case_insensitive(self) -> None:
-        cats = extract_categories("MISSING TEST COVERAGE")
-        assert "missing_tests" in cats
+    @pytest.mark.parametrize(
+        ("summary", "category"),
+        [
+            pytest.param(
+                "Missing test coverage for edge cases",
+                "missing_tests",
+                id="extracts_missing_tests",
+            ),
+            pytest.param(
+                "Missing type annotations on public functions",
+                "type_annotations",
+                id="extracts_type_annotations",
+            ),
+            pytest.param(
+                "Potential SQL injection vulnerability found",
+                "security",
+                id="extracts_security",
+            ),
+            pytest.param(
+                "Poor naming convention for variables", "naming", id="extracts_naming"
+            ),
+            pytest.param(
+                "No handling for empty input or null values",
+                "edge_cases",
+                id="extracts_edge_cases",
+            ),
+            pytest.param(
+                "Missing error handling for API calls",
+                "error_handling",
+                id="extracts_error_handling",
+            ),
+            pytest.param(
+                "High complexity — consider refactor",
+                "code_quality",
+                id="extracts_code_quality",
+            ),
+            pytest.param(
+                "Ruff lint issues not addressed",
+                "lint_format",
+                id="extracts_lint_format",
+            ),
+            # The shouted twin of `extracts_missing_tests`: matching is
+            # case-insensitive, so an all-caps summary lands the same category.
+            pytest.param(
+                "MISSING TEST COVERAGE", "missing_tests", id="case_insensitive"
+            ),
+        ],
+    )
+    def test_extracts_category(self, summary: str, category: str) -> None:
+        assert category in extract_categories(summary)
 
     def test_multiple_categories(self) -> None:
         cats = extract_categories(
