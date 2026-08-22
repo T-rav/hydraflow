@@ -25,6 +25,7 @@ from models import LoopResult, TranscriptEventData
 from prompt_gate import GateResult, gate_prompt
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from repo_backend import apply_repo_provider
+from route_shadow import record_agentic_route_shadow
 from runner_utils import (
     AuthenticationRetryError,
     StreamConfig,
@@ -277,6 +278,7 @@ class BaseRunner:
         # credit-scoping provider). Default "claude" (native Anthropic) is a
         # no-op; a runner whose role dial is "zai" runs on the GLM harness.
         provider = self._resolve_provider()
+        dial_provider = provider
         cmd_tool, _ = parse_command_tool_model(cmd)
         if (
             getattr(self._config, "gateway_fleet_ratchet_enabled", False) is True
@@ -284,6 +286,7 @@ class BaseRunner:
             and cmd_tool == "claude"
         ):
             provider = "gateway"
+        after_ratchet = provider
         # Repo-wide backend override (#11211): a still-Claude spawn reroutes to
         # this repo's zai dial (config.repo_provider) when the role itself
         # hasn't already routed off Claude. No-op unless repo_provider == "zai"
@@ -302,6 +305,7 @@ class BaseRunner:
         # failover model) instead of pausing. No-op unless failover is active,
         # enabled, and ZAI_API_KEY is present. The rerouted cmd flows on to both
         # the spawn and telemetry, so cost attributes to the GLM model.
+        pre_credit_provider = provider
         rerouted, cmd = apply_credit_failover(provider, cmd, self._config)
         if rerouted != provider:
             self._log.info(
@@ -312,6 +316,21 @@ class BaseRunner:
             )
             provider = rerouted
         _, resolved_model = parse_command_tool_model(cmd)
+        # Routing shadow (#11536, ADR-0139): record what the policy resolver
+        # WOULD have chosen beside the route legacy routing just chose. The
+        # route is already fixed above; this observes it and returns nothing.
+        record_agentic_route_shadow(
+            config=self._config,
+            principal_id=str(event_data.get("source", self._phase_name)),
+            dial_field=self.PROVIDER_FIELD,
+            dial_provider=dial_provider,
+            after_ratchet=after_ratchet,
+            after_repo_provider=pre_credit_provider,
+            final_provider=provider,
+            final_model=resolved_model,
+            issue_number=_as_opt_int(raw_issue),
+            pr_number=_as_opt_int(event_data.get("pr")),
+        )
         spawn_timeout = self._spawn_timeout(timeout_s)
         harness_env = await resolve_harness_env(
             provider,

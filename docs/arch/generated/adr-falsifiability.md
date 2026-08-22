@@ -4,7 +4,7 @@ The **claim density** of each Accepted ADR — the fraction of its statements ca
 
 ## Baseline
 
-- **Population:** Accepted (84 ADRs)
+- **Population:** Accepted (85 ADRs)
 - **Mean claim density:** 54%
 - **Mush floor:** 25% (density below this reads as mush)
 - **Below the mush floor:** _(none — the sound corpus clears it)_
@@ -78,6 +78,7 @@ The **claim density** of each Accepted ADR — the fraction of its statements ca
 | ADR-0045 | 61% | 72 | 118 |
 | ADR-0138 | 62% | 96 | 155 |
 | ADR-0136 | 63% | 52 | 83 |
+| ADR-0139 | 64% | 92 | 144 |
 | ADR-0052 | 64% | 43 | 67 |
 | ADR-0010 | 64% | 65 | 101 |
 | ADR-0060 | 65% | 39 | 60 |

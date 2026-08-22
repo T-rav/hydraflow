@@ -37,6 +37,7 @@ from model_pricing import input_includes_cache_for, load_pricing, usage_shape_fo
 from prompt_gate import PromptGateBlockedError, gate_prompt
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from repo_backend import apply_repo_provider
+from route_shadow import record_agentic_route_shadow
 from runner_utils import (
     AuthenticationRetryError,
     StreamConfig,
@@ -279,12 +280,27 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
         # the only lever routing this seam's spawns to GLM. No-op unless
         # repo_provider == "zai" and ZAI_API_KEY is present.
         provider, cmd = apply_repo_provider(initial_provider, cmd, self._config)
+        after_repo_provider = provider
         # Credit failover (#10844): these runners always spawn on native Claude
         # (no provider dial), so without this a Claude cap would crash-loop the
         # loop instead of failing over. Reroute the spawn to GLM while failover
         # is active, mirroring base_runner._execute. No-op otherwise.
         provider, cmd = apply_credit_failover(provider, cmd, self._config)
         _, resolved_model = parse_command_tool_model(cmd)
+        # Routing shadow (#11536, ADR-0139): observation only — the route above
+        # is already fixed and this records what policy would have chosen.
+        # ``dial_field=None`` is the truth here: this seam has no role dial.
+        record_agentic_route_shadow(
+            config=self._config,
+            principal_id=self._telemetry_source(),
+            dial_field=None,
+            dial_provider="claude",
+            after_ratchet=initial_provider,
+            after_repo_provider=after_repo_provider,
+            final_provider=provider,
+            final_model=resolved_model,
+            issue_number=issue_number,
+        )
         timeout_s = self._default_timeout_s()
         try:
             harness_env = await resolve_harness_env(

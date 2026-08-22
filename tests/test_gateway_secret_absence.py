@@ -20,6 +20,10 @@ from pydantic import SecretStr
 
 import hydraflow_gateway.accounts as accounts_module
 import hydraflow_gateway.active_routes as active_routes_module
+import hydraflow_gateway.routing_audit as routing_audit_module
+import hydraflow_gateway.routing_policy as routing_policy_module
+import hydraflow_gateway.routing_store as routing_store_module
+import route_shadow as route_shadow_module
 from hydraflow_gateway.accounts import AccountView
 from hydraflow_gateway.active_routes import (
     ActiveRouteRegistry,
@@ -36,11 +40,20 @@ from hydraflow_gateway.models import (
     ProviderBinding,
     RepoClass,
 )
+from hydraflow_gateway.routing_policy import (
+    AccountAvailability,
+    LegacyRoute,
+    RouteContext,
+    RouteDecision,
+    RouteExplanation,
+    RoutingPolicy,
+)
 from hydraflow_gateway.settings import (
     GatewaySettings,
     UpstreamAuthStyle,
     UpstreamSettings,
 )
+from route_shadow import RouteStage, ShadowDecision
 from secret_scrub import scan_for_secrets
 
 # Every credential here is deliberately shaped like a real one, so the
@@ -257,7 +270,25 @@ async def test_every_payload_section_actually_returned_a_row(
 
 
 @pytest.mark.parametrize(
-    "model", [AccountView, LeaseView, InFlightRouteView, TerminalRouteView]
+    "model",
+    [
+        AccountView,
+        LeaseView,
+        InFlightRouteView,
+        TerminalRouteView,
+        # ADR-0139 adds a durable, hash-linked decision record. It is a
+        # projection like the read models above, so it inherits the same
+        # schema-level guard: a field named like a credential fails here
+        # before it can ever be populated.
+        AccountAvailability,
+        LegacyRoute,
+        RouteContext,
+        RouteDecision,
+        RouteExplanation,
+        RoutingPolicy,
+        RouteStage,
+        ShadowDecision,
+    ],
 )
 def test_read_model_declares_no_credential_shaped_field(model: type) -> None:
     """Schema-level guard: a future field named like a credential fails here."""
@@ -271,7 +302,17 @@ def test_read_model_declares_no_credential_shaped_field(model: type) -> None:
     assert named == []
 
 
-@pytest.mark.parametrize("module", [accounts_module, active_routes_module])
+@pytest.mark.parametrize(
+    "module",
+    [
+        accounts_module,
+        active_routes_module,
+        routing_policy_module,
+        routing_store_module,
+        routing_audit_module,
+        route_shadow_module,
+    ],
+)
 def test_projection_module_never_unwraps_a_secret(module: object) -> None:
     """AST guard: the sanitized projections never call ``get_secret_value``."""
     source = Path(module.__file__ or "").read_text(encoding="utf-8")

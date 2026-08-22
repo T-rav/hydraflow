@@ -1785,6 +1785,20 @@ async def run_lightweight_agent(
     # and the telemetry record (below) always wrap them. ``cmd`` is only a
     # telemetry descriptor parsed into (tool, model).
     cmd = _telemetry_cmd(transport_provider, tool, model)
+    # Routing shadow (#11536, ADR-0139): this is the seam the per-role
+    # ``*_provider`` dials run through, so it is where a z.ai-pinned loop
+    # becomes observable. Observation only — the transport is already resolved.
+    from route_shadow import record_one_shot_route_shadow  # noqa: PLC0415
+
+    record_one_shot_route_shadow(
+        config=config,
+        principal_id=source,
+        requested_provider=provider,
+        transport_provider=transport_provider,
+        model=model,
+        issue_number=issue_number,
+        pr_number=pr_number,
+    )
     start = time.monotonic()
     success = False
     record_row = False
