@@ -64,6 +64,7 @@ from hydraflow_gateway.routing_policy import (
 from hydraflow_gateway.routing_store import (
     POLICY_SNAPSHOT_FILENAME,
     RoutingPolicyStore,
+    SnapshotLoad,
 )
 from secret_scrub import scan_for_secrets
 
@@ -87,6 +88,9 @@ MAX_HISTORY_LIMIT = 500
 
 _MUTATION_LOCK_TIMEOUT_SECONDS = 10.0
 """Bounded: a policy write is an interactive operator action, not a batch job."""
+
+_HISTORY_LOCK_TIMEOUT_SECONDS = 2.0
+"""Shorter still: a dashboard poll must never queue behind a slow writer."""
 
 
 class PolicyMutationKind(StrEnum):
@@ -354,8 +358,27 @@ class PolicyWorkspace:
         )
 
     def history(self, *, limit: int = DEFAULT_HISTORY_LIMIT) -> PolicyHistory:
-        """Return the most recent mutation records, newest last, plus verification."""
+        """Return the most recent mutation records, newest last, plus verification.
+
+        Read under the writer's own advisory lock. ``append_jsonl`` writes
+        through a buffered writer, so a record larger than that buffer reaches
+        disk in several ``write`` calls — and a reader that caught the gap would
+        see a torn tail line and report a BROKEN CHAIN on the one panel whose
+        entire job is trustworthiness. The lock is short-timeout and falls back
+        to an unlocked read: worst case is exactly today's behaviour, never a
+        hung poll.
+
+        Blocking (a lock plus a full-file read). Async callers hand it to a
+        thread, like :meth:`apply`.
+        """
         bounded = max(1, min(limit, MAX_HISTORY_LIMIT))
+        try:
+            with file_lock(self._lock_path, timeout=_HISTORY_LOCK_TIMEOUT_SECONDS):
+                return self._history_unlocked(bounded)
+        except OSError:
+            return self._history_unlocked(bounded)
+
+    def _history_unlocked(self, bounded: int) -> PolicyHistory:
         verification = self._audit.verify()
         try:
             records = self._audit.read_all()
@@ -540,9 +563,17 @@ class PolicyWorkspace:
             and load.snapshot.revision == intent.next_revision
             and load.snapshot.content_hash == intent.next_content_hash
         )
+        # ONE idempotency check, above both branches: a crash between the append
+        # and the unlink is possible on either path, and guarding only the
+        # committed one would let recovery write a second `aborted` record for a
+        # single intent. `mutation_id` identifies the transaction, not its
+        # outcome, so it covers both payload kinds.
+        head = self._audit.head()
+        recorded = (
+            head is not None and head.payload.get("mutation_id") == intent.mutation_id
+        )
         if landed:
-            head = self._audit.head()
-            if head is None or head.payload.get("mutation_id") != intent.mutation_id:
+            if not recorded:
                 self._audit.append(
                     _committed_payload(intent, load.snapshot, recovered=True),
                     recorded_at=intent.recorded_at,
@@ -552,9 +583,10 @@ class PolicyWorkspace:
         # The atomic replace never happened, so the prior revision is still
         # authoritative and always was — recovery records that, it does not
         # invent the revision the interrupted write was reaching for.
-        self._audit.append(
-            _aborted_payload(intent, load.snapshot), recorded_at=now.isoformat()
-        )
+        if not recorded:
+            self._audit.append(
+                _aborted_payload(intent, load), recorded_at=now.isoformat()
+            )
         self._journal.unlink(missing_ok=True)
         return JournalOutcome.ROLLED_BACK
 
@@ -710,10 +742,18 @@ def _committed_payload(
     }
 
 
-def _aborted_payload(
-    intent: MutationIntent, snapshot: PolicySnapshot
-) -> dict[str, Any]:
-    """An intent that never reached the snapshot, recorded rather than forgotten."""
+def _aborted_payload(intent: MutationIntent, load: SnapshotLoad) -> dict[str, Any]:
+    """An intent that never reached the snapshot, recorded rather than forgotten.
+
+    ``new_revision`` is the revision that REMAINS authoritative. A corrupt load
+    reports revision 0, which is not that — so the intent's own
+    ``prior_revision`` is used instead of publishing a zero the chain would then
+    carry as fact.
+    """
+    snapshot = load.snapshot
+    remaining = (
+        snapshot.revision if load.state is SnapshotState.OK else intent.prior_revision
+    )
     return {
         "record_kind": MUTATION_RECORD_KIND,
         "mutation_id": intent.mutation_id,
@@ -723,9 +763,10 @@ def _aborted_payload(
         "actor": intent.actor,
         "recovered": True,
         "prior_revision": intent.prior_revision,
-        "new_revision": snapshot.revision,
+        "new_revision": remaining,
         "prior_content_hash": intent.prior_content_hash,
         "new_content_hash": snapshot.content_hash,
+        "snapshot_state": load.state.value,
         "target_revision": intent.target_revision,
         "diff": PolicyDiff().to_json_dict(),
         "policies": [],

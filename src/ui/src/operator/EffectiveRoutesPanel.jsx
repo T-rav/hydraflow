@@ -21,7 +21,7 @@
 
 import React from 'react'
 import { Badge, Text, useTokens } from '../styles/primitives'
-import { EMPTY_EFFECTIVE_MATRIX_VM } from './model/policyWorkspace'
+import { EMPTY_EFFECTIVE_MATRIX_VM, feedNotice } from './model/policyWorkspace'
 
 const SNAPSHOT_MESSAGES = {
   corrupt:
@@ -200,17 +200,24 @@ function ExplanationTrace({ cell, styles }) {
 }
 
 /**
- * @param {{ matrix?: object, selection?: string|null, select?: Function }} props
+ * @param {{
+ *   matrix?: object, sourceState?: string, selection?: string|null,
+ *   select?: Function,
+ * }} props
  */
 export default function EffectiveRoutesPanel({
   matrix = EMPTY_EFFECTIVE_MATRIX_VM,
+  sourceState = 'loading',
   selection = null,
   select = () => {},
 }) {
   const t = useTokens()
   const styles = makeStyles(t)
   const selected = matrix.cells.find(cell => cell.key === selection) || null
-  const snapshotMessage = SNAPSHOT_MESSAGES[matrix.snapshotState]
+  const notice = feedNotice(sourceState, matrix.loaded)
+  // Only a LOADED matrix may say what the snapshot state is. Before that,
+  // "no policy has been written" would be a claim about bytes never read.
+  const snapshotMessage = matrix.loaded ? SNAPSHOT_MESSAGES[matrix.snapshotState] : ''
 
   return (
     <div style={styles.wrap} data-testid="effective-routes">
@@ -220,13 +227,26 @@ export default function EffectiveRoutesPanel({
             Effective routes
           </Text>
           <Text as="span" size="xs" tone="muted" data-testid="effective-revision">
-            {`${matrix.repo || 'this repo'} · policy revision ${matrix.policyRevision}`}
+            {matrix.loaded
+              ? `${matrix.repo || 'this repo'} · policy revision ${matrix.policyRevision}`
+              : 'policy revision not read yet'}
           </Text>
           <span style={styles.spacer} />
           <Text as="span" size="xs" tone="muted">
             {`${matrix.cells.length} routes`}
           </Text>
         </div>
+        {notice ? (
+          <div style={styles.note} data-testid="effective-feed-notice">
+            <Text
+              size="sm"
+              tone={sourceState === 'unavailable' ? 'danger' : 'muted'}
+              role={sourceState === 'unavailable' ? 'alert' : 'status'}
+            >
+              {notice}
+            </Text>
+          </div>
+        ) : null}
         {snapshotMessage && (
           <div style={styles.note} data-testid="effective-snapshot-note">
             <Text
@@ -238,9 +258,9 @@ export default function EffectiveRoutesPanel({
             </Text>
           </div>
         )}
-        {matrix.cells.length === 0 ? (
+        {matrix.loaded && matrix.cells.length === 0 ? (
           <Text role="status" size="sm" tone="muted" data-testid="effective-empty">
-            The effective-route matrix has not loaded yet.
+            This revision resolves no routes at all — not even an unmanaged one.
           </Text>
         ) : (
           <div style={styles.scroller}>

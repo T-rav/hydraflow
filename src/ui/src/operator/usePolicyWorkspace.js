@@ -3,21 +3,28 @@
  * (issue #11538, ADR-0140).
  *
  * It follows `useGatewayRouting`'s shape (one pinned `setInterval`, one
- * `AbortController` per cycle, a last-known VM kept on failure) and adds the two
+ * `AbortController` per cycle, a last-known VM kept on failure) and adds the
  * things a WRITE surface needs that a read-only poll does not:
  *
- * **A monotonic sequence guard.** An `AbortController` cancels a cycle on
- * unmount, but it does nothing about two *live* cycles finishing out of order —
- * a slow poll landing after a fast save's refresh would put the pre-save
+ * **Two monotonic sequence guards, not one.** An `AbortController` cancels a
+ * cycle on unmount, but it does nothing about two *live* cycles finishing out of
+ * order — a slow poll landing after a save's refresh would put the pre-save
  * revision back on screen and invite the operator to save against it, which is
- * exactly the lost update optimistic concurrency exists to prevent. Every load
- * takes a ticket; a response whose ticket is older than the newest one already
- * applied is dropped rather than rendered.
+ * exactly the lost update optimistic concurrency exists to prevent. The poll and
+ * the preview take tickets from SEPARATE counters, because they write disjoint
+ * state: one counter would let a routine 30-second poll silently discard an
+ * in-flight preview and leave the Preview button looking inert.
+ *
+ * **An honest source state.** A cycle that threw, or any response that was not
+ * 2xx, sets `sourceState = 'unavailable'`. Without it a dead endpoint is
+ * indistinguishable from "this repository has no policy", which is precisely the
+ * false-coherent state ADR-0140 exists to prevent — and it would be asserted by
+ * a panel whose whole job is trustworthiness.
  *
  * **A credential that is never stored.** The operator token is passed in per
  * save and forwarded straight to the request. It is never written to state, to
- * `localStorage`, or into any view model — a token in browser storage is a
- * token in every later page view's blast radius.
+ * `localStorage`, or into any view model — a token in browser storage is a token
+ * in every later page view's blast radius.
  *
  * The fetcher deliberately does NOT throw on a non-2xx response: a 409 carries
  * the revision that won, and a 422 carries every validation issue. Those bodies
@@ -41,6 +48,13 @@ export const POLICY_EFFECTIVE_ENDPOINT = '/api/gateway/policies/effective'
 export const POLICY_PREVIEW_ENDPOINT = '/api/gateway/policies/preview'
 export const POLICY_MUTATIONS_ENDPOINT = '/api/gateway/policies/mutations'
 export const POLICY_AUDIT_ENDPOINT = '/api/gateway/policies/audit'
+
+/** The cross-repo sentinel the dashboard uses; policy reads it as read-only. */
+export const REPO_ALL = '__all__'
+
+export const POLICY_SOURCE_LOADING = 'loading'
+export const POLICY_SOURCE_AVAILABLE = 'available'
+export const POLICY_SOURCE_UNAVAILABLE = 'unavailable'
 
 /**
  * Default fetcher. Returns `{ok, status, data}` and throws only on a transport
@@ -73,51 +87,89 @@ function withRepo(endpoint, repo) {
 }
 
 /**
- * @param {{ repo?: string|null, fetcher?: Function, intervalMs?: number }} [options]
+ * @param {{
+ *   repo?: string|null, enabled?: boolean, fetcher?: Function, intervalMs?: number,
+ * }} [options]
  */
 export function usePolicyWorkspace({
   repo = null,
+  enabled = true,
   fetcher = defaultPolicyFetcher,
   intervalMs = GATEWAY_ROUTING_POLL_MS,
 } = {}) {
   const [workspace, setWorkspace] = useState(EMPTY_POLICY_WORKSPACE_VM)
   const [matrix, setMatrix] = useState(EMPTY_EFFECTIVE_MATRIX_VM)
   const [audit, setAudit] = useState(EMPTY_POLICY_AUDIT_VM)
+  const [sourceState, setSourceState] = useState(POLICY_SOURCE_LOADING)
   const [preview, setPreview] = useState(null)
   const [rejection, setRejection] = useState(null)
 
-  // Two counters, not one: `issued` hands out tickets, `applied` remembers the
-  // newest one that reached state. A response only lands if it is newer.
-  const issuedRef = useRef(0)
-  const appliedRef = useRef(0)
-  const fetcherRef = useRef(fetcher)
-  fetcherRef.current = fetcher
+  // Two counters per channel, not one shared pair: `issued` hands out tickets,
+  // `applied` remembers the newest one that reached state, and a response only
+  // lands if it is newer. The poll and the preview keep their own pair so
+  // neither can invalidate the other's answer.
+  const pollIssued = useRef(0)
+  const pollApplied = useRef(0)
+  const previewIssued = useRef(0)
+  const previewApplied = useRef(0)
+
+  // A repository selection is the one input that invalidates every slice at
+  // once. Without the reset the panel renders the previous repo's policies
+  // under the new repo's header for a whole round trip — and `mutation()`
+  // would build a body from a revision that belongs to a different repository.
+  useEffect(() => {
+    setWorkspace(EMPTY_POLICY_WORKSPACE_VM)
+    setMatrix(EMPTY_EFFECTIVE_MATRIX_VM)
+    setAudit(EMPTY_POLICY_AUDIT_VM)
+    setPreview(null)
+    setRejection(null)
+    setSourceState(POLICY_SOURCE_LOADING)
+  }, [repo])
 
   const load = useCallback(
     async signal => {
-      const ticket = ++issuedRef.current
+      const ticket = ++pollIssued.current
+      // No repository selected is the AGGREGATE view, and aggregate is
+      // read-only by construction: the summary read answers it and the
+      // per-repository detail routes refuse it, so they are not called at all.
+      const aggregate = !repo
+      const scope = repo || REPO_ALL
       let responses
       try {
         responses = await Promise.all([
-          fetcherRef.current(withRepo(POLICY_ENDPOINT, repo), { signal }),
-          fetcherRef.current(withRepo(POLICY_EFFECTIVE_ENDPOINT, repo), { signal }),
-          fetcherRef.current(withRepo(POLICY_AUDIT_ENDPOINT, repo), { signal }),
+          fetcher(withRepo(POLICY_ENDPOINT, scope), { signal }),
+          aggregate
+            ? null
+            : fetcher(withRepo(POLICY_EFFECTIVE_ENDPOINT, scope), { signal }),
+          aggregate
+            ? null
+            : fetcher(withRepo(POLICY_AUDIT_ENDPOINT, scope), { signal }),
         ])
       } catch {
+        if (!signal?.aborted && ticket >= pollApplied.current) {
+          pollApplied.current = ticket
+          setSourceState(POLICY_SOURCE_UNAVAILABLE)
+        }
         return
       }
-      if (signal?.aborted || ticket < appliedRef.current) return
-      appliedRef.current = ticket
+      if (signal?.aborted || ticket < pollApplied.current) return
+      pollApplied.current = ticket
       const [policies, effective, history] = responses
       if (policies?.ok) setWorkspace(toPolicyWorkspace(policies.data))
       if (effective?.ok) setMatrix(toEffectiveMatrix(effective.data))
       if (history?.ok) setAudit(toPolicyAudit(history.data))
+      const answered = responses.filter(response => response !== null)
+      setSourceState(
+        answered.every(response => response?.ok)
+          ? POLICY_SOURCE_AVAILABLE
+          : POLICY_SOURCE_UNAVAILABLE,
+      )
     },
-    [repo],
+    [fetcher, repo],
   )
 
   useEffect(() => {
-    if (typeof fetcher !== 'function') return undefined
+    if (!enabled || typeof fetcher !== 'function') return undefined
     const controller = new AbortController()
     load(controller.signal)
     const timer = setInterval(() => load(controller.signal), intervalMs)
@@ -125,41 +177,44 @@ export function usePolicyWorkspace({
       controller.abort()
       clearInterval(timer)
     }
-  }, [fetcher, intervalMs, load])
+  }, [enabled, fetcher, intervalMs, load])
 
   const requestPreview = useCallback(
     async mutation => {
-      const ticket = ++issuedRef.current
+      const ticket = ++previewIssued.current
       let response
       try {
-        response = await fetcherRef.current(withRepo(POLICY_PREVIEW_ENDPOINT, repo), {
-          method: 'POST',
-          body: mutation,
-        })
+        response = await fetcher(
+          withRepo(POLICY_PREVIEW_ENDPOINT, repo || REPO_ALL),
+          { method: 'POST', body: mutation },
+        )
       } catch {
+        if (ticket >= previewApplied.current) {
+          previewApplied.current = ticket
+          setRejection('storage-unavailable')
+        }
         return null
       }
-      // A preview that landed after a newer one would show the operator the
+      // A preview that landed after a NEWER preview would show the operator the
       // consequences of an edit they have already moved on from.
-      if (ticket < appliedRef.current) return null
-      appliedRef.current = ticket
+      if (ticket < previewApplied.current) return null
+      previewApplied.current = ticket
       const vm = response?.ok ? toPolicyPreview(response.data) : null
       setPreview(vm)
-      setRejection(response?.ok ? null : response?.data?.code || 'preview-failed')
+      setRejection(response?.ok ? null : response?.data?.code || 'validation-failed')
       return vm
     },
-    [repo],
+    [fetcher, repo],
   )
 
   const save = useCallback(
     async (mutation, token) => {
       let response
       try {
-        response = await fetcherRef.current(withRepo(POLICY_MUTATIONS_ENDPOINT, repo), {
-          method: 'POST',
-          body: mutation,
-          token,
-        })
+        response = await fetcher(
+          withRepo(POLICY_MUTATIONS_ENDPOINT, repo || REPO_ALL),
+          { method: 'POST', body: mutation, token },
+        )
       } catch {
         setRejection('storage-unavailable')
         return { ok: false, status: 0, code: 'storage-unavailable' }
@@ -182,7 +237,7 @@ export function usePolicyWorkspace({
       await load()
       return { ok: true, status: response.status, revision: response.data?.revision }
     },
-    [load, repo],
+    [fetcher, load, repo],
   )
 
   const clearPreview = useCallback(() => {
@@ -194,6 +249,7 @@ export function usePolicyWorkspace({
     workspace,
     matrix,
     audit,
+    sourceState,
     preview,
     rejection,
     requestPreview,

@@ -153,7 +153,9 @@ class TestGatewayRouteShadowScenario:
         dark = await _run_turn(tmp_path / "dark", monkeypatch, shadow=False)
         lit = await _run_turn(tmp_path / "lit", monkeypatch, shadow=True)
 
-        assert lit.exchanges == dark.exchanges
+        # Two empty lists compare equal, so the non-vacuity half is part of the
+        # assertion: the origin was reached, and it saw the same bytes.
+        assert (lit.exchanges, bool(dark.exchanges)) == (dark.exchanges, True)
 
     async def test_a_governed_spawn_records_exactly_one_shadow_decision(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -207,7 +209,7 @@ class TestGatewayRouteShadowScenario:
             tmp_path / "lit", monkeypatch, shadow=True, policies=[_zai_lock()]
         )
 
-        assert lit.exchanges == dark.exchanges
+        assert (lit.exchanges, bool(dark.exchanges)) == (dark.exchanges, True)
 
     async def test_that_policy_is_recorded_as_a_route_divergence(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

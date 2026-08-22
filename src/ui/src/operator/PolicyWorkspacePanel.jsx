@@ -31,11 +31,15 @@ import {
   REQUIREMENT_CHOICES,
   WORKER_ROLE_CHOICES,
   draftToPolicy,
+  feedNotice,
   policyToDraft,
   rejectionMessage,
   snapshotTone,
   writeGateMessage,
 } from './model/policyWorkspace'
+
+/** Most recent rollback targets offered as controls; the rest live in Audit. */
+export const MAX_ROLLBACK_BUTTONS = 8
 
 const CORRUPT_MESSAGE =
   'The policy snapshot on disk cannot be read. It is NOT "no policies" — the resolver holds every route until it is repaired, and writes are refused so the revision counter cannot restart.'
@@ -157,7 +161,7 @@ function Field({ label, children, styles }) {
   )
 }
 
-function PolicyRow({ policy, selected, editable, onSelect, onEdit, onDisable, styles }) {
+function PolicyRow({ policy, selected, editable, writable, onSelect, onEdit, onDisable, styles }) {
   return (
     <div
       style={selected ? styles.selectedRow : styles.row}
@@ -205,6 +209,11 @@ function PolicyRow({ policy, selected, editable, onSelect, onEdit, onDisable, st
               variant="ghost"
               size="sm"
               data-testid={`policy-disable-${policy.id}`}
+              // Disable is a WRITE, unlike Edit, which only loads the draft:
+              // it needs the same credential and the same un-rebased form the
+              // Save button does, or it would 401 with a message about a token
+              // that was never sent.
+              disabled={!writable}
               onClick={() => onDisable(policy)}
             >
               Disable
@@ -268,8 +277,9 @@ function PreviewSummary({ preview, styles }) {
 /**
  * @param {{
  *   workspace?: object, preview?: object|null, rejection?: string|null,
- *   audit?: object, selection?: string|null, select?: Function,
- *   onPreview?: Function, onSave?: Function, onClearPreview?: Function,
+ *   audit?: object, sourceState?: string, selection?: string|null,
+ *   select?: Function, onPreview?: Function, onSave?: Function,
+ *   onClearPreview?: Function,
  * }} props
  */
 export default function PolicyWorkspacePanel({
@@ -277,6 +287,7 @@ export default function PolicyWorkspacePanel({
   preview = null,
   rejection = null,
   audit = null,
+  sourceState = 'loading',
   selection = null,
   select = () => {},
   onPreview = () => {},
@@ -289,22 +300,47 @@ export default function PolicyWorkspacePanel({
   const [kind, setKind] = React.useState('create')
   const [token, setToken] = React.useState('')
   const [conflict, setConflict] = React.useState(null)
+  // The revision this form is being edited AGAINST — pinned to the one the
+  // operator actually saw, never re-read from the live poll. Reading
+  // `workspace.revision` at click time would make `expected_revision` the
+  // WINNER's revision, so the 409 that stops a lost update could never fire
+  // from this console (ADR-0140 D3).
+  const [basis, setBasis] = React.useState(null)
 
+  React.useEffect(() => {
+    setBasis(prev => (prev === null && workspace.loaded ? workspace.revision : prev))
+  }, [workspace.loaded, workspace.revision])
+
+  const notice = feedNotice(sourceState, workspace.loaded)
   const editable = workspace.editable && workspace.scope === 'repo'
+  const pinned = basis === null ? workspace.revision : basis
+  // Somebody else's revision landed under this form. The edit is not
+  // necessarily wrong, but it was reasoned against a route matrix that no
+  // longer exists, so it may not be saved until the operator re-bases.
+  const rebased = basis !== null && workspace.loaded && workspace.revision !== basis
+
   const set = (key, value) => {
     setDraft(prev => ({ ...prev, [key]: value }))
+    setConflict(null)
     onClearPreview()
   }
 
   const mutation = () => ({
     kind,
-    expected_revision: workspace.revision,
+    expected_revision: pinned,
     policy: draftToPolicy(draft, workspace.repo),
   })
+
+  const rebase = () => {
+    setBasis(workspace.revision)
+    setConflict(null)
+    onClearPreview()
+  }
 
   const startEdit = policy => {
     setDraft(policyToDraft(policy))
     setKind('update')
+    setBasis(workspace.revision)
     setConflict(null)
     onClearPreview()
     select('routingSelection', policy.id)
@@ -313,6 +349,7 @@ export default function PolicyWorkspacePanel({
   const startCreate = () => {
     setDraft(EMPTY_POLICY_DRAFT)
     setKind('create')
+    setBasis(workspace.revision)
     setConflict(null)
     onClearPreview()
   }
@@ -320,7 +357,15 @@ export default function PolicyWorkspacePanel({
   const commit = async body => {
     const result = await onSave(body, token)
     setConflict(result && result.ok === false ? result : null)
+    if (result && result.ok) setBasis(result.revision ?? null)
   }
+
+  // Rolling back to the revision already in force would write a redundant new
+  // revision, so it is not offered; the list is bounded because the audit route
+  // returns up to fifty records and fifty controls is not a control.
+  const rollbackTargets = (audit?.rollbackTargets || [])
+    .filter(target => target !== pinned)
+    .slice(-MAX_ROLLBACK_BUTTONS)
 
   if (workspace.scope === 'aggregate') {
     return (
@@ -359,10 +404,15 @@ export default function PolicyWorkspacePanel({
             Policies
           </Text>
           <Text as="span" size="xs" tone="muted" data-testid="policy-revision">
-            {`${workspace.repo || 'this repo'} · revision ${workspace.revision}`}
+            {workspace.loaded
+              ? `${workspace.repo || 'this repo'} · revision ${workspace.revision}`
+              : 'revision not read yet'}
           </Text>
-          <Badge tone={snapshotTone(workspace.state)} data-testid="policy-snapshot-state">
-            {workspace.state}
+          <Badge
+            tone={workspace.loaded ? snapshotTone(workspace.state) : 'neutral'}
+            data-testid="policy-snapshot-state"
+          >
+            {workspace.loaded ? workspace.state : 'unread'}
           </Badge>
           <span style={styles.spacer} />
           {editable ? (
@@ -371,18 +421,27 @@ export default function PolicyWorkspacePanel({
             </Button>
           ) : null}
         </div>
-        {workspace.state === 'corrupt' && (
+        {notice ? (
+          <Notice
+            tone={sourceState === 'unavailable' ? 'danger' : 'muted'}
+            styles={styles}
+            testid="policy-feed-notice"
+          >
+            {notice}
+          </Notice>
+        ) : null}
+        {workspace.loaded && workspace.state === 'corrupt' && (
           <Notice tone="danger" styles={styles} testid="policy-snapshot-corrupt">
             {CORRUPT_MESSAGE}
           </Notice>
         )}
-        {!editable && (
+        {workspace.loaded && !editable && (
           <Notice tone="warning" styles={styles} testid="policy-write-gate">
             {writeGateMessage(workspace.writeGate) ||
               'Policy writes are unavailable on this dashboard.'}
           </Notice>
         )}
-        {workspace.policies.length === 0 ? (
+        {workspace.loaded && workspace.policies.length === 0 ? (
           <Text role="status" size="sm" tone="muted" data-testid="policy-empty">
             No policy has been written for this repository. Legacy routing decides
             every route until one is.
@@ -395,13 +454,14 @@ export default function PolicyWorkspacePanel({
                 policy={policy}
                 selected={selection === policy.id}
                 editable={editable}
+                writable={editable && !!token && !rebased}
                 styles={styles}
                 onSelect={id => select('routingSelection', id)}
                 onEdit={startEdit}
                 onDisable={row =>
                   commit({
                     kind: 'disable',
-                    expected_revision: workspace.revision,
+                    expected_revision: pinned,
                     policy_id: row.id,
                   })
                 }
@@ -541,6 +601,11 @@ export default function PolicyWorkspacePanel({
             </Text>
           </label>
           <PreviewSummary preview={preview} styles={styles} />
+          {rebased && (
+            <Notice tone="warning" styles={styles} testid="policy-rebased">
+              {`${rejectionMessage('stale-revision')} This form was opened against revision ${basis}; revision ${workspace.revision} is current.`}
+            </Notice>
+          )}
           {conflict && (
             <Notice tone="danger" styles={styles} testid="policy-conflict">
               {`${rejectionMessage(conflict.code)}${
@@ -568,16 +633,26 @@ export default function PolicyWorkspacePanel({
               variant="primary"
               size="sm"
               data-testid="policy-save-button"
-              disabled={!preview || !preview.writable || !token}
+              disabled={!preview || !preview.writable || !token || rebased}
               onClick={() => commit(mutation())}
             >
-              Save revision {workspace.revision + 1}
+              {`Save revision ${pinned + 1}`}
             </Button>
+            {rebased && (
+              <Button
+                variant="ghost"
+                size="sm"
+                data-testid="policy-rebase-button"
+                onClick={rebase}
+              >
+                {`Re-base on r${workspace.revision}`}
+              </Button>
+            )}
           </div>
         </div>
       )}
 
-      {editable && audit && audit.rollbackTargets.length > 0 && (
+      {editable && audit && rollbackTargets.length > 0 && (
         <div style={styles.card} data-testid="policy-rollback">
           <Text size="sm" weight="semibold" uppercase>
             Roll back
@@ -587,17 +662,17 @@ export default function PolicyWorkspacePanel({
             rewrites history, and it leaves inherited rules alone.
           </Text>
           <div style={styles.actions}>
-            {audit.rollbackTargets.map(target => (
+            {rollbackTargets.map(target => (
               <Button
                 key={target}
                 variant="ghost"
                 size="sm"
                 data-testid={`policy-rollback-${target}`}
-                disabled={!token}
+                disabled={!token || rebased}
                 onClick={() =>
                   commit({
                     kind: 'rollback',
-                    expected_revision: workspace.revision,
+                    expected_revision: pinned,
                     target_revision: target,
                   })
                 }
@@ -606,6 +681,12 @@ export default function PolicyWorkspacePanel({
               </Button>
             ))}
           </div>
+          {audit.truncated && (
+            <Text as="span" size="xs" tone="muted" data-testid="policy-rollback-truncated">
+              Only the most recent revisions are offered here. Older ones are in
+              the Audit view.
+            </Text>
+          )}
         </div>
       )}
     </div>

@@ -21,7 +21,7 @@
 
 import React from 'react'
 import { Badge, Text, useTokens } from '../styles/primitives'
-import { EMPTY_POLICY_AUDIT_VM } from './model/policyWorkspace'
+import { EMPTY_POLICY_AUDIT_VM, feedNotice } from './model/policyWorkspace'
 
 function makeStyles(t) {
   return {
@@ -109,10 +109,17 @@ function AuditRow({ record, styles }) {
   )
 }
 
-/** @param {{ audit?: object }} props */
-export default function PolicyAuditPanel({ audit = EMPTY_POLICY_AUDIT_VM }) {
+/** @param {{ audit?: object, sourceState?: string }} props */
+export default function PolicyAuditPanel({
+  audit = EMPTY_POLICY_AUDIT_VM,
+  sourceState = 'loading',
+}) {
   const t = useTokens()
   const styles = makeStyles(t)
+  const notice = feedNotice(sourceState, audit.loaded)
+  // `verified` is a THREE-state fact: verified, broken, or never read. Only the
+  // first two are claims this panel is entitled to make.
+  const unread = audit.verified == null
 
   return (
     <div style={styles.card} data-testid="policy-audit">
@@ -121,17 +128,28 @@ export default function PolicyAuditPanel({ audit = EMPTY_POLICY_AUDIT_VM }) {
           Policy audit
         </Text>
         <Text as="span" size="xs" tone="muted" data-testid="policy-audit-count">
-          {`${audit.records.length} recorded mutations`}
+          {audit.loaded ? `${audit.records.length} recorded mutations` : 'not read yet'}
         </Text>
         <span style={styles.spacer} />
         <Badge
-          tone={audit.verified ? 'info' : 'danger'}
+          tone={unread ? 'neutral' : audit.verified ? 'info' : 'danger'}
           data-testid="policy-audit-verified"
         >
-          {audit.verified ? 'chain verified' : 'chain broken'}
+          {unread ? 'chain unread' : audit.verified ? 'chain verified' : 'chain broken'}
         </Badge>
       </div>
-      {!audit.verified && (
+      {notice ? (
+        <div style={styles.note} data-testid="policy-audit-feed-notice">
+          <Text
+            size="sm"
+            tone={sourceState === 'unavailable' ? 'danger' : 'muted'}
+            role={sourceState === 'unavailable' ? 'alert' : 'status'}
+          >
+            {notice}
+          </Text>
+        </div>
+      ) : null}
+      {audit.verified === false && (
         <div style={styles.note} data-testid="policy-audit-broken">
           <Text role="alert" size="sm" tone="danger">
             {`The hash-linked mutation chain does not verify${
@@ -140,7 +158,7 @@ export default function PolicyAuditPanel({ audit = EMPTY_POLICY_AUDIT_VM }) {
           </Text>
         </div>
       )}
-      {audit.records.length === 0 ? (
+      {audit.loaded && audit.records.length === 0 ? (
         <Text role="status" size="sm" tone="muted" data-testid="policy-audit-empty">
           No policy mutation has been recorded for this repository.
         </Text>

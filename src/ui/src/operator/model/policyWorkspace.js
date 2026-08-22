@@ -109,6 +109,24 @@ export function rejectionMessage(code) {
   return REJECTION_MESSAGES[code] || String(code)
 }
 
+export const UNAVAILABLE_MESSAGE =
+  'The policy plane did not answer. This is NOT "no policy" — nothing below has been read from this repository, and no write should be attempted until it loads.'
+
+export const LOADING_MESSAGE =
+  'Reading this repository’s policy state…'
+
+/**
+ * The one line a panel renders instead of an empty state it has not earned.
+ *
+ * Returns `''` once a real payload has landed, so a genuinely empty repository
+ * still gets its calm "no policy has been written" copy — the point is only
+ * that "not fetched" may never wear it.
+ */
+export function feedNotice(sourceState, loaded) {
+  if (loaded) return ''
+  return sourceState === 'unavailable' ? UNAVAILABLE_MESSAGE : LOADING_MESSAGE
+}
+
 export const EMPTY_POLICY_WORKSPACE_VM = Object.freeze({
   loaded: false,
   scope: 'repo',
@@ -135,7 +153,10 @@ export const EMPTY_EFFECTIVE_MATRIX_VM = Object.freeze({
 export const EMPTY_POLICY_AUDIT_VM = Object.freeze({
   loaded: false,
   records: EMPTY_LIST,
-  verified: true,
+  // `null`, NOT `true`. A chain nobody has read yet has not been verified, and
+  // a badge claiming otherwise would be a positive tamper-evidence claim about
+  // bytes this session never saw — the one lie this panel exists to prevent.
+  verified: null,
   brokenAtSeq: null,
   truncated: false,
   rollbackTargets: EMPTY_LIST,
@@ -282,17 +303,23 @@ export function toPolicyAudit(raw) {
   return {
     loaded: true,
     records,
-    verified: raw.verified !== false,
+    // Three states, not two: a payload that did not carry the field has not
+    // told us anything, and `true` would be a verification claim we invented.
+    verified: raw.verified == null ? null : raw.verified !== false,
     brokenAtSeq: raw.broken_at_seq == null ? null : num(raw.broken_at_seq),
     truncated: raw.truncated === true,
     // Revision 0 is a real target — the state before any policy was written —
-    // so it is offered alongside every committed revision.
+    // so it is offered alongside every committed revision. Deduped and sorted:
+    // two records can only claim one `new_revision` after an out-of-band
+    // snapshot repair, and a duplicate would render as a duplicate control.
     rollbackTargets: [
-      0,
-      ...records
-        .filter(record => record.outcome === 'committed')
-        .map(record => record.newRevision),
-    ],
+      ...new Set([
+        0,
+        ...records
+          .filter(record => record.outcome === 'committed')
+          .map(record => record.newRevision),
+      ]),
+    ].sort((left, right) => left - right),
   }
 }
 

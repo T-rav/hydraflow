@@ -577,3 +577,95 @@ def test_the_write_lands_where_the_shadow_resolver_reads(tmp_path: Path) -> None
         PolicyWorkspace(routing_dir(config), repo=_REPO).read().policies[0].id
         == "pin-zai"
     )
+
+
+# --------------------------------------------------------------------------
+# Multi-repo scoping: the kill switch an operator sets per repo
+# --------------------------------------------------------------------------
+
+
+class _Registry:
+    """The multi-repo seam the dashboard router resolves through."""
+
+    def __init__(self, config: Any, repo_config: Any, slug: str) -> None:
+        self._config = config
+        self._repo_config = repo_config
+        self._slug = slug
+
+    def resolve_runtime(self, slug: str | None) -> tuple[Any, None, None, None]:
+        resolved = self._repo_config if slug == self._slug else self._config
+        return resolved, None, None, None
+
+    def resolve_runtimes(self, _slug: str | None) -> list[tuple[Any, ...]]:
+        return [(self._repo_config, None, None, None, self._slug)]
+
+
+def _multi_repo_client(tmp_path: Path, *, repo_enabled: bool) -> TestClient:
+    host = _config(tmp_path)
+    repo_config = _config(tmp_path, enabled=repo_enabled)
+    app = FastAPI()
+    app.include_router(
+        build_gateway_policy_router(
+            host, _Registry(host, repo_config, _REPO), env=_ENV, clock=lambda: _NOW
+        )
+    )
+    return TestClient(app)
+
+
+def test_a_repository_may_close_its_own_write_plane(tmp_path: Path) -> None:
+    """The kill switch is a per-repo setting, so it has to bind per repo."""
+    client = _multi_repo_client(tmp_path, repo_enabled=False)
+
+    response = client.post(
+        f"/api/gateway/policies/mutations?repo={_REPO}",
+        json={"kind": "create", "expected_revision": 0, "policy": _policy_body()},
+        headers=_AUTH,
+    )
+
+    assert (response.status_code, response.json()["code"]) == (
+        403,
+        "workspace-disabled",
+    )
+
+
+def test_the_read_plane_reports_that_repository_s_own_gate(tmp_path: Path) -> None:
+    """An editor that read the host's gate would offer a save that always 403s."""
+    client = _multi_repo_client(tmp_path, repo_enabled=False)
+
+    payload = client.get(f"/api/gateway/policies?repo={_REPO}").json()
+
+    assert (payload["editable"], payload["write_gate"]) == (False, "workspace-disabled")
+
+
+def test_a_repository_that_left_its_switch_on_still_writes(tmp_path: Path) -> None:
+    """The per-repo check may only ever close the gate, never open a shut one."""
+    client = _multi_repo_client(tmp_path, repo_enabled=True)
+
+    response = client.post(
+        f"/api/gateway/policies/mutations?repo={_REPO}",
+        json={"kind": "create", "expected_revision": 0, "policy": _policy_body()},
+        headers=_AUTH,
+    )
+
+    assert response.status_code == 200
+
+
+def test_a_repo_editor_cannot_write_a_system_safety_rule(tmp_path: Path) -> None:
+    """System safety outranks every exact-project route; it is host-admin business."""
+    client = _client(_config(tmp_path))
+
+    response = client.post(
+        "/api/gateway/policies/mutations",
+        json={
+            "kind": "create",
+            "expected_revision": 0,
+            "policy": {
+                **_policy_body("escalate"),
+                "priority": 10000,
+                "system_safety": True,
+            },
+        },
+        headers=_AUTH,
+    )
+
+    assert (response.status_code, response.json()["code"]) == (422, "out-of-scope")

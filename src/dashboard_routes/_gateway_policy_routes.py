@@ -161,19 +161,33 @@ def build_gateway_policy_router(
             )
         return PolicyWorkspace(routing_dir(resolved), repo=canonical)
 
-    def _gate() -> WriteGate:
-        # The HOST config, deliberately: the bind is one socket for the whole
-        # dashboard, so a per-repo runtime's copy of it would be a second answer
-        # to a question the operating system already answered once.
-        return write_gate(config, env=env)
+    def _gate(repo: str | None = None) -> WriteGate:
+        """The write disposition for one repository: host first, then the repo.
+
+        The BIND is host business — one socket for the whole dashboard, so a
+        per-repo runtime's copy of ``dashboard_host`` would be a second answer to
+        a question the operating system already answered once. The KILL SWITCH is
+        not: ``gateway_policy_workspace_enabled`` is a per-repo editable setting,
+        and an operator who turns it off for one repository has to be obeyed for
+        that repository. Checking both can only ever close the gate further.
+        """
+        host = write_gate(config, env=env)
+        if host is not WriteGate.ENABLED or repo is None:
+            return host
+        return write_gate(_config_for(repo), env=env)
 
     @router.get("")
     async def read_policies(repo: RepoSlugParam = None) -> dict[str, Any]:
         """The current snapshot, which policies are editable, and the write gate."""
         if repo is not None and repo.strip().lower() == REPO_ALL:
-            return _aggregate_summary(config, ctx, gate=_gate())
+            # One small read per registered repository: off the loop, because
+            # its cost is O(repos) rather than O(1) like every other read here.
+            return await asyncio.to_thread(
+                _aggregate_summary, config, ctx, gate=_gate()
+            )
         workspace = _workspace(repo)
-        return _view_json(workspace.read(), gate=_gate())
+        view = await asyncio.to_thread(workspace.read)
+        return _view_json(view, gate=_gate(repo))
 
     @router.get("/effective")
     async def read_effective_routes(
@@ -182,7 +196,7 @@ def build_gateway_policy_router(
     ) -> dict[str, Any]:
         """The repository × role × face matrix, pinned to one policy revision."""
         workspace = _workspace(repo)
-        view = workspace.read()
+        view = await asyncio.to_thread(workspace.read)
         matrix = build_effective_matrix(
             repo=workspace.repo,
             repo_class=repo_class_for(_config_for(repo)),
@@ -204,7 +218,7 @@ def build_gateway_policy_router(
         would push operators to save first and look afterwards.
         """
         workspace = _workspace(repo)
-        preview = workspace.preview(body)
+        preview = await asyncio.to_thread(workspace.preview, body)
         repo_class = repo_class_for(_config_for(repo))
         accounts = local_account_availability()
         before = build_effective_matrix(
@@ -228,7 +242,7 @@ def build_gateway_policy_router(
         body: PolicyMutation, request: Request, repo: RepoSlugParam = None
     ) -> JSONResponse:
         """Commit one revision-safe edit. The only write route in this module."""
-        gate = _gate()
+        gate = _gate(repo)
         if gate is not WriteGate.ENABLED:
             # Before authentication on purpose: a credential cannot make a
             # non-loopback bind safe, and saying so is the actionable answer.
@@ -277,7 +291,9 @@ def build_gateway_policy_router(
         limit: int = Query(default=DEFAULT_HISTORY_LIMIT, ge=1, le=MAX_HISTORY_LIMIT),
     ) -> dict[str, Any]:
         """The append-only mutation history and whether the chain still verifies."""
-        history = _workspace(repo).history(limit=limit)
+        # The one O(file) read on this plane: it takes the writer's lock and
+        # hash-verifies the whole chain, so it never runs on the event loop.
+        history = await asyncio.to_thread(_workspace(repo).history, limit=limit)
         return {
             "records": [_record_json(record) for record in history.records],
             "truncated": history.truncated,

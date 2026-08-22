@@ -932,3 +932,162 @@ def _replay_journal_for_last_mutation(
             "policy_ids": [policy.id for policy in view.policies],
         },
     )
+
+
+# --------------------------------------------------------------------------
+# Escalation, recovery idempotency, and the journal's own hash check
+# --------------------------------------------------------------------------
+
+
+def test_a_repo_editor_cannot_claim_system_safety(tmp_path: Path) -> None:
+    """A system-safety rule outranks every exact-project route by design.
+
+    ``priority`` is a field this editor already controls, and two policies at
+    ``SYSTEM_SAFETY`` are ordered by it — so a repo-scoped operator who could
+    set the flag could outrank a host-admin's own invariant for their repo's
+    traffic. This clause is the only thing stopping that.
+    """
+    workspace = _workspace(tmp_path)
+
+    with pytest.raises(PolicyMutationRejected) as caught:
+        workspace.apply(
+            PolicyMutation(
+                kind=PolicyMutationKind.CREATE,
+                expected_revision=0,
+                policy=RoutingPolicy(
+                    id="escalate",
+                    priority=10_000,
+                    system_safety=True,
+                    match=RoutingMatch(repo_ids=(_REPO,)),
+                    action=RoutingAction(provider_lock=ProviderBinding.ZAI_HARNESS),
+                ),
+            ),
+            actor=_ACTOR,
+            now=_NOW,
+        )
+
+    assert caught.value.code is MutationRejection.OUT_OF_SCOPE
+
+
+def test_a_system_safety_rule_is_inherited_not_editable(tmp_path: Path) -> None:
+    """It renders in the list, and the editor may not rewrite it either."""
+    workspace = _workspace(tmp_path)
+    workspace.store.save(
+        (
+            RoutingPolicy(
+                id="host-invariant",
+                system_safety=True,
+                match=RoutingMatch(repo_ids=(_REPO,)),
+                action=RoutingAction(provider_lock=ProviderBinding.ANTHROPIC),
+            ),
+        )
+    )
+
+    assert workspace.read().editable_policy_ids == ()
+
+
+def test_a_credential_pasted_into_a_policy_is_refused(tmp_path: Path) -> None:
+    """The snapshot is written unredacted and served over an open read route."""
+    workspace = _workspace(tmp_path)
+
+    with pytest.raises(PolicyMutationRejected) as caught:
+        workspace.apply(
+            PolicyMutation(
+                kind=PolicyMutationKind.CREATE,
+                expected_revision=0,
+                policy=RoutingPolicy(
+                    id="leaky",
+                    match=RoutingMatch(repo_ids=(_REPO,)),
+                    action=RoutingAction(
+                        provider_lock=ProviderBinding.ZAI_HARNESS,
+                        allowed_patterns=("sk-ant-" + "a" * 44,),
+                    ),
+                ),
+            ),
+            actor=_ACTOR,
+            now=_NOW,
+        )
+
+    assert caught.value.code is MutationRejection.CREDENTIAL_SHAPED_VALUE
+
+
+def test_a_journal_whose_hash_disagrees_is_not_treated_as_landed(
+    tmp_path: Path,
+) -> None:
+    """Matching the revision is not enough: the CONTENTS have to match too."""
+    workspace = _workspace(tmp_path)
+    _create(workspace, _policy())
+    _write_journal(
+        tmp_path,
+        {
+            "mutation_id": "hash-mismatch",
+            "kind": "create",
+            "repo": _REPO,
+            "actor": _ACTOR,
+            "prior_revision": 0,
+            "next_revision": 1,
+            "next_content_hash": "sha256:" + "f" * 64,
+            "recorded_at": _NOW.isoformat(),
+            "policy_ids": ["something-else"],
+        },
+    )
+
+    assert workspace.recover(now=_NOW) is JournalOutcome.ROLLED_BACK
+
+
+def test_recovery_does_not_record_one_aborted_intent_twice(tmp_path: Path) -> None:
+    """A crash between the aborted append and the journal unlink is recoverable.
+
+    The committed branch was already guarded; without the same guard on the
+    aborted branch, one interrupted intent produces two `aborted` records.
+    """
+    workspace = _workspace(tmp_path)
+    _create(workspace, _policy())
+    intent = {
+        "mutation_id": "never-landed",
+        "kind": "create",
+        "repo": _REPO,
+        "actor": _ACTOR,
+        "prior_revision": 1,
+        "next_revision": 2,
+        "next_content_hash": "sha256:" + "f" * 64,
+        "recorded_at": _NOW.isoformat(),
+        "policy_ids": ["never-landed"],
+    }
+    _write_journal(tmp_path, intent)
+    workspace.recover(now=_NOW)
+    _write_journal(tmp_path, intent)
+
+    workspace.recover(now=_NOW)
+
+    assert [record.payload["outcome"] for record in workspace.history().records] == [
+        "committed",
+        "aborted",
+    ]
+
+
+def test_an_aborted_record_names_the_revision_that_remains_authoritative(
+    tmp_path: Path,
+) -> None:
+    """A corrupt load reports revision 0, which is not the surviving revision."""
+    workspace = _workspace(tmp_path)
+    _create(workspace, _policy())
+    (tmp_path / "routing" / POLICY_SNAPSHOT_FILENAME).write_text("{", encoding="utf-8")
+    _write_journal(
+        tmp_path,
+        {
+            "mutation_id": "aborted-over-corrupt",
+            "kind": "create",
+            "repo": _REPO,
+            "actor": _ACTOR,
+            "prior_revision": 1,
+            "next_revision": 2,
+            "next_content_hash": "sha256:" + "f" * 64,
+            "recorded_at": _NOW.isoformat(),
+            "policy_ids": ["never-landed"],
+        },
+    )
+
+    workspace.recover(now=_NOW)
+
+    assert workspace.history().records[-1].payload["new_revision"] == 1

@@ -371,7 +371,8 @@ function LiveView({ live, styles }) {
 /**
  * @param {{
  *   accounts?: object, live?: object, workspace?: object, matrix?: object,
- *   audit?: object, preview?: object|null, rejection?: string|null,
+ *   audit?: object, policySourceState?: string, preview?: object|null,
+ *   rejection?: string|null,
  *   routingView?: string, routingSelection?: string|null, select?: Function,
  *   onPreviewPolicy?: Function, onSavePolicy?: Function, onClearPreview?: Function,
  * }} props
@@ -382,6 +383,7 @@ export default function RoutingMode({
   workspace = EMPTY_POLICY_WORKSPACE_VM,
   matrix = EMPTY_EFFECTIVE_MATRIX_VM,
   audit = EMPTY_POLICY_AUDIT_VM,
+  policySourceState = 'loading',
   preview = null,
   rejection = null,
   routingView = 'accounts',
@@ -419,6 +421,7 @@ export default function RoutingMode({
         workspace,
         matrix,
         audit,
+        policySourceState,
         preview,
         rejection,
         routingSelection,
@@ -440,6 +443,7 @@ function renderView({
   workspace,
   matrix,
   audit,
+  policySourceState,
   preview,
   rejection,
   routingSelection,
@@ -454,6 +458,7 @@ function renderView({
     return (
       <EffectiveRoutesPanel
         matrix={matrix}
+        sourceState={policySourceState}
         selection={routingSelection}
         select={select}
       />
@@ -466,6 +471,7 @@ function renderView({
         preview={preview}
         rejection={rejection}
         audit={audit}
+        sourceState={policySourceState}
         selection={routingSelection}
         select={select}
         onPreview={onPreviewPolicy}
@@ -474,6 +480,7 @@ function renderView({
       />
     )
   }
-  if (view === 'audit') return <PolicyAuditPanel audit={audit} />
+  if (view === 'audit')
+    return <PolicyAuditPanel audit={audit} sourceState={policySourceState} />
   return <AccountsView accounts={accounts} styles={styles} />
 }

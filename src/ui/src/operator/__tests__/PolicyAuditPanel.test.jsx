@@ -93,3 +93,25 @@ describe('PolicyAuditPanel', () => {
     expect(screen.getByTestId('policy-audit-truncated')).toBeInTheDocument()
   })
 })
+
+describe('PolicyAuditPanel — what it may not claim', () => {
+  it('says the chain is unread rather than verified before anything is fetched', () => {
+    // The frozen empty VM is what a session renders on its first cycle, and a
+    // "chain verified" badge there is a positive tamper-evidence claim about
+    // bytes nobody read.
+    render(<PolicyAuditPanel />)
+    expect(screen.getByTestId('policy-audit-verified')).toHaveTextContent('chain unread')
+  })
+
+  it('does not render a "no mutation" empty state it has not earned', () => {
+    render(<PolicyAuditPanel />)
+    expect(screen.queryByTestId('policy-audit-empty')).toBeNull()
+  })
+
+  it('names an unreachable policy plane instead of an empty history', () => {
+    render(<PolicyAuditPanel sourceState="unavailable" />)
+    expect(screen.getByTestId('policy-audit-feed-notice')).toHaveTextContent(
+      'NOT "no policy"',
+    )
+  })
+})

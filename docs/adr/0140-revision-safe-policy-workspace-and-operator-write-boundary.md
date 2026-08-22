@@ -57,6 +57,8 @@ When #11539 arms enforcement inside the gateway, the snapshot moves with a docum
 
 The two conditions are independent, and `test_a_valid_operator_token_cannot_write_past_a_non_loopback_bind` is the test that keeps them that way: the credential says *who is asking*, the bind says *who can ask*, and only the second is a property of the socket. Reporting the bind first is not cosmetic either — it is the thing an operator has to fix before the credential means anything.
 
+**The bind is host business; the kill switch is not.** `dashboard_host` describes one socket for the whole dashboard, so it is read from the host config — a per-repository runtime's copy of it would be a second answer to a question the operating system already answered once. `gateway_policy_workspace_enabled`, however, is a per-repository editable setting, and an operator who turns it off for one repository has to be obeyed *for that repository*: the route evaluates the host gate first and then the resolved repository's, so the check can only ever close the gate further, never open a shut one. The read plane reports that same per-repository disposition, because an editor rendering the host's gate would offer a save button that always 403s.
+
 Three details make the boundary honest rather than decorative:
 
 - **The credential is env-only**, never a config field and never persisted — the same shape as `HYDRAFLOW_GATEWAY_CONTROL_TOKEN`, and for the same reason: a settings screen that could show it is a settings screen that could leak it. It is deliberately excluded from `config.declared_env_keys()`, like every other credential (#10885).
@@ -83,6 +85,8 @@ So `apply` writes a `MutationIntent` to `routing/policy-journal.json` **before**
 
 - **the snapshot matches** (revision *and* content hash) — the replace committed, so recovery finishes the append the crash cut off and clears the journal (`completed`). It is idempotent: an append whose `mutation_id` already sits at the chain head is not repeated;
 - **it does not match** — the replace never happened, the prior revision is authoritative and always was, and recovery records the intent as `aborted` rather than pretending it did not exist (`rolled-back`).
+
+The idempotency check sits **above both branches**, not just the committed one. `mutation_id` identifies the transaction rather than its outcome, and a crash between the *aborted* append and the journal unlink is exactly as possible as one after a committed append — guarding only the happy path would let a single interrupted intent leave two `aborted` records on a chain whose whole value is that it can be counted.
 
 An append that itself fails leaves the journal in place, so the transaction stays open and the next recovery retries it — `test_an_unwritable_audit_leaves_the_transaction_open` pins that, and `test_a_snapshot_replace_that_fails_leaves_a_recoverable_intent` pins the write-ahead ordering by breaking the save and finding the intent. An **unreadable** journal refuses every mutation (`journal-unreadable`) rather than being cleared: a wedge an operator must repair beats a silent guess about what a dead process meant.
 
@@ -128,7 +132,13 @@ The matrix earns its place at the moment it makes ADR-0139 D4's guard visible *b
 
 `routingView` gains the three keys ADR-0138 reserved (`effective`, `policies`, `audit`) with no URL break, and one new bounded parameter, `routingSelection`, carries the within-view selection: a policy id in Policies, a matrix cell key in Effective. Changing view clears it, because a policy id highlights nothing in a route grid but would still sit in a shared URL.
 
-`usePolicyWorkspace` adds a **monotonic sequence guard** to the `useGatewayRouting` polling shape. An `AbortController` cancels a cycle on unmount but does nothing about two *live* cycles finishing out of order, and a slow poll landing after a save's refresh would put the pre-save revision back on screen — inviting a save against it, which is the lost update D3 exists to prevent. Every load takes a ticket; a response older than the newest already applied is dropped.
+`usePolicyWorkspace` adds a **monotonic sequence guard** to the `useGatewayRouting` polling shape. An `AbortController` cancels a cycle on unmount but does nothing about two *live* cycles finishing out of order, and a slow poll landing after a save's refresh would put the pre-save revision back on screen — inviting a save against it, which is the lost update D3 exists to prevent. Every load takes a ticket; a response older than the newest already applied is dropped. The poll and the preview keep **separate** ticket pairs, because they write disjoint state: one shared counter would let a routine thirty-second poll silently discard an in-flight preview and leave the Preview button looking inert with no error anywhere.
+
+Three more properties the console needs for D3 to mean anything from a browser:
+
+- **The editor pins the revision it opened on.** `expected_revision` comes from that pin, never re-read from the live poll at click time — reading it at click time would make it the *winner's* revision, and the 409 that stops a lost update could never fire from the surface it was built for. When a newer revision lands under an open form, Save is disabled, the form says which revision it was opened against, and the operator re-bases explicitly.
+- **The feed says whether it has been read.** A cycle that threw, or any response that was not 2xx, sets an `unavailable` source state, and every empty-state string is gated on a payload having actually landed. Otherwise a dead endpoint renders as "no policy has been written for this repository" — and, worse, as a **`chain verified`** badge on a chain nobody read, which is a positive tamper-evidence claim about bytes that never arrived.
+- **The feed is scoped and idle-exempt in the other direction.** It follows the console's canonical repository selection (an editor pointed at a repository the operator did not pick would write the wrong repository's policy), reads only the read-only aggregate summary when no repository is selected, and does not poll at all while Routing is closed — the audit read walks and hash-verifies a chain this ADR deliberately never prunes.
 
 ## Non-goals — what this phase deliberately does not build
 
@@ -146,6 +156,7 @@ The matrix earns its place at the moment it makes ADR-0139 D4's guard visible *b
 
 - **#11539 inherits a write plane, not a format.** An enforcement canary can turn one repository's policy on and off through an audited, revision-safe route, and roll it back without an operator editing JSON on a host.
 - **Rollback targets are bounded by the chain, not by disk.** Every committed revision is restorable for as long as the chain exists, and the chain cannot be trimmed without breaking itself (ADR-0139's accepted consequence, now load-bearing for a second reason).
+- **Reads are off the event loop, and the history read takes the writer's lock.** Every route hands its file I/O to a worker thread. `history()` additionally acquires the mutation lock on a short timeout, because `append_jsonl` writes through a buffered writer: a record larger than that buffer reaches disk in several writes, and a reader catching the gap would see a torn tail line and report a **broken chain** on the one panel whose entire job is trustworthiness. The lock falls back to an unlocked read rather than ever hanging a poll.
 - **The mutation chain grows with the policy set, not just with edits.** Each record carries the resulting policy set, so a large policy set makes each record larger. Acceptable at v1's scale — policy sets are tens of rows and mutations are deliberate operator acts — and revisited with rotation when volume warrants it.
 - **A host with no `HYDRAFLOW_OPERATOR_TOKEN` gets a read-only workspace and says so.** That is the default, and it is deliberate: the new surface changes nothing for an existing operator until they opt in.
 - **The dashboard now has one authenticated route.** It is the only one. Every other dashboard route retains ADR-0138's boundary-of-record — the loopback bind — and this ADR does not extend operator authentication to them.

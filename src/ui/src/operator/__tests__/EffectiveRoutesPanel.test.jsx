@@ -128,8 +128,20 @@ describe('EffectiveRoutesPanel', () => {
     expect(screen.getByTestId('effective-snapshot-note')).toHaveTextContent('legacy routing')
   })
 
-  it('renders a calm empty state before the matrix loads', () => {
+  it('says the grid has not been read rather than that no policy exists', () => {
+    // The frozen empty VM is what every session renders for its first cycle.
+    // "No policy has been written" there would be a claim about bytes never read.
     render(<EffectiveRoutesPanel />)
-    expect(screen.getByTestId('effective-empty')).toBeInTheDocument()
+    expect(screen.getByTestId('effective-feed-notice')).toBeInTheDocument()
+  })
+
+  it('does not claim a snapshot state it has not read', () => {
+    render(<EffectiveRoutesPanel />)
+    expect(screen.getByTestId('effective-revision')).toHaveTextContent('not read yet')
+  })
+
+  it('names an unreachable policy plane as unavailable, not empty', () => {
+    render(<EffectiveRoutesPanel sourceState="unavailable" />)
+    expect(screen.getByTestId('effective-feed-notice')).toHaveTextContent('NOT "no policy"')
   })
 })

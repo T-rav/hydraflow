@@ -245,7 +245,10 @@ class TestGatewayPolicyWorkspaceScenario:
         _, before = await _turn(unedited.config)
         _, after = await _turn(edited.config)
 
-        assert after == before
+        # Both halves: the bytes match AND the origin was actually reached. Two
+        # empty lists compare equal, and "the upstream saw identical bytes" is a
+        # claim about the wire — the one shape that quietly is not.
+        assert (after, bool(before)) == (before, True)
 
     async def test_the_turn_still_succeeds_after_the_edit(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

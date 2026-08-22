@@ -10,7 +10,7 @@
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import PolicyWorkspacePanel from '../PolicyWorkspacePanel'
+import PolicyWorkspacePanel, { MAX_ROLLBACK_BUTTONS } from '../PolicyWorkspacePanel'
 import { toPolicyAudit, toPolicyPreview, toPolicyWorkspace } from '../model/policyWorkspace'
 
 const REPO = 'acme/hydraflow'
@@ -268,6 +268,7 @@ describe('PolicyWorkspacePanel — saving', () => {
   it('disables a policy through a mutation rather than a delete', async () => {
     const onSave = vi.fn(() => Promise.resolve({ ok: true, revision: 5 }))
     render(<PolicyWorkspacePanel workspace={workspace()} onSave={onSave} />)
+    fillEditor()
 
     fireEvent.click(screen.getByTestId('policy-disable-pin-zai'))
 
@@ -321,5 +322,129 @@ describe('PolicyWorkspacePanel — honest states', () => {
     fireEvent.click(screen.getByTestId('policy-select-pin-zai'))
 
     expect(select).toHaveBeenCalledWith('routingSelection', 'pin-zai')
+  })
+})
+
+describe('PolicyWorkspacePanel — the revision it edits against', () => {
+  it('saves against the revision the form was opened on, not the newest poll', () => {
+    // Reading `workspace.revision` at click time would make expected_revision
+    // the WINNER's revision, so the 409 that stops a lost update could never
+    // fire from this console (ADR-0140 D3).
+    const onPreview = vi.fn()
+    const { rerender } = render(
+      <PolicyWorkspacePanel workspace={workspace()} onPreview={onPreview} />,
+    )
+    fillEditor()
+    rerender(
+      <PolicyWorkspacePanel workspace={workspace({ revision: 9 })} onPreview={onPreview} />,
+    )
+
+    fireEvent.click(screen.getByTestId('policy-preview-button'))
+
+    expect(onPreview.mock.calls[0][0].expected_revision).toBe(4)
+  })
+
+  it('refuses to save once somebody else’s revision landed under the form', () => {
+    const { rerender } = render(
+      <PolicyWorkspacePanel workspace={workspace()} preview={WRITABLE_PREVIEW} />,
+    )
+    fillEditor()
+    rerender(
+      <PolicyWorkspacePanel
+        workspace={workspace({ revision: 9 })}
+        preview={WRITABLE_PREVIEW}
+      />,
+    )
+
+    expect(screen.getByTestId('policy-save-button')).toBeDisabled()
+  })
+
+  it('says which revision the form was opened against when it is re-based', () => {
+    const { rerender } = render(<PolicyWorkspacePanel workspace={workspace()} />)
+    rerender(<PolicyWorkspacePanel workspace={workspace({ revision: 9 })} />)
+
+    expect(screen.getByTestId('policy-rebased')).toHaveTextContent(
+      'opened against revision 4; revision 9 is current',
+    )
+  })
+
+  it('offers a re-base rather than leaving the operator stuck', () => {
+    const { rerender } = render(<PolicyWorkspacePanel workspace={workspace()} />)
+    rerender(<PolicyWorkspacePanel workspace={workspace({ revision: 9 })} />)
+
+    fireEvent.click(screen.getByTestId('policy-rebase-button'))
+
+    expect(screen.queryByTestId('policy-rebased')).toBeNull()
+  })
+
+  it('does not offer a rollback to the revision already in force', () => {
+    render(<PolicyWorkspacePanel workspace={workspace({ revision: 1 })} audit={AUDIT} />)
+    expect(screen.queryByTestId('policy-rollback-1')).toBeNull()
+  })
+
+  it('bounds the rollback controls no matter how long the history is', () => {
+    const long = toPolicyAudit({
+      verified: true,
+      records: Array.from({ length: 40 }, (_, index) => ({
+        seq: index,
+        recorded_at: '2026-08-22T12:00:00+00:00',
+        payload: {
+          kind: 'create',
+          outcome: 'committed',
+          actor: 'travis',
+          prior_revision: index,
+          new_revision: index + 1,
+          diff: {},
+        },
+      })),
+    })
+    render(<PolicyWorkspacePanel workspace={workspace()} audit={long} />)
+
+    const targets = screen
+      .getAllByTestId(/^policy-rollback-\d+$/)
+      .map(node => node.getAttribute('data-testid'))
+
+    expect(targets).toHaveLength(MAX_ROLLBACK_BUTTONS)
+  })
+})
+
+describe('PolicyWorkspacePanel — what it may not claim', () => {
+  it('does not say a repository has no policy before anything is fetched', () => {
+    render(<PolicyWorkspacePanel />)
+    expect(screen.queryByTestId('policy-empty')).toBeNull()
+  })
+
+  it('does not instruct the operator to fix a write gate it has not read', () => {
+    render(<PolicyWorkspacePanel />)
+    expect(screen.queryByTestId('policy-write-gate')).toBeNull()
+  })
+
+  it('names an unreachable policy plane instead of an empty repository', () => {
+    render(<PolicyWorkspacePanel sourceState="unavailable" />)
+    expect(screen.getByTestId('policy-feed-notice')).toHaveTextContent('NOT "no policy"')
+  })
+
+  it('does not claim a revision it has not read', () => {
+    render(<PolicyWorkspacePanel />)
+    expect(screen.getByTestId('policy-revision')).toHaveTextContent('not read yet')
+  })
+
+  it('will not send a disable with no credential attached', () => {
+    // A write with no Authorization header comes back 401 "the operator token
+    // was not accepted" — about a token that was never sent.
+    render(<PolicyWorkspacePanel workspace={workspace()} />)
+    expect(screen.getByTestId('policy-disable-pin-zai')).toBeDisabled()
+  })
+
+  it('clears a conflict banner once the operator edits the form', () => {
+    render(<PolicyWorkspacePanel workspace={workspace()} preview={WRITABLE_PREVIEW} />)
+    fillEditor()
+    fireEvent.click(screen.getByTestId('policy-save-button'))
+
+    fireEvent.change(screen.getByTestId('policy-field-model'), {
+      target: { value: 'glm-5.4' },
+    })
+
+    expect(screen.queryByTestId('policy-conflict')).toBeNull()
   })
 })

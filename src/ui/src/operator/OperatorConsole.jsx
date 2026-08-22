@@ -205,6 +205,7 @@ const EMPTY_POLICY_FEED = Object.freeze({
   workspace: EMPTY_POLICY_WORKSPACE_VM,
   matrix: EMPTY_EFFECTIVE_MATRIX_VM,
   audit: EMPTY_POLICY_AUDIT_VM,
+  sourceState: 'loading',
   preview: null,
   rejection: null,
   requestPreview: () => {},
@@ -392,6 +393,7 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                   workspace={policy.workspace}
                   matrix={policy.matrix}
                   audit={policy.audit}
+                  policySourceState={policy.sourceState}
                   preview={policy.preview}
                   rejection={policy.rejection}
                   routingView={routingView}
@@ -496,7 +498,13 @@ export function OperatorConsole() {
   // Routing policy (#11538, ADR-0140): the workspace snapshot, the effective-route
   // matrix, and the mutation history on one sequence-guarded poll, plus the
   // preview/save actions the Policies view writes through.
-  const policy = usePolicyWorkspace()
+  //
+  // Scoped to the console's canonical repo selection — an editor pointed at a
+  // repository the operator did not pick would write the wrong repo's policy —
+  // and only polled while the Routing mode is showing, because the audit read
+  // walks and hash-verifies a chain that never gets pruned.
+  const { repo, mode } = useOperatorSelection()
+  const policy = usePolicyWorkspace({ repo, enabled: mode === 'routing' })
   return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} policy={policy} />
 }
 

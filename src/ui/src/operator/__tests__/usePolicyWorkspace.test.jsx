@@ -16,8 +16,17 @@ import {
   POLICY_ENDPOINT,
   POLICY_MUTATIONS_ENDPOINT,
   POLICY_PREVIEW_ENDPOINT,
+  POLICY_SOURCE_AVAILABLE,
+  POLICY_SOURCE_UNAVAILABLE,
+  REPO_ALL,
   usePolicyWorkspace,
 } from '../usePolicyWorkspace'
+
+// Every test that wants the per-repository DETAIL feed must name a repository:
+// no selection is the aggregate view, which is read-only by construction and
+// deliberately does not call the per-repo routes at all.
+const REPO = 'acme/hydraflow'
+const SCOPED_POLICY_ENDPOINT = `${POLICY_ENDPOINT}?repo=${encodeURIComponent(REPO)}`
 
 function workspacePayload(revision) {
   return {
@@ -60,7 +69,7 @@ function readFetcher(revision = 1) {
 describe('usePolicyWorkspace', () => {
   it('loads the workspace, the matrix, and the history in one cycle', async () => {
     const fetcher = readFetcher(3)
-    const { result } = renderHook(() => usePolicyWorkspace({ fetcher }))
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
     await waitFor(() => expect(result.current.workspace.loaded).toBe(true))
     expect([
       result.current.workspace.revision,
@@ -74,13 +83,95 @@ describe('usePolicyWorkspace', () => {
     expect(result.current.workspace.loaded).toBe(false)
   })
 
+  it('does not poll at all while the routing mode is closed', async () => {
+    // The audit read walks and hash-verifies a chain that is never pruned, so a
+    // console session that never opens Routing must not pay for it every 30 s.
+    const fetcher = readFetcher(1)
+    renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO, enabled: false }))
+    await act(async () => {})
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('reads only the aggregate summary when no repository is selected', async () => {
+    // Aggregate is read-only by construction: the per-repository detail routes
+    // refuse `__all__` with a 400, so they are not called.
+    const fetcher = readFetcher(1)
+    renderHook(() => usePolicyWorkspace({ fetcher }))
+    await waitFor(() => expect(fetcher).toHaveBeenCalled())
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      `${POLICY_ENDPOINT}?repo=${encodeURIComponent(REPO_ALL)}`,
+    ])
+  })
+
+  it('reports an unavailable source rather than an empty repository', async () => {
+    const fetcher = vi.fn(() => Promise.resolve({ ok: false, status: 500, data: null }))
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
+    await waitFor(() =>
+      expect(result.current.sourceState).toBe(POLICY_SOURCE_UNAVAILABLE),
+    )
+    expect(result.current.workspace.loaded).toBe(false)
+  })
+
+  it('reports an unavailable source when the cycle throws', async () => {
+    const fetcher = vi.fn(() => Promise.reject(new Error('gone')))
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
+    await waitFor(() =>
+      expect(result.current.sourceState).toBe(POLICY_SOURCE_UNAVAILABLE),
+    )
+  })
+
+  it('reports an available source once every slice answered', async () => {
+    const fetcher = readFetcher(1)
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
+    await waitFor(() => expect(result.current.sourceState).toBe(POLICY_SOURCE_AVAILABLE))
+  })
+
+  it('clears the previous repository’s state the moment the selection changes', async () => {
+    // Otherwise the panel renders repo A's policies under repo B's header for a
+    // whole round trip — and a save would carry A's revision.
+    const fetcher = readFetcher(3)
+    const { result, rerender } = renderHook(props => usePolicyWorkspace(props), {
+      initialProps: { fetcher, repo: REPO },
+    })
+    await waitFor(() => expect(result.current.workspace.revision).toBe(3))
+    rerender({ fetcher: vi.fn(() => new Promise(() => {})), repo: 'acme/other' })
+    expect(result.current.workspace.loaded).toBe(false)
+  })
+
+  it('does not let a routine poll discard an in-flight preview', async () => {
+    // One shared counter would drop the preview here, leaving the Preview
+    // button looking inert with no error anywhere.
+    const gates = []
+    const fetcher = vi.fn(url => {
+      if (url.startsWith(POLICY_PREVIEW_ENDPOINT)) {
+        return new Promise(resolve => {
+          gates.push(resolve)
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, data: workspacePayload(1) })
+    })
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
+    await waitFor(() => expect(result.current.workspace.loaded).toBe(true))
+
+    let pending
+    await act(async () => {
+      pending = result.current.requestPreview({ kind: 'create', expected_revision: 1 })
+      await waitFor(() => expect(gates.length).toBe(1))
+      await result.current.refresh()
+      gates[0]({ ok: true, status: 200, data: { writable: true, cells: [], diff: {} } })
+      await pending
+    })
+
+    expect(result.current.preview).not.toBeNull()
+  })
+
   it('keeps the last-known workspace when a cycle throws', async () => {
     const fetcher = readFetcher(2)
     const { result, rerender } = renderHook(props => usePolicyWorkspace(props), {
-      initialProps: { fetcher },
+      initialProps: { fetcher, repo: REPO },
     })
     await waitFor(() => expect(result.current.workspace.revision).toBe(2))
-    rerender({ fetcher: vi.fn(() => Promise.reject(new Error('gone'))) })
+    rerender({ fetcher: vi.fn(() => Promise.reject(new Error('gone'))), repo: REPO })
     await act(async () => {})
     expect(result.current.workspace.revision).toBe(2)
   })
@@ -93,14 +184,14 @@ describe('usePolicyWorkspace', () => {
     const fetcher = vi.fn(url => {
       // Exact match: the effective and audit endpoints are PREFIXED by the
       // workspace one, so `startsWith` would gate three calls per cycle.
-      if (url === POLICY_ENDPOINT) {
+      if (url === SCOPED_POLICY_ENDPOINT) {
         return new Promise(resolve => {
           gates.push(resolve)
         })
       }
       return Promise.resolve({ ok: true, status: 200, data: MATRIX_PAYLOAD })
     })
-    const { result } = renderHook(() => usePolicyWorkspace({ fetcher }))
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
     await waitFor(() => expect(gates.length).toBe(1))
     await act(async () => {
       result.current.refresh()
@@ -132,7 +223,7 @@ describe('usePolicyWorkspace', () => {
       }
       return Promise.resolve({ ok: true, status: 200, data: workspacePayload(7) })
     })
-    const { result } = renderHook(() => usePolicyWorkspace({ fetcher }))
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
     await waitFor(() => expect(result.current.workspace.loaded).toBe(true))
 
     let outcome
@@ -150,7 +241,7 @@ describe('usePolicyWorkspace', () => {
         ? Promise.resolve({ ok: true, status: 200, data: { revision: 2 } })
         : Promise.resolve({ ok: true, status: 200, data: workspacePayload(2) }),
     )
-    const { result } = renderHook(() => usePolicyWorkspace({ fetcher }))
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
     await waitFor(() => expect(result.current.workspace.loaded).toBe(true))
 
     await act(async () => {
@@ -181,7 +272,7 @@ describe('usePolicyWorkspace', () => {
       }
       return Promise.resolve({ ok: true, status: 200, data: workspacePayload(2) })
     })
-    const { result } = renderHook(() => usePolicyWorkspace({ fetcher }))
+    const { result } = renderHook(() => usePolicyWorkspace({ fetcher, repo: REPO }))
     await waitFor(() => expect(result.current.workspace.loaded).toBe(true))
     await act(async () => {
       await result.current.requestPreview({ kind: 'create', expected_revision: 1 })
