@@ -159,16 +159,21 @@ def _mixed_baseline() -> MassBaseline:
         pytest.param("b.py:B", (), ("b.py:B",), id="class-below-threshold-is-removed"),
         pytest.param("a.py", ("a.py",), (), id="file-still-a-god-is-updated"),
         pytest.param("b.py", (), ("b.py",), id="file-below-threshold-is-removed"),
+        # Adoption: the remedy the mass ratchet's failure message routes every
+        # engineer through when a genuinely new god class trips the gate.
+        pytest.param("c.py:C", ("c.py:C",), (), id="new-class-is-adopted"),
+        pytest.param("c.py", ("c.py",), (), id="new-file-is-adopted"),
     ],
 )
 def test_refresh_entries_updates_or_removes_the_named_entry(
     key: str, expect_updated: tuple[str, ...], expect_removed: tuple[str, ...]
 ) -> None:
     # `a.py`/`a.py:A` are still over threshold and grew; `b.py`/`b.py:B` are gone
-    # from the live reading entirely (decomposed below threshold).
+    # from the live reading entirely (decomposed below threshold); `c.py`/`c.py:C`
+    # are live gods the baseline has never recorded.
     finding = _finding(
-        files=(GodFile("a.py", 1900),),
-        classes=(GodClass("a.py", "A", 950, 26),),
+        files=(GodFile("a.py", 1900), GodFile("c.py", 1550)),
+        classes=(GodClass("a.py", "A", 950, 26), GodClass("c.py", "C", 900, 30)),
     )
 
     refreshed, updated, removed = refresh_entries(_mixed_baseline(), finding, [key])

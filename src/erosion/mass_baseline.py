@@ -159,8 +159,10 @@ def refresh_entries(
     A key is a file path (``src/foo.py``) or a class key (``src/foo.py:Bar``).
     An entry still over threshold is updated in place; one that has fallen below
     it — decomposition working — is removed, so the membership gate will catch it
-    if it ever crosses again. Returns ``(baseline, updated, removed)`` where
-    *updated* names only the entries whose recorded numbers actually changed.
+    if it ever crosses again. A key that is live but **not yet baselined is
+    adopted**: that is how a genuinely new god class is grandfathered after the
+    ratchet trips on it. Returns ``(baseline, updated, removed)`` where *updated*
+    names only the entries whose recorded numbers actually changed.
 
     Raises ``KeyError`` for a key that is neither baselined nor live: a typo must
     never pass silently as a no-op refresh. A key repeated in *keys* is applied

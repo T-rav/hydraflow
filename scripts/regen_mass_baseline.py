@@ -90,7 +90,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc.args[0]}", file=sys.stderr)
         return 1
 
-    unchanged = [k for k in args.only if k not in updated and k not in removed]
+    # dict.fromkeys mirrors refresh_entries' own dedup, so a repeated --only is
+    # reported once rather than echoed per occurrence.
+    unchanged = [
+        k for k in dict.fromkeys(args.only) if k not in updated and k not in removed
+    ]
     if not updated and not removed:
         # Nothing moved, so the file does not move either — a "Last moved"
         # comment on an unchanged baseline is exactly the decorative rot this

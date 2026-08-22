@@ -14,10 +14,11 @@ a PR that happens to tip a class over is re-recording the number — i.e. the
 bypass. The roster, which the decomposition batches already work from, is where
 that signal belongs (#11646).
 
-Adopting a new entry is a conscious act:
-``python scripts/regen_mass_baseline.py --reason "..."``; recording one entry's
-reviewed new size, or dropping one that a decomposition took below threshold,
-uses ``--only <key>`` so no unrelated growth rides along.
+Adopting a new entry is a conscious act, and so is recording an entry's reviewed
+new size or dropping one a decomposition took below threshold. All three use
+``python scripts/regen_mass_baseline.py --only <key> --reason "..."``, which
+touches that entry alone so no unrelated growth rides along. The blanket regen
+(no ``--only``) is for a PR whose entire diff *is* the baseline advance.
 """
 
 from __future__ import annotations

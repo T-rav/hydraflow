@@ -99,6 +99,11 @@ def test_targeted_regen_rewrites_only_the_named_entry(
     # Untouched entries keep their recorded numbers — no laundering.
     assert payload["classes"]["src/other.py:Other"] == {"loc": 700, "methods": 20}
     assert payload["files"] == {"src/elsewhere.py": 1600}
+    # `refresh_entries` carries the OLD comment through by design, so the
+    # "Last moved" provenance in targeted mode rests entirely on the script.
+    # Unpinned, a required --reason could silently stop reaching the file —
+    # the #11646 failure class reintroduced inside the fix for #11646.
+    assert "recorded Hub's reviewed size" in payload["comment"]
 
 
 def test_targeted_regen_drops_an_entry_that_fell_below_threshold(
@@ -133,6 +138,7 @@ def test_targeted_regen_drops_an_entry_that_fell_below_threshold(
     payload = yaml.safe_load(out.read_text(encoding="utf-8"))
     assert "src/calm.py:Calm" not in payload["classes"]
     assert payload["classes"]["src/hub.py:Hub"] == {"loc": 91, "methods": 45}
+    assert "decomposed Calm" in payload["comment"]
 
 
 def test_targeted_regen_refuses_an_unknown_key(src_tree: Path, tmp_path: Path) -> None:
