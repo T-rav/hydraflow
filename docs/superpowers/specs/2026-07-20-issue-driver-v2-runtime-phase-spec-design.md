@@ -1,8 +1,18 @@
 # IssueDriver v2 Runtime — Phase Spec (Scheduling Model as a Selectable Strategy)
 
-**Date:** 2026-07-20
-**Status:** Design (accepted anchor: ADR-0099)
-**Issue:** #10038 (companion to #10037 / #10045 — work-queue discipline as a selectable strategy)
+**Date:** 2026-07-20 (topology realigned and constraints C5–C8 added 2026-08-22 by #11533)
+**Status:** Design (accepted anchors: ADR-0099, ADR-0137)
+**Issue:** #10038 (companion to #10037 / #10045 — work-queue discipline as a selectable strategy); realigned by #11533
+
+> **Realignment note (2026-08-22, #11533).** As first written this spec described a
+> 13-state `DriverState` including `DISCOVER` and `SHAPE`. [ADR-0107](../../adr/0107-collapse-discover-shape-into-plan.md)
+> retired both as pipeline phases in July 2026 and `src/models.py:DriverState` has
+> carried an 11-state literal without them ever since, so the spec was describing
+> stages that no longer exist. Section 4 below now matches the live topology.
+> Separately, the adversarial panel on #10038 falsified this document's headline
+> crash-safety claim; constraints **C5–C8** and Sections 5.5–5.8 are the response,
+> and [ADR-0137](../../adr/0137-fenced-issue-driver-and-director-runtime-boundary.md)
+> is the ADR that narrows ADR-0094's prior rejection so this design may be built at all.
 **Scope:** The runtime phase spec that [ADR-0099](../../adr/0099-orchestration-as-a-control-system.md) assumes but never got. ADR-0099 references v2 phases P2–P5 (`DriverManager`, `SchedulingPolicy`, `Governor`, `PolicyScorecard`, the P5 anchor cutover) as though specified elsewhere; they were not. This document is that specification. It defines the **scheduling model** as a selectable strategy — `phase_requeue` (today's implicit start-stop) vs `issue_controller` (the v2 servo) — and, crucially, states as a **design constraint** (not a late discovery) how `issue_controller` is built without weakening ADR-0002's crash-safety guarantee.
 **Related:**
 - [ADR-0099](../../adr/0099-orchestration-as-a-control-system.md) — Orchestration as a Control System (the conceptual anchor this realizes; the Servo / `SchedulingPolicy` / `DriverManager` / `Governor` / `PolicyScorecard` roles)
@@ -67,13 +77,15 @@ Capacity is allocated by `DriverManager`: it holds ≤ `max_in_flight` live `Iss
 
 The per-issue state layer is **already in the tree** (this spec's P1) and the state machine below uses it unchanged:
 
-- `src/models.py:DriverState` — the 13-state literal: `TRIAGE`, `DISCOVER`, `SHAPE`, `PLAN`, `READY`, `REVIEW`, `HITL_WAIT`, `HITL_APPLY`, `DIAGNOSE`, `PARKED`, `MERGED`, `CLOSED`, `ESCALATED`.
+- `src/models.py:DriverState` — the **11-state** literal: `TRIAGE`, `PLAN`, `READY`, `REVIEW`, `HITL_WAIT`, `HITL_APPLY`, `DIAGNOSE`, `PARKED`, `MERGED`, `CLOSED`, `ESCALATED`. There is no `DISCOVER` and no `SHAPE`: ADR-0107 collapsed both into planner-invoked helpers behind the planner's own decision gate, so discovery research and direction shaping are synchronous in-process calls producing `research_context`, never stage handoffs. `src/discover_runner.py` and `src/shape_runner.py` survive as those helpers — their existence is not a stage.
 - `src/models.py:ConvergenceLedger` — carries `driver_state`, `suspend`, `pending_correction`, `hitl_origin`, `hitl_cause`, `route_backs`, `issue_attempts`, `policy_log`.
 - `src/models.py:SuspendRecord` — `reason` / `suspended_at` / `wake_signal` (`comment` | `correction` | `label`) / `resume_state`: the defined resume path (Section 5.2).
 - `src/models.py:PolicyEvent` — one recorded `from_state`→`to_state` decision, appended to `policy_log` for audit/replay (feeds P4).
 - `src/state/_driver.py:DriverStateMixin` — the read-modify-write-then-`save()` accessors (`get_driver_state`, `set_driver_state`, `suspend_driver`, `clear_suspend`, `set/take_pending_correction`) the driver runtime calls on every transition.
 
-**Transition map (nominal path):** `TRIAGE → DISCOVER → SHAPE → PLAN → READY → REVIEW → MERGED`. Off-nominal edges: `REVIEW → DIAGNOSE` (CI red / route-back) → back to `READY`; any state `→ HITL_WAIT` (escalation) → `HITL_APPLY` (operator correction applied) → resume at `resume_state`; `→ PARKED` (suspended on a barrier: `ci_wait`, `epic_gap_barrier`, `shape_human_select`); `→ ESCALATED` / `CLOSED` (terminal). Each edge is a `PolicyEvent` and — the crux — a GitHub label write (Section 5).
+**Transition map (nominal path):** `TRIAGE → PLAN → READY → REVIEW → MERGED`, which is the live Triage → Plan → Implement → Review → HITL topology (`READY` is the implement stage; `hydraflow-ready` is its label). Off-nominal edges: `REVIEW → DIAGNOSE` (CI red / route-back) → back to `READY`; any state `→ HITL_WAIT` (escalation) → `HITL_APPLY` (operator correction applied) → resume at `resume_state`; `→ PARKED` (suspended on a barrier: `ci_wait`, `epic_gap_barrier`); `→ ESCALATED` / `CLOSED` (terminal). Each edge is a `PolicyEvent` and — the crux — a GitHub label write (Section 5).
+
+The stage labels each nominal state maps to are `hydraflow-find` (TRIAGE), `hydraflow-plan` (PLAN), `hydraflow-ready` (READY), `hydraflow-review` (REVIEW), `hydraflow-hitl` (HITL_WAIT / HITL_APPLY). `DISCOVER` and `SHAPE` appear nowhere in this map, and re-introducing them to `DriverState`, to this map, or to the driver-phase enum is pinned against by `tests/regressions/test_issue_11533_stale_driver_states.py`.
 
 **One-to-one with ADR-0002 labels.** Every `driver_state` that corresponds to a pipeline stage maps to exactly one pipeline label, so the driver's in-memory state is always a cache of the label, never a second source of truth. `DIAGNOSE`/`HITL_APPLY`/`PARKED` are sub-states of an existing labelled stage (they resolve back to `hydraflow-review` / `hydraflow-hitl` / the parked stage's label), not new pipeline labels — so the label set (`config.all_pipeline_labels`) does not change and no ADR-0002 label-set test moves.
 
@@ -97,7 +109,55 @@ Bounded by C1: labels remain the sole source of truth; `driver_state` / `Converg
 ### 5.4 Backpressure
 **Constraint C4 (stage-aware WIP caps).** `DriverManager` enforces two limits: a global `max_in_flight` (total live drivers) and a per-expensive-stage cap that reuses today's semantics — no more than `max_workers` drivers in the implement stage, `max_reviewers` in review, etc. A WIP-limited model must not let N drivers pile into implement simultaneously; C4 makes the existing per-phase caps a property the allocator respects, not a throttle the model removes.
 
-**Net:** with C1–C4, `issue_controller` preserves every virtue of `phase_requeue` (crash-safety, throttling, preemptability at boundaries) while collapsing inter-phase latency and expressing WIP. That outcome — ADR-0002 intact — is the **design target and acceptance bar**, not a hoped-for side effect.
+### 5.5 Reconcile-from-label (Constraint C5) — the falsified premise, repaired
+
+**C1 alone does not deliver "a single unambiguous current label."** `src/pr_manager.py:PRManager.swap_pipeline_labels` adds the new label first and then removes stale ones best-effort, so a crash mid-swap leaves an issue carrying **two** pipeline labels. The spec as first written asserted the guarantee the primitive does not provide.
+
+**Constraint C5 (reconcile-from-label).** Three rules, all mandatory:
+
+1. **Boot reconciliation reuses the existing tie-break.** `src/issue_store.py:IssueStore._compute_stage_map` already resolves a multi-label issue via `_STAGE_PRIORITY` **most-advanced-label-wins**. The driver does not invent a second reconciliation; it cites and reuses this one. Because the swap always adds the *forward* label first, the tie-break biases correctly forward, so a mid-swap crash resolves to the newer stage.
+2. **The label is re-read at every phase boundary,** and an externally changed label **preempts** the driver's own state. ADR-0002 documents "drag a label" as the HITL escape hatch; without this rule the next C1 write silently clobbers the operator's edit. `src/driver_contracts.py:admit_dispatch` returns `LIVE_LABEL_CHANGED` for this case.
+3. **DIAGNOSE ambiguity is resolved by rule.** DIAGNOSE shares `hydraflow-review` and is not a suspend transition, so no `SuspendRecord` is written and a crash mid-DIAGNOSE is indistinguishable from a fresh REVIEW by label alone. The rule: **resume at the nominal state and re-detect the route-back fresh.** This is safe because route-back detection is a pure function of the PR's CI state and diff, so re-running it is idempotent — no marker file is needed.
+
+### 5.6 Capacity release for non-working drivers (Constraint C6)
+
+**Constraint C6.** A driver in `PARKED` or `HITL_WAIT`, or one failing its C1 label write, **releases** its `max_in_flight` slot. Holding it would let one slow human starve total factory capacity — a failure mode `phase_requeue` structurally cannot have. Releasing does not undercut the model: its benefit is inter-phase latency *within one issue's lifecycle*, which is a different quantity from admission latency for a parked issue.
+
+- A driver blocked on a congested phase semaphore **does** count against admission — it is working, merely queued.
+- Label-write failure gets a bounded retry: 5 attempts with exponential backoff and a **10-minute maximum slot hold**, then escalate to HITL and release. Without this bound a retrying driver holds its slot indefinitely — a livelock class unique to `issue_controller`.
+- Re-admission keys on the driver's original enqueue time, so a released driver is never starved by newer arrivals.
+
+### 5.7 SchedulingPolicy / SchedulingView, and the P0 wait bound (Constraint C3, completed)
+
+`SchedulingView` is a **frozen** per-issue sensor record — no I/O, replay-testable, the same pure-engine shape as `src/queue_strategy.py`:
+
+| Field | Meaning |
+|---|---|
+| `issue_number` | identity |
+| `priority` | P0–P3 band |
+| `blast_radius` | low / medium / high (reused from ADR-0051, not re-derived) |
+| `driver_state` | current `DriverState` |
+| `waiting_since` | when admission was first requested (the anti-starvation key) |
+| `stage` | current pipeline stage |
+| `slot_occupancy` | global and per-stage occupancy at view time |
+
+`SchedulingPolicy.select(view) -> ranked candidates` is the control law over that view. Candidate ordering is drawn from the existing `queue_strategy` engine rather than reimplemented.
+
+**Worst-case P0 wait is bounded, not left open.** Because C3 makes every phase boundary a yield point and C6 releases non-working slots, a P0 arriving with all slots full waits at most **one phase-boundary interval of the longest-running in-flight phase** — in practice one implement-phase subprocess timeout. That is a hard number the canary must measure and report, not a "per policy" hand-wave. Mid-sub-process preemption stays a non-goal (Section 5.3); the bound is what makes that non-goal acceptable.
+
+### 5.8 Boundary transaction ordering (Constraint C8)
+
+**Constraint C8.** For every phase, in exactly this order:
+
+1. validate the worker's output and canonical side effects;
+2. persist the bounded artifact/result under an **idempotency key**;
+3. compare the expected live stage and **swap the label — this is the durable commit**;
+4. append the driver checkpoint/audit record;
+5. only then admit the next dispatch.
+
+A crash before step 3 safely replays the idempotent step 2. A crash after step 3 recovers from label truth even if the audit cache lags. This ordering is what prevents a `ConvergenceLedger` `driver_state`/`policy_log` write that raced ahead of the label write from corrupting P4's replay with a phantom transition. **The behavioural test P2b must ship** is a kill-mid-transition test that kills the process between steps 2 and 3, and again between steps 3 and 4, asserting correct recovery in both cases. A test that string-matches spec phrases cannot test this.
+
+**Net:** with C1–C8, `issue_controller` preserves every virtue of `phase_requeue` (crash-safety, throttling, preemptability at boundaries) while collapsing inter-phase latency and expressing WIP. That outcome — ADR-0002 intact — is the **design target and acceptance bar**, not a hoped-for side effect.
 
 ## 6. The `scheduling_model` knob (config surface — specified here, built in P2)
 
@@ -124,6 +184,34 @@ Any queuing discipline composes with any scheduling model. `queue_strategy` deci
 
 **v1 boundary for #10038:** this document (the spec) + ADR-0099 advanced from Proposed to Accepted (its conceptual model is now backed by a concrete phase spec) + the ADR-0002 resolution made explicit (Section 5). P2–P5 are separate build tickets that cite this spec.
 
+## 8a. The quantitative "proven" bar (and the anti-pattern it guards against)
+
+"`phase_requeue` remains the default until `issue_controller` is proven" is meaningless without a bar. The companion axis ran this experiment with no restraint: `queue_strategy` went build (#10045, merged 05:19Z) → guard (#10053, 14:33Z) → **default flip** (#10061, 18:13Z) in one calendar day, justified only as "that left the feature inert." **That timeline is the named anti-pattern.**
+
+To advance beyond shadow mode, all of the following must hold over a measured window of **at least 20 completed issues and at least 7 days**:
+
+- zero duplicate dispatches, zero ownership-theft events, zero post-stop spawns;
+- 100% of accepted workers carry lineage, cost, and effective-route receipts;
+- zero label-desync incidents (label and committed checkpoint disagreeing after a settled window);
+- no increase in orphan process groups versus the classic baseline;
+- terminal success rate and escaped-defect rate no worse than the `issue_controller` baseline — not merely no worse than nothing;
+- p95 worker-decision latency and parent cost bounded and reported;
+- successful fresh reconstruction on every resume failure;
+- the measured worst-case P0 wait (Section 5.7) reported against its stated bound.
+
+The eventual flip PR **must cite this evidence explicitly**. A default flip in the same calendar day as the build PR is forbidden regardless of the numbers.
+
+## 8b. Alternatives considered
+
+Neither cheaper design was evaluated in the original spec, which left "is a controller the right abstraction" unexamined.
+
+- **(a) Fix `enqueue_transition`'s back-of-queue insertion.** The eager path already exists; a promoted issue merely lands behind every older same-stage issue. Fixing that ordering removes most of the "up to `data_poll_interval` per hop" latency this spec's Section 1 leads with — the residual is a queue-ordering bug, not a full-poll-interval problem. **Complementary, not a substitute**: it produces no single traceable per-issue timeline and cannot express in-flight WIP. It should be fixed on its own merits regardless of this spec.
+- **(b) A stateless WIP-admission cap at Triage**, recomputed from label counts on boot with no in-memory ownership. Delivers finish-what-you-start without touching ADR-0002 at all, and is genuinely cheaper. Delivers neither per-issue continuity nor adaptive delegation.
+
+**The controller's unique deliverables are exactly two:** a single traceable per-issue timeline, and in-flight WIP as a first-class quantity. Those justify the servo/allocator stack over (a) and (b); nothing else in the original justification does.
+
+**Withdrawn from the justification:** the "context re-derivation paid six times per issue" cost claimed in Section 1. `issue_controller` still swaps sub-processes per phase, so it does **not** address that cost. Leaving it in inflated the ROI.
+
 ## 9. Non-goals / deferred
 
 - Mid-sub-process preemption (Section 5.3) — never in v2.
@@ -135,5 +223,7 @@ Any queuing discipline composes with any scheduling model. `queue_strategy` deci
 
 1. This phase spec exists and specifies both scheduling models, the state machine over the landed driver layer, the phase plan P1–P5, the `scheduling_model` knob surface, and orthogonal composition with `queue_strategy`.
 2. ADR-0099 is **Accepted** (was Proposed), with a resolvable, non-mutating `**Enforcement:** enforced` declaration — the ratchet (`tests/test_adr_conformance_coverage.py`) stays green.
-3. The ADR-0002 crash-safety resolution is **explicit** (Section 5, constraints C1–C4): `issue_controller` is an execution-model change only and ADR-0002 survives intact.
+3. The ADR-0002 crash-safety resolution is **explicit** (Section 5, constraints C1–C8): `issue_controller` is an execution-model change only and ADR-0002 survives intact. C5–C8 are load-bearing, not optional hardening — C1–C4 alone rest on a false atomicity premise (Section 5.5).
+5. The transition map (Section 4) matches the live 11-state `DriverState` and carries no `DISCOVER`/`SHAPE`, pinned by `tests/regressions/test_issue_11533_stale_driver_states.py`.
+6. ADR-0137 is Accepted, narrowing ADR-0094's blocking-shepherd rejection, before any P2 runtime code merges.
 4. No runtime behaviour changes on merge (design-only PR); regression pins in `tests/regressions/regression_issue_10038.py` guard the invariants above.

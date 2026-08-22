@@ -143,6 +143,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0134 | — | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
 | ADR-0135 | `src.dashboard_routes._control_routes`, `src.factory_autostart`, `src.models` | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
 | ADR-0136 | `src.adr_citation_resolve`, `src.adr_drift`, `src.adr_index`, `src.arch.generators.adr_cross_reference`, `src.finder_faceplate`, `src.prep`, `src.state._adr_audit` | `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations`, `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` |
+| ADR-0137 | `src.driver_contracts`, `src.hydraflow_gateway.keys`, `src.issue_store`, `src.models`, `src.pr_manager`, `src.process_group`, `src.queue_strategy`, `src.state._driver` | `pytest:tests/test_driver_contracts.py`, `pytest:tests/test_director_capability_probe.py`, `pytest:tests/regressions/test_issue_11533_stale_driver_states.py` |
 
 ## Module → ADRs
 
@@ -213,6 +214,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.disturbance.registry` | ADR-0101 |
 | `src.disturbance_dampener_loop` | ADR-0101 |
 | `src.docker_runner` | ADR-0010, ADR-0043 |
+| `src.driver_contracts` | ADR-0137 |
 | `src.edge_proposer_loop` | ADR-0058 |
 | `src.entry_evidence_loop` | ADR-0062 |
 | `src.epic` | ADR-0011, ADR-0012, ADR-0019, ADR-0080, ADR-0081 |
@@ -245,10 +247,11 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.human_steering` | ADR-0103 |
 | `src.human_steering_loop` | ADR-0103 |
 | `src.hydraflow_gateway.app` | ADR-0110 |
+| `src.hydraflow_gateway.keys` | ADR-0137 |
 | `src.implement_phase` | ADR-0002, ADR-0005, ADR-0014, ADR-0024, ADR-0063, ADR-0097 |
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_fetcher` | ADR-0019, ADR-0067, ADR-0108 |
-| `src.issue_store` | ADR-0002, ADR-0006, ADR-0022, ADR-0041, ADR-0084, ADR-0099, ADR-0108 |
+| `src.issue_store` | ADR-0002, ADR-0006, ADR-0022, ADR-0041, ADR-0084, ADR-0099, ADR-0108, ADR-0137 |
 | `src.jsonl_ledger` | ADR-0126, ADR-0127 |
 | `src.judge_calibration` | ADR-0127 |
 | `src.judge_independence` | ADR-0126, ADR-0127, ADR-0128, ADR-0133 |
@@ -265,7 +268,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.mockworld.fakes.fake_honeycomb` | ADR-0055 |
 | `src.mockworld.fakes.fake_llm` | ADR-0059 |
 | `src.mockworld.sandbox_main` | ADR-0052, ADR-0108 |
-| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098, ADR-0099, ADR-0103, ADR-0107, ADR-0108, ADR-0135 |
+| `src.models` | ADR-0011, ADR-0012, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0025, ADR-0031, ADR-0037, ADR-0045, ADR-0050, ADR-0064, ADR-0084, ADR-0088, ADR-0094, ADR-0095, ADR-0098, ADR-0099, ADR-0103, ADR-0107, ADR-0108, ADR-0135, ADR-0137 |
 | `src.mutation_gauntlet` | ADR-0125 |
 | `src.orchestrator` | ADR-0006, ADR-0009, ADR-0014, ADR-0044, ADR-0045, ADR-0103, ADR-0106 |
 | `src.pending_concerns` | ADR-0064 |
@@ -276,7 +279,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.planner` | ADR-0103 |
 | `src.ports` | ADR-0003, ADR-0044, ADR-0066, ADR-0067, ADR-0068, ADR-0069, ADR-0070, ADR-0109, ADR-0112 |
 | `src.post_merge_handler` | ADR-0012, ADR-0014, ADR-0015, ADR-0016, ADR-0019, ADR-0064 |
-| `src.pr_manager` | ADR-0002, ADR-0005, ADR-0011, ADR-0013, ADR-0018, ADR-0045, ADR-0055, ADR-0084, ADR-0088 |
+| `src.pr_manager` | ADR-0002, ADR-0005, ADR-0011, ADR-0013, ADR-0018, ADR-0045, ADR-0055, ADR-0084, ADR-0088, ADR-0137 |
 | `src.pr_unsticker` | ADR-0077 |
 | `src.pr_unsticker_loop` | ADR-0077 |
 | `src.precheck` | ADR-0127 |
@@ -292,11 +295,13 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.pricing_refresh_diff` | ADR-0078 |
 | `src.pricing_refresh_loop` | ADR-0078 |
 | `src.principles_audit_loop` | ADR-0045 |
+| `src.process_group` | ADR-0137 |
 | `src.prompt_builder` | ADR-0087 |
 | `src.prompt_fitness` | ADR-0116 |
 | `src.prompt_gate` | ADR-0117 |
 | `src.prompt_outcome_pairing` | ADR-0130 |
 | `src.prompt_template` | ADR-0087 |
+| `src.queue_strategy` | ADR-0137 |
 | `src.rails_drift_caretaker_loop` | ADR-0121 |
 | `src.rails_manifest` | ADR-0121 |
 | `src.rc_budget_loop` | ADR-0045 |
@@ -338,7 +343,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.state._adr_audit` | ADR-0056, ADR-0136 |
 | `src.state._auto_agent` | ADR-0050, ADR-0097 |
 | `src.state._convergence` | ADR-0094, ADR-0097, ADR-0098 |
-| `src.state._driver` | ADR-0099 |
+| `src.state._driver` | ADR-0099, ADR-0137 |
 | `src.state._report` | ADR-0013 |
 | `src.state._sandbox_failure_fixer` | ADR-0097 |
 | `src.state._session` | ADR-0014, ADR-0021 |
@@ -429,5 +434,7 @@ Non-blocking authoring aid (#10458): each ADR below bare-cites a high-churn shar
 | ADR-0108 | `src/models.py` | `src/models.py:<Symbol>` |
 | ADR-0109 | `src/review_phase/_phase.py` | `src/review_phase/_phase.py:<Symbol>` |
 | ADR-0135 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0137 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0137 | `src/pr_manager.py` | `src/pr_manager.py:<Symbol>` |
 
 <!-- arch:generated -->
