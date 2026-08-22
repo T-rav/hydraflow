@@ -10,22 +10,22 @@
       "content_sha": "63149bb1b034aee839ed572310b158af3879ce846e5d26664624b5daf123f371"
     },
     "adr-falsifiability.md": {
-      "content_sha": "9e01123ed49359dd3f4e0379bc63629f8d2e81d894b2c12a750503a8c16804fe"
+      "content_sha": "7e8e4a7cbd47300cc59c697c2495b0d796dd447f747d03f7970186c07dfe2f80"
     },
     "adr_xref.md": {
-      "content_sha": "d6bd74ccddde51e7de341a7ef8849b40a765c2f0df84eeb3662b8147cdf62eac"
+      "content_sha": "52f988e3ed49959453ca2dde3d74f8f84c77b364d3f64a2a557b965b5b30e714"
     },
     "ai_system_inventory.md": {
-      "content_sha": "2381f3afd37771426b714ba2c452b287d8947a371cc36bed4cd6c49059a93255"
+      "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
     "changelog.md": {
-      "content_sha": "71bb69e800018fe2b3617aa7de2498e84d5b4cb9f302373a06678b267339a7cd"
+      "content_sha": "679054eb902bee914b49efa8b0ae04caf86f54477e0f60204c761e6a50400da1"
     },
     "coverage_matrix.md": {
       "content_sha": "e577c48a967a117dde6114523719893b7fd4b0ab5f5cbd1802308c3df917184f"
     },
     "events.md": {
-      "content_sha": "9727dde17137d399cdfa37aac2f7cf50349945dd73f5c6408cf5e315c2f882ae"
+      "content_sha": "5e813c46b0409769b15b9412fdf34203595ccc1406f15def76b6e3cd46b5f28f"
     },
     "functional_areas.md": {
       "content_sha": "f83319abd0865b55e7b1f487729df5f7f52d9a9c1d85b2706e32e6482ca3f95e"
@@ -43,7 +43,7 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "f8c477bea40bee30817ab14b7cf6dd332fa0643d575c23beeb2a5530ece3cbd8"
+      "content_sha": "bed11a3cad53debe2975329a19123b7dac042a9260cd3eee6fcc627a0eaad634"
     },
     "ports.md": {
       "content_sha": "c5694cc02e165570a5196a4f9443170f984d254d68710cbe41856bdd4da64cc0"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "276ac25c72b30026c806da5c945576f82c31d43c7a10c62d45725480a79b148d"
+  "content_sha": "c66b90fa714104afb88c7ac29048621fe230254ea5f3a5111109d1498a2d64e8"
 }

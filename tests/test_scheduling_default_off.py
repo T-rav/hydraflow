@@ -138,3 +138,87 @@ class TestPipelineLoopRegistration:
         orch = HydraFlowOrchestrator(controller_config)
 
         assert orch._svc.driver_manager is not None  # noqa: SLF001
+
+
+class TestGlobalWipFloor:
+    """ADR-0137's narrowing of ADR-0094 (i) is binding, not aspirational."""
+
+    def test_the_default_cap_is_not_below_the_per_stage_cap_total(self) -> None:
+        config = HydraFlowConfig()
+
+        assert config.driver_max_in_flight >= config.driver_stage_cap_total()
+
+    def test_a_cap_set_below_the_stage_total_is_raised_to_the_floor(
+        self, tmp_path
+    ) -> None:
+        # A lower value would serialize work the per-stage caps already allow
+        # in parallel — a throughput regression wearing a WIP limit's clothes,
+        # which is exactly what ADR-0094's concurrency objection was about.
+        config = HydraFlowConfig(state_file=tmp_path / "state.json", max_planners=3)
+
+        assert (
+            config.effective_driver_max_in_flight() == config.driver_stage_cap_total()
+        )
+
+    def test_a_cap_above_the_floor_is_left_alone(self, tmp_path) -> None:
+        config = HydraFlowConfig(
+            state_file=tmp_path / "state.json", driver_max_in_flight=12
+        )
+
+        assert config.effective_driver_max_in_flight() == 12
+
+
+class TestTransitionIntentSlots:
+    """ADR-0137 C5(a)/C9 — the two slots, and why they are two."""
+
+    def test_a_stage_intent_round_trips_through_the_ledger(self, tmp_path) -> None:
+        from state import StateTracker
+
+        state = StateTracker(tmp_path / "state.json")
+        state.record_stage_transition(
+            7,
+            from_label="hydraflow-review",
+            to_label="hydraflow-ready",
+            epoch=2,
+            phase_attempt=1,
+        )
+
+        assert state.get_stage_transition(7).to_label == "hydraflow-ready"
+
+    def test_clearing_the_stage_intent_leaves_the_sub_state_intent_intact(
+        self, tmp_path
+    ) -> None:
+        # The reason the slots are separate: C5(a) rule 1 clears the stage
+        # record whenever exactly one pipeline label is present, which is the
+        # normal condition for a sub-state transition. A shared slot would
+        # delete the sub-state commit on the very path C9 exists to protect.
+        from state import StateTracker
+
+        state = StateTracker(tmp_path / "state.json")
+        state.record_stage_transition(
+            7, from_label="a", to_label="b", epoch=0, phase_attempt=0
+        )
+        state.record_sub_state_transition(
+            7, from_state="REVIEW", to_state="DIAGNOSE", epoch=0, phase_attempt=0
+        )
+
+        state.clear_stage_transition(7)
+
+        assert state.get_sub_state_transition(7) is not None
+
+    def test_a_transition_intent_survives_a_state_reload(self, tmp_path) -> None:
+        from state import StateTracker
+
+        path = tmp_path / "state.json"
+        state = StateTracker(path)
+        state.record_stage_transition(
+            7,
+            from_label="hydraflow-hitl",
+            to_label="hydraflow-ready",
+            epoch=3,
+            phase_attempt=0,
+        )
+
+        reloaded = StateTracker(path)
+
+        assert reloaded.get_stage_transition(7).from_label == "hydraflow-hitl"

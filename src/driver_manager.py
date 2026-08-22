@@ -36,17 +36,21 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from driver_contracts import DriverPhase
 from exception_classify import reraise_on_credit_or_bug
 from issue_driver import AdvanceOutcome, IssueDriver
 from issue_driver_policy import (
     NON_WORKING_DRIVER_STATES,
+    ReconcileOutcome,
     SchedulingView,
     SlotOccupancy,
+    StageIntent,
+    StageReconciliation,
     counts_against_wip,
     phase_for_state,
+    reconcile_stage_label,
     select_admissions,
 )
 
@@ -56,8 +60,35 @@ if TYPE_CHECKING:
     from driver_journal import DriverJournal
     from driver_ownership import DriverOwnershipRegistry
     from issue_driver import DriverAdvance, PhaseAdapter
-    from models import Task
+    from models import PendingStageTransition, Task
     from ports import IssueStorePort, PRPort
+
+
+class DriverTransitions(Protocol):
+    """The ``ConvergenceLedger``-backed transition-intent slots (ADR-0137 C5/C9).
+
+    Implemented by ``StateTracker`` via ``state._driver.DriverStateMixin``. The
+    intent lives on the ledger rather than in the driver's own journal because
+    ADR-0094 keeps per-issue durable state there, and because recovery needs it
+    without depending on a file the driver happened to write.
+    """
+
+    def record_stage_transition(
+        self,
+        issue_number: int,
+        *,
+        from_label: str,
+        to_label: str,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None: ...
+
+    def get_stage_transition(
+        self, issue_number: int
+    ) -> PendingStageTransition | None: ...
+
+    def clear_stage_transition(self, issue_number: int) -> None: ...
+
 
 logger = logging.getLogger("driver_manager")
 
@@ -94,33 +125,121 @@ class PipelineLabelAdapter:
     silently preempted. Writes go through ``swap_pipeline_labels``, the same
     add-first primitive every phase already uses — the driver introduces no new
     way to move an issue.
+
+    **Resolution is by recorded intent, not by priority** (ADR-0137 C5(a), as
+    corrected by #11632). A mid-swap crash leaves two labels, and choosing the
+    most advanced of them silently reverts every backward edge in this pipeline
+    — a route-back and a HITL resume both look like a *regression* to a
+    priority table. So the driver records where it is going before it goes, and
+    this reads that record back. Priority remains only as rule 4: several
+    labels and no usable intent, which a driver crash cannot produce because
+    the record is written before the label add.
     """
 
-    def __init__(self, prs: PRPort, *, ordered_labels: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        prs: PRPort,
+        *,
+        ordered_labels: tuple[str, ...],
+        transitions: DriverTransitions | None = None,
+    ) -> None:
         self._prs = prs
         self._ordered_labels = ordered_labels
+        self._transitions = transitions
 
-    async def read_stage_label(self, issue_number: int) -> str | None:
-        """The issue's most advanced pipeline label, or ``None`` if it has none.
+    async def read_pipeline_labels(self, issue_number: int) -> frozenset[str]:
+        """Every pipeline label the issue currently carries."""
+        labels = await self._prs.get_issue_labels(issue_number)
+        return frozenset(label for label in labels if label in self._ordered_labels)
 
-        A crash mid-swap leaves two pipeline labels on an issue
-        (``swap_pipeline_labels`` adds the forward label before it removes the
-        old one), so this must pick one. It applies the same
-        most-advanced-label-wins rule ``IssueStore._compute_stage_map`` uses via
-        ``_STAGE_PRIORITY`` — ADR-0137 C5a says reuse that rule rather than
-        inventing a second reconciliation — and because the swap adds forward
-        first, the tie-break resolves a mid-swap crash to the *newer* stage.
+    async def reconcile(
+        self, issue_number: int, *, epoch: int, phase_attempt: int
+    ) -> StageReconciliation:
+        """Resolve the issue's true stage, completing an interrupted swap.
 
-        ``ordered_labels`` is that priority order, ascending, supplied by the
-        composition root from config so this adapter needs no config object and
-        no private import.
+        The record is honoured only when it belongs to the incarnation being
+        recovered, and it is cleared by the first reconciliation that observes
+        it — which is what makes it safe to honour a record written under the
+        epoch recovery has just fenced.
         """
-        labels = set(await self._prs.get_issue_labels(issue_number))
-        best: str | None = None
-        for label in self._ordered_labels:
-            if label in labels:
-                best = label
-        return best
+        present = await self.read_pipeline_labels(issue_number)
+        resolution = reconcile_stage_label(
+            present_labels=present,
+            priority_order=self._ordered_labels,
+            intent=self._intent_for(issue_number),
+            recovering_epoch=epoch,
+            phase_attempt=phase_attempt,
+        )
+        if resolution.remove_label is not None and resolution.label is not None:
+            # Finish the swap the dead incarnation began: one add already
+            # landed, so re-issuing the swap removes the stale ``from_label``
+            # through the same primitive rather than a bespoke delete.
+            await self._prs.swap_pipeline_labels(issue_number, resolution.label)
+        if resolution.clear_stage_intent and self._transitions is not None:
+            self._transitions.clear_stage_transition(issue_number)
+        if resolution.outcome is ReconcileOutcome.EXTERNAL_DRIFT:
+            logger.warning(
+                "driver: #%d carries a label outside its recorded transition "
+                "(%s) — abandoning the swap and adopting the external label",
+                issue_number,
+                resolution.label,
+            )
+        return resolution
+
+    async def read_stage_label(
+        self, issue_number: int, *, epoch: int = 0, phase_attempt: int = 0
+    ) -> str | None:
+        """The issue's resolved pipeline stage, or ``None`` if it has no label.
+
+        The caller supplies its own fencing tokens rather than letting the
+        record vouch for itself: a record from a superseded epoch or a previous
+        attempt must fall through to rule 4, not be honoured because it happens
+        to be the only one on disk. This is the same call recovery makes, so a
+        live driver and its own recovery can never disagree about which label
+        is the truth.
+        """
+        resolution = await self.reconcile(
+            issue_number, epoch=epoch, phase_attempt=phase_attempt
+        )
+        return resolution.label
+
+    def _intent_for(self, issue_number: int) -> StageIntent | None:
+        if self._transitions is None:
+            return None
+        recorded = self._transitions.get_stage_transition(issue_number)
+        if recorded is None:
+            return None
+        return StageIntent(
+            from_label=recorded.from_label,
+            to_label=recorded.to_label,
+            epoch=recorded.epoch,
+            phase_attempt=recorded.phase_attempt,
+        )
+
+    def record_intent(
+        self,
+        issue_number: int,
+        *,
+        from_label: str,
+        to_label: str,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None:
+        """C8 step 3': record where the swap is going, before issuing it."""
+        if self._transitions is None:
+            return
+        self._transitions.record_stage_transition(
+            issue_number,
+            from_label=from_label,
+            to_label=to_label,
+            epoch=epoch,
+            phase_attempt=phase_attempt,
+        )
+
+    def clear_intent(self, issue_number: int) -> None:
+        """C8 step 5: the boundary is checkpointed; the intent is spent."""
+        if self._transitions is not None:
+            self._transitions.clear_stage_transition(issue_number)
 
     async def commit_stage_label(self, issue_number: int, label: str) -> None:
         await self._prs.swap_pipeline_labels(issue_number, label)

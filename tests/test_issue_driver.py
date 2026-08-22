@@ -42,9 +42,30 @@ class RecordingLabels:
     def __init__(self, label: str | None) -> None:
         self.label = label
         self.events: list[str] = []
+        self.intent: tuple[str, str, int, int] | None = None
+        self.intent_history: list[str] = []
 
-    async def read_stage_label(self, issue_number: int) -> str | None:
+    async def read_stage_label(
+        self, issue_number: int, *, epoch: int = 0, phase_attempt: int = 0
+    ) -> str | None:
         return self.label
+
+    def record_intent(
+        self,
+        issue_number: int,
+        *,
+        from_label: str,
+        to_label: str,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None:
+        self.intent = (from_label, to_label, epoch, phase_attempt)
+        self.intent_history.append("record")
+        self.events.append(f"intent:{from_label}->{to_label}")
+
+    def clear_intent(self, issue_number: int) -> None:
+        self.intent = None
+        self.intent_history.append("clear")
 
     async def commit_stage_label(self, issue_number: int, label: str) -> None:
         self.events.append(f"label:{label}")
@@ -86,8 +107,10 @@ class ScriptedAdapter:
         labels: RecordingLabels | None = None,
         commits_label: str | None = None,
         on_run: object = None,
+        target_label: str | None = None,
     ) -> None:
         self.phase = phase
+        self.target_label = target_label
         self._outcome = outcome
         self._labels = labels
         self._commits_label = commits_label
@@ -161,7 +184,9 @@ async def test_the_checkpoint_is_appended_only_after_the_label_is_committed() ->
 
     await driver.advance(_task())
 
-    assert labels.events == ["label:hydraflow-ready"], (
+    swaps = [e for e in labels.events if e.startswith("label:")]
+
+    assert swaps == ["label:hydraflow-ready"], (
         "the label swap must land before the checkpoint records the boundary"
     )
 
@@ -194,7 +219,9 @@ async def test_the_driver_does_not_re_swap_a_label_its_stage_worker_committed() 
 
     await driver.advance(_task())
 
-    assert labels.events == ["label:hydraflow-ready"], (
+    swaps = [e for e in labels.events if e.startswith("label:")]
+
+    assert swaps == ["label:hydraflow-ready"], (
         "one write, made by the stage worker — the driver must not duplicate it"
     )
 
@@ -225,6 +252,80 @@ async def test_a_committed_plan_boundary_moves_the_driver_to_the_ready_state() -
     await driver.advance(_task())
 
     assert driver.driver_state == "READY"
+
+
+# --------------------------------------------------------------------------
+# C5(a) — the transition intent is recorded before anything moves the label
+# --------------------------------------------------------------------------
+
+
+async def test_the_transition_intent_is_recorded_before_the_phase_runs() -> None:
+    # The stage worker commits its own swap inside ``run``, so recording the
+    # intent only around the driver's own swap would leave the one swap that
+    # actually happens on the nominal path uncovered.
+    labels = RecordingLabels(PLAN_LABEL)
+    adapter = ScriptedAdapter(
+        DriverPhase.PLAN,
+        _plan_ok(),
+        labels=labels,
+        commits_label=READY_LABEL,
+        target_label=READY_LABEL,
+    )
+    driver = _driver(labels=labels, journal=RecordingJournal(), adapter=adapter)
+
+    await driver.advance(_task())
+
+    assert labels.events[0] == "intent:hydraflow-plan->hydraflow-ready"
+
+
+async def test_the_recorded_intent_names_the_boundary_it_covers() -> None:
+    labels = RecordingLabels(PLAN_LABEL)
+    adapter = ScriptedAdapter(DriverPhase.PLAN, _plan_ok(), target_label=READY_LABEL)
+    driver = _driver(
+        labels=labels, journal=RecordingJournal(), adapter=adapter, epoch=3
+    )
+
+    await driver.advance(_task())
+
+    assert labels.intent_history == ["record", "clear"]
+
+
+async def test_a_boundary_killed_before_the_swap_leaves_its_intent_recorded() -> None:
+    # Recovery needs the record to complete the interrupted swap; clearing it
+    # on the failure path would reopen the window it exists to close.
+    labels = RecordingLabels(PLAN_LABEL)
+
+    def _die() -> None:
+        raise RuntimeError("killed mid-transition")
+
+    adapter = ScriptedAdapter(
+        DriverPhase.PLAN, _plan_ok(), on_run=_die, target_label=READY_LABEL
+    )
+    driver = _driver(labels=labels, journal=RecordingJournal(), adapter=adapter)
+
+    await driver.advance(_task())
+
+    assert labels.intent == (PLAN_LABEL, READY_LABEL, 0, 0)
+
+
+async def test_a_phase_that_declares_no_target_records_no_stage_intent() -> None:
+    # Review may merge or route back and HITL stays put, so neither declares a
+    # single target and neither writes a stage record.
+    labels = RecordingLabels(REVIEW_LABEL)
+    adapter = ScriptedAdapter(
+        DriverPhase.REVIEW,
+        PhaseOutcome(ok=True, next_label=None, next_state="MERGED", artifact={}),
+    )
+    driver = _driver(
+        labels=labels,
+        journal=RecordingJournal(),
+        adapter=adapter,
+        driver_state="REVIEW",
+    )
+
+    await driver.advance(_task())
+
+    assert labels.intent_history == ["clear"]
 
 
 # --------------------------------------------------------------------------

@@ -14,7 +14,7 @@ from driver_journal import DriverJournal
 from driver_manager import DriverManager, PipelineLabelAdapter
 from driver_ownership import DriverOwnershipRegistry
 from issue_driver import PhaseOutcome
-from models import Task
+from models import PendingStageTransition, Task
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -85,10 +85,40 @@ class FakeStore:
         self.requeued.append((task.id, next_stage))
 
 
+class FakeTransitions:
+    """The two ledger-backed intent slots, in memory."""
+
+    def __init__(self) -> None:
+        self.stage: dict[int, PendingStageTransition] = {}
+
+    def record_stage_transition(
+        self,
+        issue_number: int,
+        *,
+        from_label: str,
+        to_label: str,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None:
+        self.stage[issue_number] = PendingStageTransition(
+            from_label=from_label,
+            to_label=to_label,
+            epoch=epoch,
+            phase_attempt=phase_attempt,
+        )
+
+    def get_stage_transition(self, issue_number: int) -> PendingStageTransition | None:
+        return self.stage.get(issue_number)
+
+    def clear_stage_transition(self, issue_number: int) -> None:
+        self.stage.pop(issue_number, None)
+
+
 class StuckAdapter:
     """A plan adapter that never succeeds, so admitted drivers stay admitted."""
 
     phase = DriverPhase.PLAN
+    target_label = PLAN_LABEL
 
     async def run(self, task: Task, *, lease: object) -> PhaseOutcome:
         return PhaseOutcome(ok=False, next_label=PLAN_LABEL, detail="still planning")
@@ -98,6 +128,7 @@ class MergingAdapter:
     """A plan adapter that takes the issue straight to a terminal state."""
 
     phase = DriverPhase.PLAN
+    target_label = None
 
     async def run(self, task: Task, *, lease: object) -> PhaseOutcome:
         return PhaseOutcome(ok=True, next_label=None, next_state="MERGED", artifact={})
@@ -332,27 +363,138 @@ async def test_a_driver_rebuilt_after_a_restart_takes_a_higher_epoch(
 
 
 # --------------------------------------------------------------------------
-# PipelineLabelAdapter — most-advanced-label-wins
+# PipelineLabelAdapter — reconcile against recorded intent (ADR-0137 C5(a))
 # --------------------------------------------------------------------------
 
 
-async def test_a_mid_swap_crash_leaving_two_labels_resolves_to_the_newer_stage() -> (
-    None
-):
-    # ``swap_pipeline_labels`` adds the forward label before removing the old
-    # one, so a crash between the two leaves both. ADR-0137 C5a: reuse
-    # IssueStore's most-advanced-wins rule, which biases correctly forward.
-    github = FakeGitHubLabels({3: [PLAN_LABEL, READY_LABEL]})
-    adapter = PipelineLabelAdapter(github, ordered_labels=ORDERED_LABELS)
+def _adapter(
+    labels: dict[int, list[str]], transitions: FakeTransitions | None = None
+) -> PipelineLabelAdapter:
+    return PipelineLabelAdapter(
+        FakeGitHubLabels(labels),
+        ordered_labels=ORDERED_LABELS,
+        transitions=transitions,
+    )
 
-    assert await adapter.read_stage_label(3) == READY_LABEL
+
+async def test_a_single_pipeline_label_is_the_truth() -> None:
+    assert await _adapter({3: [READY_LABEL]}).read_stage_label(3) == READY_LABEL
 
 
 async def test_an_issue_with_no_pipeline_label_reads_as_none() -> None:
-    github = FakeGitHubLabels({3: ["P1", "bug"]})
-    adapter = PipelineLabelAdapter(github, ordered_labels=ORDERED_LABELS)
+    assert await _adapter({3: ["P1", "bug"]}).read_stage_label(3) is None
 
-    assert await adapter.read_stage_label(3) is None
+
+async def test_a_single_label_discards_a_stale_stage_intent() -> None:
+    # A crash between the record and the label add leaves one label: the
+    # transition never happened, and replaying its intent would invent one.
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        3, from_label=PLAN_LABEL, to_label=READY_LABEL, epoch=0, phase_attempt=0
+    )
+    adapter = _adapter({3: [PLAN_LABEL]}, transitions)
+
+    await adapter.reconcile(3, epoch=0, phase_attempt=0)
+
+    assert transitions.get_stage_transition(3) is None
+
+
+async def test_an_interrupted_route_back_completes_backwards_from_its_intent() -> None:
+    # THE case priority-based reconciliation got wrong. DIAGNOSE -> READY
+    # crashing mid-swap leaves review(5) + ready(4); most-advanced-wins picks
+    # review and silently undoes the route-back.
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        3, from_label=REVIEW_LABEL, to_label=READY_LABEL, epoch=1, phase_attempt=0
+    )
+    adapter = _adapter({3: [REVIEW_LABEL, READY_LABEL]}, transitions)
+
+    resolved = await adapter.read_stage_label(3, epoch=1, phase_attempt=0)
+
+    assert resolved == READY_LABEL
+
+
+async def test_an_interrupted_hitl_resume_completes_backwards_from_its_intent() -> None:
+    # The second backward edge: HITL(6) -> READY(4) reverts under priority.
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        3, from_label=HITL_LABEL, to_label=READY_LABEL, epoch=2, phase_attempt=1
+    )
+    adapter = _adapter({3: [HITL_LABEL, READY_LABEL]}, transitions)
+
+    resolved = await adapter.read_stage_label(3, epoch=2, phase_attempt=1)
+
+    assert resolved == READY_LABEL
+
+
+async def test_completing_an_interrupted_swap_removes_the_stale_from_label() -> None:
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        3, from_label=REVIEW_LABEL, to_label=READY_LABEL, epoch=1, phase_attempt=0
+    )
+    github = FakeGitHubLabels({3: [REVIEW_LABEL, READY_LABEL]})
+    adapter = PipelineLabelAdapter(
+        github, ordered_labels=ORDERED_LABELS, transitions=transitions
+    )
+
+    await adapter.reconcile(3, epoch=1, phase_attempt=0)
+
+    assert github.labels[3] == [READY_LABEL]
+
+
+async def test_an_intent_from_a_superseded_epoch_is_not_honoured() -> None:
+    # Recovery honours the record written by the incarnation it replaces and
+    # no older one; anything else falls through to the priority fallback.
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        3, from_label=REVIEW_LABEL, to_label=READY_LABEL, epoch=0, phase_attempt=0
+    )
+    adapter = _adapter({3: [REVIEW_LABEL, READY_LABEL]}, transitions)
+
+    resolved = await adapter.read_stage_label(3, epoch=5, phase_attempt=0)
+
+    assert resolved == REVIEW_LABEL
+
+
+async def test_a_label_outside_the_recorded_transition_is_adopted_not_clobbered() -> (
+    None
+):
+    # An operator dragged the card during the swap window. ADR-0002 calls that
+    # the escape hatch; the driver abandons its transition rather than
+    # completing it over the top of the edit.
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        3, from_label=PLAN_LABEL, to_label=READY_LABEL, epoch=0, phase_attempt=0
+    )
+    adapter = _adapter({3: [PLAN_LABEL, READY_LABEL, HITL_LABEL]}, transitions)
+
+    resolved = await adapter.read_stage_label(3, epoch=0, phase_attempt=0)
+
+    assert resolved == HITL_LABEL
+
+
+async def test_external_drift_never_removes_the_externally_set_label() -> None:
+    transitions = FakeTransitions()
+    transitions.record_stage_transition(
+        3, from_label=PLAN_LABEL, to_label=READY_LABEL, epoch=0, phase_attempt=0
+    )
+    github = FakeGitHubLabels({3: [PLAN_LABEL, READY_LABEL, HITL_LABEL]})
+    adapter = PipelineLabelAdapter(
+        github, ordered_labels=ORDERED_LABELS, transitions=transitions
+    )
+
+    await adapter.reconcile(3, epoch=0, phase_attempt=0)
+
+    assert github.swaps == []
+
+
+async def test_two_labels_with_no_intent_fall_back_to_most_advanced() -> None:
+    # Rule 4: unreachable via a driver crash (the record precedes the add), so
+    # it exists for drift the driver did not cause — where forward-bias is
+    # still the right guess.
+    resolved = await _adapter({3: [PLAN_LABEL, READY_LABEL]}).read_stage_label(3)
+
+    assert resolved == READY_LABEL
 
 
 async def test_committing_a_stage_label_goes_through_the_existing_swap_primitive() -> (

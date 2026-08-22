@@ -143,7 +143,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0134 | — | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
 | ADR-0135 | `src.dashboard_routes._control_routes`, `src.factory_autostart`, `src.models` | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
 | ADR-0136 | `src.adr_citation_resolve`, `src.adr_drift`, `src.adr_index`, `src.arch.generators.adr_cross_reference`, `src.finder_faceplate`, `src.prep`, `src.state._adr_audit` | `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations`, `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` |
-| ADR-0137 | `src.driver_contracts`, `src.driver_journal`, `src.driver_manager`, `src.driver_ownership`, `src.driver_phase_adapters`, `src.hydraflow_gateway.keys`, `src.issue_driver`, `src.issue_driver_policy`, `src.issue_store`, `src.models`, `src.pr_manager`, `src.process_group`, `src.queue_strategy`, `src.scheduling_model`, `src.state._driver` | `pytest:tests/test_driver_contracts.py`, `pytest:tests/test_director_capability_probe.py`, `pytest:tests/regressions/test_issue_11533_stale_driver_states.py`, `pytest:tests/test_issue_driver.py`, `pytest:tests/test_issue_driver_policy.py`, `pytest:tests/test_driver_manager.py`, `pytest:tests/test_scheduling_default_off.py`, `pytest:tests/regressions/test_issue_11535_kill_mid_transition.py` |
+| ADR-0137 | `src.config`, `src.driver_contracts`, `src.driver_journal`, `src.driver_manager`, `src.driver_ownership`, `src.driver_phase_adapters`, `src.hydraflow_gateway.keys`, `src.issue_driver`, `src.issue_driver_policy`, `src.issue_store`, `src.models`, `src.pr_manager`, `src.process_group`, `src.queue_strategy`, `src.scheduling_model`, `src.state._driver` | `pytest:tests/test_driver_contracts.py`, `pytest:tests/test_director_capability_probe.py`, `pytest:tests/regressions/test_issue_11533_stale_driver_states.py`, `pytest:tests/test_issue_driver.py`, `pytest:tests/test_issue_driver_policy.py`, `pytest:tests/test_driver_manager.py`, `pytest:tests/test_scheduling_default_off.py`, `pytest:tests/regressions/test_issue_11535_kill_mid_transition.py` |
 
 ## Module → ADRs
 
@@ -180,7 +180,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.branch_protection_auditor_loop` | ADR-0082 |
 | `src.caching_issue_store` | ADR-0041 |
 | `src.code_grooming_loop` | ADR-0065 |
-| `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065, ADR-0084, ADR-0094, ADR-0102, ADR-0103, ADR-0106, ADR-0112 |
+| `src.config` | ADR-0002, ADR-0009, ADR-0010, ADR-0018, ADR-0021, ADR-0022, ADR-0031, ADR-0033, ADR-0034, ADR-0035, ADR-0036, ADR-0045, ADR-0050, ADR-0055, ADR-0065, ADR-0084, ADR-0094, ADR-0102, ADR-0103, ADR-0106, ADR-0112, ADR-0137 |
 | `src.contract_diff` | ADR-0047, ADR-0052 |
 | `src.contract_recording` | ADR-0047, ADR-0052 |
 | `src.contract_refresh_loop` | ADR-0045, ADR-0047 |
@@ -445,6 +445,7 @@ Non-blocking authoring aid (#10458): each ADR below bare-cites a high-churn shar
 | ADR-0108 | `src/models.py` | `src/models.py:<Symbol>` |
 | ADR-0109 | `src/review_phase/_phase.py` | `src/review_phase/_phase.py:<Symbol>` |
 | ADR-0135 | `src/models.py` | `src/models.py:<Symbol>` |
+| ADR-0137 | `src/config.py` | `src/config.py:<Symbol>` |
 | ADR-0137 | `src/models.py` | `src/models.py:<Symbol>` |
 | ADR-0137 | `src/pr_manager.py` | `src/pr_manager.py:<Symbol>` |
 

@@ -601,6 +601,7 @@ def _driver_stage_labels(config: HydraFlowConfig) -> dict[str, str]:
 def _build_driver_manager(
     *,
     config: HydraFlowConfig,
+    state: StateTracker,
     store: IssueStorePort,
     prs: PRPort,
     planner_phase: PlanPhase,
@@ -632,6 +633,12 @@ def _build_driver_manager(
     )
 
     stage_labels = _driver_stage_labels(config)
+    stage_caps = {
+        DriverPhase.PLAN: config.max_planners,
+        DriverPhase.IMPLEMENT: config.max_workers,
+        DriverPhase.REVIEW: config.max_reviewers,
+        DriverPhase.HITL: config.max_hitl_workers,
+    }
     adapters = {
         DriverPhase.PLAN: PlanPhaseAdapter(
             planner_phase, ready_label=config.ready_label[0]
@@ -654,19 +661,17 @@ def _build_driver_manager(
                 config.review_label[0],
                 config.hitl_label[0],
             ),
+            # ADR-0137 C5(a): the transition-intent slots live on the
+            # ConvergenceLedger, reached through DriverStateMixin.
+            transitions=state,
         ),
         journal=DriverJournal(config.state_file.parent / "driver_journal.jsonl"),
         ownership=ownership,
         adapters=adapters,
         stage_labels=stage_labels,
         repo_slug=config.repo,
-        max_in_flight=config.driver_max_in_flight,
-        stage_caps={
-            DriverPhase.PLAN: config.max_planners,
-            DriverPhase.IMPLEMENT: config.max_workers,
-            DriverPhase.REVIEW: config.max_reviewers,
-            DriverPhase.HITL: config.max_hitl_workers,
-        },
+        max_in_flight=config.effective_driver_max_in_flight(),
+        stage_caps=stage_caps,
     )
 
 
@@ -2062,6 +2067,7 @@ def build_services(
     driver_manager = (
         _build_driver_manager(
             config=config,
+            state=state,
             store=store,
             prs=prs,
             planner_phase=planner_phase,

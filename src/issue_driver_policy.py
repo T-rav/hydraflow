@@ -236,16 +236,24 @@ def admit_driver(
 
 
 def rank_candidates(views: Iterable[SchedulingView]) -> tuple[SchedulingView, ...]:
-    """Order candidates: P0 first, then longest-waiting, then issue number.
+    """Order candidates by ADR-0137 B3's stated precedence, highest first.
 
-    ``waiting_since`` is the anti-starvation key ADR-0137 C6 requires — a driver
-    released while parked keeps its **original** admission-request time, so it
-    is reconsidered ahead of issues that arrived while it waited. Issue number
-    is the final tie-break purely so the order is total and reproducible.
+    **(1) priority band, (2) original enqueue time within a band, (3) the
+    ``queue_strategy`` ordering within that.** The ranking has to be spelled out
+    because the three rules otherwise contradict each other: C6's
+    anti-starvation rule keys re-admission on original enqueue time, and a P0 is
+    by construction the *newest* arrival — so an unranked "oldest first" would
+    let a released P3 outrank an arriving P0 and break B3's wait bound.
+    Anti-starvation therefore operates strictly *within* a band.
+
+    Rule 3 is honoured by preserving input order as the final tie-break:
+    candidates arrive in the order ``IssueStore`` handed them over, which is
+    already the configured ``queue_strategy`` ordering. Reimplementing the
+    band draw here would be a second copy of an engine that already exists.
     """
-    return tuple(
-        sorted(views, key=lambda v: (v.band_rank, v.waiting_since, v.issue_number))
-    )
+    indexed = list(enumerate(views))
+    indexed.sort(key=lambda pair: (pair[1].band_rank, pair[1].waiting_since, pair[0]))
+    return tuple(view for _index, view in indexed)
 
 
 def select_admissions(
@@ -343,6 +351,146 @@ def admit_phase_result(
     return None
 
 
+class ReconcileOutcome(StrEnum):
+    """How a set of present pipeline labels was resolved (ADR-0137 C5(a))."""
+
+    SINGLE_LABEL = "single_label"
+    """Exactly one pipeline label. It is the truth; the stage intent is stale."""
+
+    COMPLETED_SWAP = "completed_swap"
+    """An interrupted swap, finished from the recorded intent — either direction."""
+
+    EXTERNAL_DRIFT = "external_drift"
+    """A label nobody recorded an intent for. An operator's drag; escalate."""
+
+    PRIORITY_FALLBACK = "priority_fallback"
+    """Several labels and no usable intent. Most-advanced-wins, as before."""
+
+    NO_PIPELINE_LABEL = "no_pipeline_label"
+    """The issue carries no pipeline label at all."""
+
+
+@dataclass(frozen=True)
+class StageReconciliation:
+    """The resolved stage, and what the driver owes the world as a result."""
+
+    label: str | None
+    outcome: ReconcileOutcome
+    remove_label: str | None = None
+    """A stale ``from_label`` the driver should finish removing."""
+
+    clear_stage_intent: bool = False
+    escalate: bool = False
+
+
+@dataclass(frozen=True)
+class StageIntent:
+    """A recorded transition intent, flattened for the pure reconciler.
+
+    Mirrors :class:`models.PendingStageTransition` without importing it, so
+    this module keeps the no-I/O, no-persistence-model shape ``queue_strategy``
+    established.
+    """
+
+    from_label: str
+    to_label: str
+    epoch: int
+    phase_attempt: int
+
+    def is_usable(self, *, recovering_epoch: int, phase_attempt: int) -> bool:
+        """True when this record belongs to the incarnation being recovered.
+
+        Recovery honours the record written by the incarnation it is replacing
+        and no older one, and the attempt must match the ledger's — anything
+        else is stale and is ignored rather than replayed.
+        """
+        return self.epoch == recovering_epoch and self.phase_attempt == phase_attempt
+
+
+def reconcile_stage_label(
+    *,
+    present_labels: frozenset[str],
+    priority_order: tuple[str, ...],
+    intent: StageIntent | None = None,
+    recovering_epoch: int = 0,
+    phase_attempt: int = 0,
+) -> StageReconciliation:
+    """Resolve which pipeline label is the truth (ADR-0137 C5(a), corrected).
+
+    ``swap_pipeline_labels`` adds before it removes, so a crash inside that
+    window leaves two labels. The obvious repair — take the most advanced —
+    is **wrong for this pipeline**, and wrong in a way that fails silently:
+    its crash-interesting edges run backward. ``DIAGNOSE → READY`` leaves
+    ``review`` + ``ready`` and most-advanced-wins picks ``review``, undoing a
+    route-back; ``HITL_APPLY → READY`` is reverted the same way. Priority is a
+    monotonicity assumption about a direction-agnostic primitive, which is the
+    same class of false premise as the atomicity assumption it replaced.
+
+    So this resolves against **recorded intent**, in four rules, first match
+    winning:
+
+    1. one label — it is the truth, and any stage intent is discarded (a crash
+       between the record and the label add lands here, and correctly concludes
+       the transition never happened);
+    2. several labels, a usable intent whose ``to_label`` is present, and every
+       other present label is its ``from_label`` — the swap had begun, and the
+       **recorded target wins regardless of direction**;
+    3. several labels including one outside ``{from, to}`` — external drift,
+       not an interrupted swap. Adopt it, escalate, and **never remove it**;
+    4. several labels and no usable intent — fall back to most-advanced-wins,
+       the pre-existing behaviour, correct for the forward case and reachable
+       only through drift the driver did not cause.
+
+    ``priority_order`` is ascending, so the last present member is the most
+    advanced — the same ordering ``IssueStore._STAGE_PRIORITY`` encodes.
+    """
+    if not present_labels:
+        return StageReconciliation(
+            label=None, outcome=ReconcileOutcome.NO_PIPELINE_LABEL
+        )
+
+    if len(present_labels) == 1:
+        return StageReconciliation(
+            label=next(iter(present_labels)),
+            outcome=ReconcileOutcome.SINGLE_LABEL,
+            clear_stage_intent=True,
+        )
+
+    usable = intent is not None and intent.is_usable(
+        recovering_epoch=recovering_epoch, phase_attempt=phase_attempt
+    )
+    if usable and intent is not None and intent.to_label in present_labels:
+        outside = present_labels - {intent.from_label, intent.to_label}
+        if outside:
+            return StageReconciliation(
+                label=_most_advanced(outside, priority_order),
+                outcome=ReconcileOutcome.EXTERNAL_DRIFT,
+                escalate=True,
+            )
+        return StageReconciliation(
+            label=intent.to_label,
+            outcome=ReconcileOutcome.COMPLETED_SWAP,
+            remove_label=intent.from_label
+            if intent.from_label in present_labels
+            else None,
+            clear_stage_intent=True,
+        )
+
+    return StageReconciliation(
+        label=_most_advanced(present_labels, priority_order),
+        outcome=ReconcileOutcome.PRIORITY_FALLBACK,
+    )
+
+
+def _most_advanced(labels: frozenset[str] | set[str], order: tuple[str, ...]) -> str:
+    """The furthest-along label in *order* (ascending), else any present one."""
+    best: str | None = None
+    for label in order:
+        if label in labels:
+            best = label
+    return best if best is not None else sorted(labels)[0]
+
+
 def boundary_idempotency_key(
     *,
     issue_number: int,
@@ -365,8 +513,11 @@ __all__ = [
     "PREEMPT_BAND",
     "TERMINAL_DRIVER_STATES",
     "AdmissionVerdict",
+    "ReconcileOutcome",
     "SchedulingView",
     "SlotOccupancy",
+    "StageIntent",
+    "StageReconciliation",
     "admit_driver",
     "admit_phase_result",
     "boundary_idempotency_key",
@@ -374,5 +525,6 @@ __all__ = [
     "is_preemptible",
     "phase_for_state",
     "rank_candidates",
+    "reconcile_stage_label",
     "select_admissions",
 ]

@@ -100,6 +100,7 @@ class PlanPhaseAdapter:
     def __init__(self, planner: SingleItemPlanner, *, ready_label: str) -> None:
         self._planner = planner
         self._ready_label = ready_label
+        self.target_label: str | None = ready_label
 
     async def run(self, task: Task, *, lease: DriverLease) -> PhaseOutcome:
         result = await self._planner.plan_single_issue(task)
@@ -138,6 +139,7 @@ class ImplementPhaseAdapter:
     ) -> None:
         self._implementer = implementer
         self._review_label = review_label
+        self.target_label: str | None = review_label
 
     async def run(self, task: Task, *, lease: DriverLease) -> PhaseOutcome:
         results, _issues = await self._implementer.run_batch(issues=[task])
@@ -182,6 +184,10 @@ class ReviewPhaseAdapter:
         self._reviewer = reviewer
         self._fetcher = fetcher
         self._merged_state = merged_state
+        # Review declares no single target: it may merge (leaving the
+        # pipeline), approve, or route back. The reviewer commits whichever
+        # transition it decides on, and the driver follows the label.
+        self.target_label: str | None = None
 
     async def run(self, task: Task, *, lease: DriverLease) -> PhaseOutcome:
         from models import GitHubIssue
@@ -246,6 +252,8 @@ class HITLPhaseAdapter:
     ) -> None:
         self._hitl = hitl
         self._waiting_state = waiting_state
+        # A correction is applied in place; the stage label does not move.
+        self.target_label: str | None = None
 
     async def run(self, task: Task, *, lease: DriverLease) -> PhaseOutcome:
         correction = self._hitl.hitl_corrections.get(task.id)

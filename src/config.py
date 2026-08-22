@@ -1364,15 +1364,53 @@ class HydraFlowConfig(BaseModel):
     # caps, which the allocator respects. Inert under Classic, which has no
     # global cap at all (concurrency there is workers-per-phase).
     driver_max_in_flight: int = Field(
-        default=2,
+        default=4,
         ge=1,
-        le=20,
+        le=40,
         description=(
             "Maximum issues held by a live IssueDriver at once under "
             "scheduling_model='issue_controller'. Parked and HITL-waiting "
-            "drivers release their slot (ADR-0137 C6). Ignored under Classic."
+            "drivers release their slot (ADR-0137 C6). Raised to the sum of "
+            "the per-stage caps if set below it — see "
+            "effective_driver_max_in_flight. Ignored under Classic."
         ),
     )
+
+    def driver_stage_cap_total(self) -> int:
+        """Total concurrent work today's per-stage caps allow a driver to occupy.
+
+        Plan + implement + review + HITL. Triage stays Classic under
+        ``issue_controller``, so its cap is not part of the driver's budget.
+        """
+        return (
+            self.max_planners
+            + self.max_workers
+            + self.max_reviewers
+            + self.max_hitl_workers
+        )
+
+    def effective_driver_max_in_flight(self) -> int:
+        """The global WIP cap actually used, never below the stage-cap total.
+
+        ADR-0137's narrowing of ADR-0094 rests on the driver being a *WIP
+        limit* rather than a serialization, and that only holds if total
+        concurrent work is no lower than today's per-stage caps already allow.
+        The ADR makes it a binding constraint on this phase rather than an
+        assumption, so a configured value below the floor is raised to it —
+        the alternative is a throughput regression wearing a WIP limit's
+        clothes, which is exactly what the constraint exists to prevent.
+        """
+        floor = self.driver_stage_cap_total()
+        if self.driver_max_in_flight < floor:
+            logger.warning(
+                "driver_max_in_flight=%d is below the per-stage cap total (%d); "
+                "raising it to the floor — a lower value would be a throughput "
+                "regression, not a WIP limit (ADR-0137, ADR-0094 narrowing (i))",
+                self.driver_max_in_flight,
+                floor,
+            )
+            return floor
+        return self.driver_max_in_flight
 
     @model_validator(mode="after")
     def _scheduling_combination_is_supported(self) -> HydraFlowConfig:

@@ -143,13 +143,44 @@ class PhaseAdapter(Protocol):
     @property
     def phase(self) -> DriverPhase: ...
 
+    @property
+    def target_label(self) -> str | None:
+        """The pipeline label this phase nominally moves the issue to.
+
+        Declared up front, before the phase runs, because ADR-0137 C5(a)
+        requires the transition intent to be recorded *before* anything can
+        move the label — and on the nominal path the stage worker moves it
+        itself, inside ``run``. ``None`` means this phase declares no single
+        target (review may merge or route back; HITL stays put), so no stage
+        intent is recorded for it.
+        """
+        ...
+
     async def run(self, task: Task, *, lease: DriverLease) -> PhaseOutcome: ...
 
 
 class DriverLabels(Protocol):
-    """Read and commit the issue's pipeline label. Labels are the truth."""
+    """Read, record intent for, and commit the issue's pipeline label.
 
-    async def read_stage_label(self, issue_number: int) -> str | None: ...
+    Labels are the truth; the intent record is how a crash *inside* the
+    non-atomic swap is resolved without guessing a direction (ADR-0137 C5(a)).
+    """
+
+    async def read_stage_label(
+        self, issue_number: int, *, epoch: int = 0, phase_attempt: int = 0
+    ) -> str | None: ...
+
+    def record_intent(
+        self,
+        issue_number: int,
+        *,
+        from_label: str,
+        to_label: str,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None: ...
+
+    def clear_intent(self, issue_number: int) -> None: ...
 
     async def commit_stage_label(self, issue_number: int, label: str) -> None: ...
 
@@ -392,7 +423,11 @@ class IssueDriver:
         # --- pre-flight fence: the same questions asked before the long call,
         # so a stopped factory, a dragged label or an already-committed
         # boundary costs nothing rather than a whole phase subprocess.
-        live_before = await self._labels.read_stage_label(self._issue_number)
+        live_before = await self._labels.read_stage_label(
+            self._issue_number,
+            epoch=self._epoch,
+            phase_attempt=self.phase_attempt(phase),
+        )
         pre = admit_phase_result(
             result_epoch=self._epoch,
             result_phase_attempt=self.phase_attempt(phase),
@@ -409,6 +444,23 @@ class IssueDriver:
             return refused
 
         lease = self._lease_for(phase, expected_label)
+
+        # --- C5(a): record where this boundary is going BEFORE anything can
+        # move the label. The stage worker commits its own transition inside
+        # ``adapter.run``, so the record has to precede the run, not just the
+        # driver's own swap — otherwise the one swap that actually happens on
+        # the nominal path is the one no intent covers. A crash between the
+        # record and the add leaves one label, which rule 1 resolves as "the
+        # transition never happened" and discards the record.
+        target_label = adapter.target_label
+        if target_label is not None and target_label != expected_label:
+            self._labels.record_intent(
+                self._issue_number,
+                from_label=expected_label,
+                to_label=target_label,
+                epoch=lease.epoch,
+                phase_attempt=lease.phase_attempt,
+            )
 
         # --- the phase itself. Long, and the only place a subprocess runs.
         try:
@@ -433,7 +485,9 @@ class IssueDriver:
         # tokens against the driver's *current* ones: if recovery bumped the
         # epoch while the phase ran, this result belongs to a generation that no
         # longer owns the issue and must not commit.
-        live_after = await self._labels.read_stage_label(self._issue_number)
+        live_after = await self._labels.read_stage_label(
+            self._issue_number, epoch=lease.epoch, phase_attempt=lease.phase_attempt
+        )
         accepted = frozenset(
             {expected_label} | ({outcome.next_label} if outcome.next_label else set())
         )
@@ -489,6 +543,10 @@ class IssueDriver:
                 rotation_reason=None,
             ),
         )
+        # C8 step 5: the boundary is checkpointed, so the intent is spent.
+        # Cleared only here, after the checkpoint — clearing it before would
+        # reopen the window the record exists to close.
+        self._labels.clear_intent(self._issue_number)
         self._state = self._resolve_state(outcome, expected_label)
         self._phase_attempts.pop(phase, None)
         return self._advance(

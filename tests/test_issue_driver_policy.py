@@ -219,13 +219,17 @@ def test_rank_candidates_orders_equal_band_candidates_by_longest_wait_first() ->
     assert ranked[0].issue_number == 2
 
 
-def test_rank_candidates_breaks_an_exact_wait_tie_by_issue_number() -> None:
-    high = _view(issue_number=9, priority="P1", waiting_since=NOW)
-    low = _view(issue_number=2, priority="P1", waiting_since=NOW)
+def test_rank_candidates_breaks_an_exact_wait_tie_by_the_queue_strategy_order() -> None:
+    # ADR-0137 B3's third precedence rule. Candidates arrive in the order
+    # IssueStore handed them over, which is already the configured
+    # queue_strategy ordering — so preserving input order honours that engine
+    # rather than reimplementing its band draw here.
+    first_from_the_queue = _view(issue_number=9, priority="P1", waiting_since=NOW)
+    second_from_the_queue = _view(issue_number=2, priority="P1", waiting_since=NOW)
 
-    ranked = rank_candidates([high, low])
+    ranked = rank_candidates([first_from_the_queue, second_from_the_queue])
 
-    assert ranked[0].issue_number == 2
+    assert ranked[0].issue_number == 9
 
 
 # --------------------------------------------------------------------------
@@ -474,3 +478,143 @@ def test_boundary_idempotency_key_differs_for_a_different_phase_attempt() -> Non
     )
 
     assert key_a != key_b
+
+
+# --------------------------------------------------------------------------
+# reconcile_stage_label — ADR-0137 C5(a), corrected by #11632
+# --------------------------------------------------------------------------
+
+ORDER = (
+    "hydraflow-find",
+    "hydraflow-plan",
+    "hydraflow-ready",
+    "hydraflow-review",
+    "hydraflow-hitl",
+)
+
+
+def _intent(from_label: str, to_label: str, *, epoch: int = 0, attempt: int = 0):
+    from issue_driver_policy import StageIntent
+
+    return StageIntent(
+        from_label=from_label, to_label=to_label, epoch=epoch, phase_attempt=attempt
+    )
+
+
+def _reconcile(labels: set[str], **kwargs):
+    from issue_driver_policy import reconcile_stage_label
+
+    return reconcile_stage_label(
+        present_labels=frozenset(labels), priority_order=ORDER, **kwargs
+    )
+
+
+def test_no_pipeline_label_resolves_to_nothing() -> None:
+    from issue_driver_policy import ReconcileOutcome
+
+    assert _reconcile(set()).outcome is ReconcileOutcome.NO_PIPELINE_LABEL
+
+
+def test_one_label_is_the_truth() -> None:
+    assert _reconcile({"hydraflow-ready"}).label == "hydraflow-ready"
+
+
+def test_one_label_marks_the_stage_intent_for_clearing() -> None:
+    assert _reconcile({"hydraflow-ready"}).clear_stage_intent is True
+
+
+def test_an_interrupted_backward_swap_resolves_to_the_recorded_target() -> None:
+    # review(5) + ready(4): most-advanced-wins would pick review and silently
+    # undo the route-back. The recorded target wins regardless of direction.
+    resolution = _reconcile(
+        {"hydraflow-review", "hydraflow-ready"},
+        intent=_intent("hydraflow-review", "hydraflow-ready"),
+    )
+
+    assert resolution.label == "hydraflow-ready"
+
+
+def test_an_interrupted_swap_names_the_stale_label_to_remove() -> None:
+    resolution = _reconcile(
+        {"hydraflow-review", "hydraflow-ready"},
+        intent=_intent("hydraflow-review", "hydraflow-ready"),
+    )
+
+    assert resolution.remove_label == "hydraflow-review"
+
+
+def test_an_interrupted_forward_swap_also_resolves_to_the_recorded_target() -> None:
+    resolution = _reconcile(
+        {"hydraflow-plan", "hydraflow-ready"},
+        intent=_intent("hydraflow-plan", "hydraflow-ready"),
+    )
+
+    assert resolution.label == "hydraflow-ready"
+
+
+def test_an_intent_from_another_epoch_is_not_usable() -> None:
+    from issue_driver_policy import ReconcileOutcome
+
+    resolution = _reconcile(
+        {"hydraflow-review", "hydraflow-ready"},
+        intent=_intent("hydraflow-review", "hydraflow-ready", epoch=1),
+        recovering_epoch=4,
+    )
+
+    assert resolution.outcome is ReconcileOutcome.PRIORITY_FALLBACK
+
+
+def test_an_intent_from_another_phase_attempt_is_not_usable() -> None:
+    from issue_driver_policy import ReconcileOutcome
+
+    resolution = _reconcile(
+        {"hydraflow-review", "hydraflow-ready"},
+        intent=_intent("hydraflow-review", "hydraflow-ready", attempt=2),
+        phase_attempt=0,
+    )
+
+    assert resolution.outcome is ReconcileOutcome.PRIORITY_FALLBACK
+
+
+def test_a_label_outside_the_recorded_transition_is_external_drift() -> None:
+    from issue_driver_policy import ReconcileOutcome
+
+    resolution = _reconcile(
+        {"hydraflow-plan", "hydraflow-ready", "hydraflow-hitl"},
+        intent=_intent("hydraflow-plan", "hydraflow-ready"),
+    )
+
+    assert resolution.outcome is ReconcileOutcome.EXTERNAL_DRIFT
+
+
+def test_external_drift_adopts_the_externally_set_label() -> None:
+    resolution = _reconcile(
+        {"hydraflow-plan", "hydraflow-ready", "hydraflow-hitl"},
+        intent=_intent("hydraflow-plan", "hydraflow-ready"),
+    )
+
+    assert resolution.label == "hydraflow-hitl"
+
+
+def test_external_drift_never_asks_for_a_label_to_be_removed() -> None:
+    resolution = _reconcile(
+        {"hydraflow-plan", "hydraflow-ready", "hydraflow-hitl"},
+        intent=_intent("hydraflow-plan", "hydraflow-ready"),
+    )
+
+    assert resolution.remove_label is None
+
+
+def test_external_drift_escalates() -> None:
+    resolution = _reconcile(
+        {"hydraflow-plan", "hydraflow-ready", "hydraflow-hitl"},
+        intent=_intent("hydraflow-plan", "hydraflow-ready"),
+    )
+
+    assert resolution.escalate is True
+
+
+def test_two_labels_and_no_intent_fall_back_to_most_advanced() -> None:
+    resolution = _reconcile({"hydraflow-plan", "hydraflow-ready"})
+
+    assert resolution.label == "hydraflow-ready"

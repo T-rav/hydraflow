@@ -43,14 +43,36 @@ ISSUE = 11535
 
 
 class KillableLabels:
-    """A label port that can die exactly at the swap (gap 1)."""
+    """A label port that can die exactly at the swap (gap 1).
+
+    Also carries the C5(a) intent slot, so a test can assert that a boundary
+    killed before its swap leaves recovery the record it needs to finish the
+    transition in the right direction.
+    """
 
     def __init__(self, label: str, *, die_on_commit: bool = False) -> None:
         self.label = label
         self.die_on_commit = die_on_commit
+        self.intent: tuple[str, str, int, int] | None = None
 
-    async def read_stage_label(self, issue_number: int) -> str | None:
+    async def read_stage_label(
+        self, issue_number: int, *, epoch: int = 0, phase_attempt: int = 0
+    ) -> str | None:
         return self.label
+
+    def record_intent(
+        self,
+        issue_number: int,
+        *,
+        from_label: str,
+        to_label: str,
+        epoch: int,
+        phase_attempt: int,
+    ) -> None:
+        self.intent = (from_label, to_label, epoch, phase_attempt)
+
+    def clear_intent(self, issue_number: int) -> None:
+        self.intent = None
 
     async def commit_stage_label(self, issue_number: int, label: str) -> None:
         if self.die_on_commit:
@@ -81,6 +103,7 @@ class PlanAdapter:
     """A planner that always succeeds, counting how many times it ran."""
 
     phase = DriverPhase.PLAN
+    target_label = READY_LABEL
 
     def __init__(self) -> None:
         self.runs = 0
@@ -240,3 +263,97 @@ async def test_no_checkpoint_ever_records_a_transition_the_label_did_not_commit(
         )
 
     assert DriverJournal(path).last_epoch(ISSUE) is None
+
+
+# --------------------------------------------------------------------------
+# The two BACKWARD edges — the cases priority-based reconciliation reverts
+# --------------------------------------------------------------------------
+#
+# ADR-0137 B6 requires these specifically, because a forward-only kill test
+# passes against the *wrong* reconciliation rule and would have let #11627's
+# most-advanced-wins repair ship looking green.
+
+
+class BackwardAdapter:
+    """A phase that moves the issue backward, as a route-back or resume does."""
+
+    def __init__(self, phase: DriverPhase, from_label: str) -> None:
+        self.phase = phase
+        self.target_label = READY_LABEL
+        self._from_label = from_label
+        self.runs = 0
+
+    async def run(self, task: Task, *, lease) -> PhaseOutcome:
+        self.runs += 1
+        return PhaseOutcome(ok=True, next_label=READY_LABEL, artifact={"back": "ok"})
+
+
+REVIEW_LABEL = "hydraflow-review"
+HITL_LABEL = "hydraflow-hitl"
+BACKWARD_STAGE_LABELS = {
+    "PLAN": PLAN_LABEL,
+    "READY": READY_LABEL,
+    "REVIEW": REVIEW_LABEL,
+    "DIAGNOSE": REVIEW_LABEL,
+    "HITL_WAIT": HITL_LABEL,
+    "HITL_APPLY": HITL_LABEL,
+}
+
+
+async def _kill_backward_edge(tmp_path, *, state: str, from_label: str, phase):
+    """Run a backward transition and kill it at the swap; return the intent."""
+    labels = KillableLabels(from_label, die_on_commit=True)
+    driver = IssueDriver(
+        issue_number=ISSUE,
+        driver_id=f"drv-{ISSUE}",
+        repo_slug="acme/widgets",
+        adapters={phase: BackwardAdapter(phase, from_label)},
+        labels=labels,
+        journal=DriverJournal(tmp_path / "driver_journal.jsonl"),
+        stage_labels=BACKWARD_STAGE_LABELS,
+        driver_state=state,
+    )
+    with pytest.raises(RuntimeError):
+        await driver.advance(_task())
+    return labels
+
+
+async def test_a_killed_route_back_leaves_an_intent_naming_the_backward_target(
+    tmp_path,
+) -> None:
+    # DIAGNOSE -> READY. Labels after the crash would be review(5) + ready(4);
+    # most-advanced-wins picks review and the route-back is silently undone.
+    # The recorded intent is what makes the backward target recoverable.
+    labels = await _kill_backward_edge(
+        tmp_path, state="DIAGNOSE", from_label=REVIEW_LABEL, phase=DriverPhase.REVIEW
+    )
+
+    assert labels.intent == (REVIEW_LABEL, READY_LABEL, 0, 0)
+
+
+async def test_a_killed_hitl_resume_leaves_an_intent_naming_the_backward_target(
+    tmp_path,
+) -> None:
+    # HITL_APPLY -> READY. hitl(6) beats ready(4) under priority, so the resume
+    # is reverted; the intent record is what survives the window.
+    labels = await _kill_backward_edge(
+        tmp_path, state="HITL_APPLY", from_label=HITL_LABEL, phase=DriverPhase.HITL
+    )
+
+    assert labels.intent == (HITL_LABEL, READY_LABEL, 0, 0)
+
+
+@pytest.mark.parametrize(
+    ("state", "from_label", "phase"),
+    [
+        ("DIAGNOSE", REVIEW_LABEL, DriverPhase.REVIEW),
+        ("HITL_APPLY", HITL_LABEL, DriverPhase.HITL),
+    ],
+)
+async def test_a_killed_backward_edge_records_no_committed_boundary(
+    tmp_path, state: str, from_label: str, phase
+) -> None:
+    path = tmp_path / "driver_journal.jsonl"
+    await _kill_backward_edge(tmp_path, state=state, from_label=from_label, phase=phase)
+
+    assert DriverJournal(path).committed_keys(ISSUE) == frozenset()
