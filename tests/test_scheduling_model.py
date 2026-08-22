@@ -59,12 +59,33 @@ def test_phase_requeue_with_fable_director_raises_as_structurally_invalid() -> N
         resolve_preset(SchedulingModel.PHASE_REQUEUE, ExecutionRuntime.FABLE_DIRECTOR)
 
 
-def test_issue_controller_with_fable_director_raises_as_unarmed() -> None:
-    # Designed but not runnable yet: the director/broker lands in #11537.
-    with pytest.raises(SchedulingCombinationError, match="unarmed"):
-        resolve_preset(
-            SchedulingModel.ISSUE_CONTROLLER, ExecutionRuntime.FABLE_DIRECTOR
-        )
+def test_issue_controller_with_fable_director_resolves_in_shadow_mode() -> None:
+    # #11535 shipped this pair UNARMED and this test pinned that it raised.
+    # #11537 landed the director and the broker, so it resolves — and what it
+    # resolves to is SHADOW mode: the deterministic controller still executes
+    # every phase, and ``director_dispatch_armed`` is the separate flip that
+    # would let a director act.
+    preset = resolve_preset(
+        SchedulingModel.ISSUE_CONTROLLER, ExecutionRuntime.FABLE_DIRECTOR
+    )
+
+    assert preset.director_dispatch_armed is False
+
+
+def test_the_fable_preset_reports_that_it_uses_a_director() -> None:
+    preset = resolve_preset(
+        SchedulingModel.ISSUE_CONTROLLER, ExecutionRuntime.FABLE_DIRECTOR
+    )
+
+    assert preset.uses_fable_director is True
+
+
+def test_the_deterministic_controller_reports_no_director() -> None:
+    preset = resolve_preset(
+        SchedulingModel.ISSUE_CONTROLLER, ExecutionRuntime.STAGE_SUBPROCESS
+    )
+
+    assert preset.uses_fable_director is False
 
 
 def test_uses_issue_driver_agrees_with_resolve_preset_for_the_classic_pair() -> None:

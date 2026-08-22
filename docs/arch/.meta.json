@@ -1,25 +1,25 @@
 {
   "artifacts": {
     "adr-assertion-density.md": {
-      "content_sha": "d1b104e6922aae6b5b6fa720754d01176fd4949c817782748386a355dfed31cd"
+      "content_sha": "19af829183c8d072318dd34f474f690df3c1e78e072b281bfc6e9cc325d03f58"
     },
     "adr-conformance.md": {
-      "content_sha": "1ec79dc5db5dd4a5bee35c173ae281cdabbd371048159bc99e45f5de365098dd"
+      "content_sha": "c2937eaa52810604be7bef97500fb7d1a58c56bdad71630e6f47ec596626e7a8"
     },
     "adr-enforcement.md": {
-      "content_sha": "fdbb1954463ed4a54835782912f3fbf36029686025fbd8bfc06fc91f8a295f89"
+      "content_sha": "c72af41633f97287a5f40615ae6f4efcde59435fa13d0867cb7b378f986053d4"
     },
     "adr-falsifiability.md": {
-      "content_sha": "68b10cdd4469a2e9e6096008d258dfeb96d610967086587d376611aca23a7db3"
+      "content_sha": "c19ea22b7ec7fa5f799d3b7c1434fe4dd8e4a22a816b7fb1f6c6b88a1a832b33"
     },
     "adr_xref.md": {
-      "content_sha": "087a146500a8658da07c855f667be6f7d2f44c5fe24d05bc0a8c51a2dc831aae"
+      "content_sha": "564d743bbed3610b2f995617162ce82a375280fcbf01d4457477abd3234079dd"
     },
     "ai_system_inventory.md": {
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
     "changelog.md": {
-      "content_sha": "5ab9977ff60f69341418751869a02af9837be5dead72ae4ecc17e9830a036056"
+      "content_sha": "50cdf790c6eaa59165d04e875ecb9db06fdca63c385af3e2f2ab717b821deb63"
     },
     "coverage_matrix.md": {
       "content_sha": "e577c48a967a117dde6114523719893b7fd4b0ab5f5cbd1802308c3df917184f"
@@ -43,7 +43,7 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "7437212120f5dd986cc66cd2d487360b414e5d0ad1b1acebddf955b686627933"
+      "content_sha": "9a708f5dacd34a6db9f34dacc9b123e84c2c78db9e511bd43ab74ed74c59f7da"
     },
     "ports.md": {
       "content_sha": "c5694cc02e165570a5196a4f9443170f984d254d68710cbe41856bdd4da64cc0"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "96aef6a0ff56ff998ad870a16be5158a8fcf3660d5ccdb02385749ac3e7221ae"
+  "content_sha": "01431499726e1fcd2271d52f7a4da4aaa5605d61ce6abe4856e35cf936b72e74"
 }

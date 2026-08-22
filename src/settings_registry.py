@@ -67,6 +67,15 @@ SETTINGS: dict[str, SettingSpec] = {
     "scheduling_model": SettingSpec("Scheduling", live=False, order=20),
     "execution_runtime": SettingSpec("Scheduling", live=False, order=21),
     "driver_max_in_flight": SettingSpec("Scheduling", live=False, order=22),
+    # --- Fable director, shadow mode (#11537) ----------------------------
+    # Same group and the same live=False reason: the director is attached to
+    # the allocator once, at boot, so a live badge would be a lie.
+    "director_turn_timeout_seconds": SettingSpec("Scheduling", live=False, order=23),
+    "director_shadow_usd_budget": SettingSpec("Scheduling", live=False, order=24),
+    # live=True, unlike its neighbours: this one is a kill switch, and a kill
+    # switch that needs a restart is not a kill switch (docs/wiki/patterns.md).
+    "director_shadow_enabled": SettingSpec("Scheduling", live=True, order=25),
+    "director_shadow_usd_ceiling": SettingSpec("Scheduling", live=True, order=26),
     # --- Models ----------------------------------------------------------
     "model": SettingSpec("Models", live=True, order=0),
     "planner_model": SettingSpec("Models", live=True, order=1),

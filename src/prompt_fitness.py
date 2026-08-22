@@ -292,6 +292,10 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     "acceptance_criteria_build": frozenset({3, 4, 5}),
     "acceptance_criteria_precheck": frozenset({2, 3, 5, 8}),
     "adr_reviewer": frozenset({3, 7}),
+    # #11537. The one entry in this table with no failures: the shadow
+    # director's capsule prompt was written against the rubric rather than
+    # baselined against its own first draft, which is what the rubric is for.
+    "director_capsule_turn": frozenset(),
     "adversarial_agent_compose": frozenset({1, 3, 4}),
     "agent_build_prompt_first_attempt": frozenset({1}),
     "agent_build_prompt_with_prior_failure": frozenset({1}),

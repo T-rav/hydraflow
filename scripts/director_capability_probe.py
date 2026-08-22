@@ -59,6 +59,21 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
+# The sandbox contract itself lives in ``src/director_sandbox.py`` — #11537 gave
+# it a production consumer, so the probe consumes the same definitions rather
+# than keeping a second copy that could drift from the runtime it certifies.
+# Re-exported here because this module's public surface is what the probe tests
+# and the ADR both cite.
+from director_sandbox import (  # noqa: E402 — must follow the sys.path insert
+    DIRECTOR_DENIED_TOOLS,
+    DIRECTOR_ENV_ALLOWLIST,
+    build_scrubbed_env,
+    captured_session_id,
+    last_init_frame,
+    parse_stream_json,
+    turn_failed,
+)
+
 DIRECTOR_PROBE_SCHEMA_VERSION = 1
 
 TURN_TIMED_OUT = -1
@@ -68,26 +83,8 @@ _SHA256_DIGEST_BYTES = 32
 """A retained key record must hold exactly a SHA-256 digest, never the token."""
 
 # --------------------------------------------------------------------------
-# The environment allow-list — the whole scrub contract, in one place.
+# Sanitization grammar — the probe's own, since the artifact is the probe's.
 # --------------------------------------------------------------------------
-
-DIRECTOR_ENV_ALLOWLIST: frozenset[str] = frozenset(
-    {
-        "PATH",
-        "HOME",
-        "TMPDIR",
-        "LANG",
-        "LC_ALL",
-        "CLAUDE_CONFIG_DIR",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_AUTH_TOKEN",
-    }
-)
-"""Every variable the director process is permitted to see.
-
-``ANTHROPIC_BASE_URL`` / ``ANTHROPIC_AUTH_TOKEN`` carry the *virtual* gateway
-key only. A real upstream provider key must never occupy them.
-"""
 
 _SECRET_NAME_PATTERN = re.compile(
     r"(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|COOKIE|SESSION)", re.IGNORECASE
@@ -114,39 +111,6 @@ exists to avoid recording), any long hex run (digests, key ids), and the common
 token prefixes. Sanitization is claimed to be enforced by the schema rather than
 by discipline, so it has to actually hold.
 """
-
-# Tool names the CLI advertises today plus the two it does NOT advertise but
-# still enables (Glob, Grep — discovered by the #11533 probe). The list is a
-# *starting* deny-list; the load-bearing check is the observed-empty assertion
-# in :func:`_probe_tool_surface`, never this list's completeness.
-DIRECTOR_DENIED_TOOLS: tuple[str, ...] = (
-    "Task",
-    "Bash",
-    "CronCreate",
-    "CronDelete",
-    "CronList",
-    "DesignSync",
-    "Edit",
-    "EnterWorktree",
-    "ExitWorktree",
-    "NotebookEdit",
-    "Read",
-    "ReportFindings",
-    "ScheduleWakeup",
-    "SendMessage",
-    "Skill",
-    "TaskOutput",
-    "TaskStop",
-    "ToolSearch",
-    "WebFetch",
-    "WebSearch",
-    "Workflow",
-    "Write",
-    "Glob",
-    "Grep",
-    "LS",
-    "TodoWrite",
-)
 
 
 class ProofName(StrEnum):
@@ -259,39 +223,6 @@ class ProbeEvidence(BaseModel):
 # --------------------------------------------------------------------------
 
 
-def build_scrubbed_env(
-    source_env: dict[str, str],
-    *,
-    home: str,
-    config_dir: str,
-    gateway_base_url: str | None = None,
-    gateway_token: str | None = None,
-) -> dict[str, str]:
-    """Build the director's environment from an allow-list, never a deny-list.
-
-    Only :data:`DIRECTOR_ENV_ALLOWLIST` names survive from *source_env*, and
-    ``HOME`` / ``CLAUDE_CONFIG_DIR`` are overwritten with the disposable
-    sandbox paths. Any provider credential inherited from the operator's shell
-    is dropped rather than forwarded: the sole credential the director may hold
-    is the short-lived virtual key passed explicitly here.
-    """
-    scrubbed = {
-        key: value
-        for key, value in source_env.items()
-        if key in DIRECTOR_ENV_ALLOWLIST and key not in {"ANTHROPIC_AUTH_TOKEN"}
-    }
-    scrubbed["HOME"] = home
-    scrubbed["CLAUDE_CONFIG_DIR"] = config_dir
-    scrubbed.setdefault("PATH", os.defpath)
-    if gateway_base_url is not None:
-        scrubbed["ANTHROPIC_BASE_URL"] = gateway_base_url
-    else:
-        scrubbed.pop("ANTHROPIC_BASE_URL", None)
-    if gateway_token is not None:
-        scrubbed["ANTHROPIC_AUTH_TOKEN"] = gateway_token
-    return scrubbed
-
-
 def leaked_secret_names(env: dict[str, str]) -> list[str]:
     """Names in *env* that look like credentials but are not the virtual key."""
     return sorted(
@@ -299,28 +230,6 @@ def leaked_secret_names(env: dict[str, str]) -> list[str]:
         for name in env
         if _SECRET_NAME_PATTERN.search(name) and name != "ANTHROPIC_AUTH_TOKEN"
     )
-
-
-def parse_stream_json(raw: str) -> list[dict[str, Any]]:
-    """Parse the CLI's ``stream-json`` output strictly — one JSON object per line.
-
-    Raises on the first unparseable non-blank line. A director that tolerates
-    junk framing would let a banner line or a partial write masquerade as a
-    command.
-    """
-    frames: list[dict[str, Any]] = []
-    for number, line in enumerate(raw.splitlines(), start=1):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            frame = json.loads(stripped)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"unframed output at line {number}: {exc}") from exc
-        if not isinstance(frame, dict):
-            raise ValueError(f"line {number} is not a JSON object")
-        frames.append(frame)
-    return frames
 
 
 def _frames_or_empty(raw: str) -> list[dict[str, Any]]:
@@ -336,42 +245,6 @@ def _frames_or_empty(raw: str) -> list[dict[str, Any]]:
         return parse_stream_json(raw)
     except ValueError:
         return []
-
-
-def turn_failed(frames: list[dict[str, Any]]) -> bool:
-    """True when the turn failed, keyed on ``is_error`` — never on ``subtype``.
-
-    The #11533 probe observed ``result.subtype == "success"`` alongside
-    ``result.is_error is True`` for both an authentication failure and a
-    connection refusal. Keying success on ``subtype`` is fail-open; ``is_error``
-    is the authoritative field.
-    """
-    for frame in frames:
-        if frame.get("type") == "result":
-            return bool(frame.get("is_error"))
-    return True
-
-
-def last_init_frame(frames: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Return the final ``system/init`` frame, tolerating repeats.
-
-    A single turn emitted eleven init frames under upstream retry during the
-    #11533 probe. A parser that assumes exactly one init frame breaks; the last
-    one describes the session that actually proceeded.
-    """
-    inits = [
-        f for f in frames if f.get("type") == "system" and f.get("subtype") == "init"
-    ]
-    return inits[-1] if inits else None
-
-
-def captured_session_id(frames: list[dict[str, Any]]) -> str | None:
-    """Vendor session id from any frame that carries one."""
-    for frame in frames:
-        session_id = frame.get("session_id")
-        if isinstance(session_id, str) and session_id:
-            return session_id
-    return None
 
 
 def describe_id_shape(value: str | None) -> str:
