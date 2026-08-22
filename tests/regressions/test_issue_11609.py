@@ -215,3 +215,72 @@ class TestSignalSurvivesTheWholeGivingUpPath:
         )
 
         assert result == []
+
+
+class TestTheReraiseDoesNotStrandTheIssueItWasGating:
+    """Making a total function raise is a contract change for its callers.
+
+    ``ImplementPhase._supply_live`` pulls one issue with
+    ``get_implementable(1)`` — which splices it out of the ready queue AND
+    stamps it into ``IssueStore._in_flight``, an in-memory map that only a
+    full orchestrator reset clears — and released that claim on the
+    ``if not gated:`` path. Once the gate re-raises, that path is skipped and
+    the enclosing ``finally`` only re-enqueues dispatch-overlap holds, so the
+    issue being gated at the moment credit ran out would be invisible to
+    ``get_implementable`` forever. A real ``IssueStore`` is used here so the
+    claim is observed, not mocked.
+    """
+
+    @pytest.mark.asyncio
+    async def test_credit_exhaustion_mid_gate_leaves_no_stranded_claim(
+        self, tmp_path: Path
+    ) -> None:
+        from unittest.mock import AsyncMock as _AsyncMock  # noqa: PLC0415
+
+        from events import EventBus  # noqa: PLC0415
+        from implement_phase import ImplementPhase  # noqa: PLC0415
+        from issue_store import IssueStore  # noqa: PLC0415
+        from tests.helpers import ConfigFactory, make_implement_phase  # noqa: PLC0415
+
+        config = ConfigFactory.create(
+            repo_root=tmp_path / "repo",
+            workspace_base=tmp_path / "wt",
+            state_file=tmp_path / "state.json",
+        )
+        issue = Task(id=_ISSUE, title="t", body="b")
+        phase, _wt, _prs = make_implement_phase(config, [issue])
+
+        # Swap the helper's mock store for a real one holding the issue at
+        # ready, so the in-flight claim is the real thing.
+        fetcher = _AsyncMock()
+        fetcher.fetch_all = _AsyncMock(return_value=[])
+        store = IssueStore(config, fetcher, EventBus())
+        store.enqueue_transition(issue, "ready")
+        phase._store = store
+
+        exc = CreditExhaustedError("credit balance too low")
+
+        class _RaisingGate:
+            enabled = True
+
+            async def filter_and_route(self, issues, stage):
+                del issues, stage
+                raise exc
+
+        phase._precondition_gate = _RaisingGate()
+
+        assert isinstance(phase, ImplementPhase)
+        with pytest.raises(CreditExhaustedError):
+            await phase.run_batch()
+
+        # The in-flight claim is what matters: `_route_incoming_tasks` skips
+        # any issue still in `_in_flight`, so a leaked claim makes the next
+        # GitHub refresh unable to re-admit the issue — permanently, since
+        # only a full orchestrator reset clears that map.
+        assert _ISSUE not in store._in_flight
+
+        # Proof of re-admission: the next refresh puts it back on ready, so
+        # the issue resumes once the orchestrator's credit pause lifts.
+        refetched = Task(id=_ISSUE, title="t", body="b", tags=[config.ready_label[0]])
+        store._route_issues([refetched])
+        assert store.get_implementable(1) == [refetched]

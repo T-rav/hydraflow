@@ -435,9 +435,25 @@ class ImplementPhase:
                         if not batch:
                             return []
                         if self._precondition_gate is not None:
-                            gated = await self._precondition_gate.filter_and_route(
-                                batch, Stage.READY
-                            )
+                            try:
+                                gated = await self._precondition_gate.filter_and_route(
+                                    batch, Stage.READY
+                                )
+                            except BaseException:
+                                # The gate re-raises credit exhaustion and real
+                                # bugs rather than swallowing them (#11609), so
+                                # this call is no longer total. ``batch`` is
+                                # already spliced out of the ready queue and
+                                # stamped in ``_in_flight`` — an in-memory map
+                                # only a full orchestrator reset clears — so
+                                # without this release the issue being gated
+                                # when credit runs out is invisible to
+                                # ``get_implementable`` forever. The ``finally``
+                                # below only re-enqueues ``held``.
+                                release_batch_in_flight(
+                                    self._store, {t.id for t in batch}
+                                )
+                                raise
                             if not gated:
                                 # Gate failure: filter_and_route already routed
                                 # it back. Release the in-flight claim
