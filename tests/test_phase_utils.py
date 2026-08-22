@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sys
-from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,7 +12,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from adr_utils import next_adr_number
 from events import EventType
 from exception_classify import LIKELY_BUG_EXCEPTIONS
 from harness_insights import FailureCategory, HarnessInsightStore
@@ -647,71 +645,10 @@ class TestPublishReviewStatus:
 
 
 # ---------------------------------------------------------------------------
-# next_adr_number
+# next_adr_number lives in adr_utils; its tests live with it, in
+# tests/test_adr_utils.py::TestNextAdrNumber (the copy that used to sit here
+# was a verbatim leftover from before the move).
 # ---------------------------------------------------------------------------
-
-
-class TestNextAdrNumber:
-    @pytest.fixture(autouse=True)
-    def _clear_assigned(self) -> Generator[None, None, None]:
-        """Reset the module-level assigned set before and after each test."""
-        import adr_utils
-
-        adr_utils._assigned_adr_numbers.clear()
-        yield
-        adr_utils._assigned_adr_numbers.clear()
-
-    def test_returns_one_for_empty_dir(self, tmp_path: Path) -> None:
-        assert next_adr_number(tmp_path) == 1
-
-    def test_returns_one_for_missing_dir(self, tmp_path: Path) -> None:
-        assert next_adr_number(tmp_path / "nonexistent") == 1
-
-    def test_increments_past_highest(self, tmp_path: Path) -> None:
-        (tmp_path / "0001-first.md").touch()
-        (tmp_path / "0003-third.md").touch()
-        assert next_adr_number(tmp_path) == 4
-
-    def test_ignores_non_adr_files(self, tmp_path: Path) -> None:
-        (tmp_path / "0005-fifth.md").touch()
-        (tmp_path / "README.md").touch()
-        (tmp_path / "template.md").touch()
-        assert next_adr_number(tmp_path) == 6
-
-    def test_concurrent_calls_return_unique_numbers(self, tmp_path: Path) -> None:
-        """Simulate concurrent workers — each call must return a distinct number."""
-        (tmp_path / "0002-existing.md").touch()
-        results = [next_adr_number(tmp_path) for _ in range(5)]
-        assert results == [3, 4, 5, 6, 7]
-
-    def test_scans_primary_adr_dir(self, tmp_path: Path) -> None:
-        """The primary repo dir should be checked even if the local dir differs."""
-        local = tmp_path / "worktree" / "docs" / "adr"
-        local.mkdir(parents=True)
-        (local / "0001-local.md").touch()
-
-        primary = tmp_path / "primary" / "docs" / "adr"
-        primary.mkdir(parents=True)
-        (primary / "0010-primary.md").touch()
-
-        result = next_adr_number(local, primary_adr_dir=primary)
-        assert result == 11
-
-    def test_assigned_set_tracks_numbers(self, tmp_path: Path) -> None:
-        """Returned numbers must be recorded in the module-level set."""
-        import adr_utils
-
-        next_adr_number(tmp_path)
-        next_adr_number(tmp_path)
-        assert adr_utils._assigned_adr_numbers == {1, 2}
-
-    def test_assigned_numbers_override_disk(self, tmp_path: Path) -> None:
-        """Previously assigned numbers beat what's on disk."""
-        import adr_utils
-
-        adr_utils._assigned_adr_numbers.add(20)
-        result = next_adr_number(tmp_path)
-        assert result == 21
 
 
 # ---------------------------------------------------------------------------

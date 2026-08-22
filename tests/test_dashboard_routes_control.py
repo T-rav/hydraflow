@@ -584,24 +584,75 @@ class TestBgWorkerIntervalEndpoint:
         mock_orch.set_bg_worker_interval.assert_called_once_with("metrics", 1800)
 
     @pytest.mark.asyncio
-    async def test_interval_rejects_below_minimum_for_pr_unsticker(
-        self, _endpoint
+    @pytest.mark.parametrize(
+        ("payload", "status", "error_fragment"),
+        [
+            # Each loop carries its own (min, max) bound — both ends are pinned.
+            pytest.param(
+                {"name": "pr_unsticker", "interval_seconds": 30},
+                422,
+                "between 60 and 86400",
+                id="below_minimum_for_pr_unsticker",
+            ),
+            pytest.param(
+                {"name": "pr_unsticker", "interval_seconds": 100000},
+                422,
+                "between 60 and 86400",
+                id="above_maximum_for_pr_unsticker",
+            ),
+            pytest.param(
+                {"name": "pipeline_poller", "interval_seconds": 2},
+                422,
+                "between 5 and 14400",
+                id="below_minimum_for_pipeline_poller",
+            ),
+            pytest.param(
+                {"name": "pipeline_poller", "interval_seconds": 20000},
+                422,
+                "between 5 and 14400",
+                id="above_maximum_for_pipeline_poller",
+            ),
+            pytest.param(
+                {"name": "metrics", "interval_seconds": 10},
+                422,
+                "between 30 and 14400",
+                id="below_minimum_for_metrics",
+            ),
+            pytest.param(
+                {"name": "metrics", "interval_seconds": 20000},
+                422,
+                "between 30 and 14400",
+                id="above_maximum_for_metrics",
+            ),
+            pytest.param(
+                {"name": "adr_reviewer", "interval_seconds": 3600},
+                422,
+                "between 28800 and 432000",
+                id="below_minimum_for_adr_reviewer",
+            ),
+            pytest.param(
+                {"name": "adr_reviewer", "interval_seconds": 500000},
+                422,
+                "between 28800 and 432000",
+                id="above_maximum_for_adr_reviewer",
+            ),
+            # A worker with no interval knob is a 400, not an out-of-range 422.
+            pytest.param(
+                {"name": "triage", "interval_seconds": 3600},
+                400,
+                "not editable",
+                id="non_editable_worker",
+            ),
+        ],
+    )
+    async def test_interval_rejects(
+        self, _endpoint, payload: dict, status: int, error_fragment: str
     ) -> None:
         endpoint, _ = _endpoint
-        response = await endpoint({"name": "pr_unsticker", "interval_seconds": 30})
+        response = await endpoint(payload)
         data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 60 and 86400" in data["error"]
-
-    @pytest.mark.asyncio
-    async def test_interval_rejects_above_maximum_for_pr_unsticker(
-        self, _endpoint
-    ) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint({"name": "pr_unsticker", "interval_seconds": 100000})
-        data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 60 and 86400" in data["error"]
+        assert response.status_code == status
+        assert error_fragment in data["error"]
 
     @pytest.mark.asyncio
     async def test_interval_update_succeeds_for_pipeline_poller(
@@ -617,36 +668,6 @@ class TestBgWorkerIntervalEndpoint:
         mock_orch.set_bg_worker_interval.assert_called_once_with(
             "pipeline_poller", 3600
         )
-
-    @pytest.mark.asyncio
-    async def test_interval_rejects_below_minimum_for_pipeline_poller(
-        self, _endpoint
-    ) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint({"name": "pipeline_poller", "interval_seconds": 2})
-        data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 5 and 14400" in data["error"]
-
-    @pytest.mark.asyncio
-    async def test_interval_rejects_above_maximum_for_pipeline_poller(
-        self, _endpoint
-    ) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint(
-            {"name": "pipeline_poller", "interval_seconds": 20000}
-        )
-        data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 5 and 14400" in data["error"]
-
-    @pytest.mark.asyncio
-    async def test_interval_rejects_non_editable_worker(self, _endpoint) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint({"name": "triage", "interval_seconds": 3600})
-        data = json.loads(response.body)
-        assert response.status_code == 400
-        assert "not editable" in data["error"]
 
     @pytest.mark.asyncio
     async def test_interval_rejects_missing_name(self, _endpoint) -> None:
@@ -686,22 +707,6 @@ class TestBgWorkerIntervalEndpoint:
         assert data["error"] == "no orchestrator"
 
     @pytest.mark.asyncio
-    async def test_interval_rejects_below_minimum_for_metrics(self, _endpoint) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint({"name": "metrics", "interval_seconds": 10})
-        data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 30 and 14400" in data["error"]
-
-    @pytest.mark.asyncio
-    async def test_interval_rejects_above_maximum_for_metrics(self, _endpoint) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint({"name": "metrics", "interval_seconds": 20000})
-        data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 30 and 14400" in data["error"]
-
-    @pytest.mark.asyncio
     async def test_interval_update_succeeds_for_adr_reviewer(self, _endpoint) -> None:
         endpoint, mock_orch = _endpoint
         response = await endpoint({"name": "adr_reviewer", "interval_seconds": 86400})
@@ -711,26 +716,6 @@ class TestBgWorkerIntervalEndpoint:
         assert data["name"] == "adr_reviewer"
         assert data["interval_seconds"] == 86400
         mock_orch.set_bg_worker_interval.assert_called_once_with("adr_reviewer", 86400)
-
-    @pytest.mark.asyncio
-    async def test_interval_rejects_below_minimum_for_adr_reviewer(
-        self, _endpoint
-    ) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint({"name": "adr_reviewer", "interval_seconds": 3600})
-        data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 28800 and 432000" in data["error"]
-
-    @pytest.mark.asyncio
-    async def test_interval_rejects_above_maximum_for_adr_reviewer(
-        self, _endpoint
-    ) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint({"name": "adr_reviewer", "interval_seconds": 500000})
-        data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 28800 and 432000" in data["error"]
 
     def test_interval_bounds_importable_from_module(self) -> None:
         """_INTERVAL_BOUNDS should be a module-level constant, not closure-scoped."""
@@ -793,32 +778,38 @@ class TestBgWorkerWatchdogTimeoutEndpoint:
         mock_orch.set_bg_worker_timeout.assert_called_once_with("pr_unsticker", 5400)
 
     @pytest.mark.asyncio
-    async def test_watchdog_timeout_rejects_below_minimum(self, _endpoint) -> None:
+    @pytest.mark.parametrize(
+        ("payload", "status", "error_fragment"),
+        [
+            pytest.param(
+                {"name": "pr_unsticker", "watchdog_timeout_seconds": 10},
+                422,
+                "between 60 and 43200",
+                id="below_minimum",
+            ),
+            pytest.param(
+                {"name": "pr_unsticker", "watchdog_timeout_seconds": 100000},
+                422,
+                "between 60 and 43200",
+                id="above_maximum",
+            ),
+            # A non-loop worker has no watchdog to retime: 400, not an out-of-range 422.
+            pytest.param(
+                {"name": "triage", "watchdog_timeout_seconds": 3600},
+                400,
+                "not editable",
+                id="non_loop_worker",
+            ),
+        ],
+    )
+    async def test_watchdog_timeout_rejects(
+        self, _endpoint, payload: dict, status: int, error_fragment: str
+    ) -> None:
         endpoint, _ = _endpoint
-        response = await endpoint(
-            {"name": "pr_unsticker", "watchdog_timeout_seconds": 10}
-        )
+        response = await endpoint(payload)
         data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 60 and 43200" in data["error"]
-
-    @pytest.mark.asyncio
-    async def test_watchdog_timeout_rejects_above_maximum(self, _endpoint) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint(
-            {"name": "pr_unsticker", "watchdog_timeout_seconds": 100000}
-        )
-        data = json.loads(response.body)
-        assert response.status_code == 422
-        assert "between 60 and 43200" in data["error"]
-
-    @pytest.mark.asyncio
-    async def test_watchdog_timeout_rejects_non_loop_worker(self, _endpoint) -> None:
-        endpoint, _ = _endpoint
-        response = await endpoint({"name": "triage", "watchdog_timeout_seconds": 3600})
-        data = json.loads(response.body)
-        assert response.status_code == 400
-        assert "not editable" in data["error"]
+        assert response.status_code == status
+        assert error_fragment in data["error"]
 
     @pytest.mark.asyncio
     async def test_watchdog_timeout_rejects_principles_audit(self, _endpoint) -> None:

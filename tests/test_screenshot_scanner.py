@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from screenshot_scanner import scan_base64_for_secrets
@@ -16,35 +18,82 @@ class TestScanBase64ForSecrets:
         result = scan_base64_for_secrets("iVBORw0KGgoAAAANSUhEUgAA")
         assert result == []
 
-    def test_github_pat_classic_detected(self) -> None:
-        """A GitHub PAT (classic) pattern is detected."""
-        payload = "some data ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl more data"
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            pytest.param(
+                "some data ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl more data",
+                "GitHub PAT (classic)",
+                id="github_pat_classic_detected",
+            ),
+            pytest.param(
+                "github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop more",
+                "GitHub PAT (fine-grained)",
+                id="github_pat_fine_grained_detected",
+            ),
+            pytest.param(
+                "AKIAIOSFODNN7EXAMPLE more",
+                "AWS access key",
+                id="aws_access_key_detected",
+            ),
+            pytest.param(
+                "xoxb-123456789-abcdefghijk more",
+                "Slack token",
+                id="slack_token_detected",
+            ),
+            pytest.param(
+                "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWX more",
+                "Anthropic API key",
+                id="anthropic_api_key_detected",
+            ),
+            pytest.param(
+                "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIB more",
+                "Generic private key",
+                id="private_key_header_detected",
+            ),
+            pytest.param(
+                'secret: "my_super_secret_value"',
+                "Generic secret assignment",
+                id="generic_secret_assignment_detected",
+            ),
+            pytest.param(
+                "gho_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl",
+                "GitHub OAuth token",
+                id="github_oauth_token_detected",
+            ),
+            pytest.param(
+                "ghu_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl",
+                "GitHub App token",
+                id="github_app_token_detected",
+            ),
+            pytest.param(
+                "ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl",
+                "GitHub App installation",
+                id="github_app_installation_token_detected",
+            ),
+            pytest.param(
+                "ghr_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl",
+                "GitHub refresh token",
+                id="github_refresh_token_detected",
+            ),
+            # OpenSSH headers must land on the same generic-private-key label as PEM.
+            pytest.param(
+                "-----BEGIN OPENSSH PRIVATE KEY-----\nbase64data",
+                "Generic private key",
+                id="openssh_private_key_detected",
+            ),
+            # Upper-case assignment: secret-assignment matching is case-insensitive.
+            pytest.param(
+                'PASSWORD="supersecretpassword1"',
+                "Generic secret assignment",
+                id="case_insensitive_secret_assignment",
+            ),
+        ],
+    )
+    def test_secret_pattern_detected(self, payload: str, expected: str) -> None:
+        """Each supported secret shape is recognised and labelled."""
         result = scan_base64_for_secrets(payload)
-        assert "GitHub PAT (classic)" in result
-
-    def test_github_pat_fine_grained_detected(self) -> None:
-        """A fine-grained GitHub PAT is detected."""
-        payload = "github_pat_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop more"
-        result = scan_base64_for_secrets(payload)
-        assert "GitHub PAT (fine-grained)" in result
-
-    def test_aws_access_key_detected(self) -> None:
-        """An AWS access key is detected."""
-        payload = "AKIAIOSFODNN7EXAMPLE more"
-        result = scan_base64_for_secrets(payload)
-        assert "AWS access key" in result
-
-    def test_slack_token_detected(self) -> None:
-        """A Slack token is detected."""
-        payload = "xoxb-123456789-abcdefghijk more"
-        result = scan_base64_for_secrets(payload)
-        assert "Slack token" in result
-
-    def test_anthropic_api_key_detected(self) -> None:
-        """An Anthropic API key is detected."""
-        payload = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWX more"
-        result = scan_base64_for_secrets(payload)
-        assert "Anthropic API key" in result
+        assert expected in result
 
     def test_openai_api_key_detected(self) -> None:
         """A realistic 48-char OpenAI API key is detected.
@@ -58,18 +107,6 @@ class TestScanBase64ForSecrets:
         result = scan_base64_for_secrets(payload)
         assert "OpenAI API key" in result
 
-    def test_private_key_header_detected(self) -> None:
-        """A PEM private key header is detected."""
-        payload = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIB more"
-        result = scan_base64_for_secrets(payload)
-        assert "Generic private key" in result
-
-    def test_generic_secret_assignment_detected(self) -> None:
-        """A generic secret assignment pattern is detected."""
-        payload = 'secret: "my_super_secret_value"'
-        result = scan_base64_for_secrets(payload)
-        assert "Generic secret assignment" in result
-
     def test_multiple_secrets_returns_all(self) -> None:
         """Multiple different secret types in the same payload are all reported."""
         payload = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl AKIAIOSFODNN7EXAMPLE"
@@ -82,39 +119,3 @@ class TestScanBase64ForSecrets:
         """An empty string returns an empty list."""
         result = scan_base64_for_secrets("")
         assert result == []
-
-    def test_github_oauth_token_detected(self) -> None:
-        """GitHub OAuth token pattern is detected."""
-        payload = "gho_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl"
-        result = scan_base64_for_secrets(payload)
-        assert "GitHub OAuth token" in result
-
-    def test_github_app_token_detected(self) -> None:
-        """GitHub App user-to-server token is detected."""
-        payload = "ghu_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl"
-        result = scan_base64_for_secrets(payload)
-        assert "GitHub App token" in result
-
-    def test_github_app_installation_token_detected(self) -> None:
-        """GitHub App installation token is detected."""
-        payload = "ghs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl"
-        result = scan_base64_for_secrets(payload)
-        assert "GitHub App installation" in result
-
-    def test_github_refresh_token_detected(self) -> None:
-        """GitHub refresh token is detected."""
-        payload = "ghr_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl"
-        result = scan_base64_for_secrets(payload)
-        assert "GitHub refresh token" in result
-
-    def test_openssh_private_key_detected(self) -> None:
-        """An OpenSSH private key header is detected."""
-        payload = "-----BEGIN OPENSSH PRIVATE KEY-----\nbase64data"
-        result = scan_base64_for_secrets(payload)
-        assert "Generic private key" in result
-
-    def test_case_insensitive_secret_assignment(self) -> None:
-        """Secret assignment detection is case-insensitive."""
-        payload = 'PASSWORD="supersecretpassword1"'
-        result = scan_base64_for_secrets(payload)
-        assert "Generic secret assignment" in result
