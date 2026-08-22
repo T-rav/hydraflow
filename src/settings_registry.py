@@ -172,6 +172,14 @@ SETTINGS: dict[str, SettingSpec] = {
     "event_loop_watchdog_hard_restart": SettingSpec(
         "Event-Loop Watchdog", live=True, order=2
     ),
+    # #11604 escalation gates on the DESTRUCTIVE path only — both re-read at
+    # trip time, so tuning them never needs a restart.
+    "event_loop_watchdog_restart_after_episodes": SettingSpec(
+        "Event-Loop Watchdog", live=True, order=3
+    ),
+    "event_loop_watchdog_starvation_service_ratio": SettingSpec(
+        "Event-Loop Watchdog", live=True, order=4
+    ),
     # --- Goal Supervisor (Tier-2 liveness, ADR-0124) ----------------------
     # enabled: deploy-time kill-switch (captured at startup → restart badge).
     # interval: the cadence is re-read via interval_cb each cycle → live.

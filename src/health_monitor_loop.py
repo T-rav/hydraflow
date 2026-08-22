@@ -1753,6 +1753,14 @@ class HealthMonitorLoop(BaseBackgroundLoop):
         dump_path = marker.get("dump_path", "unknown")
         episodes = marker.get("episode_count", 1)
         hard_restart = marker.get("hard_restart", False)
+        # #11604 attribution: was the loop wedged, or was the HOST starving
+        # the whole process? Restarting the second class makes it worse, so
+        # the watchdog records its verdict and the operator needs to see it
+        # before chasing the frame in the stack dump.
+        verdict = marker.get("verdict", "unknown")
+        decision = marker.get("restart_decision", "unknown")
+        service_ratio = marker.get("observer_service_ratio", "?")
+        cpu_fraction = marker.get("process_cpu_fraction", "?")
         title = (
             f"event-loop-stalled: process event loop froze synchronously "
             f"for {stalled_for}s"
@@ -1770,15 +1778,28 @@ class HealthMonitorLoop(BaseBackgroundLoop):
             f"- Detected at: `{detected_at}`\n"
             f"- Freeze episodes before this escalation: `{episodes}`\n"
             f"- All-thread stack dump: `{dump_path}`\n"
-            f"- Hard restart was enabled at trip time: `{hard_restart}`\n\n"
+            f"- Hard restart was enabled at trip time: `{hard_restart}`\n"
+            f"- Verdict: `{verdict}` — restart decision `{decision}`\n"
+            f"- Watchdog observer service ratio: `{service_ratio}` "
+            f"(1.0 = the watchdog thread kept its own poll cadence); "
+            f"process CPU per wall-second: `{cpu_fraction}`\n\n"
             f"### Operator playbook\n"
-            f"1. Open the stack dump above — the frozen loop thread's top "
-            f"Python frame IS the offending synchronous call site.\n"
-            f"2. Move that call off-loop (`asyncio.create_subprocess_exec`, "
+            f"1. Read the verdict first (#11604). `starved` means the HOST "
+            f"was oversubscribed and the watchdog thread lost its own "
+            f"schedule too — the loop was not wedged, the stack frame below "
+            f"is just where it happened to be, and no code fix is implied. "
+            f"`blocked` / `blocked_spin` mean the loop really did stop while "
+            f"the observer kept running.\n"
+            f"2. For a `blocked` verdict, open the stack dump above — the "
+            f"frozen loop thread's top Python frame IS the offending "
+            f"synchronous call site.\n"
+            f"3. Move that call off-loop (`asyncio.create_subprocess_exec`, "
             f"`run_in_executor`) and file/fix accordingly.\n"
-            f"3. For recovery-in-place next time, consider enabling "
+            f"4. For recovery-in-place next time, consider enabling "
             f"`event_loop_watchdog_hard_restart` in the **System** tab "
-            f"(requires a process supervisor with Restart=always).\n\n"
+            f"(requires a process supervisor with Restart=always). The "
+            f"destructive path additionally requires a non-`starved` verdict "
+            f"and `event_loop_watchdog_restart_after_episodes` episodes.\n\n"
             f"_Auto-filed by HydraFlow `health_monitor` (event-loop freeze "
             f"escalation, #9552)._"
         )

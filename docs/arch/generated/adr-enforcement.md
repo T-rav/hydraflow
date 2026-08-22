@@ -85,7 +85,7 @@ By declared `**Enforcement:**` kind: `enforced` 79 · `manual` 3 · `decision-of
 | ADR-0102 | REAL | — | enforced | `pytest:tests/test_review_phase_core.py` |
 | ADR-0103 | REAL | — | enforced | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | REAL | — | enforced | `pytest:tests/test_auto_tighten_invariant.py` |
-| ADR-0106 | REAL | — | enforced | `pytest:tests/regressions/test_issue_9552.py` |
+| ADR-0106 | REAL | — | enforced | `pytest:tests/regressions/test_issue_9552.py`, `pytest:tests/regressions/test_issue_11604.py` |
 | ADR-0107 | REAL | — | enforced | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
 | ADR-0109 | REAL | — | enforced | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | REAL | — | enforced | `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` |
@@ -167,7 +167,6 @@ REAL ADRs whose cited test resolves and asserts, but whose text never names the 
 | ADR-0097 | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
 | ADR-0102 | `pytest:tests/test_review_phase_core.py` |
 | ADR-0104 | `pytest:tests/test_auto_tighten_invariant.py` |
-| ADR-0106 | `pytest:tests/regressions/test_issue_9552.py` |
 | ADR-0109 | `pytest:tests/test_ultra_review.py` |
 | ADR-0111 | `pytest:tests/test_flows.py` |
 | ADR-0117 | `pytest:tests/test_prompt_observatory.py` |

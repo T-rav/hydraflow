@@ -83,7 +83,7 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0102 | Convergence gate general availability (flag removed) | 100% | 1 | 0 |
 | ADR-0103 | Continuous Human-on-the-Loop Steering Channel | 100% | 6 | 0 |
 | ADR-0104 | Auto-tightening ratchet | 100% | 1 | 0 |
-| ADR-0106 | Thread-level event-loop freeze detector | 100% | 1 | 0 |
+| ADR-0106 | Thread-level event-loop freeze detector | 100% | 2 | 0 |
 | ADR-0107 | Collapse Discover + Shape into Plan — Triage → Plan Directly | 100% | 1 | 0 |
 | ADR-0109 | Opt-in "ultra" deep-review tier for the review phase | 100% | 1 | 0 |
 | ADR-0110 | Provider/Harness Backend Split — z.ai as a Claude-harness backend | 100% | 1 | 0 |
