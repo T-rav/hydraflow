@@ -6,8 +6,7 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `6e48915` — fix(driver): close the last doc residues and the provenance sliver (#11533) (#11533) *(2026-08-22)*
-- `341aa80` — fix(driver): correct the B1 reconciliation rule and harden the P0 contracts (#11533) (#11533) *(2026-08-22)*
+- `798cdd2` — fix(driver): correct the B1 reconciliation rule and harden the P0 contracts (#11533) (#11632) (#11632) *(2026-08-21)*
 - `ab3e5d1` — refactor(pr-manager,review-phase): decompose two god classes below the mass threshold (#11628) (#11628) *(2026-08-21)*
 - `e24b730` — fix(mixins): TYPE_CHECKING-only seam declarations + guard against MRO shadowing (#11631) (#11631) *(2026-08-21)*
 - `5128551` — feat(driver): ADR-0137 narrows ADR-0094, fixes driver contracts, proves the runtime boundary (#11533) (#11627) (#11627) *(2026-08-21)*

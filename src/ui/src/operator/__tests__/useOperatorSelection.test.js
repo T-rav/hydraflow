@@ -17,12 +17,19 @@ describe('readSelectionFromUrl — pure URL parse', () => {
       stage: null,
       item: null,
       mode: 'focus',
+      routingView: 'accounts',
     })
   })
 
   it('restores every selection level from a fully-qualified query', () => {
     const sel = readSelectionFromUrl('repo=acme%2Fweb&stage=plan&item=42&mode=all-active')
-    expect(sel).toEqual({ repo: 'acme/web', stage: 'plan', item: '42', mode: 'all-active' })
+    expect(sel).toEqual({
+      repo: 'acme/web',
+      stage: 'plan',
+      item: '42',
+      mode: 'all-active',
+      routingView: 'accounts',
+    })
   })
 
   it('coerces an unknown mode back to the focus default', () => {
@@ -31,6 +38,20 @@ describe('readSelectionFromUrl — pure URL parse', () => {
 
   it('accepts mode=supervisor (#11207)', () => {
     expect(readSelectionFromUrl('mode=supervisor').mode).toBe('supervisor')
+  })
+
+  it('accepts mode=routing (#11534)', () => {
+    expect(readSelectionFromUrl('mode=routing').mode).toBe('routing')
+  })
+
+  it('restores the routing sub-view from the query', () => {
+    expect(readSelectionFromUrl('mode=routing&routingView=live').routingView).toBe('live')
+  })
+
+  it('coerces an unimplemented routing sub-view back to accounts', () => {
+    // `policies` is reserved by the routing-control-plane design for a later
+    // phase; until it exists the URL must not select an empty workspace.
+    expect(readSelectionFromUrl('routingView=policies').routingView).toBe('accounts')
   })
 })
 
@@ -164,5 +185,43 @@ describe('useOperatorSelection', () => {
     expect(result.current.breadcrumb).toHaveLength(4)
     act(() => result.current.select('repo', null))
     expect(result.current.breadcrumb).toHaveLength(1)
+  })
+})
+
+describe('routing sub-view selection (#11534)', () => {
+  let originalHref
+
+  beforeEach(() => {
+    originalHref = window.location.href
+    setUrl('')
+  })
+
+  afterEach(() => {
+    window.history.replaceState({}, '', originalHref)
+  })
+
+  it('defaults to the accounts view', () => {
+    const { result } = renderHook(() => useOperatorSelection())
+    expect(result.current.routingView).toBe('accounts')
+  })
+
+  it('mirrors a selected sub-view into the URL', () => {
+    const { result } = renderHook(() => useOperatorSelection())
+    act(() => result.current.select('routingView', 'live'))
+    expect(new URLSearchParams(window.location.search).get('routingView')).toBe('live')
+  })
+
+  it('omits the default sub-view from the URL', () => {
+    setUrl('routingView=live')
+    const { result } = renderHook(() => useOperatorSelection())
+    act(() => result.current.select('routingView', 'accounts'))
+    expect(new URLSearchParams(window.location.search).get('routingView')).toBeNull()
+  })
+
+  it('does not clear the drill-down when the sub-view changes', () => {
+    setUrl('repo=acme%2Fweb&stage=plan&item=42')
+    const { result } = renderHook(() => useOperatorSelection())
+    act(() => result.current.select('routingView', 'live'))
+    expect(result.current.item).toBe('42')
   })
 })

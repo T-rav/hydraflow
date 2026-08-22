@@ -197,6 +197,7 @@ cadence and files remediation issues on drift.
 | [0135](0135-factory-as-launchd-service-operator-stop-latch.md) | Factory runs as a launchd service; operator Stop is a latch honoured by autostart and the liveness kernel | Accepted |
 | [0136](0136-adr-drift-enforcement-deterministic-citation-gate.md) | ADR drift enforcement is a deterministic cited-symbol CI gate, not a caretaker loop | Accepted |
 | [0137](0137-fenced-issue-driver-and-director-runtime-boundary.md) | Fenced IssueDriver and director runtime boundary | Accepted |
+| [0138](0138-gateway-account-identity-and-sanitized-route-visibility.md) | Gateway account identity and sanitized route visibility | Accepted |
 
 ## Adding a new ADR
 

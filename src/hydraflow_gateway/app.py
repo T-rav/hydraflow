@@ -8,12 +8,28 @@ import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from hydraflow_gateway.accounts import (
+    DEFAULT_HEALTH_WINDOW_SECONDS,
+    MAX_HEALTH_WINDOW_SECONDS,
+    MIN_HEALTH_WINDOW_SECONDS,
+    AccountsView,
+    build_accounts_view,
+)
+from hydraflow_gateway.active_routes import (
+    MAX_RECENT_LIMIT,
+    ActiveRouteRegistry,
+    ActiveRoutesView,
+    RecentRoutesView,
+    build_active_routes_view,
+    build_recent_routes_view,
+)
 from hydraflow_gateway.keys import (
     ExpiredVirtualKey,
     InvalidVirtualKey,
@@ -137,6 +153,7 @@ def create_app(
     ledger: GatewayLedger | None = None,
     body_store: GatewayBodyStore | None = None,
     pricing: ModelPricingTable | None = None,
+    active_routes: ActiveRouteRegistry | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     wall_clock: Callable[[], float] = time.time,
 ) -> FastAPI:
@@ -149,6 +166,9 @@ def create_app(
     resolved_ledger = ledger or GatewayLedger(resolved_settings.ledger_path)
     resolved_body_store = body_store or GatewayBodyStore(resolved_settings.body_dir)
     resolved_pricing = pricing or load_pricing()
+    resolved_active_routes = active_routes or ActiveRouteRegistry(
+        started_at=_as_utc(wall_clock())
+    )
     owns_client = client is None
     resolved_client = client or _build_http_client(resolved_settings)
     proxy = GatewayProxy(
@@ -157,6 +177,7 @@ def create_app(
         ledger=resolved_ledger,
         body_store=resolved_body_store,
         pricing=resolved_pricing,
+        active_routes=resolved_active_routes,
     )
 
     @asynccontextmanager
@@ -179,6 +200,9 @@ def create_app(
             reaper.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await reaper
+            # Shutdown ends every stream this process owned; no in-flight row
+            # may survive it and misreport traffic on the next read.
+            resolved_active_routes.clear()
             if owns_client:
                 await resolved_client.aclose()
 
@@ -194,6 +218,7 @@ def create_app(
     app.state.gateway_body_store = resolved_body_store
     app.state.gateway_http_client = resolved_client
     app.state.gateway_proxy = proxy
+    app.state.gateway_active_routes = resolved_active_routes
 
     @app.get("/healthz", include_in_schema=False)
     async def health() -> object:
@@ -234,6 +259,45 @@ def create_app(
     async def revoke_key(key_id: str) -> RevokeKeyResponse:
         return RevokeKeyResponse(key_id=key_id, revoked=resolved_store.revoke(key_id))
 
+    @app.get("/control/v2/accounts", response_model=AccountsView)
+    async def read_accounts(
+        window_seconds: int = Query(
+            default=DEFAULT_HEALTH_WINDOW_SECONDS,
+            ge=MIN_HEALTH_WINDOW_SECONDS,
+            le=MAX_HEALTH_WINDOW_SECONDS,
+        ),
+    ) -> AccountsView:
+        return build_accounts_view(
+            settings=resolved_settings,
+            leases=resolved_store.lease_identities(),
+            in_flight=resolved_active_routes.in_flight(),
+            recent=resolved_active_routes.recent(),
+            now=_as_utc(wall_clock()),
+            window_seconds=window_seconds,
+            evidence_since=resolved_active_routes.started_at,
+        )
+
+    @app.get("/control/v2/routes/active", response_model=ActiveRoutesView)
+    async def read_active_routes() -> ActiveRoutesView:
+        return build_active_routes_view(
+            leases=resolved_store.lease_identities(),
+            in_flight=resolved_active_routes.in_flight(),
+            now=_as_utc(wall_clock()),
+            evidence_since=resolved_active_routes.started_at,
+        )
+
+    @app.get("/control/v2/routes/recent", response_model=RecentRoutesView)
+    async def read_recent_routes(
+        limit: int = Query(default=50, ge=1, le=MAX_RECENT_LIMIT),
+    ) -> RecentRoutesView:
+        return build_recent_routes_view(
+            routes=resolved_active_routes.recent(limit=limit),
+            now=_as_utc(wall_clock()),
+            evidence_since=resolved_active_routes.started_at,
+            capacity=resolved_active_routes.recent_capacity,
+            truncated=resolved_active_routes.truncated(),
+        )
+
     @app.api_route("/{path:path}", methods=_DATA_PLANE_METHODS)
     async def passthrough(request: Request, path: str) -> object:
         del path
@@ -250,6 +314,10 @@ def create_app(
         return await proxy.forward(request, identity)
 
     return app
+
+
+def _as_utc(epoch_seconds: float) -> datetime:
+    return datetime.fromtimestamp(epoch_seconds, tz=UTC)
 
 
 def _build_http_client(settings: GatewaySettings) -> httpx.AsyncClient:

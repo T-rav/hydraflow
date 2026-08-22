@@ -153,6 +153,21 @@ class VirtualKeyStore:
         with self._lock:
             return len(self._records)
 
+    def lease_identities(self) -> tuple[GatewayIdentity, ...]:
+        """Return the non-secret identity of every unexpired key, oldest first.
+
+        Only :class:`GatewayIdentity` leaves the store: the token digest stays
+        private, and no caller can reach token material through this seam.
+        """
+        now = self._monotonic()
+        with self._lock:
+            identities = [
+                record.identity
+                for record in self._records.values()
+                if now < record.expires_at_monotonic
+            ]
+        return tuple(sorted(identities, key=lambda item: (item.issued_at, item.key_id)))
+
     def _validate_policy(self, request: MintKeyRequest) -> None:
         if request.ttl_seconds > self._max_ttl_seconds:
             raise KeyPolicyError("requested TTL exceeds the configured maximum")
