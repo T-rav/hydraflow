@@ -102,6 +102,9 @@ SETTINGS: dict[str, SettingSpec] = {
     # Repair-in-run (#11593). Live: AgentRunner._run_skill reads it via
     # getattr(config, skill.repair_config_key) on every gate evaluation.
     "test_adequacy_repair_passes": SettingSpec("CI & Quality", live=True, order=22),
+    # Demand contract (#11644). Live: skill_gate reads it via
+    # getattr(config, skill.pin_config_key) on every gate evaluation.
+    "test_adequacy_pin_demand": SettingSpec("CI & Quality", live=True, order=23),
     "test_adequacy_verifier_model": SettingSpec("Models", live=True, order=4),
     # Live: auto_pr re-reads both via trace_collector.get_active_config()
     # on every gate run (#10013), so a toggle applies to the next bot PR.

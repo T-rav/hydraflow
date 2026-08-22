@@ -116,6 +116,13 @@ class AgentSkill:
         pass_number, max_passes, **kwargs) -> str`` — builds the focused
         "write exactly these missing tests" repair prompt. Required when
         ``repair_config_key`` is set.
+    pin_config_key:
+        Name of the ``HydraFlowConfig`` boolean that arms the demand contract
+        (#11644). When set (and the field is true), a retry carrying the
+        previous attempt's findings is judged against **that** demand rather
+        than a freshly-derived one — see ``adequacy_demand.evaluate_demand``.
+        ``None`` means the skill never receives a pinned demand. Only
+        test-adequacy sets it today.
     """
 
     name: str
@@ -128,6 +135,7 @@ class AgentSkill:
     verifier: VerifierSpec | None = None
     repair_config_key: str | None = None
     repair_prompt_builder: Callable[..., str] | None = None
+    pin_config_key: str | None = None
 
 
 # Built-in skills — registered in execution order
@@ -188,6 +196,13 @@ BUILTIN_SKILLS: list[AgentSkill] = [
         # max_test_adequacy_attempts=0 still disables the gate entirely.
         repair_config_key="test_adequacy_repair_passes",
         repair_prompt_builder=build_test_adequacy_repair_prompt,
+        # Demand contract (#11644 seam 2 follow-up): the calibration measured
+        # 9 of 15 consecutive re-rejections demanding something ENTIRELY NEW
+        # (mean overlap 0.04) and 75 % of findings naming nothing locatable, so
+        # an implementer could satisfy the stated bar and be rejected anyway.
+        # With this armed, a retry is judged against the demand the previous
+        # attempt actually stated. Bounded by test_adequacy_pin_demand.
+        pin_config_key="test_adequacy_pin_demand",
     ),
     AgentSkill(
         name="discover-completeness",

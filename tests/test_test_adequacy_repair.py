@@ -459,6 +459,337 @@ class TestRejectionTelemetry:
 
 
 # ---------------------------------------------------------------------------
+# Pinned demand across retries (#11644)
+# ---------------------------------------------------------------------------
+
+#: A retry finding that shares no substantive vocabulary with the pin below and
+#: names nothing locatable — the 0.04-overlap pathology #11643 measured.
+_FINDER_RETRY_NEW_UNANCHORED = (
+    "TEST_ADEQUACY_RESULT: RETRY\nSUMMARY: boundary-condition gap in truncation logic\n"
+)
+#: A retry finding that is new but points at a file — a bar the retry can meet.
+_FINDER_RETRY_NEW_ANCHORED = (
+    "TEST_ADEQUACY_RESULT: RETRY\n"
+    "SUMMARY: untested wiring\n"
+    "GAPS:\n"
+    "- src/widget.py:spin — no test for the boot path\n"
+)
+#: One anchored finding the pin never mentioned, plus one unlocatable one.
+_MIXED_RETRY = (
+    "TEST_ADEQUACY_RESULT: RETRY\n"
+    "SUMMARY: gaps\n"
+    "GAPS:\n"
+    "- src/widget.py:spin — no test for the boot path\n"
+    "- boundary-condition gap in truncation logic\n"
+)
+_PIN = ["src/frobnicator.py:rebuild_index — no test for the failure branch"]
+
+
+class TestPinnedDemand:
+    @pytest.mark.asyncio
+    async def test_new_unanchored_demand_does_not_reject_a_pinned_retry(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Satisfying the stated bar is enough: an unlocatable new bar cannot reject."""
+        runner = _runner(config, event_bus, passes=0)
+        execute = AsyncMock(return_value=_FINDER_RETRY_NEW_UNANCHORED)
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.passed is True
+
+    @pytest.mark.asyncio
+    async def test_the_absorbed_demand_is_recorded_as_advisory(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """The non-stationarity stays visible instead of vanishing behind the fix."""
+        runner = _runner(config, event_bus, passes=0)
+        execute = AsyncMock(return_value=_FINDER_RETRY_NEW_UNANCHORED)
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.test_adequacy.advisory_findings == [
+            "boundary-condition gap in truncation logic"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_pin_in_force_is_echoed_into_the_telemetry(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        runner = _runner(config, event_bus, passes=0)
+        execute = AsyncMock(return_value=_FINDER_RETRY_NEW_UNANCHORED)
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.test_adequacy.pinned_findings == _PIN
+
+    @pytest.mark.asyncio
+    async def test_a_new_anchored_demand_still_rejects_a_pinned_retry(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """The gate may raise a fresh bar — but only one it can point at."""
+        runner = _runner(config, event_bus, passes=0)
+        execute = AsyncMock(return_value=_FINDER_RETRY_NEW_ANCHORED)
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_a_new_anchored_demand_is_recorded_as_new(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        runner = _runner(config, event_bus, passes=0)
+        execute = AsyncMock(return_value=_FINDER_RETRY_NEW_ANCHORED)
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.test_adequacy.new_findings == [
+            "src/widget.py:spin — no test for the boot path"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_restated_pinned_demand_still_rejects(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        runner = _runner(config, event_bus, passes=0)
+        execute = AsyncMock(return_value=_FINDER_RETRY)
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_the_kill_switch_restores_pre_11644_rejection(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        runner = _runner(config, event_bus, passes=0)
+        runner._config.test_adequacy_pin_demand = False
+        execute = AsyncMock(return_value=_FINDER_RETRY_NEW_UNANCHORED)
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_without_a_pin_a_new_unanchored_demand_still_rejects(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """First attempt is unchanged: the gate states the bar and holds it."""
+        runner = _runner(config, event_bus, passes=0)
+        execute = AsyncMock(return_value=_FINDER_RETRY_NEW_UNANCHORED)
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await _run(runner, agent_task, tmp_path)
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_a_deterministic_coverage_gap_is_never_waived_by_the_pin(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """The #11603 invariant survives: coverage gaps override an LLM OK."""
+        runner = _runner(config, event_bus, passes=0)
+        execute = AsyncMock(return_value=_FINDER_OK)
+        p = _gate_patches(runner, execute)
+        with (
+            p[0],
+            p[1],
+            p[2],
+            patch.object(
+                runner,
+                "_run_coverage_delta_check",
+                new_callable=AsyncMock,
+                return_value=["src/quux.py:17"],
+            ),
+        ):
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_a_verifier_override_of_a_new_unanchored_gap_does_not_reject(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """The override arm routes through the same contract as the finder."""
+        runner = _runner(config, event_bus, passes=0, verifier=True)
+        execute = AsyncMock(
+            side_effect=[
+                _FINDER_OK,
+                "TEST_ADEQUACY_VERIFIER_RESULT: OVERRIDE\n"
+                "SUMMARY: boundary-condition gap in truncation logic\n",
+            ]
+        )
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.passed is True
+
+    @pytest.mark.asyncio
+    async def test_the_repair_pass_marks_the_absorbed_finding_as_advisory(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Seam 1's prompt asks for what the run must close, not the advisory noise."""
+        runner = _runner(config, event_bus, passes=1)
+        execute = AsyncMock(side_effect=[_MIXED_RETRY, "wrote tests", _FINDER_OK])
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3], p[4], p[5]:
+            await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        advisory = execute.call_args_list[1].args[1].split("## Advisory")[-1]
+        assert "boundary-condition gap in truncation logic" in advisory
+
+    @pytest.mark.asyncio
+    async def test_the_repair_pass_still_demands_the_blocking_finding(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        runner = _runner(config, event_bus, passes=1)
+        execute = AsyncMock(side_effect=[_MIXED_RETRY, "wrote tests", _FINDER_OK])
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3], p[4], p[5]:
+            await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        blocking = execute.call_args_list[1].args[1].split("## Advisory")[0]
+        assert "src/widget.py:spin — no test for the boot path" in blocking
+
+    @pytest.mark.asyncio
+    async def test_a_verdict_stating_nothing_at_all_still_rejects(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """Fail-closed: nothing was stated, so nothing can be shown closed."""
+        runner = _runner(config, event_bus, passes=0)
+        execute = AsyncMock(return_value="TEST_ADEQUACY_RESULT: RETRY\nSUMMARY:  \n")
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_a_summary_only_verdict_is_judged_on_its_summary(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """No GAPS block: the demand is the summary line, and it still counts."""
+        runner = _runner(config, event_bus, passes=0)
+        execute = AsyncMock(
+            return_value="TEST_ADEQUACY_RESULT: RETRY\n"
+            "SUMMARY: src/frobnicator.py:rebuild_index still has no failure test\n"
+        )
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.passed is False
+
+    @pytest.mark.asyncio
+    async def test_a_pin_is_only_applied_to_the_skill_that_declares_one(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path
+    ) -> None:
+        """diff-sanity has no pin seam: its findings are unaffected."""
+        runner = _runner(config, event_bus, passes=0)
+        config.max_diff_sanity_attempts = 1
+        execute = AsyncMock(
+            return_value="DIFF_SANITY_RESULT: RETRY\nSUMMARY: unlocatable prose\n"
+        )
+        p = _gate_patches(runner, execute)
+        with p[0], p[1], p[2], p[3]:
+            result = await runner._run_skill(
+                DIFF_SANITY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert result.passed is False
+
+
+# ---------------------------------------------------------------------------
 # run() integration: error-string compatibility + WorkerResult propagation
 # ---------------------------------------------------------------------------
 

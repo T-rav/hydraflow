@@ -62,6 +62,20 @@ states plainly which of them can and cannot support a strictness change:
    code, a contract mismatch)? An unanchored demand is the one the #11603
    repair loop cannot act on: it hands the finding text back to the implementer.
 
+Since #11644 the live gate enforces the same two properties, so (3) and (4) are
+also this instrument's **acceptance test** — the numbers it prints are what the
+change has to move:
+
+* :func:`demand_anchoring` — the anchored share of the gate's findings.
+  #11643 measured 97 of 129 (75 %) with no referent at all. The predicate is
+  imported from ``adequacy_demand``, the module the runtime enforces with, so
+  there is exactly one definition of "anchored" and the measurement cannot
+  drift from the enforcement.
+* :func:`pinned_demand_overlap` — the retry overlap read off the pin the gate
+  actually carried onto the retry, rather than inferred from consecutive
+  rejections. A corpus with no pinned run reports "not enforced", never a
+  fabricated score.
+
 Everything in (3) and (4) is a **lexical proxy for the justification's quality**,
 NOT proof the rejection was wrong. :class:`SuspectRejection` is named for that:
 these are rejections whose stated reason is weak *on its face* and which a human
@@ -81,6 +95,13 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
+from adequacy_demand import (
+    cites_demonstration,
+    demand_tokens,
+    is_anchored,
+    names_referent,
+    split_findings,
+)
 from implement_failure_class import classify_implement_failure
 from judge_calibration import (
     DEFAULT_GRACE_WINDOW,
@@ -130,56 +151,6 @@ BINARY_VERDICT_CONFIDENCE = 1.0
 
 #: Two-sided 95% normal quantile for the Wilson score interval.
 DEFAULT_Z = 1.959963984540054
-
-#: Tokens shorter than this carry no topical signal in a findings string.
-MIN_TOKEN_LENGTH = 4
-
-#: Ordinary English filler, dropped before any token comparison.
-_STOPWORDS = frozenset(
-    {
-        "also",
-        "both",
-        "from",
-        "into",
-        "only",
-        "over",
-        "that",
-        "this",
-        "when",
-        "then",
-        "with",
-    }
-)
-
-#: The gate's own vocabulary. These words appear in *nearly every* finding
-#: ("untested X", "missing Y coverage", "boundary-condition gap") and say
-#: nothing about **which** gap is being demanded, so leaving them in would
-#: manufacture overlap between two rejections that asked for entirely different
-#: things. Dropped for the same reason as ordinary stopwords: no discriminating
-#: information. Kept deliberately small and greppable — words that do
-#: discriminate ("error", "boundary", "wiring", "fallback") stay in.
-_GATE_VOCABULARY = frozenset(
-    {
-        "branch",
-        "branches",
-        "case",
-        "cases",
-        "cover",
-        "coverage",
-        "covered",
-        "edge",
-        "edges",
-        "gaps",
-        "missing",
-        "test",
-        "tested",
-        "testing",
-        "tests",
-        "uncovered",
-        "unpinned",
-        "untested",
-    }
-)
 
 
 class GateOutcome(StrEnum):
@@ -242,6 +213,15 @@ class AdequacyRunRecord:
     duration_seconds: float = 0.0
     repair_passes_used: int = 0
     shape: RecordShape = RecordShape.LEGACY
+    #: The demand the PREVIOUS attempt stated, carried onto this one (#11644).
+    #: Empty for every pre-#11644 run — the instrument reports "not enforced"
+    #: rather than a fabricated 0, so before/after stays legible.
+    pinned_findings: tuple[str, ...] = ()
+    #: Findings this attempt raised that the pinned demand never mentioned.
+    new_findings: tuple[str, ...] = ()
+    #: Findings recorded but NOT blocking (new *and* unanchored on a pinned
+    #: retry). The non-stationarity the pin absorbs, kept visible.
+    advisory_findings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -313,6 +293,76 @@ class DemandStationarity:
             "disjoint_rate": (
                 self.disjoint_rate.to_json_dict() if self.disjoint_rate else None
             ),
+        }
+
+
+@dataclass(frozen=True)
+class DemandAnchoring:
+    """How much of the gate's demand names something locatable (#11644).
+
+    The headline number the anchoring rule moves: #11643 measured **97 of 129
+    findings (75 %) with no code referent at all**, which is what the seam-1
+    repair loop was being handed as "write exactly these missing tests".
+    ``anchored_share`` is that number's complement, with a Wilson interval;
+    ``n_fully_unanchored_rejections`` counts rejections where *nothing* the
+    gate demanded could be located.
+    """
+
+    n_findings: int
+    n_anchored: int
+    anchored_share: ProportionInterval | None
+    n_rejections: int
+    n_fully_unanchored_rejections: int
+
+    def to_json_dict(self) -> dict[str, Any]:
+        return {
+            "n_findings": self.n_findings,
+            "n_anchored": self.n_anchored,
+            "anchored_share": (
+                self.anchored_share.to_json_dict() if self.anchored_share else None
+            ),
+            "n_rejections": self.n_rejections,
+            "n_fully_unanchored_rejections": self.n_fully_unanchored_rejections,
+        }
+
+
+@dataclass(frozen=True)
+class PinnedDemandOverlap:
+    """Retry overlap measured against the demand that was actually PINNED (#11644).
+
+    :class:`DemandStationarity` infers the moving bar from consecutive
+    rejections; this measures it directly, from the pin the gate carried onto
+    the retry. ``n_pinned_rejections == 0`` means no run in the corpus enforced
+    a pin — the pre-#11644 state, reported as "not enforced" rather than as a
+    perfect or a zero score.
+
+    ``n_advisory_findings`` is the count the pin absorbed: findings that were
+    both new *and* unanchored, recorded instead of rejecting the run.
+    """
+
+    n_pinned_rejections: int
+    n_disjoint: int
+    mean_jaccard: float | None
+    disjoint_rate: ProportionInterval | None
+    n_new_findings: int
+    n_advisory_findings: int
+
+    @property
+    def enforced(self) -> bool:
+        """Did any run in this corpus carry a pinned demand?"""
+        return self.n_pinned_rejections > 0
+
+    def to_json_dict(self) -> dict[str, Any]:
+        return {
+            "n_pinned_rejections": self.n_pinned_rejections,
+            "n_disjoint": self.n_disjoint,
+            "mean_jaccard": self.mean_jaccard,
+            "disjoint_rate": (
+                self.disjoint_rate.to_json_dict() if self.disjoint_rate else None
+            ),
+            "n_new_findings": self.n_new_findings,
+            "n_advisory_findings": self.n_advisory_findings,
+            "enforced": self.enforced,
         }
 
 
@@ -421,6 +471,10 @@ class CalibrationReport:
     rejection_hours: float
     by_verdict_source: tuple[VerdictSourceSummary, ...]
     stationarity: DemandStationarity
+    #: #11644 acceptance metrics — the anchored share of the demand, and the
+    #: retry overlap measured against the pin the gate actually carried.
+    anchoring: DemandAnchoring
+    pinned_demand: PinnedDemandOverlap
     accept_arm_score: JudgeScore
     identifiability: Identifiability
     suspect_rejections: tuple[SuspectRejection, ...]
@@ -440,6 +494,8 @@ class CalibrationReport:
             "rejection_hours": self.rejection_hours,
             "by_verdict_source": [s.to_json_dict() for s in self.by_verdict_source],
             "stationarity": self.stationarity.to_json_dict(),
+            "anchoring": self.anchoring.to_json_dict(),
+            "pinned_demand": self.pinned_demand.to_json_dict(),
             "accept_arm_score": self.accept_arm_score.to_json_dict(),
             "identifiability": self.identifiability.to_json_dict(),
             "suspect_rejections": [s.to_json_dict() for s in self.suspect_rejections],
@@ -494,34 +550,6 @@ def strip_rejection_prefix(error: str) -> tuple[str, str]:
     return VERDICT_SOURCE_LLM_FAIL, summary
 
 
-def split_findings(summary: str) -> tuple[str, ...]:
-    """Split a rejection summary into findings at top-level separators only.
-
-    Findings are comma- or semicolon-joined, but they routinely contain commas
-    inside parentheses (``(skill/description/prompt)``) and inside backticked
-    code spans, so the split tracks bracket depth and backtick parity. Empty
-    fragments are dropped.
-    """
-    parts: list[str] = []
-    current: list[str] = []
-    depth = 0
-    in_code = False
-    for char in summary:
-        if char == "`":
-            in_code = not in_code
-        elif char in "([{" and not in_code:
-            depth += 1
-        elif char in ")]}" and not in_code:
-            depth = max(0, depth - 1)
-        if char in ",;" and depth == 0 and not in_code:
-            parts.append("".join(current))
-            current = []
-            continue
-        current.append(char)
-    parts.append("".join(current))
-    return tuple(p.strip() for p in parts if p.strip())
-
-
 def _coerce_findings(raw: object) -> tuple[str, ...]:
     """Keep only non-empty string findings from a structured block."""
     if not isinstance(raw, list):
@@ -574,6 +602,9 @@ def parse_run_manifest(raw: object) -> AdequacyRunRecord | None:
     block = raw.get("test_adequacy")
     shape = RecordShape.LEGACY
     repair_passes = 0
+    pinned: tuple[str, ...] = ()
+    new_findings: tuple[str, ...] = ()
+    advisory: tuple[str, ...] = ()
     if isinstance(block, Mapping):
         shape = RecordShape.STRUCTURED
         source = block.get("verdict_source")
@@ -585,6 +616,11 @@ def parse_run_manifest(raw: object) -> AdequacyRunRecord | None:
         passes = block.get("repair_passes_used")
         if isinstance(passes, int) and not isinstance(passes, bool):
             repair_passes = max(0, passes)
+        # #11644 demand-contract telemetry. Absent on every pre-#11644
+        # manifest, which is exactly what "not enforced" must look like.
+        pinned = _coerce_findings(block.get("pinned_findings"))
+        new_findings = _coerce_findings(block.get("new_findings"))
+        advisory = _coerce_findings(block.get("advisory_findings"))
 
     duration = raw.get("duration_seconds")
     seconds = float(duration) if isinstance(duration, (int, float)) else 0.0
@@ -598,34 +634,13 @@ def parse_run_manifest(raw: object) -> AdequacyRunRecord | None:
         duration_seconds=max(0.0, seconds),
         repair_passes_used=repair_passes,
         shape=shape,
+        pinned_findings=pinned,
+        new_findings=new_findings,
+        advisory_findings=advisory,
     )
 
 
 # --- finding taxonomy (lexical proxies) -----------------------------------------
-
-#: Phrases that make a demand *falsifiable*: a surviving mutant, a revert the
-#: suite does not catch, a regression shown to pass silently. These are claims
-#: about observed behaviour, not opinions about coverage.
-_DEMONSTRATED_NEEDLES: tuple[str, ...] = (
-    "mutant",
-    "mutation",
-    "survive",
-    "revert-safe",
-    "revert-safety",
-    "silently inert if reverted",
-    "demonstrated",
-)
-
-#: Patterns that anchor a demand to a concrete referent in the diff.
-_NAMED_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"`[^`]+`"),  # backticked code span
-    re.compile(r"(?<![A-Za-z0-9])_?[a-z][a-z0-9]*(?:_[a-z0-9]+)+"),  # snake_case
-    re.compile(r"\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b"),  # CamelCase
-    re.compile(r"\b[\w./-]+\.(?:py|sh|js|jsx|ts|tsx|yml|yaml|md|json)\b"),  # path
-    re.compile(r"\b[A-Z][A-Z0-9_]{3,}\b"),  # ALLCAPS constant
-    re.compile(r"--[A-Za-z][\w-]*"),  # CLI flag
-    re.compile(r"/api/[\w/-]+"),  # route
-)
 
 #: Demands that describe a defect the *test-adequacy* gate does not own.
 _OUT_OF_REMIT_NEEDLES: tuple[str, ...] = (
@@ -670,11 +685,14 @@ def grade_finding(finding: str) -> EvidenceGrade:
     :attr:`EvidenceGrade.NAMED_GAP`; text naming no code referent at all is
     :attr:`EvidenceGrade.UNANCHORED`. "Unanchored" is a statement about the
     finding's *locatability*, not about whether the gap is real.
+
+    The two predicates live in ``adequacy_demand`` (#11644) because the live
+    gate now enforces the same test at its emit site. One definition, two
+    readers: what this instrument scores is exactly what the runtime demands.
     """
-    lowered = finding.lower()
-    if any(needle in lowered for needle in _DEMONSTRATED_NEEDLES):
+    if cites_demonstration(finding):
         return EvidenceGrade.DEMONSTRATED
-    if any(pattern.search(finding) for pattern in _NAMED_PATTERNS):
+    if names_referent(finding):
         return EvidenceGrade.NAMED_GAP
     return EvidenceGrade.UNANCHORED
 
@@ -694,28 +712,9 @@ def is_out_of_remit(finding: str) -> bool:
     return not any(needle in lowered for needle in _TEST_GAP_NEEDLES)
 
 
-def finding_tokens(text: str) -> frozenset[str]:
-    """Topical tokens of a finding — lowercase words, stopwords/short ones out.
-
-    The unit of comparison for :func:`demand_stationarity`. Non-alphanumeric
-    characters (backticks, underscores, hyphens) split, so ``_merge_base`` and
-    ``merge-base`` produce the same tokens.
-    """
-    return frozenset(
-        token
-        for token in re.findall(r"[a-z0-9]+", text.lower())
-        if len(token) >= MIN_TOKEN_LENGTH
-        and token not in _STOPWORDS
-        and token not in _GATE_VOCABULARY
-    )
-
-
 def _record_tokens(record: AdequacyRunRecord) -> frozenset[str]:
     """Union of every finding's tokens on one rejection."""
-    tokens: set[str] = set()
-    for finding in record.findings:
-        tokens |= finding_tokens(finding)
-    return frozenset(tokens)
+    return demand_tokens(record.findings)
 
 
 # --- statistics (pure) ----------------------------------------------------------
@@ -778,6 +777,72 @@ def demand_stationarity(records: Sequence[AdequacyRunRecord]) -> DemandStationar
         n_disjoint_pairs=disjoint,
         mean_jaccard=statistics.fmean(scores) if scores else None,
         disjoint_rate=wilson_interval(disjoint, len(scores)),
+    )
+
+
+def demand_anchoring(records: Sequence[AdequacyRunRecord]) -> DemandAnchoring:
+    """How much of the gate's demand names something locatable (#11644).
+
+    The complement of #11643's headline: 97 of 129 findings (75 %) named no
+    code referent at all. This is the number the anchoring rule has to move,
+    and it needs no ground truth — same property that makes
+    :func:`demand_stationarity` the load-bearing measurement in an
+    outcome-censored corpus.
+    """
+    rejections = [r for r in records if r.gate_outcome is GateOutcome.REJECTED]
+    findings = [f for r in rejections for f in r.findings]
+    n_anchored = sum(1 for f in findings if is_anchored(f))
+    fully_unanchored = sum(
+        1
+        for r in rejections
+        if r.findings and not any(is_anchored(f) for f in r.findings)
+    )
+    return DemandAnchoring(
+        n_findings=len(findings),
+        n_anchored=n_anchored,
+        anchored_share=wilson_interval(n_anchored, len(findings)),
+        n_rejections=len(rejections),
+        n_fully_unanchored_rejections=fully_unanchored,
+    )
+
+
+def pinned_demand_overlap(
+    records: Sequence[AdequacyRunRecord],
+) -> PinnedDemandOverlap:
+    """Retry overlap against the demand the gate actually pinned (#11644).
+
+    :func:`demand_stationarity` *infers* the moving bar by pairing consecutive
+    rejections; this reads the pin the run carried and compares it with what
+    that run then demanded. A corpus where nothing enforced a pin reports
+    ``n_pinned_rejections=0`` and ``mean_jaccard=None`` — "not enforced", never
+    a fabricated score.
+
+    A pin carrying no topical tokens of its own (short symbol names only) is
+    excluded rather than scored: it cannot be compared with anything, so a
+    Jaccard of 0.0 against it would read as "demanded something entirely new"
+    when the truth is "not comparable". The live gate treats the same case as
+    "no pin in force" and blocks on every finding, so the exclusion matches
+    what actually happened.
+    """
+    pinned_runs = [
+        r
+        for r in records
+        if r.gate_outcome is GateOutcome.REJECTED
+        and r.pinned_findings
+        and demand_tokens(r.pinned_findings)
+    ]
+    scores = [
+        _jaccard(demand_tokens(r.pinned_findings), demand_tokens(r.findings))
+        for r in pinned_runs
+    ]
+    disjoint = sum(1 for s in scores if s == 0.0)
+    return PinnedDemandOverlap(
+        n_pinned_rejections=len(pinned_runs),
+        n_disjoint=disjoint,
+        mean_jaccard=statistics.fmean(scores) if scores else None,
+        disjoint_rate=wilson_interval(disjoint, len(scores)),
+        n_new_findings=sum(len(r.new_findings) for r in pinned_runs),
+        n_advisory_findings=sum(len(r.advisory_findings) for r in records),
     )
 
 
@@ -1105,6 +1170,8 @@ def calibrate(
         rejection_hours=sum(r.duration_seconds for r in rejections) / 3600.0,
         by_verdict_source=summaries,
         stationarity=demand_stationarity(records),
+        anchoring=demand_anchoring(records),
+        pinned_demand=pinned_demand_overlap(records),
         accept_arm_score=score,
         identifiability=_assess_identifiability(
             n_rejections=len(rejections),

@@ -36,6 +36,11 @@ For each changed or added production function/method/class, verify:
 ## Instructions
 
 - List each gap found with the production file:function and what test is missing.
+- **Every gap MUST name a referent from the diff** — a `path/file.py:symbol`, a
+  constant, a flag or a route. A gap the reader cannot locate is not a gap you
+  may report: "missing-error-path-coverage" and "edge-case-coverage" name
+  nothing and will not be acted on. If you believe a gap exists but cannot point
+  at the code, do not report it.
 - If coverage is adequate, report OK.
 - Do NOT modify any files. This is a read-only assessment.
 - Ignore test file changes when assessing adequacy — focus on whether production code is tested.
@@ -96,6 +101,15 @@ _VERDICT_SOURCE_LABELS: dict[str, str] = {
 _MAX_REPAIR_FINDINGS = 30
 
 
+def _findings_block(findings: list[str]) -> str:
+    """Render a bounded bullet list of findings for a prompt section."""
+    shown = findings[:_MAX_REPAIR_FINDINGS]
+    block = "\n".join(f"- {f}" for f in shown)
+    if len(findings) > _MAX_REPAIR_FINDINGS:
+        block += f"\n- (+ {len(findings) - _MAX_REPAIR_FINDINGS} more)"
+    return block
+
+
 def build_test_adequacy_repair_prompt(
     *,
     issue_number: int,
@@ -105,6 +119,8 @@ def build_test_adequacy_repair_prompt(
     findings: list[str],
     pass_number: int,
     max_passes: int,
+    anchored_findings: list[str] | None = None,
+    advisory_findings: list[str] | None = None,
     **_kwargs: object,
 ) -> str:
     """Build the bounded in-run repair prompt (#11593 seam 1).
@@ -116,12 +132,48 @@ def build_test_adequacy_repair_prompt(
     including the independent verifier and the deterministic coverage delta —
     re-runs afterwards, so this pass can rescue the run but never weaken the
     gate.
+
+    ``findings`` is the demand the run must close. #11644 splits it by
+    whether the text names something locatable: #11643 measured **75 % of the
+    gate's findings naming no code referent at all**, and handing those back
+    verbatim as "write exactly these missing tests" is an instruction that
+    cannot be followed because it does not say where. Anchored findings are
+    listed as-is; unanchored ones get their own section with a locate-the-
+    referent-first instruction. ``advisory_findings`` are recorded but not
+    blocking (new *and* unanchored on a pinned retry) and are marked as such,
+    so the pass is never sent chasing a bar that no longer rejects the run.
     """
     source_label = _VERDICT_SOURCE_LABELS.get(verdict_source, verdict_source)
-    shown = findings[:_MAX_REPAIR_FINDINGS]
-    findings_block = "\n".join(f"- {f}" for f in shown) or "- (see summary above)"
-    if len(findings) > _MAX_REPAIR_FINDINGS:
-        findings_block += f"\n- (+ {len(findings) - _MAX_REPAIR_FINDINGS} more)"
+    anchored_set = set(anchored_findings or findings)
+    anchored = [f for f in findings if f in anchored_set]
+    unanchored = [f for f in findings if f not in anchored_set]
+
+    sections = ["## Findings to fix", ""]
+    sections.append(_findings_block(anchored) or "- (see summary above)")
+    if unanchored:
+        sections += [
+            "",
+            "## Unlocatable demands — find the referent first",
+            "",
+            _findings_block(unanchored),
+            "",
+            "These name no file, symbol or line. For each one, locate the "
+            "concrete production symbol in YOUR diff that it is about, state "
+            "it in the test's name or docstring, and write the test there. If "
+            "no changed production code matches it, say so in your final "
+            "message rather than inventing a test.",
+        ]
+    if advisory_findings:
+        sections += [
+            "",
+            "## Advisory — NOT blocking this run",
+            "",
+            _findings_block(advisory_findings),
+            "",
+            "Recorded for telemetry only. Do not spend this pass on them.",
+        ]
+    findings_section = "\n".join(sections)
+
     return f"""You are running a bounded Test Adequacy REPAIR pass ({pass_number} of {max_passes}) for issue #{issue_number}: {issue_title}.
 
 The post-implementation test-adequacy gate REJECTED the current branch. This pass is your one chance to fix it in-run — write exactly the missing tests below instead of losing the whole attempt.
@@ -131,9 +183,7 @@ The post-implementation test-adequacy gate REJECTED the current branch. This pas
 Source: {source_label}
 Summary: {summary}
 
-## Findings to fix
-
-{findings_block}
+{findings_section}
 
 ## Instructions
 
@@ -195,6 +245,11 @@ judgment yourself, from the diff alone.
 - Do NOT modify any files. This is a read-only assessment.
 - If you cannot positively confirm that each changed production symbol is exercised
   by a meaningful test, you MUST report OVERRIDE. When unsure, OVERRIDE.
+- **Every gap you list MUST name a referent from the diff** — a
+  `path/file.py:symbol`, a constant, a flag or a route — or cite a concrete
+  survivability demonstration (a mutation that the suite does not catch, a
+  revert it passes through silently). A gap naming nothing locatable cannot be
+  acted on: name the symbol you are overriding on, not a category.
 
 ## Required Output
 

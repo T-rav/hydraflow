@@ -20,9 +20,10 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
+from adequacy_demand import DemandVerdict, evaluate_demand, split_findings
 from coverage_delta import (
     compute_uncovered_changed_lines,
     parse_cobertura_covered_lines,
@@ -33,6 +34,7 @@ from file_util import atomic_write
 from models import LoopResult
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from agent import AgentRunner
@@ -45,6 +47,11 @@ logger = logging.getLogger("hydraflow.skill_gate")
 #: What produced a failing gate verdict (#11593 seam 3 telemetry).
 VerdictSource = Literal["llm-fail", "verifier-override", "coverage-delta"]
 
+#: Summary recorded when the demand contract (#11644) finds the pinned demand
+#: closed and only new, unlocatable findings left. Distinct from a plain OK so
+#: the manifest says *why* the run cleared the gate.
+PIN_CLOSED_SUMMARY = "pinned test-adequacy demand closed"
+
 
 @dataclass(slots=True)
 class SkillCheckOutcome:
@@ -53,12 +60,112 @@ class SkillCheckOutcome:
     ``verdict_source`` and ``findings`` describe the failing verdict (both
     empty on a pass); ``short_circuit`` marks the no-op cases (empty diff,
     empty prompt) that must return without telemetry or repair.
+
+    ``pinned`` is the demand the previous attempt stated (#11644) and
+    ``demand`` is how this evaluation's findings partitioned against it —
+    which of them block, which are new, which were absorbed as advisory.
     """
 
     result: LoopResult
     verdict_source: VerdictSource | None = None
     findings: list[str] = field(default_factory=list)
     short_circuit: bool = False
+    pinned: list[str] = field(default_factory=list)
+    demand: DemandVerdict = field(default_factory=DemandVerdict)
+
+
+def skill_demand_pin(
+    runner: AgentRunner, skill: AgentSkill, pinned: Sequence[str]
+) -> list[str]:
+    """Resolve the pinned demand actually in force for *skill* (#11644).
+
+    Empty unless the skill declares a ``pin_config_key``, that config field
+    is true, and the caller supplied a previous attempt's demand. Read via
+    ``getattr`` on every gate evaluation so the knob stays live-editable —
+    same convention as ``skill_repair_budget``.
+    """
+    if skill.pin_config_key is None or not pinned:
+        return []
+    if not getattr(runner._config, skill.pin_config_key, False):
+        return []
+    return [f for f in pinned if f.strip()]
+
+
+def _stated_findings(findings: list[str], summary: str) -> list[str]:
+    """The demand a failing verdict actually stated.
+
+    A finder or verifier that reports RETRY/OVERRIDE without a ``GAPS:`` block
+    still states its demand — in the summary line. Recovering it matters twice:
+    the #11644 contract has something to judge instead of an empty list, and
+    the #11593 repair prompt gets a demand instead of "(see summary above)".
+    Split the same way the calibration instrument splits a legacy manifest's
+    error string, so runtime and instrument enumerate findings identically.
+    """
+    return findings or list(split_findings(summary))
+
+
+def _merge_advisory(demand: DemandVerdict, carried: Sequence[str]) -> DemandVerdict:
+    """Fold an earlier stage's absorbed findings into a later stage's partition.
+
+    A run can be flipped by the finder's contract and then still rejected by
+    the coverage delta or the verifier. The findings the first flip absorbed
+    are what makes the moving bar measurable, so they must survive the later
+    stage rather than being overwritten by it.
+    """
+    if not carried:
+        return demand
+    seen = set(demand.advisory)
+    extra = tuple(f for f in carried if f not in seen)
+    if not extra:
+        return demand
+    return replace(demand, advisory=(*demand.advisory, *extra))
+
+
+def _apply_demand_contract(
+    result: LoopResult,
+    findings: list[str],
+    pinned: list[str],
+    issue_id: int,
+    source: VerdictSource,
+    carried_advisory: Sequence[str] = (),
+) -> tuple[LoopResult, DemandVerdict]:
+    """Judge a failing LLM verdict against the pinned demand (#11644).
+
+    Returns the (possibly flipped) result plus the partition. With no pin in
+    force this is a no-op that still records the anchored/unanchored split.
+    Only the LLM-sourced verdicts route through here: a deterministic
+    coverage-delta failure is anchored by construction and always blocks.
+
+    Fail-closed guard: a verdict from which no finding text can be recovered
+    at all is left rejecting. Nothing was stated, so nothing can be shown
+    closed — without this a bare ``RETRY`` with an empty summary would waive
+    itself.
+    """
+    if not findings:
+        return result, _merge_advisory(
+            DemandVerdict(pinned_enforced=bool(pinned)), carried_advisory
+        )
+    demand = _merge_advisory(
+        evaluate_demand(findings, pinned, pinned_enforced=bool(pinned)),
+        carried_advisory,
+    )
+    if demand.blocks:
+        return result, demand
+    logger.info(
+        "test-adequacy pinned demand closed for #%d (%s): %d new unanchored "
+        "finding(s) recorded as advisory",
+        issue_id,
+        source,
+        len(demand.advisory),
+    )
+    return (
+        LoopResult(
+            passed=True,
+            summary=PIN_CLOSED_SUMMARY,
+            attempts=result.attempts,
+        ),
+        demand,
+    )
 
 
 async def run_skill_check(
@@ -69,6 +176,7 @@ async def run_skill_check(
     branch: str,
     max_attempts: int,
     plan_text: str,
+    pinned_findings: Sequence[str] = (),
 ) -> SkillCheckOutcome:
     """One full gate evaluation: finder loop, coverage delta, verifier.
 
@@ -76,7 +184,16 @@ async def run_skill_check(
     (#11593) judges the repaired worktree, not the diff the first check
     saw. The failing verdict's source and concrete findings ride the
     outcome for the repair prompt and the rejection telemetry.
+
+    ``pinned_findings`` (#11644) is the demand the previous attempt stated.
+    When it is in force, each LLM-sourced failing verdict is judged against
+    it before the run is rejected: a finding restating the pin blocks, a
+    genuinely new finding blocks only if it names a locatable referent, and
+    a new unlocatable finding is absorbed as advisory. The deterministic
+    coverage delta and the verifier both still run after a flip, so nothing
+    downstream of the finder is skipped by it.
     """
+    pinned = skill_demand_pin(runner, skill, pinned_findings)
     full_diff = await runner._get_branch_diff(worktree_path, branch)
     if not full_diff.strip():
         return SkillCheckOutcome(
@@ -143,6 +260,19 @@ async def run_skill_check(
 
     verdict_source: VerdictSource | None = None if result.passed else "llm-fail"
 
+    # #11644 demand contract, applied BEFORE the coverage delta and the
+    # verifier so a flipped verdict still faces both. Applying it at the end
+    # would let a retry skip the deterministic coverage check entirely, which
+    # would be a real weakening rather than a bounded demand.
+    demand = DemandVerdict()
+    if not result.passed:
+        findings = _stated_findings(findings, result.summary)
+        result, demand = _apply_demand_contract(
+            result, findings, pinned, issue.id, "llm-fail"
+        )
+        if result.passed:
+            verdict_source = None
+
     # Coverage delta runs once after the LLM attempt loop — not per-attempt.
     # Running make coverage on each retry is expensive and redundant because
     # the worktree code doesn't change between LLM attempts. (A repair
@@ -169,6 +299,17 @@ async def run_skill_check(
             )
             verdict_source = "coverage-delta"
             findings = uncovered
+            # Deliberately NOT routed through the demand contract: uncovered
+            # changed lines are anchored by construction (`path:line`) and a
+            # deterministic gap must keep overriding an LLM OK (#11593).
+            demand = _merge_advisory(
+                DemandVerdict(
+                    blocking=tuple(uncovered),
+                    anchored=tuple(uncovered),
+                    pinned_enforced=demand.pinned_enforced,
+                ),
+                demand.advisory,
+            )
 
     # Independent verifier (#9546): a second-opinion pass with its own
     # model, gated on the finder's EXPLICIT OK marker — never on the
@@ -186,13 +327,32 @@ async def run_skill_check(
         )
         if not result.passed:
             verdict_source = "verifier-override"
-            findings = verifier_gaps
+            findings = _stated_findings(verifier_gaps, result.summary)
+            # The override arm routes through the same contract as the finder
+            # (#11644): its threshold, model independence and explicit-OK
+            # trigger are untouched — only what its findings may DEMAND is.
+            result, demand = _apply_demand_contract(
+                result,
+                findings,
+                pinned,
+                issue.id,
+                "verifier-override",
+                carried_advisory=demand.advisory,
+            )
+            if result.passed:
+                verdict_source = None
 
     if result.passed:
         verdict_source = None
-        findings = []
+        # Absorbed findings are the measurement of the moving bar (#11644),
+        # so they survive a pass; a plain clean verdict still carries none.
+        findings = list(demand.advisory)
     return SkillCheckOutcome(
-        result=result, verdict_source=verdict_source, findings=findings
+        result=result,
+        verdict_source=verdict_source,
+        findings=findings,
+        pinned=pinned,
+        demand=demand,
     )
 
 
@@ -227,7 +387,16 @@ async def run_skill_repair_loop(
         )
         if changed:
             recheck = await runner._run_skill_check(
-                skill, issue, worktree_path, branch, max_attempts, plan_text
+                skill,
+                issue,
+                worktree_path,
+                branch,
+                max_attempts,
+                plan_text,
+                # The re-check faces the SAME pinned demand as the first
+                # check (#11644) — a repair pass must not silently widen or
+                # narrow the bar it was told to close.
+                pinned_findings=check.pinned,
             )
             if recheck.short_circuit:
                 # The diff vanished mid-repair. Keep the standing failing
@@ -304,7 +473,13 @@ async def run_skill_repair_pass(
         issue_title=issue.title,
         verdict_source=check.verdict_source or "llm-fail",
         summary=check.result.summary,
-        findings=check.findings,
+        # The demand the run must close. #11644 splits it: anchored findings
+        # are handed over as-is, unanchored ones carry a locate-it-first
+        # instruction, and findings the pin absorbed ride along as advisory
+        # so the pass is never told to chase a bar that no longer blocks.
+        findings=list(check.demand.blocking) or check.findings,
+        anchored_findings=list(check.demand.anchored),
+        advisory_findings=list(check.demand.advisory),
         pass_number=pass_number,
         max_passes=max_passes,
     )

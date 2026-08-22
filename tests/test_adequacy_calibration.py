@@ -27,12 +27,13 @@ from adequacy_calibration import (
     RecordShape,
     SuspectReason,
     calibrate,
+    demand_anchoring,
     demand_stationarity,
-    finding_tokens,
     grade_finding,
     is_out_of_remit,
     parse_run_manifest,
     parse_run_timestamp,
+    pinned_demand_overlap,
     resolved_escapes,
     split_findings,
     suspect_rejections,
@@ -60,6 +61,9 @@ def _rejection(
     duration_seconds: float = 1800.0,
     repair_passes_used: int = 0,
     shape: RecordShape = RecordShape.LEGACY,
+    pinned_findings: tuple[str, ...] = (),
+    new_findings: tuple[str, ...] = (),
+    advisory_findings: tuple[str, ...] = (),
 ) -> AdequacyRunRecord:
     """Build one gate rejection record."""
     return AdequacyRunRecord(
@@ -71,6 +75,9 @@ def _rejection(
         duration_seconds=duration_seconds,
         repair_passes_used=repair_passes_used,
         shape=shape,
+        pinned_findings=pinned_findings,
+        new_findings=new_findings,
+        advisory_findings=advisory_findings,
     )
 
 
@@ -427,19 +434,8 @@ def test_wilson_interval_widens_as_the_sample_shrinks() -> None:
 
 
 # -- demand stationarity --------------------------------------------------------
-
-
-def test_finding_tokens_keeps_the_discriminating_words() -> None:
-    assert finding_tokens("the error path in a `_merge_base`") == frozenset(
-        {"error", "path", "merge", "base"}
-    )
-
-
-@pytest.mark.parametrize(
-    "filler", ["the", "in", "a", "with", "untested", "missing", "coverage", "tests"]
-)
-def test_finding_tokens_drops_filler_and_gate_vocabulary(filler: str) -> None:
-    assert filler not in finding_tokens(f"{filler} error path")
+# (the tokeniser these compare with lives in ``adequacy_demand`` since #11644 —
+# its own tests are in tests/test_adequacy_demand.py)
 
 
 def test_demand_stationarity_counts_no_pairs_for_single_rejection_issues() -> None:
@@ -495,6 +491,90 @@ def test_demand_stationarity_bounds_the_disjoint_rate() -> None:
 
 def test_demand_stationarity_reports_no_disjoint_rate_without_any_pair() -> None:
     assert demand_stationarity([]).disjoint_rate is None
+
+
+# -- #11644 acceptance metrics ---------------------------------------------------
+
+
+def test_demand_anchoring_measures_the_locatable_share() -> None:
+    result = demand_anchoring(
+        [
+            _rejection(9001, findings=("src/foo_bar.py:baz has no test",)),
+            _rejection(9002, findings=("edge-case-coverage",)),
+        ]
+    )
+    assert result.anchored_share.point == 0.5
+
+
+def test_demand_anchoring_counts_rejections_naming_nothing_locatable() -> None:
+    result = demand_anchoring(
+        [
+            _rejection(9001, findings=("edge-case-coverage", "missing-error-path")),
+            _rejection(9002, findings=("src/foo_bar.py:baz has no test",)),
+        ]
+    )
+    assert result.n_fully_unanchored_rejections == 1
+
+
+def test_demand_anchoring_reports_none_for_an_empty_corpus() -> None:
+    assert demand_anchoring([]).anchored_share is None
+
+
+def test_demand_anchoring_ignores_runs_that_never_reached_the_gate() -> None:
+    not_reached = AdequacyRunRecord(
+        issue_number=9002,
+        recorded_at=datetime(2026, 8, 1, tzinfo=UTC),
+        gate_outcome=GateOutcome.NOT_REACHED,
+        findings=("edge-case-coverage",),
+    )
+    assert demand_anchoring([_acceptance(9001), not_reached]).n_findings == 0
+
+
+def test_pinned_overlap_reports_not_enforced_on_a_pre_change_corpus() -> None:
+    """The pre-#11644 state must read as 'no pin', never as a perfect score."""
+    assert pinned_demand_overlap([_rejection(9001)]).enforced is False
+
+
+def test_pinned_overlap_scores_a_retry_against_its_own_pin() -> None:
+    result = pinned_demand_overlap(
+        [
+            _rejection(
+                9001,
+                findings=("`rebuild_index` failure path untested",),
+                pinned_findings=("`rebuild_index` failure path untested",),
+            )
+        ]
+    )
+    assert result.mean_jaccard == 1.0
+
+
+def test_pinned_overlap_flags_a_demand_disjoint_from_its_pin() -> None:
+    result = pinned_demand_overlap(
+        [
+            _rejection(
+                9001,
+                findings=("`truncate_span` boundary untested",),
+                pinned_findings=("`rebuild_index` has no failure test",),
+                new_findings=("`truncate_span` boundary untested",),
+            )
+        ]
+    )
+    assert result.n_disjoint == 1
+
+
+def test_pinned_overlap_counts_the_findings_the_pin_absorbed() -> None:
+    result = pinned_demand_overlap(
+        [_rejection(9001, advisory_findings=("edge-case-coverage",))]
+    )
+    assert result.n_advisory_findings == 1
+
+
+def test_pinned_overlap_excludes_a_pin_that_cannot_discriminate() -> None:
+    """A pin of only short tokens is not comparable — excluded, not scored 0."""
+    result = pinned_demand_overlap(
+        [_rejection(9001, pinned_findings=("a.py:b — no test",))]
+    )
+    assert result.n_pinned_rejections == 0
 
 
 # -- suspect rejections ---------------------------------------------------------

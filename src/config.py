@@ -135,6 +135,7 @@ _ENV_INT_OVERRIDES: list[tuple[str, str, int]] = [
     ("max_scope_check_attempts", "HYDRAFLOW_MAX_SCOPE_CHECK_ATTEMPTS", 1),
     ("max_test_adequacy_attempts", "HYDRAFLOW_MAX_TEST_ADEQUACY_ATTEMPTS", 1),
     ("test_adequacy_repair_passes", "HYDRAFLOW_TEST_ADEQUACY_REPAIR_PASSES", 1),
+    ("test_adequacy_pin_demand", "HYDRAFLOW_TEST_ADEQUACY_PIN_DEMAND", True),
     (
         "test_adequacy_coverage_timeout_secs",
         "HYDRAFLOW_TEST_ADEQUACY_COVERAGE_TIMEOUT_SECS",
@@ -1793,6 +1794,24 @@ class HydraFlowConfig(BaseModel):
             "0 = today's straight-to-rejection behavior. "
             "max_test_adequacy_attempts=0 still disables the whole gate, "
             "repair included."
+        ),
+    )
+    test_adequacy_pin_demand: bool = Field(
+        default=True,
+        description=(
+            "Judge a test-adequacy retry against the demand the PREVIOUS "
+            "attempt actually stated (#11644). #11643's calibration measured "
+            "9 of 15 consecutive re-rejections demanding something entirely "
+            "new (mean substantive overlap 0.04), so an implementer could "
+            "satisfy every stated finding and still be rejected on a fresh "
+            "set. With the pin in force a retry is rejected by a finding that "
+            "restates the pinned demand, by a genuinely NEW finding that names "
+            "a locatable referent, or by a deterministic coverage gap — but "
+            "not by a new finding that names nothing locatable, which is "
+            "recorded as advisory instead. Strictness is otherwise unchanged: "
+            "a first attempt still blocks on every finding, and the "
+            "coverage-delta source never routes through the contract at all. "
+            "False = pre-#11644 behavior."
         ),
     )
     test_adequacy_coverage_timeout_secs: int = Field(

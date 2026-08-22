@@ -390,6 +390,41 @@ def render_report(report: CalibrationReport, *, skipped: int = 0) -> str:
         )
         lines.append(f"  mean substantive overlap between consecutive demands: {mean}")
 
+    anchoring = report.anchoring
+    lines.append("\nDEMAND ANCHORING (#11644 — needs no ground truth)")
+    if anchoring.n_findings == 0:
+        lines.append("  no rejection findings in the window — nothing to grade")
+    else:
+        lines.append(
+            f"  findings naming a code referent: "
+            f"{_fmt_interval(anchoring.anchored_share)}"
+        )
+        lines.append(
+            f"  rejections where NOTHING was locatable: "
+            f"{anchoring.n_fully_unanchored_rejections}/{anchoring.n_rejections}"
+        )
+
+    pinned = report.pinned_demand
+    lines.append("\nPINNED DEMAND (#11644 — the bar the retry was actually judged on)")
+    if not pinned.enforced:
+        lines.append(
+            "  NOT ENFORCED in this window: no run carried a pinned demand "
+            "(pre-#11644 corpus, or test_adequacy_pin_demand off)"
+        )
+    else:
+        mean = "n/a" if pinned.mean_jaccard is None else f"{pinned.mean_jaccard:.2f}"
+        lines.append(
+            f"  retries judged against a pin: {pinned.n_pinned_rejections}   "
+            f"mean overlap with the pin: {mean}"
+        )
+        lines.append(
+            f"  demanded something entirely new: {_fmt_interval(pinned.disjoint_rate)}"
+        )
+    lines.append(
+        f"  findings absorbed as advisory (new AND unanchored): "
+        f"{pinned.n_advisory_findings}"
+    )
+
     score = report.accept_arm_score
     lines.append("\nACCEPT-ARM PROPER SCORE (judge_calibration, ADR-0127)")
     if score.n_resolved == 0:
