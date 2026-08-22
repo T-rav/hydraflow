@@ -688,6 +688,46 @@ class TestPinnedDemand:
         assert expected in prompt
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "field",
+        [
+            pytest.param("advisory_findings", id="advisory-survives"),
+            pytest.param("new_findings", id="new-survives"),
+        ],
+    )
+    async def test_a_later_stage_rejection_keeps_what_the_flip_absorbed(
+        self, config, event_bus: EventBus, agent_task, tmp_path: Path, field: str
+    ) -> None:
+        """Flipped by the finder, then rejected on coverage: the absorbed
+        findings are the measurement of the moving bar and must not be
+        overwritten by the stage that rejects.
+        """
+        runner = _runner(config, event_bus, passes=0)
+        p = _gate_patches(runner, AsyncMock(return_value=_FINDER_RETRY_NEW_UNANCHORED))
+        with (
+            p[0],
+            p[1],
+            p[2],
+            patch.object(
+                runner,
+                "_run_coverage_delta_check",
+                new_callable=AsyncMock,
+                return_value=["src/quux.py:17"],
+            ),
+        ):
+            result = await runner._run_skill(
+                TEST_ADEQUACY,
+                agent_task,
+                tmp_path,
+                "branch",
+                worker_id=0,
+                pinned_findings=_PIN,
+            )
+        assert getattr(result.test_adequacy, field) == [
+            "boundary-condition gap in truncation logic"
+        ]
+
+    @pytest.mark.asyncio
     async def test_a_pin_is_only_applied_to_the_skill_that_declares_one(
         self, config, event_bus: EventBus, agent_task, tmp_path: Path
     ) -> None:

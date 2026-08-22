@@ -104,21 +104,29 @@ def _stated_findings(findings: list[str], summary: str) -> list[str]:
     return findings or list(split_findings(summary))
 
 
-def _merge_advisory(demand: DemandVerdict, carried: Sequence[str]) -> DemandVerdict:
+def _carry_absorbed(demand: DemandVerdict, earlier: DemandVerdict) -> DemandVerdict:
     """Fold an earlier stage's absorbed findings into a later stage's partition.
 
-    A run can be flipped by the finder's contract and then still rejected by
-    the coverage delta or the verifier. The findings the first flip absorbed
-    are what makes the moving bar measurable, so they must survive the later
-    stage rather than being overwritten by it.
+    A run flipped by the finder's contract can still be rejected afterwards by
+    the deterministic coverage delta (and, for a transcript carrying both an OK
+    marker and a RETRY verdict, by the verifier). Whatever the first flip
+    absorbed is the measurement of the moving bar, so it must survive the later
+    stage rather than being overwritten by it — ``new`` as well as ``advisory``,
+    or the instrument's new-finding count silently under-reports every run that
+    was flipped and then rejected on other grounds.
     """
-    if not carried:
+
+    def _extend(later: tuple[str, ...], carried: tuple[str, ...]) -> tuple[str, ...]:
+        seen = set(later)
+        return (*later, *(f for f in carried if f not in seen))
+
+    if not earlier.advisory and not earlier.new:
         return demand
-    seen = set(demand.advisory)
-    extra = tuple(f for f in carried if f not in seen)
-    if not extra:
-        return demand
-    return replace(demand, advisory=(*demand.advisory, *extra))
+    return replace(
+        demand,
+        advisory=_extend(demand.advisory, earlier.advisory),
+        new=_extend(demand.new, earlier.new),
+    )
 
 
 def _apply_demand_contract(
@@ -127,7 +135,7 @@ def _apply_demand_contract(
     pinned: list[str],
     issue_id: int,
     source: VerdictSource,
-    carried_advisory: Sequence[str] = (),
+    earlier: DemandVerdict = DemandVerdict(),
 ) -> tuple[LoopResult, DemandVerdict]:
     """Judge a failing LLM verdict against the pinned demand (#11644).
 
@@ -142,12 +150,12 @@ def _apply_demand_contract(
     itself.
     """
     if not findings:
-        return result, _merge_advisory(
-            DemandVerdict(pinned_enforced=bool(pinned)), carried_advisory
+        return result, _carry_absorbed(
+            DemandVerdict(pinned_enforced=bool(pinned)), earlier
         )
-    demand = _merge_advisory(
+    demand = _carry_absorbed(
         evaluate_demand(findings, pinned, pinned_enforced=bool(pinned)),
-        carried_advisory,
+        earlier,
     )
     if demand.blocks:
         return result, demand
@@ -302,13 +310,13 @@ async def run_skill_check(
             # Deliberately NOT routed through the demand contract: uncovered
             # changed lines are anchored by construction (`path:line`) and a
             # deterministic gap must keep overriding an LLM OK (#11593).
-            demand = _merge_advisory(
+            demand = _carry_absorbed(
                 DemandVerdict(
                     blocking=tuple(uncovered),
                     anchored=tuple(uncovered),
                     pinned_enforced=demand.pinned_enforced,
                 ),
-                demand.advisory,
+                demand,
             )
 
     # Independent verifier (#9546): a second-opinion pass with its own
@@ -347,7 +355,7 @@ async def run_skill_check(
                 pinned,
                 issue.id,
                 "verifier-override",
-                carried_advisory=demand.advisory,
+                earlier=demand,
             )
             if result.passed:
                 verdict_source = None
