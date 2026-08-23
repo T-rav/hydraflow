@@ -42,27 +42,66 @@ class TestIsSettledRed:
     def test_empty_rollup_is_not_settled(self) -> None:
         assert is_settled_red([]) is False
 
-    def test_all_success_is_not_red(self) -> None:
-        rollup = [
-            {"status": "completed", "conclusion": "success"},
-            {"status": "completed", "conclusion": "success"},
-        ]
-        assert is_settled_red(rollup) is False
-
-    def test_completed_with_failure_is_settled_red(self) -> None:
-        rollup = [
-            {"status": "completed", "conclusion": "failure"},
-            {"status": "completed", "conclusion": "success"},
-        ]
-        assert is_settled_red(rollup) is True
-
-    def test_pending_entry_is_never_settled_even_with_a_failure(self) -> None:
-        """Failures present AND something still queued/in-progress -> not settled."""
-        rollup = [
-            {"status": "completed", "conclusion": "failure"},
-            {"status": "in_progress", "conclusion": ""},
-        ]
-        assert is_settled_red(rollup) is False
+    @pytest.mark.parametrize(
+        ("rollup", "expected"),
+        [
+            pytest.param(
+                [
+                    {"status": "completed", "conclusion": "success"},
+                    {"status": "completed", "conclusion": "success"},
+                ],
+                False,
+                id="test_all_success_is_not_red",
+            ),
+            pytest.param(
+                [
+                    {"status": "completed", "conclusion": "failure"},
+                    {"status": "completed", "conclusion": "success"},
+                ],
+                True,
+                id="test_completed_with_failure_is_settled_red",
+            ),
+            # Failures present AND something still queued/in-progress -> not settled.
+            pytest.param(
+                [
+                    {"status": "completed", "conclusion": "failure"},
+                    {"status": "in_progress", "conclusion": ""},
+                ],
+                False,
+                id="test_pending_entry_is_never_settled_even_with_a_failure",
+            ),
+            # PINNED (#10027): after ``gh run rerun --failed``, an entry can keep
+            # reporting its OLD (pre-rerun) FAILURE conclusion while its status has
+            # already flipped back to in_progress for the new attempt. The predicate
+            # must NOT fire settled-red in this window — this is the exact trap hit
+            # twice during the 2026-07-19/20 overnight session (stale rollup
+            # mid-rerun).
+            pytest.param(
+                [
+                    # Stale: still says FAILURE from the pre-rerun attempt, but the
+                    # job is actually running again.
+                    {"status": "in_progress", "conclusion": "failure"},
+                    {"status": "completed", "conclusion": "success"},
+                ],
+                False,
+                id="test_mid_rerun_stale_conclusion_trap_pinned",
+            ),
+            # Once the reran job actually finishes (status flips to completed), a
+            # genuine still-red outcome DOES fire settled-red again.
+            pytest.param(
+                [
+                    {"status": "completed", "conclusion": "failure"},
+                    {"status": "completed", "conclusion": "success"},
+                ],
+                True,
+                id="test_after_rerun_completes_red_again_is_settled_red",
+            ),
+        ],
+    )
+    def test_settled_red_verdict(
+        self, rollup: list[dict[str, str]], expected: bool
+    ) -> None:
+        assert is_settled_red(rollup) is expected
 
     def test_queued_only_is_not_settled(self) -> None:
         rollup = [{"status": "queued", "conclusion": ""}]
@@ -72,31 +111,6 @@ class TestIsSettledRed:
         """Fail-safe: an entry with no status at all never counts as settled."""
         rollup = [{"conclusion": "failure"}]
         assert is_settled_red(rollup) is False
-
-    def test_mid_rerun_stale_conclusion_trap_pinned(self) -> None:
-        """PINNED (#10027): after ``gh run rerun --failed``, an entry can
-        keep reporting its OLD (pre-rerun) FAILURE conclusion while its
-        status has already flipped back to in_progress for the new
-        attempt. The predicate must NOT fire settled-red in this window —
-        this is the exact trap hit twice during the 2026-07-19/20
-        overnight session (stale rollup mid-rerun).
-        """
-        rollup = [
-            # Stale: still says FAILURE from the pre-rerun attempt, but the
-            # job is actually running again.
-            {"status": "in_progress", "conclusion": "failure"},
-            {"status": "completed", "conclusion": "success"},
-        ]
-        assert is_settled_red(rollup) is False
-
-    def test_after_rerun_completes_red_again_is_settled_red(self) -> None:
-        """Once the reran job actually finishes (status flips to completed),
-        a genuine still-red outcome DOES fire settled-red again."""
-        rollup = [
-            {"status": "completed", "conclusion": "failure"},
-            {"status": "completed", "conclusion": "success"},
-        ]
-        assert is_settled_red(rollup) is True
 
     def test_cancelled_counts_as_failure(self) -> None:
         rollup = [{"status": "completed", "conclusion": "cancelled"}]

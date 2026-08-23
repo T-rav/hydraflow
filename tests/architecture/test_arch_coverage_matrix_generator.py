@@ -155,20 +155,18 @@ def test_all_cells_use_valid_vocabulary(matrix_md: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_header_present(matrix_md: str) -> None:
-    assert "# Coverage Matrix" in matrix_md
-
-
-def test_generated_comment_present(matrix_md: str) -> None:
-    assert "do not hand-edit" in matrix_md
-
-
-def test_section1_header(matrix_md: str) -> None:
-    assert "## Section 1: Loops" in matrix_md
-
-
-def test_section2_header(matrix_md: str) -> None:
-    assert "## Section 2: Ports" in matrix_md
+@pytest.mark.parametrize(
+    "expected",
+    [
+        pytest.param("# Coverage Matrix", id="test_header_present"),
+        pytest.param("do not hand-edit", id="test_generated_comment_present"),
+        pytest.param("## Section 1: Loops", id="test_section1_header"),
+        pytest.param("## Section 2: Ports", id="test_section2_header"),
+        pytest.param("{{ARCH_FOOTER}}", id="test_footer_sentinel"),
+    ],
+)
+def test_structural_markers_present(matrix_md: str, expected: str) -> None:
+    assert expected in matrix_md
 
 
 def test_section3_is_note_not_prose(matrix_md: str) -> None:
@@ -183,10 +181,6 @@ def test_section3_is_note_not_prose(matrix_md: str) -> None:
     )
     has_phase_row = any(phase_table_row.match(line) for line in matrix_md.splitlines())
     assert not has_phase_row, "Section 3 must not contain a regenerated phase table"
-
-
-def test_footer_sentinel(matrix_md: str) -> None:
-    assert "{{ARCH_FOOTER}}" in matrix_md
 
 
 def test_all_loop_names_present(matrix_md: str, live_loops: list[LoopInfo]) -> None:

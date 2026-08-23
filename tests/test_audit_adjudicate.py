@@ -8,6 +8,8 @@ prompt, which withholds all prior verdicts).
 
 from __future__ import annotations
 
+import pytest
+
 from audit.adjudicate import (
     ADJUDICATION_VERDICTS,
     build_adjudication_prompt,
@@ -36,21 +38,40 @@ def _sample(
 
 
 class TestParseAdjudication:
-    def test_upheld(self) -> None:
-        raw = '{"verdict": "upheld", "rationale": "real off-by-one"}'
-        assert parse_adjudication(raw) == ("upheld", "real off-by-one")
-
-    def test_refuted(self) -> None:
-        raw = '{"verdict": "refuted", "rationale": "guarded above"}'
-        assert parse_adjudication(raw) == ("refuted", "guarded above")
-
-    def test_explicit_inconclusive(self) -> None:
-        raw = '{"verdict": "inconclusive", "rationale": "need runtime context"}'
-        assert parse_adjudication(raw) == ("inconclusive", "need runtime context")
-
-    def test_json_embedded_in_prose(self) -> None:
-        raw = 'Here is my call:\n{"verdict": "upheld", "rationale": "x"}\nDone.'
-        assert parse_adjudication(raw) == ("upheld", "x")
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param(
+                '{"verdict": "upheld", "rationale": "real off-by-one"}',
+                ("upheld", "real off-by-one"),
+                id="test_upheld",
+            ),
+            pytest.param(
+                '{"verdict": "refuted", "rationale": "guarded above"}',
+                ("refuted", "guarded above"),
+                id="test_refuted",
+            ),
+            pytest.param(
+                '{"verdict": "inconclusive", "rationale": "need runtime context"}',
+                ("inconclusive", "need runtime context"),
+                id="test_explicit_inconclusive",
+            ),
+            pytest.param(
+                'Here is my call:\n{"verdict": "upheld", "rationale": "x"}\nDone.',
+                ("upheld", "x"),
+                id="test_json_embedded_in_prose",
+            ),
+            pytest.param(
+                '{"verdict": "maybe", "rationale": "hedging"}',
+                ("inconclusive", "hedging"),
+                id="test_unknown_verdict_token_is_inconclusive",
+            ),
+        ],
+    )
+    def test_parses_verdict_and_rationale(
+        self, raw: str, expected: tuple[str, str]
+    ) -> None:
+        assert parse_adjudication(raw) == expected
 
     def test_unparseable_is_inconclusive_not_upheld(self) -> None:
         # Fail-soft toward a HUMAN: a malformed response must never fabricate an
@@ -58,10 +79,6 @@ class TestParseAdjudication:
         verdict, rationale = parse_adjudication("total garbage, no json here")
         assert verdict == "inconclusive"
         assert "garbage" in rationale
-
-    def test_unknown_verdict_token_is_inconclusive(self) -> None:
-        raw = '{"verdict": "maybe", "rationale": "hedging"}'
-        assert parse_adjudication(raw) == ("inconclusive", "hedging")
 
     def test_empty_is_inconclusive(self) -> None:
         assert parse_adjudication("")[0] == "inconclusive"

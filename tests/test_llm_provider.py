@@ -76,42 +76,26 @@ def _ok(content="hello", usage=None):
 
 
 class TestTelemetryCmd:
-    def test_openrouter_head_is_provider_name(self):
-        assert _telemetry_cmd("openrouter", "claude", "deepseek/x") == [
-            "openrouter",
-            "--model",
-            "deepseek/x",
-        ]
-
-    def test_zai_head_is_provider_name(self):
-        # z.ai gets its own attribution bucket on the cost dashboard.
-        assert _telemetry_cmd("zai", "claude", "glm-4.6") == [
-            "zai",
-            "--model",
-            "glm-4.6",
-        ]
-
-    def test_kimi_head_is_provider_name(self):
-        # kimi (Moonshot) gets its own attribution bucket on the cost dashboard.
-        assert _telemetry_cmd("kimi", "claude", "kimi-k3") == [
-            "kimi",
-            "--model",
-            "kimi-k3",
-        ]
-
-    def test_claude_head_is_tool(self):
-        assert _telemetry_cmd("claude", "claude", "haiku") == [
-            "claude",
-            "--model",
-            "haiku",
-        ]
-
-    def test_gateway_head_marks_transport_for_coverage_deduplication(self):
-        assert _telemetry_cmd("gateway", "claude", "haiku") == [
-            "gateway",
-            "--model",
-            "haiku",
-        ]
+    @pytest.mark.parametrize(
+        ("head", "model"),
+        [
+            pytest.param(
+                "openrouter", "deepseek/x", id="test_openrouter_head_is_provider_name"
+            ),
+            # z.ai gets its own attribution bucket on the cost dashboard.
+            pytest.param("zai", "glm-4.6", id="test_zai_head_is_provider_name"),
+            # kimi (Moonshot) gets its own attribution bucket on the cost dashboard.
+            pytest.param("kimi", "kimi-k3", id="test_kimi_head_is_provider_name"),
+            pytest.param("claude", "haiku", id="test_claude_head_is_tool"),
+            pytest.param(
+                "gateway",
+                "haiku",
+                id="test_gateway_head_marks_transport_for_coverage_deduplication",
+            ),
+        ],
+    )
+    def test_telemetry_cmd_preserves_head_and_model(self, head, model):
+        assert _telemetry_cmd(head, "claude", model) == [head, "--model", model]
 
 
 class TestBackendRegistry:

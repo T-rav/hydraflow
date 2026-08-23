@@ -60,12 +60,47 @@ def test_root_conftest_without_fixtures_fails(tmp_path: Path) -> None:
 # --- MockWorld ------------------------------------------------------------
 
 
-def test_mock_world_fixture_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "tests" / "scenarios" / "conftest.py",
-        "import pytest\n\n\n@pytest.fixture\ndef mock_world():\n    return object()\n",
-    )
-    assert _run("P3.2", _ctx(tmp_path)).status is Status.PASS
+@pytest.mark.parametrize(
+    ("check_id", "relpath", "content"),
+    [
+        pytest.param(
+            "P3.2",
+            "tests/scenarios/conftest.py",
+            "import pytest\n\n\n@pytest.fixture\ndef mock_world():\n    return object()\n",
+            id="test_mock_world_fixture_detected",
+        ),
+        pytest.param(
+            "P3.12",
+            "tests/scenarios/results.py",
+            "from dataclasses import dataclass\n\n@dataclass\nclass ScenarioResult:\n    ok: bool\n",
+            id="test_scenario_result_type_detected",
+        ),
+        pytest.param(
+            "P3.13",
+            "tests/scenarios/clock.py",
+            "class FakeClock: ...\n",
+            id="test_fake_clock_detected",
+        ),
+        pytest.param(
+            "P3.15",
+            "tests/scenarios/world.py",
+            "class MockWorld:\n    def fail_service(self, name): ...\n    def heal_service(self, name): ...\n",
+            id="test_fault_injection_api_detected",
+        ),
+        # CI + conditional: release gating passes when a workflow mentions scenarios.
+        pytest.param(
+            "P3.10",
+            ".github/workflows/ci.yml",
+            "jobs:\n  scenario:\n    runs-on: ubuntu-latest\n",
+            id="test_release_gating_detected_when_workflow_mentions_scenario",
+        ),
+    ],
+)
+def test_p3_check_passes_when_artifact_present(
+    check_id: str, relpath: str, content: str, tmp_path: Path
+) -> None:
+    _write(tmp_path / relpath, content)
+    assert _run(check_id, _ctx(tmp_path)).status is Status.PASS
 
 
 def test_mock_world_fixture_missing_fails(tmp_path: Path) -> None:
@@ -89,25 +124,9 @@ def test_scenario_fakes_under_three_fails(tmp_path: Path) -> None:
     assert _run("P3.3", _ctx(tmp_path)).status is Status.FAIL
 
 
-def test_scenario_result_type_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "tests" / "scenarios" / "results.py",
-        "from dataclasses import dataclass\n\n@dataclass\nclass ScenarioResult:\n    ok: bool\n",
-    )
-    assert _run("P3.12", _ctx(tmp_path)).status is Status.PASS
-
-
 def test_scenario_result_type_missing_fails(tmp_path: Path) -> None:
     (tmp_path / "tests" / "scenarios").mkdir(parents=True)
     assert _run("P3.12", _ctx(tmp_path)).status is Status.FAIL
-
-
-def test_fake_clock_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "tests" / "scenarios" / "clock.py",
-        "class FakeClock: ...\n",
-    )
-    assert _run("P3.13", _ctx(tmp_path)).status is Status.PASS
 
 
 def test_fake_clock_missing_fails(tmp_path: Path) -> None:
@@ -129,14 +148,6 @@ def test_stateful_fakes_pass(tmp_path: Path) -> None:
         "class FakeVCS:\n    def __init__(self): self.issues = {}\n",
     )
     assert _run("P3.14", _ctx(tmp_path)).status is Status.PASS
-
-
-def test_fault_injection_api_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "tests" / "scenarios" / "world.py",
-        "class MockWorld:\n    def fail_service(self, name): ...\n    def heal_service(self, name): ...\n",
-    )
-    assert _run("P3.15", _ctx(tmp_path)).status is Status.PASS
 
 
 def test_fault_injection_missing_fails(tmp_path: Path) -> None:
@@ -217,16 +228,6 @@ def test_pytest_markers_missing_fails(tmp_path: Path) -> None:
 
 
 # --- CI + conditional -----------------------------------------------------
-
-
-def test_release_gating_detected_when_workflow_mentions_scenario(
-    tmp_path: Path,
-) -> None:
-    _write(
-        tmp_path / ".github" / "workflows" / "ci.yml",
-        "jobs:\n  scenario:\n    runs-on: ubuntu-latest\n",
-    )
-    assert _run("P3.10", _ctx(tmp_path)).status is Status.PASS
 
 
 def test_release_gating_missing_fails(tmp_path: Path) -> None:

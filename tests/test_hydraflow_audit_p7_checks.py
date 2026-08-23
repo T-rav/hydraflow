@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from scripts.hydraflow_audit import registry  # noqa: F401
 from scripts.hydraflow_audit.checks import p7_observability  # noqa: F401
 from scripts.hydraflow_audit.models import CheckContext, Status
@@ -55,12 +56,48 @@ def test_wiki_missing_layers_warn(tmp_path: Path) -> None:
     assert _run("P7.3a", _ctx(tmp_path)).status is Status.WARN
 
 
-def test_wiki_store_ops_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "repo_wiki.py",
-        "class RepoWikiStore:\n    def ingest(self): ...\n    def query(self): ...\n    def lint(self): ...\n",
-    )
-    assert _run("P7.3b", _ctx(tmp_path)).status is Status.PASS
+@pytest.mark.parametrize(
+    ("check_id", "relpath", "content"),
+    [
+        pytest.param(
+            "P7.3b",
+            "src/repo_wiki.py",
+            "class RepoWikiStore:\n    def ingest(self): ...\n    def query(self): ...\n    def lint(self): ...\n",
+            id="test_wiki_store_ops_detected",
+        ),
+        pytest.param(
+            "P7.3c",
+            "src/base_runner.py",
+            "class BaseRunner:\n    def _inject_repo_wiki(self, prompt): return prompt\n",
+            id="test_runner_injects_wiki_detected",
+        ),
+        # Logging discipline: a narrow `except` clause with a real handler body.
+        pytest.param(
+            "P7.4",
+            "src/good.py",
+            "def f():\n    try:\n        x = 1\n    except ValueError:\n        x = 0\n",
+            id="test_clean_try_passes",
+        ),
+        # Logging discipline: lazy %-format logging instead of a bare value.
+        pytest.param(
+            "P7.5",
+            "src/good.py",
+            'import logging\nlogger = logging.getLogger()\ndef f(e):\n    logger.error("failed: %s", e)\n',
+            id="test_format_string_logger_error_passes",
+        ),
+        pytest.param(
+            "P7.7",
+            "src/ports.py",
+            "from typing import Protocol\n\nclass ObservabilityPort(Protocol):\n    def emit(self, event): ...\n",
+            id="test_observability_port_detected",
+        ),
+    ],
+)
+def test_p7_check_passes_when_artifact_present(
+    check_id: str, relpath: str, content: str, tmp_path: Path
+) -> None:
+    _write(tmp_path / relpath, content)
+    assert _run(check_id, _ctx(tmp_path)).status is Status.PASS
 
 
 def test_wiki_store_missing_op_fails(tmp_path: Path) -> None:
@@ -71,14 +108,6 @@ def test_wiki_store_missing_op_fails(tmp_path: Path) -> None:
     result = _run("P7.3b", _ctx(tmp_path))
     assert result.status is Status.FAIL
     assert "query" in result.message
-
-
-def test_runner_injects_wiki_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "base_runner.py",
-        "class BaseRunner:\n    def _inject_repo_wiki(self, prompt): return prompt\n",
-    )
-    assert _run("P7.3c", _ctx(tmp_path)).status is Status.PASS
 
 
 def test_runner_injection_missing_fails(tmp_path: Path) -> None:
@@ -97,28 +126,12 @@ def test_bare_except_pass_warns(tmp_path: Path) -> None:
     assert _run("P7.4", _ctx(tmp_path)).status is Status.WARN
 
 
-def test_clean_try_passes(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "good.py",
-        "def f():\n    try:\n        x = 1\n    except ValueError:\n        x = 0\n",
-    )
-    assert _run("P7.4", _ctx(tmp_path)).status is Status.PASS
-
-
 def test_bare_value_logger_error_warns(tmp_path: Path) -> None:
     _write(
         tmp_path / "src" / "bad.py",
         "import logging\nlogger = logging.getLogger()\ndef f(e):\n    logger.error(e)\n",
     )
     assert _run("P7.5", _ctx(tmp_path)).status is Status.WARN
-
-
-def test_format_string_logger_error_passes(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "good.py",
-        'import logging\nlogger = logging.getLogger()\ndef f(e):\n    logger.error("failed: %s", e)\n',
-    )
-    assert _run("P7.5", _ctx(tmp_path)).status is Status.PASS
 
 
 # --- Self-instrumentation ------------------------------------------------
@@ -135,14 +148,6 @@ def test_audit_self_instrumentation_passes_with_filter(tmp_path: Path) -> None:
 def test_audit_self_instrumentation_missing_fails(tmp_path: Path) -> None:
     _write(tmp_path / "scripts" / "hydraflow_audit" / "observability.py", "# stub\n")
     assert _run("P7.6", _ctx(tmp_path)).status is Status.FAIL
-
-
-def test_observability_port_detected(tmp_path: Path) -> None:
-    _write(
-        tmp_path / "src" / "ports.py",
-        "from typing import Protocol\n\nclass ObservabilityPort(Protocol):\n    def emit(self, event): ...\n",
-    )
-    assert _run("P7.7", _ctx(tmp_path)).status is Status.PASS
 
 
 def test_observability_port_absent_warns(tmp_path: Path) -> None:

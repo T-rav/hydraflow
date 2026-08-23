@@ -734,30 +734,28 @@ class TestGranularReviewStatusEvents:
 
 
 class TestCountReviewFindings:
-    def test_counts_bullet_points(self, config: HydraFlowConfig) -> None:
+    @pytest.mark.parametrize(
+        ("summary", "expected"),
+        [
+            pytest.param(
+                "- Fix A\n- Fix B\n- Fix C", 3, id="test_counts_bullet_points"
+            ),
+            pytest.param("1. Fix A\n2. Fix B", 2, id="test_counts_numbered_items"),
+            pytest.param("* Fix A\n* Fix B", 2, id="test_counts_asterisk_bullets"),
+            pytest.param("All looks good.", 0, id="test_returns_zero_for_no_findings"),
+            pytest.param("", 0, id="test_returns_zero_for_empty_string"),
+        ],
+    )
+    def test_counts_findings(
+        self, config: HydraFlowConfig, summary: str, expected: int
+    ) -> None:
         phase = make_review_phase(config)
-        assert phase._count_review_findings("- Fix A\n- Fix B\n- Fix C") == 3
-
-    def test_counts_numbered_items(self, config: HydraFlowConfig) -> None:
-        phase = make_review_phase(config)
-        assert phase._count_review_findings("1. Fix A\n2. Fix B") == 2
-
-    def test_counts_asterisk_bullets(self, config: HydraFlowConfig) -> None:
-        phase = make_review_phase(config)
-        assert phase._count_review_findings("* Fix A\n* Fix B") == 2
+        assert phase._count_review_findings(summary) == expected
 
     def test_counts_mixed_formats(self, config: HydraFlowConfig) -> None:
         phase = make_review_phase(config)
         summary = "- Bullet item\n1. Numbered item\n* Star item"
         assert phase._count_review_findings(summary) == 3
-
-    def test_returns_zero_for_no_findings(self, config: HydraFlowConfig) -> None:
-        phase = make_review_phase(config)
-        assert phase._count_review_findings("All looks good.") == 0
-
-    def test_returns_zero_for_empty_string(self, config: HydraFlowConfig) -> None:
-        phase = make_review_phase(config)
-        assert phase._count_review_findings("") == 0
 
 
 # ---------------------------------------------------------------------------
