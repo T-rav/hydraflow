@@ -254,9 +254,16 @@ class WikiIngestMixin:
         path-matching logic.
 
         Path list source-of-truth (T30.5 I3): we import
-        ``review_advisor.SELF_MODIFYING_PATHS`` to keep the recognized-path
+        ``review_advisor.is_self_modifying_path`` to keep the recognized-path
         set aligned with the advisor module; different matchers (unified-
-        diff headers vs. content context) consume the same paths.
+        diff headers vs. content context) consume the same identities.
+
+        #11669: that predicate matches on module IDENTITY, so a transcript
+        describing an edit to ``src/review_phase/_advisors.py`` synthesizes a
+        header just as one naming ``src/review_phase.py`` does. Under the
+        previous literal ``path in SELF_MODIFYING_PATHS`` test it did not —
+        and no wiki-ingest run has forced veto authority for a review_phase
+        package member since that module was split.
 
         T37: detection is context-sensitive. A bare substring mention of an
         advisor source path (e.g., "review found a type-hint gap in
@@ -265,7 +272,7 @@ class WikiIngestMixin:
         diff/patch blocks, or editorial verbs like "modified <path>") does.
         See ``_detect_self_modification_context``.
         """
-        from review_advisor import SELF_MODIFYING_PATHS  # noqa: PLC0415
+        from review_advisor import is_self_modifying_path  # noqa: PLC0415
 
         # Mirror the synthesize_ingest cap so the descriptor reflects
         # exactly the content that would feed the wiki compiler.
@@ -277,12 +284,12 @@ class WikiIngestMixin:
         ]
         # Synthesize unified-diff headers only for self-mod paths that
         # appear in a *modification context* — bare substring mentions
-        # (benign prose) do NOT trigger synthesis. Intersect with
-        # SELF_MODIFYING_PATHS so the regex remains the gate but the
-        # canonical path list still governs which paths are eligible.
+        # (benign prose) do NOT trigger synthesis. The regex supplies the
+        # context gate; ``is_self_modifying_path`` supplies the identity
+        # judgement, so neither side carries a copy of the other's list.
         detected = _detect_self_modification_context(combined)
         for path in detected:
-            if path in SELF_MODIFYING_PATHS:
+            if is_self_modifying_path(path):
                 lines.append(f"diff --git a/{path} b/{path}")
         lines.extend(
             [

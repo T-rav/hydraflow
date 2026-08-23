@@ -49,6 +49,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from path_membership import module_identities
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from config import HydraFlowConfig
 
@@ -93,10 +95,13 @@ class BlastRadiusClass(StrEnum):
 # merges. A change touching any of these is the highest class and fails CLOSED.
 # The classifier module itself (``judge_independence.py``) is included per the
 # spec's explicit acceptance criterion — the policy machinery watches itself.
+#
+# Entries name MODULES. ``_path_matches`` resolves each changed path to its
+# module identities first, so an entry keeps covering its module after the
+# module is decomposed into a package — see ``path_membership``.
 _SELF_MOD_SUBSTRINGS: tuple[str, ...] = (
     "src/review_advisor.py",
     "src/review_phase.py",
-    "src/review_phase/",
     "src/judge_independence.py",
     "src/fail_open_monitor_loop.py",
     # #10373: the green-while-dying monitor must not be quietly editable by the
@@ -171,7 +176,11 @@ _STRUCTURAL_SUBSTRINGS: tuple[str, ...] = (
     "src/orchestrator.py",
     "src/orchestrator_",  # the orchestrator mixin family (#11547)
     "src/service_registry.py",
-    "src/persistence/",
+    # ``src/persistence/`` sat here from #10371 (2026-07-23) until #11669.
+    # That directory has never existed in this repo's history — the
+    # persistence layer is ``src/state/`` (ADR-0021), already listed below.
+    # A needle that matches nothing reads exactly like a needle that happens
+    # not to match today, which is why it survived 31 days unnoticed.
     "src/state/",
     "docs/arch/functional_areas.yml",
 )
@@ -203,8 +212,29 @@ def paths_from_diff(diff: str) -> list[str]:
     return sorted(paths)
 
 
+# Public aliases for the path-membership registry (``path_membership``), which
+# asserts repo-wide that every entry here still resolves on disk and that
+# membership follows a module into a package.
+SELF_MOD_PATHS: tuple[str, ...] = _SELF_MOD_SUBSTRINGS
+SECURITY_PATHS: tuple[str, ...] = _SECURITY_SUBSTRINGS
+MIGRATION_PATHS: tuple[str, ...] = _MIGRATION_SUBSTRINGS
+STRUCTURAL_PATHS: tuple[str, ...] = _STRUCTURAL_SUBSTRINGS
+
+
 def _path_matches(path: str, needles: tuple[str, ...]) -> bool:
-    return any(n in path for n in needles)
+    """Whether *path* — or the module it is part of — matches any needle.
+
+    Substring matching alone is package-blind: ``"src/convergence_gate.py"``
+    is not a substring of ``"src/convergence_gate/_engine.py"``, so the day
+    that gate is decomposed it drops out of the self-modification class and
+    stops requiring an independent, out-of-family verdict. Nothing reddens.
+
+    Resolving the path to its module identities first makes membership follow
+    the MODULE. This is strictly additive — the raw path is always the first
+    identity — and it fails in the safe direction: it can only ever ADD a
+    blast-radius class, never remove one.
+    """
+    return any(n in identity for identity in module_identities(path) for n in needles)
 
 
 def classify_paths(
