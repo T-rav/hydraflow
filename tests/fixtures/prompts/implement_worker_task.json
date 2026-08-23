@@ -1,0 +1,12 @@
+{
+  "builder": "implement_worker_runner.build_implement_worker_prompt",
+  "args": {
+    "role": "implementer",
+    "task_contract": "The retry counter is incremented twice after a timeout. Say exactly where, and what to change.",
+    "issue_goal": "Retries on the upload path double-count an attempt\n\n`upload_chunk` increments `attempts` in its `except TimeoutError` arm and again at the top of the loop, so a single timeout burns two of the five permitted attempts. Bound the retry count correctly and keep the failure surfaced to the caller.",
+    "issue_number": 8832
+  },
+  "faked_deps": {
+    "worktree": "implement_canary_snapshot"
+  }
+}

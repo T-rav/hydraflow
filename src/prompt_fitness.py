@@ -302,6 +302,13 @@ PROMPT_BASELINE: dict[str, frozenset[int]] = {
     # no edge cases — and both were real gaps for a prompt whose whole job is to
     # produce one bounded artifact a receipt will vouch for.
     "plan_worker_task": frozenset(),
+    # #11542, held to the same standard as the two above: written against the
+    # rubric rather than baselined against its own first draft. It carries one
+    # thing neither of them does — the bounded slice is *stated* to the worker
+    # (which branch, which base, which HEAD, and that an answer about anything
+    # else is discarded) — because a worker that knows the bound produces fewer
+    # answers the fence has to throw away.
+    "implement_worker_task": frozenset(),
     "adversarial_agent_compose": frozenset({1, 3, 4}),
     "agent_build_prompt_first_attempt": frozenset({1}),
     "agent_build_prompt_with_prior_failure": frozenset({1}),

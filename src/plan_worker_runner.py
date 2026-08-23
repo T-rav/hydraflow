@@ -60,8 +60,15 @@ from driver_contracts import (
     WorkerTransport,
 )
 from exception_classify import reraise_on_credit_or_bug
-from hydraflow_gateway.routing_policy import DecisionReason
-from plan_broker import PlanRouteOutcome, PlanRouteReason, resolve_plan_model
+from plan_broker import (
+    INADMISSIBLE_ROUTE_REASONS,
+    OPERATIONAL_ROUTE_REASONS,
+    REFUSAL_CODES,
+    PlanRouteOutcome,
+    PlanRouteReason,
+    refusal_for_spawn,
+    resolve_plan_model,
+)
 from runner_utils import run_lightweight_agent
 
 if TYPE_CHECKING:
@@ -97,92 +104,15 @@ thousand dispatches is not the replay this fence exists to catch — while an
 unbounded set on a long-lived component is a slow leak with no upper bound at
 all."""
 
-#: Which refusal each unsatisfiable tier resolution reports on the receipt.
-#: A table rather than branches so the mapping is one thing an operator can
-#: read, and so a new :class:`plan_broker.PlanRouteReason` fails loudly here
-#: (``_REFUSAL_CODES[...]`` raises) rather than defaulting to a plausible code.
-_REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
-    PlanRouteReason.PHASE_NOT_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
-    PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
-    PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
-    # A hold, not a rejection: the tier table is the fixable thing and the
-    # request was not inadmissible. Mapping it to the terminal code — which an
-    # earlier draft did — put two holds for the same reason under opposite
-    # receipt codes inside one module.
-    PlanRouteReason.CAPABILITY_UNMAPPED: RejectionReason.ROUTE_UNAVAILABLE,
-    PlanRouteReason.CONCRETE_MODEL_REQUESTED: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
-}
+#: Re-exported from the module that owns the vocabulary, so the two actuators
+#: cannot drift on what a refusal means. See ``plan_broker.REFUSAL_CODES``.
+_REFUSAL_CODES = REFUSAL_CODES
 
-#: Routing-policy refusal reasons that mean *the request was inadmissible*
-#: rather than *something operational is missing*. These map to
-#: MODEL_REQUIREMENT_UNSATISFIABLE — retrying changes nothing, whatever an
-#: operator edits; every other reason is ROUTE_UNAVAILABLE, where a caretaker
-#: retry is right once whatever is missing is supplied. The remedy for a hold
-#: may be a policy edit rather than a gateway one, so this does not say "look
-#: at the gateway" — an earlier version did, and it was wrong for every hold
-#: except an outage.
-#:
-#: Built from the resolver's own enum rather than from string literals, because
-#: the first draft of this set contained a member that does not exist
-#: (``concrete-model-not-allowed``) and omitted one that does
-#: (``policy-conflict``) — a hand-written copy of another module's vocabulary
-#: drifts silently and reads as a working classification while classifying
-#: nothing. ``tests/test_plan_worker_runner.py`` requires every
-#: :class:`DecisionReason` member to be classified, so a new one fails there
-#: rather than defaulting to "retry it".
-_INADMISSIBLE_ROUTE_REASONS = frozenset(
-    {
-        DecisionReason.LITERAL_FAMILY_UNSATISFIABLE.value,
-        DecisionReason.MODEL_NOT_ALLOWED.value,
-        # Two policies claim the same rung: an operator must resolve it, and a
-        # retry against an unresolved conflict is an infinite one.
-        DecisionReason.POLICY_CONFLICT.value,
-    }
-)
-
-#: Reasons deliberately left retryable, and why — so the judgement is visible
-#: rather than implied by absence from the set above.
-_OPERATIONAL_ROUTE_REASONS = frozenset(
-    {
-        # The snapshot will be back; nothing about the request is wrong.
-        DecisionReason.SNAPSHOT_UNAVAILABLE.value,
-        # Unreachable on THIS seam, and the reason is worth stating because
-        # an earlier comment here got it wrong: it is not that the resolver
-        # never rejects on a hold — ``enforce_canary_route`` raises on every
-        # non-SELECTED outcome, HELD included, which is the whole premise of
-        # classifying on the reason. It is that a brokered child's model is
-        # always a ``PLAN_TIER_CATALOG`` id, and ``requirement_for_model``
-        # returns CAPABILITY only for an *empty* model string — so the resolver
-        # cannot emit ``capability-unmapped`` for one of these spawns at all.
-        # Classified anyway, because the table is required to be total.
-        DecisionReason.CAPABILITY_UNMAPPED.value,
-        # Collapses "no credential for this account" with "a provider lock
-        # excluded every account". The first is operational and the second is
-        # policy, and the resolver does not distinguish them here — so the
-        # conservative reading is the retryable one, which sends the operator
-        # to the gateway where both are visible.
-        DecisionReason.NO_ELIGIBLE_ACCOUNT.value,
-        # Reasons a *selected* decision carries. They reach a refusal only
-        # through ``enforce_canary_route``'s empty-effective-model guard, which
-        # a brokered child cannot trip (its legacy model is always the catalog
-        # id) — so "not a refusal" is nearly but not exactly right, and
-        # operational is the correct reading of the case that can occur.
-        DecisionReason.MATCHED_POLICY.value,
-        DecisionReason.NO_POLICY_APPLIES.value,
-        # NOT one of those two, and an earlier comment here swept it in with
-        # them: ``_legacy_decision`` emits it HELD, so it raises at the outcome
-        # check rather than at the empty-model guard. It is unreachable for a
-        # different reason — ``route_shadow.build_route_context`` always
-        # constructs a ``LegacyRoute``, so ``context.legacy_route`` is never
-        # ``None`` on this path. Operational either way: nothing about the
-        # request is wrong.
-        DecisionReason.NO_LEGACY_ROUTE.value,
-    }
-)
+#: Re-exported from the module that owns the shared vocabulary, so the two
+#: actuators cannot classify one routing refusal two ways.
+#: See ``plan_broker.INADMISSIBLE_ROUTE_REASONS``.
+_INADMISSIBLE_ROUTE_REASONS = INADMISSIBLE_ROUTE_REASONS
+_OPERATIONAL_ROUTE_REASONS = OPERATIONAL_ROUTE_REASONS
 
 
 class PlanWorkerSpawn(Protocol):
@@ -795,29 +725,7 @@ def _child_lineage(
     return lineage if spawn_out.get("spawned") else None
 
 
-def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
-    """Why a spawn that never ran did not run, in the receipt's vocabulary.
-
-    The seam collapses a routing-policy refusal and a transport failure onto
-    the same soft ``rc=-1``, so without the reason it left behind, both would
-    be filed as ``ROUTE_UNAVAILABLE`` — which tells an operator the request was
-    fine and to retry once whatever is missing is supplied. For an inadmissible
-    route that is wrong: the retry will never succeed, and the thing to edit is
-    the policy.
-    """
-    # Classified on the REASON alone, deliberately. A previous draft short-
-    # circuited on ``refused_outcome == held`` first, reasoning that a hold is
-    # retryable whatever its reason — and that silently reversed the one code
-    # this canary is named after: ``RoutingAction.on_unavailable`` defaults to
-    # HOLD, so the ordinary ``provider_lock=zai-harness`` refusal arrives as
-    # HELD with ``literal-family-unsatisfiable``, and the guard turned it back
-    # into a retryable ``ROUTE_UNAVAILABLE``. The reason is the durable fact
-    # about the request; the outcome is a per-policy *dial* over what to do
-    # when a lane is unavailable, and it is the wrong axis to classify on.
-    reason = str(spawn_out.get("refused", "") or "")
-    if reason in _INADMISSIBLE_ROUTE_REASONS:
-        return RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    return RejectionReason.ROUTE_UNAVAILABLE
+_refusal_for_spawn = refusal_for_spawn
 
 
 def _unresolved_decision(route_policy_revision: str) -> PlanRouteDecision:
