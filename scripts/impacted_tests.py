@@ -145,7 +145,13 @@ SMOKE_TESTS: tuple[str, ...] = (
 
 # Rule (c): glob(s) for the always-on cross-cutting guard tests. Globbed at
 # runtime so newly added architecture tests are picked up automatically.
-ARCHITECTURE_GLOBS: tuple[str, ...] = ("tests/architecture/test_*.py",)
+#: Recursive on purpose: a non-recursive ``tests/architecture/test_*.py``
+#: silently drops any future ``tests/architecture/<sub>/test_*.py`` out of
+#: the always-on CI floor, and a floor that shrinks is quiet (#11673).
+ARCHITECTURE_GLOBS: tuple[str, ...] = (
+    "tests/architecture/test_*.py",
+    "tests/architecture/**/test_*.py",
+)
 
 
 class FileIndex(Protocol):

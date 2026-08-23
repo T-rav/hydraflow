@@ -33,7 +33,14 @@ def _routes_dir(repo_root: Path) -> Path:
 
 
 def _route_modules(repo_root: Path) -> list[Path]:
-    return sorted(_routes_dir(repo_root).glob("*.py"))
+    """``rglob``: a route family large enough to become its own sub-package
+    would drop out of a non-recursive glob and stop being checked (#11673)."""
+    modules = sorted(_routes_dir(repo_root).rglob("*.py"))
+    assert modules, (
+        "no route modules found — this guard would pass vacuously. "
+        "Did src/dashboard_routes/ move?"
+    )
+    return modules
 
 
 def test_route_modules_import_shared_symbols_via_canonical_path(
