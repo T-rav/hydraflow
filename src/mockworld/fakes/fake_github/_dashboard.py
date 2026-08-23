@@ -5,12 +5,12 @@ Extracted VERBATIM from ``src/mockworld/fakes/fake_github.py``
 so every method here still resolves as an attribute of ``FakeGitHub`` and every
 seam that drives the fake through a Port resolves to the same object as before.
 
-The cluster boundary mirrors the real adapter's: this module is the fake's side
-of ``pr_manager_dashboard.PRManagerDashboardMixin``, so the fake and the thing it doubles read alike.
+The cluster boundary mirrors the real adapter's: this module is the fake's
+side of ``pr_manager_dashboard.PRManagerDashboardMixin``, so the fake and the thing it doubles read alike.
 
 One concern: the bulk snapshots ``GitHubCacheLoop`` and the dashboard poll —
 the full issue and PR listings, the HITL queue, the label counts, and the two
-open-PR views — plus the shared ``_issue_summary`` row shape they render.
+open-PR views.
 """
 
 from __future__ import annotations
@@ -43,23 +43,6 @@ class FakeGitHubDashboardMixin:
         def pr_for_issue(
             self, issue_number: int
         ) -> FakePR | None: ...  # provided by _seeding
-
-    @staticmethod
-    def _issue_summary(issue: FakeIssue) -> dict[str, Any]:
-        """GitHubIssueSummary-style projection of one issue.
-
-        Shared by ``list_issues_by_label`` / ``list_open_issues`` — previously
-        two byte-identical copies (#10025). ``labels`` mirrors the gh wire
-        shape (``{"name": ...}``, #9943) so filters reading ``lbl["name"]``
-        behave identically under the fake and the adapter.
-        """
-        return {
-            "number": issue.number,
-            "title": issue.title,
-            "body": issue.body,
-            "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
-            "labels": [{"name": name} for name in issue.labels],
-        }
 
     async def list_all_prs(
         self, *, state: str = "all", limit: int = 1000

@@ -5,12 +5,13 @@ Extracted VERBATIM from ``src/mockworld/fakes/fake_github.py``
 so every method here still resolves as an attribute of ``FakeGitHub`` and every
 seam that drives the fake through a Port resolves to the same object as before.
 
-The cluster boundary mirrors the real adapter's: this module is the fake's side
-of ``pr_manager_issues.PRManagerIssuesMixin``, so the fake and the thing it doubles read alike.
+The cluster boundary mirrors the real adapter's: this module is the fake's
+side of ``pr_manager_issues.PRManagerIssuesMixin``, so the fake and the thing it doubles read alike.
 
 One concern: the issue side of the GitHub surface — closing (with the #10394
 dispatchable-label strip), reopening, creating, body edits, the state/label/body
-reads, and the label-scoped listings the dispatchers poll.
+reads, the label-scoped listings the dispatchers poll, and the
+``_issue_summary`` row shape those listings render.
 """
 
 from __future__ import annotations
@@ -40,11 +41,6 @@ class FakeGitHubIssuesMixin:
 
     if TYPE_CHECKING:
 
-        @staticmethod
-        def _issue_summary(
-            issue: FakeIssue,
-        ) -> dict[str, Any]: ...  # provided by _dashboard
-
         def _maybe_rate_limit(self) -> None: ...  # provided by _seeding
 
         def add_issue(
@@ -57,6 +53,23 @@ class FakeGitHubIssuesMixin:
             updated_at: str | None = None,
             created_at: str | None = None,
         ) -> None: ...  # provided by _seeding
+
+    @staticmethod
+    def _issue_summary(issue: FakeIssue) -> dict[str, Any]:
+        """GitHubIssueSummary-style projection of one issue.
+
+        Shared by ``list_issues_by_label`` / ``list_open_issues`` — previously
+        two byte-identical copies (#10025). ``labels`` mirrors the gh wire
+        shape (``{"name": ...}``, #9943) so filters reading ``lbl["name"]``
+        behave identically under the fake and the adapter.
+        """
+        return {
+            "number": issue.number,
+            "title": issue.title,
+            "body": issue.body,
+            "updated_at": getattr(issue, "updated_at", "2026-01-01T00:00:00Z"),
+            "labels": [{"name": name} for name in issue.labels],
+        }
 
     async def close_issue(
         self, issue_number: int, *, reason: str | None = None

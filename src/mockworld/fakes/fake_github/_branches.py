@@ -5,8 +5,8 @@ Extracted VERBATIM from ``src/mockworld/fakes/fake_github.py``
 so every method here still resolves as an attribute of ``FakeGitHub`` and every
 seam that drives the fake through a Port resolves to the same object as before.
 
-The cluster boundary mirrors the real adapter's: this module is the fake's side
-of ``pr_manager_branches.PRManagerBranchesMixin``, so the fake and the thing it doubles read alike.
+The cluster boundary mirrors the real adapter's: this module is the fake's
+side of ``pr_manager_branches.PRManagerBranchesMixin``, so the fake and the thing it doubles read alike.
 
 One concern: questions asked about a BRANCH rather than a PR — finding the open
 PR for a branch, its combined PR state, whether it differs from main, remote ref
