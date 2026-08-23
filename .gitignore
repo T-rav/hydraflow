@@ -292,11 +292,15 @@ docs/arch/generated/second-order-vitals.md
 # duplicating entries until the next mainline regen cleaned them.
 #
 # Nothing validated the committed copy: arch.runner exempts it from drift
-# detection (`_DRIFT_EXEMPT`), .meta.json no longer digests it (#11674),
-# mkdocs.yml never listed it in the nav, and DiagramLoop already excluded it
-# from the regen-PR trigger as pure churn. The site is unaffected --
-# pages-deploy.yml runs `arch.runner --emit` before building, so readers get a
-# copy rendered fresh at deploy time rather than one stale since the last regen.
+# detection (`_DRIFT_EXEMPT`), .meta.json no longer digests it (#11674), and
+# DiagramLoop already excluded it from the regen-PR trigger as pure churn.
+#
+# The site DOES publish it -- mkdocs.yml navs it and docs/index.md links it --
+# so untracking only works because pages-deploy.yml runs `arch.runner --emit`
+# before building. Readers now get a copy rendered fresh at deploy time rather
+# than one stale since the last regen. tests/architecture/test_mkdocs_strict.py
+# provisions it the same way, so the strict build tests the site the deploy
+# actually produces.
 docs/arch/generated/changelog.md
 
 # arch.runner --emit writes the VOLATILE regen stamp (wall-clock + HEAD sha)

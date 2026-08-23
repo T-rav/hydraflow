@@ -7,9 +7,13 @@ perpetual divergence: it conflicted on every rebase and staging advance, and
 the `merge=union` driver "resolved" that by duplicating entries.
 
 Nothing validated the committed copy -- `arch.runner` exempts it from drift
-detection, `.meta.json` stopped digesting it (#11674), `mkdocs.yml` never
-listed it, and `DiagramLoop` already excluded it from the regen-PR trigger.
-It is now rendered at Pages-deploy time.
+detection, `.meta.json` stopped digesting it (#11674), and `DiagramLoop`
+already excluded it from the regen-PR trigger.
+
+The site still publishes it: `mkdocs.yml` navs it and `docs/index.md` links
+it, so untracking is only safe because `pages-deploy.yml` regenerates before
+building -- which is what `test_the_site_still_renders_it_at_deploy_time`
+pins.
 """
 
 from __future__ import annotations

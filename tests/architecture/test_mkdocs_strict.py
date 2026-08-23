@@ -20,6 +20,7 @@ def test_mkdocs_build_strict_succeeds(real_repo_root: Path, tmp_path: Path):
     uncovered CI path — a same-suite ordering flake.
     """
     assert shutil.which("mkdocs") is not None, "mkdocs must be installed"
+    _ensure_gitignored_artifacts(real_repo_root, tmp_path)
     res = subprocess.run(
         ["mkdocs", "build", "--strict", "--site-dir", str(tmp_path / "site")],
         cwd=real_repo_root,
@@ -33,3 +34,33 @@ def test_mkdocs_build_strict_succeeds(real_repo_root: Path, tmp_path: Path):
             f"--- stdout ---\n{res.stdout}\n"
             f"--- stderr ---\n{res.stderr}"
         )
+
+
+#: Generated artifacts that are gitignored rather than committed, so they are
+#: absent from a fresh checkout. ``mkdocs.yml`` navs them and ``docs/index.md``
+#: links them, so a strict build fails without them -- which is how CI went red
+#: while every local tree (where a previous ``arch-regen`` had left the file
+#: behind) stayed green.
+_UNTRACKED_ARTIFACTS = ("changelog.md",)
+
+
+def _ensure_gitignored_artifacts(repo_root: Path, tmp_path: Path) -> None:
+    """Provision untracked generated artifacts, as pages-deploy.yml does.
+
+    The real deploy runs ``arch.runner --emit`` before ``mkdocs build``; this
+    test has to do the same or it is testing a site the deploy never builds.
+    Emits into a throwaway directory and copies only the untracked artifacts
+    across, so a stale tracked artifact is still caught by arch-check rather
+    than being silently overwritten here.
+    """
+    generated = repo_root / "docs/arch/generated"
+    missing = [n for n in _UNTRACKED_ARTIFACTS if not (generated / n).exists()]
+    if not missing:
+        return
+
+    from arch import runner  # noqa: PLC0415
+
+    staging = tmp_path / "arch-emit"
+    runner.emit(repo_root=repo_root, out_dir=staging)
+    for name in missing:
+        shutil.copyfile(staging / name, generated / name)
