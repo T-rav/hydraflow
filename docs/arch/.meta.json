@@ -13,13 +13,13 @@
       "content_sha": "6023bec03f522ea910466e5622107f45385f39c0775ac13059c334baf4833682"
     },
     "adr_xref.md": {
-      "content_sha": "127dee2f2736e0b94212931962302e321f0d32c96c0fadec5d0a0f0e9160648b"
+      "content_sha": "549b4a074ec8f8182aaa6043406e4a9aac7677de7ef546e419733f0b1729d3bb"
     },
     "ai_system_inventory.md": {
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
     "changelog.md": {
-      "content_sha": "5be85f5fa0aa24a76f3107e1540b0cbf49fcad76cd7aa592763282e6693cc940"
+      "content_sha": "49fa68575f9640e5e6574cbdd4a5383fc589afc4b9093de4524391d2e8347eae"
     },
     "coverage_matrix.md": {
       "content_sha": "a455e148e242c4fc13110ac6f6c1629fe2d8b996659a182f4172e1f21d3ffaf9"
@@ -28,7 +28,7 @@
       "content_sha": "58e2f112e0c991d435026cddd89c1bf282891a3f3a389cd84ffdc8ccb62bb6ca"
     },
     "functional_areas.md": {
-      "content_sha": "f83319abd0865b55e7b1f487729df5f7f52d9a9c1d85b2706e32e6482ca3f95e"
+      "content_sha": "f0ef0fc82d9c4a0bd48d67b6ab8c4df8b8f25f1354840ea01a4e0536c451286c"
     },
     "gauntlet-calibration.md": {
       "content_sha": "a04ac9289e3456ea2de979818193f105d5d69d3d08c0f19d77e8008ec226502d"
@@ -43,7 +43,7 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "ab57fb8752950cc020d1a5aa1767ec4fb5ec3bb0cdf58253ccba4d6eadff404c"
+      "content_sha": "d3a21a5e3620f233ece21158d4220f448e547bb87c446c5897dcd7f46dd81d4d"
     },
     "ports.md": {
       "content_sha": "c5694cc02e165570a5196a4f9443170f984d254d68710cbe41856bdd4da64cc0"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "5662f1fc73fec20a10363c2efab3a99137fa667b7d1226f3ae4aa617af9ad9cc"
+  "content_sha": "910878a19efb0275a589a9afb7777035945e5c76632b2789e92e7ca4c5cbdb51"
 }

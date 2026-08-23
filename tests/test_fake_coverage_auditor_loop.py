@@ -85,6 +85,64 @@ def test_catalog_fake_methods_splits_surface_vs_helper(tmp_path: Path) -> None:
     assert helpers == {"script_ci", "fail_service"}
 
 
+def _write_decomposed_fake(fake_dir: Path) -> None:
+    """A fake split into a package of per-surface mixins (the Refs #11547 shape)."""
+    pkg = fake_dir / "fake_github"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("from ._fake import FakeGitHub\n")
+    (pkg / "_issues.py").write_text(
+        "class FakeGitHubIssuesMixin:\n"
+        "    async def close_issue(self, num): ...\n"
+        "    def _private(self): ...\n"
+    )
+    (pkg / "_seeding.py").write_text(
+        "class FakeGitHubSeedingMixin:\n    def script_ci(self, events): ...\n"
+    )
+    (pkg / "_fake.py").write_text(
+        "from ._issues import FakeGitHubIssuesMixin\n"
+        "from ._seeding import FakeGitHubSeedingMixin\n\n"
+        "class FakeGitHub(FakeGitHubIssuesMixin, FakeGitHubSeedingMixin):\n"
+        "    async def create_issue(self, title, body, labels): ...\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("bucket", "expected"),
+    [
+        pytest.param(
+            "adapter-surface",
+            {"create_issue", "close_issue"},
+            id="mixin-methods-join-the-host-adapter-surface",
+        ),
+        pytest.param(
+            "test-helper",
+            {"script_ci"},
+            id="mixin-helpers-still-classify-as-helpers",
+        ),
+    ],
+)
+def test_catalog_folds_mixins_into_the_fake_that_inherits_them(
+    tmp_path: Path, bucket: str, expected: set[str]
+) -> None:
+    """A fake decomposed into a package keeps ONE audited surface (Refs #11547).
+
+    The runtime object is unchanged by the split, so the audit must be too. A
+    non-recursive scan would not see the package at all, and cataloguing each
+    ``Fake*Mixin`` separately would move its methods into an entry no cassette
+    map covers — either way the gap would go silently un-audited.
+    """
+    fake_dir = tmp_path / "fakes"
+    fake_dir.mkdir()
+    _write_decomposed_fake(fake_dir)
+
+    cat = catalog_fake_methods(fake_dir)
+
+    assert set(cat) == {"FakeGitHub"}, (
+        "mixin classes must be folded into their host, not catalogued as fakes"
+    )
+    assert set(cat["FakeGitHub"][bucket]) == expected
+
+
 def test_catalog_fake_methods_fake_git_script_api_helpers_are_test_helpers(
     tmp_path: Path,
 ) -> None:
@@ -518,25 +576,20 @@ def test_fake_to_cassette_dir_keys_match_real_classes() -> None:
 
     Guards against case-mismatch regressions (e.g. 'FakeFs' vs actual 'FakeFS')
     and stale entries for removed classes.
+
+    The live class set comes from ``catalog_fake_methods`` — the same primitive
+    the loop keys ``_FAKE_TO_CASSETTE_DIR`` against — rather than a second,
+    hand-rolled scan. A duplicate scan drifts: this test's own copy went stale
+    the moment ``FakeGitHub`` moved into a package (Refs #11547) and reported a
+    live fake as deleted.
     """
-    import ast as _ast
     from pathlib import Path as _Path
 
     from fake_coverage_auditor_loop import _FAKE_TO_CASSETTE_DIR
 
     repo_root = _Path(__file__).parent.parent
     fake_dir = repo_root / "src" / "mockworld" / "fakes"
-    actual: set[str] = set()
-    for path in fake_dir.glob("*.py"):
-        if path.name.startswith("test_") or path.name == "__init__.py":
-            continue
-        try:
-            tree = _ast.parse(path.read_text())
-        except SyntaxError:
-            continue
-        for node in _ast.walk(tree):
-            if isinstance(node, _ast.ClassDef) and node.name.startswith("Fake"):
-                actual.add(node.name)
+    actual = set(catalog_fake_methods(fake_dir))
 
     stale = set(_FAKE_TO_CASSETTE_DIR) - actual
     assert not stale, (

@@ -94,6 +94,6 @@ Supersede when: a new phase changes attempt counter semantics (for example, intr
 - `src/state/_auto_agent.py`: StateTracker accessor for `auto_agent_attempts`, now delegating to the ledger under stage `"auto_agent"`.
 - `src/state/_sandbox_failure_fixer.py`: StateTracker accessor for `sandbox_failure_fixer_attempts`, now delegating to the ledger under stage `"sandbox_fix"`, keyed by `str(pr.number)`.
 - `src/state/_convergence.py`: `set_quality_fix_attempts` and related read accessor, delegating to stage `"quality_fix"`.
-- `src/implement_phase.py`: writes quality-fix count via `set_quality_fix_attempts` at the end of a worker run.
+- `src/implement_phase/_build.py`: writes quality-fix count via `set_quality_fix_attempts` at the end of a worker run.
 - `src/retrospective.py`: reads quality-fix count from the ledger for post-run analysis.
 - `tests/scenarios/test_convergence_counter_migration_mockworld.py`: integration scenario driving the real `SandboxFailureFixerLoop` to prove the `sandbox_fix` counter lands in the ledger through production code (representative of all three migrations' shared delegation pattern).

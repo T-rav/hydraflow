@@ -757,9 +757,9 @@ also resets the worktree, discarding partial commits).
   "rule": "Gate push_branch, _resolve_pr, and transition on (result.success or is_retry).",
   "anti_pattern": "Calling push_branch or create_pr regardless of result.success",
   "code_refs": [
-    "src/implement_phase.py:_handle_implementation_result",
-    "src/implement_phase.py:_handle_successful_push",
-    "src/implement_phase.py:_resolve_pr"
+    "src/implement_phase/_phase.py:_handle_implementation_result",
+    "src/implement_phase/_pr.py:_handle_successful_push",
+    "src/implement_phase/_pr.py:_resolve_pr"
   ],
   "fixed_in_pr": "#8713",
   "added": "2026-05-07"

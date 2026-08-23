@@ -9,10 +9,10 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR | Modules cited | Enforced by |
 |---|---|---|
 | ADR-0001 | — | `pytest:tests/test_orchestrator_loops.py`, `pytest:tests/architecture/test_loop_count_matches_adr0001.py` |
-| ADR-0002 | `src.config`, `src.implement_phase`, `src.issue_store`, `src.label_transitions`, `src.pr_manager_labels` | `pytest:tests/test_state_machine.py` |
+| ADR-0002 | `src.config`, `src.implement_phase._build`, `src.issue_store`, `src.label_transitions`, `src.pr_manager_labels` | `pytest:tests/test_state_machine.py` |
 | ADR-0003 | `src.ports`, `src.workspace` | — |
 | ADR-0004 | `src.agent_cli`, `src.base_runner` | `pytest:tests/test_agent_cli.py`, `pytest:tests/test_base_runner.py` |
-| ADR-0005 | `src.implement_phase`, `src.pr_manager` | `pytest:tests/test_implement_phase.py` |
+| ADR-0005 | `src.implement_phase._pr`, `src.implement_phase._screen`, `src.pr_manager` | `pytest:tests/test_implement_phase.py` |
 | ADR-0006 | `src.events`, `src.issue_store`, `src.orchestrator`, `src.repo_runtime`, `src.state.__init__` | — |
 | ADR-0007 | `src.dashboard`, `src.dashboard_routes._routes`, `src.dashboard_routes._state_routes`, `src.repo_runtime` | `pytest:tests/test_dashboard_routes_repo.py` |
 | ADR-0008 | `src.dashboard`, `src.dashboard_routes._routes`, `src.repo_runtime` | `pytest:tests/test_dashboard_routes_repo.py` |
@@ -21,7 +21,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0011 | `src.epic`, `src.models`, `src.pr_manager_artifacts`, `src.pr_manager_branches` | `pytest:tests/test_epic.py`, `pytest:tests/test_release.py` |
 | ADR-0012 | `src.epic`, `src.epic_monitor_loop`, `src.models`, `src.post_merge_handler`, `src.review_phase._self_fix` | `pytest:tests/test_epic_merge_coordination.py` |
 | ADR-0013 | `src.dashboard_routes._reports_routes`, `src.models`, `src.pr_manager`, `src.report_issue_loop`, `src.state._report` | — |
-| ADR-0014 | `src.implement_phase`, `src.models`, `src.orchestrator_stats`, `src.plan_phase_disposition`, `src.post_merge_handler`, `src.review_phase._phase`, `src.state._session`, `src.triage_phase` | `pytest:tests/test_state_machine.py` |
+| ADR-0014 | `src.implement_phase._phase`, `src.models`, `src.orchestrator_stats`, `src.plan_phase_disposition`, `src.post_merge_handler`, `src.review_phase._phase`, `src.state._session`, `src.triage_phase` | `pytest:tests/test_state_machine.py` |
 | ADR-0015 | `src.escalation_gate`, `src.models`, `src.post_merge_handler`, `src.review_phase._phase`, `src.review_phase._visual_gate`, `src.visual_validation` | `pytest:tests/test_review_phase_hooks.py` |
 | ADR-0016 | `src.models`, `src.post_merge_handler` | `pytest:tests/test_visual_validation.py` |
 | ADR-0017 | `src.state.__init__`, `src.triage_phase` | `pytest:tests/test_state_machine.py` |
@@ -31,7 +31,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0021 | `src.config`, `src.data_migration`, `src.file_util`, `src.metrics_manager`, `src.state._session` | `pytest:tests/test_state_persistence.py`, `pytest:tests/test_event_persistence.py`, `pytest:tests/test_data_migration_d2.py` |
 | ADR-0022 | `src.config`, `src.issue_store` | `pytest:tests/test_integration_pipeline.py` |
 | ADR-0023 | — | `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` |
-| ADR-0024 | `src.agent`, `src.implement_phase`, `src.state.__init__` | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
+| ADR-0024 | `src.agent`, `src.implement_phase._phase`, `src.state.__init__` | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
 | ADR-0025 | `src.models`, `src.reviewer` | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
 | ADR-0027 | `src.agent`, `src.reviewer` | `pytest:tests/architecture/test_adr0027_duplicate_model_class_definitions.py::test_no_dead_duplicate_model_class_definitions` |
 | ADR-0028 | — | `pytest:tests/test_report_event_flow.py` |
@@ -69,7 +69,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0060 | `src.dashboard_routes._atlas_routes` | `pytest:tests/test_atlas_routes.py` |
 | ADR-0061 | `src.repo_wiki` | `pytest:tests/test_atlas_routes.py` |
 | ADR-0062 | `src.entry_evidence_loop`, `src.term_proposer_llm` | `pytest:tests/test_entry_evidence_loop.py`, `pytest:tests/scenarios/test_entry_evidence_loop_scenario.py` |
-| ADR-0063 | `src.auto_agent_preflight_loop`, `src.discover_runner`, `src.implement_phase`, `src.plan_phase`, `src.review_phase._visual_gate`, `src.triage_phase` | — |
+| ADR-0063 | `src.auto_agent_preflight_loop`, `src.discover_runner`, `src.implement_phase._abort`, `src.implement_phase._pr`, `src.plan_phase`, `src.review_phase._visual_gate`, `src.triage_phase` | — |
 | ADR-0064 | `src.adversarial_labels`, `src.adversarial_retry_loop`, `src.assumption_surfacer`, `src.events`, `src.models`, `src.pending_concerns`, `src.plan_council`, `src.plan_council_prompts`, `src.plan_phase`, `src.post_merge_handler`, `src.spec_ac_generator`, `src.spec_judge`, `src.wiki_carryover` | `pytest:tests/test_adversarial_retry_loop.py` |
 | ADR-0065 | `src.code_grooming_loop`, `src.config`, `src.skill_registry` | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` |
 | ADR-0066 | `src.agent`, `src.base_runner`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
@@ -103,7 +103,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0094 | `src.config`, `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase`, `src.state._convergence` | `pytest:tests/test_convergence_ledger.py`, `pytest:tests/test_convergence_gate.py`, `pytest:tests/scenarios/test_convergence_review_mockworld.py`, `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
 | ADR-0095 | `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase` | `pytest:tests/test_review_advisor.py`, `pytest:tests/test_review_phase_core.py::TestApproveConvergenceGate`, `pytest:tests/scenarios/test_convergence_review_mockworld.py`, `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
 | ADR-0096 | `src.convergence_recording`, `src.plan_phase_flow`, `src.triage_phase` | `pytest:tests/scenarios/test_convergence_pipeline_mockworld.py` |
-| ADR-0097 | `src.implement_phase`, `src.retrospective`, `src.state._auto_agent`, `src.state._convergence`, `src.state._sandbox_failure_fixer` | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
+| ADR-0097 | `src.implement_phase._build`, `src.retrospective`, `src.state._auto_agent`, `src.state._convergence`, `src.state._sandbox_failure_fixer` | `pytest:tests/scenarios/test_convergence_counter_migration_mockworld.py` |
 | ADR-0098 | `src.convergence_oscillation_loop`, `src.models`, `src.state._convergence` | `pytest:tests/scenarios/test_convergence_oscillation_mockworld.py` |
 | ADR-0099 | `src.base_background_loop`, `src.base_runner`, `src.harness_insights`, `src.issue_store`, `src.models`, `src.review_advisor`, `src.state._driver`, `src.ubiquitous_language` | `pytest:tests/test_seed_terms.py` |
 | ADR-0100 | `src.adr_conformance`, `src.adr_conformance_loop`, `src.adr_index` | `pytest:tests/test_adr_conformance_coverage.py` |
@@ -271,7 +271,11 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.hydraflow_gateway.models` | ADR-0138 |
 | `src.hydraflow_gateway.routing_audit` | ADR-0139 |
 | `src.hydraflow_gateway.routing_policy` | ADR-0139 |
-| `src.implement_phase` | ADR-0002, ADR-0005, ADR-0014, ADR-0024, ADR-0063, ADR-0097 |
+| `src.implement_phase._abort` | ADR-0063 |
+| `src.implement_phase._build` | ADR-0002, ADR-0097 |
+| `src.implement_phase._phase` | ADR-0014, ADR-0024 |
+| `src.implement_phase._pr` | ADR-0005, ADR-0063 |
+| `src.implement_phase._screen` | ADR-0005 |
 | `src.issue_cache` | ADR-0041 |
 | `src.issue_driver` | ADR-0137 |
 | `src.issue_driver_policy` | ADR-0137 |
