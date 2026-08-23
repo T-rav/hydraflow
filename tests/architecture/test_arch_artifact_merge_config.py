@@ -43,20 +43,39 @@ def test_target_artifacts_exist() -> None:
         )
 
 
-def test_changelog_uses_union_merge() -> None:
-    """The append-only changelog must auto-resolve via the built-in union driver."""
+def test_changelog_is_untracked_rather_than_union_merged() -> None:
+    """The changelog is no longer committed, so it needs no merge rule at all.
+
+    It used to carry `merge=union`, which auto-resolved conflicts by keeping
+    both sides' lines -- i.e. by DUPLICATING entries until the next mainline
+    regen cleaned them. That treated the symptom: the file renders from a
+    moving `git log` window, so its bytes are a function of the branch's commit
+    graph and it can never be conflict-free while tracked. It is now rendered
+    at Pages-deploy time instead, which removes the conflict class outright.
+    """
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", _CHANGELOG],
+        cwd=_GITATTRIBUTES.parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    assert tracked == "", (
+        f"{_CHANGELOG} is committed again — it is a view of git history, so "
+        "every branch renders different bytes and it conflicts on every rebase."
+    )
+
     attrs = _read(_GITATTRIBUTES)
-    line = next(
-        (ln for ln in attrs.splitlines() if ln.strip().startswith(_CHANGELOG)),
-        None,
-    )
-    assert line is not None, (
-        f".gitattributes must have a `{_CHANGELOG} merge=union` rule so the "
-        "changelog auto-resolves on merge. Missing → manual re-resolve returns."
-    )
-    assert "merge=union" in line, (
-        f"{_CHANGELOG} must use `merge=union` (built-in, honoured by GitHub); "
-        f"found: {line!r}"
+    live = [
+        ln
+        for ln in attrs.splitlines()
+        if ln.strip() and not ln.lstrip().startswith("#") and _CHANGELOG in ln
+    ]
+    assert not live, (
+        f"stale merge rule for an untracked path: {live}. A driver for a file "
+        "git no longer tracks is an instruction nothing will ever follow."
     )
 
 
