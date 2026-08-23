@@ -76,8 +76,9 @@ durable, non-root-writable mount discipline as `GATEWAY_LEDGER_PATH`.
 `GATEWAY_MAX_FALLBACK_HOPS` (1 by default) is the hard ceiling on bounded
 fallback, and a ceiling rather than a target: the effective bound is always the
 smaller of this and the candidate list, so a pool can never be walked in a loop.
-`0` disables fallback entirely — every request is served by its first eligible
-candidate or fails there.
+`0` refuses every fallback **hop** — a request is served by its first eligible
+candidate or held there. Lost-response recovery is unaffected: a `supersedes`
+citation re-mints at the same position and spends no budget.
 
 ## Read-only account and route visibility (ADR-0138)
 

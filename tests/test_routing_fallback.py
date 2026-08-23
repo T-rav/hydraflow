@@ -315,3 +315,17 @@ def test_a_supersede_still_requires_the_prior_lease_to_be_gone() -> None:
     assert _authorise(advance=False, lease_held=True).refusal is (
         FallbackRefusal.LEASE_STILL_HELD
     )
+
+
+def test_a_zero_hop_ceiling_still_permits_lost_response_recovery() -> None:
+    """``0`` refuses hops, not replacements — the documented distinction.
+
+    A supersede moves nowhere and therefore spends no budget, so a deployment
+    that has switched fallback off entirely can still recover a mint whose
+    response was lost.
+    """
+    assert _authorise(advance=False, max_hops=0).authorised is True
+
+
+def test_a_zero_hop_ceiling_refuses_an_ordinary_hop() -> None:
+    assert _authorise(max_hops=0).refusal is FallbackRefusal.BUDGET_EXHAUSTED
