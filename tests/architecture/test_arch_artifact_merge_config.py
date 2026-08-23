@@ -35,12 +35,18 @@ def _read(path: Path) -> str:
 
 
 def test_target_artifacts_exist() -> None:
-    """The paths .gitattributes points at must be real (no stale globs)."""
-    for rel in (_CHANGELOG, _META):
-        assert (_REPO_ROOT / rel).exists(), (
-            f"{rel} is named in .gitattributes but does not exist — the "
-            "auto-merge rule is dead. Update .gitattributes if the artifact moved."
-        )
+    """The paths .gitattributes points at must be real (no stale globs).
+
+    Only ``_META`` is checked. ``_CHANGELOG`` is no longer a .gitattributes
+    target *or* a tracked file — it is gitignored and rendered at Pages-deploy
+    time — so asserting it exists on disk would pass on any machine that had
+    run ``arch-regen`` and fail on every fresh checkout, which is precisely
+    how it failed in CI while passing locally.
+    """
+    assert (_REPO_ROOT / _META).exists(), (
+        f"{_META} is named in .gitattributes but does not exist — the "
+        "auto-merge rule is dead. Update .gitattributes if the artifact moved."
+    )
 
 
 def test_changelog_is_untracked_rather_than_union_merged() -> None:
