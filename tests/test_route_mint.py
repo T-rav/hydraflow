@@ -1086,3 +1086,93 @@ def test_a_disabled_account_is_passed_over_by_the_mint(tmp_path: Path) -> None:
     store = _pooled_store(pool=pool, admin=admin)
 
     assert store.resolve_and_mint(_request()).decision.account_id == _SECONDARY
+
+
+def test_a_hop_records_where_it_landed_not_where_it_started_looking() -> None:
+    """A skipped candidate must not let the next hop re-select this account.
+
+    The successor computes its start as ``recorded + 1``. When a scan steps over
+    an ineligible candidate it lands further down than it began, so recording the
+    *start* would put the next hop on the account this decision actually used —
+    a fallback that falls back onto the thing that just failed.
+    """
+    key_store = VirtualKeyStore(max_ttl_seconds=86_400)
+    # Three z.ai candidates; the middle one has no credential, so a hop that
+    # starts at position 1 is forced onward and lands at position 2.
+    pool = _pooled(
+        _declared(id="zai-a"),
+        _declared(id="zai-b"),
+        configured=frozenset(
+            {
+                legacy_account_id(ProviderBinding.ANTHROPIC),
+                legacy_account_id(ProviderBinding.ZAI_HARNESS),
+                "zai-b",
+            }
+        ),
+    )
+    state = AccountRuntimeState(pool.registry)
+    key_store.on_release(state.release_lease)
+    terminals = TerminalDecisionIndex()
+    store = _pooled_store(
+        pool=pool,
+        key_store=key_store,
+        account_state=state,
+        terminals=terminals,
+        max_fallback_hops=2,
+    )
+    cited = _first_hop(store, terminals, key_store)
+
+    second = store.resolve_and_mint(
+        _request(mint_attempt_id="att-2", retry_of_mint_decision_id=cited)
+    )
+
+    assert (second.decision.account_id, second.decision.fallback_position) == (
+        "zai-b",
+        2,
+    )
+
+
+def test_a_second_hop_starts_past_the_account_the_first_one_landed_on() -> None:
+    """The end-to-end consequence of recording the landing rather than the start."""
+    key_store = VirtualKeyStore(max_ttl_seconds=86_400)
+    pool = _pooled(
+        _declared(id="zai-a"),
+        _declared(id="zai-b"),
+        configured=frozenset(
+            {
+                legacy_account_id(ProviderBinding.ANTHROPIC),
+                legacy_account_id(ProviderBinding.ZAI_HARNESS),
+                "zai-b",
+            }
+        ),
+    )
+    state = AccountRuntimeState(pool.registry)
+    key_store.on_release(state.release_lease)
+    terminals = TerminalDecisionIndex()
+    store = _pooled_store(
+        pool=pool,
+        key_store=key_store,
+        account_state=state,
+        terminals=terminals,
+        max_fallback_hops=2,
+    )
+    cited = _first_hop(store, terminals, key_store)
+    second = store.resolve_and_mint(
+        _request(mint_attempt_id="att-2", retry_of_mint_decision_id=cited)
+    )
+    terminals.record(
+        second.decision.mint_decision_id,
+        account_id=str(second.decision.account_id),
+        condition=FallbackCondition.RATE_LIMITED,
+        now=1_700_000_000.0,
+    )
+    key_store.revoke(str(second.key_id))
+
+    third = store.resolve_and_mint(
+        _request(
+            mint_attempt_id="att-3",
+            retry_of_mint_decision_id=second.decision.mint_decision_id,
+        )
+    )
+
+    assert third.decision.account_id is None

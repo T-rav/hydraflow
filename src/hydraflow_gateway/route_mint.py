@@ -622,7 +622,7 @@ class RouteMintStore:
             policy_revision=request.policy_revision,
             snapshot_hash=request.snapshot_hash,
             key_id=key_id,
-            fallback_position=0 if verdict is None else verdict.start_position,
+            fallback_position=_recorded_position(selection, verdict),
             fallback_hops=0 if verdict is None else verdict.hops,
             rejected_accounts=() if selection is None else selection.rejected,
         )
@@ -765,6 +765,25 @@ class RouteMintStore:
             credential_state=CredentialState.ISSUED,
             decision=decision,
         )
+
+
+def _recorded_position(
+    selection: AccountSelection | None, verdict: FallbackVerdict | None
+) -> int:
+    """Where this decision landed — the position the NEXT hop advances from.
+
+    The position actually **selected**, not the position the scan started at. A
+    scan that skipped an ineligible candidate lands further down than it began,
+    and the successor computes its start as ``recorded + 1``: recording the start
+    instead would make the next hop begin on the very account this decision used,
+    so a "fallback" would re-select the account whose failure licensed it. A
+    decision that selected nothing reports where it looked, because there is no
+    landing to report and the next attempt should not skip past a candidate this
+    one never took.
+    """
+    if selection is not None and selection.position is not None:
+        return selection.position
+    return 0 if verdict is None else verdict.start_position
 
 
 def _cited_decision(decision: MintDecisionView) -> CitedDecision:
