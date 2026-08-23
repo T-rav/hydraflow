@@ -595,6 +595,19 @@ PROMPT_REGISTRY: list[AuditTarget] = [
         "Plan",
         "src/plan_worker_runner.py",
     ),
+    # The fenced IMPLEMENT worker's whole input (#11542). Held to the same bar
+    # as the Plan worker's above and for a sharper reason: this prompt is the
+    # entire contract between a director's task_contract and a real write-scoped
+    # child, and it is also where the bounded slice is *stated* to the worker —
+    # an under-specified one produces a proposal about a tree the fence will
+    # then reject, which costs a worker and teaches nobody anything.
+    AuditTarget(
+        "implement_worker_task",
+        "implement_worker_runner.build_implement_worker_prompt",
+        "tests/fixtures/prompts/implement_worker_task.json",
+        "Implement",
+        "src/implement_worker_runner.py",
+    ),
     AuditTarget(
         "prompt_refiner_refine",
         "prompt_refiner.build_refine_prompt",

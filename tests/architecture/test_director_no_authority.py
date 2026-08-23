@@ -52,6 +52,12 @@ DECISION_PATH_MODULES = (
     # reach a process is ``implement_worker_runner``, which is seam-declared and
     # has its own tests at the bottom of this file.
     "src/implement_broker.py",
+    # #11542 cut the actuator half out of ``fable_director`` when the mass
+    # sensor flagged the host class. It moved with its guarantees: the mixin
+    # decides which canary covers a boundary and hands an admitted batch to a
+    # dispatcher, and it must remain unable to spawn, mutate a label, or touch
+    # convergence state. Splitting a god class must not split a guard.
+    "src/director_dispatch.py",
 )
 
 #: Mutation calls that would give the director real authority over an issue.
@@ -230,24 +236,6 @@ def test_the_plan_actuator_never_mutates_a_label_or_merges() -> None:
     assert not (_called_names(_tree("src/plan_worker_runner.py")) & FORBIDDEN_MUTATIONS)
 
 
-def test_the_plan_actuator_never_writes_convergence_state() -> None:
-    # ADR-0137's narrowing of ADR-0094 survives dispatch being armed:
-    # ConvergenceLedger stays the sole owner of convergence state, and the
-    # canary's evidence is telemetry beside it rather than a second copy.
-    forbidden = {
-        "increment_route_backs",
-        "record_lap",
-        "recompute_converged",
-        "set_converged",
-        "add_open_concern",
-        "resolve_open_concern",
-        "record_stage_transition",
-        "record_sub_state_transition",
-    }
-
-    assert not (_called_names(_tree("src/plan_worker_runner.py")) & forbidden)
-
-
 def test_the_plan_actuator_owns_no_raw_spawn_primitive() -> None:
     # Same rule as the turn runner's, for the same reason: the sanctioned
     # ``run_lightweight_agent`` carries the CH-6 gate, the per-spawn mint and
@@ -278,12 +266,13 @@ def test_the_implement_actuator_never_mutates_a_label_or_merges() -> None:
     assert not (called & FORBIDDEN_MUTATIONS)
 
 
-def test_the_implement_actuator_never_writes_convergence_state() -> None:
-    # ADR-0137's narrowing of ADR-0094 survives a write-capable worker existing:
-    # a driver may sequence the outer lap but may not own its state, and a
-    # worker that started keeping a parallel view of laps or verdicts would
-    # have broken the ADR that permits it.
-    forbidden = {
+#: Calls that would make an actuator an owner of convergence state. ADR-0137's
+#: narrowing of ADR-0094 survives dispatch being armed and survives a
+#: write-capable worker existing: a driver may sequence the outer lap but may
+#: not own its state, and the canaries' evidence is telemetry beside the ledger
+#: rather than a second copy of it.
+CONVERGENCE_WRITES = frozenset(
+    {
         "increment_route_backs",
         "record_lap",
         "recompute_converged",
@@ -293,17 +282,15 @@ def test_the_implement_actuator_never_writes_convergence_state() -> None:
         "record_stage_transition",
         "record_sub_state_transition",
     }
+)
 
-    assert not (_called_names(_tree("src/implement_worker_runner.py")) & forbidden)
-
-
-def test_the_implement_actuator_never_commits_or_pushes() -> None:
-    # #11542's sixth acceptance criterion — "existing implementation output
-    # markers, quality gates, commit rules, and no-push rule remain unchanged" —
-    # as a property of what this module cannot reach, rather than as a promise
-    # beside it. Names rather than types, because the point is that the call
-    # site must not exist.
-    forbidden = {
+#: Calls that would let a worker's output become the commit. #11542's sixth
+#: acceptance criterion — "existing implementation output markers, quality
+#: gates, commit rules, and no-push rule remain unchanged" — as a property of
+#: what the module cannot reach rather than a promise beside it. Names rather
+#: than types, because the point is that the call site must not exist.
+WRITE_PRIMITIVES = frozenset(
+    {
         "commit",
         "commit_all",
         "push_branch",
@@ -313,8 +300,29 @@ def test_the_implement_actuator_never_commits_or_pushes() -> None:
         "write_text",
         "write_bytes",
     }
+)
 
-    assert not (_called_names(_tree("src/implement_worker_runner.py")) & forbidden)
+
+@pytest.mark.parametrize(
+    ("module", "forbidden"),
+    [
+        pytest.param(
+            "src/plan_worker_runner.py", CONVERGENCE_WRITES, id="plan-convergence"
+        ),
+        pytest.param(
+            "src/implement_worker_runner.py",
+            CONVERGENCE_WRITES,
+            id="implement-convergence",
+        ),
+        pytest.param(
+            "src/implement_worker_runner.py", WRITE_PRIMITIVES, id="implement-writes"
+        ),
+    ],
+)
+def test_an_actuator_reaches_no_forbidden_call(
+    module: str, forbidden: frozenset[str]
+) -> None:
+    assert not (_called_names(_tree(module)) & forbidden)
 
 
 def test_the_implement_actuator_owns_no_raw_spawn_primitive() -> None:

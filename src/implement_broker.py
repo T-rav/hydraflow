@@ -83,10 +83,22 @@ CANARY_PHASE = DriverPhase.IMPLEMENT
 UNMEASURED_DIGEST = "unmeasured"
 """What a worktree token reads as when the probe could not answer.
 
-The same discipline ``fable_director.UNOBSERVED_DIGEST`` established: a token
+The same discipline ``director_dispatch.UNOBSERVED_DIGEST`` established: a token
 that could not be measured says so rather than carrying a plausible-looking
 sha. :func:`check_worker_fence` treats it as *unverified*, never as
 *unchanged*, which is ADR-0137 S4's rule applied to a second boundary.
+"""
+
+UNMEASURED_TOKENS: frozenset[str] = frozenset({UNMEASURED_DIGEST, "unobserved"})
+"""Every value that means "nobody looked", including #11537's spelling.
+
+Two words for one idea is a trap rather than a synonym: ``director_dispatch``
+puts ``"unobserved"`` on the writer lease of any boundary outside the Implement
+canary, and a :class:`WorktreeState` built from those tokens would have read as
+**measured** while every digest in it was a placeholder — a fence that verifies
+because nothing was compared. #11537's value is matched here rather than renamed
+because it is already written into shipped shadow-log rows, and rewriting
+recorded evidence to tidy a constant is the worse trade.
 """
 
 
@@ -183,7 +195,7 @@ class WorktreeState:
     def measured(self) -> bool:
         """True when every token is a real reading rather than a stated absence."""
         return all(
-            token and token != UNMEASURED_DIGEST
+            token and token not in UNMEASURED_TOKENS
             for token in (self.branch, self.base_sha, self.head_sha, self.diff_digest)
         )
 

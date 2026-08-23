@@ -863,7 +863,7 @@ class TestTheBrokerIsHandedAMeasuredLease:
     async def test_a_disarmed_boundary_still_says_it_looked_at_nothing(
         self, tmp_path: Path
     ) -> None:
-        from fable_director import UNOBSERVED_DIGEST
+        from director_dispatch import UNOBSERVED_DIGEST
 
         handed = await self._handed(tmp_path, canary=None)
 

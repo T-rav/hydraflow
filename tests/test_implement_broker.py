@@ -514,19 +514,27 @@ class TestExactlyOneWriterHoldsAWorktree:
     def test_the_first_request_takes_it(self) -> None:
         assert WriterLeaseRegistry().acquire(7, "req-1") is True
 
-    def test_a_second_request_is_refused_while_it_is_held(self) -> None:
+    @pytest.mark.parametrize(
+        ("issue", "request_id", "granted"),
+        [
+            # Another request wanting the same worktree: the fence.
+            pytest.param(7, "req-2", False, id="another-request-same-worktree"),
+            # The same request again: idempotent, because a retry within one
+            # batch is the same logical writer and refusing it would make one
+            # writer look like two.
+            pytest.param(7, "req-1", True, id="the-holder-re-acquiring"),
+            # Another issue: two worktrees, no contention. A global single
+            # writer would be a throughput regression wearing a fence.
+            pytest.param(9, "req-2", True, id="another-issue-another-worktree"),
+        ],
+    )
+    def test_a_second_acquire_is_granted_only_when_it_contends_with_nothing(
+        self, issue: int, request_id: str, granted: bool
+    ) -> None:
         registry = WriterLeaseRegistry()
         registry.acquire(7, "req-1")
 
-        assert registry.acquire(7, "req-2") is False
-
-    def test_re_acquiring_is_idempotent_for_the_holder(self) -> None:
-        # A retry of the same request within one batch is the same logical
-        # writer; refusing it would make one writer look like two.
-        registry = WriterLeaseRegistry()
-        registry.acquire(7, "req-1")
-
-        assert registry.acquire(7, "req-1") is True
+        assert registry.acquire(issue, request_id) is granted
 
     def test_releasing_frees_it_for_the_next_request(self) -> None:
         registry = WriterLeaseRegistry()
@@ -541,14 +549,6 @@ class TestExactlyOneWriterHoldsAWorktree:
         registry.release(7, "req-2")
 
         assert registry.holder(7) == "req-1"
-
-    def test_two_issues_do_not_contend(self) -> None:
-        # Two issues have two worktrees, and a writer in each races nothing. A
-        # global single writer would be a throughput regression wearing a fence.
-        registry = WriterLeaseRegistry()
-        registry.acquire(7, "req-1")
-
-        assert registry.acquire(9, "req-2") is True
 
     def test_revoking_reports_the_holder_it_displaced(self) -> None:
         # Reported rather than merely performed, because ADR-0137 B5 counts
