@@ -3,17 +3,17 @@ classes:
     loc: 833
     methods: 29
   src/agent.py:AgentRunner:
-    loc: 1408
-    methods: 36
+    loc: 1388
+    methods: 42
   src/auto_agent_preflight_loop.py:AutoAgentPreflightLoop:
-    loc: 611
-    methods: 17
+    loc: 644
+    methods: 18
   src/beads_manager.py:BeadsManager:
     loc: 713
     methods: 40
   src/config.py:HydraFlowConfig:
-    loc: 4898
-    methods: 39
+    loc: 5059
+    methods: 45
   src/contract_refresh_loop.py:ContractRefreshLoop:
     loc: 671
     methods: 23
@@ -21,23 +21,23 @@ classes:
     loc: 898
     methods: 36
   src/health_monitor_loop.py:HealthMonitorLoop:
-    loc: 1489
+    loc: 1506
     methods: 36
   src/implement_phase.py:ImplementPhase:
-    loc: 1672
-    methods: 56
+    loc: 1845
+    methods: 61
   src/issue_store.py:IssueStore:
-    loc: 710
-    methods: 48
+    loc: 726
+    methods: 49
   src/mockworld/fakes/fake_github.py:FakeGitHub:
-    loc: 1561
-    methods: 125
+    loc: 1656
+    methods: 133
   src/planner.py:PlannerRunner:
     loc: 854
     methods: 23
   src/ports.py:PRPort:
-    loc: 488
-    methods: 76
+    loc: 510
+    methods: 78
   src/post_merge_handler.py:PostMergeHandler:
     loc: 696
     methods: 13
@@ -45,7 +45,7 @@ classes:
     loc: 903
     methods: 20
   src/repo_wiki.py:RepoWikiStore:
-    loc: 763
+    loc: 767
     methods: 30
   src/repo_wiki_loop.py:RepoWikiLoop:
     loc: 826
@@ -62,9 +62,6 @@ classes:
   src/staging_promotion_loop.py:StagingPromotionLoop:
     loc: 977
     methods: 32
-  src/triage.py:TriageRunner:
-    loc: 602
-    methods: 17
   src/wiki_compiler.py:WikiCompiler:
     loc: 773
     methods: 23
@@ -76,19 +73,17 @@ classes:
     methods: 41
 comment: "Grandfathered god files (LOC >= file threshold) and god classes (LOC or\
   \ method count >= class thresholds) \u2014 the mass sensor (erosion.mass). The gate\
-  \ flags NEW entries beyond this set; the ErosionMetricsLoop files the burn-down\
-  \ roster. Last moved: 2026-08-22 \u2014 targeted removal of the four entries decomposed\
-  \ in the batch-2 erosion burn-down (Refs #11547): HydraFlowOrchestrator 2022\u2192398\
-  \ LOC / 86\u219215 methods and PlanPhase 1914\u2192168 LOC / 57\u21924 methods,\
-  \ both now under both thresholds, plus their two files. Batch 1 removed the PRManager\
-  \ and ReviewPhase entries the same way. Hand-edited rather than regenerated so no\
-  \ unrelated god-class growth is laundered through this change."
+  \ flags NEW entries beyond this set; the recorded loc/methods are the high-water\
+  \ mark the ErosionMetricsLoop's burn-down roster reports growth against. Refresh\
+  \ one entry with --only so unrelated growth is never laundered through an unrelated\
+  \ PR. Last moved: correct the 9 class + 8 file entries that had rotted below live\
+  \ size since #11522; this PR's whole diff is the baseline advance (#11646)"
 files:
-  src/config.py: 7198
-  src/dashboard_routes/_routes.py: 2103
-  src/health_monitor_loop.py: 1736
-  src/implement_phase.py: 1750
-  src/mockworld/fakes/fake_github.py: 1672
-  src/models.py: 2844
-  src/repo_wiki.py: 1589
-  src/service_registry.py: 1636
+  src/config.py: 7339
+  src/dashboard_routes/_routes.py: 2109
+  src/health_monitor_loop.py: 1753
+  src/implement_phase.py: 1949
+  src/mockworld/fakes/fake_github.py: 1773
+  src/models.py: 2950
+  src/repo_wiki.py: 1594
+  src/service_registry.py: 1782

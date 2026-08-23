@@ -17,7 +17,10 @@ from hydraflow_gateway.models import (
     GatewayIdentity,
     MintKeyRequest,
     MintKeyResponse,
+    Principal,
+    ProviderBinding,
     RepoClass,
+    RouteBinding,
 )
 
 _VIRTUAL_PREFIX = "hfgw_"
@@ -78,10 +81,75 @@ class VirtualKeyStore:
 
     def mint(self, request: MintKeyRequest) -> MintKeyResponse:
         """Mint and retain one high-entropy token for the requested identity."""
-        self._validate_policy(request)
+        self._validate_policy(
+            ttl_seconds=request.ttl_seconds,
+            repo_class=request.repo_class,
+            repo_slug=request.repo_slug,
+            body_capture_policy=request.body_capture_policy,
+        )
+        return self._mint(
+            principal=request.principal(),
+            repo_slug=request.repo_slug,
+            repo_class=request.repo_class,
+            provider_binding=request.provider_binding,
+            body_capture_policy=request.body_capture_policy,
+            ttl_seconds=request.ttl_seconds,
+            route_binding=None,
+        )
+
+    def mint_bound(
+        self,
+        *,
+        principal: Principal,
+        repo_slug: str,
+        repo_class: RepoClass,
+        provider_binding: ProviderBinding,
+        capture_bodies: bool,
+        ttl_seconds: int,
+        route_binding: RouteBinding,
+    ) -> MintKeyResponse:
+        """Mint a key whose route is fixed for its whole lifetime (ADR-0141).
+
+        Same store, same token shape, same policy gate as :meth:`mint` — the only
+        difference is that the resulting identity carries a ``route_binding``, so
+        "this key is governed" is a fact the data plane reads off the identity
+        rather than a claim any caller makes.
+        """
+        capture_policy = (
+            BodyCapturePolicy.FULL
+            if capture_bodies
+            else BodyCapturePolicy.METADATA_ONLY
+        )
+        self._validate_policy(
+            ttl_seconds=ttl_seconds,
+            repo_class=repo_class,
+            repo_slug=repo_slug,
+            body_capture_policy=capture_policy,
+        )
+        return self._mint(
+            principal=principal,
+            repo_slug=repo_slug,
+            repo_class=repo_class,
+            provider_binding=provider_binding,
+            body_capture_policy=capture_policy,
+            ttl_seconds=ttl_seconds,
+            route_binding=route_binding,
+        )
+
+    def _mint(
+        self,
+        *,
+        principal: Principal,
+        repo_slug: str,
+        repo_class: RepoClass,
+        provider_binding: ProviderBinding,
+        body_capture_policy: BodyCapturePolicy,
+        ttl_seconds: int,
+        route_binding: RouteBinding | None,
+    ) -> MintKeyResponse:
         now = self._wall_clock()
-        expires_at = now + request.ttl_seconds
-        expires_at_monotonic = self._monotonic() + request.ttl_seconds
+        expires_at = now + ttl_seconds
+        expires_at_monotonic = self._monotonic() + ttl_seconds
         key_id = self._id_factory()
         if not key_id or "." in key_id:
             raise ValueError("id_factory returned an invalid key id")
@@ -91,13 +159,14 @@ class VirtualKeyStore:
         token = f"{_VIRTUAL_PREFIX}{key_id}.{secret}"
         identity = GatewayIdentity(
             key_id=key_id,
-            principal=request.principal(),
-            repo_slug=request.repo_slug,
-            repo_class=request.repo_class,
-            provider_binding=request.provider_binding,
-            body_capture_policy=request.body_capture_policy,
+            principal=principal,
+            repo_slug=repo_slug,
+            repo_class=repo_class,
+            provider_binding=provider_binding,
+            body_capture_policy=body_capture_policy,
             issued_at=_as_datetime(now),
             expires_at=_as_datetime(expires_at),
+            route_binding=route_binding,
         )
         record = _KeyRecord(
             identity=identity,
@@ -168,19 +237,26 @@ class VirtualKeyStore:
             ]
         return tuple(sorted(identities, key=lambda item: (item.issued_at, item.key_id)))
 
-    def _validate_policy(self, request: MintKeyRequest) -> None:
-        if request.ttl_seconds > self._max_ttl_seconds:
+    def _validate_policy(
+        self,
+        *,
+        ttl_seconds: int,
+        repo_class: RepoClass,
+        repo_slug: str,
+        body_capture_policy: BodyCapturePolicy,
+    ) -> None:
+        if ttl_seconds > self._max_ttl_seconds:
             raise KeyPolicyError("requested TTL exceeds the configured maximum")
         if (
-            request.repo_class is not RepoClass.HYDRAFLOW
-            and request.body_capture_policy is BodyCapturePolicy.FULL
+            repo_class is not RepoClass.HYDRAFLOW
+            and body_capture_policy is BodyCapturePolicy.FULL
         ):
             raise KeyPolicyError(
                 "body capture is prohibited for client and personal repos"
             )
         if (
-            request.body_capture_policy is BodyCapturePolicy.FULL
-            and request.repo_slug.lower() not in self._body_capture_repo_slugs
+            body_capture_policy is BodyCapturePolicy.FULL
+            and repo_slug.lower() not in self._body_capture_repo_slugs
         ):
             raise KeyPolicyError(
                 "body capture is not authorized for the requested repository"

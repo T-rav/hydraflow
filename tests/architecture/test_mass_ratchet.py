@@ -4,9 +4,21 @@ The size axis of the god-file family. ``test_concentration_ratchet`` gates
 fan-in (#10840); this gate computes the live LOC / method-count reading of
 ``src/`` (``erosion.mass``) and fails if a file or class crossed a mass
 threshold that ``disturbance/baselines/mass.yaml`` did not grandfather.
-Growing an existing god class never trips this (the ErosionMetricsLoop files
-that as a roster refresh); only a genuinely new one does. Adopting one is a
-conscious act: ``python scripts/regen_mass_baseline.py --reason "..."``.
+Growing an existing god class never trips this; only a genuinely new one does.
+Growth is *sensed* — ``erosion.mass_baseline.grown`` compares the recorded
+``loc``/``methods`` against the live reading on both god-making axes — but it is
+reported by the ErosionMetricsLoop's burn-down roster, not gated here.
+Measured on 60 days of ``staging``, gating growth at the 10 % tolerance would
+have blocked 70 of 948 merged commits (7.4 %), and the only remedy in scope for
+a PR that happens to tip a class over is re-recording the number — i.e. the
+bypass. The roster, which the decomposition batches already work from, is where
+that signal belongs (#11646).
+
+Adopting a new entry is a conscious act, and so is recording an entry's reviewed
+new size or dropping one a decomposition took below threshold. All three use
+``python scripts/regen_mass_baseline.py --only <key> --reason "..."``, which
+touches that entry alone so no unrelated growth rides along. The blanket regen
+(no ``--only``) is for a PR whose entire diff *is* the baseline advance.
 """
 
 from __future__ import annotations
@@ -42,8 +54,11 @@ def test_no_new_god_files_or_classes_beyond_baseline(real_repo_root: Path) -> No
         )
         + "\n\nSplit the class (extract a cohesive cluster into a new module and "
         "re-export — see the open 'Erosion: … god class' issue for the recipe), or, "
-        "if this size is a reviewed decision, regenerate the baseline:\n  "
-        'python scripts/regen_mass_baseline.py --reason "<why>"'
+        "if this size is a reviewed decision, grandfather just this entry:\n  "
+        'python scripts/regen_mass_baseline.py --only <key> --reason "<why>"\n\n'
+        "Use --only, not a blanket regen: a blanket regen re-snapshots every other "
+        "entry too, sweeping unrelated growth into this PR's diff as if it had been "
+        "reviewed."
     )
     # A baseline entry that shrank below threshold is deliberately NOT a failure —
     # that is decomposition working; only a NEW entry trips the ratchet.

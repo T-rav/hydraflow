@@ -6,6 +6,10 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `b482bc1` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-1911 *(2026-08-22)*
+- `f714ecf` — feat(gateway): P3 — bounded, reversible routing enforcement canary (ADR-0141) (#11653) (#11653) *(2026-08-22)*
+- `1363268` — fix(erosion): stop mass.yaml's numbers rotting — targeted --only regen, method-axis growth, and drop the field nobody read (#11652) (#11652) *(2026-08-22)*
+- `ac9ef21` — chore(rc): regenerate arch artifacts after main merge *(2026-08-22)*
 - `6a06e09` — Merge remote-tracking branch 'origin/main' into rc/2026-08-22-1422 *(2026-08-22)*
 - `94b544e` — fix(implement): anchor the test-adequacy demand and pin it across retries (#11644) (#11649) (#11649) *(2026-08-22)*
 - `8c392d0` — feat(gateway): P2 — revision-safe project policy workspace (ADR-0140) (#11648) (#11648) *(2026-08-22)*

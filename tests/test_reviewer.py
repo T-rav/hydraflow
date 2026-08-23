@@ -362,39 +362,64 @@ def test_parse_verdict_case_insensitive(config, event_bus):
 # ---------------------------------------------------------------------------
 
 
-def test_extract_summary_with_summary_line(config, event_bus):
+@pytest.mark.parametrize(
+    ("transcript", "expected"),
+    [
+        # --- SUMMARY marker, and the fallback to the last usable line ---
+        pytest.param(
+            "Review done.\nVERDICT: APPROVE\nSUMMARY: looks good to me",
+            "looks good to me",
+            id="with_summary_line",
+        ),
+        pytest.param(
+            "summary: everything checks out",
+            "everything checks out",
+            id="case_insensitive",
+        ),
+        pytest.param(
+            "SUMMARY:   extra spaces around this   ",
+            "extra spaces around this",
+            id="strips_whitespace",
+        ),
+        pytest.param(
+            "First line.\nSecond line.\nThis is the last line",
+            "This is the last line",
+            id="fallback_to_last_line",
+        ),
+        pytest.param(
+            "First line.\nSecond line.\n\n   \n",
+            "Second line.",
+            id="fallback_ignores_empty_lines",
+        ),
+        # --- garbage-resistant fallback: tool output / JSON / fenced code are
+        # never accepted as a summary, and a garbage SUMMARY marker still falls
+        # back to a clean line ---
+        pytest.param(
+            'Review completed successfully.\n{"status": "done", "result": true}\n',
+            "Review completed successfully.",
+            id="skips_json_in_fallback",
+        ),
+        pytest.param(
+            '→ Tool call\n{"json": true}\n```code```\nok\n',
+            "No summary provided",
+            id="returns_default_when_all_garbage",
+        ),
+        # SUMMARY line is garbage, so it falls back to the clean line.
+        pytest.param(
+            "SUMMARY: → TaskOutput: {'task_id': 'abc'}\nGood fallback line here.",
+            "Good fallback line here.",
+            id="sanitizes_summary_marker_content",
+        ),
+        pytest.param(
+            "SUMMARY: All checks pass, implementation is solid.",
+            "All checks pass, implementation is solid.",
+            id="prefers_summary_marker_when_clean",
+        ),
+    ],
+)
+def test_extract_summary(config, event_bus, transcript, expected):
     runner = _make_runner(config, event_bus)
-    transcript = "Review done.\nVERDICT: APPROVE\nSUMMARY: looks good to me"
-    summary = runner._extract_summary(transcript)
-    assert summary == "looks good to me"
-
-
-def test_extract_summary_case_insensitive(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    transcript = "summary: everything checks out"
-    summary = runner._extract_summary(transcript)
-    assert summary == "everything checks out"
-
-
-def test_extract_summary_strips_whitespace(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    transcript = "SUMMARY:   extra spaces around this   "
-    summary = runner._extract_summary(transcript)
-    assert summary == "extra spaces around this"
-
-
-def test_extract_summary_fallback_to_last_line(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    transcript = "First line.\nSecond line.\nThis is the last line"
-    summary = runner._extract_summary(transcript)
-    assert summary == "This is the last line"
-
-
-def test_extract_summary_fallback_ignores_empty_lines(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    transcript = "First line.\nSecond line.\n\n   \n"
-    summary = runner._extract_summary(transcript)
-    assert summary == "Second line."
+    assert runner._extract_summary(transcript) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -455,35 +480,6 @@ def test_extract_summary_skips_tool_output_in_fallback(config, event_bus):
     summary = runner._extract_summary(transcript)
     assert summary == "Good review line here."
     assert "TaskOutput" not in summary
-
-
-def test_extract_summary_skips_json_in_fallback(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    transcript = 'Review completed successfully.\n{"status": "done", "result": true}\n'
-    summary = runner._extract_summary(transcript)
-    assert summary == "Review completed successfully."
-
-
-def test_extract_summary_returns_default_when_all_garbage(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    transcript = '→ Tool call\n{"json": true}\n```code```\nok\n'
-    summary = runner._extract_summary(transcript)
-    assert summary == "No summary provided"
-
-
-def test_extract_summary_sanitizes_summary_marker_content(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    transcript = "SUMMARY: → TaskOutput: {'task_id': 'abc'}\nGood fallback line here."
-    summary = runner._extract_summary(transcript)
-    # SUMMARY line is garbage, should fall back to clean line
-    assert summary == "Good fallback line here."
-
-
-def test_extract_summary_prefers_summary_marker_when_clean(config, event_bus):
-    runner = _make_runner(config, event_bus)
-    transcript = "SUMMARY: All checks pass, implementation is solid."
-    summary = runner._extract_summary(transcript)
-    assert summary == "All checks pass, implementation is solid."
 
 
 # ---------------------------------------------------------------------------

@@ -33,19 +33,23 @@ from credit_failover import apply_credit_failover
 from events import EventBus
 from exception_classify import reraise_on_credit_or_bug
 from execution import get_default_runner
+from gateway_mint_client import (
+    renew_gateway_key_if_needed,
+    revoke_gateway_key,
+)
+from hydraflow_gateway.routing_policy import RequestFace
 from model_pricing import input_includes_cache_for, load_pricing, usage_shape_for_tool
 from prompt_gate import PromptGateBlockedError, gate_prompt
 from prompt_telemetry import PromptTelemetry, parse_command_tool_model
 from repo_backend import apply_repo_provider
-from route_shadow import record_agentic_route_shadow
+from route_enforcement import canary_armed, enforce_canary_route
+from route_shadow import agentic_route_stages, record_agentic_route_shadow
 from runner_utils import (
     AuthenticationRetryError,
     StreamConfig,
     _terminal_gateway_runner,
     harness_billing_provider,
-    renew_gateway_key_if_needed,
     resolve_harness_env,
-    revoke_gateway_key,
     stream_claude_process,
     telemetry_tool_for_transport,
 )
@@ -304,6 +308,32 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
         )
         timeout_s = self._default_timeout_s()
         try:
+            # Enforcement canary (#11539, ADR-0141). Returns None outside the one
+            # armed repository, so nothing below changes for anyone else. A held
+            # or rejected route raises, and it raises here — inside the same
+            # guard a failed mint already uses, so a refused route collapses to a
+            # pre-spawn crash rather than to a spawn on an ambient credential.
+            route = None
+            if canary_armed(self._config):
+                route = await asyncio.to_thread(
+                    enforce_canary_route,
+                    config=self._config,
+                    principal_id=self._telemetry_source(),
+                    stages=agentic_route_stages(
+                        config=self._config,
+                        dial_field=None,
+                        dial_provider="claude",
+                        after_ratchet=initial_provider,
+                        after_repo_provider=after_repo_provider,
+                        final_provider=provider,
+                    ),
+                    final_provider=provider,
+                    final_model=resolved_model,
+                    request_face=RequestFace.AGENTIC,
+                )
+            if route is not None:
+                cmd = route.apply_to_command(cmd)
+                _, resolved_model = parse_command_tool_model(cmd)
             harness_env = await resolve_harness_env(
                 provider,
                 self._config,
@@ -312,6 +342,7 @@ class BaseSubprocessRunner(abc.ABC, Generic[T_Result]):
                 session_id=getattr(self._bus, "current_session_id", None),
                 timeout_seconds=timeout_s,
                 issue_number=issue_number,
+                route=route,
             )
         except Exception as exc:
             # A failed gateway mint is a pre-spawn crash, never permission to

@@ -200,6 +200,7 @@ cadence and files remediation issues on drift.
 | [0138](0138-gateway-account-identity-and-sanitized-route-visibility.md) | Gateway account identity and sanitized route visibility | Accepted |
 | [0139](0139-shadow-routing-policy-resolver.md) | Shadow routing policy resolver and hash-linked decision record | Accepted |
 | [0140](0140-revision-safe-policy-workspace-and-operator-write-boundary.md) | Revision-safe policy workspace and the operator write boundary | Accepted |
+| [0141](0141-bounded-reversible-routing-enforcement-canary.md) | Bounded, reversible routing enforcement — the resolve-and-mint canary | Accepted |
 
 ## Adding a new ADR
 

@@ -6,15 +6,13 @@ import asyncio
 import contextlib
 import json
 import logging
-import math
 import os
 import time
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import httpx
 
@@ -24,6 +22,18 @@ from agent_rate_backoff import classify_agent_outcome, get_agent_rate_backoff
 from docker_runner import get_docker_runner
 from events import EventBus, EventType, HydraFlowEvent
 from execution import HostRunner, SimpleResult, SubprocessRunner, get_default_runner
+from gateway_mint_client import (
+    GatewayControlClient,
+    GatewayMintError,
+    GatewayMintRequest,
+    GatewayMintV2Request,
+    _gateway_ttl_seconds,
+    _GatewayKeyLease,
+    _HttpGatewayControlClient,
+    _RoutedHarnessEnv,
+    _validate_gateway_credential,
+    revoke_gateway_key,
+)
 from model_pricing import USAGE_SHAPE_OPENAI_COMPAT, usage_shape_for_tool
 from models import TranscriptEventData, TranscriptLinePayload
 from process_group import kill_process_group
@@ -42,6 +52,7 @@ from subprocess_util import (
 if TYPE_CHECKING:
     from agent_cli import AgentTool
     from config import HydraFlowConfig
+    from route_enforcement import EnforcedRoute
     from trace_collector import TraceCollector
 
 logger = logging.getLogger("hydraflow.runner_utils")
@@ -52,10 +63,6 @@ logger = logging.getLogger("hydraflow.runner_utils")
 # same-message stream deltas is still caught, while keeping the per-line scan
 # O(1) instead of re-scanning the whole (growing) transcript.
 _CREDIT_SCAN_TAIL_CHARS = 512
-
-# A key must remain valid beyond the subprocess deadline so scheduling jitter,
-# container startup, and the final response bytes cannot race token expiry.
-_GATEWAY_LEASE_GRACE_SECONDS = 60
 
 
 class AuthenticationRetryError(RuntimeError):
@@ -711,12 +718,14 @@ async def stream_claude_with_telemetry(
     # transport — exactly what a policy would bind. Observation only; the
     # transport is already resolved above.
     from hydraflow_gateway.routing_policy import RequestFace
-    from route_shadow import record_dialled_route_shadow
+    from route_enforcement import canary_armed, enforce_canary_route
+    from route_shadow import dialled_route_stages, record_dialled_route_shadow
 
+    telemetry_source = str(event_data.get("source", "unknown"))
     await asyncio.to_thread(
         record_dialled_route_shadow,
         config=config,
-        principal_id=str(event_data.get("source", "unknown")),
+        principal_id=telemetry_source,
         requested_provider=provider,
         transport_provider=transport_provider,
         model=gate_model,
@@ -724,6 +733,29 @@ async def stream_claude_with_telemetry(
         issue_number=attributed_issue,
         pr_number=attributed_pr,
     )
+    # Enforcement canary (#11539, ADR-0141): None outside the armed repository,
+    # and this seam does not own its argv — the caller built it — so the rewrite
+    # goes through the same ``rewrite_command_model`` writer every other routing
+    # stage uses, and ``gate_model`` follows it so the mint and the telemetry row
+    # cannot disagree with what the child was actually spawned with.
+    route = None
+    if canary_armed(config):
+        route = await asyncio.to_thread(
+            enforce_canary_route,
+            config=config,
+            principal_id=telemetry_source,
+            stages=dialled_route_stages(
+                config=config,
+                requested_provider=provider,
+                transport_provider=transport_provider,
+            ),
+            final_provider=transport_provider,
+            final_model=gate_model,
+            request_face=RequestFace.AGENTIC,
+        )
+    if route is not None:
+        cmd = route.apply_to_command(cmd)
+        gate_tool, gate_model = parse_command_tool_model(cmd)
     # Point the CLI at the role's harness backend for this spawn only (empty for
     # native Anthropic — the main workers stay pristine), and carry the resolved
     # provider so a credit-out is scoped to the right backend.
@@ -731,11 +763,12 @@ async def stream_claude_with_telemetry(
         transport_provider,
         config,
         model=gate_model,
-        source=str(event_data.get("source", "unknown")),
+        source=telemetry_source,
         session_id=getattr(event_bus, "current_session_id", None),
         timeout_seconds=stream_config.timeout,
         issue_number=attributed_issue,
         pr_number=attributed_pr,
+        route=route,
     )
     stream_config = replace(
         stream_config,
@@ -809,373 +842,6 @@ _OPENROUTER = "openrouter"
 _ZAI = "zai"
 _KIMI = "kimi"
 _GATEWAY = "gateway"
-
-
-class GatewayMintError(RuntimeError):
-    """The gateway was selected but a per-spawn credential could not be minted."""
-
-
-@dataclass(frozen=True, slots=True)
-class GatewayMintRequest:
-    """Stable runner-side contract for ``POST /control/v1/keys``."""
-
-    principal_kind: Literal["loop", "role", "spawn", "person", "team"]
-    principal_id: str
-    spawn_id: str
-    session_id: str | None
-    repo_slug: str
-    repo_class: Literal["hydraflow", "client", "personal"]
-    provider_binding: Literal["anthropic", "zai-harness"]
-    capture_bodies: bool
-    ttl_seconds: int
-    # Optional work attribution stamped onto the key's principal and hence
-    # every ledger row it produces. Omitted from the wire when unset.
-    issue_number: int | None = None
-    pr_number: int | None = None
-
-    def wire_payload(self) -> dict[str, object]:
-        """JSON body for ``POST /control/v1/keys``; attribution only when set
-        so an older gateway (``extra="forbid"``) keeps accepting the mint."""
-        payload: dict[str, object] = {
-            "principal_kind": self.principal_kind,
-            "principal_id": self.principal_id,
-            "spawn_id": self.spawn_id,
-            "session_id": self.session_id,
-            "repo_slug": self.repo_slug,
-            "repo_class": self.repo_class,
-            "provider_binding": self.provider_binding,
-            "capture_bodies": self.capture_bodies,
-            "ttl_seconds": self.ttl_seconds,
-        }
-        if self.issue_number is not None:
-            payload["issue_number"] = self.issue_number
-        if self.pr_number is not None:
-            payload["pr_number"] = self.pr_number
-        return payload
-
-
-@dataclass(frozen=True, slots=True)
-class GatewayMintCredential:
-    """Validated subset of the gateway mint response used by a worker spawn."""
-
-    key_id: str
-    token: str = field(repr=False)
-    expires_at: str
-
-
-class GatewayControlClient(Protocol):
-    """Injectable key-lifecycle boundary for the gateway control plane."""
-
-    async def mint_key(
-        self,
-        *,
-        base_url: str,
-        control_token: str,
-        request: GatewayMintRequest,
-    ) -> GatewayMintCredential: ...
-
-    async def revoke_key(
-        self,
-        *,
-        base_url: str,
-        control_token: str,
-        key_id: str,
-    ) -> bool: ...
-
-
-class _HttpGatewayControlClient:
-    """Minimal production adapter for the gateway control endpoint."""
-
-    async def mint_key(
-        self,
-        *,
-        base_url: str,
-        control_token: str,
-        request: GatewayMintRequest,
-    ) -> GatewayMintCredential:
-        try:
-            async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
-                response = await client.post(
-                    f"{base_url.rstrip('/')}/control/v1/keys",
-                    headers={"Authorization": f"Bearer {control_token}"},
-                    json=request.wire_payload(),
-                )
-                response.raise_for_status()
-                payload = response.json()
-        except (httpx.HTTPError, json.JSONDecodeError):
-            # Never include a response body or credential in this exception: the
-            # failure can flow through caretaker logs.
-            raise GatewayMintError("gateway credential mint failed") from None
-
-        safe_key_id = _safe_gateway_key_id(
-            payload.get("key_id") if isinstance(payload, dict) else None
-        )
-        try:
-            if not isinstance(payload, dict):
-                raise GatewayMintError("gateway mint returned an invalid response")
-            key_id = payload.get("key_id")
-            token = payload.get("token")
-            expires_at = payload.get("expires_at")
-            if (
-                not isinstance(key_id, str)
-                or not isinstance(token, str)
-                or not isinstance(expires_at, str)
-            ):
-                raise GatewayMintError("gateway mint returned an invalid response")
-            credential = GatewayMintCredential(
-                key_id=key_id,
-                token=token,
-                expires_at=expires_at,
-            )
-            _validate_gateway_credential(credential)
-        except GatewayMintError:
-            if safe_key_id is not None:
-                await self._cleanup_invalid_mint(
-                    base_url=base_url,
-                    control_token=control_token,
-                    key_id=safe_key_id,
-                )
-            raise GatewayMintError(
-                "gateway mint returned an invalid response"
-            ) from None
-        return credential
-
-    async def _cleanup_invalid_mint(
-        self,
-        *,
-        base_url: str,
-        control_token: str,
-        key_id: str,
-    ) -> None:
-        """Best-effort revoke a key returned with malformed credential data."""
-
-        try:
-            revoked = await self.revoke_key(
-                base_url=base_url,
-                control_token=control_token,
-                key_id=key_id,
-            )
-            if not revoked:
-                raise GatewayMintError(
-                    "gateway invalid-mint revocation was not acknowledged"
-                )
-        except GatewayMintError:
-            # TTL remains the fail-closed fallback. Never retain or log the
-            # malformed response, which can contain virtual secret material.
-            logger.warning(
-                "gateway invalid-mint cleanup failed for key_id=%s",
-                key_id,
-            )
-
-    async def revoke_key(
-        self,
-        *,
-        base_url: str,
-        control_token: str,
-        key_id: str,
-    ) -> bool:
-        try:
-            async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
-                response = await client.delete(
-                    f"{base_url.rstrip('/')}/control/v1/keys/{key_id}",
-                    headers={"Authorization": f"Bearer {control_token}"},
-                )
-                response.raise_for_status()
-                payload = response.json()
-        except (httpx.HTTPError, json.JSONDecodeError):
-            # Do not retain an exception containing the authenticated request;
-            # cleanup failures can be logged by long-lived caretaker processes.
-            raise GatewayMintError("gateway credential revocation failed") from None
-        revoked = payload.get("revoked")
-        if not isinstance(revoked, bool):
-            raise GatewayMintError("gateway revoke returned an invalid response")
-        return revoked
-
-
-def _parse_gateway_expiry(value: str) -> datetime:
-    """Parse a control-plane expiry without ever including it in an error."""
-
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        raise GatewayMintError("gateway mint returned an invalid expiry") from None
-    if parsed.tzinfo is None:
-        raise GatewayMintError("gateway mint returned an invalid expiry")
-    return parsed.astimezone(UTC)
-
-
-def _safe_gateway_key_id(value: object) -> str | None:
-    """Return a path-safe key ID suitable for malformed-mint cleanup."""
-
-    if not isinstance(value, str) or not 1 <= len(value) <= 128:
-        return None
-    if not value.isascii() or any(
-        not (char.isalnum() or char in "-_") for char in value
-    ):
-        return None
-    return value
-
-
-def _validate_gateway_credential(credential: GatewayMintCredential) -> None:
-    if not credential.key_id or not credential.token or not credential.expires_at:
-        raise GatewayMintError("gateway mint returned an incomplete credential")
-    _parse_gateway_expiry(credential.expires_at)
-
-
-def _gateway_ttl_seconds(config: HydraFlowConfig, timeout_seconds: float | None) -> int:
-    """Return a TTL that covers one complete subprocess attempt plus cleanup."""
-
-    configured = int(getattr(config, "gateway_key_ttl_seconds", 3660))
-    if timeout_seconds is None:
-        return configured
-    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
-        raise GatewayMintError("gateway spawn timeout must be positive and finite")
-    return max(configured, math.ceil(timeout_seconds) + _GATEWAY_LEASE_GRACE_SECONDS)
-
-
-@dataclass(slots=True)
-class _GatewayKeyLease:
-    """Private retained control-plane state for one worker spawn."""
-
-    base_url: str
-    control_token: str = field(repr=False)
-    request: GatewayMintRequest
-    client: GatewayControlClient = field(repr=False)
-    credential: GatewayMintCredential = field(repr=False)
-    revoked: bool = False
-
-    @property
-    def key_id(self) -> str:
-        return self.credential.key_id
-
-    @property
-    def expires_at(self) -> str:
-        return self.credential.expires_at
-
-    def seconds_remaining(self) -> float:
-        return (
-            _parse_gateway_expiry(self.expires_at) - datetime.now(UTC)
-        ).total_seconds()
-
-    async def renew_if_needed(self, *, min_validity_seconds: float) -> bool:
-        """Remint only when this lease cannot cover one more full attempt."""
-
-        if self.revoked:
-            raise GatewayMintError("gateway credential lease is already closed")
-        if self.seconds_remaining() >= min_validity_seconds:
-            return False
-
-        previous_key_id = self.key_id
-        credential = await self.client.mint_key(
-            base_url=self.base_url,
-            control_token=self.control_token,
-            request=self.request,
-        )
-        _validate_gateway_credential(credential)
-        self.credential = credential
-        try:
-            revoked = await self.client.revoke_key(
-                base_url=self.base_url,
-                control_token=self.control_token,
-                key_id=previous_key_id,
-            )
-            if not revoked:
-                raise GatewayMintError(
-                    "gateway superseded-key revocation was not acknowledged"
-                )
-        except Exception:
-            # The superseded credential still has its short TTL. Do not discard
-            # the successfully minted replacement or expose control credentials.
-            logger.warning(
-                "gateway superseded-key revocation failed for key_id=%s",
-                previous_key_id,
-            )
-        return True
-
-    async def revoke(self) -> None:
-        if self.revoked:
-            return
-        revoked = await self.client.revoke_key(
-            base_url=self.base_url,
-            control_token=self.control_token,
-            key_id=self.key_id,
-        )
-        if not revoked:
-            raise GatewayMintError("gateway key revocation was not acknowledged")
-        self.revoked = True
-
-
-class _RoutedHarnessEnv(dict[str, str]):
-    """Env mapping with non-exported transport metadata for spawn boundaries."""
-
-    __slots__ = ("transport", "_gateway_lease")
-
-    def __init__(
-        self,
-        values: dict[str, str],
-        *,
-        transport: str,
-        gateway_lease: _GatewayKeyLease | None = None,
-    ) -> None:
-        super().__init__(values)
-        self.transport = transport
-        self._gateway_lease = gateway_lease
-
-    @property
-    def key_id(self) -> str | None:
-        return self._gateway_lease.key_id if self._gateway_lease is not None else None
-
-    @property
-    def expires_at(self) -> str | None:
-        return (
-            self._gateway_lease.expires_at if self._gateway_lease is not None else None
-        )
-
-    def __repr__(self) -> str:
-        redacted = {
-            key: "<redacted>" if key == "ANTHROPIC_AUTH_TOKEN" else value
-            for key, value in self.items()
-        }
-        return (
-            f"{type(self).__name__}({redacted!r}, transport={self.transport!r}, "
-            f"key_id={self.key_id!r}, expires_at={self.expires_at!r})"
-        )
-
-    __str__ = __repr__
-
-
-async def renew_gateway_key_if_needed(
-    harness_env: dict[str, str], *, min_validity_seconds: float
-) -> bool:
-    """Renew a gateway lease only when it cannot cover another attempt."""
-
-    if not isinstance(harness_env, _RoutedHarnessEnv):
-        return False
-    lease = harness_env._gateway_lease
-    if lease is None:
-        return False
-    renewed = await lease.renew_if_needed(min_validity_seconds=min_validity_seconds)
-    if renewed:
-        harness_env["ANTHROPIC_AUTH_TOKEN"] = lease.credential.token
-    return renewed
-
-
-async def revoke_gateway_key(harness_env: dict[str, str]) -> None:
-    """Best-effort close of a per-spawn gateway lease; TTL remains fallback."""
-
-    if not isinstance(harness_env, _RoutedHarnessEnv):
-        return
-    lease = harness_env._gateway_lease
-    if lease is None:
-        return
-    try:
-        await lease.revoke()
-    except Exception:
-        # Cleanup must never mask the worker's result or original exception.
-        logger.warning(
-            "gateway key revocation failed for key_id=%s",
-            lease.key_id,
-        )
 
 
 @dataclass(frozen=True)
@@ -1377,6 +1043,7 @@ async def resolve_harness_env(
     gateway_client: GatewayControlClient | None = None,
     issue_number: int | None = None,
     pr_number: int | None = None,
+    route: EnforcedRoute | None = None,
 ) -> dict[str, str]:
     """Per-spawn env overrides that point the Claude CLI at a harness backend.
 
@@ -1400,6 +1067,13 @@ async def resolve_harness_env(
     open: mint/config failures raise before any worker process starts.
     """
     base_url = harness_base_url(provider, config)
+    if provider == _GATEWAY and not base_url:
+        # The docstring's "gateway selection never falls open" promise, held.
+        # ``gateway_base_url`` declares ``min_length=1``, but the env-override
+        # table assigns after construction, so an empty override reaches here —
+        # and returning {} would spawn the policy-chosen model against whatever
+        # ambient credential the host happens to have.
+        raise GatewayMintError("gateway selected but gateway_base_url is unset")
     if not base_url:
         return {}
     if provider == _GATEWAY:
@@ -1408,25 +1082,60 @@ async def resolve_harness_env(
             raise GatewayMintError(
                 "gateway selected but HYDRAFLOW_GATEWAY_CONTROL_TOKEN is unset"
             )
-        billing_provider = harness_billing_provider(provider, model)
-        request = GatewayMintRequest(
-            principal_kind="spawn",
-            principal_id=source.strip() or "unknown",
-            spawn_id=spawn_id or uuid.uuid4().hex,
-            session_id=session_id,
-            repo_slug=str(getattr(config, "repo_slug", "") or "unknown"),
-            repo_class=cast(
-                Literal["hydraflow", "client", "personal"],
-                getattr(config, "gateway_repo_class", "personal"),
-            ),
-            provider_binding=(
-                "zai-harness" if billing_provider == _ZAI else "anthropic"
-            ),
-            capture_bodies=bool(getattr(config, "gateway_capture_bodies", False)),
-            ttl_seconds=_gateway_ttl_seconds(config, timeout_seconds),
-            issue_number=issue_number,
-            pr_number=pr_number,
+        resolved_spawn_id = spawn_id or uuid.uuid4().hex
+        repo_class = cast(
+            Literal["hydraflow", "client", "personal"],
+            getattr(config, "gateway_repo_class", "personal"),
         )
+        request: GatewayMintRequest | GatewayMintV2Request
+        if route is not None:
+            # ADR-0141: a governed spawn states identity and intent. It does not
+            # name a provider binding, and there is no field on this request that
+            # could carry one.
+            request = GatewayMintV2Request(
+                mint_attempt_id=route.mint_attempt_id,
+                dispatch_id=route.dispatch_id,
+                principal_kind="spawn",
+                principal_id=source.strip() or "unknown",
+                spawn_id=resolved_spawn_id,
+                session_id=session_id,
+                repo=str(getattr(config, "repo", "") or ""),
+                repo_slug=str(getattr(config, "repo_slug", "") or "unknown"),
+                repo_class=repo_class,
+                worker_role=(
+                    None if route.worker_role is None else route.worker_role.value
+                ),
+                request_face=route.context.request_face.value,
+                requirement_kind=route.requirement.kind.value,
+                requirement_value=route.requirement.value,
+                requested_model=route.requested_model,
+                effective_model=route.effective_model,
+                route_decision_id=route.decision.decision_id,
+                policy_id=route.decision.policy_id,
+                policy_revision=route.decision.policy_revision,
+                snapshot_hash=route.decision.snapshot_hash,
+                capture_bodies=bool(getattr(config, "gateway_capture_bodies", False)),
+                ttl_seconds=_gateway_ttl_seconds(config, timeout_seconds),
+                issue_number=issue_number,
+                pr_number=pr_number,
+            )
+        else:
+            billing_provider = harness_billing_provider(provider, model)
+            request = GatewayMintRequest(
+                principal_kind="spawn",
+                principal_id=source.strip() or "unknown",
+                spawn_id=resolved_spawn_id,
+                session_id=session_id,
+                repo_slug=str(getattr(config, "repo_slug", "") or "unknown"),
+                repo_class=repo_class,
+                provider_binding=(
+                    "zai-harness" if billing_provider == _ZAI else "anthropic"
+                ),
+                capture_bodies=bool(getattr(config, "gateway_capture_bodies", False)),
+                ttl_seconds=_gateway_ttl_seconds(config, timeout_seconds),
+                issue_number=issue_number,
+                pr_number=pr_number,
+            )
         client = gateway_client or _HttpGatewayControlClient()
         credential = await client.mint_key(
             base_url=base_url,
@@ -1518,6 +1227,7 @@ async def _claude_cli_complete(
     session_id: str | None = None,
     gateway_client: GatewayControlClient | None = None,
     usage_out: dict[str, object] | None = None,
+    route: EnforcedRoute | None = None,
 ) -> SimpleResult:
     """The Claude CLI backend (today's behaviour). Credit-out surfaces as
     ``rc != 0`` output text, so it is detected and raised here.
@@ -1553,6 +1263,7 @@ async def _claude_cli_complete(
                 session_id=session_id,
                 timeout_seconds=timeout,
                 gateway_client=gateway_client,
+                route=route,
             )
             if provider == _GATEWAY:
                 env = scrub_gateway_spawn_env(env)
@@ -1611,8 +1322,6 @@ async def _openai_compatible_complete(
     output (more reliable than parsing JSON out of prose). HTTP 429/402 and
     quota/credit error bodies raise :class:`CreditExhaustedError` so the
     orchestrator's pause/refund fires. ``provider`` only labels errors."""
-
-    import httpx  # noqa: PLC0415
 
     from execution import SimpleResult  # noqa: PLC0415
     from subprocess_util import (  # noqa: PLC0415
@@ -1792,12 +1501,6 @@ async def run_lightweight_agent(
             f"for source {source!r}"
         )
         raise ValueError(msg)
-    runner, owned_runner = _terminal_gateway_runner(
-        runner,
-        config,
-        transport_provider,
-    )
-
     # Backend selection (pluggable one-shot provider). The chosen backend owns
     # its own credit-exhaustion detection (CLI: output text; OpenRouter: HTTP
     # 429/402). Both spawns live in THIS seam module so the CH-6 gate (above)
@@ -1808,7 +1511,12 @@ async def run_lightweight_agent(
     # ``*_provider`` dials run through, so it is where a z.ai-pinned loop
     # becomes observable. Observation only — the transport is already resolved.
     from hydraflow_gateway.routing_policy import RequestFace
-    from route_shadow import record_dialled_route_shadow
+    from route_enforcement import (
+        EnforcementRefused,
+        canary_armed,
+        enforce_canary_route,
+    )
+    from route_shadow import dialled_route_stages, record_dialled_route_shadow
 
     await asyncio.to_thread(
         record_dialled_route_shadow,
@@ -1820,6 +1528,47 @@ async def run_lightweight_agent(
         request_face=RequestFace.ONE_SHOT,
         issue_number=issue_number,
         pr_number=pr_number,
+    )
+    # Enforcement canary (#11539, ADR-0141): None unless this is the armed
+    # repository AND ``transport_provider`` is the gateway, so a direct
+    # OpenAI-compatible backend — which the gateway never sees — is untouched.
+    # Here the model is a plain variable rather than an argv, so the rewrite is
+    # an assignment; ``cmd`` is only a telemetry descriptor and is rebuilt from
+    # it so the recorded model is the one that actually ran.
+    route = None
+    try:
+        if canary_armed(config):
+            route = await asyncio.to_thread(
+                enforce_canary_route,
+                config=config,
+                principal_id=source,
+                stages=dialled_route_stages(
+                    config=config,
+                    requested_provider=provider,
+                    transport_provider=transport_provider,
+                ),
+                final_provider=transport_provider,
+                final_model=model,
+                request_face=RequestFace.ONE_SHOT,
+            )
+    except EnforcementRefused as exc:
+        # Collapses to this seam's soft-failure contract, exactly like the CH-6
+        # gate block above and for the same reason: the prompt was never sent
+        # (fail closed), and no telemetry row is recorded because no inference
+        # happened. A caretaker loop reads rc=-1 and tries again later, which is
+        # right — a held route is a state an operator can change.
+        return SimpleResult(stderr=str(exc), returncode=-1)
+    if route is not None:
+        model = route.effective_model
+        cmd = _telemetry_cmd(transport_provider, tool, model)
+    # Only now, past every early return: ``_terminal_gateway_runner`` may open a
+    # Docker API client, and the one path that returns between here and the
+    # ``finally`` that closes it would leak one per refused attempt — and a held
+    # route is a persistent state a caretaker loop retries.
+    runner, owned_runner = _terminal_gateway_runner(
+        runner,
+        config,
+        transport_provider,
     )
     start = time.monotonic()
     success = False
@@ -1858,6 +1607,7 @@ async def run_lightweight_agent(
                     session_id=session_id,
                     gateway_client=gateway_client,
                     usage_out=usage_stats,
+                    route=route,
                 )
         except TimeoutError:
             # ``asyncio.wait_for`` raises a *bare* TimeoutError whose ``str()``

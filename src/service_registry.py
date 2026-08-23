@@ -627,8 +627,9 @@ def _build_fable_director(
     from director_sandbox import DirectorSandboxError
     from director_shadow_log import ShadowObservationLog
     from director_turn_runner import DirectorTurnRunner
+    from gateway_mint_client import revoke_gateway_key
     from package_resources import ResourceNotFoundError
-    from runner_utils import resolve_harness_env, revoke_gateway_key
+    from runner_utils import resolve_harness_env
 
     try:
         evidence = FableDirector.load_evidence(config.director_probe_evidence_path())

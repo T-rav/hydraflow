@@ -41,6 +41,20 @@ the returned virtual `token` as either a bearer token or `x-api-key`; the
 gateway rejects missing, expired, or ambiguous credentials and never supports
 a direct-provider bypass.
 
+`GATEWAY_GOVERNED_REPOS` (empty by default) is the server-owned, comma-separated
+list of repositories whose keys **must** be route-bound (ADR-0141). Either
+spelling works — the canonical `owner/repo` or the path-safe `owner-repo` — and
+both sides of the comparison are reduced to one form, so neither the operator's
+spelling nor the caller's can open the boundary.
+While a slug is listed, `POST /control/v1/keys` refuses that repository and the
+data plane turns away any key without a route binding — so a caller cannot
+declare itself ungoverned. It is a deployment control on the far side of the
+trust boundary from HydraFlow's own canary dial, and the two are disarmed in a
+fixed order: clear `HYDRAFLOW_GATEWAY_ENFORCEMENT_CANARY_REPO` first (routing
+reverts on the next spawn), then remove the slug here. Clearing this one first,
+or clearing only the HydraFlow dial, leaves that repository's gateway spawns
+failing **closed** at the mint — loudly, and in the safe direction.
+
 ## Read-only account and route visibility (ADR-0138)
 
 Three authenticated GET endpoints sit behind the same control-token boundary
