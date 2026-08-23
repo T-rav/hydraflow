@@ -198,9 +198,16 @@ def _event_subs(cls: ast.ClassDef, path: Path, src_dir: Path) -> list[str]:
     ``HealthMonitorLoop`` SYSTEM_ALERT off the event map (Refs #11547).
     """
     if path.parent != src_dir and path.parent.name.endswith("_loop"):
-        src = "\n".join(
-            sibling.read_text() for sibling in sorted(path.parent.rglob("*.py"))
-        )
+        # ``ast.unparse`` per sibling, not raw text: unparsing drops comments,
+        # so a commented-out ``EventType.X`` cannot inflate the event map the
+        # way a regex over the file would.
+        sources = []
+        for sibling in sorted(path.parent.rglob("*.py")):
+            try:
+                sources.append(ast.unparse(ast.parse(sibling.read_text())))
+            except SyntaxError:
+                continue
+        src = "\n".join(sources)
     else:
         src = ast.unparse(cls)
     return sorted(set(re.findall(r"EventType\.([A-Z_]+)", src)))

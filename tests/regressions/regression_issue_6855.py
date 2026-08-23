@@ -127,6 +127,50 @@ def _unguarded_handlers(
 # ---------------------------------------------------------------------------
 
 
+class TestSiteAnchorsStillResolve:
+    """The anti-vacuity tripwire, deliberately UNMARKED.
+
+    The checks below are ``xfail`` until the #6855 fix lands (#11664), and
+    ``xfail`` swallows EVERY exception in the body — including the
+    ``AssertionError`` ``_method_node`` raises when the anchor is gone, and
+    the ``filepath.exists()`` assert. Left inside a marked test, the guard
+    written to prevent this file from passing vacuously would itself be unable
+    to turn the suite red: the same failure mode, one layer up.
+
+    So anchor resolution lives here, unmarked. If the module or the method is
+    renamed or moved, THIS reddens, whatever the xfails do.
+    """
+
+    @pytest.mark.parametrize(
+        ("filename", "method"),
+        [(f, m) for f, m, _ in KNOWN_UNGUARDED_SITES],
+        ids=[f"{f}:{m}" for f, m, _ in KNOWN_UNGUARDED_SITES],
+    )
+    def test_site_module_and_method_exist(self, filename: str, method: str) -> None:
+        filepath = SRC / filename
+        assert filepath.exists(), (
+            f"{filename} does not exist — the #6855 checks below are anchored "
+            "at a path that moved, and would report nothing. Re-point them."
+        )
+        # Raises a descriptive AssertionError if the method is gone.
+        assert _method_node(filepath, method) is not None
+
+    def test_the_anchor_still_encloses_broad_handlers(self) -> None:
+        """The method must still CONTAIN the handlers this file is about.
+
+        Existing is not enough: if the two ``except Exception`` blocks were
+        refactored out of this method into a helper, every check below would
+        find zero handlers and read as "fixed" when nothing was fixed.
+        """
+        module, method = INGESTION_SITE
+        handlers = _except_exception_handlers(_method_node(SRC / module, method))
+        assert handlers, (
+            f"{method}() no longer contains any ``except Exception`` block. "
+            "Either the fix landed (drop the xfail markers and this guard's "
+            "premise) or the handlers moved and the checks are now vacuous."
+        )
+
+
 class TestHealthMonitorSuggestionIngestionBlocksHaveReraise:
     """AST check — the ``except Exception`` blocks surrounding harness
     suggestion ingestion in health_monitor_loop.py must call
@@ -135,15 +179,13 @@ class TestHealthMonitorSuggestionIngestionBlocksHaveReraise:
 
     @pytest.mark.xfail(
         reason="#6855 guard never landed; re-anchored off rotted line windows "
-        "in #11547 batch 4 — tracked by #11664",
-        strict=False,
+        "in #11547 batch 4 — tracked by #11664. strict=True so landing the fix "
+        "forces the marker off instead of silently XPASSing.",
+        strict=True,
     )
     def test_suggestion_ingestion_except_blocks_have_reraise_guard(self) -> None:
         module, method = INGESTION_SITE
-        filepath = SRC / module
-        assert filepath.exists(), f"Source file not found: {filepath}"
-
-        unguarded = _unguarded_handlers(filepath, method)
+        unguarded = _unguarded_handlers(SRC / module, method)
 
         assert not unguarded, (
             f"{module} has unguarded ``except Exception`` block(s) in "
@@ -162,16 +204,14 @@ class TestKnownSitesHaveReraiseGuard:
     )
     @pytest.mark.xfail(
         reason="#6855 guard never landed; re-anchored off rotted line windows "
-        "in #11547 batch 4 — tracked by #11664",
-        strict=False,
+        "in #11547 batch 4 — tracked by #11664. strict=True so landing the fix "
+        "forces the marker off instead of silently XPASSing.",
+        strict=True,
     )
     def test_known_site_has_reraise_guard(
         self, filename: str, method: str, desc: str
     ) -> None:
-        filepath = SRC / filename
-        assert filepath.exists()
-
-        nearby = [ln for ln, _ in _unguarded_handlers(filepath, method)]
+        nearby = [ln for ln, _ in _unguarded_handlers(SRC / filename, method)]
 
         assert not nearby, (
             f"{filename}:{method}() ({desc}) — ``except Exception`` "

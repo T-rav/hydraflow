@@ -14,13 +14,8 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
 
 from base_runner import BaseRunner
-
-if TYPE_CHECKING:
-    pass
-
 
 logger = logging.getLogger("hydraflow.agent")
 

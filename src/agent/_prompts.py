@@ -34,10 +34,6 @@ from skill_registry import (
 from task_graph import extract_phases, has_task_graph, topological_sort
 from untrusted_text import UNTRUSTED_DATA_PREAMBLE, fence_untrusted
 
-if TYPE_CHECKING:
-    pass
-
-
 logger = logging.getLogger("hydraflow.agent")
 
 

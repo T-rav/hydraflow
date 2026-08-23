@@ -30,24 +30,30 @@ Ref: ADR-0055 (telemetry/credit contract for spawn paths),
 from __future__ import annotations
 
 from tests._credit_reraise_audit import (
+    SRC,
     find_violations_in_file,
     find_violations_in_source,
     iter_supervised_loop_files,
 )
 
-# Ratchet allow-list, keyed by filename relative to src/. MUST shrink toward
-# empty and MUST NOT grow — every new supervised loop must reraise credit/auth
-# from its own broad excepts before it lands.
+# Ratchet allow-list, keyed by the path relative to src/ (e.g. "foo_loop.py" or
+# "foo_loop/_bar.py"). MUST shrink toward empty and MUST NOT grow — every new
+# supervised loop must reraise credit/auth from its own broad excepts before it
+# lands. Path, not basename: loops are packages now (#11547), so two of them
+# each holding a `_common.py` would collide on the basename and ONE allowlist
+# entry would exempt every package's same-named file.
 _GRANDFATHERED: frozenset[str] = frozenset()
 
 
 def _violations_by_file() -> dict[str, list[int]]:
-    """Return {loop filename: [try-block line numbers]} for every real violator."""
+    """Return {src-relative loop path: [try-block line numbers]} per violator."""
     offenders: dict[str, list[int]] = {}
     for path in iter_supervised_loop_files():
         violations = find_violations_in_file(path)
         if violations:
-            offenders[path.name] = [v.try_lineno for v in violations]
+            offenders[path.relative_to(SRC).as_posix()] = [
+                v.try_lineno for v in violations
+            ]
     return offenders
 
 

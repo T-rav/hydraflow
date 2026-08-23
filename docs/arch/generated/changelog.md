@@ -6,6 +6,8 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
+- `bb626bf` — fix(review-advisor,gates): three pass-2 findings — a ninth glob hole, a vacuous ratchet, an xfail that ate its own tripwire *(2026-08-23)*
+- `9103ea5` — refactor(health-monitor,agent): decompose two god classes into mixin packages *(2026-08-23)*
 - `73b0565` — fix(director): Fable P3 review findings — live arming, seam-reported outcomes, honest lane boundary (#11541) (#11657) (#11657) *(2026-08-22)*
 - `befb5a6` — refactor(mockworld,arch): close two latent gate holes and finish the cluster pass (#11659) (#11659) *(2026-08-22)*
 - `1dfa921` — refactor(implement,mockworld): decompose ImplementPhase and FakeGitHub into mixin packages (#11658) (#11658) *(2026-08-22)*

@@ -112,6 +112,19 @@ def _iter_filing_loops() -> list[Path]:
     return [p for p in _iter_loop_files() if _is_filing_loop(p)]
 
 
+def _unit_for(name: str) -> Path | None:
+    """Resolve a loop NAME to its unit, whatever shape that loop has on disk.
+
+    The allowlists are keyed by loop name, and a name is not a path: a
+    decomposed loop is a directory, so ``_SRC / name`` is neither its module
+    nor its package. Building the path by hand yields something that does not
+    exist, and ``loop_text`` on a missing directory returns "" rather than
+    raising — which turned the shrink-only half of this ratchet into an
+    unconditional pass. Resolve through discovery instead.
+    """
+    return {unit.stem: unit for unit in _iter_loop_files()}.get(name)
+
+
 def _has_cap(path: Path) -> bool:
     text = loop_text(path)
     return any(marker in text for marker in _CAP_MARKERS)
@@ -161,8 +174,15 @@ def test_grandfathered_loops_stay_uncapped_until_removed() -> None:
         f"{stale} are grandfathered but no longer call create_issue. Remove "
         "them from `_GRANDFATHERED_UNCAPPED`."
     )
+    units = {name: _unit_for(name) for name in _GRANDFATHERED_UNCAPPED}
+    unresolved = sorted(name for name, unit in units.items() if unit is None)
+    assert not unresolved, (
+        f"{unresolved} are grandfathered but no loop of that name exists — "
+        "this check cannot see them and would pass vacuously. Remove the "
+        "stale entries, or fix the name."
+    )
     now_capped = sorted(
-        name for name in _GRANDFATHERED_UNCAPPED if _has_cap(_SRC / name)
+        name for name, unit in units.items() if unit is not None and _has_cap(unit)
     )
     assert not now_capped, (
         f"{now_capped} now carry a per-tick filing cap — remove them from "
