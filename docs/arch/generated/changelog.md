@@ -6,12 +6,13 @@ Commits touching `docs/arch/`, `docs/adr/`, `docs/wiki/`, `src/arch/`, or `mkdoc
 
 ## 2026-W34
 
-- `c21a5c0` — wip(director): Fable P3 checkpoint before make quality *(2026-08-22)*
-- `3fa3278` — fix(gateway): build the overlay view from one read of the chain *(2026-08-22)*
-- `efb6dc4` — fix(review pass 2): a mutation decides from the file; an emptied chain is corrupt *(2026-08-22)*
-- `f1a8d30` — fix(review pass 1): gateway-authored failures are not upstream evidence; anchor the admin chain *(2026-08-22)*
-- `964ea09` — docs(adr-0142): cite the receipt the Divergence line rests on (P1.17) *(2026-08-22)*
-- `b36bf59` — feat(gateway): P4 — multi-account pools and bounded fallback (ADR-0142) *(2026-08-22)*
+- `5d06398` — refactor(gateway): drop the two seams the pool refactor left behind *(2026-08-22)*
+- `ef35618` — fix(gateway): build the overlay view from one read of the chain *(2026-08-22)*
+- `0f932a8` — fix(review pass 2): a mutation decides from the file; an emptied chain is corrupt *(2026-08-22)*
+- `8fe4c6b` — fix(review pass 1): gateway-authored failures are not upstream evidence; anchor the admin chain *(2026-08-22)*
+- `4e259b2` — docs(adr-0142): cite the receipt the Divergence line rests on (P1.17) *(2026-08-22)*
+- `7c19a3a` — feat(gateway): P4 — multi-account pools and bounded fallback (ADR-0142) *(2026-08-22)*
+- `d412796` — feat(director): Fable P3 — brokered Sonnet and Opus Plan canary (#11541) (#11655) (#11655) *(2026-08-22)*
 - `f714ecf` — feat(gateway): P3 — bounded, reversible routing enforcement canary (ADR-0141) (#11653) (#11653) *(2026-08-22)*
 - `1363268` — fix(erosion): stop mass.yaml's numbers rotting — targeted --only regen, method-axis growth, and drop the field nobody read (#11652) (#11652) *(2026-08-22)*
 - `94b544e` — fix(implement): anchor the test-adequacy demand and pin it across retries (#11644) (#11649) (#11649) *(2026-08-22)*

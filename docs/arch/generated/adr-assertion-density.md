@@ -4,10 +4,10 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 
 ## Population
 
-- **Population:** Accepted (87 ADRs)
+- **Population:** Accepted (88 ADRs)
 - **Mean density** (per-ADR, unweighted): 97%
-- **Executable fraction** (check-weighted): 99% (202 of 205 cited checks)
-- **Check kinds:** pytest 201, make 1, script 0, prose 3
+- **Executable fraction** (check-weighted): 99% (211 of 214 cited checks)
+- **Check kinds:** pytest 210, make 1, script 0, prose 3
 - **Prose-count control limit** (Shewhart c-chart UCL): 0.59
 - **Prose outliers** (non-executable enforcement anomalously concentrated — look here first): ADR-0025, ADR-0035, ADR-0051
 
@@ -104,6 +104,7 @@ The **executable share** of each Accepted ADR's cited enforcement (`pytest` / `m
 | ADR-0139 | Shadow routing policy resolver and hash-linked decision record | 100% | 7 | 0 |
 | ADR-0140 | Revision-safe policy workspace and the operator write boundary | 100% | 6 | 0 |
 | ADR-0141 | Bounded, reversible routing enforcement — the resolve-and-mint canary | 100% | 6 | 0 |
+| ADR-0142 | Multi-account pools and bounded fallback | 100% | 9 | 0 |
 
 
 <!-- arch:generated -->
