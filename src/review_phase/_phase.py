@@ -65,6 +65,7 @@ from baseline_policy import BaselinePolicy
 from comment_formatter import SelfReviewError
 from config import HydraFlowConfig
 from events import EventBus
+from exception_classify import reraise_on_credit_or_bug
 from harness_insights import FailureCategory, HarnessInsightStore
 from merge_conflict_resolver import MergeConflictResolver
 from models import (
@@ -271,6 +272,10 @@ class ReviewPhase(
                     log_file=self._review_log_reference(result.pr_number),
                 )
             except Exception as exc:
+                # Best-effort summary posting, but not for infra-fatal errors:
+                # this path spawns an LLM, so credit/auth exhaustion here must
+                # reach the loop's pause handler (#6855 class, #11666 sweep).
+                reraise_on_credit_or_bug(exc)
                 log_exception_with_bug_classification(
                     logger,
                     exc,

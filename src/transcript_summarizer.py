@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from config import Credentials, HydraFlowConfig
 from dedup_store import DedupStore
 from events import EventBus, EventType, HydraFlowEvent
+from exception_classify import reraise_on_credit_or_bug
 from execution import SubprocessRunner, get_default_runner
 from models import TranscriptSummaryPayload
 from pr_manager import PRManager
@@ -200,7 +201,14 @@ class TranscriptSummarizer:
         """Summarize a transcript and post as a comment on the original issue.
 
         Returns ``True`` on success, ``False`` if skipped or failed.
-        Never raises — all errors are logged and swallowed.
+
+        Swallows ordinary failures — posting a summary is best-effort and must
+        not fail a phase. It does NOT swallow infrastructure-fatal errors: this
+        method summarizes by spawning an LLM, so ``CreditExhaustedError`` /
+        ``AuthenticationError`` here mean the account is unusable, and burying
+        them as ``return False`` leaves the loop spawning against an exhausted
+        account instead of pausing (#6855 class, found by the #11666 audit
+        sweep). See ``docs/wiki/dark-factory.md`` §2.2.
 
         *issue_labels* feeds the CH-6 gate's upward-only ``data-class:``
         label elevation for the summarization spawn — callers with the issue
@@ -217,7 +225,8 @@ class TranscriptSummarizer:
                 log_file=log_file,
                 issue_labels=issue_labels,
             )
-        except Exception:
+        except Exception as exc:
+            reraise_on_credit_or_bug(exc)
             logger.exception(
                 "Transcript summary comment failed for issue #%d (%s phase)",
                 issue_number,

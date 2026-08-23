@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from exception_classify import reraise_on_credit_or_bug
 from harness_insights import FailureCategory
 from models import IssueOutcomeType, PlanResult, Task
 from pending_concerns import Concern, is_design_decision_concern
@@ -120,7 +121,11 @@ class PlanDispositionMixin:
                     log_file=self._plan_log_reference(issue.id),
                     issue_labels=issue.tags,
                 )
-            except (RuntimeError, OSError):
+            except (RuntimeError, OSError) as exc:
+                # CreditExhaustedError/AuthenticationError subclass RuntimeError,
+                # so this clause would otherwise bury the one failure the loop
+                # must pause on (#6855 class, #11666 audit sweep).
+                reraise_on_credit_or_bug(exc)
                 logger.exception(
                     "Failed to post transcript summary for issue #%d", issue.id
                 )
@@ -276,7 +281,11 @@ class PlanDispositionMixin:
                     log_file=self._plan_log_reference(issue.id),
                     issue_labels=issue.tags,
                 )
-            except (RuntimeError, OSError):
+            except (RuntimeError, OSError) as exc:
+                # CreditExhaustedError/AuthenticationError subclass RuntimeError,
+                # so this clause would otherwise bury the one failure the loop
+                # must pause on (#6855 class, #11666 audit sweep).
+                reraise_on_credit_or_bug(exc)
                 logger.exception(
                     "Failed to post transcript summary for issue #%d", issue.id
                 )

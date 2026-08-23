@@ -1,25 +1,39 @@
 """Regression test for issue #6809.
 
-Bug: ``diagnostic_loop.py`` has three ``except Exception`` handlers that
-do NOT call ``reraise_on_credit_or_bug``:
+Bug: ``diagnostic_loop.py`` has ``except Exception`` handlers that do NOT call
+``reraise_on_credit_or_bug``:
 
-- Line ~231: ``_run_stage2_fix`` / ``_process_issue`` catches
-  ``runner.fix()`` crashes but silently absorbs
-  ``AuthenticationError`` / ``CreditExhaustedError``, treating them
-  as a soft fix failure and recording a ``DiagnosticAttempt``.
-- Line ~309: ``_escalate_to_hitl`` catches ``post_comment`` failures
-  without re-raising auth/credit errors.
-- Line ~319: ``_escalate_to_hitl`` catches ``swap_pipeline_labels``
-  failures without re-raising auth/credit errors, leaving the issue
-  stuck on the diagnose label.
+- ``_run_fix`` (the ``runner.fix()`` crash handler reached from
+  ``_process_issue``) silently absorbs ``AuthenticationError`` /
+  ``CreditExhaustedError``, treating them as a soft fix failure and
+  recording a ``DiagnosticAttempt``.
+- ``_escalate_to_hitl`` catches ``post_comment`` failures without
+  re-raising auth/credit errors.
+- ``_escalate_to_hitl`` catches ``swap_pipeline_labels`` failures without
+  re-raising auth/credit errors, leaving the issue stuck on the diagnose
+  label.
 
 Expected behaviour after fix:
   - ``AuthenticationError`` and ``CreditExhaustedError`` propagate up
     from all three sites so the orchestrator's credit-pause / auth-retry
     logic can handle them.
 
-These tests assert the *correct* behaviour and are RED against the
-current (buggy) code.
+Anchored on the METHOD, not on a line number (#11664)
+-----------------------------------------------------
+
+The per-site assertion below used to filter whole-file handler line numbers to
+a ±15-line window around ``diagnostic_loop.py:231`` / ``:309`` / ``:319``. All
+three targets have since moved well past those windows (``_run_fix`` now starts
+near 398, ``_escalate_to_hitl`` near 535), so each filter matched an EMPTY set
+and ``assert not []`` passed VACUOUSLY — three green tests asserting nothing
+about a defect that was never fixed. The non-strict ``xfail`` then reported
+them as XPASS, which reads like good news and is not.
+
+The anchors are now enclosing method names, resolved through
+``tests.regressions._handler_anchors.unguarded_handlers``, which RAISES if the
+method disappears. With honest anchors these assertions go RED, because the
+underlying defect is real and still unfixed — which is why the ``xfail``
+markers stay. See ``_handler_anchors`` for the full rationale.
 """
 
 from __future__ import annotations
@@ -37,20 +51,29 @@ from diagnostic_loop import DiagnosticLoop
 from models import EscalationContext, Severity
 from subprocess_util import AuthenticationError, CreditExhaustedError
 from tests.helpers import make_bg_loop_deps
-
-SRC = Path(__file__).resolve().parent.parent.parent / "src"
+from tests.regressions._handler_anchors import (
+    RERAISE_GUARD,
+    SRC,
+    _except_exception_handlers,
+    _handler_calls_reraise_guard,
+    unguarded_handlers,
+)
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
-REQUIRED_GUARD = "reraise_on_credit_or_bug"
+REQUIRED_GUARD = RERAISE_GUARD
 
-#: (approx_line, short description) from the issue findings.
-KNOWN_UNGUARDED_SITES: list[tuple[int, str]] = [
-    (231, "runner.fix() crash handler in _process_issue"),
-    (309, "_escalate_to_hitl post_comment handler"),
-    (319, "_escalate_to_hitl swap_pipeline_labels handler"),
+#: (enclosing method, short description) from the issue findings.
+#:
+#: The two ``_escalate_to_hitl`` rows are kept separate so each finding stays
+#: traceable, but the method-scoped scan checks every broad handler in the
+#: method — so both rows assert the same (strictly stronger) property.
+KNOWN_UNGUARDED_SITES: list[tuple[str, str]] = [
+    ("_run_fix", "runner.fix() crash handler reached from _process_issue"),
+    ("_escalate_to_hitl", "_escalate_to_hitl post_comment handler"),
+    ("_escalate_to_hitl", "_escalate_to_hitl swap_pipeline_labels handler"),
 ]
 
 
@@ -104,36 +127,15 @@ def _make_loop(
 # ---------------------------------------------------------------------------
 
 
-def _except_exception_handlers(tree: ast.Module) -> list[ast.ExceptHandler]:
-    """Return all ``except Exception`` handler nodes in *tree*."""
-    handlers: list[ast.ExceptHandler] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ExceptHandler):
-            continue
-        if isinstance(node.type, ast.Name) and node.type.id == "Exception":
-            handlers.append(node)
-    return handlers
+def _unguarded_handlers_in_file(
+    filepath: Path,
+) -> list[tuple[int, ast.ExceptHandler]]:
+    """Whole-file variant used by the file-wide sweep below.
 
-
-def _handler_calls_reraise_guard(handler: ast.ExceptHandler) -> bool:
-    """Return True if the handler body calls ``reraise_on_credit_or_bug``."""
-    for node in ast.walk(handler):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if isinstance(func, ast.Name) and func.id == REQUIRED_GUARD:
-            return True
-        if isinstance(func, ast.Attribute) and func.attr == REQUIRED_GUARD:
-            return True
-    return False
-
-
-def _unguarded_handlers(filepath: Path) -> list[tuple[int, ast.ExceptHandler]]:
-    """Return ``(lineno, handler)`` pairs for every ``except Exception``
-    that does **not** call ``reraise_on_credit_or_bug``.
+    The per-site tests use the method-scoped
+    :func:`~tests.regressions._handler_anchors.unguarded_handlers` instead.
     """
-    source = filepath.read_text()
-    tree = ast.parse(source, filename=str(filepath))
+    tree = ast.parse(filepath.read_text(), filename=str(filepath))
     return [
         (h.lineno, h)
         for h in _except_exception_handlers(tree)
@@ -146,7 +148,13 @@ class TestDiagnosticLoopExceptBlocksHaveReraise:
     call ``reraise_on_credit_or_bug``.
     """
 
-    @pytest.mark.xfail(reason="Regression for issue #6809 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Issue #6809 is genuinely UNFIXED — diagnostic_loop.py still has "
+        "unguarded ``except Exception`` handlers. Anchors are method-based as "
+        "of #11664, so this failure is the real defect, no longer line-anchor "
+        "rot. Tracked by #11668.",
+        strict=False,
+    )
     def test_all_except_exception_blocks_have_reraise_guard(self) -> None:
         """Every ``except Exception`` in diagnostic_loop.py must call
         ``reraise_on_credit_or_bug()`` so that auth/credit failures
@@ -155,7 +163,7 @@ class TestDiagnosticLoopExceptBlocksHaveReraise:
         filepath = SRC / "diagnostic_loop.py"
         assert filepath.exists(), f"Source file not found: {filepath}"
 
-        unguarded = _unguarded_handlers(filepath)
+        unguarded = _unguarded_handlers_in_file(filepath)
 
         assert not unguarded, (
             f"diagnostic_loop.py has {len(unguarded)} ``except Exception`` "
@@ -165,24 +173,35 @@ class TestDiagnosticLoopExceptBlocksHaveReraise:
         )
 
     @pytest.mark.parametrize(
-        ("approx_line", "desc"),
+        ("method", "desc"),
         KNOWN_UNGUARDED_SITES,
-        ids=[f"diagnostic_loop.py:{ln}" for ln, _ in KNOWN_UNGUARDED_SITES],
+        ids=[
+            f"diagnostic_loop.py:{m}:{i}"
+            for i, (m, _) in enumerate(KNOWN_UNGUARDED_SITES)
+        ],
     )
-    @pytest.mark.xfail(reason="Regression for issue #6809 — fix not yet landed", strict=False)
-    def test_known_site_has_reraise_guard(self, approx_line: int, desc: str) -> None:
-        """Each specific site from the issue's findings table must have
-        ``reraise_on_credit_or_bug`` within +/-15 lines.
+    @pytest.mark.xfail(
+        reason="Issue #6809 is genuinely UNFIXED — _run_fix and "
+        "_escalate_to_hitl still swallow credit/auth errors. Anchors are "
+        "method-based as of #11664, so this failure is the real defect, no "
+        "longer line-anchor rot. Tracked by #11668.",
+        strict=False,
+    )
+    def test_known_site_has_reraise_guard(self, method: str, desc: str) -> None:
+        """Every ``except Exception`` inside the anchored method from the
+        issue's findings table must call ``reraise_on_credit_or_bug``.
+
+        ``unguarded_handlers`` raises if *method* is gone, so this can never
+        pass by matching nothing.
         """
         filepath = SRC / "diagnostic_loop.py"
         assert filepath.exists()
 
-        unguarded = _unguarded_handlers(filepath)
-        nearby = [ln for ln, _ in unguarded if abs(ln - approx_line) <= 15]
+        unguarded = [ln for ln, _ in unguarded_handlers(filepath, method)]
 
-        assert not nearby, (
-            f"diagnostic_loop.py:{approx_line} ({desc}) — ``except Exception`` "
-            f"near line {nearby[0]} does not call reraise_on_credit_or_bug(). "
+        assert not unguarded, (
+            f"diagnostic_loop.py:{method}() ({desc}) — ``except Exception`` at "
+            f"line {unguarded[0]} does not call reraise_on_credit_or_bug(). "
             f"Auth/credit failures are silently swallowed (issue #6809)."
         )
 
@@ -227,7 +246,10 @@ class TestEscalateToHitlPostCommentAuthErrorPropagates:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6809 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6809 — fix not yet landed (tracked by #11668)",
+        strict=False,
+    )
     async def test_credit_error_from_post_comment_propagates(
         self, tmp_path: Path
     ) -> None:
@@ -241,7 +263,10 @@ class TestEscalateToHitlPostCommentAuthErrorPropagates:
             await loop._process_issue(42, "Title", "Body")
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6809 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6809 — fix not yet landed (tracked by #11668)",
+        strict=False,
+    )
     async def test_auth_error_from_post_comment_propagates(
         self, tmp_path: Path
     ) -> None:
@@ -260,7 +285,10 @@ class TestEscalateToHitlLabelSwapAuthErrorPropagates:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6809 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6809 — fix not yet landed (tracked by #11668)",
+        strict=False,
+    )
     async def test_credit_error_from_label_swap_propagates(
         self, tmp_path: Path
     ) -> None:
@@ -273,7 +301,10 @@ class TestEscalateToHitlLabelSwapAuthErrorPropagates:
             await loop._process_issue(42, "Title", "Body")
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Regression for issue #6809 — fix not yet landed", strict=False)
+    @pytest.mark.xfail(
+        reason="Regression for issue #6809 — fix not yet landed (tracked by #11668)",
+        strict=False,
+    )
     async def test_auth_error_from_label_swap_propagates(self, tmp_path: Path) -> None:
         """AuthenticationError during HITL label swap must propagate."""
         loop, _runner, prs, state = _make_loop(tmp_path)
