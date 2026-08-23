@@ -412,7 +412,8 @@ class ReviewPhase(
                         review_text=result.summary,
                         has_blocking=(result.verdict == ReviewVerdict.REQUEST_CHANGES),
                     )
-                except Exception:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001
+                    reraise_on_credit_or_bug(exc)
                     logger.warning(
                         "Failed to write review_stored cache record for issue #%d",
                         result.issue_number,
@@ -545,7 +546,8 @@ class ReviewPhase(
                     phase=trace_phase,
                     run_id=run_id,
                 )
-            except Exception:
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "Phase rollup failed for PR #%d",
                     pr.number,

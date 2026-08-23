@@ -75,21 +75,14 @@ from tests.regressions._handler_anchors import (  # noqa: E402
 #: param would slide back to XFAIL and the suite would stay green. That is the
 #: same "marker hides reality" failure the line anchors caused (#11664), so
 #: fixed sites carry no mark and go red the moment they regress.
-_STILL_UNFIXED = pytest.mark.xfail(
-    reason="Issue #6752 is genuinely UNFIXED at this site — the handler still "
-    "swallows likely-bug exceptions. The anchor is method-based as of #11664, "
-    "so this failure is the real defect, no longer line-anchor rot. "
-    "Tracked by #11668.",
-    strict=False,
-)
-
+#: Every site is now guarded (#11668). No marks: a future removal of any of
+#: these guards fails loudly rather than sliding back into a silent xfail —
+#: which is the "marker hides reality" failure the line anchors caused (#11664).
 KNOWN_UNGUARDED_SITES = [
-    # Guarded as of #11664's transcript-summary chain fix — no mark, so a
-    # future removal of that guard fails loudly instead of silently xfailing.
     ("review_phase/_phase.py", "_post_review_transcript"),
-    pytest.param("review_phase/_phase.py", "_review_one_inner", marks=_STILL_UNFIXED),
-    pytest.param("diagnostic_runner.py", "diagnose", marks=_STILL_UNFIXED),
-    pytest.param("diagnostic_loop.py", "_run_fix", marks=_STILL_UNFIXED),
+    ("review_phase/_phase.py", "_review_one_inner"),
+    ("diagnostic_runner.py", "diagnose"),
+    ("diagnostic_loop.py", "_run_fix"),
 ]
 
 
@@ -123,9 +116,9 @@ class TestExceptBlocksBugClassification:
             # T36 — ``review_phase`` is now a package; the ``ReviewPhase``
             # class (which held the original anchored ``except Exception``
             # sites) lives in ``review_phase/_phase.py``.
-            pytest.param("review_phase/_phase.py", marks=_STILL_UNFIXED),
-            pytest.param("diagnostic_runner.py", marks=_STILL_UNFIXED),
-            pytest.param("diagnostic_loop.py", marks=_STILL_UNFIXED),
+            "review_phase/_phase.py",
+            "diagnostic_runner.py",
+            "diagnostic_loop.py",
             # #11547 split ``plan_phase`` into ``plan_phase_flow`` /
             # ``_prepass`` / ``_disposition`` / …; what remains here is
             # construction + queue draining and carries no broad handlers, so
@@ -238,13 +231,6 @@ class TestDiagnosticRunnerValidationError:
     with ``exc_info=True`` for actionable stack traces.
     """
 
-    @pytest.mark.xfail(
-        reason="Issue #6752 is genuinely UNFIXED — the try around "
-        "DiagnosisResult.model_validate() still catches bare Exception. The "
-        "anchor is AST-based as of #11664, so this failure is the real defect, "
-        "no longer a missed proximity window. Tracked by #11668.",
-        strict=False,
-    )
     def test_validation_error_not_caught_specifically(self) -> None:
         """The except block around ``DiagnosisResult.model_validate()``
         must catch ``pydantic.ValidationError`` explicitly (with exc_info)

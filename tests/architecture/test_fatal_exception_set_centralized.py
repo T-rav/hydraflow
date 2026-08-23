@@ -47,7 +47,6 @@ _GRANDFATHERED = frozenset(
         "adr_reviewer.py",
         "approval_records.py",
         "base_background_loop.py",
-        "diagnostic_loop.py",
         "entry_evidence_loop.py",
         "evidence_pack.py",
         "plan_council.py",

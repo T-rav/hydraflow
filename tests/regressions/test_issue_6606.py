@@ -161,8 +161,15 @@ class TestRunnerFixCrashLogsExcInfo:
         prs.list_issues_by_label.return_value = [
             {"number": 42, "title": "broken", "body": "details"}
         ]
-        # runner.fix() crashes
-        runner.fix.side_effect = ValueError("something broke inside fix")
+        # runner.fix() crashes. The stand-in is deliberately RuntimeError, not
+        # ValueError: #6752/#6809 made LIKELY_BUG_EXCEPTIONS (which includes
+        # ValueError) propagate out of this handler rather than be logged and
+        # swallowed, so a likely-bug stand-in would never reach the log line
+        # this test is about. #6606's finding is that the crash path captures
+        # exc_info -- that is unchanged, and is what this asserts. The
+        # propagate-instead-of-swallow contract is pinned by the sibling test
+        # below, so neither guarantee rests on the other's stand-in.
+        runner.fix.side_effect = RuntimeError("something broke inside fix")
 
         with caplog.at_level(logging.ERROR, logger="hydraflow.diagnostic_loop"):
             await loop._do_work()
@@ -182,3 +189,23 @@ class TestRunnerFixCrashLogsExcInfo:
         assert record.exc_info[1] is not None, (
             "exc_info was set but exception instance is None"
         )
+
+    @pytest.mark.asyncio
+    async def test_a_likely_bug_from_runner_fix_propagates_instead(
+        self, tmp_path: Path
+    ) -> None:
+        """The other half of the contract (#6752/#6809, landed by #11668).
+
+        A ``ValueError`` from ``runner.fix()`` is a probable defect in our own
+        code, not a transient failure of the work. It used to be logged as
+        "runner.fix() crashed" and filed as a failed fix, so the loop moved on
+        to the next issue and the bug stayed invisible. It now propagates.
+        """
+        loop, runner, prs, _state = _make_loop(tmp_path)
+        prs.list_issues_by_label.return_value = [
+            {"number": 42, "title": "broken", "body": "details"}
+        ]
+        runner.fix.side_effect = ValueError("a real bug, not a flaky fix")
+
+        with pytest.raises(ValueError, match="a real bug"):
+            await loop._do_work()

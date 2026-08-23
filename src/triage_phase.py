@@ -405,7 +405,8 @@ class TriagePhase:
                     phase=trace_phase,
                     run_id=run_id,
                 )
-            except Exception:
+            except Exception as exc:
+                reraise_on_credit_or_bug(exc)
                 logger.warning(
                     "Phase rollup failed for issue #%d",
                     issue.id,

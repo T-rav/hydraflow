@@ -148,13 +148,6 @@ class TestDiagnosticLoopExceptBlocksHaveReraise:
     call ``reraise_on_credit_or_bug``.
     """
 
-    @pytest.mark.xfail(
-        reason="Issue #6809 is genuinely UNFIXED — diagnostic_loop.py still has "
-        "unguarded ``except Exception`` handlers. Anchors are method-based as "
-        "of #11664, so this failure is the real defect, no longer line-anchor "
-        "rot. Tracked by #11668.",
-        strict=False,
-    )
     def test_all_except_exception_blocks_have_reraise_guard(self) -> None:
         """Every ``except Exception`` in diagnostic_loop.py must call
         ``reraise_on_credit_or_bug()`` so that auth/credit failures
@@ -179,13 +172,6 @@ class TestDiagnosticLoopExceptBlocksHaveReraise:
             f"diagnostic_loop.py:{m}:{i}"
             for i, (m, _) in enumerate(KNOWN_UNGUARDED_SITES)
         ],
-    )
-    @pytest.mark.xfail(
-        reason="Issue #6809 is genuinely UNFIXED — _run_fix and "
-        "_escalate_to_hitl still swallow credit/auth errors. Anchors are "
-        "method-based as of #11664, so this failure is the real defect, no "
-        "longer line-anchor rot. Tracked by #11668.",
-        strict=False,
     )
     def test_known_site_has_reraise_guard(self, method: str, desc: str) -> None:
         """Every ``except Exception`` inside the anchored method from the
@@ -246,10 +232,6 @@ class TestEscalateToHitlPostCommentAuthErrorPropagates:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6809 — fix not yet landed (tracked by #11668)",
-        strict=False,
-    )
     async def test_credit_error_from_post_comment_propagates(
         self, tmp_path: Path
     ) -> None:
@@ -263,10 +245,6 @@ class TestEscalateToHitlPostCommentAuthErrorPropagates:
             await loop._process_issue(42, "Title", "Body")
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6809 — fix not yet landed (tracked by #11668)",
-        strict=False,
-    )
     async def test_auth_error_from_post_comment_propagates(
         self, tmp_path: Path
     ) -> None:
@@ -285,10 +263,6 @@ class TestEscalateToHitlLabelSwapAuthErrorPropagates:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6809 — fix not yet landed (tracked by #11668)",
-        strict=False,
-    )
     async def test_credit_error_from_label_swap_propagates(
         self, tmp_path: Path
     ) -> None:
@@ -301,10 +275,6 @@ class TestEscalateToHitlLabelSwapAuthErrorPropagates:
             await loop._process_issue(42, "Title", "Body")
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason="Regression for issue #6809 — fix not yet landed (tracked by #11668)",
-        strict=False,
-    )
     async def test_auth_error_from_label_swap_propagates(self, tmp_path: Path) -> None:
         """AuthenticationError during HITL label swap must propagate."""
         loop, _runner, prs, state = _make_loop(tmp_path)
