@@ -1806,7 +1806,9 @@ def create_router(
 
     router.include_router(build_factory_health_router(config, ctx))
 
-    # --- Gateway routing routes (read-only account + route visibility) ---
+    # --- Gateway routing routes: account + route visibility, plus the two
+    # host-admin mutations (ADR-0142), gated on a loopback bind and an
+    # authenticated operator identity exactly as the policy write plane is.
     from dashboard_routes._gateway_routes import build_gateway_router
 
     router.include_router(build_gateway_router(config))

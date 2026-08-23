@@ -7,7 +7,7 @@ slots, so an item enqueued mid-run is dispatched into a free slot without
 waiting for a long in-flight task to complete. That fix was wired ONLY at the
 plan callsite (``src/plan_phase.py``).
 
-The triage (``src/triage_phase.py``) and implement (``src/implement_phase.py``)
+The triage (``src/triage_phase.py``) and implement (``src/implement_phase/_phase.py``)
 callsites shared the identical gap: they re-polled ``supply_fn`` only on task
 completion, so an item enqueued mid-run while a long triage/implement worker
 held a slot waited for completion even with free slots.
@@ -73,7 +73,11 @@ class TestMidRunRefillWiredAtTriageAndImplementCallsites:
         phase, _mock_wt, _mock_prs = make_implement_phase(config, [_ISSUE])
 
         spy = AsyncMock(return_value=[])
-        monkeypatch.setattr(implement_phase, "run_refilling_pool", spy)
+        # ``run_batch`` now lives in ``implement_phase/_phase.py`` (the package
+        # split, Refs #11547), so the module-global to patch is the one that
+        # module bound — same repoint the ``pr_manager_promotion.run_subprocess``
+        # precedent made. Same call, same assertion, new home.
+        monkeypatch.setattr(implement_phase._phase, "run_refilling_pool", spy)
 
         await phase.run_batch([_ISSUE])
 

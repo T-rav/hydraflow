@@ -201,6 +201,7 @@ cadence and files remediation issues on drift.
 | [0139](0139-shadow-routing-policy-resolver.md) | Shadow routing policy resolver and hash-linked decision record | Accepted |
 | [0140](0140-revision-safe-policy-workspace-and-operator-write-boundary.md) | Revision-safe policy workspace and the operator write boundary | Accepted |
 | [0141](0141-bounded-reversible-routing-enforcement-canary.md) | Bounded, reversible routing enforcement — the resolve-and-mint canary | Accepted |
+| [0142](0142-multi-account-pools-and-bounded-fallback.md) | Multi-account pools and bounded fallback | Accepted |
 
 ## Adding a new ADR
 

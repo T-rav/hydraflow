@@ -1,0 +1,10 @@
+{
+  "builder": "plan_worker_runner.build_plan_worker_prompt",
+  "args": {
+    "role": "explorer",
+    "task_contract": "List the modules that implement chunked upload and describe how each one signals failure to its caller.",
+    "issue_goal": "Retries on the upload path are unbounded\n\n`upload_chunk` retries forever on a 503, so a bucket outage turns into a hot loop that burns the whole worker pool. Bound the retry count and surface the failure to the caller.",
+    "issue_number": 8801
+  },
+  "faked_deps": {}
+}

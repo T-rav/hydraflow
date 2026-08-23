@@ -40,14 +40,7 @@ class UpstreamSettings(BaseModel):
     @classmethod
     def validate_base_url(cls, value: str) -> str:
         """Accept only fixed HTTP origins, without userinfo/query/fragment."""
-        parsed = urlsplit(value)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            raise ValueError("upstream base_url must be an http(s) URL")
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError(
-                "upstream base_url must not contain credentials or a query"
-            )
-        return value.rstrip("/")
+        return normalise_upstream_base_url(value)
 
 
 class GatewaySettings(BaseModel):
@@ -69,6 +62,26 @@ class GatewaySettings(BaseModel):
     Arming it is a deployment act *after* the spawn side is already minting v2;
     disarming runs the other way. ADR-0141 states the ordering and why the
     operator-facing rollback is HydraFlow's own dial rather than this one.
+    """
+    accounts_file: Path | None = None
+    """Server-owned multi-account registry document (ADR-0142), or ``None``.
+
+    Absent by default, which is the whole of "a pool is opt-in": with no file
+    this deployment has exactly ADR-0138's two compiled legacy accounts, every
+    candidate list has one entry, and no fallback hop has anywhere to go. The
+    file is restart-required on purpose — an account's credential and origin are
+    deployment facts, and reloading them under live leases would let a key
+    minted against one origin be served by another.
+    """
+    account_state_dir: Path = Path(".hydraflow/gateway/accounts")
+    """Where the audited administrative overlay and its hash chain live."""
+    max_fallback_hops: int = Field(default=1, ge=0)
+    """The hard ceiling on bounded fallback. ``0`` refuses every hop.
+
+    A ceiling rather than a target: the effective bound is always the smaller of
+    this and the candidate list, so a pool can never be walked in a loop. One is
+    the default because the shipped story is one primary and one backup, and a
+    bound nobody chose should be the smallest one that still does something.
     """
     max_key_ttl_seconds: int = Field(default=86_400, gt=0)
     max_request_bytes: int = Field(default=33_554_432, gt=0)
@@ -154,6 +167,13 @@ class GatewaySettings(BaseModel):
             governed_repo_slugs=_repo_slug_allowlist(
                 env.get("GATEWAY_GOVERNED_REPOS", "")
             ),
+            accounts_file=_optional_path(env, "GATEWAY_ACCOUNTS_FILE"),
+            account_state_dir=Path(
+                env.get("GATEWAY_ACCOUNT_STATE_DIR", ".hydraflow/gateway/accounts")
+            ),
+            max_fallback_hops=_non_negative_int(
+                env, "GATEWAY_MAX_FALLBACK_HOPS", default=1
+            ),
             max_key_ttl_seconds=_positive_int(
                 env, "GATEWAY_MAX_KEY_TTL_SECONDS", default=86_400
             ),
@@ -187,6 +207,48 @@ def _positive_int(environ: Mapping[str, str], name: str, *, default: int) -> int
     if value <= 0:
         raise ValueError(f"{name} must be positive")
     return value
+
+
+def _non_negative_int(environ: Mapping[str, str], name: str, *, default: int) -> int:
+    """Parse a ceiling that may legitimately be zero.
+
+    ``_positive_int`` refuses zero, which is right for a TTL or a byte ceiling
+    and wrong for a fallback bound: ``0`` is the honest way to say "never hop",
+    and forcing an operator to spell that as a kill-switch elsewhere would give
+    the bound two places to look.
+    """
+    raw = environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < 0:
+        raise ValueError(f"{name} must not be negative")
+    return value
+
+
+def _optional_path(environ: Mapping[str, str], name: str) -> Path | None:
+    """Return the configured path, or ``None`` when the variable is unset/blank."""
+    raw = environ.get(name, "").strip()
+    return Path(raw) if raw else None
+
+
+def normalise_upstream_base_url(value: str) -> str:
+    """Return one fixed http(s) origin, or raise. Shared by every upstream owner.
+
+    Both a legacy environment pair and a file-declared account name an origin,
+    and one predicate decides what an origin may be for both — a second copy is
+    how a declared account eventually accepts a userinfo URL the legacy pair
+    would have refused.
+    """
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("upstream base_url must be an http(s) URL")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("upstream base_url must not contain credentials or a query")
+    return value.rstrip("/")
 
 
 def _repo_slug_allowlist(raw: str) -> frozenset[str]:

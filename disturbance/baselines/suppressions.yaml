@@ -168,9 +168,16 @@ entries:
   src/hitl_phase.py::noqa:BLE001: 1
   src/hitl_phase.py::noqa:PLC0415: 3
   src/human_steering_loop.py::noqa:BLE001: 1
-  src/implement_phase.py::noqa:BLE001: 1
-  src/implement_phase.py::noqa:PLC0415: 13
-  src/implement_phase.py::type-ignore[arg-type]: 2
+  src/implement_phase/_beads.py::noqa:BLE001: 1
+  src/implement_phase/_beads.py::noqa:PLC0415: 3
+  src/implement_phase/_build.py::noqa:PLC0415: 4
+  src/implement_phase/_build.py::type-ignore[arg-type]: 1
+  src/implement_phase/_flow.py::noqa:PLC0415: 1
+  src/implement_phase/_phase.py::noqa:PLC0415: 1
+  src/implement_phase/_pr.py::noqa:PLC0415: 1
+  src/implement_phase/_screen.py::noqa:PLC0415: 1
+  src/implement_phase/_spec_review.py::noqa:PLC0415: 2
+  src/implement_phase/_spec_review.py::type-ignore[arg-type]: 1
   "src/implement_spec_reviewer.py::noqa:ANN001\u2014duck-typed": 1
   "src/implement_spec_reviewer.py::noqa:ANN001\u2014duck-typedrun_simplecallable": 2
   src/implement_spec_reviewer.py::noqa:PLC0415: 2
@@ -190,8 +197,8 @@ entries:
   src/merge_state_watcher.py::noqa:BLE001: 3
   src/metrics_manager.py::noqa:PLC0415: 1
   src/mockworld/fakes/fake_clock.py::noqa:PLC0415: 3
-  src/mockworld/fakes/fake_github.py::noqa:PLC0415: 1
-  src/mockworld/fakes/fake_github.py::type-ignore[arg-type]: 1
+  src/mockworld/fakes/fake_github/_drift.py::type-ignore[arg-type]: 1
+  src/mockworld/fakes/fake_github/_pr_queries.py::noqa:PLC0415: 1
   src/mockworld/fakes/fake_issue_fetcher.py::type-ignore[attr-defined]: 5
   src/mockworld/fakes/fake_issue_store.py::noqa:BLE001: 1
   src/mockworld/fakes/fake_review_insight_store.py::noqa:PLC0415: 1

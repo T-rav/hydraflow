@@ -548,6 +548,9 @@ GATEWAY_CONTROL_PLANE_ENV_KEYS: frozenset[str] = frozenset(
         "GATEWAY_BODY_DIR",
         "GATEWAY_BODY_CAPTURE_REPOS",
         "GATEWAY_GOVERNED_REPOS",
+        "GATEWAY_ACCOUNTS_FILE",
+        "GATEWAY_ACCOUNT_STATE_DIR",
+        "GATEWAY_MAX_FALLBACK_HOPS",
         "GATEWAY_MAX_KEY_TTL_SECONDS",
         "GATEWAY_MAX_REQUEST_BYTES",
         "GATEWAY_MAX_CONTROL_REQUEST_BYTES",
@@ -587,6 +590,7 @@ _GATEWAY_PROVIDER_ROUTING_ENV_KEYS: frozenset[str] = frozenset(
 _GATEWAY_CREDENTIAL_SUFFIXES: tuple[str, ...] = (
     "_API_KEY",
     "_AUTH_TOKEN",
+    "_CONTROL_TOKEN",
     "_OAUTH_TOKEN",
     "_ACCESS_TOKEN",
     "_SESSION_TOKEN",
@@ -621,12 +625,39 @@ def gateway_sensitive_env_keys() -> frozenset[str]:
 
 
 def _is_gateway_sensitive_env_key(key: str) -> bool:
-    """Defensively recognize credentials added outside HydraFlow's registries."""
+    """Defensively recognize credentials added outside HydraFlow's registries.
+
+    Three independent rules, unioned — a key is sensitive when *any* of them
+    matches, and none of them is a replacement for another:
+
+    1. Explicit registration in :data:`_GATEWAY_SENSITIVE_ENV_KEYS`.  This is
+       the only rule that reaches non-prefixed names such as
+       ``HYDRAFLOW_GATEWAY_CONTROL_TOKEN`` and ``ANTHROPIC_AUTH_TOKEN``, so it
+       remains load-bearing no matter how broad the others get.
+    2. A credential-shaped suffix (``_API_KEY``, ``_SECRET``, ``_AUTH_TOKEN``…),
+       which catches provider keys nobody registered here.
+    3. Membership of the ``GATEWAY_`` namespace.  That whole namespace belongs
+       to the gateway control plane: no routed worker reads a ``GATEWAY_*``
+       variable (``GATEWAY_HOST``/``GATEWAY_PORT`` are read by the gateway
+       server's own entrypoint, a separate process that is never spawned
+       through this scrub).  ADR-0142 additionally lets a deployment declare
+       accounts whose credential lives in an operator-chosen variable, and
+       ``GatewayAccount.validate_credential_env`` requires that name to match
+       ``^GATEWAY_[A-Z0-9_]+$`` *precisely* so a scrub can reach it by prefix.
+       Such names cannot be enumerated in advance, so an explicit set can never
+       be complete — and over-scrubbing a namespace the worker never reads is
+       strictly safer than under-scrubbing one that can hold a real provider
+       credential.
+
+    ``GH_TOKEN`` stays the one deliberate exemption: a worker genuinely needs it.
+    """
 
     if key == "GH_TOKEN":
         return False
-    return key in _GATEWAY_SENSITIVE_ENV_KEYS or key.endswith(
-        _GATEWAY_CREDENTIAL_SUFFIXES
+    return (
+        key in _GATEWAY_SENSITIVE_ENV_KEYS
+        or key.startswith("GATEWAY_")
+        or key.endswith(_GATEWAY_CREDENTIAL_SUFFIXES)
     )
 
 

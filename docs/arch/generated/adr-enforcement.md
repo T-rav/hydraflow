@@ -6,14 +6,14 @@ Inverts ADR conformance from citation-drift noise to the load-bearing question: 
 
 ## Summary
 
-- **Accepted ADRs:** 87
-- **REAL** (real asserting enforcement): 84 (96.6%)
+- **Accepted ADRs:** 88
+- **REAL** (real asserting enforcement): 85 (96.6%)
 - **WEAK** (prose-only or tautological): 3
 - **MISSING** (no `**Enforced by:**`): 0
 - **Justified exemptions** (process-only, allow-listed): 3
-- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 87 = 0.0%**
+- **Outstanding unenforced-decision debt** (non-exempt WEAK + MISSING): **0 / 88 = 0.0%**
 
-By declared `**Enforcement:**` kind: `enforced` 84 · `manual` 3 · `decision-of-record` 0.
+By declared `**Enforcement:**` kind: `enforced` 85 · `manual` 3 · `decision-of-record` 0.
 
 ## Classification
 
@@ -101,11 +101,12 @@ By declared `**Enforcement:**` kind: `enforced` 84 · `manual` 3 · `decision-of
 | ADR-0134 | REAL | — | enforced | `pytest:tests/test_repo_backend.py`, `pytest:tests/test_config_repo_provider.py`, `pytest:tests/test_base_runner_repo_provider.py`, `pytest:tests/test_base_subprocess_runner_repo_provider.py`, `pytest:tests/test_dashboard_routes_state.py` |
 | ADR-0135 | REAL | — | enforced | `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_workspace_outside_dot_hydraflow`, `pytest:tests/test_factory_launcher_service_mode.py::test_service_mode_refuses_missing_workspace_instead_of_cloning`, `pytest:tests/test_install_factory_service.py::TestRenderPlist::test_environment_pins_service_mode_workspace_branch_home_and_path`, `pytest:tests/test_install_factory_service.py::TestEnsureRestartLabel::test_never_overwrites_an_existing_label`, `pytest:tests/test_liveness_boot_guard.py::TestOperatorStoppedLatch::test_idle_verified_boot_under_latch_is_no_action_not_start`, `pytest:tests/test_operator_stopped_latch_routes.py::test_status_carries_operator_stopped_after_stop_and_clears_after_start`, `pytest:tests/regressions/test_liveness_kernel_operator_stop_latch.py`, `pytest:tests/scenarios/test_operator_stop_latch_kernel_scenario.py` |
 | ADR-0136 | REAL | — | enforced | `pytest:tests/test_adr_citation_conformance.py::test_no_unresolved_adr_citations`, `pytest:tests/architecture/test_adr0136_adr_drift_loops_removed.py::test_no_live_adr_drift_loop_references` |
-| ADR-0137 | REAL | — | enforced | `pytest:tests/test_driver_contracts.py`, `pytest:tests/test_director_capability_probe.py`, `pytest:tests/regressions/test_issue_11533_stale_driver_states.py`, `pytest:tests/test_issue_driver.py`, `pytest:tests/test_issue_driver_policy.py`, `pytest:tests/test_driver_manager.py`, `pytest:tests/test_scheduling_default_off.py`, `pytest:tests/regressions/test_issue_11535_kill_mid_transition.py`, `pytest:tests/test_director_sandbox.py`, `pytest:tests/test_director_broker.py`, `pytest:tests/test_fable_director.py`, `pytest:tests/test_director_shadow_default_off.py`, `pytest:tests/test_director_turn_runner_env.py`, `pytest:tests/test_dashboard_routes_scheduling.py`, `pytest:tests/architecture/test_director_no_authority.py`, `pytest:tests/regressions/test_issue_11537_shadow_safety.py`, `pytest:tests/regressions/test_issue_11537_shadow_idle_spin.py` |
+| ADR-0137 | REAL | — | enforced | `pytest:tests/test_driver_contracts.py`, `pytest:tests/test_director_capability_probe.py`, `pytest:tests/regressions/test_issue_11533_stale_driver_states.py`, `pytest:tests/test_issue_driver.py`, `pytest:tests/test_issue_driver_policy.py`, `pytest:tests/test_driver_manager.py`, `pytest:tests/test_scheduling_default_off.py`, `pytest:tests/regressions/test_issue_11535_kill_mid_transition.py`, `pytest:tests/test_director_sandbox.py`, `pytest:tests/test_director_broker.py`, `pytest:tests/test_fable_director.py`, `pytest:tests/test_director_shadow_default_off.py`, `pytest:tests/test_director_turn_runner_env.py`, `pytest:tests/test_dashboard_routes_scheduling.py`, `pytest:tests/architecture/test_director_no_authority.py`, `pytest:tests/regressions/test_issue_11537_shadow_safety.py`, `pytest:tests/regressions/test_issue_11537_shadow_idle_spin.py`, `pytest:tests/test_plan_broker.py`, `pytest:tests/test_plan_worker_runner.py`, `pytest:tests/test_plan_canary_default_off.py`, `pytest:tests/regressions/test_issue_11541_outside_the_slice.py`, `pytest:tests/scenarios/test_fable_plan_canary_scenario.py` |
 | ADR-0138 | REAL | — | enforced | `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/test_accounts.py`, `pytest:tests/test_active_routes.py`, `pytest:tests/test_gateway_control_v2_read_api.py`, `pytest:tests/test_gateway_control_reader.py`, `pytest:tests/test_dashboard_gateway_routes.py`, `pytest:tests/regressions/test_issue_11534_in_flight_route_leak.py`, `pytest:tests/scenarios/test_gateway_account_visibility_scenario.py` |
 | ADR-0139 | REAL | — | enforced | `pytest:tests/test_routing_policy.py`, `pytest:tests/test_routing_store.py`, `pytest:tests/test_routing_audit.py`, `pytest:tests/test_route_shadow.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11536_shadow_route_is_inert.py`, `pytest:tests/scenarios/test_gateway_route_shadow_scenario.py` |
 | ADR-0140 | REAL | — | enforced | `pytest:tests/test_routing_workspace.py`, `pytest:tests/test_routing_matrix.py`, `pytest:tests/test_operator_identity.py`, `pytest:tests/test_dashboard_gateway_policy_routes.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/scenarios/test_gateway_policy_workspace_scenario.py` |
 | ADR-0141 | REAL | — | enforced | `pytest:tests/test_route_enforcement.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_governed_preflight.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/regressions/test_issue_11539_canary_off_is_byte_identical.py`, `pytest:tests/scenarios/test_gateway_enforcement_canary_scenario.py` |
+| ADR-0142 | REAL | — | enforced | `pytest:tests/test_routing_accounts.py`, `pytest:tests/test_routing_account_state.py`, `pytest:tests/test_routing_account_admin.py`, `pytest:tests/test_routing_fallback.py`, `pytest:tests/test_route_mint.py`, `pytest:tests/test_gateway_secret_absence.py`, `pytest:tests/architecture/test_gateway_env_key_coverage.py`, `pytest:tests/regressions/test_issue_11540_pool_is_default_inert.py`, `pytest:tests/scenarios/test_gateway_account_pool_scenario.py` |
 
 ## Unenforced-decision debt
 

@@ -64,28 +64,38 @@ from director_shadow_log import (
 )
 from director_turn_runner import extract_command_json, render_capsule_prompt
 from driver_contracts import (
+    MAX_CAPSULE_RECEIPTS,
     WORKER_CATALOG,
     DirectorCapsule,
     DirectorCommand,
     DriverLease,
+    RejectionReason,
     WorkerRole,
     WriterLease,
 )
 from exception_classify import reraise_on_credit_or_bug
 from issue_driver import AdvanceOutcome
 from issue_driver_policy import phase_for_state
+from plan_broker import CANARY_PHASE
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from director_broker import BrokerVerdict, ShadowDispatchBroker
     from director_shadow_log import ShadowObservationLog
     from director_turn_runner import DirectorTurnResult, DirectorTurnRunner
-    from driver_contracts import DirectorCommandKind, DriverPhase
+    from driver_contracts import (
+        DirectorCommandKind,
+        DriverPhase,
+        WorkerDispatchRequest,
+        WorkerReceipt,
+    )
     from issue_driver import DriverAdvance, IssueDriver
     from models import Task
+    from plan_broker import PlanCanaryLatch
+    from plan_worker_runner import PlanWorkerRunner
 
 logger = logging.getLogger("fable_director")
 
@@ -158,6 +168,9 @@ class FableDirector:
         usd_budget_per_boundary: float = 1.0,
         usd_ceiling: Callable[[], float] | float = 25.0,
         is_enabled: Callable[[], bool] | None = None,
+        dispatcher: PlanWorkerRunner | None = None,
+        is_covered: Callable[[DriverPhase | None], bool] | None = None,
+        latch: PlanCanaryLatch | None = None,
     ) -> None:
         self._runner = runner
         self._broker = broker
@@ -178,6 +191,21 @@ class FableDirector:
         )
         self._is_enabled = is_enabled
         self._ceiling_announced = False
+        # The canary half (#11541). All three are ``None`` only for a director
+        # hand-built without them — a test, or #11537's shape. A production
+        # ``fable_director`` build always passes all three, because making
+        # construction conditional on the dial made arming restart-required.
+        # What keeps a disarmed operator's boundary inert is ``is_covered``,
+        # not their absence; ``_dispatcher`` and ``_latch`` are read on EVERY
+        # boundary regardless of arming (the decision join in ``_record``, the
+        # slot release in ``_release_slot_if_moved_on``).
+        # ``is_covered`` is a callable rather than a captured boolean for the
+        # same reason the kill switch is: the dial is live, and clearing it must
+        # stop the NEXT dispatch rather than the next restart.
+        self._dispatcher = dispatcher
+        self._is_covered = is_covered
+        self._latch = latch
+        self._receipts: dict[int, tuple[WorkerReceipt, ...]] = {}
 
     @property
     def shadow_log(self) -> ShadowObservationLog:
@@ -250,6 +278,11 @@ class FableDirector:
         factory-wide rather than a shadow failure — and the allocator's own
         containment re-raises it for the same reason.
         """
+        # Cheap and unconditional, because the slot must be freed on the tick
+        # the issue leaves PLAN — including the IDLE ticks the observer declines
+        # below. A latch released only on a boundary the director paid for would
+        # stay held for as long as the next issue waited.
+        self._release_slot_if_moved_on(task, advance, driver)
         refusal = self._refuse_before_spending()
         if refusal is not None:
             self._shadow_log.decline(refusal)
@@ -288,11 +321,13 @@ class FableDirector:
             )
             return
 
-        self._judge(task, advance, driver, lease, capsule, result, live_label)
+        await self._judge(
+            task, advance, driver, lease, capsule, result, live_label, phase
+        )
 
     # -- one turn, judged ---------------------------------------------------
 
-    def _judge(
+    async def _judge(
         self,
         task: Task,
         advance: DriverAdvance,
@@ -301,6 +336,7 @@ class FableDirector:
         capsule: DirectorCapsule,
         result: DirectorTurnResult,
         live_label: str,
+        phase: DriverPhase,
     ) -> None:
         """Apply S4, then the schema, then the broker — in that order.
 
@@ -387,6 +423,9 @@ class FableDirector:
             now=datetime.now(UTC),
             live_stage_label=live_label or lease.expected_stage_label,
         )
+        receipts = await self._dispatch(
+            task, driver, lease, command, verdict, phase, live_label
+        )
         self._record(
             task,
             advance,
@@ -398,7 +437,142 @@ class FableDirector:
             sandbox_verdict=surface.verdict.value,
             command=command,
             verdict=verdict,
+            receipts=receipts,
+            decisions=(
+                None if self._dispatcher is None else self._dispatcher.last_decision_ids
+            ),
         )
+
+    # -- the canary's actuator ---------------------------------------------
+
+    async def _dispatch(
+        self,
+        task: Task,
+        driver: IssueDriver,
+        lease: DriverLease,
+        command: DirectorCommand,
+        verdict: BrokerVerdict,
+        phase: DriverPhase,
+        live_label: str,
+    ) -> tuple[WorkerReceipt, ...]:
+        """Run what the broker admitted, if and only if this boundary is inside
+        the canary (#11541).
+
+        Three gates, in this order and each for its own reason:
+
+        1. **the seam is wired** — a director constructed without an actuator
+           (Classic and the deterministic controller build no director at all;
+           a hand-built one in a test may omit it) returns here before
+           evaluating anything else, so that path stays #11537's exactly. Under
+           a production ``fable_director`` build both are always present, and
+           what stops a dispatch is clause 2, not this one;
+        2. **the boundary is covered** — one repository, phase ``PLAN``, read
+           live so clearing the dial stops the next dispatch;
+        3. **the repository's single brokered slot is free** — the issue's
+           first acceptance criterion, held as a fence.
+
+        The dispatcher's own per-request fence is passed down and re-evaluated
+        immediately before each spawn, so a stop or an epoch bump *between* two
+        children of one batch stops the second.
+        """
+        if self._dispatcher is None or self._is_covered is None:
+            return ()
+        if not self._is_covered(phase):
+            return ()
+        admitted = _admitted_requests(command, verdict)
+        if not admitted:
+            return ()
+        if self._latch is not None and not self._latch.claim(
+            task.id, now=datetime.now(UTC)
+        ):
+            logger.info(
+                "fable_director: #%d refused the brokered plan slot; #%s holds it",
+                task.id,
+                self._latch.holder,
+            )
+            return self._dispatcher.refuse(admitted, RejectionReason.CANARY_SLOT_HELD)
+        receipts = await self._dispatcher.dispatch(
+            admitted,
+            task=task,
+            lease=lease,
+            phase=phase,
+            fence=self._pre_spawn_fence(driver, lease, phase, live_label),
+        )
+        # Real receipts are real context for the next turn — ADR-0137 kept
+        # ``prior_receipts`` empty only for as long as no worker had run.
+        # Bounded by the contract's own ceiling, newest last.
+        previous = self._receipts.get(task.id, ())
+        self._receipts[task.id] = (previous + receipts)[-MAX_CAPSULE_RECEIPTS:]
+        return receipts
+
+    def _pre_spawn_fence(
+        self,
+        driver: IssueDriver,
+        lease: DriverLease,
+        phase: DriverPhase,
+        live_label: str,
+    ) -> Callable[[], RejectionReason | None]:
+        """Everything that can move between admission and a spawn, re-read.
+
+        Deliberately not a second copy of ``admit_dispatch``: that table judged
+        the *request* against a snapshot, and this re-reads the handful of facts
+        that can change while a batch is running. The label fence reads the
+        driver's own post-boundary view rather than issuing a fresh GitHub read
+        — C1 makes that view a cache of the label the driver re-read at this
+        boundary, and giving an observer its own port would hand authority to
+        the one component that must not have any.
+        """
+
+        def fence() -> RejectionReason | None:
+            # Rule order is part of the contract, so it is data rather than
+            # control flow — the same shape ``admit_dispatch`` uses, and for the
+            # same reason: first match wins, and the code an operator reads in a
+            # receipt is reproducible from the inputs alone.
+            current = self._stage_labels.get(driver.driver_state, "")
+            rules: tuple[tuple[bool, RejectionReason], ...] = (
+                (self._stopping(), RejectionReason.STOP_FENCE),
+                (
+                    self._is_enabled is not None and not self._is_enabled(),
+                    RejectionReason.DRAINING,
+                ),
+                # The dial was cleared while this batch was running. Draining is
+                # the honest code: the canary stopped accepting work, which is
+                # not the request's fault and not a fence it failed.
+                (
+                    self._is_covered is not None and not self._is_covered(phase),
+                    RejectionReason.DRAINING,
+                ),
+                (driver.epoch != lease.epoch, RejectionReason.STALE_EPOCH),
+                (
+                    driver.phase_attempt(phase) != lease.phase_attempt,
+                    RejectionReason.STALE_PHASE_ATTEMPT,
+                ),
+                (
+                    bool(current) and current != lease.expected_stage_label,
+                    RejectionReason.LIVE_LABEL_CHANGED,
+                ),
+            )
+            return next((reason for fired, reason in rules if fired), None)
+
+        return fence
+
+    def _release_slot_if_moved_on(
+        self, task: Task, advance: DriverAdvance, driver: IssueDriver
+    ) -> None:
+        """Free this repository's brokered-Plan slot once its issue leaves PLAN.
+
+        The director is the only component that sees every boundary for every
+        issue, so it is the only one that can tell when the holder has moved on.
+        A slot released only by the TTL would idle the canary for the whole
+        window after every successful plan.
+        """
+        if self._latch is None or self._latch.holder != task.id:
+            return
+        phase = advance.phase or phase_for_state(driver.driver_state)
+        if phase is CANARY_PHASE and not driver.is_retired:
+            return
+        self._latch.release(task.id)
+        self._receipts.pop(task.id, None)
 
     # -- capsule construction ----------------------------------------------
 
@@ -430,11 +604,13 @@ class FableDirector:
         reconstruction succeeds without vendor session history", and it is met
         by never having anything to reconstruct *from*.
 
-        ``prior_receipts`` is deliberately empty. In shadow mode no worker ever
-        ran, so there are no receipts of work; the only receipts that exist are
-        the broker's own refusals, and feeding a director its refusals would
-        teach it to route around the rule table rather than to it. When #11541
-        lets a worker run, its receipt is real context and belongs here.
+        ``prior_receipts`` carries the receipts of workers this director has
+        actually dispatched for *this* issue, and nothing else. In shadow mode
+        it stays empty, because no worker ran and the only receipts in
+        existence are the broker's own refusals — feeding a director its
+        refusals would teach it to route around the rule table rather than to
+        it. Once the canary lets a worker run, its receipt is a real fact about
+        this issue and belongs here, which is exactly what ADR-0137 left #11541.
         """
         return DirectorCapsule(
             lease=lease,
@@ -444,7 +620,7 @@ class FableDirector:
             route_policy_revision=self._route_policy_revision,
             remaining_usd_budget=self._usd_budget_per_boundary,
             remaining_wall_clock_seconds=CAPSULE_LEASE_TTL_SECONDS,
-            prior_receipts=(),
+            prior_receipts=self._receipts.get(task.id, ()),
             stop_requested=self._stopping(),
             draining=False,
         )
@@ -523,6 +699,8 @@ class FableDirector:
         sandbox_verdict: str = "",
         command: DirectorCommand | None = None,
         verdict: BrokerVerdict | None = None,
+        receipts: tuple[WorkerReceipt, ...] = (),
+        decisions: Mapping[str, str] | None = None,
     ) -> None:
         """Write one observation. A failed turn records **no** hypothetical work.
 
@@ -551,11 +729,59 @@ class FableDirector:
                 if verdict is None
                 else tuple(reason.value for reason in verdict.rejection_reasons),
                 route_revisions=0 if verdict is None else verdict.route_revisions,
-                usd_cost=result.usd_cost if result else 0.0,
+                dispatched=tuple(_receipt_row(r, decisions) for r in receipts),
+                # The parent turn's spend plus every child's. Keeping them in
+                # one number is what makes the aggregate ceiling a real ceiling
+                # now that a boundary can cost more than one turn.
+                usd_cost=(result.usd_cost if result else 0.0)
+                + sum(r.usd_cost for r in receipts),
                 latency_ms=result.latency_ms if result else 0,
                 sandbox_verdict=sandbox_verdict,
             )
         )
+
+
+def _admitted_requests(
+    command: DirectorCommand, verdict: BrokerVerdict
+) -> tuple[WorkerDispatchRequest, ...]:
+    """The full requests behind the broker's admitted shadow dispatches.
+
+    ``ShadowDispatch`` deliberately drops the task contract and the fencing
+    tokens — it is a "what would have happened" record, not a command. The
+    dispatcher needs the whole request, so the admitted set is used as a filter
+    over the command rather than as a source, which also means a request the
+    broker refused can never be reconstructed into one it dispatches.
+    """
+    admitted = {dispatch.request_id for dispatch in verdict.would_dispatch}
+    return tuple(
+        request for request in command.dispatches if request.request_id in admitted
+    )
+
+
+def _receipt_row(
+    receipt: WorkerReceipt, decisions: Mapping[str, str] | None
+) -> dict[str, object]:
+    """One receipt as the operator status and the evidence log render it.
+
+    Never the artifact and never a credential: a receipt is the *fact* that a
+    child ran, on which model, at what cost, under whose lineage — and under
+    which tier decision. ``plan_broker`` content-addresses that decision so a
+    receipt can be joined back to *why* the model was chosen; a row that did
+    not carry the id would leave the join unbuilt and the id decorative.
+    """
+    return {
+        "route_decision_id": (decisions or {}).get(receipt.request_id, ""),
+        "request_id": receipt.request_id,
+        "role": receipt.worker_role.value,
+        "status": receipt.status.value,
+        "reason": None if receipt.reason_code is None else receipt.reason_code.value,
+        "served_model": receipt.served_model,
+        "child_spawn_id": None
+        if receipt.lineage is None
+        else receipt.lineage.child_spawn_id,
+        "usd_cost": receipt.usd_cost,
+        "output_contract_ok": receipt.output_contract_ok,
+    }
 
 
 def _agreement_or_no_command(

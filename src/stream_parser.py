@@ -540,6 +540,14 @@ class ResultEnvelope:
     is_error: bool
     session_id: str
     usage: dict[str, object]
+    served_model: str = ""
+    """The model the CLI reports having actually used, or ``""`` (#11541).
+
+    Empty is a real answer and must stay distinguishable from a wrong one: the
+    field is absent on older CLIs, so a caller that needs to *record* which
+    model served a request has to be able to say "the CLI did not tell me"
+    rather than substitute the one it asked for and call that an observation.
+    """
 
 
 def parse_result_envelope(stdout: str) -> ResultEnvelope | None:
@@ -574,7 +582,39 @@ def parse_result_envelope(stdout: str) -> ResultEnvelope | None:
         is_error=bool(event.get("is_error", False)),
         session_id=session_id if isinstance(session_id, str) else "",
         usage=parser.usage_snapshot,
+        served_model=_served_model(event),
     )
+
+
+def _served_model(event: dict[str, Any]) -> str:
+    """The model id the CLI says it used, from whichever field carries it.
+
+    Two shapes, tried in order and neither assumed: a bare ``model`` string,
+    and ``modelUsage``, whose keys are the model ids a turn billed against.
+    A turn that billed exactly one model is the only case that can name one —
+    with several, no single id served the request and answering with any of
+    them would be a guess. Unknown shapes return ``""``, which the caller reads
+    as "unobserved" rather than as a model.
+
+    ``modelUsage``'s **key is a billing key, not a model id**: the repo's own
+    recorded CLI stream carries ``"claude-opus-4-8[1m]"``, whose real id sits
+    one level down as ``canonicalModel``. The key satisfies a literal-family
+    check, so returning it would have passed every guard and quietly put a
+    context-window suffix into the receipt and into every join keyed on a model
+    id. The canonical field is preferred and the key is the last resort.
+    """
+    model = event.get("model")
+    if isinstance(model, str) and model.strip():
+        return model.strip()[:128]
+    usage = event.get("modelUsage")
+    if not isinstance(usage, dict) or len(usage) != 1:
+        return ""
+    key, entry = next(iter(usage.items()))
+    if isinstance(entry, dict):
+        canonical = entry.get("canonicalModel")
+        if isinstance(canonical, str) and canonical.strip():
+            return canonical.strip()[:128]
+    return key.strip()[:128] if isinstance(key, str) and key.strip() else ""
 
 
 def _pick_usage_extractor(

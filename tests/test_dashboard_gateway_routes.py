@@ -1,10 +1,20 @@
-"""Dashboard proxy for the gateway's read-only account and route plane."""
+"""Dashboard proxy for the gateway's account and route plane.
+
+Two planes in one file, deliberately: the ungated reads (#11534, ADR-0138) and
+the two host-admin writes (#11540, ADR-0142) that spend ADR-0138 §D5's
+precondition. The write tests exist to pin three things that are easy to get
+subtly wrong — the gate refusing before it authenticates, the gateway's own
+optimistic-concurrency refusal surviving the proxy with its status intact, and
+the recorded ``actor`` coming from the authenticated boundary rather than from
+anything a browser sent.
+"""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -13,7 +23,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from dashboard_routes._gateway_routes import build_gateway_router
-from gateway_control_reader import GatewayControlReader
+from gateway_control_reader import GatewayControlReader, GatewayControlWriter
 from hydraflow_gateway.active_routes import ActiveRouteRegistry
 from hydraflow_gateway.app import create_app
 from hydraflow_gateway.keys import VirtualKeyStore
@@ -29,10 +39,20 @@ from hydraflow_gateway.settings import (
     UpstreamAuthStyle,
     UpstreamSettings,
 )
+from operator_identity import OPERATOR_ID_ENV, OPERATOR_TOKEN_ENV
 from tests.helpers import ConfigFactory, make_dashboard_router
 
 _CONTROL_TOKEN = "test-control-token-0123456789abcdef"
 _NOW = datetime(2026, 8, 22, 12, 0, 0, tzinfo=UTC)
+
+_OPERATOR_TOKEN = "hfop_" + "t" * 40
+_OPERATOR_ID = "travis"
+_ENV = {OPERATOR_TOKEN_ENV: _OPERATOR_TOKEN, OPERATOR_ID_ENV: _OPERATOR_ID}
+_AUTH = {"Authorization": f"Bearer {_OPERATOR_TOKEN}"}
+
+_ZAI_ACCOUNT = "legacy-zai-harness"
+_STATE_ROUTE = f"/api/gateway/accounts/{_ZAI_ACCOUNT}/state"
+_REVOKE_ROUTE = f"/api/gateway/accounts/{_ZAI_ACCOUNT}/revoke-leases"
 
 
 class _EmptyStream(httpx.AsyncByteStream):
@@ -56,6 +76,11 @@ def _gateway_settings(tmp_path: Path) -> GatewaySettings:
         },
         ledger_path=tmp_path / "gateway.jsonl",
         body_dir=tmp_path / "bodies",
+        # Under tmp_path on purpose: the default is a RELATIVE path, so leaving
+        # it would have every run of this file append to a hash chain inside the
+        # working copy — and the revision each test composes against would then
+        # depend on how many times the suite had run before.
+        account_state_dir=tmp_path / "accounts",
     )
 
 
@@ -134,8 +159,12 @@ def _dashboard(
     control_token: str = _CONTROL_TOKEN,
     unreachable: bool = False,
     principal_id: str = "implementer",
+    host: str = "127.0.0.1",
+    workspace_enabled: bool = True,
+    env: dict[str, str] | None = None,
 ) -> TestClient:
-    config = ConfigFactory.create()
+    config = ConfigFactory.create(dashboard_host=host)
+    object.__setattr__(config, "gateway_policy_workspace_enabled", workspace_enabled)
     resolved = gateway or _live_gateway(tmp_path, principal_id=principal_id)
 
     def client_factory() -> httpx.AsyncClient:
@@ -154,9 +183,38 @@ def _dashboard(
             client_factory=client_factory,
         )
 
+    def writer_factory() -> GatewayControlWriter:
+        return GatewayControlWriter(
+            base_url="http://gateway.test",
+            control_token=control_token,
+            client_factory=client_factory,
+        )
+
     app = FastAPI()
-    app.include_router(build_gateway_router(config, reader_factory=reader_factory))
+    app.include_router(
+        build_gateway_router(
+            config,
+            reader_factory=reader_factory,
+            writer_factory=writer_factory,
+            env=_ENV if env is None else env,
+        )
+    )
     return TestClient(app)
+
+
+def _mutate(
+    client: TestClient,
+    route: str,
+    *,
+    body: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """Send one host-admin mutation on whichever of the two routes is named."""
+    payload = body if body is not None else {"expected_revision": 0}
+    if route == _STATE_ROUTE:
+        payload = {"administrative_state": "draining", **payload}
+        return client.patch(route, json=payload, headers=headers)
+    return client.post(route, json=payload, headers=headers)
 
 
 def test_accounts_route_returns_the_gateway_account_inventory(tmp_path: Path) -> None:
@@ -183,11 +241,42 @@ def test_accounts_route_forwards_the_requested_window(tmp_path: Path) -> None:
     assert body["data"]["window_seconds"] == 600
 
 
-def test_accounts_route_rejects_an_out_of_range_window(tmp_path: Path) -> None:
-    """The proxy bounds its own inputs; it does not relay arbitrary queries."""
-    response = _dashboard(tmp_path).get("/api/gateway/accounts?window_seconds=0")
+@pytest.mark.parametrize(
+    ("url", "status"),
+    [
+        pytest.param(
+            "/api/gateway/accounts?window_seconds=0",
+            422,
+            id="an-out-of-range-health-window-is-refused",
+        ),
+        pytest.param(
+            "/api/gateway/routes/recent?limit=100000",
+            422,
+            id="an-unbounded-route-page-is-refused",
+        ),
+        pytest.param(
+            "/api/gateway/accounts/audit?limit=100000",
+            422,
+            id="an-unbounded-history-page-is-refused",
+        ),
+        pytest.param(
+            "/api/gateway/accounts/audit",
+            200,
+            id="the-audit-read-needs-no-operator-credential",
+        ),
+    ],
+)
+def test_the_read_plane_bounds_its_inputs_and_gates_none_of_them(
+    tmp_path: Path, url: str, status: int
+) -> None:
+    """The proxy bounds its own queries — and gates none of its reads.
 
-    assert response.status_code == 422
+    A page-size ceiling keeps a dashboard poll from becoming a scan, and the
+    bounds are the gateway's own so a stale copy cannot 422 every poll. The
+    audit read is in the same table on purpose: seeing the administrative
+    overlay is not changing it, so it answers without a credential.
+    """
+    assert _dashboard(tmp_path).get(url).status_code == status
 
 
 def _dig(payload: object, keys: tuple[str | int, ...]) -> object:
@@ -256,13 +345,6 @@ def test_active_routes_leave_an_unmapped_principal_unroled(tmp_path: Path) -> No
     assert body["data"]["in_flight"][0]["worker_role"] is None
 
 
-def test_recent_routes_rejects_an_unbounded_limit(tmp_path: Path) -> None:
-    """A page size ceiling keeps a dashboard poll from becoming a scan."""
-    response = _dashboard(tmp_path).get("/api/gateway/routes/recent?limit=100000")
-
-    assert response.status_code == 422
-
-
 def test_the_dashboard_router_actually_mounts_the_gateway_routes(
     config: object, event_bus: object, state: object, tmp_path: Path
 ) -> None:
@@ -295,3 +377,355 @@ def test_dashboard_response_never_carries_an_upstream_provider_key(
     body = _dashboard(tmp_path).get("/api/gateway/accounts").text
 
     assert "real-zai-key" not in body
+
+
+# --------------------------------------------------------------------------
+# ADR-0142 pool facts on the read plane
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        pytest.param("lease_capacity", None, id="an-undeclared-lease-ceiling-is-null"),
+        pytest.param(
+            "request_capacity", None, id="an-undeclared-request-ceiling-is-null"
+        ),
+        pytest.param("circuit_state", "closed", id="an-untripped-breaker-is-closed"),
+        pytest.param(
+            "circuit_consecutive_failures", 0, id="a-quiet-account-has-no-failures"
+        ),
+        pytest.param("circuit_reset_at", None, id="a-closed-breaker-has-no-reset-time"),
+        pytest.param(
+            "circuit_last_condition", None, id="a-closed-breaker-names-no-condition"
+        ),
+    ],
+)
+def test_pool_facts_reach_the_dashboard_for_a_legacy_account(
+    tmp_path: Path, field: str, expected: object
+) -> None:
+    """A legacy account declares no ceiling, and the proxy publishes that as null."""
+    body = _dashboard(tmp_path).get("/api/gateway/accounts").json()
+
+    assert body["data"]["accounts"][0][field] == expected
+
+
+# --------------------------------------------------------------------------
+# ADR-0138 §D5 — the gate the host-admin writes spend
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("route", [_STATE_ROUTE, _REVOKE_ROUTE])
+@pytest.mark.parametrize(
+    ("kwargs", "headers", "status", "code"),
+    [
+        pytest.param(
+            {"host": "0.0.0.0"},  # noqa: S104 — the bind under test
+            _AUTH,
+            403,
+            "dashboard-not-loopback",
+            id="a-valid-operator-token-cannot-write-past-a-non-loopback-bind",
+        ),
+        pytest.param(
+            {"workspace_enabled": False},
+            _AUTH,
+            403,
+            "workspace-disabled",
+            id="the-kill-switch-closes-the-write-plane-outright",
+        ),
+        pytest.param(
+            {"env": {}},
+            _AUTH,
+            403,
+            "no-operator-identity",
+            id="no-configured-operator-credential-is-not-an-open-gate",
+        ),
+        pytest.param(
+            {},
+            None,
+            401,
+            "unauthenticated-operator",
+            id="an-open-gate-still-needs-a-presented-credential",
+        ),
+        pytest.param(
+            {},
+            {"Authorization": "Bearer hfop_wrong"},
+            401,
+            "unauthenticated-operator",
+            id="a-wrong-credential-authenticates-nobody",
+        ),
+    ],
+)
+def test_a_host_admin_mutation_is_refused_at_the_write_boundary(
+    tmp_path: Path,
+    route: str,
+    kwargs: dict[str, Any],
+    headers: dict[str, str] | None,
+    status: int,
+    code: str,
+) -> None:
+    """Both mutations refuse identically, and the bind is reported before the token."""
+    response = _mutate(_dashboard(tmp_path, **kwargs), route, headers=headers)
+
+    assert (response.status_code, response.json()["code"]) == (status, code)
+
+
+def test_a_refused_mutation_changes_nothing_on_the_gateway(tmp_path: Path) -> None:
+    """A 403 is total: no revision is burned by a request that never authenticated."""
+    client = _dashboard(tmp_path, host="0.0.0.0")  # noqa: S104 — the bind under test
+
+    _mutate(client, _STATE_ROUTE, headers=_AUTH)
+
+    assert client.get("/api/gateway/accounts/audit").json()["data"]["revision"] == 0
+
+
+# --------------------------------------------------------------------------
+# The authenticated happy path
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("route", "field", "expected"),
+    [
+        pytest.param(
+            _STATE_ROUTE,
+            "administrative_state",
+            "draining",
+            id="draining-an-account-returns-the-state-that-landed",
+        ),
+        pytest.param(
+            _STATE_ROUTE, "revision", 1, id="a-state-change-advances-the-revision"
+        ),
+        pytest.param(
+            _STATE_ROUTE, "actor", _OPERATOR_ID, id="a-state-change-names-the-operator"
+        ),
+        pytest.param(
+            # An unbound v1 key names a lane, not an account, so an
+            # account-scoped revocation must not end it as collateral — and the
+            # proxy reports the empty list honestly rather than a count it wishes
+            # it had.
+            _REVOKE_ROUTE,
+            "revoked_key_ids",
+            [],
+            id="revoking-reports-only-the-route-bound-keys-it-actually-ended",
+        ),
+        pytest.param(
+            _REVOKE_ROUTE, "revision", 1, id="a-revocation-advances-the-revision"
+        ),
+        pytest.param(
+            _REVOKE_ROUTE, "actor", _OPERATOR_ID, id="a-revocation-names-the-operator"
+        ),
+    ],
+)
+def test_an_authenticated_operator_administers_an_account(
+    tmp_path: Path, route: str, field: str, expected: object
+) -> None:
+    """The gate open and a credential presented, the mutation commits and says so."""
+    response = _mutate(_dashboard(tmp_path), route, headers=_AUTH)
+
+    assert response.json()[field] == expected
+
+
+def test_a_committed_state_change_is_visible_on_the_next_accounts_read(
+    tmp_path: Path,
+) -> None:
+    """The write and the read describe the same overlay, not two copies of one."""
+    client = _dashboard(tmp_path)
+
+    _mutate(client, _STATE_ROUTE, headers=_AUTH)
+    accounts = client.get("/api/gateway/accounts").json()["data"]["accounts"]
+
+    assert [a["administrative_state"] for a in accounts] == ["enabled", "draining"]
+
+
+# --------------------------------------------------------------------------
+# Provenance: the actor is the boundary's, never the caller's
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("route", [_STATE_ROUTE, _REVOKE_ROUTE])
+def test_a_caller_supplied_actor_is_refused_rather_than_recorded(
+    tmp_path: Path, route: str
+) -> None:
+    """The body cannot claim provenance: there is no actor field to claim it with."""
+    response = _mutate(
+        _dashboard(tmp_path),
+        route,
+        body={"expected_revision": 0, "actor": "somebody-else"},
+        headers=_AUTH,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("route", [_STATE_ROUTE, _REVOKE_ROUTE])
+def test_the_recorded_actor_comes_from_the_authenticated_identity(
+    tmp_path: Path, route: str
+) -> None:
+    """What lands on the gateway's audit chain is HYDRAFLOW_OPERATOR_ID, full stop."""
+    client = _dashboard(tmp_path)
+
+    _mutate(client, route, headers=_AUTH)
+    entries = client.get("/api/gateway/accounts/audit").json()["data"]["entries"]
+
+    assert [entry["actor"] for entry in entries] == [_OPERATOR_ID]
+
+
+def test_an_unnamed_operator_is_recorded_under_the_default_label(
+    tmp_path: Path,
+) -> None:
+    """A deployment that authenticated an operator but named none still has provenance."""
+    client = _dashboard(tmp_path, env={OPERATOR_TOKEN_ENV: _OPERATOR_TOKEN})
+
+    _mutate(client, _STATE_ROUTE, headers=_AUTH)
+    entries = client.get("/api/gateway/accounts/audit").json()["data"]["entries"]
+
+    assert entries[0]["actor"] == "operator"
+
+
+# --------------------------------------------------------------------------
+# The gateway's own refusals, passed through rather than reinterpreted
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("route", [_STATE_ROUTE, _REVOKE_ROUTE])
+def test_a_stale_revision_surfaces_as_the_gateway_s_409(
+    tmp_path: Path, route: str
+) -> None:
+    """A lost update is a 409 an operator can act on, not a generic failure."""
+    client = _dashboard(tmp_path)
+    _mutate(client, _STATE_ROUTE, headers=_AUTH)  # the overlay moves to revision 1
+
+    response = _mutate(client, route, body={"expected_revision": 0}, headers=_AUTH)
+
+    assert (response.status_code, response.json()["code"]) == (409, "stale-revision")
+
+
+def test_a_stale_mutation_tells_the_operator_to_reload(tmp_path: Path) -> None:
+    """The 409's detail names the action, because "conflict" is not an instruction."""
+    client = _dashboard(tmp_path)
+    _mutate(client, _STATE_ROUTE, headers=_AUTH)
+
+    response = _mutate(client, _STATE_ROUTE, headers=_AUTH)
+
+    assert "reload" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("route", "method"),
+    [
+        pytest.param("/state", "PATCH", id="setting-state-on-a-phantom-account"),
+        pytest.param(
+            "/revoke-leases", "POST", id="revoking-leases-on-a-phantom-account"
+        ),
+    ],
+)
+def test_an_unknown_account_surfaces_as_the_gateway_s_404(
+    tmp_path: Path, route: str, method: str
+) -> None:
+    """An account the gateway does not compile is a 404, never an invented one."""
+    client = _dashboard(tmp_path)
+    body: dict[str, Any] = {"expected_revision": 0}
+    if method == "PATCH":
+        body["administrative_state"] = "disabled"
+
+    response = client.request(
+        method,
+        f"/api/gateway/accounts/no-such-account{route}",
+        json=body,
+        headers=_AUTH,
+    )
+
+    assert (response.status_code, response.json()["code"]) == (404, "unknown-account")
+
+
+def test_an_unreachable_gateway_never_reports_a_mutation_as_failed(
+    tmp_path: Path,
+) -> None:
+    """Nobody knows whether it committed, so the answer is 502 "re-read", not 4xx."""
+    client = _dashboard(tmp_path, unreachable=True)
+
+    response = _mutate(client, _STATE_ROUTE, headers=_AUTH)
+
+    assert (response.status_code, response.json()["code"]) == (
+        502,
+        "gateway-unreachable",
+    )
+
+
+def test_a_control_credential_failure_is_never_relayed_as_the_operator_s(
+    tmp_path: Path,
+) -> None:
+    """A 401 on THIS proxy's gateway token must not read as the operator's fault."""
+    client = _dashboard(tmp_path, control_token="wrong-gateway-control-token")
+
+    response = _mutate(client, _STATE_ROUTE, headers=_AUTH)
+
+    assert (response.status_code, response.json()["code"]) == (
+        502,
+        "gateway-unreachable",
+    )
+
+
+def test_a_mutation_response_never_carries_the_control_token(tmp_path: Path) -> None:
+    """The write path is held to the read path's secrecy contract."""
+    body = _mutate(_dashboard(tmp_path), _STATE_ROUTE, headers=_AUTH).text
+
+    assert _CONTROL_TOKEN not in body and _OPERATOR_TOKEN not in body
+
+
+# --------------------------------------------------------------------------
+# The audit read
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "key", "expected"),
+    [
+        pytest.param(
+            {}, "editable", True, id="a-loopback-bind-with-a-token-is-editable"
+        ),
+        pytest.param({}, "write_gate", "enabled", id="an-open-gate-says-so"),
+        pytest.param(
+            {"host": "0.0.0.0"},  # noqa: S104 — the bind under test
+            "editable",
+            False,
+            id="a-non-loopback-bind-is-never-editable",
+        ),
+        pytest.param(
+            {"host": "0.0.0.0"},  # noqa: S104 — the bind under test
+            "write_gate",
+            "dashboard-not-loopback",
+            id="a-closed-gate-names-the-reason-the-console-must-render",
+        ),
+    ],
+)
+def test_the_audit_read_publishes_the_write_gate(
+    tmp_path: Path, kwargs: dict[str, Any], key: str, expected: object
+) -> None:
+    """The console learns the gate from a read, not from a click that would 403."""
+    body = _dashboard(tmp_path, **kwargs).get("/api/gateway/accounts/audit").json()
+
+    assert body[key] == expected
+
+
+def test_the_audit_read_publishes_a_verified_chain(tmp_path: Path) -> None:
+    """`chain_verified` is stated rather than assumed, and an empty chain verifies."""
+    body = _dashboard(tmp_path).get("/api/gateway/accounts/audit").json()
+
+    assert body["data"]["chain_verified"] is True
+
+
+def test_the_dashboard_router_mounts_the_host_admin_write_routes(
+    config: object, event_bus: object, state: object, tmp_path: Path
+) -> None:
+    """The real ``create_router`` wiring, not just the router built in isolation."""
+    router, _ = make_dashboard_router(config, event_bus, state, tmp_path)
+
+    paths = {getattr(route, "path", "") for route in router.routes}
+
+    assert {
+        "/api/gateway/accounts/{account_id}/state",
+        "/api/gateway/accounts/{account_id}/revoke-leases",
+        "/api/gateway/accounts/audit",
+    } <= paths

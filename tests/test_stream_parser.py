@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from stream_parser import StreamParser, _summarize_input
@@ -692,3 +694,99 @@ class TestParseResultEnvelope:
         assert envelope.session_id == ""
         assert envelope.usage["usage_available"] is False
         assert envelope.usage["usage_status"] == "unavailable"
+
+
+class TestTheResultEnvelopeNamesTheModelThatServed:
+    """#11541: a receipt that records *which* model served a request cannot
+    take the id it asked for and call that an observation — so the envelope
+    surfaces what the CLI itself reported, and ``""`` when it reported nothing.
+
+    The `modelUsage` **key is a billing key, not a model id**: this repo's own
+    recorded CLI stream carries ``claude-opus-4-8[1m]``, whose real id is one
+    level down. The key satisfies a literal-family check, so returning it would
+    have passed every guard and put a context-window suffix into the receipt.
+    """
+
+    def _envelope(self, **extra: object) -> str:  # noqa: PLR6301
+        return json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": "the reply",
+                "session_id": "sess-1",
+                **extra,
+            }
+        )
+
+    def test_a_bare_model_field_is_taken(self) -> None:
+        from stream_parser import parse_result_envelope
+
+        envelope = parse_result_envelope(self._envelope(model="claude-sonnet-4-6"))
+
+        assert envelope is not None
+        assert envelope.served_model == "claude-sonnet-4-6"
+
+    def test_the_canonical_model_wins_over_the_billing_key(self) -> None:
+        from stream_parser import parse_result_envelope
+
+        envelope = parse_result_envelope(
+            self._envelope(
+                modelUsage={
+                    "claude-opus-4-8[1m]": {
+                        "inputTokens": 2,
+                        "canonicalModel": "claude-opus-4-8",
+                    }
+                }
+            )
+        )
+
+        assert envelope is not None
+        assert envelope.served_model == "claude-opus-4-8"
+
+    def test_the_billing_key_is_the_last_resort(self) -> None:
+        from stream_parser import parse_result_envelope
+
+        envelope = parse_result_envelope(
+            self._envelope(modelUsage={"claude-sonnet-4-6": {"inputTokens": 2}})
+        )
+
+        assert envelope is not None
+        assert envelope.served_model == "claude-sonnet-4-6"
+
+    def test_two_billed_models_name_none(self) -> None:
+        # No single id served the request, and answering with either is a guess.
+        from stream_parser import parse_result_envelope
+
+        envelope = parse_result_envelope(
+            self._envelope(
+                modelUsage={
+                    "claude-sonnet-4-6": {"inputTokens": 2},
+                    "claude-opus-4-8": {"inputTokens": 3},
+                }
+            )
+        )
+
+        assert envelope is not None
+        assert envelope.served_model == ""
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            pytest.param({}, id="absent"),
+            pytest.param({"modelUsage": []}, id="not-a-dict"),
+            pytest.param({"modelUsage": {}}, id="empty"),
+            pytest.param({"model": "   "}, id="blank-model"),
+            pytest.param({"modelUsage": {"  ": {}}}, id="blank-key"),
+        ],
+    )
+    def test_an_unreadable_shape_reads_as_unobserved(
+        self, extra: dict[str, object]
+    ) -> None:
+        # Empty is a real answer and must stay distinguishable from a wrong one.
+        from stream_parser import parse_result_envelope
+
+        envelope = parse_result_envelope(self._envelope(**extra))
+
+        assert envelope is not None
+        assert envelope.served_model == ""

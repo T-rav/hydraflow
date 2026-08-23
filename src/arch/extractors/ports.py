@@ -95,6 +95,12 @@ def _repo_relative_module(path: Path, repo_root: Path) -> str:
     # not src.mockworld.fakes.X).
     if parts and parts[0] == "src":
         parts = parts[1:]
+    # A fake big enough to be decomposed lives in a package whose members are
+    # ``_``-prefixed and private (``fake_github/_fake.py``); the importable
+    # identity is the package, and that is also the string scenario files
+    # actually contain (Refs #11547).
+    if len(parts) > 1 and parts[-1].startswith("_"):
+        parts = parts[:-1]
     return ".".join(parts)
 
 
@@ -145,6 +151,9 @@ def extract_ports(*, src_dir: Path, fakes_dir: Path) -> list[PortInfo]:
     src_class_by_name: dict[str, ast.ClassDef] = {}
     for _apath, acls in src_classes:
         src_class_by_name.setdefault(acls.name, acls)
+    fake_class_by_name: dict[str, ast.ClassDef] = {}
+    for _fpath, fcls_ in fake_classes:
+        fake_class_by_name.setdefault(fcls_.name, fcls_)
 
     ports: list[PortInfo] = []
     for path, cls in src_classes:
@@ -195,7 +204,14 @@ def extract_ports(*, src_dir: Path, fakes_dir: Path) -> list[PortInfo]:
             for fpath, fcls in fake_classes:
                 if not fcls.name.startswith("Fake"):
                     continue
-                if not port_methods.issubset(set(_public_methods(fcls))):
+                # Match against the fake's FULL surface, bases included — the
+                # same ``_methods_with_bases`` adapter matching already uses.
+                # A fake decomposed into mixins (Refs #11547) keeps its methods
+                # in sibling classes, so an own-body-only superset test would
+                # stop matching the host and start matching one of its slices.
+                if not port_methods.issubset(
+                    _methods_with_bases(fcls, fake_class_by_name)
+                ):
                     continue
                 fake = PortAdapterInfo(
                     name=fcls.name,

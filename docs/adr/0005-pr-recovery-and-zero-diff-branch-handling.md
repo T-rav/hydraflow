@@ -47,9 +47,9 @@ issues with `hydraflow-review` plus an open PR.
 
 ## Related
 
-- `src/implement_phase.py:ImplementPhase._resolve_pr` — PR recovery by branch (reuse an already-open PR)
-- `src/implement_phase.py:ImplementPhase._handle_successful_push` — enforce implement→review contract (no review without a valid PR)
-- `src/implement_phase.py:ImplementPhase._handle_no_pr_fallback` — branch diff guard (`ahead_by == 0`)
-- `src/implement_phase.py:ImplementPhase._handle_zero_commits` — zero-diff branch resolution
+- `src/implement_phase/_pr.py:ImplementPRMixin._resolve_pr` — PR recovery by branch (reuse an already-open PR)
+- `src/implement_phase/_pr.py:ImplementPRMixin._handle_successful_push` — enforce implement→review contract (no review without a valid PR)
+- `src/implement_phase/_pr.py:ImplementPRMixin._handle_no_pr_fallback` — branch diff guard (`ahead_by == 0`)
+- `src/implement_phase/_screen.py:ImplementScreeningMixin._handle_zero_commits` — zero-diff branch resolution
 - `src/pr_manager.py` — `find_open_pr_for_branch` / `branch_has_diff_from_main` helpers (shared-infra dependency)
 - PR #1294

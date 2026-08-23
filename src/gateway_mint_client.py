@@ -126,6 +126,12 @@ class GatewayMintV2Request:
     ttl_seconds: int
     issue_number: int | None = None
     pr_number: int | None = None
+    # ADR-0142 bounded fallback. Mutually exclusive, and neither names an
+    # account: a citation can only move the gateway's own scan further down a
+    # candidate list it computes itself, and the gateway verifies the lineage
+    # against its own terminal ledger before it moves at all.
+    retry_of_mint_decision_id: str | None = None
+    supersedes_mint_decision_id: str | None = None
 
     def wire_payload(self) -> dict[str, object]:
         """JSON body for ``POST /control/v2/keys``; attribution only when set."""
@@ -156,6 +162,12 @@ class GatewayMintV2Request:
             payload["issue_number"] = self.issue_number
         if self.pr_number is not None:
             payload["pr_number"] = self.pr_number
+        # Omitted when unset, like the attribution above, so an older gateway
+        # with ``extra="forbid"`` keeps accepting an ordinary mint.
+        if self.retry_of_mint_decision_id is not None:
+            payload["retry_of_mint_decision_id"] = self.retry_of_mint_decision_id
+        if self.supersedes_mint_decision_id is not None:
+            payload["supersedes_mint_decision_id"] = self.supersedes_mint_decision_id
         return payload
 
     def with_new_attempt(self) -> GatewayMintV2Request:
@@ -164,8 +176,19 @@ class GatewayMintV2Request:
         Reusing the attempt id would be read by the gateway as a replay and
         answered with a withheld token — correct for a duplicate submission, and
         exactly wrong for a lease that legitimately needs a successor key.
+
+        Any fallback citation is cleared. A renewal is not a hop: it wants the
+        *same* account for a lease whose TTL is running out, and it mints before
+        it revokes — so carrying a citation forward would present the live prior
+        lease to the gateway's revoke-then-remint check and turn every renewal
+        into a refusal (ADR-0142).
         """
-        return replace(self, mint_attempt_id=uuid.uuid4().hex)
+        return replace(
+            self,
+            mint_attempt_id=uuid.uuid4().hex,
+            retry_of_mint_decision_id=None,
+            supersedes_mint_decision_id=None,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -521,6 +544,27 @@ async def renew_gateway_key_if_needed(
     if renewed:
         harness_env["ANTHROPIC_AUTH_TOKEN"] = lease.credential.token
     return renewed
+
+
+def bound_model_for(harness_env: dict[str, str]) -> str:
+    """The model a route-bound lease binds this spawn to, or ``""`` (#11541).
+
+    A governed key is bound to one effective model and the gateway's data plane
+    refuses any body naming another (``governed_preflight.check_governed_body``),
+    so a caller that builds its own argv has to know which model the mint it
+    just performed committed it to. Reading it off the lease rather than
+    re-deriving it is the point: the mint and the spawn cannot disagree about
+    the binding if only one of them decides it.
+
+    Empty for a v1 (unbound) lease and for a non-gateway env, which is what
+    keeps an unrouted spawn's argv exactly what it was.
+    """
+    if not isinstance(harness_env, _RoutedHarnessEnv):
+        return ""
+    lease = harness_env._gateway_lease
+    if lease is None or not isinstance(lease.request, GatewayMintV2Request):
+        return ""
+    return lease.request.effective_model
 
 
 async def revoke_gateway_key(harness_env: dict[str, str]) -> None:

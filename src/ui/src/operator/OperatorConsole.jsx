@@ -56,9 +56,15 @@ import { useTrustFleet } from './useTrustFleet'
 import { toSupervisorGauges } from './model/supervisorGauges'
 import { EMPTY_TRUST_FLEET_VM } from './model/trustFleet'
 import RoutingMode from './RoutingMode'
-import { useGatewayAccounts, useGatewayLiveRoutes } from './useGatewayRouting'
+import {
+  defaultControlFetcher,
+  useAccountAdmin,
+  useGatewayAccounts,
+  useGatewayLiveRoutes,
+} from './useGatewayRouting'
 import { defaultPolicyFetcher, usePolicyWorkspace } from './usePolicyWorkspace'
 import {
+  EMPTY_ACCOUNT_ADMIN_VM,
   EMPTY_GATEWAY_ACCOUNTS_VM,
   EMPTY_GATEWAY_LIVE_VM,
 } from './model/gatewayRouting'
@@ -197,7 +203,7 @@ function ModeToggle({ mode, select, styles }) {
  * with a fixture in tests without a live HydraFlowProvider.
  * @param {{ socket: object }} props
  */
-export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM, policy = null, policyFetcher = null }) {
+export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPTY_COST_VM, supervisor = EMPTY_SUPERVISOR_VM, faceplates = EMPTY_FINDER_FACEPLATES_VM, calibration = EMPTY_JUDGE_CALIBRATION_VM, loopFaceplatesRaw = null, fleet = EMPTY_TRUST_FLEET_VM, gatewayAccounts = EMPTY_GATEWAY_ACCOUNTS_VM, gatewayLive = EMPTY_GATEWAY_LIVE_VM, accountAdmin = null, adminFetcher = null, policy = null, policyFetcher = null }) {
   const themeMode = useThemeMode()
   const t = useTokens(themeMode)
   const styles = makeStyles(t)
@@ -219,6 +225,21 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
     fetcher: policyFetcher || undefined,
   })
   const policyFeed = policy ?? livePolicy
+  // Host-admin overlay (#11540, ADR-0142). Same ownership and same guard as the
+  // policy feed above: one selection instance decides when it is live, and a
+  // shell rendered with fixtures must never open a real request or a 30-second
+  // interval, so the container's fetcher is what arms it.
+  // Its OWN fetcher prop, not `policyFetcher`: these are two planes with two
+  // endpoints, and sharing the prop would make "did the policy feed poll?" an
+  // untestable question — a spy would see this hook's account-audit call too.
+  const liveAccountAdmin = useAccountAdmin({
+    enabled:
+      mode === 'routing' &&
+      accountAdmin == null &&
+      typeof adminFetcher === 'function',
+    fetcher: adminFetcher || undefined,
+  })
+  const accountAdminFeed = accountAdmin ?? liveAccountAdmin
   const events = socket.events ?? []
 
   const pipeline = useMemo(
@@ -385,6 +406,7 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
               ) : mode === 'routing' ? (
                 <RoutingMode
                   accounts={gatewayAccounts}
+                  admin={accountAdminFeed.admin ?? EMPTY_ACCOUNT_ADMIN_VM}
                   live={gatewayLive}
                   workspace={policyFeed.workspace}
                   matrix={policyFeed.matrix}
@@ -398,6 +420,8 @@ export function OperatorConsoleView({ socket = {}, now = Date.now(), cost = EMPT
                   onPreviewPolicy={policyFeed.requestPreview}
                   onSavePolicy={policyFeed.save}
                   onClearPreview={policyFeed.clearPreview}
+                  onSetAccountState={accountAdminFeed.setAccountState}
+                  onRevokeLeases={accountAdminFeed.revokeLeases}
                 />
               ) : mode === 'supervisor' ? (
                 <SupervisorMode
@@ -491,7 +515,7 @@ export function OperatorConsole() {
   // of the WS slice the shell otherwise renders from.
   const gatewayAccounts = useGatewayAccounts()
   const gatewayLive = useGatewayLiveRoutes()
-  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} policyFetcher={defaultPolicyFetcher} />
+  return <OperatorConsoleView socket={socket} now={now} cost={cost} supervisor={supervisor} faceplates={faceplates} calibration={calibration} loopFaceplatesRaw={loopFaceplatesRaw} fleet={fleet} gatewayAccounts={gatewayAccounts} gatewayLive={gatewayLive} policyFetcher={defaultPolicyFetcher} adminFetcher={defaultControlFetcher} />
 }
 
 export default OperatorConsole

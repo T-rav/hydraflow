@@ -35,6 +35,12 @@ def _repo_relative_module(path: Path, repo_root: Path) -> str:
     parts = rel.with_suffix("").parts
     if parts and parts[0] == "src":
         parts = parts[1:]
+    # A fake big enough to be decomposed lives in a package whose members are
+    # ``_``-prefixed and private (``fake_github/_fake.py``); the importable
+    # identity is the package, and that is also the string scenario files
+    # actually contain, so the usage scan still resolves (Refs #11547).
+    if len(parts) > 1 and parts[-1].startswith("_"):
+        parts = parts[:-1]
     return ".".join(parts)
 
 
@@ -97,7 +103,10 @@ def _fake_classes(fakes_dir: Path, repo_root: Path) -> list[FakeInfo]:
     out: list[FakeInfo] = []
     if not fakes_dir.exists():
         return out
-    for py in sorted(fakes_dir.glob("*.py")):
+    # ``rglob``, not ``glob``: a fake large enough to be decomposed lives in a
+    # package of its own (``fake_github/_fake.py``), and a non-recursive walk
+    # would drop it out of the map entirely (Refs #11547).
+    for py in sorted(fakes_dir.rglob("*.py")):
         if py.name.startswith("__") or py.name.startswith("test_"):
             continue
         try:

@@ -8,9 +8,13 @@
 
 import React from 'react'
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import RoutingMode from '../RoutingMode'
-import { toGatewayAccounts, toGatewayLiveRoutes } from '../model/gatewayRouting'
+import {
+  toAccountAdmin,
+  toGatewayAccounts,
+  toGatewayLiveRoutes,
+} from '../model/gatewayRouting'
 
 const ACCOUNTS = toGatewayAccounts({
   available: true,
@@ -51,6 +55,12 @@ const ACCOUNTS = toGatewayAccounts({
         credential_env: 'GATEWAY_ZAI_HARNESS_API_KEY',
         configured: true,
         administrative_state: 'enabled',
+        lease_capacity: 8,
+        request_capacity: 4,
+        circuit_state: 'closed',
+        circuit_consecutive_failures: 0,
+        circuit_reset_at: null,
+        circuit_last_condition: null,
         leased: true,
         lease_count: 2,
         in_flight: true,
@@ -66,6 +76,37 @@ const ACCOUNTS = toGatewayAccounts({
     ],
   },
 })
+
+const ZAI = 'legacy-zai-harness'
+
+function adminVm({ editable = true, revision = 4, chainVerified = true, writeGate = 'enabled' } = {}) {
+  return toAccountAdmin({
+    available: true,
+    source_state: 'available',
+    write_gate: writeGate,
+    editable,
+    data: { revision, chain_verified: chainVerified, entries: [] },
+  })
+}
+
+/** Render the accounts view with host-admin wired, and enter the operator token. */
+function renderAdmin({ admin = adminVm(), onSetAccountState = vi.fn(), onRevokeLeases = vi.fn(), token = 'hfop_secret' } = {}) {
+  render(
+    <RoutingMode
+      accounts={ACCOUNTS}
+      admin={admin}
+      routingView="accounts"
+      onSetAccountState={onSetAccountState}
+      onRevokeLeases={onRevokeLeases}
+    />,
+  )
+  if (token && admin.editable) {
+    fireEvent.change(screen.getByTestId('routing-admin-token'), {
+      target: { value: token },
+    })
+  }
+  return { onSetAccountState, onRevokeLeases }
+}
 
 const LIVE = toGatewayLiveRoutes(
   {
@@ -228,6 +269,268 @@ describe('RoutingMode accounts view', () => {
     expect(screen.getByTestId('routing-accounts-unavailable')).toHaveTextContent(
       'HYDRAFLOW_GATEWAY_CONTROL_TOKEN',
     )
+  })
+})
+
+describe('RoutingMode account capacity and circuit (#11540, ADR-0142)', () => {
+  it('shows lease capacity as used over the declared limit', () => {
+    render(<RoutingMode accounts={ACCOUNTS} routingView="accounts" />)
+    expect(screen.getByTestId(`routing-account-leases-${ZAI}`)).toHaveTextContent('2 / 8')
+  })
+
+  it('shows request capacity as used over the declared limit', () => {
+    render(<RoutingMode accounts={ACCOUNTS} routingView="accounts" />)
+    expect(screen.getByTestId(`routing-account-inflight-${ZAI}`)).toHaveTextContent('1 / 4')
+  })
+
+  it('says "no limit" for an account that declares no ceiling', () => {
+    render(<RoutingMode accounts={ACCOUNTS} routingView="accounts" />)
+    expect(screen.getByTestId('routing-account-leases-legacy-anthropic')).toHaveTextContent(
+      '0 / no limit',
+    )
+  })
+
+  it('shows a closed circuit as its own fact', () => {
+    render(<RoutingMode accounts={ACCOUNTS} routingView="accounts" />)
+    expect(screen.getByTestId(`routing-account-circuit-${ZAI}`)).toHaveTextContent(
+      'circuit closed',
+    )
+  })
+
+  it('does not show a reset time or trip condition while the circuit is closed', () => {
+    render(<RoutingMode accounts={ACCOUNTS} routingView="accounts" />)
+    expect(screen.queryByTestId(`routing-account-circuit-detail-${ZAI}`)).toBeNull()
+  })
+
+  it('names the condition and the reset time when the circuit is open', () => {
+    const open = toGatewayAccounts({
+      available: true,
+      source_state: 'available',
+      data: {
+        window_seconds: 900,
+        summary: { configured: 1, enabled: 0, leased: 0, in_flight: 0 },
+        accounts: [
+          {
+            account_id: ZAI,
+            display_name: 'z.ai harness',
+            provider_binding: 'zai-harness',
+            configured: true,
+            administrative_state: 'enabled',
+            circuit_state: 'open',
+            circuit_last_condition: 'rate_limited',
+            circuit_reset_at: '2026-08-22T12:05:00Z',
+            circuit_consecutive_failures: 3,
+            health: 'degraded',
+          },
+        ],
+      },
+    })
+    render(<RoutingMode accounts={open} routingView="accounts" />)
+    expect(screen.getByTestId(`routing-account-circuit-detail-${ZAI}`)).toHaveTextContent(
+      'rate_limited · resets 2026-08-22T12:05:00Z · 3 consecutive',
+    )
+  })
+})
+
+describe('RoutingMode host-admin controls (#11540, ADR-0142)', () => {
+  it('renders no controls at all until the admin overlay has been read', () => {
+    render(<RoutingMode accounts={ACCOUNTS} routingView="accounts" />)
+    expect(screen.queryByTestId(`routing-account-controls-${ZAI}`)).toBeNull()
+  })
+
+  it('shows the overlay revision the controls act against', () => {
+    renderAdmin()
+    expect(screen.getByTestId('routing-admin-revision')).toHaveTextContent('revision 4')
+  })
+
+  it.each([
+    ['enabled'],
+    ['draining'],
+    ['disabled'],
+  ])('disables the %s control when the write gate is closed', state => {
+    renderAdmin({
+      admin: adminVm({ editable: false, writeGate: 'dashboard-not-loopback' }),
+    })
+    expect(screen.getByTestId(`routing-account-${state}-${ZAI}`)).toBeDisabled()
+  })
+
+  it('disables revoke when the write gate is closed rather than hiding it', () => {
+    renderAdmin({
+      admin: adminVm({ editable: false, writeGate: 'dashboard-not-loopback' }),
+    })
+    expect(screen.getByTestId(`routing-account-revoke-${ZAI}`)).toBeDisabled()
+  })
+
+  it('explains WHY the write gate is closed', () => {
+    renderAdmin({
+      admin: adminVm({ editable: false, writeGate: 'dashboard-not-loopback' }),
+    })
+    expect(screen.getByTestId('routing-admin-write-gate')).toHaveTextContent('loopback')
+  })
+
+  it('offers no token field while the gate is closed', () => {
+    renderAdmin({ admin: adminVm({ editable: false }) })
+    expect(screen.queryByTestId('routing-admin-token')).toBeNull()
+  })
+
+  it('refuses to write against an audit chain that does not verify', () => {
+    renderAdmin({ admin: adminVm({ chainVerified: false }) })
+    expect(screen.getByTestId(`routing-account-draining-${ZAI}`)).toBeDisabled()
+  })
+
+  it('says the chain is broken rather than blaming the write gate', () => {
+    renderAdmin({ admin: adminVm({ chainVerified: false }) })
+    expect(screen.getByTestId('routing-admin-write-gate')).toHaveTextContent(
+      /audit chain does not verify/,
+    )
+  })
+
+  it('keeps every control inert until the operator token is entered', () => {
+    render(
+      <RoutingMode accounts={ACCOUNTS} admin={adminVm()} routingView="accounts" />,
+    )
+    expect(screen.getByTestId(`routing-account-draining-${ZAI}`)).toBeDisabled()
+  })
+
+  it('does not offer the administrative state already in force', () => {
+    renderAdmin()
+    expect(screen.getByTestId(`routing-account-enabled-${ZAI}`)).toBeDisabled()
+  })
+
+  it('sends the state change with the revision the view was loaded with', () => {
+    const { onSetAccountState } = renderAdmin()
+
+    fireEvent.click(screen.getByTestId(`routing-account-draining-${ZAI}`))
+
+    expect(onSetAccountState).toHaveBeenCalledWith(
+      ZAI,
+      { administrativeState: 'draining', expectedRevision: 4 },
+      'hfop_secret',
+    )
+  })
+
+  it('does not revoke leases on the first click', () => {
+    const { onRevokeLeases } = renderAdmin()
+
+    fireEvent.click(screen.getByTestId(`routing-account-revoke-${ZAI}`))
+
+    expect(onRevokeLeases).not.toHaveBeenCalled()
+  })
+
+  it('names the blast radius in the confirmation step', () => {
+    renderAdmin()
+
+    fireEvent.click(screen.getByTestId(`routing-account-revoke-${ZAI}`))
+
+    expect(screen.getByTestId(`routing-account-revoke-confirm-${ZAI}`)).toHaveTextContent(
+      'end 2 lease(s)',
+    )
+  })
+
+  it('revokes only after the explicit confirmation', () => {
+    const { onRevokeLeases } = renderAdmin()
+
+    fireEvent.click(screen.getByTestId(`routing-account-revoke-${ZAI}`))
+    fireEvent.click(screen.getByTestId(`routing-account-revoke-confirm-${ZAI}`))
+
+    expect(onRevokeLeases).toHaveBeenCalledWith(ZAI, { expectedRevision: 4 }, 'hfop_secret')
+  })
+
+  it('lets the operator back out of a revocation', () => {
+    const { onRevokeLeases } = renderAdmin()
+
+    fireEvent.click(screen.getByTestId(`routing-account-revoke-${ZAI}`))
+    fireEvent.click(screen.getByTestId(`routing-account-revoke-cancel-${ZAI}`))
+
+    expect(onRevokeLeases).not.toHaveBeenCalled()
+  })
+
+  it('confirms one account at a time, never every row at once', () => {
+    renderAdmin()
+
+    fireEvent.click(screen.getByTestId(`routing-account-revoke-${ZAI}`))
+
+    expect(
+      screen.queryByTestId('routing-account-revoke-confirm-legacy-anthropic'),
+    ).toBeNull()
+  })
+
+  it('renders a 409 as "reload, someone else changed this"', async () => {
+    renderAdmin({
+      onSetAccountState: vi.fn().mockResolvedValue({ ok: false, code: 'stale-revision' }),
+    })
+
+    fireEvent.click(screen.getByTestId(`routing-account-draining-${ZAI}`))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('routing-admin-conflict')).toHaveTextContent(/Reload/),
+    )
+  })
+
+  it('does not render a generic error for a refusal it can name', async () => {
+    renderAdmin({
+      onSetAccountState: vi.fn().mockResolvedValue({ ok: false, code: 'stale-revision' }),
+    })
+
+    fireEvent.click(screen.getByTestId(`routing-account-draining-${ZAI}`))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('routing-admin-conflict')).toHaveTextContent(
+        /administrative overlay moved/,
+      ),
+    )
+  })
+
+  it('warns and stops writing when someone else advanced the revision underneath', () => {
+    const { rerender } = render(
+      <RoutingMode accounts={ACCOUNTS} admin={adminVm({ revision: 4 })} routingView="accounts" />,
+    )
+    fireEvent.change(screen.getByTestId('routing-admin-token'), {
+      target: { value: 'hfop_secret' },
+    })
+
+    rerender(
+      <RoutingMode accounts={ACCOUNTS} admin={adminVm({ revision: 5 })} routingView="accounts" />,
+    )
+
+    expect(screen.getByTestId('routing-admin-rebased')).toBeInTheDocument()
+  })
+
+  it('holds the pinned revision rather than following the live poll', () => {
+    const onSetAccountState = vi.fn()
+    const { rerender } = render(
+      <RoutingMode
+        accounts={ACCOUNTS}
+        admin={adminVm({ revision: 4 })}
+        routingView="accounts"
+        onSetAccountState={onSetAccountState}
+      />,
+    )
+    fireEvent.change(screen.getByTestId('routing-admin-token'), {
+      target: { value: 'hfop_secret' },
+    })
+    rerender(
+      <RoutingMode
+        accounts={ACCOUNTS}
+        admin={adminVm({ revision: 5 })}
+        routingView="accounts"
+        onSetAccountState={onSetAccountState}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('routing-admin-rebase-button'))
+
+    fireEvent.click(screen.getByTestId(`routing-account-draining-${ZAI}`))
+
+    expect(onSetAccountState).toHaveBeenCalledWith(
+      ZAI,
+      { administrativeState: 'draining', expectedRevision: 5 },
+      'hfop_secret',
+    )
+  })
+
+  it('never puts the operator token in the DOM as readable text', () => {
+    renderAdmin()
+    expect(screen.getByTestId('routing-admin-token')).toHaveAttribute('type', 'password')
   })
 })
 

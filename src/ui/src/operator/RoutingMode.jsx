@@ -1,5 +1,6 @@
 /**
- * RoutingMode — the gateway Routing workspace (#11534 ADR-0138, #11538 ADR-0140).
+ * RoutingMode — the gateway Routing workspace
+ * (#11534 ADR-0138, #11538 ADR-0140, #11540 ADR-0142).
  *
  * All five URL-addressable views the routing-control-plane design reserves, at
  * `?mode=routing&routingView=accounts|effective|policies|live|audit`. P0 shipped
@@ -9,11 +10,25 @@
  * records the disagreement; legacy routing still decides every live spawn.
  *
  * ACCOUNTS shows each compiled gateway account with its facts kept SEPARATE:
- * credential configured, administrative state, leases, in-flight requests,
- * observed traffic, and passive health. "Configured" is never drawn as
- * "healthy", "healthy" is never drawn as "currently routing", and `unverified`
- * is neutral rather than green. There is no eligibility badge: eligibility only
- * exists inside a route explanation, which this phase does not compute.
+ * credential configured, administrative state, pool capacity, circuit state,
+ * leases, in-flight requests, observed traffic, and passive health.
+ * "Configured" is never drawn as "healthy", "healthy" is never drawn as
+ * "currently routing", and `unverified` is neutral rather than green. There is
+ * no eligibility badge: eligibility only exists inside a route explanation,
+ * which this phase does not compute.
+ *
+ * ACCOUNTS is also the console's HOST-ADMIN surface (#11540, ADR-0142). Its
+ * rules mirror `PolicyWorkspacePanel`'s, because they are the same rules:
+ *   - it says whether it may write, and why not — the backend's `write_gate`
+ *     comes down on the audit read, so a dashboard bound beyond loopback
+ *     renders the reason instead of buttons that would always 403;
+ *   - it acts against the revision it was LOADED with, never the one the live
+ *     poll is showing, so a lost update produces the 409 it should;
+ *   - a 409 says "reload, someone else changed this" — not "error";
+ *   - revoking leases needs a second, explicit confirmation: it ends live work
+ *     on every spawn holding a key for that account;
+ *   - the operator token lives in component state for this page view and
+ *     reaches no view model, no URL, and no browser storage.
  *
  * LIVE shows leases, in-flight requests, and bounded recent terminal routes —
  * provider/account, project, role, requested vs served model, lease age, and
@@ -30,13 +45,16 @@
  */
 
 import React from 'react'
-import { Badge, Text, useTokens } from '../styles/primitives'
+import { Badge, Button, Text, useTokens } from '../styles/primitives'
 import EffectiveRoutesPanel from './EffectiveRoutesPanel'
 import PolicyAuditPanel from './PolicyAuditPanel'
 import PolicyWorkspacePanel from './PolicyWorkspacePanel'
 import {
+  EMPTY_ACCOUNT_ADMIN_VM,
   EMPTY_GATEWAY_ACCOUNTS_VM,
   EMPTY_GATEWAY_LIVE_VM,
+  accountWriteGateMessage,
+  adminRejectionMessage,
 } from './model/gatewayRouting'
 import {
   EMPTY_EFFECTIVE_MATRIX_VM,
@@ -50,6 +68,13 @@ export const ROUTING_VIEWS = [
   { key: 'policies', label: 'Policies' },
   { key: 'live', label: 'Live' },
   { key: 'audit', label: 'Audit' },
+]
+
+/** The administrative states an operator can move an account into. */
+export const ADMIN_STATE_CONTROLS = [
+  { state: 'enabled', label: 'Enable' },
+  { state: 'draining', label: 'Drain' },
+  { state: 'disabled', label: 'Disable' },
 ]
 
 const SOURCE_MESSAGES = {
@@ -107,6 +132,21 @@ function makeStyles(t) {
     fact: { display: 'inline-flex', alignItems: 'baseline', gap: t.space.xxs },
     scroller: { overflowX: 'auto', maxWidth: '100%' },
     section: { display: 'flex', flexDirection: 'column', gap: t.space.xs },
+    actions: { display: 'flex', gap: t.space.xxs, flexShrink: 0, flexWrap: 'wrap' },
+    field: { display: 'flex', flexDirection: 'column', gap: t.space.xxs, minWidth: 240 },
+    input: {
+      padding: `${t.space.xxs}px ${t.space.xs}px`,
+      borderRadius: t.radius.sm,
+      borderWidth: 1,
+      borderStyle: 'solid',
+      borderColor: t.color.border,
+      background: t.color.bg,
+      color: t.color.text,
+      fontFamily: t.type.family.mono,
+      fontSize: t.type.size.sm,
+      boxSizing: 'border-box',
+      width: '100%',
+    },
   }
 }
 
@@ -130,7 +170,70 @@ function SourceUnavailable({ sourceState, styles, testid }) {
   )
 }
 
-function AccountRow({ account, styles }) {
+/**
+ * The enable / drain / disable / revoke controls for one account.
+ *
+ * Rendered ALWAYS once the admin feed has been read, and disabled rather than
+ * hidden when the write gate is closed — mirroring how `PolicyWorkspacePanel`
+ * treats `editable`. A control that vanished would leave an operator wondering
+ * whether this build has the capability at all; a disabled one plus the gate's
+ * reason answers that.
+ */
+function AccountAdminControls({ account, styles, writable, confirming, onSetState, onRevoke, onConfirm, onCancel }) {
+  const id = account.accountId
+  return (
+    <span style={styles.actions} data-testid={`routing-account-controls-${id}`}>
+      {ADMIN_STATE_CONTROLS.map(({ state, label }) => (
+        <Button
+          key={state}
+          variant="ghost"
+          size="sm"
+          data-testid={`routing-account-${state}-${id}`}
+          // The state already in force is not offered: writing it would burn a
+          // revision to change nothing, and every other tab's pinned revision
+          // with it.
+          disabled={!writable || account.administrativeState === state}
+          onClick={() => onSetState(account, state)}
+        >
+          {label}
+        </Button>
+      ))}
+      {confirming ? (
+        <>
+          <Button
+            variant="danger"
+            size="sm"
+            data-testid={`routing-account-revoke-confirm-${id}`}
+            disabled={!writable}
+            onClick={() => onRevoke(account)}
+          >
+            {`Confirm — end ${account.leaseCount} lease(s)`}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid={`routing-account-revoke-cancel-${id}`}
+            onClick={onCancel}
+          >
+            Cancel
+          </Button>
+        </>
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          data-testid={`routing-account-revoke-${id}`}
+          disabled={!writable}
+          onClick={() => onConfirm(id)}
+        >
+          Revoke leases
+        </Button>
+      )}
+    </span>
+  )
+}
+
+function AccountRow({ account, styles, admin, controls }) {
   return (
     <div style={styles.row} data-testid={`routing-account-${account.accountId}`}>
       <span style={styles.nameCol}>
@@ -151,13 +254,13 @@ function AccountRow({ account, styles }) {
         </Badge>
         <Fact
           label="leases"
-          value={String(account.leaseCount)}
+          value={account.leaseCapacityLabel}
           styles={styles}
           testid={`routing-account-leases-${account.accountId}`}
         />
         <Fact
           label="in flight"
-          value={String(account.inFlightCount)}
+          value={account.requestCapacityLabel}
           styles={styles}
           testid={`routing-account-inflight-${account.accountId}`}
         />
@@ -178,6 +281,27 @@ function AccountRow({ account, styles }) {
           />
         )}
         <Badge
+          tone={account.circuitTone}
+          data-testid={`routing-account-circuit-${account.accountId}`}
+        >
+          {`circuit ${account.circuitState}`}
+        </Badge>
+        {account.circuitState === 'open' && (
+          // Only when OPEN: a reset time and a trip condition on a closed
+          // breaker are last-time facts, and rendering them beside "closed"
+          // would read as a lane that is currently refused.
+          <Fact
+            label="opened"
+            value={`${account.circuitLastCondition || 'unknown condition'} · ${
+              account.circuitResetAt
+                ? `resets ${account.circuitResetAt}`
+                : 'no reset time published'
+            } · ${account.circuitConsecutiveFailures} consecutive`}
+            styles={styles}
+            testid={`routing-account-circuit-detail-${account.accountId}`}
+          />
+        )}
+        <Badge
           tone={account.healthTone}
           title={account.healthReason || undefined}
           data-testid={`routing-account-health-${account.accountId}`}
@@ -185,11 +309,69 @@ function AccountRow({ account, styles }) {
           {account.health}
         </Badge>
       </span>
+      {admin.available && (
+        <AccountAdminControls account={account} styles={styles} {...controls} />
+      )}
     </div>
   )
 }
 
-function AccountsView({ accounts, styles }) {
+function AccountsView({ accounts, admin, styles, onSetAccountState, onRevokeLeases }) {
+  const [token, setToken] = React.useState('')
+  const [confirming, setConfirming] = React.useState(null)
+  const [conflict, setConflict] = React.useState(null)
+  // The revision these controls act AGAINST — pinned to the one the operator
+  // actually saw, never re-read from the live poll at click time. Reading
+  // `admin.revision` on click would make `expected_revision` the WINNER's
+  // revision, so the 409 that stops a lost update could never fire from this
+  // console (the same trap ADR-0140 D3 named for the policy form).
+  const [basis, setBasis] = React.useState(null)
+
+  React.useEffect(() => {
+    if (!admin.available) return
+    setBasis(prev => (prev === null ? admin.revision : prev))
+  }, [admin.available, admin.revision])
+
+  const pinned = basis === null ? admin.revision : basis
+  // Somebody else's revision landed under this view. The action is not
+  // necessarily wrong, but it was chosen against an overlay that no longer
+  // exists, so it may not be sent until the operator re-reads.
+  const rebased = basis !== null && admin.available && admin.revision !== basis
+  const writable = admin.editable && !!token && !rebased && pinned != null
+
+  const rebase = () => {
+    setBasis(admin.revision)
+    setConflict(null)
+    setConfirming(null)
+  }
+
+  const commit = async body => {
+    setConfirming(null)
+    const result = await body()
+    setConflict(result && result.ok === false ? result : null)
+    // `?? basis`, never `?? null`: dropping the pin would restore the unpinned
+    // behaviour where `expected_revision` follows the live poll.
+    if (result && result.ok) setBasis(result.revision ?? basis)
+  }
+
+  const controls = {
+    writable,
+    onSetState: (account, state) =>
+      commit(() =>
+        onSetAccountState(
+          account.accountId,
+          { administrativeState: state, expectedRevision: pinned },
+          token,
+        ),
+      ),
+    onRevoke: account =>
+      commit(() =>
+        onRevokeLeases(account.accountId, { expectedRevision: pinned }, token),
+      ),
+    onConfirm: setConfirming,
+    onCancel: () => setConfirming(null),
+  }
+
   if (!accounts.available) {
     return (
       <div style={styles.card} data-testid="routing-accounts">
@@ -209,12 +391,70 @@ function AccountsView({ accounts, styles }) {
         <Text as="span" size="xs" tone="muted" data-testid="routing-accounts-summary">
           {`${accounts.summary.configured} configured · ${accounts.summary.leased} leased · ${accounts.summary.inFlight} in flight`}
         </Text>
+        {admin.available && (
+          <Text as="span" size="xs" tone="muted" data-testid="routing-admin-revision">
+            {`overlay revision ${admin.revision}`}
+          </Text>
+        )}
         <span style={styles.spacer} />
         <Text as="span" size="xs" tone="muted">{`window ${accounts.windowSeconds}s`}</Text>
       </div>
+      {admin.available && !admin.editable && (
+        <div style={styles.note} data-testid="routing-admin-write-gate">
+          <Text role="alert" size="sm" tone="warning">
+            {admin.chainVerified
+              ? accountWriteGateMessage(admin.writeGate) ||
+                'Account administration is unavailable on this dashboard.'
+              : adminRejectionMessage('audit-chain-broken')}
+          </Text>
+        </div>
+      )}
+      {admin.available && admin.editable && (
+        <label style={styles.field}>
+          <Text as="span" size="xs" tone="muted" uppercase>
+            operator token (never stored)
+          </Text>
+          <input
+            style={styles.input}
+            type="password"
+            autoComplete="off"
+            data-testid="routing-admin-token"
+            value={token}
+            onChange={event => setToken(event.target.value)}
+          />
+        </label>
+      )}
+      {rebased && (
+        <div style={styles.note} data-testid="routing-admin-rebased">
+          <Text role="alert" size="sm" tone="warning">
+            {`${adminRejectionMessage('stale-revision')} This view was loaded against revision ${basis}; revision ${admin.revision} is current.`}
+          </Text>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="routing-admin-rebase-button"
+            onClick={rebase}
+          >
+            {`Re-base on r${admin.revision}`}
+          </Button>
+        </div>
+      )}
+      {conflict && (
+        <div style={styles.note} data-testid="routing-admin-conflict">
+          <Text role="alert" size="sm" tone="danger">
+            {adminRejectionMessage(conflict.code)}
+          </Text>
+        </div>
+      )}
       <div style={styles.rows}>
         {accounts.accounts.map(account => (
-          <AccountRow key={account.accountId} account={account} styles={styles} />
+          <AccountRow
+            key={account.accountId}
+            account={account}
+            admin={admin}
+            controls={{ ...controls, confirming: confirming === account.accountId }}
+            styles={styles}
+          />
         ))}
       </div>
       <Text as="span" size="xs" tone="muted" data-testid="routing-accounts-evidence">
@@ -370,15 +610,17 @@ function LiveView({ live, styles }) {
 
 /**
  * @param {{
- *   accounts?: object, live?: object, workspace?: object, matrix?: object,
- *   audit?: object, policySourceState?: string, preview?: object|null,
- *   rejection?: string|null,
+ *   accounts?: object, admin?: object, live?: object, workspace?: object,
+ *   matrix?: object, audit?: object, policySourceState?: string,
+ *   preview?: object|null, rejection?: string|null,
  *   routingView?: string, routingSelection?: string|null, select?: Function,
  *   onPreviewPolicy?: Function, onSavePolicy?: Function, onClearPreview?: Function,
+ *   onSetAccountState?: Function, onRevokeLeases?: Function,
  * }} props
  */
 export default function RoutingMode({
   accounts = EMPTY_GATEWAY_ACCOUNTS_VM,
+  admin = EMPTY_ACCOUNT_ADMIN_VM,
   live = EMPTY_GATEWAY_LIVE_VM,
   workspace = EMPTY_POLICY_WORKSPACE_VM,
   matrix = EMPTY_EFFECTIVE_MATRIX_VM,
@@ -392,6 +634,8 @@ export default function RoutingMode({
   onPreviewPolicy = () => {},
   onSavePolicy = () => {},
   onClearPreview = () => {},
+  onSetAccountState = () => ({ ok: false, code: 'gateway-not-configured' }),
+  onRevokeLeases = () => ({ ok: false, code: 'gateway-not-configured' }),
 }) {
   const t = useTokens()
   const styles = makeStyles(t)
@@ -417,6 +661,7 @@ export default function RoutingMode({
       {renderView({
         view,
         accounts,
+        admin,
         live,
         workspace,
         matrix,
@@ -429,6 +674,8 @@ export default function RoutingMode({
         onPreviewPolicy,
         onSavePolicy,
         onClearPreview,
+        onSetAccountState,
+        onRevokeLeases,
         styles,
       })}
     </div>
@@ -439,6 +686,7 @@ export default function RoutingMode({
 function renderView({
   view,
   accounts,
+  admin,
   live,
   workspace,
   matrix,
@@ -451,6 +699,8 @@ function renderView({
   onPreviewPolicy,
   onSavePolicy,
   onClearPreview,
+  onSetAccountState,
+  onRevokeLeases,
   styles,
 }) {
   if (view === 'live') return <LiveView live={live} styles={styles} />
@@ -482,5 +732,13 @@ function renderView({
   }
   if (view === 'audit')
     return <PolicyAuditPanel audit={audit} sourceState={policySourceState} />
-  return <AccountsView accounts={accounts} styles={styles} />
+  return (
+    <AccountsView
+      accounts={accounts}
+      admin={admin}
+      styles={styles}
+      onSetAccountState={onSetAccountState}
+      onRevokeLeases={onRevokeLeases}
+    />
+  )
 }

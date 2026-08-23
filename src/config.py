@@ -1439,6 +1439,69 @@ class HydraFlowConfig(BaseModel):
         ),
     )
 
+    # --- Fable Plan canary (#11541, ADR-0137 P3) --------------------------
+    # The dial on which a Fable director stops being an observer. It names one
+    # canonical `owner/repo`, and only that repository's PLAN boundaries may
+    # dispatch a brokered worker. Empty is off everywhere, which is both the
+    # default and the rollback: clearing it disarms on the next boundary, with
+    # no restart and no other edit. It arms nothing on its own — the director
+    # must also be selected — and it never widens past PLAN.
+    fable_plan_canary_repo: str = Field(
+        default="",
+        max_length=512,
+        description=(
+            "Canonical 'owner/repo' whose PLAN boundaries may dispatch real "
+            "brokered Sonnet/Opus workers under execution_runtime="
+            "'fable_director'. Empty (the default) dispatches nothing "
+            "anywhere; clearing it is the one-action rollback. Anything that "
+            "is not exactly owner/repo arms nothing. Deliberately NOT an env "
+            "override: an env var that re-applies whenever the field is at its "
+            "default would mean clearing the field did not disarm, and a "
+            "rollback with two places to look is not one action (ADR-0141 D5)."
+        ),
+    )
+    fable_plan_worker_timeout_seconds: int = Field(
+        default=240,
+        ge=30,
+        le=900,
+        description=(
+            "Wall-clock budget for one brokered Plan BATCH, shared by its "
+            "children. Each child is given whatever the batch has left, and a "
+            "child that exceeds it is killed with its process group and its "
+            "receipt is EXPIRED. It bounds the BATCH rather than each child, "
+            "and its ceiling is deliberately low, because the dispatch is "
+            "awaited inside the allocator tick: this figure is exactly how "
+            "long one armed PLAN boundary can delay every other driver, and a "
+            "per-child budget would multiply it by MAX_DISPATCH_BATCH. The "
+            "default is of the same order as director_turn_timeout_seconds, "
+            "which the shadow director already spends on that tick, and the "
+            "ceiling sits well below CANARY_SLOT_TTL_SECONDS so the latch's "
+            "backstop cannot reclaim a slot from a batch still running. "
+            "Ignored unless fable_plan_canary_repo names this repository."
+        ),
+    )
+
+    def fable_plan_canary_armed(self) -> bool:
+        """True when this process may dispatch a real brokered Plan worker.
+
+        Both halves are required and they are two different operator decisions:
+        selecting the director (restart-required) and naming the canary
+        repository (live). Collapsing them into one dial is how "we turned on
+        the observer" becomes "we turned on the actuator" — the distinction
+        #11537 built ``SchedulingPreset.director_dispatch_armed`` to preserve.
+
+        The arming lives here rather than on the preset because a preset is
+        fleet-wide and a canary must be bounded to one repository; a preset
+        that armed dispatch would arm it for every repository the factory
+        touches, which is the opposite of a bounded slice.
+        """
+        from hydraflow_gateway.routing_policy import canonicalize_repo
+
+        if not self.uses_fable_director():
+            return False
+        armed = canonicalize_repo(str(self.fable_plan_canary_repo or ""))
+        return armed is not None and armed == canonicalize_repo(str(self.repo or ""))
+
     def uses_fable_director(self) -> bool:
         """True when a shadow Fable director is attached to the driver.
 
@@ -7038,6 +7101,29 @@ def _validate_gateway_enforcement_canary(config: HydraFlowConfig) -> None:
         raise ValueError(msg)
 
 
+def _validate_fable_plan_canary(config: HydraFlowConfig) -> None:
+    """A Plan-canary dial that arms nothing must say so at load (#11541).
+
+    Same rule and the same reason as
+    :func:`_validate_gateway_enforcement_canary`: only an exact canonical
+    ``owner/repo`` arms the canary, the runtime predicate fails closed on
+    anything else, and failing closed silently would leave an operator
+    believing a repository was brokered while every boundary stayed shadow.
+    The runtime check stays — this dial is live-editable — but a value written
+    to the config file is refused where the mistake is still cheap.
+    """
+    from hydraflow_gateway.routing_policy import canonicalize_repo
+
+    raw = str(config.fable_plan_canary_repo or "").strip()
+    if raw and canonicalize_repo(raw) is None:
+        msg = (
+            "fable_plan_canary_repo must be an exact canonical 'owner/repo' "
+            f"(got {raw!r}); the path-safe runtime slug cannot identify a "
+            "canary repository. Leave it empty to dispatch nothing."
+        )
+        raise ValueError(msg)
+
+
 def _validate_gateway_capture_policy(config: HydraFlowConfig) -> None:
     """Validate repo classification and the body-capture privacy boundary."""
     if config.gateway_repo_class not in {"hydraflow", "client", "personal"}:
@@ -7284,6 +7370,7 @@ def _harmonize_tool_model_defaults(config: HydraFlowConfig) -> None:
 
     _validate_gateway_capture_policy(config)
     _validate_gateway_enforcement_canary(config)
+    _validate_fable_plan_canary(config)
     _validate_gateway_fleet_profile(config)
     _validate_gateway_pr_unstick_tool(config)
     for stage, tool, model in _tool_model_stage_pairs(config):

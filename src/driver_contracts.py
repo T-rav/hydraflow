@@ -165,6 +165,45 @@ class RejectionReason(StrEnum):
     BUDGET_EXHAUSTED = "budget_exhausted"
     SANDBOX_UNVERIFIED = "sandbox_unverified"
 
+    # Added by #11541, when dispatch stopped being hypothetical. Both describe
+    # failures that cannot occur while nothing is dispatched, which is why
+    # neither existed before. Additive members only: the schema version gates
+    # consumers of the *shape*, and no field changed.
+    ROUTE_UNAVAILABLE = "route_unavailable"
+    """No route or credential could be obtained for an otherwise legal request.
+
+    The gateway was unreachable, minted nothing, or **held** the route because
+    something it needs is missing — an account with no credential, a capability
+    class with no mapping. The request itself was admissible, so a caretaker
+    retry is the correct response once whatever is missing is supplied.
+
+    Distinct from :attr:`ROUTE_POLICY_REVISION_STALE`, which means the director
+    worked from a routing view that had moved, and from
+    :attr:`MODEL_REQUIREMENT_UNSATISFIABLE`, which means the request was
+    inadmissible and retrying it will never succeed. The remedy for a hold may
+    be a *policy* edit rather than a gateway one — an earlier draft of this
+    docstring said "look at the gateway rather than the policy", which was
+    right about the outage case and wrong about every other hold.
+    """
+
+    WORKER_TIMEOUT = "worker_timeout"
+    """The child exceeded its own wall-clock budget and was reaped with its group.
+
+    Deliberately not folded into :attr:`BUDGET_EXHAUSTED`, which counts a
+    *USD* budget a director may not spend against: an operator reading a spike
+    in one of these needs to know whether the fleet ran out of money or a
+    worker ran out of time, and one counter cannot say both.
+    """
+
+    CANARY_SLOT_HELD = "canary_slot_held"
+    """Another issue holds this repository's single brokered-Plan slot.
+
+    Its own code rather than :attr:`FANOUT_OVERFLOW`, which counts a *role*
+    exceeding its concurrency: folding the two together would make the canary's
+    "one active Fable-directed issue per repository" bound unreadable in the
+    evidence it is supposed to be proved by.
+    """
+
 
 def has_anthropic_provenance(served_model: str) -> bool:
     """True when *served_model*'s id is an Anthropic one by the allow-list.

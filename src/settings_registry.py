@@ -76,6 +76,14 @@ SETTINGS: dict[str, SettingSpec] = {
     # switch that needs a restart is not a kill switch (docs/wiki/patterns.md).
     "director_shadow_enabled": SettingSpec("Scheduling", live=True, order=25),
     "director_shadow_usd_ceiling": SettingSpec("Scheduling", live=True, order=26),
+    # --- Fable Plan canary (#11541) --------------------------------------
+    # Live for the same reason the enforcement canary's dial is (ADR-0141 D5):
+    # ``plan_broker.canary_repo`` re-reads it at every boundary, so clearing it
+    # stops the next dispatch without a restart. That liveness IS the rollback
+    # — an actuator an operator has to restart the factory to disarm is not a
+    # canary switch.
+    "fable_plan_canary_repo": SettingSpec("Scheduling", live=True, order=27),
+    "fable_plan_worker_timeout_seconds": SettingSpec("Scheduling", live=True, order=28),
     # --- Models ----------------------------------------------------------
     "model": SettingSpec("Models", live=True, order=0),
     "planner_model": SettingSpec("Models", live=True, order=1),

@@ -38,6 +38,13 @@ DECISION_PATH_MODULES = (
     "src/fable_director.py",
     "src/director_broker.py",
     "src/director_shadow_log.py",
+    # #11541 added an actuator, and split it from its decision layer precisely
+    # so the decision layer could stay on this list. ``plan_broker`` resolves
+    # model tiers and owns the canary's bound; it must remain unable to spawn,
+    # mutate a label, or touch convergence state. The one module that CAN reach
+    # a process is ``plan_worker_runner``, which is seam-declared and has its
+    # own tests at the bottom of this file.
+    "src/plan_broker.py",
 )
 
 #: Mutation calls that would give the director real authority over an issue.
@@ -207,6 +214,51 @@ def test_the_turn_runner_owns_no_raw_spawn_primitive() -> None:
     # because the director is the one component with a legitimate reason to
     # want a raw spawn — it needs a *replaced* environment, not a merged one.
     assert not (_called_names(_tree("src/director_turn_runner.py")) & SPAWN_PRIMITIVES)
+
+
+def test_the_plan_actuator_never_mutates_a_label_or_merges() -> None:
+    # #11541 gives one module the ability to start a process. It must gain
+    # nothing else: a brokered Plan worker produces an artifact and a receipt,
+    # and the deterministic driver still owns every label and every merge.
+    assert not (_called_names(_tree("src/plan_worker_runner.py")) & FORBIDDEN_MUTATIONS)
+
+
+def test_the_plan_actuator_never_writes_convergence_state() -> None:
+    # ADR-0137's narrowing of ADR-0094 survives dispatch being armed:
+    # ConvergenceLedger stays the sole owner of convergence state, and the
+    # canary's evidence is telemetry beside it rather than a second copy.
+    forbidden = {
+        "increment_route_backs",
+        "record_lap",
+        "recompute_converged",
+        "set_converged",
+        "add_open_concern",
+        "resolve_open_concern",
+        "record_stage_transition",
+        "record_sub_state_transition",
+    }
+
+    assert not (_called_names(_tree("src/plan_worker_runner.py")) & forbidden)
+
+
+def test_the_plan_actuator_owns_no_raw_spawn_primitive() -> None:
+    # Same rule as the turn runner's, for the same reason: the sanctioned
+    # ``run_lightweight_agent`` carries the CH-6 gate, the per-spawn mint and
+    # revoke, the credit detection and the telemetry row. A raw spawn here
+    # would have to re-derive all four and would get one wrong.
+    raw = SPAWN_PRIMITIVES - {"run_lightweight_agent"}
+
+    assert not (_called_names(_tree("src/plan_worker_runner.py")) & raw)
+
+
+def test_the_plan_actuator_is_seam_declared() -> None:
+    # It DOES lexically call ``run_lightweight_agent``, so the sandbox scan
+    # sees it and a declaration is required rather than optional. Without the
+    # row an air-gapped scenario could spawn a real Sonnet worker — the s51/s56
+    # wedge class.
+    from mockworld.sandbox_main import SANDBOX_SEAMS
+
+    assert SANDBOX_SEAMS["plan_worker_runner"] == "config_disable"
 
 
 async def test_the_turn_runner_actually_uses_the_injected_spawner() -> None:

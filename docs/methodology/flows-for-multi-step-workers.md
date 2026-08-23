@@ -16,7 +16,8 @@ survives the code.
 **The default:** a new multi-step-with-verification worker starts as a `Flow`.
 The four pipeline phases (implement, plan, review, triage) plus the
 wiki-compilation background worker are the reference implementations. Copy the
-one closest to your shape; `_build_implement_flow` (in `implement_phase.py`) is
+one closest to your shape; `_build_implement_flow` (in
+`implement_phase/_flow.py`) is
 the canonical worked example.
 
 ---
@@ -154,7 +155,7 @@ there is a single source of truth for the screen → verify → gate branches.
 ## 4. Recipe — convert a worker to a flow
 
 1. **Draw the DAG first**, as an ASCII diagram in the module docstring (see the
-   top of `implement_phase.py`). Name the nodes; mark which edges are
+   top of `implement_phase/_common.py`). Name the nodes; mark which edges are
    conditional and on what.
 2. **Identify the actuator boundary** — the single node that spends the LLM/agent
    call. Everything else is deterministic routing. In implement it is `build`;

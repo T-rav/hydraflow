@@ -53,13 +53,28 @@ from arch._models import LoopInfo
 # loops) mapped to the source file(s) where the phase's decision-making
 # lives. This maps metadata for a derived list — the LIST of pipeline
 # workers still comes from ``_bg_worker_defs``, and an unmapped worker
-# fails generation loudly. ``implement`` names the phase module and the
-# agent-runner module because the coding-agent spawn (the ``model``
-# resolution) lives one module deeper than the phase.
+# fails generation loudly.
 _PIPELINE_WORKER_SOURCES: dict[str, tuple[str, ...]] = {
     "triage": ("src/triage_phase.py",),
     "plan": ("src/plan_phase.py",),
-    "implement": ("src/implement_phase.py", "src/agent.py"),
+    # ``implement`` names every module of the phase package plus the
+    # agent-runner module: the coding-agent spawn (the ``model`` resolution)
+    # lives one module deeper than the phase, and the phase itself is a package
+    # of per-stage mixins (Refs #11547). The oversight scan reads exactly these
+    # files, so listing only the spine would drop the HITL/PR signals that live
+    # in ``_abort.py`` / ``_pr.py`` and silently shrink the rendered row.
+    "implement": (
+        "src/implement_phase/_abort.py",
+        "src/implement_phase/_beads.py",
+        "src/implement_phase/_build.py",
+        "src/implement_phase/_common.py",
+        "src/implement_phase/_flow.py",
+        "src/implement_phase/_phase.py",
+        "src/implement_phase/_pr.py",
+        "src/implement_phase/_screen.py",
+        "src/implement_phase/_spec_review.py",
+        "src/agent.py",
+    ),
     "review": ("src/review_phase/_phase.py",),
     "review_insights": ("src/review_insights.py",),
     "pipeline_poller": (),  # orchestrator-internal snapshot poller — no LLM
