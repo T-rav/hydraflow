@@ -1069,7 +1069,20 @@ class TestAsyncioEventResetGuard:
         # part of the host. Same guard, one more file to look in.
         src_dir = Path(__file__).parent.parent / "src"
         orchestrator_bodies: list[ast.stmt] = []
-        for path in sorted(src_dir.glob("orchestrator*.py")):
+        # ``glob`` is non-recursive: a ``src/orchestrator/`` package matches
+        # neither this pattern nor the file test, so the guard would scan ZERO
+        # files and pass vacuously (#11673). Package members are folded in.
+        orchestrator_sources = sorted(src_dir.glob("orchestrator*.py")) + sorted(
+            f
+            for d in src_dir.glob("orchestrator*")
+            if d.is_dir()
+            for f in d.rglob("*.py")
+        )
+        assert orchestrator_sources, (
+            "no orchestrator sources found under src/ — this guard would pass "
+            "vacuously. Did orchestrator move or get renamed?"
+        )
+        for path in orchestrator_sources:
             tree = ast.parse(path.read_text())
             for node in tree.body:
                 if isinstance(node, ast.ClassDef):

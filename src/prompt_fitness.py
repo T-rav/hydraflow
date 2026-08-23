@@ -74,8 +74,13 @@ _BUILDER_NAME = re.compile(
 # "Reply with a single ```diff fence." A module-level exclusion hid a real
 # prompt behind a reason that only covered one of its functions, so exclusions
 # that apply to a single function now live in EXCLUDED_BUILDERS instead.
+# Keys are DOTTED module names, ``src``-relative. ``_skill_prompt_eval`` used
+# to be keyed by bare stem, which only matched via the ``path.stem`` arm below
+# — over-broad (any module of that name anywhere is excluded) and exactly the
+# stem-keying this file's own docstring warns against. Its real identity is
+# ``state._skill_prompt_eval`` (#11673).
 EXCLUDED_MODULES: dict[str, str] = {
-    "_skill_prompt_eval": "get/set helpers for eval state",
+    "state._skill_prompt_eval": "get/set helpers for eval state",
     "prompt_gate_alerts": "operator alerting, not assembly",
     "prompt_stats": "measurement over a built prompt",
     "prompt_fitness": "this module measures prompts, it does not build them",
@@ -151,7 +156,10 @@ def discovered_builders() -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for path in sorted(_src_root().rglob("*.py")):
         module = _module_name(path)
-        if module in EXCLUDED_MODULES or path.stem in EXCLUDED_MODULES:
+        # Dotted name only. The ``path.stem`` arm was load-bearing for exactly
+        # one entry, whose key is now its real dotted identity; keeping it
+        # would let a stem match a module in any package (#11673).
+        if module in EXCLUDED_MODULES:
             continue
         try:
             tree = ast.parse(path.read_text(errors="replace"))
