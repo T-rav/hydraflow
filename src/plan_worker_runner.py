@@ -461,6 +461,15 @@ class PlanWorkerRunner:
         budget: float,
     ) -> WorkerReceipt:
         child_spawn_id = uuid.uuid4().hex
+        # Minted before the spawn so every path AFTER it can name the child that
+        # ran — including the refusals. A refusal that dropped it made a reaped
+        # child look like one that never started.
+        lineage = WorkerLineage(
+            driver_id=lease.driver_id,
+            epoch=lease.epoch,
+            child_spawn_id=child_spawn_id,
+            depth=1,
+        )
         spawn_out: dict[str, object] = {}
         started = datetime.now(UTC)
         try:
@@ -493,6 +502,7 @@ class PlanWorkerRunner:
                 RejectionReason.WORKER_TIMEOUT,
                 decision,
                 status=ReceiptStatus.EXPIRED,
+                lineage=lineage,
             )
         except Exception as exc:
             # A burnt credit balance is factory-wide and must not be converted
@@ -533,6 +543,7 @@ class PlanWorkerRunner:
                 RejectionReason.WORKER_TIMEOUT,
                 decision,
                 status=ReceiptStatus.EXPIRED,
+                lineage=lineage,
             )
         # The model the CLI *reported*, when it reported one. When it did not,
         # the requested id is recorded and ``model_observed`` says so rather
@@ -549,7 +560,10 @@ class PlanWorkerRunner:
                 served,
             )
             return _refusal(
-                request, RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE, decision
+                request,
+                RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE,
+                decision,
+                lineage=lineage,
             )
 
         text = (result.stdout or "")[:MAX_ARTIFACT_CHARS]
@@ -567,12 +581,7 @@ class PlanWorkerRunner:
             request_id=request.request_id,
             idempotency_key=request.idempotency_key,
             status=ReceiptStatus.ACCEPTED,
-            lineage=WorkerLineage(
-                driver_id=lease.driver_id,
-                epoch=lease.epoch,
-                child_spawn_id=child_spawn_id,
-                depth=1,
-            ),
+            lineage=lineage,
             worker_role=request.worker_role,
             transport=WorkerTransport.BROKERED,
             requested_model=request.model_requirement,
@@ -674,6 +683,7 @@ def _refusal(
     decision: PlanRouteDecision,
     *,
     status: ReceiptStatus = ReceiptStatus.REJECTED,
+    lineage: WorkerLineage | None = None,
 ) -> WorkerReceipt:
     """A real receipt for a real refusal, naming no served model.
 
@@ -682,12 +692,20 @@ def _refusal(
     it would put a mis-resolved id on a receipt in the one field whose validator
     exists to make that a validation error, which is the smuggling path rather
     than the evidence.
+
+    ``lineage`` is the opposite case and is passed on the refusals that follow a
+    **real spawn**: a child that ran to its deadline and was reaped did exist,
+    was billed, and had a spawn id, and a receipt that hid that would make a
+    dispatched child indistinguishable from one that was never started. It is
+    what tells the two emitters of ``WORKER_TIMEOUT`` apart, and what keeps the
+    worker tree from reporting ``dispatched: false`` for a child that ran.
     """
     return WorkerReceipt(
         request_id=request.request_id,
         idempotency_key=request.idempotency_key,
         status=status,
         reason_code=reason,
+        lineage=lineage,
         worker_role=request.worker_role,
         transport=WorkerTransport.BROKERED,
         requested_model=request.model_requirement,

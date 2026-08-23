@@ -69,7 +69,6 @@ from driver_contracts import (
     DirectorCapsule,
     DirectorCommand,
     DriverLease,
-    ReceiptStatus,
     RejectionReason,
     WorkerRole,
     WriterLease,
@@ -600,10 +599,16 @@ class FableDirector:
     ) -> DirectorCapsule:
         """Rebuild the whole of one turn's context from live state.
 
-        Nothing carries over from a previous turn — not a transcript, not a
-        session, not a receipt. That is the acceptance criterion "fresh
+        No *conversation* carries over from a previous turn — not a
+        transcript, not a session. That is the acceptance criterion "fresh
         reconstruction succeeds without vendor session history", and it is met
         by never having anything to reconstruct *from*.
+
+        Receipts are the deliberate exception once the canary is armed, and the
+        paragraph below is the reason. This docstring used to say "not a
+        receipt" and then explain, two paragraphs later, that receipts are
+        carried — a file contradicting itself about the one thing it is
+        describing.
 
         ``prior_receipts`` carries the receipts of workers this director has
         actually dispatched for *this* issue, and nothing else. In shadow mode
@@ -726,7 +731,7 @@ class FableDirector:
                 turn_failure_detail=detail[:500],
                 would_dispatch=()
                 if verdict is None
-                else tuple(verdict.worker_tree(_accepted_ids(receipts))),
+                else tuple(verdict.worker_tree(_dispatched_ids(receipts))),
                 invalid_requests=0 if verdict is None else verdict.invalid_requests,
                 rejection_reasons=()
                 if verdict is None
@@ -761,18 +766,25 @@ def _admitted_requests(
     )
 
 
-def _accepted_ids(receipts: tuple[WorkerReceipt, ...]) -> frozenset[str]:
+def _dispatched_ids(receipts: tuple[WorkerReceipt, ...]) -> frozenset[str]:
     """The requests that produced a child that actually ran.
 
-    ``ACCEPTED`` and nothing else: a refused or expired receipt is evidence a
-    request was *judged*, not that a worker ran, and marking its tree node
-    dispatched would overstate the canary in the record its own rollout bar is
-    read from.
+    Keyed on **lineage**, not on status. Status was the obvious reading and it
+    was wrong in both directions at once: an ``EXPIRED`` receipt from a child
+    that ran to its deadline and was reaped describes a worker that really was
+    dispatched — it had a spawn id and it was billed — while a
+    ``CANARY_SLOT_HELD`` or budget refusal describes one that never started.
+    Filtering on ``ACCEPTED`` understated the first; accepting any receipt would
+    have overstated the second. A lineage exists exactly when a child does, and
+    an ``ACCEPTED`` receipt always carries one (``WorkerReceipt``'s validator),
+    so this is a strict superset of the status reading rather than a looser one.
+
+    Both errors are the same defect the hardcoded ``dispatched: false`` was: the
+    worker tree and the receipts disagreeing about one ``request_id`` in the
+    record ADR-0137 B5's bar is read from.
     """
     return frozenset(
-        receipt.request_id
-        for receipt in receipts
-        if receipt.status is ReceiptStatus.ACCEPTED
+        receipt.request_id for receipt in receipts if receipt.lineage is not None
     )
 
 

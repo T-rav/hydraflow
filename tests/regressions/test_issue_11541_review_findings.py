@@ -324,3 +324,75 @@ class TestAnAdmittedRequestThatNeverRanIsNotMarkedDispatched:
 
         row = director.shadow_log.recent()[0]
         assert [node["dispatched"] for node in row.would_dispatch] == [True]
+
+
+class TestAChildThatRanIsDispatchedEvenWhenItsReceiptIsNotAccepted:
+    """The pass-7 defect in the other direction, found by pass 8.
+
+    A child that ran to its deadline and was reaped produces an ``EXPIRED``
+    receipt — it had a spawn id and it was billed, so it *was* dispatched.
+    Keying the worker tree on ``ACCEPTED`` marked its node ``dispatched:
+    false``, which is the same tree-vs-receipts contradiction the hardcoded
+    ``false`` was, understating instead of overstating.
+
+    Lineage is the discriminator: a child that ran carries one, a request that
+    was never started does not — which is also what makes ``WORKER_TIMEOUT``'s
+    two emitters tellable apart at all.
+    """
+
+    async def _timed_out(self, tmp_path: Path):
+        class TimedOutChild(EnvelopeSpawn):
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                await super().__call__(**kwargs)
+                kwargs["spawn_out"]["timed_out"] = True
+                return SimpleResult(stderr="timed out after 240s", returncode=-1)
+
+        director = _director(tmp_path, TimedOutChild(REAL_MODEL_USAGE))
+        await _observe(director, 7)
+        return director.shadow_log.recent()[0]
+
+    async def test_the_receipt_is_expired(self, tmp_path: Path) -> None:
+        row = await self._timed_out(tmp_path)
+
+        assert [r["status"] for r in row.dispatched] == ["expired"]
+
+    async def test_the_reaped_child_still_carries_its_spawn_id(
+        self, tmp_path: Path
+    ) -> None:
+        # Without this the receipt is byte-identical to a request the batch
+        # budget refused before starting, and the two are different facts.
+        row = await self._timed_out(tmp_path)
+
+        assert row.dispatched[0]["child_spawn_id"]
+
+    async def test_the_tree_says_the_child_was_dispatched(self, tmp_path: Path) -> None:
+        row = await self._timed_out(tmp_path)
+
+        assert [node["dispatched"] for node in row.would_dispatch] == [True]
+
+    async def test_a_request_that_never_started_carries_no_spawn_id(
+        self, tmp_path: Path, spawn: EnvelopeSpawn
+    ) -> None:
+        # The other side of the discriminator: the canary-slot refusal never
+        # reached a spawn, so it has no lineage and its node stays False.
+        director = _director(tmp_path, spawn)
+        await _observe(director, 7)
+
+        await _observe(director, 9)
+
+        row = director.shadow_log.recent()[-1]
+        assert row.dispatched[0]["child_spawn_id"] is None
+        assert [node["dispatched"] for node in row.would_dispatch] == [False]
+
+    async def test_the_rollup_counts_only_children_that_ran(
+        self, tmp_path: Path, spawn: EnvelopeSpawn
+    ) -> None:
+        # workers_dispatched counted every receipt, so a refusal that started
+        # nothing inflated it — and could flip shadow_mode to False on a
+        # boundary that spawned nothing at all.
+        director = _director(tmp_path, spawn)
+        await _observe(director, 7)
+        await _observe(director, 9)
+
+        summary = director.shadow_log.summary()
+        assert (summary["workers_dispatched"], summary["workers_refused"]) == (1, 1)

@@ -594,9 +594,15 @@ exact about: an unmatched role yields `ROLE_NOT_IN_SET`, no policy wins, and
 `explain` falls through to `_legacy_decision`, which returns **selected** /
 `no-policy-applies` with the effective model the spawn already had — the
 `PLAN_TIER_CATALOG` id — so the child runs, on a bound v2 key, unchanged. An
-empty snapshot behaves the same way. Note that an empty `match.roles` means
-*all* roles, so a repository-wide policy matches a brokered child regardless of
-which roles it names.
+empty snapshot behaves the same way.
+
+Two dimensions decide whether a policy matches at all, and the safety-relevant
+reading is the opposite of the intuitive one. A policy that names **no** roles
+matches every brokered child (an empty `match.roles` means *all* roles); a
+policy that **does** name roles matches one only if it names `planner`,
+`architect` or `explorer` — so an `implementer`-only policy is inert here
+rather than hostile. `match.principal_ids` is a separate dimension and can
+exclude a brokered child even with `roles` empty.
 
 The prerequisite is **policy-side, not gateway-side**: the snapshot lives under
 the repository's own data root and the check is `enforce_canary_route` on the
