@@ -83,6 +83,7 @@ from implement_broker import (
 )
 from plan_broker import (
     PLAN_TIER_CATALOG_REVISION,
+    REFUSAL_CODES,
     PlanRouteDecision,
     PlanRouteOutcome,
     PlanRouteReason,
@@ -118,6 +119,14 @@ a change beyond the cut still moves the fence — which is why the excerpt and t
 state are two fields of one measurement rather than one field doing both jobs.
 """
 
+MAX_RETAINED_RECORDS = 50
+"""How many decisions and artifacts this object keeps.
+
+Bounded for the reason ``_dispatched_keys`` is: it lives for the whole run.
+#11657 found both accumulators unbounded on the Plan actuator and read by
+nothing; the same two had already been copied here before that was found.
+"""
+
 MAX_DISPATCHED_KEYS = 2000
 """How many spent idempotency keys the replay fence remembers. Bounded because
 this object lives for the whole run and a boundary key already carries the
@@ -127,26 +136,9 @@ MEASURE_TIMEOUT_SECONDS = 30.0
 """Per-probe budget for a git read. Local, no network; the tier
 ``pattern_async_communicate_timeout_tiers`` gives a plain git query."""
 
-#: Which refusal each unsatisfiable tier resolution reports on the receipt.
-#: A table rather than branches, so a new :class:`plan_broker.PlanRouteReason`
-#: fails loudly here rather than defaulting to a plausible code.
-_REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
-    PlanRouteReason.PHASE_NOT_IMPLEMENT: RejectionReason.ROLE_PHASE_FORBIDDEN,
-    PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_IMPLEMENT: (
-        RejectionReason.ROLE_PHASE_FORBIDDEN
-    ),
-    PlanRouteReason.PHASE_NOT_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
-    PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
-    PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
-    PlanRouteReason.CAPABILITY_UNMAPPED: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
-    PlanRouteReason.CONCRETE_MODEL_REQUESTED: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
-}
+#: Re-exported from the module that owns the vocabulary, so the two actuators
+#: cannot drift on what a refusal means. See ``plan_broker.REFUSAL_CODES``.
+_REFUSAL_CODES = REFUSAL_CODES
 
 
 class ImplementWorkerSpawn(Protocol):
@@ -251,6 +243,15 @@ class ImplementWorkerArtifact:
     request_id: str
     role: str
     served_model: str
+    model_observed: bool
+    """Whether the CLI reported the served id, or it was inferred from the request.
+
+    A weak claim that says so is better evidence than a weak claim that looks
+    strong — ADR-0137 B5 reads "effective-route receipts", and one implying an
+    observation it never made is worse than one that admits the gap.
+    """
+
+    decision_id: str
     head_sha: str
     text: str
 
@@ -289,8 +290,18 @@ class ImplementWorkerRunner:
         self._spawn: ImplementWorkerSpawn = spawn or _spawn_implement_worker
         self._dispatched_keys: set[str] = set()
         self._dispatched_order: deque[str] = deque()
-        self.decisions: list[PlanRouteDecision] = []
-        self.artifacts: list[ImplementWorkerArtifact] = []
+        self.decisions: deque[PlanRouteDecision] = deque(maxlen=MAX_RETAINED_RECORDS)
+        self.last_decision_ids: dict[str, str] = {}
+        """This batch's ``request_id -> decision_id``, for the receipt join.
+
+        The tier decision is content-addressed precisely so a receipt can be
+        joined to what authorised it without either side carrying the other's
+        identifier — and #11657 found that join unbuilt on the Plan side, with
+        the id carried by nothing.
+        """
+        self.artifacts: deque[ImplementWorkerArtifact] = deque(
+            maxlen=MAX_RETAINED_RECORDS
+        )
         self.revocations: list[tuple[int, str]] = []
         """Every writer lease taken away from a live holder, as (issue, holder).
 
@@ -393,6 +404,7 @@ class ImplementWorkerRunner:
         deadline = time.monotonic() + float(
             self._config.fable_implement_worker_timeout_seconds
         )
+        self.last_decision_ids = {}
         receipts: list[WorkerReceipt] = []
         for request in requests:
             receipts.append(
@@ -413,6 +425,9 @@ class ImplementWorkerRunner:
         function rather than of every caller remembering it.
         """
         blank = _unresolved_decision(self._route_policy_revision)
+        self.last_decision_ids = dict.fromkeys(
+            (request.request_id for request in requests), ""
+        )
         return tuple(_refusal(request, reason, blank) for request in requests)
 
     def revoke(self, issue_number: int, reason: RejectionReason) -> None:
@@ -454,6 +469,7 @@ class ImplementWorkerRunner:
             route_policy_revision=self._route_policy_revision,
         )
         self.decisions.append(decision)
+        self.last_decision_ids[request.request_id] = decision.decision_id
         if decision.outcome is not PlanRouteOutcome.SELECTED:
             logger.info(
                 "implement_worker_runner: #%d %s refused before spawn (%s)",
@@ -564,24 +580,10 @@ class ImplementWorkerRunner:
             )
             return _refusal(request, RejectionReason.ROUTE_UNAVAILABLE, decision)
 
-        served = str(spawn_out.get("model", "") or "")
-        if not served:
-            # The seam returned before it spawned anything — a CH-6 block or an
-            # enforcement refusal. No inference happened, so there is nothing to
-            # bill and no served model to record.
-            return _refusal(request, RejectionReason.ROUTE_UNAVAILABLE, decision)
-        if not request.model_requirement.satisfied_by(served):
-            logger.warning(
-                "implement_worker_runner: #%d %s asked for %s and was served %r; "
-                "refusing the receipt rather than recording the substitution",
-                task.id,
-                request.worker_role.value,
-                request.model_requirement.value,
-                served,
-            )
-            return _refusal(
-                request, RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE, decision
-            )
+        refusal = self._refusal_after_spawn(request, task, decision, spawn_out)
+        if refusal is not None:
+            return refusal
+        served, observed = _served_model(spawn_out)
 
         breach = await self._fence_on_the_way_out(
             task, lease, measured.state, driver_facts
@@ -611,6 +613,8 @@ class ImplementWorkerRunner:
                 request_id=request.request_id,
                 role=request.worker_role.value,
                 served_model=served,
+                model_observed=bool(observed),
+                decision_id=decision.decision_id,
                 head_sha=measured.state.head_sha,
                 text=text,
             )
@@ -636,6 +640,70 @@ class ImplementWorkerRunner:
             finished_at=datetime.now(UTC),
             usd_cost=_estimate_cost(served, spawn_out.get("usage")),
         )
+
+    def _refusal_after_spawn(
+        self,
+        request: WorkerDispatchRequest,
+        task: Task,
+        decision: PlanRouteDecision,
+        spawn_out: dict[str, object],
+    ) -> WorkerReceipt | None:
+        """Every way a spawn that returned still produced nothing usable.
+
+        Extracted from :meth:`_run_child` so that method keeps one job — run a
+        child and fence its result — and so these three, which are the three
+        #11657 found the Plan actuator getting wrong, read as one table rather
+        than as three arms buried in a longer function.
+        """
+        requested = str(spawn_out.get("model", "") or "")
+        if not requested:
+            # The seam returned before it spawned anything — a CH-6 block or an
+            # enforcement refusal. No inference happened, so there is nothing to
+            # bill and no served model to record. Which of the two it was decides
+            # whether a retry can ever work, so it is classified rather than
+            # collapsed onto ROUTE_UNAVAILABLE (#11657).
+            refusal = _refusal_for_spawn(spawn_out)
+            logger.info(
+                "implement_worker_runner: #%d %s never spawned: %s/%s -> %s",
+                task.id,
+                request.worker_role.value,
+                spawn_out.get("refused_outcome") or "no-decision",
+                spawn_out.get("refused") or "no-reason",
+                refusal.value,
+            )
+            return _refusal(request, refusal, decision)
+        if spawn_out.get("timed_out"):
+            # A deadline, not a bad reply. ``run_lightweight_agent`` converts its
+            # own timeout into a soft rc=-1 and returns — it never raises
+            # TimeoutError — so the ``except TimeoutError`` arm above is
+            # unreachable in production, and without this signal a timed-out
+            # child was recorded ACCEPTED with an unusable artifact (#11657).
+            return _refusal(
+                request,
+                RejectionReason.WORKER_TIMEOUT,
+                decision,
+                status=ReceiptStatus.EXPIRED,
+            )
+        # The model the CLI *reported*, when it reported one. ``spawn_out["model"]``
+        # is the id this runner passed in, reassigned to the effective model only
+        # when the gateway enforcement canary is armed — an independent dial — so
+        # in the default configuration re-checking it compared the tier catalog's
+        # answer against the requirement that produced it, and could not fail.
+        observed = str(spawn_out.get("served_model", "") or "")
+        served = observed or requested
+        if not request.model_requirement.satisfied_by(served):
+            logger.warning(
+                "implement_worker_runner: #%d %s asked for %s and was served %r; "
+                "refusing the receipt rather than recording the substitution",
+                task.id,
+                request.worker_role.value,
+                request.model_requirement.value,
+                served,
+            )
+            return _refusal(
+                request, RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE, decision
+            )
+        return None
 
     async def _fence_on_the_way_out(
         self,
@@ -829,6 +897,52 @@ def _unresolved_decision(route_policy_revision: str) -> PlanRouteDecision:
         requirement_kind="",
         requirement_value="",
     )
+
+
+_INADMISSIBLE_ROUTE_REASONS = frozenset(
+    {
+        "literal-family-unsatisfiable",
+        "concrete-model-not-approved",
+        "capability-unmapped",
+        "policy-forbids-principal",
+    }
+)
+"""Routing-policy reasons a retry can never fix. Mirrors the Plan actuator's set."""
+
+
+def _served_model(spawn_out: dict[str, object]) -> tuple[str, bool]:
+    """The model that served, and whether the CLI actually said so.
+
+    ``spawn_out["model"]`` is the id the runner passed in, reassigned to the
+    effective model only when the gateway enforcement canary is armed — an
+    independent dial. ``served_model`` is what the CLI's own result envelope
+    reported. When there is no observation the requested id is recorded and the
+    receipt says ``model_observed: false``, because a weak claim that admits the
+    gap is better evidence than one that looks strong (#11657).
+    """
+    observed = str(spawn_out.get("served_model", "") or "")
+    requested = str(spawn_out.get("model", "") or "")
+    return (observed or requested), bool(observed)
+
+
+def _refusal_for_spawn(spawn_out: dict[str, object]) -> RejectionReason:
+    """Why a spawn that never ran did not run, in the receipt's vocabulary.
+
+    The seam collapses a routing-policy refusal and a transport failure onto the
+    same soft ``rc=-1``, so without the reason it leaves behind both are filed as
+    ``ROUTE_UNAVAILABLE`` — whose own contract says a caretaker retry is correct
+    and an operator should look at the gateway. For an inadmissible route both
+    halves are wrong: the retry never succeeds and the thing to edit is a policy.
+
+    Classified on the REASON alone, never on the outcome: ``on_unavailable``
+    defaults to HOLD, so the ordinary ``provider_lock=zai-harness`` refusal
+    arrives HELD with ``literal-family-unsatisfiable``, and short-circuiting on
+    the outcome would turn it back into a retryable code (#11657).
+    """
+    reason = str(spawn_out.get("refused", "") or "")
+    if reason in _INADMISSIBLE_ROUTE_REASONS:
+        return RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+    return RejectionReason.ROUTE_UNAVAILABLE
 
 
 def _digest(text: str) -> str:

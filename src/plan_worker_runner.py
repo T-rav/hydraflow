@@ -61,7 +61,12 @@ from driver_contracts import (
 )
 from exception_classify import reraise_on_credit_or_bug
 from hydraflow_gateway.routing_policy import DecisionReason
-from plan_broker import PlanRouteOutcome, PlanRouteReason, resolve_plan_model
+from plan_broker import (
+    REFUSAL_CODES,
+    PlanRouteOutcome,
+    PlanRouteReason,
+    resolve_plan_model,
+)
 from runner_utils import run_lightweight_agent
 
 if TYPE_CHECKING:
@@ -97,25 +102,9 @@ thousand dispatches is not the replay this fence exists to catch — while an
 unbounded set on a long-lived component is a slow leak with no upper bound at
 all."""
 
-#: Which refusal each unsatisfiable tier resolution reports on the receipt.
-#: A table rather than branches so the mapping is one thing an operator can
-#: read, and so a new :class:`plan_broker.PlanRouteReason` fails loudly here
-#: (``_REFUSAL_CODES[...]`` raises) rather than defaulting to a plausible code.
-_REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
-    PlanRouteReason.PHASE_NOT_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
-    PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
-    PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
-    # A hold, not a rejection: the tier table is the fixable thing and the
-    # request was not inadmissible. Mapping it to the terminal code — which an
-    # earlier draft did — put two holds for the same reason under opposite
-    # receipt codes inside one module.
-    PlanRouteReason.CAPABILITY_UNMAPPED: RejectionReason.ROUTE_UNAVAILABLE,
-    PlanRouteReason.CONCRETE_MODEL_REQUESTED: (
-        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
-    ),
-}
+#: Re-exported from the module that owns the vocabulary, so the two actuators
+#: cannot drift on what a refusal means. See ``plan_broker.REFUSAL_CODES``.
+_REFUSAL_CODES = REFUSAL_CODES
 
 #: Routing-policy refusal reasons that mean *the request was inadmissible*
 #: rather than *something operational is missing*. These map to

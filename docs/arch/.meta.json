@@ -10,16 +10,16 @@
       "content_sha": "b2c2c8e82d5224ed76c3ce8ffe2295af9f96522e30f8d65969f111e31b7dcbe9"
     },
     "adr-falsifiability.md": {
-      "content_sha": "b3f639cc532aacbf65e54d86b2235f1fddba8de5d5fbf4d0baf16b243bd9c13c"
+      "content_sha": "301d5813fdcacb8bd027b47e04741269ac6ff6ba912c4c96a8969995a7d3b9c7"
     },
     "adr_xref.md": {
-      "content_sha": "757a19f22ba0404d8f7b416343881e71baf994125b8ebf506d746e76aec634ed"
+      "content_sha": "5970de38a0195dd663d0a7b987db3c9dbedb97c8677685601d055a1f042ed8a7"
     },
     "ai_system_inventory.md": {
       "content_sha": "bfbb25d8293ecc16a90b15d514cacbf56a6f31d57e4444c961c73a51e53476ab"
     },
     "changelog.md": {
-      "content_sha": "8db587acdc2aeeda5396b477813c63adf6fbde89051cd586c048c3ab32b4932d"
+      "content_sha": "b6a9bd861e592ce6b187ba441260fd88404bfecf38eda2b7d17553d7f6603073"
     },
     "coverage_matrix.md": {
       "content_sha": "a2f313db50a91f02f177d1a6c61824439da8050dd53ff8f42c9f4412dc43eaeb"
@@ -28,7 +28,7 @@
       "content_sha": "58e2f112e0c991d435026cddd89c1bf282891a3f3a389cd84ffdc8ccb62bb6ca"
     },
     "functional_areas.md": {
-      "content_sha": "f83319abd0865b55e7b1f487729df5f7f52d9a9c1d85b2706e32e6482ca3f95e"
+      "content_sha": "f0ef0fc82d9c4a0bd48d67b6ab8c4df8b8f25f1354840ea01a4e0536c451286c"
     },
     "gauntlet-calibration.md": {
       "content_sha": "a04ac9289e3456ea2de979818193f105d5d69d3d08c0f19d77e8008ec226502d"
@@ -43,7 +43,7 @@
       "content_sha": "e5466f3ee487fba9d593207283eaa8933dba06ca2160424a73afefdee60a19e2"
     },
     "modules.md": {
-      "content_sha": "0697873136d846ede849e5872c91b6cde52cf28ac3298b6d4a09df5475b22e3d"
+      "content_sha": "8f7ca8818eedba17e7b5a1e99206ab69190c0da6bb1027adb44a7a6bc7ed43e3"
     },
     "ports.md": {
       "content_sha": "c5694cc02e165570a5196a4f9443170f984d254d68710cbe41856bdd4da64cc0"
@@ -61,5 +61,5 @@
       "content_sha": "78a2ef4e47e3a115a705b96a21e5f94bc4a1e270e031c389c65089bba011be96"
     }
   },
-  "content_sha": "c7269d3b9b6b349d9c99972bcb5b362f0a122c2f63326670945d17508ba98182"
+  "content_sha": "e52e0d990215a33852992e4cb1099d769edf70f910ea09595db6f67161c557a9"
 }

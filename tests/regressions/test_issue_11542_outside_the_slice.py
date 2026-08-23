@@ -419,7 +419,7 @@ class TestOutsideTheBoundNothingMoves:
         assert spawns == []
         assert [row["dispatched"] for row in rows] == [[]]
 
-    async def test_the_plan_canary_alone_starts_no_writer(
+    async def test_the_plan_canary_alone_dispatches_no_writer(
         self, tmp_path: Path, shadow_baseline
     ) -> None:
         """The case this phase introduces: one dial armed, the other empty.
@@ -440,8 +440,13 @@ class TestOutsideTheBoundNothingMoves:
         )
         built = HydraFlowOrchestrator(settings)._svc.fable_director  # noqa: SLF001
 
+        # The actuator EXISTS — #11657 removed the conditional construction that
+        # made arming need a restart, and this phase inherited that correction.
+        # What keeps it inert is the predicate, so that is what is asserted; the
+        # behavioural half is the differential proof in this file's first class.
         assert built is not None
-        assert built._implement_dispatcher is None  # noqa: SLF001
+        assert built._implement_dispatcher is not None  # noqa: SLF001
+        assert built._implement_is_covered(DriverPhase.IMPLEMENT) is False  # noqa: SLF001
 
     async def test_clearing_the_dial_mid_run_stops_the_next_boundary(
         self, tmp_path: Path
@@ -583,7 +588,7 @@ class TestTheFenceIsConsultedAtTheDirectorSeam:
         await _observe(built)
         actuator = built._implement_dispatcher  # noqa: SLF001
 
-        assert actuator is not None and actuator.artifacts == []
+        assert actuator is not None and list(actuator.artifacts) == []
 
     async def test_an_unmoved_slice_does_become_context(self, tmp_path: Path) -> None:
         built, _log, _spawn, _git = _assemble(

@@ -616,7 +616,7 @@ class TestAWorkerThatCameBackToAMovedTreeIsRejected:
         }
 
     async def test_no_superseded_artifact_survives(self, moved) -> None:
-        assert moved["actuator"].artifacts == []
+        assert list(moved["actuator"].artifacts) == []
 
     async def test_the_deterministic_phase_is_unaffected(self, moved) -> None:
         # A rejected worker changes nothing about the pipeline: the label moved,

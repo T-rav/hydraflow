@@ -51,7 +51,7 @@ from plan_broker import CANARY_PHASE
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from director_broker import BrokerVerdict
     from driver_contracts import (
@@ -273,6 +273,26 @@ class CanaryDispatchMixin:
         self._remember(task, receipts)
         self._remember_implementer_spawns(task, receipts)
         return receipts
+
+    def _decision_ids(self, phase: DriverPhase) -> Mapping[str, str] | None:
+        """The tier decisions behind this boundary's receipts, from the actuator
+        that made them.
+
+        Keyed on the phase rather than reading the Plan actuator unconditionally.
+        Both actuators now always exist (#11657 removed the conditional
+        construction that made arming need a restart), so "whichever one is not
+        None" stopped being a valid way to ask which one ran — an IMPLEMENT
+        boundary would have joined its receipts against the Plan runner's map
+        and found nothing, silently emptying the very join the content-addressed
+        decision id exists for.
+        """
+        if self._implement_dispatcher is not None and self._covers(
+            self._implement_is_covered, phase
+        ):
+            return self._implement_dispatcher.last_decision_ids
+        if self._dispatcher is not None:
+            return self._dispatcher.last_decision_ids
+        return None
 
     async def _measure_worktree(
         self, task: Task, driver: IssueDriver, phase: DriverPhase

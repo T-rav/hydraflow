@@ -666,7 +666,6 @@ class TestTheTierChoiceIsTheSharedResolver:
             _request(),
             phase=DriverPhase.IMPLEMENT,
             route_policy_revision="route-v1",
-            lane_serves_anthropic=True,
         )
 
         assert decision.served_model == "claude-sonnet-4-6"
@@ -683,7 +682,6 @@ class TestTheTierChoiceIsTheSharedResolver:
             ),
             phase=DriverPhase.IMPLEMENT,
             route_policy_revision="route-v1",
-            lane_serves_anthropic=True,
         )
 
         assert (decision.served_model, decision.source) == (
@@ -691,12 +689,36 @@ class TestTheTierChoiceIsTheSharedResolver:
             PlanRouteSource.CAPABILITY_TABLE,
         )
 
-    def test_a_lane_that_cannot_serve_anthropic_rejects_before_any_spawn(self) -> None:
+    def test_a_tier_table_edit_cannot_answer_a_capability_with_glm(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The capability arm's fence, which matters most at IMPLEMENT.
+
+        ``ModelRequirement.satisfied_by`` returns True unconditionally for a
+        ``CAPABILITY``, by design — so a resolver that checked the *incoming
+        requirement* left that arm with no fence at all. #11657 found it on the
+        Plan side and moved the check onto the family the table resolved to.
+        The catalogued **debugger** is the one role in this phase that asks for
+        a capability rather than a family, so the arm the fix protects is
+        exactly the one this canary's correction workers take.
+        """
+        import plan_broker
+
+        monkeypatch.setitem(plan_broker.PLAN_TIER_CATALOG, "claude-opus", "glm-5.3")
+
         decision = resolve_implement_model(
-            _request(),
+            _request(
+                role=WorkerRole.DEBUGGER,
+                kind=ModelRequirementKind.CAPABILITY,
+                value="high-reasoning",
+            ),
             phase=DriverPhase.IMPLEMENT,
             route_policy_revision="route-v1",
-            lane_serves_anthropic=False,
+        )
+
+        assert (decision.outcome, decision.reason) == (
+            PlanRouteOutcome.REJECTED,
+            PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE,
         )
 
         assert (decision.outcome, decision.reason) == (
@@ -714,7 +736,6 @@ class TestTheTierChoiceIsTheSharedResolver:
             _request(),
             phase=DriverPhase.PLAN,
             route_policy_revision="route-v1",
-            lane_serves_anthropic=True,
         )
 
         assert decision.reason is PlanRouteReason.PHASE_NOT_IMPLEMENT
@@ -724,7 +745,6 @@ class TestTheTierChoiceIsTheSharedResolver:
             _request(role=WorkerRole.PLANNER),
             phase=DriverPhase.IMPLEMENT,
             route_policy_revision="route-v1",
-            lane_serves_anthropic=True,
         )
 
         assert decision.reason is PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_IMPLEMENT
@@ -739,13 +759,11 @@ class TestTheTierChoiceIsTheSharedResolver:
             _request(role=WorkerRole.EXPLORER),
             phase=DriverPhase.IMPLEMENT,
             route_policy_revision="route-v1",
-            lane_serves_anthropic=True,
         )
         plan = resolve_plan_model(
             _request(role=WorkerRole.EXPLORER),
             phase=DriverPhase.PLAN,
             route_policy_revision="route-v1",
-            lane_serves_anthropic=True,
         )
 
         assert implement.served_model == plan.served_model
@@ -757,7 +775,6 @@ class TestTheTierChoiceIsTheSharedResolver:
             _request(),
             phase=DriverPhase.IMPLEMENT,
             route_policy_revision="route-v1",
-            lane_serves_anthropic=True,
         )
 
         assert decision.catalog_revision == PLAN_TIER_CATALOG_REVISION

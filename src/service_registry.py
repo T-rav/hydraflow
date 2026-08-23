@@ -733,17 +733,27 @@ def _build_fable_director(
         is_covered=lambda phase: plan_canary_covers(config, phase=phase),
         latch=PlanCanaryLatch(ttl_seconds=CANARY_SLOT_TTL_SECONDS),
         # --- the Implement canary (#11542) --------------------------------
-        # A second actuator behind a second dial. Same object-graph standard:
-        # an operator who has armed only the Plan canary has no implement
-        # dispatcher in their process, so nothing here can measure a worktree,
-        # take a writer lease, or start a writer.
-        implement_dispatcher=(
-            _build_implement_worker_runner(
-                config=config, subprocess_runner=subprocess_runner
-            )
-            if config.fable_implement_canary_armed()
-            else None
+        # Built whenever a director is selected, and gated only by the live
+        # predicate below — the same correction #11657 had to make to the Plan
+        # actuator directly above, and for the same reason. This phase copied
+        # the conditional-construction shape before that fix existed: it looks
+        # like a stronger default-off proof and is in fact a bug, because the
+        # dial is live and empty by default, so a factory booted disarmed — the
+        # documented starting state — would have had no dispatcher to arm and
+        # naming a repository would have silently done nothing until a restart.
+        # Both directions of a live dial have to work, or it is not live.
+        #
+        # Default-off is proven where it is actually true: Classic and the
+        # deterministic controller build no director and therefore no actuator,
+        # and a director whose dial is empty dispatches nothing — proven
+        # differentially in tests/regressions/test_issue_11542_outside_the_slice.py
+        # rather than by an absent object.
+        implement_dispatcher=_build_implement_worker_runner(
+            config=config, subprocess_runner=subprocess_runner
         ),
+        # Live, so arming reaches the NEXT boundary and clearing stops it, with
+        # no restart in either direction. This predicate, not the dispatcher's
+        # existence, is what lets a writer run.
         implement_is_covered=lambda phase: implement_canary_covers(config, phase=phase),
     )
 

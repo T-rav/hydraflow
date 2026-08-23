@@ -359,7 +359,150 @@ class TestOneRequestBecomesOneChild:
 
         await _dispatch(runner, [_request()])
 
-        assert runner.artifacts == []
+        assert list(runner.artifacts) == []
+
+    async def test_a_timed_out_child_is_expired_not_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        """The seam never raises ``TimeoutError`` — it returns a soft rc=-1.
+
+        So the ``except TimeoutError`` arm is unreachable in production, and
+        without the seam's own ``timed_out`` signal a child that blew its
+        deadline was recorded ACCEPTED with an unusable artifact. #11657 found
+        this on the Plan actuator; the same unreachable arm had already been
+        copied here.
+        """
+
+        class TimedOutSpawn:
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                spawn_out = kwargs["spawn_out"]
+                spawn_out.update({"model": kwargs["model"], "timed_out": True})
+                return SimpleResult(stderr="timed out after 240s", returncode=-1)
+
+        runner, _git = _build(tmp_path, spawn=TimedOutSpawn())
+
+        receipts = await _dispatch(runner, [_request()])
+
+        assert (receipts[0].status, receipts[0].reason_code) == (
+            ReceiptStatus.EXPIRED,
+            RejectionReason.WORKER_TIMEOUT,
+        )
+
+    async def test_an_inadmissible_route_is_not_reported_as_retryable(
+        self, tmp_path: Path
+    ) -> None:
+        """A routing policy that refuses this spawn will refuse it again.
+
+        ``ROUTE_UNAVAILABLE``'s own contract says a caretaker retry is correct
+        and an operator should look at the gateway. For an inadmissible route
+        both halves are wrong: the thing to edit is a policy.
+        """
+
+        class RefusedSpawn:
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                kwargs["spawn_out"].update(
+                    {
+                        "refused": "literal-family-unsatisfiable",
+                        "refused_outcome": "held",
+                    }
+                )
+                return SimpleResult(stderr="refused", returncode=-1)
+
+        runner, _git = _build(tmp_path, spawn=RefusedSpawn())
+
+        receipts = await _dispatch(runner, [_request()])
+
+        assert receipts[0].reason_code is (
+            RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+        )
+
+    async def test_a_transport_failure_stays_retryable(self, tmp_path: Path) -> None:
+        # The contrast, and the reason the classifier reads the REASON rather
+        # than the outcome: a HELD outcome with no policy reason is a transport
+        # failure, and a retry is exactly right for it.
+        class UnreachableSpawn:
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                return SimpleResult(stderr="connection refused", returncode=-1)
+
+        runner, _git = _build(tmp_path, spawn=UnreachableSpawn())
+
+        receipts = await _dispatch(runner, [_request()])
+
+        assert receipts[0].reason_code is RejectionReason.ROUTE_UNAVAILABLE
+
+    async def test_an_unobserved_model_is_recorded_as_unobserved(
+        self, tmp_path: Path
+    ) -> None:
+        """A weak claim that says so beats one that looks strong.
+
+        ``spawn_out["model"]`` is the id this runner passed in; it only becomes
+        the effective model when the *gateway* enforcement canary is armed — an
+        independent dial. So in the default configuration the served-model
+        re-check compared the tier catalog's answer against the requirement
+        that produced it and could not fail.
+        """
+        runner, _git = _build(tmp_path, spawn=SpawnRecorder())
+
+        await _dispatch(runner, [_request()])
+
+        assert runner.artifacts[0].model_observed is False
+
+    async def test_a_model_the_cli_reported_is_recorded_as_observed(
+        self, tmp_path: Path
+    ) -> None:
+        # The contrast: with a real observation the receipt says so, so the
+        # assertion above is not satisfied by the flag being False always.
+        class ReportingSpawn:
+            async def __call__(self, **kwargs: Any) -> SimpleResult:
+                kwargs["spawn_out"].update(
+                    {
+                        "model": kwargs["model"],
+                        "served_model": kwargs["model"],
+                        "usage": {"input_tokens": 10, "output_tokens": 2},
+                    }
+                )
+                return SimpleResult(stdout="## Where\n\nthe arm", returncode=0)
+
+        runner, _git = _build(tmp_path, spawn=ReportingSpawn())
+
+        await _dispatch(runner, [_request()])
+
+        assert runner.artifacts[0].model_observed is True
+
+    async def test_the_decision_id_is_published_for_the_receipt_join(
+        self, tmp_path: Path
+    ) -> None:
+        # The tier decision is content-addressed precisely so a receipt can be
+        # joined to what authorised it. #11657 found that join carried by
+        # nothing on the Plan side; the same gap had been copied here.
+        runner, _git = _build(tmp_path)
+
+        await _dispatch(runner, [_request()])
+
+        assert runner.last_decision_ids["req-1"] == runner.decisions[0].decision_id
+
+    async def test_the_decision_map_does_not_grow_across_batches(
+        self, tmp_path: Path
+    ) -> None:
+        # It describes THIS boundary's receipts. Carrying the previous batch's
+        # ids forward would join a receipt to a decision made for another one.
+        runner, _git = _build(tmp_path)
+
+        await _dispatch(runner, [_request(request_id="req-1", key="key-1")])
+        await _dispatch(runner, [_request(request_id="req-2", key="key-2")])
+
+        assert list(runner.last_decision_ids) == ["req-2"]
+
+    async def test_the_retained_records_are_bounded(self, tmp_path: Path) -> None:
+        # This object lives for the whole run, and both accumulators were
+        # unbounded and read by nothing — the same class the idempotency-key
+        # set had already been bounded against.
+        from implement_worker_runner import MAX_RETAINED_RECORDS
+
+        runner, _git = _build(tmp_path)
+
+        assert runner.decisions.maxlen == MAX_RETAINED_RECORDS
+        assert runner.artifacts.maxlen == MAX_RETAINED_RECORDS
 
     async def test_a_refused_receipt_names_no_served_model(
         self, tmp_path: Path
@@ -516,7 +659,7 @@ class TestALateWorkerIsRejectedNotDropped:
 
         await _dispatch(runner, [_request()])
 
-        assert runner.artifacts == []
+        assert list(runner.artifacts) == []
 
     async def test_a_driver_that_recovered_mid_run_supersedes_its_worker(
         self, tmp_path: Path

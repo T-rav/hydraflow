@@ -89,36 +89,73 @@ class TestNoWriterActuatorExistsUnlessArmed:
     ) -> None:
         assert _built_director(_config(tmp_path, **dials)) is None
 
-    def test_a_shadow_director_alone_builds_no_writer_actuator(
-        self, tmp_path: Path
-    ) -> None:
-        assert _writer_actuator(_directed(tmp_path)) is None
+    def test_a_shadow_director_alone_dispatches_no_writer(self, tmp_path: Path) -> None:
+        """Selecting the director is #11537's decision; naming an implement
+        canary repository is this phase's, and an operator who has made only
+        the first must never have a writer dispatched.
 
-    def test_the_plan_canary_alone_builds_no_writer_actuator(
-        self, tmp_path: Path
-    ) -> None:
-        # The load-bearing one for THIS phase. An operator who armed #11541's
-        # dial and nothing else must have no object in their process that can
-        # measure a worktree, take a writer lease, or start a writer.
+        Asserted on the **predicate**, not on the actuator being absent. The
+        first version of this file asserted the absence, and #11657 proved that
+        absence is a bug rather than a proof: the dial is live and empty by
+        default, so a factory booted disarmed had no actuator to arm and naming
+        a repository would have done nothing until a restart. This phase copied
+        that shape before the fix existed. The behavioural proof lives in
+        ``tests/regressions/test_issue_11542_outside_the_slice.py``, which runs
+        the fully wired director over an uncovered boundary and requires
+        byte-identical evidence, zero spawns and zero git reads.
+        """
+        settings = _directed(tmp_path)
+        _orchestrator_for(settings)
+
+        assert implement_canary_covers(settings, phase=DriverPhase.IMPLEMENT) is False
+
+    def test_the_plan_canary_alone_dispatches_no_writer(self, tmp_path: Path) -> None:
+        # The load-bearing one for THIS phase: arming #11541's dial must arm
+        # nothing about this one. Still a predicate assertion, for the reason
+        # above — the actuator now exists in both cases and is inert in one.
         settings = _directed(tmp_path, fable_plan_canary_repo=CANARY_REPO)
+        _orchestrator_for(settings)
 
-        assert _writer_actuator(settings) is None
+        assert implement_canary_covers(settings, phase=DriverPhase.IMPLEMENT) is False
 
-    def test_a_writer_dial_naming_another_repository_builds_none(
+    def test_a_writer_dial_naming_another_repository_dispatches_nothing(
         self, tmp_path: Path
     ) -> None:
         settings = _directed(tmp_path, fable_implement_canary_repo="acme/other")
+        _orchestrator_for(settings)
 
-        assert _writer_actuator(settings) is None
+        assert implement_canary_covers(settings, phase=DriverPhase.IMPLEMENT) is False
 
-    def test_naming_this_repository_builds_the_writer_actuator(
+    def test_a_director_is_built_with_its_writer_actuator_ready_but_inert(
         self, tmp_path: Path
     ) -> None:
-        # The mirror image, so the four assertions above cannot pass by the
-        # feature being broken rather than off.
-        settings = _directed(tmp_path, fable_implement_canary_repo=CANARY_REPO)
+        # The shape #11657 established: the actuator is ALWAYS constructed
+        # under a director, so arming is live in both directions. What makes it
+        # inert is the predicate, and the two are asserted together so neither
+        # can be mistaken for the other.
+        settings = _directed(tmp_path)
 
         assert _writer_actuator(settings) is not None
+        assert implement_canary_covers(settings, phase=DriverPhase.IMPLEMENT) is False
+
+    def test_arming_reaches_the_next_boundary_without_a_restart(
+        self, tmp_path: Path
+    ) -> None:
+        # The direction the old shape could not do at all: a factory booted
+        # disarmed, then armed live. The predicate the ORCHESTRATOR built is
+        # what is asked, so this fails if that wiring goes away.
+        settings = _directed(tmp_path)
+        orchestrator = _orchestrator_for(settings)
+        director = orchestrator._svc.fable_director  # noqa: SLF001
+        assert director is not None
+        before = director._implement_is_covered(DriverPhase.IMPLEMENT)  # noqa: SLF001
+
+        object.__setattr__(settings, "fable_implement_canary_repo", CANARY_REPO)
+
+        assert (before, director._implement_is_covered(DriverPhase.IMPLEMENT)) == (  # noqa: SLF001
+            False,
+            True,
+        )
 
     def test_arming_the_writer_canary_introduces_no_loop(self, tmp_path: Path) -> None:
         # It hangs off the driver's boundary like the observer and the Plan

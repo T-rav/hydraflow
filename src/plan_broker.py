@@ -57,6 +57,7 @@ from driver_contracts import (
     DriverPhase,
     ModelRequirement,
     ModelRequirementKind,
+    RejectionReason,
     WorkerRole,
 )
 from hydraflow_gateway.routing_policy import canonicalize_repo
@@ -203,6 +204,34 @@ class PlanRouteReason(StrEnum):
     quietly returned ``SELECTED`` for a requirement kind it does not handle
     would be the silent-fallback shape (#10053) inside the resolver.
     """
+
+
+#: Which deterministic receipt code each refusal reason reports.
+#:
+#: Lives beside the enum rather than in an actuator because there are now two
+#: actuators bound to one vocabulary, and #11542 proved the hazard by adding two
+#: members here and reddening the Plan actuator's own totality test. A table per
+#: consumer is a drift waiting for the next phase; a table per *vocabulary* is
+#: total by construction, and a new reason reddens one test rather than N.
+REFUSAL_CODES: dict[PlanRouteReason, RejectionReason] = {
+    PlanRouteReason.PHASE_NOT_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
+    PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_PLAN: RejectionReason.ROLE_PHASE_FORBIDDEN,
+    PlanRouteReason.PHASE_NOT_IMPLEMENT: RejectionReason.ROLE_PHASE_FORBIDDEN,
+    PlanRouteReason.ROLE_NOT_CATALOGUED_FOR_IMPLEMENT: (
+        RejectionReason.ROLE_PHASE_FORBIDDEN
+    ),
+    PlanRouteReason.LITERAL_FAMILY_UNSATISFIABLE: (
+        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+    ),
+    # A hold, not a rejection: the tier table is the fixable thing and the
+    # request was not inadmissible. Mapping it to the terminal code — which an
+    # earlier draft did — put two holds for the same reason under opposite
+    # receipt codes inside one module.
+    PlanRouteReason.CAPABILITY_UNMAPPED: RejectionReason.ROUTE_UNAVAILABLE,
+    PlanRouteReason.CONCRETE_MODEL_REQUESTED: (
+        RejectionReason.MODEL_REQUIREMENT_UNSATISFIABLE
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)

@@ -1503,15 +1503,22 @@ class HydraFlowConfig(BaseModel):
         ),
     )
     fable_implement_worker_timeout_seconds: int = Field(
-        default=900,
+        default=240,
         ge=30,
-        le=3600,
+        le=900,
         description=(
-            "Wall-clock budget for one brokered IMPLEMENT batch. A child that "
-            "exceeds what the batch has left is killed with its process group "
-            "and its receipt is EXPIRED. Longer than the Plan default because "
-            "a correction worker reads a diff rather than a goal. Ignored "
-            "unless fable_implement_canary_repo names this repository."
+            "Wall-clock budget for one brokered IMPLEMENT BATCH, shared by its "
+            "children. A child that exceeds what the batch has left is killed "
+            "with its process group and its receipt is EXPIRED. Deliberately "
+            "the SAME default and ceiling as the Plan batch, not larger: this "
+            "dispatch is also awaited inside the allocator tick, so the figure "
+            "is exactly how long one armed IMPLEMENT boundary can delay every "
+            "other driver in the fleet. An earlier draft set 900s/3600s on the "
+            "reasoning that a correction worker reads a diff rather than a "
+            "goal — true, and not a licence to spend it on that tick. ADR-0137 "
+            "makes moving dispatch off the tick the precondition for the batch "
+            "growing, and this phase did not build it. Ignored unless "
+            "fable_implement_canary_repo names this repository."
         ),
     )
 

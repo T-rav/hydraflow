@@ -729,7 +729,9 @@ refused by the fence if anything moved.
 
 **The canary still adds workers, not authority.** The deterministic
 `ImplementPhase` runs, gates, commits and does not push, exactly as before —
-`src/implement_phase.py` is untouched by this phase. A brokered implementer or
+the deterministic implement phase is untouched by this phase (#11658 moved it
+into its own package while this one was in flight, and the two do not overlap).
+A brokered implementer or
 debugger produces a bounded correction proposal beside it, as an artifact and a
 receipt. `tests/architecture/test_director_no_authority.py` pins that
 `implement_worker_runner` reaches no label mutation, no merge, no convergence

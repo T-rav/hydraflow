@@ -445,9 +445,7 @@ class FableDirector(CanaryDispatchMixin):
             command=command,
             verdict=verdict,
             receipts=receipts,
-            decisions=(
-                None if self._dispatcher is None else self._dispatcher.last_decision_ids
-            ),
+            decisions=self._decision_ids(phase),
         )
 
     # -- capsule construction ----------------------------------------------
