@@ -75,7 +75,13 @@ UNOBSERVED_DIGEST = "unobserved"
 ``WriterLease`` requires them, and #11537 deliberately left real measurement to
 #11542. Outside that canary's bound there is still nothing to measure, so rather
 than fabricate a plausible-looking sha the lease carries a value that reads as
-what it is. Re-exported from :mod:`fable_director` so it keeps one identity.
+what it is.
+
+Defined here rather than in :mod:`fable_director` because the code that mints
+it moved here with the actuator. :data:`implement_broker.UNMEASURED_TOKENS`
+matches this exact string as well as its own, so a ``WorktreeState`` built
+from these placeholders reads as unmeasured rather than as a tree somebody
+looked at.
 """
 
 

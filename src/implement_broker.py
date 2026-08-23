@@ -532,7 +532,7 @@ def writer_lease_for(
     """Mint the single-writer lease for *lease*'s driver at *state*'s digests.
 
     The one place a :class:`driver_contracts.WriterLease` is built with real
-    measurements, replacing ``fable_director._unheld_writer_lease``'s
+    measurements, replacing ``director_dispatch._unheld_writer_lease``'s
     ``"unobserved"`` placeholders for boundaries inside the canary. The
     identity and epoch come from the driver's own lease rather than from
     anywhere else, because a writer lease at a different epoch is exactly what
