@@ -31,9 +31,9 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0021 | `src.config`, `src.data_migration`, `src.file_util`, `src.metrics_manager`, `src.state._session` | `pytest:tests/test_state_persistence.py`, `pytest:tests/test_event_persistence.py`, `pytest:tests/test_data_migration_d2.py` |
 | ADR-0022 | `src.config`, `src.issue_store` | `pytest:tests/test_integration_pipeline.py` |
 | ADR-0023 | — | `pytest:tests/architecture/test_adr0023_test_local_class_instantiation.py::test_no_dead_test_local_classes` |
-| ADR-0024 | `src.agent`, `src.implement_phase._phase`, `src.state.__init__` | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
+| ADR-0024 | `src.agent._runner`, `src.implement_phase._phase`, `src.state.__init__` | `pytest:tests/test_implement_phase.py`, `pytest:tests/scenarios/fakes/test_prior_failure_propagation.py` |
 | ADR-0025 | `src.models`, `src.reviewer` | `Review checklist — reviewers verify symmetric field-assertion coverage (all three legs per method) by searching for the field name across test functions for the affected methods (see "Review checklist" under Consequences).` |
-| ADR-0027 | `src.agent`, `src.reviewer` | `pytest:tests/architecture/test_adr0027_duplicate_model_class_definitions.py::test_no_dead_duplicate_model_class_definitions` |
+| ADR-0027 | `src.agent._runner`, `src.reviewer` | `pytest:tests/architecture/test_adr0027_duplicate_model_class_definitions.py::test_no_dead_duplicate_model_class_definitions` |
 | ADR-0028 | — | `pytest:tests/test_report_event_flow.py` |
 | ADR-0029 | — | `pytest:tests/test_caretaker_loop_wiring.py` |
 | ADR-0030 | `src.dashboard_routes._routes` | `pytest:tests/architecture/test_adr0030_dashboard_routes_decomposition.py::test_create_router_wires_each_named_domain_register` |
@@ -51,8 +51,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0042 | — | `pytest:tests/architecture/test_adr0042_two_tier_branch_rulesets.py::test_main_ruleset_is_merge_commit_only` |
 | ADR-0043 | `src.docker_runner`, `src.preflight.__init__` | `pytest:tests/test_preflight_plugins.py`, `pytest:tests/test_phase_skill_filter.py` |
 | ADR-0044 | `src.orchestrator`, `src.ports` | `scripts/hydraflow_audit/* (structural/behavioural checks), tests/test_planner.py::test_build_prompt_includes_principles_checklist, tests/test_reviewer.py::test_build_review_prompt_includes_hydraflow_principles_checks (prompt-level enforcement in plan + review phases)` |
-| ADR-0045 | `src.config`, `src.contract_refresh_loop`, `src.corpus_learning_loop`, `src.dashboard_routes._cost_rollups`, `src.discover_runner`, `src.fake_coverage_auditor_loop`, `src.flake_tracker_loop`, `src.health_monitor_loop`, `src.models`, `src.orchestrator`, `src.pr_manager`, `src.principles_audit_loop`, `src.rc_budget_loop`, `src.report_issue_loop`, `src.service_registry`, `src.shape_runner`, `src.skill_prompt_eval_loop`, `src.staging_bisect_loop`, `src.trust_fleet_sanity_loop`, `src.wiki_rot_detector_loop` | `pytest:tests/test_trust_fleet_sanity_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_trust_fleet_anomaly_detectors.py` |
-| ADR-0046 | `src.health_monitor_loop`, `src.trust_fleet_sanity_loop` | `'src/trust_fleet_sanity_loop.py:TrustFleetSanityLoop' (the meta-observer); 'src/health_monitor_loop.py:HealthMonitorLoop._check_sanity_loop_staleness' (the dead-man-switch watching the meta-observer); 'tests/test_health_monitor_sanity_stall.py' (runtime enforcement test).` |
+| ADR-0045 | `src.config`, `src.contract_refresh_loop`, `src.corpus_learning_loop`, `src.dashboard_routes._cost_rollups`, `src.discover_runner`, `src.fake_coverage_auditor_loop`, `src.flake_tracker_loop`, `src.health_monitor_loop._loop`, `src.models`, `src.orchestrator`, `src.pr_manager`, `src.principles_audit_loop`, `src.rc_budget_loop`, `src.report_issue_loop`, `src.service_registry`, `src.shape_runner`, `src.skill_prompt_eval_loop`, `src.staging_bisect_loop`, `src.trust_fleet_sanity_loop`, `src.wiki_rot_detector_loop` | `pytest:tests/test_trust_fleet_sanity_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/test_trust_fleet_anomaly_detectors.py` |
+| ADR-0046 | `src.health_monitor_loop._stall`, `src.trust_fleet_sanity_loop` | `'src/trust_fleet_sanity_loop.py:TrustFleetSanityLoop' (the meta-observer); 'src/health_monitor_loop/_stall.py:HealthMonitorStallMixin._check_sanity_loop_staleness' (the dead-man-switch watching the meta-observer); 'tests/test_health_monitor_sanity_stall.py' (runtime enforcement test).` |
 | ADR-0047 | `src.contract_diff`, `src.contract_recording`, `src.contract_refresh_loop` | `make:trust-contracts`, `pytest:tests/trust/contracts/test_fake_github_contract.py` |
 | ADR-0048 | `src.staging_bisect_loop` | `'src/staging_bisect_loop.py' (the loop that performs the auto-revert); 'tests/test_staging_bisect_loop.py'; 'tests/scenarios/test_staging_bisect_scenario.py'; 'tests/test_staging_bisect_e2e.py' (three-commit fixture); watchdog in '_check_pending_watchdog'; guardrail in '_check_guardrail_and_maybe_escalate'.` |
 | ADR-0049 | `src.base_background_loop`, `src.bg_worker_manager` | `pytest:tests/test_loop_kill_switch_completeness.py`, `pytest:tests/regressions/test_canonical_killswitch.py` |
@@ -72,7 +72,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0063 | `src.auto_agent_preflight_loop`, `src.discover_runner`, `src.implement_phase._abort`, `src.implement_phase._pr`, `src.plan_phase`, `src.review_phase._visual_gate`, `src.triage_phase` | — |
 | ADR-0064 | `src.adversarial_labels`, `src.adversarial_retry_loop`, `src.assumption_surfacer`, `src.events`, `src.models`, `src.pending_concerns`, `src.plan_council`, `src.plan_council_prompts`, `src.plan_phase`, `src.post_merge_handler`, `src.spec_ac_generator`, `src.spec_judge`, `src.wiki_carryover` | `pytest:tests/test_adversarial_retry_loop.py` |
 | ADR-0065 | `src.code_grooming_loop`, `src.config`, `src.skill_registry` | `pytest:tests/architecture/test_adr0065_code_grooming_removed.py::test_no_live_code_grooming_references_in_src_or_tests` |
-| ADR-0066 | `src.agent`, `src.base_runner`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
+| ADR-0066 | `src.agent._runner`, `src.base_runner`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0067 | `src.issue_fetcher`, `src.ports` | `(none) — structural subtype check planned for 'tests/test_ports.py' in follow-up` |
 | ADR-0068 | `src.ports`, `src.term_proposer_loop`, `src.term_pruner_loop` | `(none) — structural subtype check planned in follow-up` |
 | ADR-0069 | `src.ports`, `src.workspace_gc_landed_safety`, `src.workspace_gc_loop` | `tests/test_workspace_gc_loop.py, tests/regressions/test_workspace_gc_landed_safety.py, tests/regressions/test_issue_11503.py, tests/regressions/test_issue_11507.py, tests/regressions/test_issue_11570.py, tests/regressions/test_issue_11571.py, tests/architecture/test_workspace_gc_landed_guard.py, tests/scenarios/test_workspace_gc_landed_guard_scenario.py` |
@@ -98,7 +98,7 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0089 | `src.memory_backlog_loop`, `src.memory_backlog_mirror` | `pytest:tests/test_memory_backlog_loop.py`, `pytest:tests/test_loop_wiring_completeness.py`, `pytest:tests/architecture/test_functional_area_coverage.py` |
 | ADR-0090 | `src.dashboard_routes._atlas_routes`, `src.ubiquitous_language` | `pytest:tests/test_atlas_routes.py` |
 | ADR-0091 | — | — |
-| ADR-0092 | `src.agent`, `src.preflight.runner`, `src.untrusted_text` | `pytest:tests/test_untrusted_text.py`, `pytest:tests/test_preflight_untrusted_fencing.py`, `pytest:tests/test_agent_cli.py`, `pytest:tests/test_agent_advanced.py` |
+| ADR-0092 | `src.agent._prompts`, `src.preflight.runner`, `src.untrusted_text` | `pytest:tests/test_untrusted_text.py`, `pytest:tests/test_preflight_untrusted_fencing.py`, `pytest:tests/test_agent_cli.py`, `pytest:tests/test_agent_advanced.py` |
 | ADR-0093 | `src.base_background_loop`, `src.fitness_scorecard_loop`, `src.loop_fitness` | `pytest:tests/test_loop_fitness_completeness.py` |
 | ADR-0094 | `src.config`, `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase`, `src.state._convergence` | `pytest:tests/test_convergence_ledger.py`, `pytest:tests/test_convergence_gate.py`, `pytest:tests/scenarios/test_convergence_review_mockworld.py`, `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
 | ADR-0095 | `src.convergence_gate`, `src.models`, `src.review_advisor`, `src.review_phase._phase` | `pytest:tests/test_review_advisor.py`, `pytest:tests/test_review_phase_core.py::TestApproveConvergenceGate`, `pytest:tests/scenarios/test_convergence_review_mockworld.py`, `pytest:tests/sandbox_scenarios/scenarios/s50_convergence_review.py` |
@@ -109,12 +109,12 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | ADR-0100 | `src.adr_conformance`, `src.adr_conformance_loop`, `src.adr_index` | `pytest:tests/test_adr_conformance_coverage.py` |
 | ADR-0101 | `src._mock_spec_detector`, `src.auto_pr`, `src.disturbance.baseline`, `src.disturbance.burndown`, `src.disturbance.detectors.base`, `src.disturbance.detectors.mock_spec`, `src.disturbance.detectors.suppressions`, `src.disturbance.gate`, `src.disturbance.registry`, `src.disturbance_dampener_loop` | `tests/test_disturbance_ratchet.py, tests/test_disturbance_dampener_loop.py` |
 | ADR-0102 | `src.config`, `src.convergence_recording`, `src.review_phase._phase` | `pytest:tests/test_review_phase_core.py` |
-| ADR-0103 | `src.agent`, `src.config`, `src.discover_completeness`, `src.discover_runner`, `src.hitl_runner`, `src.human_steering`, `src.human_steering_loop`, `src.models`, `src.orchestrator_hitl`, `src.planner`, `src.review_advisor`, `src.reviewer`, `src.service_registry`, `src.shape_coherence`, `src.shape_runner` | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
+| ADR-0103 | `src.agent._runner`, `src.config`, `src.discover_completeness`, `src.discover_runner`, `src.hitl_runner`, `src.human_steering`, `src.human_steering_loop`, `src.models`, `src.orchestrator_hitl`, `src.planner`, `src.review_advisor`, `src.reviewer`, `src.service_registry`, `src.shape_coherence`, `src.shape_runner` | `pytest:tests/test_human_steering.py`, `pytest:tests/test_human_steering_loop.py`, `pytest:tests/test_human_steering_actuator.py`, `pytest:tests/test_human_steering_state.py`, `pytest:tests/test_orchestrator_human_steering.py`, `pytest:tests/test_config_env.py` |
 | ADR-0104 | — | `pytest:tests/test_auto_tighten_invariant.py` |
 | ADR-0105 | — | `'tests/test_issue_decomposer.py'; 'tests/test_decomposition_council.py'; 'tests/test_auto_agent_decompose_terminal.py'; 'tests/test_decomposition_depth_cap.py'; 'tests/scenarios/test_decompose_to_converge_scenario.py'; 'tests/sandbox_scenarios/scenarios/s54_decompose_to_converge.py'. Nested-lineage follow-up (#9757): 'tests/regressions/test_epic_lineage_nested_convergence.py'; 'tests/regressions/test_epic_sweeper_lineage_gate.py'; 'tests/regressions/test_epic_manager_lineage_propagation.py'; 'tests/sandbox_scenarios/scenarios/s55_nested_decompose.py'.` |
-| ADR-0106 | `src.base_background_loop`, `src.config`, `src.event_loop_watchdog`, `src.health_monitor_loop`, `src.orchestrator`, `src.settings_registry` | `pytest:tests/regressions/test_issue_9552.py`, `pytest:tests/regressions/test_issue_11604.py` |
+| ADR-0106 | `src.base_background_loop`, `src.config`, `src.event_loop_watchdog`, `src.health_monitor_loop._stall`, `src.orchestrator`, `src.settings_registry` | `pytest:tests/regressions/test_issue_9552.py`, `pytest:tests/regressions/test_issue_11604.py` |
 | ADR-0107 | `src.discover_runner`, `src.models`, `src.plan_phase_prepass`, `src.shape_runner`, `src.triage_phase` | `pytest:tests/architecture/test_adr0107_discover_shape_collapsed.py::test_pipeline_stage_has_no_discover_or_shape` |
-| ADR-0108 | `src.event_loop_watchdog`, `src.health_monitor_loop`, `src.issue_fetcher`, `src.issue_store`, `src.mockworld.fakes.fake_clock`, `src.mockworld.sandbox_main`, `src.models`, `src.phase_utils`, `src.retrospective_queue`, `src.subprocess_util` | — |
+| ADR-0108 | `src.event_loop_watchdog`, `src.health_monitor_loop._decisions`, `src.issue_fetcher`, `src.issue_store`, `src.mockworld.fakes.fake_clock`, `src.mockworld.sandbox_main`, `src.models`, `src.phase_utils`, `src.retrospective_queue`, `src.subprocess_util` | — |
 | ADR-0109 | `src.agent_cli`, `src.exception_classify`, `src.ports`, `src.review_advisor`, `src.review_phase._phase`, `src.reviewer`, `src.ultra_review` | `pytest:tests/test_ultra_review.py` |
 | ADR-0110 | `src.base_runner`, `src.gateway_coverage_loop`, `src.hydraflow_gateway.app`, `src.runner_utils`, `src.subprocess_util` | `pytest:tests/test_config_env.py::TestEnvVarOverrideTable::test_env_bool_override_truthy_values` |
 | ADR-0111 | `src.flows.adapters`, `src.flows.flow` | `pytest:tests/test_flows.py` |
@@ -166,7 +166,8 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.adr_reviewer_loop` | ADR-0079 |
 | `src.adversarial_labels` | ADR-0064 |
 | `src.adversarial_retry_loop` | ADR-0064 |
-| `src.agent` | ADR-0024, ADR-0027, ADR-0066, ADR-0092, ADR-0103 |
+| `src.agent._prompts` | ADR-0092 |
+| `src.agent._runner` | ADR-0024, ADR-0027, ADR-0066, ADR-0103 |
 | `src.agent_cli` | ADR-0004, ADR-0109 |
 | `src.arch._models` | ADR-0114 |
 | `src.arch.extractors.events` | ADR-0114 |
@@ -261,7 +262,9 @@ Bidirectional index between ADRs and the source modules they cite. Powers "Why t
 | `src.github_cache_loop` | ADR-0076 |
 | `src.goal_supervisor_loop` | ADR-0124 |
 | `src.harness_insights` | ADR-0099 |
-| `src.health_monitor_loop` | ADR-0045, ADR-0046, ADR-0106, ADR-0108 |
+| `src.health_monitor_loop._decisions` | ADR-0108 |
+| `src.health_monitor_loop._loop` | ADR-0045 |
+| `src.health_monitor_loop._stall` | ADR-0046, ADR-0106 |
 | `src.hitl_runner` | ADR-0103 |
 | `src.human_steering` | ADR-0103 |
 | `src.human_steering_loop` | ADR-0103 |

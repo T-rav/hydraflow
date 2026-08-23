@@ -346,13 +346,39 @@ def test_the_implement_actuator_is_seam_declared() -> None:
     assert SANDBOX_SEAMS["implement_worker_runner"] == "config_disable"
 
 
-def test_the_sandbox_clears_the_implement_canary_dial() -> None:
-    # A ``config_disable`` row is silently aspirational unless the pin exists.
-    # #11541 declared one and wired it; this asserts #11542's is wired too,
-    # rather than trusting that the row implies the override.
-    source = (REPO_ROOT / "src/mockworld/sandbox_main.py").read_text(encoding="utf-8")
+def test_the_sandbox_clears_the_implement_canary_dial(tmp_path) -> None:
+    """A ``config_disable`` row is silently aspirational unless the pin exists.
 
-    assert '"fable_implement_canary_repo", ""' in source
+    Asserted by **running the override**, not by matching its source text. The
+    first version grepped for ``'"fable_implement_canary_repo", ""'``, which is
+    a gate that stops seeing its subject the moment the line is reformatted,
+    moved into a helper, or rewritten to the same effect — the exact class
+    #11665 found twice (``CRITICAL_PATHS`` entries naming files that never
+    existed, and regression tests monkeypatching a module that never existed,
+    both staying green). This one calls the function and reads the dial.
+    """
+    from config import HydraFlowConfig
+    from mockworld.sandbox_main import _apply_sandbox_config_overrides
+    from scheduling_model import ExecutionRuntime, SchedulingModel
+
+    armed = HydraFlowConfig(
+        state_file=tmp_path / "state.json",
+        repo="acme/widgets",
+        scheduling_model=SchedulingModel.ISSUE_CONTROLLER,
+        execution_runtime=ExecutionRuntime.FABLE_DIRECTOR,
+        fable_implement_canary_repo="acme/widgets",
+    )
+
+    _apply_sandbox_config_overrides(armed)
+
+    # The DIAL, not ``fable_implement_canary_armed()``. The first behavioural
+    # draft asserted the predicate and survived deleting the override outright,
+    # because the sandbox also pins ``execution_runtime`` — so the runtime pin
+    # answered False and the dial was never consulted. A defence behind the
+    # subject doing the subject's work is the same masking #11541's mutation
+    # testing found twice, and it is why this assertion reads the one field the
+    # override actually writes.
+    assert armed.fable_implement_canary_repo == ""
 
 
 async def test_the_implement_actuator_actually_uses_the_injected_git_runner() -> None:
